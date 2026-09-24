@@ -130,6 +130,23 @@ itself with a broker, so adding, removing or reconfiguring one (by editing the l
 warden runs) never restarts another. It shares nothing with bh-02 but cordis, which is the point:
 the pattern isn't about agents.
 
+## cordis in practice
+
+The techniques above, and where to read them in real code:
+
+| Technique | Implemented in | What it shows |
+|---|---|---|
+| **A resource's lifetime is a row's** (`enter`) | `warden:supervised`, `kernel:kernel`, `tui:app` | a process starts when its row loads and is terminated when it unloads; the kernel's worker lives exactly as long as the `kernel` row; the terminal app's lifetime is the `ui` row's |
+| **A broker** (`acquire`, the remover as undo) | warden's `processes`; bh-02's `commands` and `frame` | each supervised process registers itself; slash commands register into `commands`; the status bar, sidebar and palette are entries rows `acquire` in the app's `frame`, gone when their row goes |
+| **One key, swappable providers** | bh-02's `model`, `jail`, `ui` rows | Claude or any OpenAI-compatible model behind `model`; brig's sandbox or none behind `jail`; tests put fakes in the same rows with `--patch` (`bh_02.testing`) |
+| **Reshaping by editing a layer** | `/model` (bh-02); adding a process (warden) | `/model opus` writes the session's layer file and the loader swaps one row; a new `[[plugin]]` block in warden's layer starts one more process, touching nothing else |
+| **An operator over the loader** | `commands:operator` | `/rows`, `/explain`, `/restart` and `/clear` act on the running program through the loader's handle, queued as the operator row's own background work so a restart never cancels the command asking for it |
+| **Work a row owns, and its end** (`background`, `done`) | `chat:session`, bh-02's bootstrap | the conversation is the chat row's background task, bound as `done`; the bootstrap waits on it and follows a new `done` when the chat row reloads, so `/model` never ends the session |
+| **Watching the program change** (`observe`) | `tui:app` | the terminal app hears every lifecycle event and shows `↻ model reloaded` as rows reload |
+| **Two consumers, two contracts** | the `kernel` key | the agent loop needs its tool (`spec`, `run`); the status row needs its grades (`confined`, `report`); each declares its own Protocol for the same value |
+| **Stable rows around volatile ones** | bh-02's `ui` and `status` rows | the app's row depends on nothing but its config, so it never reloads; the small `status` row depends on `kernel`, so `/clear` reloads it and not the screen |
+| **Who owns the main thread** | `warden --tray` | the macOS menu-bar app needs the main thread, so the composition runs on a background thread and quitting the tray unwinds it through the same shutdown |
+
 ## brig: sandboxes that say what they enforce
 
 [`libs/brig`](libs/brig) runs untrusted processes in a jail. A `Spec` describes the jail
