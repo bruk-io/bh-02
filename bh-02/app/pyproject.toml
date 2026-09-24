@@ -1,0 +1,39 @@
+[project]
+name = "bh-02"
+version = "0.1.0"
+description = "bh-02: a coding harness in a Textual TUI, the shell around a cordis composition of plugins"
+requires-python = ">=3.15"
+dependencies = [
+    "cordis",
+    "click>=8",
+    # The shipped layers name these by entry point; the app imports none of them.
+    "models-cordis-plugin",
+    "tui-cordis-plugin",
+    "agent-cordis-plugin",
+    "chat-cordis-plugin",
+    "kernel-cordis-plugin",
+    "brig-cordis-plugin",
+    "context-cordis-plugin",
+    "commands-cordis-plugin",
+]
+
+[project.scripts]
+bh-02 = "bh_02.cli:main"
+
+[tool.uv.sources]
+cordis = { workspace = true }
+models-cordis-plugin = { workspace = true }
+tui-cordis-plugin = { workspace = true }
+agent-cordis-plugin = { workspace = true }
+chat-cordis-plugin = { workspace = true }
+kernel-cordis-plugin = { workspace = true }
+brig-cordis-plugin = { workspace = true }
+context-cordis-plugin = { workspace = true }
+commands-cordis-plugin = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bh_02"]

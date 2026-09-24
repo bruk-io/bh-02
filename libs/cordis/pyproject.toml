@@ -1,0 +1,92 @@
+[project]
+name = "cordis"
+version = "0.1.0"
+description = "Composition that can be added, replaced and removed while the program runs"
+requires-python = ">=3.15"
+dependencies = [
+    # the only runtime dependency: decorators that attach rather than register, so
+    # importing a plugin has no side effects and a scan is what finds its components.
+    "venusian>=3.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cordis"]
+
+# cordis's own architecture gate, run by scripts/arch-check from this directory: its
+# internal layering and its purity budget. What spans packages (the public API, the plugin
+# layering) is the workspace root's gate.
+[tool.pypeeker]
+src = ["src", "tests"]
+plugins = ["pypeeker_rules.apps"]
+rules = [
+    "import-boundaries",           # the two chains below
+    "init-reexport-only",          # __init__.py only re-exports
+    "import-time-side-effects",
+    "no-hidden-global-mutation",
+    "no-impure-functions",
+    "under-exposed-access",
+    "over-exposed-module-symbol",
+]
+
+[tool.pypeeker.visibility]
+mode = "library"
+
+[tool.pypeeker.import-boundaries]
+root = "cordis"
+strict = true  # a new cordis module must be declared below
+
+# Two chains, each with a pure bottom the rule proves imports nothing that owns a task:
+#   effects <- component <- decisions <- runtime <- inspection      (the runtime)
+#   composition <- loader                                            (the composition)
+# authoring and loader sit on top; testing drives a generator and performs nothing.
+[tool.pypeeker.import-boundaries.allow]
+effects = []                                # values: Effect, Key, Undo; the bottom
+component = ["effects"]                     # a function read into a Component record; pure
+decisions = ["effects"]                     # what the runtime should do next; pure
+runtime = ["effects", "component", "decisions"]   # the shell: fibers, the store, the lifecycle, the effects
+inspection = ["effects", "decisions", "runtime"]  # the read-only view
+authoring = ["effects", "component"]        # the decorator, and scanning for what it marked
+composition = []                            # rows, layers, compose, plan, format_layer; pure
+loader = ["authoring", "component", "composition", "decisions", "effects", "inspection", "runtime"]
+testing = ["effects"]                       # drives a component's generator; performs nothing
+
+[tool.pypeeker.import-time-side-effects]
+extra-impure = ["itertools.count", "importlib.resources.files", "threading.Condition"]
+
+# Purity is the default; this list is cordis's budget. Prefer the `decide` split (a pure rule in
+# decisions.py, its imperative half in runtime.py) over lengthening it.
+[tool.pypeeker.no-impure-functions]
+include = ["cordis.*"]
+exclude = [
+    # the effects themselves: performing one is the point
+    "cordis.runtime:bind_step", "cordis.runtime:bind_step.undo",
+    "cordis.runtime:use_step",
+    "cordis.runtime:background_step", "cordis.runtime:background_step.finished",
+    "cordis.runtime:acquire_step",
+    "cordis.runtime:observe_step.listener", "cordis.runtime:observe_step.undo", "cordis.runtime:_stop_hearing",
+    # the state machine's imperative half; every decision it acts on is in cordis.decisions
+    "cordis.runtime:_mount", "cordis.runtime:_apply_target",
+    "cordis.runtime:_begin_transition", "cordis.runtime:_end_transition",
+    "cordis.runtime:_refresh", "cordis.runtime:_notify", "cordis.runtime:_drain",
+    "cordis.runtime:_live", "cordis.runtime:_lifetime", "cordis.runtime:_perform_all",
+    "cordis.runtime:Fiber.retire", "cordis.runtime:Runtime.mount", "cordis.runtime:Runtime.scope",
+    "cordis.loader:read_layer",                 # reads a layer file; parse_layer is the pure half
+    "cordis.authoring:component.deco.callback", # venusian's scan callback fills the mapping it is handed
+]
+
+[tool.pypeeker.over-exposed-module-symbol]
+allow = [
+    "*test_*", "*test_*:*", "*conftest:*",
+    # @overload declarations read as unused symbols; the implementation below them is the API
+    "cordis.authoring:component*",
+    # a step's __name__ is what an Effect renders in explain() ("performed: bind(greet, greet)")
+    "cordis.runtime:*_step",
+    # named as a string ("cordis.loader:loader") by boot, like a layer file names a component
+    "cordis.loader:loader",
+    # the operator's API: reached through a value (`Booted.loader`, `Inspection.bindings`) or a key
+    "cordis.loader:Loader", "cordis.loader:LoaderConfig", "cordis.inspection:Held",
+]

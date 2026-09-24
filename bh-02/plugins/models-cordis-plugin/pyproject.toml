@@ -1,0 +1,37 @@
+[project]
+name = "models-cordis-plugin"
+version = "0.1.0"
+description = "bh-02's `model` row: named models over their providers (Claude through Claude Code, and any OpenAI-compatible endpoint), switched by name."
+requires-python = ">=3.15"
+dependencies = [
+    "cordis",
+    # claude-code: pinned, the design leans on Claude Code internals a CLI upgrade can change
+    # without a type error (the MCP call's `claudecode/toolUseId`, the `next` priority, the
+    # session file format; README.md). Bump deliberately and run the e2e tests. records.py also
+    # reads the CLI version the SDK bundles from its private `_cli_version` module (there is no
+    # public route to it), which this pin keeps where it is.
+    "claude-agent-sdk==0.2.158",
+    # claude-code: the raw low-level MCP server the tools are declared through, in its 2.x API
+    # (`Server(on_list_tools=, on_call_tool=)`, `mcp.server.context.ServerRequestContext`).
+    "mcp>=2.2,<3",
+    # openai: the one HTTP client, streaming /v1/chat/completions as server-sent events. Already
+    # in the workspace through mcp; named here because the openai provider uses it directly.
+    "httpx2>=2.13,<3",
+]
+
+# The CLI as the SDK starts it, but in a session of its own and with no ANTHROPIC_* (detach.py).
+[project.scripts]
+claude-code-detached = "models_cordis_plugin.claude_code.detach:main"
+
+[project.entry-points."cordis.plugins"]
+models = "models_cordis_plugin"
+
+[tool.uv.sources]
+cordis = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/models_cordis_plugin"]

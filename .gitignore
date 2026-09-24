@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.pypeeker/
+.DS_Store
+
+# Local secrets (the Claude Code OAuth token, CLAUDE_CODE_OAUTH_TOKEN): never committed
+local.env
+*.env
+.claude/worktrees/

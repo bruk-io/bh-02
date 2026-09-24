@@ -1,0 +1,261 @@
+# The workspace root: not a package. It lists the members by where they live, holds the
+# shared dev tools, and configures ruff, mypy and pytest for every member. Nothing here names a
+# member: adding one is creating its directory (bh-02/plugins/<name>, libs/<name>, ...).
+#
+#   bh-02/            the app (bh-02/app, the TUI harness) and bh-02/plugins/, its plugin family
+#   libs/             cordis, cordis-helpers, brig: libraries with no first-party dependencies
+#   examples/warden/  a second app on cordis: examples/warden/app and examples/warden/plugins/
+#
+# An app's folder is not itself a project: its package is <app>/app and its plugins sit beside
+# it, because uv resolves a member's sources against the nearest project above it.
+
+[tool.uv.workspace]
+members = ["bh-02/app", "bh-02/plugins/*", "libs/*", "examples/*/app", "examples/*/plugins/*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff",
+    # mypy 2.4.0-dev: the first mypy that types PEP 661 sentinels. Move back to "mypy>=2.4" once released.
+    "mypy @ git+https://github.com/python/mypy@539f6e67b6743d39ce1c643f4cea08fa60602093",
+    # pypeeker is pre-1.0 and past its breaking DSL rewrite; pin a commit, never track main.
+    "pypeeker @ git+https://github.com/brukhabtu/pypeeker@cf4f168",
+    # brig's property tests
+    "hypothesis>=6.112",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["bh-02/app/tests", "bh-02/plugins/*/tests", "libs/*/tests", "examples/*/app/tests", "examples/*/plugins/*/tests"]
+# importlib mode names test modules from the repo root (libs.cordis.tests.test_runtime), so test
+# file names need not be unique across members. consider_namespace_packages is what keeps that
+# from breaking imports: without it, a member directory named like its package (libs/cordis)
+# is registered as that package and shadows the installed one.
+addopts = ["--import-mode=importlib"]
+consider_namespace_packages = true
+# brig's suite imports its own helpers as `tests.conftest` / `tests.unit.strategies`, the way it
+# did in its own repository; `libs/brig/` on the path is what resolves them. brig's conftest
+# makes a tier marker mandatory for its own tests, and only those.
+pythonpath = ["libs/brig"]
+markers = [
+    "unit: single module, all dependencies mocked, no I/O",
+    "integration: multiple in-repo components, external deps mocked",
+    "e2e: real environment and real external dependencies",
+    "real_launch: starts an installed console script in a pseudo-terminal (seconds each; deselect with -m 'not real_launch')",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py315"
+fix = true  # `ruff check` applies safe fixes by default; pass --no-fix to only report (CI)
+# first-party is whatever lives in a member's src/: found by the globs, never listed
+src = ["bh-02/app/src", "bh-02/plugins/*/src", "libs/*/src", "examples/*/app/src", "examples/*/plugins/*/src"]
+
+[tool.ruff.lint]
+# Silences ruff's "3.15 support is under development" warning; explicit-preview-rules keeps
+# preview-only rules off unless selected by exact code, so the enabled set is unchanged.
+preview = true
+explicit-preview-rules = true
+select = ["E", "F", "I", "UP", "B", "SIM", "RET"]
+
+[tool.mypy]
+strict = true
+python_version = "3.15"
+files = ["bh-02/app/src", "bh-02/plugins/*/src", "libs/*/src", "examples/*/app/src", "examples/*/plugins/*/src"]
+
+# venusian is untyped upstream; cordis.authoring is the only module that touches it.
+[[tool.mypy.overrides]]
+module = "venusian.*"
+ignore_missing_imports = true
+
+# rumps is untyped upstream; warden_systray_cordis_plugin.tray is the only module that touches it.
+[[tool.mypy.overrides]]
+module = "rumps.*"
+ignore_missing_imports = true
+
+# The architecture gate for the apps and their plugins: the rules that span packages
+# (pypeeker_rules/apps.py). Each library (libs/*) runs a gate of its own for its internal
+# layering and purity. Run scripts/arch-check, never a bare `pypeeker check`: it writes `src`
+# below from [tool.arch-check], indexes every path, then runs `check --strict` for every gate.
+[tool.arch-check]
+src = [
+    "bh-02/app/src", "bh-02/app/tests", "bh-02/plugins/*/src", "bh-02/plugins/*/tests",
+    "examples/*/app/src", "examples/*/app/tests", "examples/*/plugins/*/src", "examples/*/plugins/*/tests",
+]
+
+[tool.pypeeker]
+# written by scripts/arch-check from [tool.arch-check].src; tests are checked too, so their
+# references count
+src = [
+    "bh-02/app/src",
+    "bh-02/app/tests",
+    "bh-02/plugins/agent-cordis-plugin/src",
+    "bh-02/plugins/agent-cordis-plugin/tests",
+    "bh-02/plugins/brig-cordis-plugin/src",
+    "bh-02/plugins/brig-cordis-plugin/tests",
+    "bh-02/plugins/chat-cordis-plugin/src",
+    "bh-02/plugins/chat-cordis-plugin/tests",
+    "bh-02/plugins/commands-cordis-plugin/src",
+    "bh-02/plugins/commands-cordis-plugin/tests",
+    "bh-02/plugins/context-cordis-plugin/src",
+    "bh-02/plugins/context-cordis-plugin/tests",
+    "bh-02/plugins/kernel-cordis-plugin/src",
+    "bh-02/plugins/kernel-cordis-plugin/tests",
+    "bh-02/plugins/models-cordis-plugin/src",
+    "bh-02/plugins/models-cordis-plugin/tests",
+    "bh-02/plugins/tui-cordis-plugin/src",
+    "bh-02/plugins/tui-cordis-plugin/tests",
+    "examples/warden/app/src",
+    "examples/warden/app/tests",
+    "examples/warden/plugins/warden-cordis-plugin/src",
+    "examples/warden/plugins/warden-cordis-plugin/tests",
+    "examples/warden/plugins/warden-systray-cordis-plugin/src",
+    "examples/warden/plugins/warden-systray-cordis-plugin/tests",
+]
+plugins = ["pypeeker_rules.apps"]
+rules = [
+    "cordis-public-api",           # outside cordis, import from `cordis`, `cordis.loader`, `cordis.composition` or `cordis.testing`, nothing deeper
+    "terminal-io",                 # terminal I/O lives in the modules terminal-io allows
+    "print-input",
+    "plugin-layering",             # no package imports another; they agree in CONTRACTS.md
+    "cordis-in-wiring-only",       # a plugin's values are a plain library; only wiring and shells know cordis
+    "init-reexport-only",          # a package __init__.py only re-exports; definitions live in modules
+    "import-time-side-effects",    # importing a module builds nothing and mutates nothing
+    "no-hidden-global-mutation",   # a function may not mutate module-level state
+    "no-impure-functions",         # the functions whose purity the design rests on
+    "under-exposed-access",        # no reaching into another module's _names
+    "over-exposed-module-symbol",  # a public name only its own module uses should be _private
+    "worker-stdlib-only",          # the kernel's worker runs in a jail: the standard library only
+    "brig-one-adapter",            # only brig_cordis_plugin imports brig
+]
+
+[tool.pypeeker.visibility]
+mode = "library"  # what a package __init__ re-exports is protected public API (every top-level package)
+
+# The ui plugin is the interface that talks to a terminal (a Textual app, all of it); an app's
+# command line has no Output to go through for option parsing or a fatal error.
+[tool.pypeeker.terminal-io]
+allowed = ["tui_cordis_plugin", "bh_02.cli", "warden.cli"]
+
+# The kernel's worker is a separate program whose stdout is the cell's output.
+[tool.pypeeker.print-input]
+allowed = ["kernel_cordis_plugin.worker"]
+
+# An app's shell modules know cordis besides every plugin's wiring.
+[tool.pypeeker.cordis-in-wiring-only]
+shell = [
+    # bh_02.testing: rows a --patch layer names for a real launch with no login (fake models);
+    # bh_02.outdated: an earlier bh-02's layers in today's row names (cordis's `Row`)
+    "bh_02.bootstrap", "bh_02.cli", "bh_02.outdated", "bh_02.sessions", "bh_02.testing",
+    "warden.bootstrap", "warden.cli",
+]
+
+[tool.pypeeker.worker-stdlib-only]
+modules = ["kernel_cordis_plugin.worker"]
+
+[tool.pypeeker.brig-one-adapter]
+adapter = "brig_cordis_plugin"
+
+# Importing a module must build nothing and mutate nothing. `extra-impure` adds the
+# constructions this codebase must not do at import: a counter, a resource lookup.
+[tool.pypeeker.import-time-side-effects]
+extra-impure = ["itertools.count", "importlib.resources.files", "threading.Condition"]
+# Entry points: running the program is the whole job of the module, and its `if __name__`
+# guard is not something the rule models. Exact and per-module; nothing else inherits it.
+allow = [
+    "bh_02.__main__", "warden.__main__",
+    # the kernel's worker, run by path (`python -I worker.py SOCKET`) inside a jail
+    "kernel_cordis_plugin.worker",
+]
+
+# Purity is the default, and the exclude list is the budget: every function in the apps and
+# their plugins is pure unless it is named below, with the reason. Adding a name is a design
+# decision, not a formality: prefer splitting the decision out pure, or moving the work into
+# an effect. A method that mutates its own instance is fine by convention; the analysis still
+# counts it. The analysis is a heuristic (it sees print/open and a stdlib denylist, not asyncio
+# or importlib), so this is what it can see, not a census.
+[tool.pypeeker.no-impure-functions]
+include = ["bh_02.*", "warden.*", "*_cordis_plugin.*"]
+exclude = [
+    # the session's history: read once when the ui row enters it, appended to as the transcript draws
+    "tui_cordis_plugin.history:History.read", "tui_cordis_plugin.history:History.record",
+    "tui_cordis_plugin.history:History.__aenter__",
+    "tui_cordis_plugin.history:History._rewrite",             # trims a grown history file (temp file, then replace)
+    # sessions and the command line
+    "bh_02.sessions:create",                                  # makes a session's directory, meta and layer
+    "bh_02.sessions:discard",                                 # removes the directory of a run that never started
+    "bh_02.sessions:set_model",                               # rewrites a session's layer (--resume --model)
+    "bh_02.sessions:update",                                  # rewrites an older session's layer (--resume)
+    "bh_02.sessions:scanned",                                 # reads every meta.json under the state dir
+    "bh_02.sessions:listed",                                  # scanned, without the broken records
+    "bh_02.sessions:find",                                    # resolves --resume: reads the state dir (scanned)
+    "bh_02.sessions:Listing.listed",                          # the `sessions` value, read fresh per call
+    "bh_02.cli:_session", "bh_02.cli:main", "bh_02.cli:sessions_command",
+    "bh_02.cli:update_layer_command",                         # rewrites a layer file, keeping FILE.bak
+    "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
+    "agent_cordis_plugin.transcript:FileTranscript.*",
+    "commands_cordis_plugin.operations:Operator.clear.job",   # empties a session's history files
+    "commands_cordis_plugin.wiring:set_model",                # /model: rewrites the session's layer
+    # the loops between input, output and the model
+    "chat_cordis_plugin.chat:converse",
+    "agent_cordis_plugin.loop:LoopModel.reply",
+    "agent_cordis_plugin.transcript:MemoryTranscript.append",
+    # Claude Code: one process per conversation and what it holds, saved in the session's
+    # state dir; the one read of local.env; a rebuilt session file; the CLI's stderr to a log;
+    # the console script that becomes the CLI
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._dir",       # makes the state dir (a temporary one without a session)
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._load",      # reads the saved state.json once
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._save",      # writes state.json
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._rebuilt",   # writes a rebuilt session file
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._resumable", # looks for Claude Code's session file
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._start",     # starts the CLI process
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._step",      # streams from the process, saves how it ended
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel.complete",   # one step: the process and state.json
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel.close",      # ends the process, removes a temporary dir
+    "models_cordis_plugin.claude_code.provider:ClaudeCodeModel.__aexit__",  # close()
+    "models_cordis_plugin.claude_code.provider:_appender.append",
+    "models_cordis_plugin.claude_code.credential:child_env",
+    "models_cordis_plugin.claude_code.records:write_session",
+    "models_cordis_plugin.claude_code.detach:main",
+    # the models file and the environment that says where it is, read when a model is chosen
+    "models_cordis_plugin.named:read_models", "models_cordis_plugin.named:environ",
+    # the model row reads the models file when it starts (`known`), and the `models` value reads
+    # it again each time it is asked, so a /model or the status bar never sees a stale one
+    "models_cordis_plugin.providers:known", "models_cordis_plugin.providers:resolved",
+    "models_cordis_plugin.providers:opened",
+    # the `models` value: each answer reads the models file afresh (through `known`); the rest
+    # of the catalog (`_config`, `_entry`, `_listed`) stays gated
+    "models_cordis_plugin.catalog:Catalog.path", "models_cordis_plugin.catalog:Catalog.listed",
+    "models_cordis_plugin.catalog:Catalog.current", "models_cordis_plugin.catalog:Catalog.check",
+    # an OpenAI-compatible model: one streamed HTTP call per step, and its key read from local.env
+    "models_cordis_plugin.openai.client:authorization",
+    "models_cordis_plugin.openai.client:missing_key",  # /model looks for the key's line, reads no value out
+    "models_cordis_plugin.openai.client:OpenAIModel.complete",
+    # the stand-in OpenAI-compatible server tests run the provider against: its socket
+    "models_cordis_plugin.openai.testing:_Handler.*",
+    # I/O at the edges: the project's files
+    "context_cordis_plugin.project:ProjectContext.text", "context_cordis_plugin.project:ProjectContext._guidance",
+    # the kernel: a socket to a process a jail started, the process itself, and the worker program
+    "kernel_cordis_plugin.client:Kernel.*",
+    "kernel_cordis_plugin.unjailed:_Process.*", "kernel_cordis_plugin.unjailed:Unjailed.start",
+    "kernel_cordis_plugin.unjailed:_until_listening",
+    "kernel_cordis_plugin.worker:*",
+    "brig_cordis_plugin.jail:BrigJail.*", "brig_cordis_plugin.jail:_Jailed.*",
+    # pure by the design's own rule (they yield a value), charged for referencing an impure function
+    "chat_cordis_plugin.wiring:session", "models_cordis_plugin.wiring:model",
+]
+
+[tool.pypeeker.over-exposed-module-symbol]
+allow = [
+    # test modules and fixtures are entry points, not API; pypeeker names them by path under tests/
+    "*test_*", "*test_*:*", "*conftest:*",
+    # components a layer file (or run() itself) names as a string: re-exported, never called by name
+    "*_cordis_plugin.wiring:*",
+    "bh_02.bootstrap:harness", "bh_02.bootstrap:layer_files", "bh_02.bootstrap:session_list",
+    "bh_02.testing:echo", "bh_02.testing:bomb", "bh_02.testing:showcase", "bh_02.testing:slow_start",
+    "bh_02.testing:echo_model", "bh_02.testing:slow_model", "bh_02.testing:cells_model",
+    "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:cells_provider",
+    # registered by decorator or by [project.scripts], never called by name
+    "bh_02.cli:sessions_command", "bh_02.cli:update_layer_command", "models_cordis_plugin.claude_code.detach:main",
+]

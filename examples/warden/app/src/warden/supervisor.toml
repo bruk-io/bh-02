@@ -1,0 +1,15 @@
+# The shipped composition: a registry of managed processes, and one contributor per process.
+# A row's id is its role; `use` is `plugin:component`, a `cordis.plugins` entry point that
+# `resolve` scans. Add another `[[plugin]]` block with a unique id and `use =
+# "warden:supervised"` to manage another process; retiring one never reloads another, because
+# each depends on `processes`, not on any sibling row. `warden --patch mine.toml` is a layer
+# over this one, the same way bh-02 composes.
+
+[[plugin]]
+id = "processes"
+use = "warden:registry"
+
+[[plugin]]
+id = "example"
+use = "warden:supervised"
+config = { name = "example", command = ["sleep", "100"] }

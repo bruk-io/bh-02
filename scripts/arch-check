@@ -1,0 +1,127 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["click"]
+# ///
+"""Run every pypeeker architecture gate in the workspace.
+
+A gate is a directory whose pyproject.toml has a `[tool.pypeeker]` table: the workspace root
+(the rules that span packages) and each library under libs/ that keeps its own (cordis,
+cordis-helpers, brig). pypeeker reads the nearest pyproject.toml, so each gate runs from its
+own directory, with the repository root on PYTHONPATH so any gate can load the shared rules
+in pypeeker_rules/.
+
+`pypeeker check` does not build the index, and against a missing one it reports nothing and
+exits 0. So for each gate this first writes `[tool.pypeeker].src` from the globs in
+`[tool.arch-check].src` (the layout, not a hand-kept list, decides what is checked), indexes
+every path, fails on any indexing error, then runs `check --strict` (plain `check` hides
+heuristic findings).
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+import click
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def gates() -> list[Path]:
+    """The root, then every library that keeps a gate of its own."""
+    found = [ROOT]
+    for pyproject in sorted(ROOT.glob("libs/*/pyproject.toml")):
+        if "tool" in (config := tomllib.loads(pyproject.read_text())) and "pypeeker" in config["tool"]:
+            found.append(pyproject.parent)
+    return found
+
+
+def pypeeker(gate: Path, *args: str, capture: bool) -> subprocess.CompletedProcess[str]:
+    """Run pypeeker from the workspace environment, in the gate's directory."""
+    env = {**os.environ, "PYTHONPATH": str(ROOT)}
+    return subprocess.run(
+        ["uv", "run", "--quiet", "pypeeker", *args], cwd=gate, text=True, capture_output=capture, env=env
+    )
+
+
+def expanded(gate: Path, patterns: list[str]) -> list[str]:
+    """The directories the globs match, relative to the gate, in a stable order."""
+    return sorted({str(p.relative_to(gate)) for pattern in patterns for p in gate.glob(pattern) if p.is_dir()})
+
+
+def sync_src(gate: Path) -> list[str]:
+    """Write `[tool.pypeeker].src` from `[tool.arch-check].src`, if the gate has one; return src."""
+    pyproject = gate / "pyproject.toml"
+    text = pyproject.read_text()
+    config = tomllib.loads(text)["tool"]
+    patterns = config.get("arch-check", {}).get("src")
+    if patterns is None:
+        return list(config["pypeeker"]["src"])
+    paths = expanded(gate, patterns)
+    listing = "src = [\n" + "".join(f'    "{p}",\n' for p in paths) + "]"
+    section = re.search(r"^\[tool\.pypeeker\]\n", text, re.M)
+    assert section is not None
+    entry = re.compile(r"^src = \[.*?\]", re.M | re.S)
+    match = entry.search(text, section.end())
+    if match is None:
+        raise SystemExit(f"arch-check: {pyproject} has [tool.arch-check] but no [tool.pypeeker] src to write")
+    updated = text[: match.start()] + listing + text[match.end() :]
+    if updated != text:
+        pyproject.write_text(updated)
+    return paths
+
+
+def index(gate: Path, path: str) -> None:
+    """Index one path, exiting non-zero if pypeeker fails or reports indexing errors."""
+    result = pypeeker(gate, "index", path, capture=True)
+    if result.returncode != 0:
+        click.echo(result.stdout + result.stderr, err=True)
+        sys.exit(result.returncode)
+    try:
+        errors = json.loads(result.stdout).get("errors", [])
+    except json.JSONDecodeError:
+        click.echo(f"pypeeker index {path}: unexpected output\n{result.stdout}", err=True)
+        sys.exit(2)
+    if errors:
+        click.echo(f"pypeeker index {path}: {json.dumps(errors, indent=2)}", err=True)
+        sys.exit(1)
+
+
+def run_gate(gate: Path, fix: bool) -> int:
+    """Index one gate's sources, apply pypeeker autofixes, then run check --strict."""
+    for path in sync_src(gate):
+        index(gate, path)
+    if fix:
+        # --fix prints a JSON report rather than findings; report what it applied, then run a
+        # plain check below so the findings and the exit code are the usual ones.
+        result = pypeeker(gate, "check", "--strict", "--fix", capture=True)
+        try:
+            report = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            click.echo(result.stdout + result.stderr, err=True)
+            sys.exit(result.returncode or 2)
+        if report.get("tx_id"):
+            click.echo(f"pypeeker applied {len(report.get('fixes', []))} fix(es): tx {report['tx_id']}")
+    return pypeeker(gate, "check", "--strict", capture=False).returncode
+
+
+@click.command()
+@click.option(
+    "--fix/--no-fix",
+    default=True,
+    help="Apply certain-confidence autofixes as one transaction first (default), or only report.",
+)
+def main(fix: bool) -> None:
+    """Run every gate; exit non-zero if any fails."""
+    failed = [gate for gate in gates() if run_gate(gate, fix) != 0]
+    for gate in failed:
+        click.echo(f"gate failed: {gate.relative_to(ROOT) if gate != ROOT else '(root)'}", err=True)
+    sys.exit(1 if failed else 0)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,287 @@
+# models-cordis-plugin
+
+bh-02's model: named models over their providers, switched by name. Two rows:
+
+| Row | Binds | Consumes |
+|---|---|---|
+| `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | |
+| `models:catalog` | `models`: the models there are, the one the model row names now, and why a name can't be switched to (CONTRACTS.md: models) | `loader` |
+
+The model row's config (`ModelConfig`):
+- `default`: the model's name, `sonnet` unless a layer says another; `--model` and `/model` set it.
+- `models`: the models file, when not the default one.
+- `extra`: models of the row's own, one table per name as in the file (a migrated layer
+  writes one: an old Ollama row is an `extra` OpenAI-compatible model).
+- `state`, `env_file`, `cwd`: the claude-code provider's (below). `env_file` is also where the
+  openai provider reads a model's key.
+
+## Named models
+
+Three places name models, each over the last (`named.py`, pure but for reading the file):
+- the built-ins: `sonnet`, `opus` and `haiku`, Claude through Claude Code by its aliases;
+- the models file, `$XDG_CONFIG_HOME/bh-02/models.toml` (else `~/.config/bh-02/models.toml`);
+- the row's `extra`.
+
+A later one of the same name wins: `extra` over the file, and a user's model over a built-in
+(allowed, and `/model` notes it as shadowing the built-in). The file is one table per model:
+
+```toml
+[llama]                                   # Ollama is an OpenAI-compatible endpoint at /v1
+provider = "openai"
+id = "llama3.2"
+base_url = "http://localhost:11434/v1"
+
+[router]
+provider = "openai"
+id = "anthropic/claude-sonnet-4"
+base_url = "https://openrouter.ai/api/v1"
+key = "OPENROUTER_API_KEY"                # a line of local.env, never the key itself
+max_tokens = 4096                         # optional, sent only when set
+temperature = 0.2                         # optional, sent only when set
+
+[opus-4-1]
+provider = "claude-code"
+id = "claude-opus-4-1"
+```
+
+A table's problems are said with what to do, and a model that can't be used still binds: an
+unknown name (the message lists the models and shows a table to add), no provider, an unknown
+provider or setting, no id, no `base_url` or one that is not an http(s) URL with a host and a
+numeric port (a malformed one is that model's problem alone, never the catalog's), a row
+`extra` that is not one table per model or a `default` that is not a name, a `key` that is not the
+name of a line (capitals, digits and `_`: a value that isn't one may be the key itself, so it
+is never quoted back), a `max_tokens` or `temperature` of the wrong type (`ModelsError(kind, message)`,
+CONTRACTS.md: Errors). Each step raises it (`Unusable`), so a typo in the models file is a
+message in the conversation, and `/model` another model fixes it. `/model NAME` checks first
+(`models.check`), so it never switches to one. The models file is read when the model row
+starts and each time `models` is asked, never watched: an edit takes effect at the next
+`/model` or launch (`/restart model` for the model already chosen).
+
+A provider can also be `module:attribute`, a factory given the model's table (its settings are
+its own). It is there for tests: bh-02's fakes (`bh_02.testing:echo_provider`) are models of
+this kind, so a real launch switches between a fake and any other model under this row. It
+imports whatever module the models file names, so name only code you trust. A factory that
+can't be imported, or raises, is a model that can't be used, like any other (`Unusable`).
+
+`models` (`catalog.py`) reads the model row's config from the loader's entries and the models
+file each time it is asked, and depends on the loader alone: `/model` (the operator) and the
+status bar depend on it, never on `model`, which a switch replaces.
+
+## openai: any OpenAI-compatible endpoint
+
+`openai/` serves any `/chat/completions` endpoint: OpenAI, OpenRouter, Groq, Together, Mistral,
+xAI, DeepSeek, Gemini's compatibility endpoint, vLLM, LM Studio, Ollama (`/v1`). Over httpx2
+(the one HTTP client, already in the workspace through mcp):
+- each step is one streamed POST (`stream: true`, `stream_options.include_usage`), the one tool
+  offered as a function; `wire.py` (pure) builds it and folds the server-sent events. A server
+  that refuses `stream_options` (a 400/422 naming it, as one that forbids fields it doesn't
+  know answers) is asked again without it, then and for every later step: usage is optional;
+- text and thinking (`reasoning_content`, `reasoning`) stream as they arrive; a call is
+  assembled by `index` from its deltas (an id and name first and the arguments in pieces, or
+  whole in one delta; without an `index`, as Gemini's endpoint sends them, a new id opens a new
+  call, and with neither index nor id, a part naming a function after a whole call does) and
+  sent once the stream ends; a call whose arguments don't decode
+  carries `error` (the loop's `undecodable`);
+- usage from the final usage-only event (`prompt_tokens_details.cached_tokens` as cache reads);
+- `stop` is the API's `finish_reason` in the loop's words: `stop`, `length`, `tool_calls`
+  (and the legacy `function_call`), `content_filter` as `refusal`;
+- `message` is the assistant message in the API's own shape (text or none, calls with their
+  arguments as the JSON text sent), replayed as it came; another provider's turn (Claude's
+  blocks, an old Ollama message) is rebuilt from the transcript's text and calls;
+- a stream that ends without a `finish_reason` or `[DONE]` is an error, not a silent stop;
+- failures are recoverable and say what to do: 401/403 (`authentication_failed`: the key's
+  line of local.env, or that the model names none), 404 (`not_found`: check `base_url` and the
+  id), 429 (`rate_limit`), 400 (`invalid_request`), 5xx (`server_error`), an error event
+  mid-stream (OpenRouter sends them), a server that isn't there (`connection`: is it running?),
+a URL no request can go to (`model_config`); nothing the HTTP client raises escapes as a bug.
+  What the server said is quoted with the key the request sent taken out, whole or masked but
+  for its end (`sk-proj-****abcd`), as `<key>`: an error is kept in the session's events.
+
+A model's `key` names a line of `local.env`, read when each request is made and put only in
+that request's `Authorization` header: never in an environment, never in anything whose repr
+shows it. A key named but not there says which file and what line to add, at `/model NAME`
+(which looks for the line, never reads it out, and does not switch) and again at a request if
+the line is removed since; no key sends none.
+Connecting times out after 10 s; reading does not (a local model can take minutes to its first
+token). Closing the step (Ctrl-C) closes the HTTP stream.
+
+## claude-code: Claude through Claude Code
+
+Claude, on a Claude subscription, as the model under bh-02's own `agent:loop`. The model is
+reached through the Claude Agent SDK, which is Claude Code: the subscription's sanctioned
+route. bh-02 never imitates Claude Code's requests by hand. The shape is pi's
+(`pi-claude-agent-sdk`, `pi-claude-bridge`): Claude Code carries the model's steps, and bh-02
+runs the loop. It is `claude_code/` (`ClaudeCodeModel`, `ClaudeCodeConfig`): `model` is
+the named model's id, `state` the session's own directory (which the session layer sets on the
+model row), `env_file` where the credential is, `cwd` the project directory.
+
+Failures are `ClaudeCodeError(kind, message)` (CONTRACTS.md: Errors). The kinds are
+Claude Code's own (`authentication_failed`, `rate_limit`, `billing_error`, `invalid_request`,
+`server_error`, `unknown`), `result_error` (Claude Code ended the query before the step), `connection`,
+`strayed` (Claude Code answered a call itself twice in a row) and `path_too_long` (a rebuild
+that can't name Claude Code's session directory); the sections below say when each happens.
+
+### Who does what
+
+bh-02's loop does all of the following:
+- classifies each step (`stops.classify`) and nudges;
+- runs every call as a cell in the kernel, asking the person first when the kernel is unjailed;
+- keeps the transcript.
+
+Claude Code does none of that. It runs with no built-in tool (`tools=[]`), no settings file
+or CLAUDE.md (`setting_sources=[]`), and no connector (`strict_mcp_config`,
+`ENABLE_CLAUDEAI_MCP_SERVERS=0`). Its system prompt is the request's system message. It does
+not compact (`DISABLE_AUTO_COMPACT`).
+
+**The tool is only declared.** The loop's one tool, `python`, reaches Claude Code as an
+in-process MCP server (`declared.py`, the MCP library's low-level `Server`), so the model calls
+`mcp__bh__python` through standard tool calling. Claude Code calls the server, and the call
+*parks* there. The server runs nothing: the loop runs the call, and the next request brings the
+result, which the parked call returns. `can_use_tool` denies anything but the declared tool
+(`mcp__bh__python`) without asking. That is a second wall: nothing else is offered anyway.
+
+### One step per `complete`
+
+One Claude Code process holds a conversation. It starts on the first step and uses one
+`ClaudeSDKClient`. How each step goes:
+- **A new user line** starts a query.
+- **A step that asks for tools** ends at its `message_stop`, and the query stays open. The
+  results the loop sends next are handed to the parked calls, paired by the tool_use id that
+  Claude Code puts in the MCP request's `_meta` (`claudecode/toolUseId`). A result that comes
+  before its call waits for it.
+- **A line the person typed after stopping a reply mid-call** is pushed at priority `next`,
+  before the results.
+- **An answered step** (`end_turn` with text) is read to the query's result.
+- **Any other end** is interrupted at once: the output limit, a silent step, a refusal, or a
+  call that did not decode. The loop's classification and nudges then decide. Left alone,
+  Claude Code's own recovery continued a truncated step three times and then failed
+  (measured).
+- **Closing the step** interrupts Claude Code and reads it to its result. This is Ctrl-C:
+  chat cancels the reply's task and the loop closes this generator. Closed on the step's last
+  chunks (the final `usage`, which the loop is still showing), an answered or cut step has
+  already settled: nothing is interrupted, and the loop's `[stopped]` entry continues the same
+  process. A tool step closed there is interrupted and drained at once (the loop won't answer
+  its calls), saved as failed, and the next request rebuilds.
+- **Stopping the process** with calls parked (a rebuild, or leaving) interrupts Claude Code
+  first and only then answers the calls `closed`, so it can't start another model request on
+  that answer (measured: closing took about 4 s the other way round, under 0.5 s this way).
+
+`stream.py` folds each step's raw Messages API stream events (`StreamEvent.event`) into chunks:
+- text and thinking arrive as they stream;
+- a tool call arrives once its block ends, under the loop's name for it (`python`, not
+  `mcp__bh__python`);
+- two usage parts, the first `partial`;
+- the API's own stop reason, so `stops.classify` works unchanged;
+- the assistant message as received, for replay.
+
+On `haiku`, Claude Code sends each thinking block with its text empty and only the signature
+(measured; Sonnet and Opus steps had no thinking blocks). Such a step shows no thinking, but its
+output tokens and cost include it, so a one-line answer can read as a couple of hundred tokens
+out. The signed block is kept verbatim for replay.
+
+Cost is what the step would cost on the API, from a price table; the subscription itself bills
+nothing per token.
+
+### What Claude Code holds, and rebuilds
+
+`reconcile.py` (pure) checks every request against what Claude Code's session holds. That is
+the first `count` transcript messages, plus the step it emitted last. Some divergences are
+accepted in place, each measured to leave the session equivalent with the cache warm:
+- the loop's entry for that step;
+- a cut step's provider-less entry, matched by its text;
+- a stopped step's `[stopped]` entry;
+- results for exactly the open calls.
+
+Anything else is a **rebuild**: a `/clear`, a failed step, a call Claude Code answered itself,
+or results that are not the open calls'. A call Claude Code answers itself (an undeclared one,
+which the permission callback denies) lets it start the next step on its own answer before the
+loop's results arrive; that step is dropped unseen and the rebuild happens in the same request,
+so the loop never streams a step the model built on a result the loop did not send. A tool step
+the person stops on its last chunks is interrupted at once (the loop won't answer its calls),
+and the next request rebuilds. `records.py` writes the transcript as a new Claude Code
+session file, and a new process resumes it:
+- the file is a linear `parentUuid` chain;
+- `provider` blocks go in verbatim, thinking signatures included;
+- tool names get `mcp__bh__`, so an older session that ran on the Messages API rebuilds too;
+- every record carries the resolved model id, since with an alias Claude Code re-cached the
+  whole conversation (measured);
+- each rebuild gets a new session id.
+
+A working directory whose path, slugged, is longer than 200 characters gets a hashed directory
+name of Claude Code's own, which bh-02 can only find once Claude Code has made it. When it can't
+be named, the step fails with `path_too_long` and says to run from a shorter path or /clear,
+rather than start a fresh session that has lost the conversation.
+
+A transcript that ends in tool results, not a user line, is continued with a one-line note
+(`CONTINUE`).
+
+A changed system prompt or tool set restarts the process on its own session before the next user
+line, never while calls are parked. `context:project`'s text has the date and branch in it, so a
+change mid-reply takes effect at the next reply.
+
+### State, per session
+
+`state` is `<session dir>/claude`. It holds:
+- `config/`: Claude Code's `CLAUDE_CONFIG_DIR`, isolated from `~/.claude` (and ~170 tokens per
+  request cheaper);
+- `state.json`: the session id, what it holds, and how its last step ended;
+- `stderr.log`: the CLI's stderr, because the TUI owns the terminal.
+
+`bh-02 --resume` continues Claude Code's own session when the transcript still matches. A crash
+with calls parked or a step streaming reads as failed, and the session is rebuilt. Without
+`state`, a temporary directory is used and removed.
+
+### The credential
+
+The credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` makes one), kept in the
+git-ignored `local.env` at the repository root. `local_env.py` finds that file above the
+install. `parse_env` (pure) reads it with one read, and the token goes only into the SDK options'
+`env` for the Claude Code child:
+- never into bh-02's `os.environ`, so the kernel and the jail can't inherit it;
+- never on a command line.
+
+The child's env is a `ChildEnv`, whose repr names its keys only (Textual prints a crash with
+every frame's locals). Without a token, the row still binds, and each step answers
+`authentication_failed`, naming the file it read (the row's `env_file` when set), whether that
+file is missing or lacks the variable, and to make a token with `claude setup-token`.
+
+### Detached, and on the subscription only
+
+The SDK starts the CLI through this plugin's `claude-code-detached` console script
+(`detach.py`). The script calls `setsid`, because a terminal's Ctrl-C signals the whole process
+group and the CLI exits on SIGINT. It then `execve`s the SDK's bundled CLI with every
+`ANTHROPIC_*` and `CLAUDE_*` variable removed but the ones the SDK and the options set (the
+token, `CLAUDE_CONFIG_DIR`, the SDK's entry point and version). The SDK merges bh-02's
+environment into the child's, and its options can override a key but not remove one; without
+the scrub, a shell's `CLAUDE_CODE_USE_BEDROCK=1` sent the steps to Bedrock (measured: the
+start timed out), and `CLAUDE_CODE_MAX_OUTPUT_TOKENS` and the like would change the steps.
+
+### Pinned, and why
+
+`claude-agent-sdk==0.2.158` (bundled CLI 2.1.280) is pinned, because the design leans on Claude
+Code internals that a CLI upgrade can break without a type error:
+- `claudecode/toolUseId` in the MCP call's `_meta`;
+- the `next` priority's ordering;
+- the session file format;
+- the tool `_meta` keys `anthropic/maxResultSizeChars` and `anthropic/alwaysLoad`. Without both
+  of these and `MAX_MCP_OUTPUT_TOKENS`, a large result was replaced by a file the model could not
+  read (measured).
+
+Bump the pin deliberately, and run the e2e tests.
+
+## Tests
+
+- `test_named_models.py`, `test_openai_wire.py` and `test_claude_code_{credential,stream,reconcile,records}.py` are pure.
+- `test_models_wiring.py` drives the rows by hand: the named model's provider, entered; a
+  model that can't be used, binding anyway; a factory provider; the catalog.
+- `test_openai_stub.py` runs the openai provider against `openai.testing.StubServer`, a
+  stand-in OpenAI-compatible server on a real socket streaming real server-sent events:
+  streamed text, a python call's round trip, a call that doesn't decode, the key from
+  local.env (and never in `os.environ`), error statuses and one mid-stream, a wrong `base_url`
+  and a server that isn't there, and a stopped step whose connection the server sees closed.
+- `test_claude_code_model.py` drives Claude Code's provider over `claude_code.testing.FakeClaudeCode`. The
+  fake speaks the SDK's own message types, and calls the declared tools over the MCP protocol
+  itself (an `mcp.Client` on the options' server) with the tool_use id in `_meta`.
+- `test_claude_code_live.py` (`e2e`, opt-in) runs against the real CLI on Sonnet: one answer,
+  then a tool round trip recalled from Claude Code's own session and from a rebuilt one. Run it
+  with `uv run pytest bh-02/plugins/models-cordis-plugin -m e2e -q`.

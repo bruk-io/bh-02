@@ -1,0 +1,64 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["click"]
+# ///
+"""The one definition of green: format, lint, types, tests, the architecture gates, and
+bh-02's theme against bh-01's tokens (when bh-01 is checked out beside this repository).
+
+`scripts/check` checks the whole workspace. `scripts/check bh-02/plugins/kernel-cordis-plugin`
+checks one member: ruff and pytest on that directory, mypy on its src/, and the gates (which
+always see the whole workspace, since what they check spans packages). Each step reports and
+the run goes on, so one pass shows everything that is red; the exit code is non-zero if any
+step failed.
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+import click
+
+ROOT = Path(__file__).resolve().parent.parent
+BH_01 = ROOT.parent / "bh-01"  # where scripts/sync-tokens reads bh-01's token CSS from
+
+
+def step(name: str, *argv: str) -> bool:
+    click.echo(click.style(f"== {name}", bold=True))
+    ok = subprocess.run(argv, cwd=ROOT).returncode == 0
+    click.echo(click.style("   ok" if ok else f"   FAILED: {name}", fg="green" if ok else "red"))
+    return ok
+
+
+@click.command()
+@click.argument("member", required=False, type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--gates/--no-gates", default=True, help="Run the architecture gates (the whole workspace).")
+def main(member: Path | None, gates: bool) -> None:
+    """Check the workspace, or one MEMBER directory."""
+    where = [str(member)] if member else ["."]
+    types = [str(member / "src")] if member and (member / "src").is_dir() else []
+    results = [
+        step("format", "uv", "run", "--quiet", "ruff", "format", "--check", *where),
+        step("lint", "uv", "run", "--quiet", "ruff", "check", "--no-fix", *where),
+        step("types", "uv", "run", "--quiet", "mypy", *types),
+        step("tests", "uv", "run", "--quiet", "pytest", "-q", *([str(member)] if member else [])),
+    ]
+    if gates:
+        results.append(step("gates", str(ROOT / "scripts" / "arch-check"), "--no-fix"))
+    results.append(tokens())
+    sys.exit(0 if all(results) else 1)
+
+
+def tokens() -> bool:
+    """bh-02's theme against bh-01's tokens (`scripts/sync-tokens --check`), when bh-01 is
+    checked out beside this repository; without it the in-repo test still pins the theme to
+    the committed snapshot, and this says it skipped."""
+    if not (BH_01 / "dist").is_dir():
+        click.echo(click.style("== tokens", bold=True))
+        click.echo(click.style(f"   skipped: no {BH_01}/dist (bh-01, built, beside this repository)", fg="yellow"))
+        return True
+    return step("tokens", str(ROOT / "scripts" / "sync-tokens"), "--check", "--bh-01", str(BH_01))
+
+
+if __name__ == "__main__":
+    main()

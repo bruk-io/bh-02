@@ -1,0 +1,6 @@
+# A layer over supervisor.toml: adds a macOS menu-bar app listing the registered processes.
+# `warden --tray` applies this on top of the base composition.
+
+[[plugin]]
+id = "tray"
+use = "warden-systray:tray"

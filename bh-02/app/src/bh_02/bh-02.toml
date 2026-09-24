@@ -1,0 +1,84 @@
+# The shipped composition: bh-02 is a CodeAct harness in a Textual app. bh-02's own loop drives
+# Claude through Claude Code (the Claude Agent SDK, on the subscription), one model step at a
+# time; the model has one tool, `python(code)`, through standard tool calling, and its cells run
+# in a persistent kernel inside a brig jail. A row's id is its role; `use`
+# is which plugin fills it, as `plugin:component` (a `cordis.plugins` entry point) or
+# `module:attribute`. Order carries no meaning: dependencies decide what activates when.
+# A session's own layer and `bh-02 --patch mine.toml` are layers over this one.
+
+# The model: bh-02's own loop (`agent:loop`: steps classified, each call run as a cell in the
+# kernel) over one model, named: `sonnet` (Claude through Claude Code, which only carries the
+# steps; credential: CLAUDE_CODE_OAUTH_TOKEN in local.env, which the row reads itself) unless
+# the row's `default` says another. `opus` and `haiku` are built in too, and the models file
+# (~/.config/bh-02/models.toml) adds any OpenAI-compatible model. The transcript is a row of its
+# own, so switching the model (`/model NAME`) keeps the conversation.
+[[plugin]]
+id = "loop"
+use = "agent:loop"
+
+[[plugin]]
+id = "model"
+use = "models:model"
+
+# The models there are, and which one the model row names: read fresh each time, depending on
+# the loader alone, so `/model` (the operator) and the status bar never reload with a switch.
+[[plugin]]
+id = "models"
+use = "models:catalog"
+
+[[plugin]]
+id = "transcript"
+use = "agent:transcript"
+
+# The app: binds `input`, `output` and `frame` (where rows push status). It depends on its
+# config alone, so no reload elsewhere restarts it.
+[[plugin]]
+id = "ui"
+use = "tui:app"
+
+[[plugin]]
+id = "chat"
+use = "chat:session"
+
+# The kernel: a persistent Python namespace, and the model's one tool, `python(code)`. Jailed,
+# its cells run without asking; unjailed (`kernel:unjailed` below), each cell asks first.
+[[plugin]]
+id = "kernel"
+use = "kernel:kernel"
+
+# `bh-02 --no-jail` puts `kernel:unjailed` here, which confines nothing.
+[[plugin]]
+id = "jail"
+use = "brig:jail"
+
+# The status bar: the session's id, the model and its provider, and the kernel's jail grades
+# (usage is the app's own). A small row over `kernel`, `loader`, `models`, `sessions` and
+# `frame`, so a new kernel (/clear, a new jail) reloads this and never the app.
+[[plugin]]
+id = "status"
+use = "tui:status"
+
+# This directory's sessions in the sidebar, the running one marked: a row over `sessions`
+# (bound by the shell's own pinned row) and `frame`.
+[[plugin]]
+id = "sidebar"
+use = "tui:sessions"
+
+[[plugin]]
+id = "system"
+use = "context:project"
+
+# Slash commands: a broker rows register commands into, and the operator's own (/rows,
+# /explain, /restart, /clear, /model), which act through the loader's handle.
+[[plugin]]
+id = "commands"
+use = "commands:registry"
+
+[[plugin]]
+id = "operator"
+use = "commands:operator"
+
+# The command palette (Ctrl-P) offers the commands broker's commands.
+[[plugin]]
+id = "palette"
+use = "tui:palette"

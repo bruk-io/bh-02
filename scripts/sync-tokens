@@ -1,0 +1,81 @@
+#!/usr/bin/env -S uv run --quiet python
+"""Bring bh-01's design tokens into bh-02's theme.
+
+Copies bh-01's `dist/tokens/colors.css` and `dist/themes/default.css` into the tui plugin's
+snapshot (`bh-02/plugins/tui-cordis-plugin/bh-01-tokens/`) and regenerates
+`tui_cordis_plugin/bh01_theme.py` from it (`tui_cordis_plugin.tokens` does the translating).
+`--check` writes nothing and exits 1 if either would change. Roles left out (not colours
+Textual parses) are listed either way; broken tokens (a `var()` to nothing, a loop, a role that
+is a colour in one theme only) are an error, and nothing is written. bh-01 is read from `../bh-01`
+beside this repository unless `--bh-01 PATH` says where it is.
+
+Runs in the workspace's environment (it imports the tui plugin), so run it from inside the
+repository after `uv sync --all-packages`.
+"""
+
+import sys
+from pathlib import Path
+
+import click
+
+ROOT = Path(__file__).resolve().parent.parent
+PLUGIN = ROOT / "bh-02" / "plugins" / "tui-cordis-plugin"
+SNAPSHOT = PLUGIN / "bh-01-tokens"
+GENERATED = PLUGIN / "src" / "tui_cordis_plugin" / "bh01_theme.py"
+# snapshot file name -> where bh-01 builds it
+SOURCES = {"colors.css": Path("dist/tokens/colors.css"), "default.css": Path("dist/themes/default.css")}
+
+
+@click.command()
+@click.option(
+    "--bh-01",
+    "bh_01",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=ROOT.parent / "bh-01",
+    show_default="../bh-01",
+    help="bh-01's checkout (its dist/ must be built).",
+)
+@click.option("--check", is_flag=True, help="Write nothing; exit 1 if the snapshot or theme would change.")
+def main(bh_01: Path, check: bool) -> None:
+    """Copy bh-01's token CSS into the snapshot and regenerate bh-02's theme from it."""
+    try:
+        from tui_cordis_plugin import tokens
+    except ImportError:
+        raise click.ClickException(
+            "tui_cordis_plugin is not importable: run this from inside the repository after "
+            "`uv sync --all-packages`, so `uv run` finds the workspace's environment"
+        ) from None
+    missing = [str(bh_01 / source) for source in SOURCES.values() if not (bh_01 / source).is_file()]
+    if missing:
+        raise click.ClickException(
+            f"bh-01's built tokens are not at {', '.join(missing)}; pass --bh-01 PATH with bh-01's "
+            "checkout, and build it (`npm run build` there) if dist/ is missing"
+        )
+    wanted = {SNAPSHOT / name: (bh_01 / source).read_text() for name, source in SOURCES.items()}
+    colors, default = wanted[SNAPSHOT / "colors.css"], wanted[SNAPSHOT / "default.css"]
+    try:
+        wanted[GENERATED] = tokens.module_source(colors, default)
+        _, _, skipped = tokens.semantic_colours(colors, default)
+    except ValueError as error:  # broken tokens: say which, write nothing
+        raise click.ClickException(str(error)) from None
+    if skipped:
+        names = ", ".join(f"--bh-color-{role}" for role in skipped)
+        click.echo(f"left out of both themes, as not colours Textual parses: {names}", err=True)
+    stale = [path for path, text in wanted.items() if not path.is_file() or path.read_text() != text]
+    for path in stale:
+        where = path.relative_to(ROOT)
+        if check:
+            click.echo(f"differs from what sync-tokens would write: {where}", err=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text := wanted[path])
+            click.echo(f"wrote {where} ({len(text.splitlines())} lines)")
+    if check and stale:
+        click.echo("run scripts/sync-tokens to bring them up to date", err=True)
+        sys.exit(1)
+    if not stale:
+        click.echo("bh-01's tokens and bh-02's theme are in sync")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,78 @@
+[project]
+name = "brig"
+version = "0.0.1"
+description = "Composable, honestly-graded sandboxes: spec -> mechanisms -> stack -> launcher -> handle."
+readme = "README.md"
+requires-python = ">=3.15"
+license = "MIT"
+authors = [{ name = "Bruk Habtu", email = "bruk.habtu@gmail.com" }]
+# brig is a standalone library: no dependencies, and nothing first-party. The gate's
+# `brig-standalone` rule proves it imports nothing from cordis or any app on it.
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/brig"]
+
+# brig was written at its own width (100, E501 off). It extends the workspace's rules and keeps
+# that width, so `ruff format .` does not reflow a tree it did not write.
+[tool.ruff]
+extend = "../../pyproject.toml"
+line-length = 100
+# brig's tests import their helpers as `tests.*` (pythonpath = libs/brig), so that is first-party too
+src = ["src", "."]
+# SPEC.md's fenced blocks are illustrative pseudocode whose aligned comments carry meaning.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# `main` ends in `os.execvp`, which replaces the process and never returns; RET503 can't see that.
+"src/brig/mech/trampoline/__init__.py" = ["RET503"]
+
+# brig's own architecture gate, separate from the workspace's: pypeeker reads the nearest
+# pyproject.toml, so `scripts/arch-check` runs it a second time from this directory. brig is
+# held to the rules it was written against, not to the app's house style.
+[tool.pypeeker]
+src = ["src", "tests"]
+plugins = ["pypeeker_rules.brig"]
+rules = [
+    "brig-layers",              # the layer DAG below (SPEC.md section 13)
+    "brig-standalone",          # the standard library and itself, nothing else
+    "import-time-side-effects",
+    # "no-import-cycles" is off. The pypeeker pinned here (newer than the one brig was
+    # gated with) reports `brig.mech`'s submodules importing their contract back from
+    # `brig.mech/__init__`, a shape the old one accepted (see the comment above those imports).
+    # The fix is to move the contract into a sibling module the submodules import instead.
+]
+
+# A test helper that exists to be run BY PATH as a second process; its `if __name__` guard is
+# the one import-time finding it cannot avoid (brig's decision-152).
+[tool.pypeeker.import-time-side-effects]
+allow = [
+    "integration._rehydrate_and_kill_helper",
+    # `python -m` entry points: running the program is the module's whole job.
+    "brig.mech.trampoline.__main__",
+    "brig.proxy.__main__",
+]
+
+[tool.pypeeker.brig-layers]
+root = "src/brig"
+strict = true
+
+# An arrow means "may import"; the absence of an arrow is a rule. `core` is pure: no I/O, no
+# clock, no randomness, no subprocess - convention carried by review, not expressible here.
+[tool.pypeeker.brig-layers.allow]
+core    = []
+mech    = ["core"]
+stack   = ["core", "mech"]
+run     = ["core", "mech", "stack"]
+observe = ["core", "run"]
+probe   = ["core", "run", "observe"]
+# `proxy` is a standalone PROCESS, not a layer in the flow: the egress filter runs trusted-side,
+# outside the jail. The empty row is the enforcement of that - it may import nothing from brig.
+proxy   = []

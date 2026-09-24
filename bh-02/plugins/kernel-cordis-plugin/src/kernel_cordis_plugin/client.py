@@ -1,0 +1,226 @@
+"""The `kernel` value: the host's end of the worker's socket, the process a jail started, and
+the model's one tool, `python(code)`, which runs a cell in it.
+
+A cell is one request and one answer: the worker runs the code and says it is done. Whether
+the person is asked first is the loop's to do (a kernel that is not `confined`), so the kernel
+depends on its jail alone and a new ui keeps the namespace. Every failure the kernel knows of (a
+worker that died, an answer too long or garbled to read, a worker that won't start again)
+comes back as the cell's text, never as an exception. Interrupting a cell (cancelling `run`) sends SIGINT
+through the jail, which the worker turns into `KeyboardInterrupt` in the cell, and waits for the
+cell to say it ended: the namespace survives. A worker that dies is started again on the next
+cell, and that cell is told its earlier variables are gone.
+"""
+
+import asyncio
+import contextlib
+import json
+import shutil
+import tempfile
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from sys import executable
+from types import TracebackType
+from typing import Any, Protocol, runtime_checkable
+
+from kernel_cordis_plugin.python import PYTHON, instructions_for
+
+__all__ = ["Jail", "Jailed", "Kernel", "KernelConfig", "is_confined", "worker_argv"]
+
+_WORKER = Path(__file__).with_name("worker.py")
+_CONFINING = ("fs_write", "network")  # the axes a jail must enforce for its cells to count as confined
+# The longest line the worker sends: its output and its error are capped at 20,000 characters
+# each, and JSON escapes a character to at most 12 bytes (a surrogate pair, `\ud83d\ude00`),
+# so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
+_LINE_LIMIT = 1 << 20
+
+
+@runtime_checkable
+class Jailed(Protocol):
+    """A program a jail started: it can be interrupted and stopped."""
+
+    def interrupt(self) -> bool: ...
+    async def stop(self) -> None: ...
+
+
+@runtime_checkable
+class Jail(Protocol):
+    """What the kernel needs of the `jail` value (CONTRACTS.md: jail)."""
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Jailed: ...
+    def report(self) -> Mapping[str, str]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class KernelConfig:
+    """`root` is the working directory cells run in; `grace` how long an interrupted cell gets
+    to say it ended before the worker is stopped and started again."""
+
+    root: str = "."
+    grace: float = 5.0
+
+
+@dataclass(frozen=True, slots=True)
+class _Cell:
+    """What running one cell produced: what it printed, and the error it ended with, if any."""
+
+    output: str
+    error: str | None = None
+
+    def text(self) -> str:
+        """The cell as the model reads it."""
+        parts = [self.output.rstrip("\n")] if self.output.strip() else []
+        if self.error:
+            parts.append(self.error)
+        return "\n".join(parts) or "(no output)"
+
+
+def worker_argv(endpoint: str) -> list[str]:
+    """The worker, run by path under this interpreter, isolated (-I: no PYTHON* env, no cwd on path)."""
+    return [executable, "-I", str(_WORKER), endpoint]
+
+
+def is_confined(report: Mapping[str, str]) -> bool:
+    """Whether a jail's report says a cell can write only where it was allowed and reach no network."""
+    return all(report.get(axis) == "enforced" for axis in _CONFINING)
+
+
+class Kernel:
+    """Implements `kernel` (CONTRACTS.md): a persistent namespace, and the model's one tool
+    (`spec`, `instructions()`, `run(code)`). An async context manager: entering starts the
+    worker in the jail, leaving stops it."""
+
+    def __init__(self, jail: Jail, config: KernelConfig) -> None:
+        self._jail = jail
+        self._config = config
+        self._lock = asyncio.Lock()
+        self._dir: str | None = None
+        self._process: Jailed | None = None
+        self._reader: asyncio.StreamReader | None = None
+        self._writer: asyncio.StreamWriter | None = None
+        self._restarted = False
+
+    @property
+    def confined(self) -> bool:
+        return is_confined(self._jail.report())
+
+    def report(self) -> Mapping[str, str]:
+        return self._jail.report()
+
+    @property
+    def spec(self) -> Mapping[str, Any]:
+        """The one tool, as the model is offered it."""
+        return PYTHON
+
+    def instructions(self) -> str:
+        """What the model is told about the tool and where its code runs, read per request."""
+        return instructions_for(self.confined)
+
+    async def __aenter__(self) -> Kernel:
+        await self._start()
+        return self
+
+    async def __aexit__(
+        self, kind: type[BaseException] | None, error: BaseException | None, tb: TracebackType | None
+    ) -> None:
+        await self._stop()
+
+    async def run(self, code: str) -> str:
+        """Run one cell and return it as the model reads it."""
+        return (await self._execute(code)).text()
+
+    async def _execute(self, code: str) -> _Cell:
+        async with self._lock:
+            if self._writer is None:
+                try:
+                    await self._start()
+                except Exception as error:  # the jail would not start it: the cell says so
+                    await self._stop()
+                    return _Cell(
+                        "",
+                        f"error: the kernel could not be started again ({error}), so this cell did "
+                        "not run; the next cell tries again, and if it keeps failing, tell the "
+                        "person (`/restart kernel` starts the row afresh)",
+                    )
+                self._restarted = True
+            note = "(the kernel was started again; variables from earlier cells are gone)\n"
+            prefix, self._restarted = (note if self._restarted else ""), False
+            try:
+                cell = await self._exchange(code)
+            except ConnectionError:
+                await self._stop()
+                return _Cell(
+                    prefix, "the kernel process ended during this cell; it will start again on the next"
+                )
+            except ValueError as error:
+                # a line over the limit, or one that is not JSON: what follows can't be trusted
+                # to line up with a cell, so the worker is replaced rather than read on
+                await self._stop()
+                return _Cell(
+                    prefix,
+                    f"error: the kernel's answer to this cell could not be read ({error}); the "
+                    "kernel will start again on the next cell, without the earlier variables",
+                )
+            return _Cell(prefix + cell.output, cell.error) if prefix else cell
+
+    async def _exchange(self, code: str) -> _Cell:
+        self._send({"op": "exec", "code": code})
+        try:
+            return await self._until_done()
+        except asyncio.CancelledError:
+            await self._interrupt()
+            raise
+
+    async def _until_done(self) -> _Cell:
+        """Read the worker until the cell ends."""
+        while True:
+            message = await self._receive()
+            if message.get("op") == "done":
+                return _Cell(str(message.get("output", "")), message.get("error"))
+
+    async def _interrupt(self) -> None:
+        """Stop the running cell and wait for it to end; a worker that won't is restarted."""
+        if self._process is None:
+            return
+        self._process.interrupt()
+        try:
+            async with asyncio.timeout(self._config.grace):
+                await asyncio.shield(self._until_done())
+        except TimeoutError, ConnectionError, ValueError:
+            await self._stop()
+
+    def _send(self, message: Mapping[str, Any]) -> None:
+        if self._writer is None:
+            raise ConnectionError("the kernel is not running")
+        self._writer.write((json.dumps(message) + "\n").encode("utf-8"))
+
+    async def _receive(self) -> dict[str, Any]:
+        if self._reader is None:
+            raise ConnectionError("the kernel is not running")
+        line = await self._reader.readline()
+        if not line:
+            raise ConnectionError("the kernel process ended")
+        message: dict[str, Any] = json.loads(line)
+        return message
+
+    async def _start(self) -> None:
+        # A Unix socket path must fit in about 100 bytes, so it lives in a short directory of its own.
+        self._dir = tempfile.mkdtemp(prefix="bh-k-", dir="/tmp")
+        endpoint = str(Path(self._dir) / "k.sock")
+        root = str(Path(self._config.root).resolve())
+        self._process = await self._jail.start(worker_argv(endpoint), cwd=root, endpoint=endpoint)
+        self._reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)
+        self._send({"op": "hello"})
+
+    async def _stop(self) -> None:
+        if self._writer is not None:
+            self._writer.close()
+            with contextlib.suppress(ConnectionError):
+                await self._writer.wait_closed()
+        self._reader = self._writer = None
+        if self._process is not None:
+            await self._process.stop()
+            self._process = None
+        if self._dir is not None:
+            shutil.rmtree(self._dir, ignore_errors=True)
+            self._dir = None

@@ -1,0 +1,43 @@
+[project]
+name = "cordis-helpers"
+version = "0.1.0"
+description = "Conveniences for cordis plugins: the paper's service broker with the domain stripped out"
+requires-python = ">=3.15"
+dependencies = ["cordis"]
+
+[tool.uv.sources]
+cordis = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cordis_helpers"]
+
+# cordis-helpers' own gate, run by scripts/arch-check from this directory.
+[tool.pypeeker]
+src = ["src", "tests"]
+plugins = ["pypeeker_rules.apps"]
+rules = [
+    "init-reexport-only",
+    "import-time-side-effects",
+    "no-hidden-global-mutation",
+    "no-impure-functions",
+    "under-exposed-access",
+    "over-exposed-module-symbol",
+]
+
+[tool.pypeeker.visibility]
+mode = "library"
+
+[tool.pypeeker.no-impure-functions]
+include = ["cordis_helpers.*"]
+exclude = [
+    # the registry mutates itself by design: each registration is an entry with its own remover
+    "cordis_helpers.registry:Registry.register", "cordis_helpers.registry:Registry.register.remove",
+    "cordis_helpers.registry:Hooks.add", "cordis_helpers.registry:Hooks.add.remove",
+]
+
+[tool.pypeeker.over-exposed-module-symbol]
+allow = ["*test_*", "*test_*:*", "*conftest:*"]

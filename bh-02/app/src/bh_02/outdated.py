@@ -1,0 +1,299 @@
+"""What an earlier bh-02's layer files named that this one does not, and the same layer in
+today's names.
+
+bh-02 renamed some of its own rows and dropped others; cordis's own words (plugin, row,
+layer, `[[plugin]]`) are unchanged. `translated` turns a layer written for an earlier bh-02
+into one for this one and says, one line per row, what it changed and why. A session's own
+layer is translated silently on a resume (`sessions.update`); a `--patch` file is the
+person's, so the command line refuses it with those lines and `bh-02 update-layer FILE`
+rewrites it. Everything here is pure.
+"""
+
+import json
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+from cordis import Row
+
+__all__ = ["clashes", "translated"]
+
+# Rows (and the keys they bind) that were renamed.
+_RENAMED = {"llm": "loop", "mode": "chat", "completion": "model"}
+# A row a config names for its model (`model_row`, an old `model_status`'s `row`): before the
+# completion row, the model was the `llm` row's; then the completion row's; it is the model
+# row's now, not the loop's.
+_MODEL_ROWS = {"llm": "model", "completion": "model"}
+# The model row: named models over their providers. Claude Code's row and Ollama's are
+# providers of it now, and a model is chosen by name (`default`), not by the provider's id.
+_MODEL = "model"
+_MODELS_USE = "models:model"
+_CLAUDE_CODE_USE = "claude-code:completion"
+_OLLAMA_USE = "ollama:completion"
+_BUILT_IN = frozenset({"sonnet", "opus", "haiku"})  # models:model's own names for Claude's
+_KEPT = ("state", "env_file", "cwd")  # what the claude-code row took that the model row still does
+# Ollama's defaults, as its row had them.
+_OLLAMA_HOST, _OLLAMA_MODEL = "http://localhost:11434", "llama3.2"
+# bh-02's fake models that bound `completion`, now bound under `model`.
+_RENAMED_USES = {
+    "bh_02.testing:echo_completion": "bh_02.testing:echo_model",
+    "bh_02.testing:slow_completion": "bh_02.testing:slow_model",
+    "bh_02.testing:cells_completion": "bh_02.testing:cells_model",
+}
+# The one status row, which the three status-bar rows became (the session's id: from `sessions`).
+_STATUS = "status"
+_STATUS_USE = "tui:status"
+_MERGED_USES = frozenset({"tui:jail_status", "tui:model"})
+_MERGED_IDS = frozenset({"jail_status", "model_status"})
+# How an old `model_status` config reads as the status row's. Its `default` (later the status
+# row's `default_model`, the model named when the row named none) is gone: the `models` row says
+# which model and provider the model row names, whatever it names.
+_STATUS_KEYS = {"row": "model_row"}
+_STATUS_GONE = frozenset({"default", "default_model"})
+# Rows an earlier bh-02 had and this one does not, by id or by the plugin they named, and why.
+_ONE_TOOL = "python is the one tool (the kernel's), and unjailed each cell is approved in the modal"
+_REMOVED_IDS = {
+    "tools": _ONE_TOOL,
+    "fs": _ONE_TOOL,
+    "approve": _ONE_TOOL,
+    "actions": _ONE_TOOL,
+    "guard": _ONE_TOOL,
+    "session": "the status row shows the session's id itself",
+}
+_REMOVED_USES = ("tools:", "fs:", "codeact:", "tui:approver", "bh_02.bootstrap:layer_guard")
+
+
+def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
+    """`rows` in this bh-02's names, and one line per change saying what changed and what to do.
+
+    - A renamed row takes its new id (`llm` is `loop`, `mode` is `chat`, `completion` is
+      `model`), and an operator's `clear` naming one names the new one; a `model_row` (or an old
+      `model_status`'s `row`) naming `llm` or `completion` names `model`, the row that holds
+      the model now. A renamed row whose
+      new id the layer already has keeps its old id, and the change says to fold the two into
+      one by hand (`clashes`): which of them wins is the person's call.
+    - `jail_status` and `model_status` (and any row using `tui:jail_status` or `tui:model`)
+      become the one `status` row: `use = "tui:status"` if any of them named a plugin, the
+      model row's config under the status row's names (`row` is `model_row`; `default`, and
+      the status row's own `default_model`, are gone: the `models` row says which model the
+      model row names). An old part's `disabled` is not carried over: the status row cannot
+      turn off one part, and turning off all of it would hide the session and the model too, so
+      the change says how to turn off the whole bar instead (a `status` row already in the
+      layer keeps its own `disabled`). A status row with nothing left to say is not written.
+    - A row bh-02 no longer has is dropped: the tool rows before the one tool, a session's
+      `session` row, and a fixed field (`tui:status` with a `field` or `text`, whatever its id).
+    - The model row's providers are `models:model`'s now (`_model_row`): `claude-code:completion`
+      (or a model row naming no plugin, which was it) names its model as `default`, an id that
+      is no built-in name as an `extra` model of its own; `ollama:completion` is an `extra`
+      OpenAI-compatible model at its host's `/v1`. bh-02's fakes that bound `completion` bind
+      `model` under new names (`echo_completion` is `echo_model`).
+
+    Nothing changed is `(list(rows), [])`, so translating twice changes nothing more.
+    """
+    out: list[Row] = []
+    changes: list[str] = []
+    merged: list[Row] = []
+    at = None  # where the status row goes: where the first of its parts was
+    taken = {row.id for row in rows}
+    for row in rows:
+        if (why := _removed(row)) is not None:
+            changes.append(f"row {row.id!r} was removed: {why}; delete it")
+            continue
+        if row.id in _MERGED_IDS or row.use in _MERGED_USES or row.id == _STATUS:
+            at = len(out) if at is None else at
+            merged.append(row)
+            if row.id != _STATUS:
+                changes.append(_merged_change(row))
+            continue
+        if (clash := _clash(row, taken)) is not None:
+            changes.append(clash)
+        elif row.id in _RENAMED:
+            changes.append(f"row {row.id!r} is now {_RENAMED[row.id]!r}; rename its id")
+            row = Row(_RENAMED[row.id], row.use, row.config, row.disabled)
+        if row.config is not None and (config := _renamed_rows(row.config)) != row.config:
+            changes.append(f"row {row.id!r}: its config names a renamed row; make it {_inline(config)}")
+            row = Row(row.id, row.use, config, row.disabled)
+        if row.use in _RENAMED_USES:
+            changes.append(
+                f"row {row.id!r}: {row.use} is now {_RENAMED_USES[row.use]}; "
+                f"make it use = {json.dumps(_RENAMED_USES[row.use])}"
+            )
+            row = Row(row.id, _RENAMED_USES[row.use], row.config, row.disabled)
+        if row.id == _MODEL and (moved := _model_row(row)) is not None:
+            row, change = moved
+            changes.append(change)
+        out.append(row)
+    if at is not None:
+        old = any(part.id != _STATUS for part in merged)
+        status = _status(merged)
+        gone = next(
+            (part for part in merged if part.id == _STATUS and _STATUS_GONE & set(part.config or {})), None
+        )
+        if gone is not None and not old:  # today's status row, but for the default it no longer takes
+            changes.append(_status_gone(gone))
+        if old or gone is not None:  # rewritten; today's status row alone stays as it is
+            out[at:at] = [status] if status != Row(_STATUS) else []
+        else:  # today's status row: only a row its config names may have been renamed
+            kept = []
+            for part in merged:
+                if part.config is not None and (config := _renamed_rows(part.config)) != part.config:
+                    changes.append(
+                        f"row {part.id!r}: its config names a renamed row; make it {_inline(config)}"
+                    )
+                    part = Row(part.id, part.use, config, part.disabled)
+                kept.append(part)
+            out[at:at] = kept
+    return out, changes
+
+
+def _model_row(row: Row) -> tuple[Row, str] | None:
+    """The model row as `models:model` fills it, and what changed; None when it already is.
+
+    Claude Code's row (or a model row naming no plugin, whose config was Claude Code's) names
+    its model by `default` now, a built-in name as it is and an id as an `extra` model of the
+    row's own; Ollama's is an `extra` OpenAI-compatible model at `<host>/v1`, named as its model."""
+    config = dict(row.config or {})
+    kept = {key: config[key] for key in _KEPT if key in config}
+    if row.use == _OLLAMA_USE:
+        name = str(config.get("model") or _OLLAMA_MODEL)
+        url = str(config.get("host") or _OLLAMA_HOST).rstrip("/") + "/v1"
+        fresh = {
+            "default": name,
+            "extra": {name: {"provider": "openai", "id": name, "base_url": url}},
+            **kept,
+        }
+        why = "Ollama is an OpenAI-compatible model of the model row now"
+    elif row.use == _CLAUDE_CODE_USE or (row.use is None and "model" in config):
+        fresh = {**_claude(config.get("model")), **kept}
+        why = "Claude Code is a provider of the model row now, which names its model `default`"
+    else:
+        return None
+    use = _MODELS_USE if row.use is not None else None
+    # a row that named no config still names none: an empty one would replace the session's
+    # own model config whole, pinning the model and dropping its `state`
+    config_out = fresh if fresh or row.config is not None else None
+    moved = Row(row.id, use, config_out, row.disabled)
+    parts = [f"use = {json.dumps(use)}"] if use else []
+    if config_out is not None:
+        parts.append(_inline(fresh))
+    said = ", ".join(parts)
+    return moved, f"row {row.id!r}: {row.use or 'its config'} is gone: {why}; make it {said}"
+
+
+def _claude(model: object) -> dict[str, Any]:
+    """A Claude Code row's `model` as the model row's config: a built-in name as `default`; an
+    id as an `extra` model of the row's own (provider `claude-code`) that `default` names."""
+    if not isinstance(model, str) or not model:
+        return {}
+    if model in _BUILT_IN:
+        return {"default": model}
+    return {"default": model, "extra": {model: {"provider": "claude-code", "id": model}}}
+
+
+def _status_gone(row: Row) -> str:
+    """What becomes of a status row's `default_model`, which the status row no longer takes."""
+    config = _status_config(row.config)
+    keep = f"make it {_inline(config)}" if config else "delete its config"
+    return (
+        f"row {row.id!r}: default_model is gone (the status bar shows the model and provider the "
+        f"model row names); {keep}"
+    )
+
+
+def _removed(row: Row) -> str | None:
+    """Why bh-02 no longer has `row`, or None when it still does."""
+    if row.id in _REMOVED_IDS:
+        return _REMOVED_IDS[row.id]
+    if row.use is not None and row.use.startswith(_REMOVED_USES):
+        return f"{row.use} is gone: {_ONE_TOOL}"
+    if row.use == _STATUS_USE and {"field", "text"} & set(row.config or {}):
+        return "tui:status is now the status bar's one row (session, model, jail), not a fixed field"
+    return None
+
+
+def clashes(rows: Sequence[Row]) -> list[str]:
+    """The changes `translated` cannot make for the person: a renamed row whose new id the
+    layer already has (both `llm` and `loop`). Empty when there are none."""
+    taken = {row.id for row in rows}
+    return [clash for row in rows if (clash := _clash(row, taken)) is not None]
+
+
+def _clash(row: Row, taken: set[str]) -> str | None:
+    """Why `row` cannot take its new id, or None when it can (or was not renamed)."""
+    new = _RENAMED.get(row.id)
+    if new is None or new not in taken:
+        return None
+    return (
+        f"row {row.id!r} is now {new!r}, and this layer has a {new!r} row too: fold what "
+        f"{row.id!r} sets into {new!r} and delete {row.id!r}"
+    )
+
+
+def _merged_change(row: Row) -> str:
+    """What becomes of a status-bar row that is now part of `status`."""
+    config = _status_config(row.config) if row.config is not None else None
+    moved = f"; its config moves there as {_inline(config)}" if config else ""
+    off = (
+        f"; it was disabled, but {_STATUS!r} cannot turn off one part, so the status bar stays "
+        f"on: to turn off all of it (session, model and jail), give {_STATUS!r} `disabled = true`"
+        if row.disabled
+        else ""
+    )
+    return f"row {row.id!r} is now part of {_STATUS!r}, the status bar's one row{moved}{off}"
+
+
+def _inline(config: Mapping[str, Any]) -> str:
+    """`config` as a layer file writes it, as TOML someone can paste: `config = { default = "fake" }`,
+    a nested table as an inline table (`extra = { "qwen3" = { provider = "openai", ... } }`)."""
+    return f"config = {_toml(config)}"
+
+
+def _toml(value: object) -> str:
+    """One TOML value, inline: a key that isn't bare (`qwen2.5:7b`) quoted, a string as JSON's
+    (a valid TOML basic string)."""
+    match value:
+        case bool():
+            return "true" if value else "false"
+        case int() | float():
+            return repr(value)
+        case Mapping():
+            pairs = (f"{_key(str(k))} = {_toml(v)}" for k, v in value.items())
+            return "{ " + ", ".join(pairs) + " }"
+        case list() | tuple():
+            return "[" + ", ".join(_toml(v) for v in value) + "]"
+    return json.dumps(str(value))
+
+
+def _key(key: str) -> str:
+    """A TOML key: bare when it can be (`default`), quoted when not (`"qwen2.5:7b"`)."""
+    return key if key and all(c.isascii() and (c.isalnum() or c in "_-") for c in key) else json.dumps(key)
+
+
+def _status(parts: Sequence[Row]) -> Row:
+    """The one status row the old status-bar rows (and any `status` row already there) make:
+    disabled only as a `status` row already there says, never by an old part's flag."""
+    use = _STATUS_USE if any(part.use is not None for part in parts) else None
+    configs = [_status_config(part.config) for part in parts if part.config is not None]
+    config = {key: value for each in configs for key, value in each.items()} or None
+    own = next((part.disabled for part in parts if part.id == _STATUS), None)
+    return Row(_STATUS, use, config, own)
+
+
+def _status_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
+    """An old status-bar row's config under the status row's names, rows renamed too, and
+    without the default model it no longer takes."""
+    renamed = {
+        _STATUS_KEYS.get(key, key): value for key, value in (config or {}).items() if key not in _STATUS_GONE
+    }
+    return dict(_renamed_rows(renamed))
+
+
+def _renamed_rows(config: Mapping[str, Any]) -> Mapping[str, Any]:
+    """`config` with each renamed row it names renamed: an operator's `clear` the rows' new ids,
+    a `model_row` the row that holds the model now."""
+    out: dict[str, Any] = dict(config)
+    if isinstance(out.get("clear"), list):
+        out["clear"] = [_RENAMED.get(name, name) for name in out["clear"]]
+    for key in ("model_row", "row"):
+        if isinstance(out.get(key), str):
+            out[key] = _MODEL_ROWS.get(out[key], out[key])
+    return out if out != config else config
