@@ -464,6 +464,72 @@ async def test_a_stream_claude_code_restarts_mid_step_is_a_recoverable_error_not
     assert _said(again) == "back" and len(h.fakes) == 2
 
 
+_THOUGHT = {"type": "thinking", "thinking": "they want a greeting", "signature": "sig"}
+
+
+@pytest.mark.parametrize("streamed", [0, 1], ids=["nothing-streamed", "message-start-streamed"])
+async def test_a_step_claude_code_falls_back_to_a_non_streamed_request_for_still_completes(
+    tmp_path: Path, streamed: int
+) -> None:
+    """Claude Code gives up on a stream that fails before a block completes and asks again
+    without streaming: the step comes as one whole `AssistantMessage` (a new id, its stop reason
+    set) and no stream events, then the result. It was the first reply after a /clear that
+    failed so, live, as "Claude couldn't finish the step" (task-0020); it is folded as the step."""
+    whole = FakeStep([_THOUGHT, _text("Hello.")], fallback_after=streamed)
+    h = _Harness(tmp_path, [FakeStep([_text("one")])], [whole, FakeStep([_text("still here")])])
+    first = await h.step([{"role": "user", "content": "a"}])
+    cleared = [{"role": "user", "content": "Say hello."}]  # /clear: a new Claude Code
+    chunks = await h.step(cleared)
+    assert _said(first) == "one" and _said(chunks) == "Hello."
+    assert {"type": "thinking", "text": "they want a greeting"} in chunks
+    assert {"type": "stop", "reason": "end_turn"} in chunks
+    assert chunks[-1] == {
+        "type": "message",
+        "message": {"role": "assistant", "content": [_THOUGHT, _text("Hello.")]},
+    }
+    used = [c for c in chunks if c["type"] == "usage"]
+    assert sum(u["input_tokens"] for u in used) == 100 and sum(u["output_tokens"] for u in used) == 10
+    assert "partial" not in used[-1]
+    # the conversation carries on in the same Claude Code: the step is what it holds
+    again = await h.step([*cleared, _entry(chunks), {"role": "user", "content": "Still there?"}])
+    assert _said(again) == "still here"
+    old, new = h.fakes
+    assert new.asked == ["Say hello.", "Still there?"] and new.interrupts == 0 and not new.disconnected
+
+
+async def test_a_tool_step_that_comes_whole_parks_its_call_and_takes_the_result(tmp_path: Path) -> None:
+    h = _Harness(
+        tmp_path,
+        [
+            FakeStep([_text("Let me run it."), _call("t1")], stop="tool_use", fallback_after=0),
+            FakeStep([_text("It is 2.")]),
+        ],
+    )
+    asked = [{"role": "user", "content": "what is 1+1"}]
+    first = await h.step(asked)
+    assert [c for c in first if c["type"] == "tool_call"] == [
+        {"type": "tool_call", "id": "t1", "name": "python", "input": {"code": "1+1"}}
+    ]
+    assert {"type": "stop", "reason": "tool_use"} in first
+    second = await h.step([*asked, _entry(first), {"role": "tool", "content": "2", "call_id": "t1"}])
+    assert _said(second) == "It is 2."
+    (fake,) = h.fakes
+    assert fake.results == {"t1": "2"} and fake.interrupts == 0
+
+
+async def test_a_step_that_comes_whole_after_part_of_it_streamed_is_not_said_twice(tmp_path: Path) -> None:
+    """Text already streamed can't be taken back, so a whole message after it is the retried
+    stream's error (the next line rebuilds), never the reply said twice."""
+    h = _Harness(tmp_path, [FakeStep([_text("Hello there")], fallback_after=3)], [FakeStep([_text("back")])])
+    asked = [{"role": "user", "content": "go"}]
+    with pytest.raises(ClaudeCodeError) as raised:
+        await h.step(asked)
+    assert raised.value.kind == "stream_retried"
+    failed = {"role": "assistant", "content": "[this reply failed here; the person saw the error]"}
+    again = await h.step([*asked, failed, {"role": "user", "content": "go"}])
+    assert _said(again) == "back" and len(h.fakes) == 2
+
+
 async def _refused(tmp_path: Path, env_file: Path) -> ClaudeCodeError:
     config = ClaudeCodeConfig(state=str(tmp_path / "s"), env_file=str(env_file))
     model = ClaudeCodeModel(config, lambda options: pytest.fail("nothing starts without a token"))

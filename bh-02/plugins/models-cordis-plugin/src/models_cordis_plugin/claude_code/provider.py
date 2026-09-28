@@ -19,6 +19,10 @@ declared to it (`declared.py`). Each call to `complete` streams exactly one mode
   it has settled, interrupts nothing (Claude Code is idle) and records it as stopped, as the loop
   does; closing a tool step there interrupts Claude Code, whose calls the loop will not answer,
   and the next request rebuilds;
+- a step Claude Code could not stream (a stream that failed before a block completed, which it
+  asks for again without streaming) comes as one whole `AssistantMessage` with no stream
+  events, and is folded as the step; one that comes after part of it was streamed can't be
+  shown without saying that part twice, so it fails as a restarted stream does;
 - a call Claude Code answers itself (one that is not declared, which the permission callback
   denies) lets it start the next model step on its own answer, before the loop's results reach
   it: that step is dropped unseen, and Claude Code is rebuilt from the loop's transcript and
@@ -43,7 +47,7 @@ import shutil
 import sysconfig
 import tempfile
 from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Final, Protocol
 
@@ -57,7 +61,9 @@ from claude_agent_sdk import (
     StreamEvent,
     SystemMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
+    ToolUseBlock,
     UserMessage,
 )
 
@@ -223,6 +229,29 @@ class _Astray(ClaudeCodeError):
 
 def _text_of(message: AssistantMessage) -> str:
     return " ".join(b.text for b in message.content if isinstance(b, TextBlock)).strip()[:400]
+
+
+def _whole(message: AssistantMessage) -> dict[str, Any] | None:
+    """A message Claude Code handed over whole, as the Messages API returns one; None when it
+    holds a block this provider can't write back as it came."""
+    blocks: list[dict[str, Any]] = []
+    for block in message.content:
+        match block:
+            case TextBlock(text=text):
+                blocks.append({"type": "text", "text": text})
+            case ThinkingBlock(thinking=thinking, signature=signature):
+                blocks.append({"type": "thinking", "thinking": thinking, "signature": signature})
+            case ToolUseBlock():
+                blocks.append({"type": "tool_use", **asdict(block)})  # id, name, input
+            case _:
+                return None
+    return {
+        "id": message.message_id,
+        "model": message.model,
+        "content": blocks,
+        "stop_reason": message.stop_reason,
+        "usage": message.usage or {},
+    }
 
 
 def _detached_cli() -> str | None:
@@ -548,7 +577,7 @@ class ClaudeCodeModel:
         assert self._client is not None
         step = Step()
         failure: AssistantMessage | None = None
-        started = astray = retried = False
+        started = astray = retried = shown = False
         try:
             async with _closing(self._client.receive_messages()) as incoming:
                 async for message in incoming:
@@ -565,11 +594,25 @@ class ClaudeCodeModel:
                             for chunk in step.take(event):
                                 if chunk["type"] == "text":
                                     said.append(chunk["text"])
+                                shown = shown or chunk["type"] != "usage"
                                 yield chunk
                             if step.ended:
                                 break
                         case AssistantMessage(error=error) if error is not None:
                             failure = message
+                        case AssistantMessage(parent_tool_use_id=None, stop_reason=str()) if (
+                            message.message_id != step.id and (whole := _whole(message)) is not None
+                        ):
+                            # the step came whole, not streamed (module docstring); a message
+                            # streamed block by block has the stream's id and no stop reason yet
+                            if shown:
+                                retried = True  # part of it is shown already: not said twice
+                                break
+                            for chunk in step.whole(whole):
+                                if chunk["type"] == "text":
+                                    said.append(chunk["text"])
+                                yield chunk
+                            break
                         case ResultMessage(is_error=is_error, errors=errors, result=result):
                             # the query ended before the step did: Claude Code gave up on it
                             self._held = replace(self._held, ended=FAILED)

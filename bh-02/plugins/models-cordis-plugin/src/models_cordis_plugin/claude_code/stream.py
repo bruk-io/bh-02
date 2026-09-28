@@ -5,7 +5,8 @@ through as a `StreamEvent` whose `event` is the event as a plain dict (`message_
 `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`,
 `message_stop`). `Step` folds them, purely: text and thinking as they stream, a tool call once
 its block ends, then usage, the API's own stop reason and the assistant message as received
-(every block, thinking signatures included), which `agent:loop` keeps for replay.
+(every block, thinking signatures included), which `agent:loop` keeps for replay. A step that
+comes whole instead (Claude Code's fallback to a non-streamed request) is folded by `whole`.
 
 Tool names come as Claude Code sent them to the API (`mcp__bh__python`): the chunk carries the
 name the loop knows (`python`), the message keeps the name as sent, so a rebuilt Claude
@@ -93,6 +94,7 @@ class Step:
     """
 
     def __init__(self) -> None:
+        self.id = ""  # the message's id (`message_start`)
         self.model = ""  # the model id the API answered with (`message_start`)
         self.stop: str | None = None
         self.ended = False  # `message_stop` seen
@@ -107,6 +109,7 @@ class Step:
         match event.get("type"):
             case "message_start":
                 message = event.get("message") or {}
+                self.id = str(message.get("id") or "")
                 self.model = str(message.get("model") or "")
                 self._count({k: v for k, v in (message.get("usage") or {}).items() if k != "output_tokens"})
                 return self._used()
@@ -129,6 +132,32 @@ class Step:
             case "message_stop":
                 self.ended = True
         return []
+
+    def whole(self, message: Json) -> list[dict[str, Any]]:
+        """Fold a step that came whole rather than streamed, as the Messages API returns one
+        (`id`, `model`, `content`, `stop_reason`, `usage`), and end it; return the chunks its
+        blocks carry. Its blocks replace any that streamed before the stream was given up on.
+        Claude Code does this when a stream fails before a block completes: it asks again
+        without streaming, and hands the answer over as one message (CLI 2.1.282)."""
+        self.id = str(message.get("id") or "")
+        self.model = str(message.get("model") or self.model)
+        self._blocks, self._json, self._bad = {}, {}, set()
+        out: list[dict[str, Any]] = []
+        for index, given in enumerate(message.get("content") or []):
+            block = dict(given)
+            self._blocks[index] = block
+            match block.get("type"):
+                case "text" if block.get("text"):
+                    out.append({"type": "text", "text": str(block["text"])})
+                case "thinking" if block.get("thinking"):
+                    out.append({"type": "thinking", "text": str(block["thinking"])})
+                case "tool_use":
+                    self._json[index] = [json.dumps(block.get("input") or {})]
+                    out.extend(self._stopped(index))
+        self._count(message.get("usage") or {})
+        self.stop = message.get("stop_reason") or self.stop
+        self.ended = True
+        return out
 
     def _count(self, usage: Json) -> None:
         for key in _COUNTS:
