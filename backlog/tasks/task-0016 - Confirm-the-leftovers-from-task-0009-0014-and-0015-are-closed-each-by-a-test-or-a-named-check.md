@@ -3,9 +3,10 @@ id: task-0016
 title: >-
   Confirm the leftovers from task-0009, 0014 and 0015 are closed, each by a test
   or a named check
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-28 12:26'
+updated_date: '2026-09-28 12:40'
 labels: []
 dependencies: []
 priority: medium
