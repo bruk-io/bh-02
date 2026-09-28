@@ -178,6 +178,10 @@ def test_golden_argv_for_the_reference_spec() -> None:
         "--ro-bind",
         _HOOKS,
         _HOOKS,
+        # Stage 8: the jail's own root tmpfs, read-only, last -- decision-166.
+        # Until it was, a write outside every write root landed in it.
+        "--remount-ro",
+        "/",
         "--",
         "/bin/true",
         "arg",
@@ -609,6 +613,7 @@ def test_a_read_carve_out_inside_a_root_is_masked_last_by_its_kind() -> None:
         "--ro-bind", "/dev/null", _ABSENT,
         "--ro-bind", "/dev/null", _SECRET,
         "--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE,
+        "--remount-ro", "/",
         "--", "w",
     )  # fmt: skip
     assert _ELSEWHERE not in argv
@@ -648,7 +653,7 @@ def test_a_read_carve_out_that_holds_a_root_is_masked_too() -> None:
         path_is_dir={_STATE: True},
     )
     argv = bwrap.compile(spec, ctx).wrap(("w",))
-    assert argv[-8:] == ("--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE, "--", "w")
+    assert argv[-10:-4] == ("--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE)
 
 
 @pytest.mark.unit
@@ -682,4 +687,4 @@ def test_a_write_carve_out_no_writable_tree_reaches_is_not_mounted() -> None:
     )
     argv = bwrap.compile(spec, ctx).wrap(("w",))
     assert layer not in argv
-    assert argv[-5:] == ("--ro-bind", _HOOKS, _HOOKS, "--", "w")
+    assert argv[-7:-4] == ("--ro-bind", _HOOKS, _HOOKS)

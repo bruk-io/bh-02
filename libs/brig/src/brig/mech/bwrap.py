@@ -70,7 +70,16 @@ restrictive".
        `--ro-bind /dev/null DEST` (file)   A file reads EACCES (bwrap mounts
        or `--perms 0000 --tmpfs DEST       nodev); a directory is an empty,
        --remount-ro DEST` (directory)      mode-0000, read-only tmpfs.
-    8. `--` then the workload's argv.
+    8. `--remount-ro /`                    the jail's own root tmpfs, read-only
+                                           (decision-166). Every directory
+                                           bwrap made to hang a mount on is a
+                                           directory of it, and until this
+                                           stage a write outside every write
+                                           root landed there and SUCCEEDED
+                                           (in the jail only). Last, since a
+                                           mount point cannot be made on a
+                                           read-only root.
+    9. `--` then the workload's argv.
 
 **Read carve-outs inside the allowlist (decision-164).** An allowlist
 denies by absence, but a secret can sit INSIDE an allowed root: a
@@ -504,7 +513,14 @@ def render_bwrap_prefix(
         else:
             args += ["--ro-bind", _NULL, path]
 
-    args.append("--")
+    # Stage 8: the jail's own root, read-only (decision-166). bwrap builds the
+    # jail on a fresh tmpfs, and every directory it makes to hang a mount on
+    # -- `/tmp` above a write root, the parents of a workspace -- is a
+    # directory of that tmpfs, WRITABLE until this line: a write outside every
+    # write root landed there and succeeded (it never reached the host, but
+    # "denied" was false). Last, because a mount point cannot be made on a
+    # read-only root; the mounts above keep their own flags.
+    args += ["--remount-ro", "/", "--"]
     return tuple(args)
 
 

@@ -670,8 +670,21 @@ be the copy decision-152 deleted the event stream for).
   root or channel directory) reaches: one outside is unwritable already, and
   its `--ro-bind` would put into the jail a path the allowlist left out, a
   read grant made by a deny (2026-09-28, decision-165); (7) the `read_denies` carve-outs that exist
-  inside a mounted tree, last of all (decision-164, below); (8) `--`, then the
-  workload's argv.
+  inside a mounted tree (decision-164, below); (8) `--remount-ro /`, the
+  jail's own root tmpfs made read-only, last of all (decision-166, below); (9)
+  `--`, then the workload's argv.
+- **The jail's root is read-only (2026-09-28, decision-166), and until it was,
+  "a write outside every write root is denied" was false.** bwrap builds the
+  jail on a fresh tmpfs and makes every directory a mount hangs on (`/tmp`
+  above a workspace, a workspace's parents) in it, and that tmpfs was
+  writable: a write to a path no `write_allows` entry named, under such a
+  directory or at `/`, landed in it and succeeded. It never reached the host,
+  so it was not an escape, but it was a denial the `fs_write` grade claimed
+  and the jail did not make, and a cell told "denied" by the policy was told
+  "wrote" by the kernel. `--remount-ro /` after every mount fixes it; the
+  mounts keep their own flags. (Found by bh-02's jailed-kernel tests, the
+  first to write outside the workspace at a path whose parent the jail had
+  made: `tests/integration/test_bwrap_fs.py` pins it now.)
 - **Read carve-outs: masked where they exist, graded where they do not
   (2026-09-28, decision-164).** Each `read_denies` entry is compared, resolved,
   against every tree the render mounts (read allows, channel directories,

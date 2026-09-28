@@ -194,6 +194,31 @@ def test_a_write_outside_every_write_root_is_denied_and_inside_succeeds() -> Non
 
 
 @pytest.mark.integration
+def test_a_write_beside_the_workspace_in_a_directory_bwrap_made_is_denied() -> None:
+    """decision-166. The jail directory is not mounted, but it exists in the
+    jail: bwrap made it, in its own root tmpfs, to hang the workspace on. A
+    write there -- and at `/` itself -- is refused with the read-only
+    signature, where until stage 8 it landed in that tmpfs and succeeded."""
+    jail_dir = _new_jail_dir()
+    workspace, hooks, envrc = _seed_workspace(jail_dir)
+    spec = _spec_for(workspace, hooks, envrc)
+
+    status, stdout, stderr = _run_in_jail(
+        jail_dir=jail_dir,
+        spec=spec,
+        script=(
+            f"echo x > {jail_dir}/beside && echo BESIDE_WROTE; echo x > /at-root && echo ROOT_WROTE; "
+            f"echo ok > {workspace}/control.txt && echo CONTROL"
+        ),
+        label="root-tmpfs",
+    )
+
+    assert "BESIDE_WROTE" not in stdout and "ROOT_WROTE" not in stdout, stdout
+    assert len(_denial_signature().findall(stderr)) == 2, stderr
+    assert "CONTROL" in stdout and status == 0
+
+
+@pytest.mark.integration
 def test_an_existing_write_denies_carveout_is_denied_and_a_sibling_succeeds() -> None:
     """Pair 2, the read-only BIND form. The carve-out sits INSIDE the
     granted workspace, so nothing but `write_denies` can be denying it --
