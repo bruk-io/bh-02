@@ -3,9 +3,10 @@ id: task-0017
 title: >-
   Turn brig's no-import-cycles gate back on by taking brig.mech's contract out
   of its __init__
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-28 12:26'
+updated_date: '2026-09-28 12:33'
 labels: []
 dependencies: []
 priority: medium
