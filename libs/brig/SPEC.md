@@ -159,7 +159,7 @@ Spec(
         write_allows=(...,),      # roots the process may write under
         write_denies=(...,),      # carve-outs INSIDE write_allows
         read_model=DENY_LIST | ALLOW_LIST,
-        read_denies=(...,),       # DENY_LIST mode
+        read_denies=(...,),       # DENY_LIST: the policy; ALLOW_LIST: carve-outs
         read_allows=(...,),       # ALLOW_LIST mode
     ),
     network=NetworkPolicy(allowed_domains=(...,)),   # empty = deny all
@@ -184,6 +184,22 @@ Notes:
   allowlist (container/bwrap/nix-native) are different shapes. A mechanism
   declares which model(s) it implements; compiling the other model through it
   is a refusal or an honest downgrade in the report, never silent.
+- **Under an allowlist, `read_denies` is the carve-outs** — the read twin of
+  `write_denies`, deny-over-allow. An allowlist denies by absence, but a secret
+  can sit *inside* an allowed root: a credential file at the top of a
+  workspace the jail may write, which is the ordinary shape for an embedder
+  that jails a coding agent in its own repository. Until this ruling that
+  secret had no spelling in an allowlist `Spec` at all (the field was refused
+  as inactive), so the only allowlist jail over such a workspace was one that
+  could read it. A mechanism compiles each carve-out against the trees it
+  actually mounts: outside every one it is inert (absent is already denied);
+  inside one it is masked; and where a mask cannot be made (for `bwrap`, a
+  path that does not exist yet, §6) the `fs_read` grade drops and names it.
+  The algebra is unchanged in shape: read denies union in the meet and grow
+  in the denies clause under both models, and the two models stay
+  incomparable. (Ruled 2026-09-28, decision-164. First embedder: bh-02's
+  jailed kernel on Linux, whose project root is a write root and whose
+  `local.env` is the credential it must not read.)
 - **Threat lists ship as data, not defaults.** brig provides curated,
   documented tuples the embedder folds in explicitly:
   - `CREDENTIAL_READ_DENIES_HOME_RELATIVE` — `.ssh`, `.aws`, `.gnupg`,
@@ -295,7 +311,8 @@ Notes:
   normalization" is plain `==` and the algebra never renormalizes. Construction
   raises on a negative or non-integer limit, a duplicate channel name, an empty
   path/name/endpoint, and on the *inactive* read-model field being populated
-  (denylist mode with `read_allows`, allowlist mode with `read_denies`) —
+  (denylist mode with `read_allows`; allowlist mode with `read_denies` was the
+  other half until decision-164 made that field the allowlist's carve-outs) —
   ignoring that field silently is the same refusal-not-downgrade posture as
   law 1. **The same refusal covers `EnvPolicy`'s inactive field**, the other one
   whose meaning depends on a mode: `EnvPolicy(mode=PASS, allow_names=(...))`
@@ -649,7 +666,52 @@ be the copy decision-152 deleted the event stream for).
   top of it; (3) `read_allows` as `--ro-bind`; (4) the declared LISTEN
   channel's endpoint DIRECTORY as `--bind`; (5) `write_allows` as `--bind`;
   (6) `write_denies` as submounts *after* the write roots — which is what
-  makes deny-over-allow true here; (7) `--`, then the workload's argv.
+  makes deny-over-allow true here, and only the ones a writable tree (a write
+  root or channel directory) reaches: one outside is unwritable already, and
+  its `--ro-bind` would put into the jail a path the allowlist left out, a
+  read grant made by a deny (2026-09-28, decision-165); (7) the `read_denies` carve-outs that exist
+  inside a mounted tree (decision-164, below); (8) `--remount-ro /`, the
+  jail's own root tmpfs made read-only, last of all (decision-166, below); (9)
+  `--`, then the workload's argv.
+- **The jail's root is read-only (2026-09-28, decision-166), and until it was,
+  "a write outside every write root is denied" was false.** bwrap builds the
+  jail on a fresh tmpfs and makes every directory a mount hangs on (`/tmp`
+  above a workspace, a workspace's parents) in it, and that tmpfs was
+  writable: a write to a path no `write_allows` entry named, under such a
+  directory or at `/`, landed in it and succeeded. It never reached the host,
+  so it was not an escape, but it was a denial the `fs_write` grade claimed
+  and the jail did not make, and a cell told "denied" by the policy was told
+  "wrote" by the kernel. `--remount-ro /` after every mount fixes it; the
+  mounts keep their own flags. (Found by bh-02's jailed-kernel tests, the
+  first to write outside the workspace at a path whose parent the jail had
+  made: `tests/integration/test_bwrap_fs.py` pins it now.)
+- **Read carve-outs: masked where they exist, graded where they do not
+  (2026-09-28, decision-164).** Each `read_denies` entry is compared, resolved,
+  against every tree the render mounts (read allows, channel directories,
+  write roots; at, under, or an ancestor of one). Outside all of them it
+  compiles to nothing, because nothing is there. Inside one and existing, it is
+  masked at stage 7: a file by `--ro-bind /dev/null` (bwrap binds `nodev`, so
+  the open fails with EACCES rather than reading empty), a directory by
+  `--perms 0000 --tmpfs … --remount-ro` (listing, reading beneath, writing and
+  `chmod` all refused; measured). The kind comes from `CompileCtx.path_is_dir`,
+  the third fact `run` observes for `mech`, and a missing answer is
+  `UnknownPathKind`, never a guess. Inside one and **absent**, it is not
+  mounted, and `fs_read` grades `best_effort` naming the path: a mask needs a
+  mount point, and the mount point would be created on the host (next bullet),
+  a `local.env/` directory where the person's credential file should go. That
+  is the objection that rejected the denylist emulation above, met in the open:
+  a file the host creates at that path after launch is readable, and the grade
+  says so.
+- **An absent `write_denies` path is created ON THE HOST, and it outlives the
+  jail (measured 2026-09-28, decision-164).** The tmpfs form's mount point is
+  made inside the write root's bind of the host directory, missing parents
+  included: denying `.envrc` leaves an empty `.envrc/` in the host workspace,
+  and denying `.git/hooks` in a directory that is not a repository leaves
+  `.git/hooks/`. brig's own text had said "inside the jail". Two consequences
+  are the embedder's: removing them after teardown, and never while the jail
+  lives — a mount point removed on the host is detached inside the jail, and
+  the jail then writes the very path it was denied (measured: `rmdir` of the
+  host's `.envrc/` mid-run, then a write at `.envrc` from inside succeeded).
 - **The channel directory is mounted BEFORE the write roots (2026-09-08,
   decision-163), and until it was, a `write_denies` carve-out inside a jail
   directory was compiled and then silently unmade.** The endpoint's directory

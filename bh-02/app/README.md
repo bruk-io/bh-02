@@ -229,7 +229,7 @@ other plugin; the gate proves it.
 | `chat-cordis-plugin` | runs `session` (a turn interruptible) and binds `done` | `loop`, `input`, `output`, `commands` |
 | `context-cordis-plugin` | `system`: the working directory, branch and CLAUDE.md/AGENTS.md, read fresh | |
 | `kernel-cordis-plugin` | `kernel`: a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, a cell run); `jail`: `unjailed` | `jail` |
-| `brig-cordis-plugin` | `jail`: brig's `scratch_darwin()`; the only importer of brig | `layers` |
+| `brig-cordis-plugin` | `jail`: brig's `scratch_darwin()` on darwin, `strict_linux()` on Linux; the only importer of brig | `layers` |
 | `commands-cordis-plugin` | `commands` (the broker); the operator's commands over the loader | `commands`, `loader`, `models` (operator) |
 
 Every model runs in the same composition: `agent:loop` offers the kernel's one tool on every

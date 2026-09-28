@@ -84,7 +84,8 @@ defines every term.
 ### Running it
 
 You need [uv](https://docs.astral.sh/uv/) and Python 3.15 (uv fetches it). The sandbox runs on
-macOS; elsewhere, pass `--no-jail`.
+macOS, and on Linux with bubblewrap installed (the `bubblewrap` package); elsewhere, pass
+`--no-jail`.
 
 ```sh
 git clone https://github.com/bruk-io/bh-02 && cd bh-02

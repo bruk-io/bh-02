@@ -53,9 +53,17 @@ _TERMINAL_MODULES = (
 )
 
 # Names in a terminal module that are not terminal I/O: the interpreter's path, the process's
-# arguments, where it imports from, and what it runs on. Imported by name (`from sys import
-# executable`), never the module.
-_NOT_TERMINAL = ("sys.argv", "sys.executable", "sys.modules", "sys.path", "sys.platform", "sys.prefix")
+# arguments, where it imports from (its environment's prefix and the base interpreter's), and
+# what it runs on. Imported by name (`from sys import executable`), never the module.
+_NOT_TERMINAL = (
+    "sys.argv",
+    "sys.base_prefix",
+    "sys.executable",
+    "sys.modules",
+    "sys.path",
+    "sys.platform",
+    "sys.prefix",
+)
 
 # What every unit may import besides itself.
 _LIBRARIES = ("cordis", "cordis_helpers")

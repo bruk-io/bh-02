@@ -37,6 +37,7 @@ uv run ruff format .                                      # format
 uv run ruff check .                                       # lint; applies safe fixes by default (fix = true), --no-fix to only report
 uv run mypy                                               # strict; checked paths come from [tool.mypy] files
 scripts/arch-check                                        # every pypeeker gate (root, then libs/*); applies autofixes first, --no-fix to only report
+scripts/linux-jail-check                                  # the Linux jail (bubblewrap) tests, in a Docker container; not part of check
 uv run pytest -m "not real_launch"                        # skip the tests that launch the real app in a pty
 scripts/sync-tokens [--check] [--bh-01 PATH]              # bh-01's token CSS -> bh-02's Textual theme (reads ../bh-01)
 uv run bh-02                                              # the harness: a CodeAct session in a TUI, Claude through Claude Code on the subscription

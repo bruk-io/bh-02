@@ -190,12 +190,22 @@ class CompileCtx:
                   this mapping REFUSES, naming the path -- it never guesses
                   a default, which would put the guess in the one place law
                   2 forbids one. Defensively copied at construction.
+        path_is_dir: Mapping from a `Spec` path (the same key shape again)
+                  to whether it was a DIRECTORY when the context was built
+                  -- the third fact of the same kind, added 2026-09-28 by
+                  decision-164. `bwrap` masks a `read_denies` carve-out
+                  that exists inside a mounted root, and the mask's form
+                  depends on what the path is: a bind mount can only cover a
+                  file with a file and a directory with a directory. Absent
+                  paths map to `False`. Same default, same refusal on a
+                  missing key, same defensive copy as `path_exists`.
     """
 
     jail_dir: str
     platform: str
     resolved_paths: Mapping[str, str] = field(default_factory=dict)
     path_exists: Mapping[str, bool] = field(default_factory=dict)
+    path_is_dir: Mapping[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Defensive copy: prevent caller mutations from affecting this ctx,
@@ -204,6 +214,8 @@ class CompileCtx:
         object.__setattr__(self, "resolved_paths", MappingProxyType(resolved_copy))
         exists_copy = dict(self.path_exists)
         object.__setattr__(self, "path_exists", MappingProxyType(exists_copy))
+        is_dir_copy = dict(self.path_is_dir)
+        object.__setattr__(self, "path_is_dir", MappingProxyType(is_dir_copy))
 
 
 @dataclass(frozen=True, slots=True)

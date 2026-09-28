@@ -8,8 +8,8 @@ from typing import Protocol
 
 import pytest
 
-# The kernel with no jail, for tests that are not about the jail: brig runs on darwin only, and
-# a test of a model or a chat row should not depend on the platform.
+# The kernel with no jail, for tests that are not about the jail: brig runs on darwin and on
+# Linux with bubblewrap, and a test of a model or a chat row should not depend on the platform.
 UNJAILED = '[[plugin]]\nid = "jail"\nuse = "kernel:unjailed"\n'
 
 # bh-02 has no one-shot chat row, but many of its tests want one: the reply to one prompt (the

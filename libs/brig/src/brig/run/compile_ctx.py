@@ -39,6 +39,11 @@ carve-out silently not holding. `os.path.exists` follows symlinks, matching
 `os.path.realpath` above: a dangling symlink is reported absent, which is
 what both mount primitives will make of it too.
 
+**`path_is_dir` (decision-164).** The same observation's other half:
+whether each path is a directory (`os.path.isdir`, following symlinks the
+same way). `bwrap` masks a `read_denies` carve-out inside a mounted root, and
+a mask must be the same kind of object as what it covers.
+
 The window between this observation and the launch is real and is a
 REFUSAL on both sides rather than a hole -- a path that appears in it makes
 bwrap's `--tmpfs` fail, one that vanishes makes its `--ro-bind` fail, and a
@@ -92,11 +97,13 @@ def build_compile_ctx(spec: Spec, *, jail_dir: str, platform: str) -> CompileCtx
     spec_paths = tuple(_spec_paths(spec))
     resolved_paths = {path: os.path.realpath(path) for path in spec_paths}
     path_exists = {path: os.path.exists(path) for path in spec_paths}
+    path_is_dir = {path: os.path.isdir(path) for path in spec_paths}
     return CompileCtx(
         jail_dir=os.path.realpath(jail_dir),
         platform=platform,
         resolved_paths=resolved_paths,
         path_exists=path_exists,
+        path_is_dir=path_is_dir,
     )
 
 
