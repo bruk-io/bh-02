@@ -666,7 +666,10 @@ be the copy decision-152 deleted the event stream for).
   top of it; (3) `read_allows` as `--ro-bind`; (4) the declared LISTEN
   channel's endpoint DIRECTORY as `--bind`; (5) `write_allows` as `--bind`;
   (6) `write_denies` as submounts *after* the write roots — which is what
-  makes deny-over-allow true here; (7) the `read_denies` carve-outs that exist
+  makes deny-over-allow true here, and only the ones a writable tree (a write
+  root or channel directory) reaches: one outside is unwritable already, and
+  its `--ro-bind` would put into the jail a path the allowlist left out, a
+  read grant made by a deny (2026-09-28, decision-165); (7) the `read_denies` carve-outs that exist
   inside a mounted tree, last of all (decision-164, below); (8) `--`, then the
   workload's argv.
 - **Read carve-outs: masked where they exist, graded where they do not

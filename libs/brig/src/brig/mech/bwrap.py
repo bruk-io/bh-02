@@ -60,7 +60,11 @@ restrictive".
        `--ro-bind SRC DEST` (exists) or    roots -- deny-over-allow, which is
        `--tmpfs DEST --remount-ro DEST`    only true because this stage comes
        (does not exist)                    AFTER stage 5. SPEC.md §5's
-                                           "submounts", literally.
+                                           "submounts", literally. Only the
+                                           ones a writable tree reaches: one
+                                           outside is unwritable already, and
+                                           its bind would be a READ grant
+                                           (decision-165).
     7. per `fs.read_denies` inside a       the READ carve-outs (decision-164),
        mounted root and existing:          last, so nothing stacks over them.
        `--ro-bind /dev/null DEST` (file)   A file reads EACCES (bwrap mounts
@@ -475,7 +479,17 @@ def render_bwrap_prefix(
     # deny-over-allow precedence SPEC.md §5 requires, and it is the one
     # line of this render a mutation check moves (put this loop above the
     # write_allows loop and both the ordering test and the golden go red).
+    #
+    # Only a carve-out a WRITABLE tree reaches is mounted (decision-165). One
+    # outside every write root and channel directory is unwritable already,
+    # and mounting it would be a READ grant: its bind would put a path into
+    # the jail that the allowlist left out (a layer file under a directory
+    # read_denies names, say).
+    channel_dirs = (_parent(_resolve(c.endpoint, resolved)) for c in spec.channels)
+    writable = (*channel_dirs, *(_resolve(path, resolved) for path in spec.fs.write_allows))
     for path, resolved_deny in zip(spec.fs.write_denies, resolved_write_denies, strict=True):
+        if not _overlaps(resolved_deny, writable):
+            continue
         if _exists(path, path_exists):
             args += ["--ro-bind", resolved_deny, path]
         else:
@@ -509,15 +523,14 @@ def _inside_the_jail(spec: Spec, resolved: Mapping[str, str]) -> tuple[str, ...]
     ancestor of one. The rest are absent from the jail already, which is the
     allowlist's own enforcement, and need no mount."""
     roots = _mounted_roots(spec, resolved)
-    return tuple(
-        path
-        for path in spec.fs.read_denies
-        if any(
-            _is_subpath(_resolve(path, resolved), root)
-            or _is_subpath(root, _resolve(path, resolved))
-            for root in roots
-        )
-    )
+    return tuple(path for path in spec.fs.read_denies if _overlaps(_resolve(path, resolved), roots))
+
+
+def _overlaps(path: str, roots: tuple[str, ...]) -> bool:
+    """Whether the resolved `path` is at or under one of `roots`, or an
+    ancestor of one: whether a mount at `path` would change what the jail
+    sees of those trees."""
+    return any(_is_subpath(path, root) or _is_subpath(root, path) for root in roots)
 
 
 def _masked_read_denies(

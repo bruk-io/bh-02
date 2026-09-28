@@ -658,3 +658,28 @@ def test_a_carve_out_to_mask_with_no_kind_is_a_refusal_naming_it() -> None:
     )
     with pytest.raises(UnknownPathKind, match=re.escape(repr(_SECRET))):
         bwrap.compile(_CARVE_OUT_SPEC, ctx)
+
+
+@pytest.mark.unit
+def test_a_write_carve_out_no_writable_tree_reaches_is_not_mounted() -> None:
+    """decision-165: a `write_denies` entry outside every write root and
+    channel directory is unwritable already, and binding it would put a path
+    into the jail the allowlist left out -- a READ grant made by a deny. So
+    it compiles to nothing; one inside the workspace still mounts."""
+    layer = "/home/me/.local/state/app/sessions/1/session.toml"
+    spec = Spec(
+        fs=FsPolicy(
+            read_model=ReadModel.ALLOW_LIST,
+            read_allows=("/usr",),
+            write_allows=(_WORKSPACE,),
+            write_denies=(layer, _HOOKS),
+        ),
+        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+    )
+    ctx = _ctx(
+        resolved=_identity_resolved("/usr", _WORKSPACE, layer, _HOOKS, _ENDPOINT),
+        exists={_HOOKS: True},  # the outside one is never asked about
+    )
+    argv = bwrap.compile(spec, ctx).wrap(("w",))
+    assert layer not in argv
+    assert argv[-5:] == ("--ro-bind", _HOOKS, _HOOKS, "--", "w")
