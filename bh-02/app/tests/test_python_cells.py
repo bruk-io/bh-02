@@ -298,7 +298,8 @@ async def test_a_jailed_cell_cannot_read_the_project_s_own_local_env_but_reads_b
     tmp_path: Path,
 ) -> None:
     """The credential inside the project, where a cell may write: the one case an allowlist
-    alone can't hide, so on Linux it is a mask over the file. A sibling reads in the same run,
+    alone can't hide, so on Linux it is a mask over the file. Nor can a cell overwrite, append
+    to, remove or rename over it. A sibling reads in the same run,
     in-process and from a program the cell starts; the host's file is untouched; and nothing
     the jail made in the project outlives it."""
     project = tmp_path / "project"
@@ -317,13 +318,20 @@ async def test_a_jailed_cell_cannot_read_the_project_s_own_local_env_but_reads_b
         "import subprocess\n"
         "r = subprocess.run(['/bin/cat', 'local.env'], capture_output=True, text=True)\n"
         "print('READ' if r.returncode == 0 else 'DENIED')",
+        # nor may it replace what it can't read: overwrite, append, remove, rename over
+        attempt("open('local.env', 'w').write('X=1')"),
+        attempt("open('local.env', 'a').write('X=1')"),
+        attempt("__import__('os').remove('local.env')"),
+        attempt("open('new.env', 'w').write('X=1'); __import__('os').replace('new.env', 'local.env')"),
         extra=_jailed_in(project),
     )
     _answers()
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
     assert "[0] DENIED" in out and "[1] READ" in out and "[2] DENIED" in out, out
+    assert all(f"[{n}] DENIED" in out for n in (3, 4, 5, 6)), out
     assert "placeholder" not in out, out
+    (project / "new.env").unlink(missing_ok=True)  # the rename's source, left when it is refused
     assert secret.read_text() == "NOT_A_REAL_CREDENTIAL=placeholder\n"
     assert sorted(p.name for p in project.iterdir()) == ["local.env", "notes.txt"]  # nothing left behind
 

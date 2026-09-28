@@ -4,8 +4,9 @@
 (`write`) and a scratch directory of the jail's own. What it may not, even inside those: the
 composition's layer files (a cell rewriting one would reshape the program running it, outside
 the jail), every path the host imports code from (`sys.path` entries and the interpreter's
-prefix), and brig's own self-modification list (`.git/hooks`, `.git/config`, shell rc files,
-CLAUDE.md, ...). What it may not read: brig's credential list under the home directory, `hide`
+prefix), brig's own self-modification list (`.git/hooks`, `.git/config`, shell rc files,
+CLAUDE.md, ...), and any secret below under a writable root (it may not replace what it can't
+read). What it may not read: brig's credential list under the home directory, `hide`
 under the project, and what the `layers` value names as `secrets` (bh-02's own `local.env`,
 wherever bh-02 runs from, and the sessions' state, where Claude Code keeps its tokens). No
 network: the kernel's own socket is the one way in or out. The worker's environment is scrubbed
@@ -137,15 +138,19 @@ def spec_for(
     # the host has not imported yet. The `bh-02` console script never puts the root on sys.path.
     under = [p for p in host if p not in writable and any(p.startswith(r + "/") for r in writable)]
     selfmod = [str(Path(r, name)) for r in roots for name in self_modify_denied(config.allow)]
-    denies = [*layers, *under, *selfmod, *(str(Path(root, d).resolve()) for d in config.deny)]
+    hidden = [*(str(Path(root, name).resolve()) for name in config.hide), *secrets]
+    # A secret a cell may not read, it may not overwrite or remove either: one under a writable
+    # root (the project's `local.env`) is denied writing too, or a cell could replace the
+    # credential it can't see.
+    kept = [s for s in hidden if any(s == r or s.startswith(r + "/") for r in writable)]
+    denies = [*layers, *under, *selfmod, *(str(Path(root, d).resolve()) for d in config.deny), *kept]
     return Spec(
         fs=FsPolicy(
             write_allows=tuple(writable),
-            write_denies=tuple(denies),
+            write_denies=tuple(dict.fromkeys(denies)),
             read_denies=(
                 *(str(Path(home, name)) for name in CREDENTIAL_READ_DENIES_HOME_RELATIVE),
-                *(str(Path(root, name).resolve()) for name in config.hide),
-                *secrets,
+                *hidden,
             ),
         ),
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=tuple(config.env), set=(("TMPDIR", scratch),)),
@@ -155,13 +160,18 @@ def spec_for(
 
 def allowlisted(spec: Spec, readable: Sequence[str]) -> Spec:
     """`spec`, reading by allowlist: `readable` is the tree a cell may read, and the policy's
-    read denies become the carve-outs inside it. The writes, the environment and the channel
-    are the policy's, unchanged."""
+    read denies become the carve-outs inside it. The environment and the channel are the
+    policy's, unchanged, and so are the writes but one kind: a path denied both reading and
+    writing (a secret under the project) keeps only its read deny. bwrap masks an existing one
+    with a read-only `/dev/null`, which refuses writes and removal too; a write deny as well
+    would be a bind of the real file (under the mask, so harmless) or, for one that doesn't
+    exist yet, an empty directory made on the host for the session, where the person's own
+    `local.env` would go."""
     return replace(
         spec,
         fs=FsPolicy(
             write_allows=spec.fs.write_allows,
-            write_denies=spec.fs.write_denies,
+            write_denies=tuple(d for d in spec.fs.write_denies if d not in spec.fs.read_denies),
             read_model=ReadModel.ALLOW_LIST,
             read_allows=tuple(readable),
             read_denies=spec.fs.read_denies,

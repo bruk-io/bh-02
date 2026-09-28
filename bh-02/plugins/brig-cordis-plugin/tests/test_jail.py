@@ -59,6 +59,8 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
     assert "/Users/me/.ssh" in spec.fs.read_denies
     assert "/w/app/local.env" in spec.fs.read_denies  # a credential beside the project
     assert "/src/bh/local.env" in spec.fs.read_denies  # bh-02's own, wherever the project is
+    assert "/w/app/local.env" in denies  # one it may not read it may not overwrite either
+    assert "/src/bh/local.env" not in denies  # outside every writable root: nothing to deny
     assert dict(spec.env.set) == {"TMPDIR": "/tmp/j/tmp"} and "PATH" in spec.env.allow_names
     assert [c.endpoint for c in spec.channels] == ["/tmp/k/k.sock"]
 
@@ -80,7 +82,8 @@ async def test_the_row_binds_a_brig_jail_over_the_layers_it_was_given() -> None:
 
 def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
     """The same policy, one read model over: what is readable is named, and every read deny
-    (credentials, `hide`, `secrets`) is a carve-out inside it; writes and env are untouched."""
+    (credentials, `hide`, `secrets`) is a carve-out inside it; writes and env are untouched,
+    but for a secret under the project, whose read mask refuses writes by itself."""
     policy = spec_for(
         root="/w/app",
         endpoint="/tmp/k/k.sock",
@@ -95,7 +98,9 @@ def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
     assert linux.fs.read_allows == ("/etc", "/opt/py", "/usr")
     assert linux.fs.read_denies == policy.fs.read_denies
     assert {"/w/app/local.env", "/src/bh/local.env", "/home/me/.ssh"} <= set(linux.fs.read_denies)
-    assert (linux.fs.write_allows, linux.fs.write_denies) == (policy.fs.write_allows, policy.fs.write_denies)
+    assert "/w/app/local.env" in policy.fs.write_denies and "/w/app/local.env" not in linux.fs.write_denies
+    kept = tuple(d for d in policy.fs.write_denies if d != "/w/app/local.env")
+    assert (linux.fs.write_allows, linux.fs.write_denies) == (policy.fs.write_allows, kept)
     assert (linux.env, linux.channels) == (policy.env, policy.channels)
     assert linux.fs.read_model.value == "allow_list" and policy.fs.read_model.value == "deny_list"
 
