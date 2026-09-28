@@ -530,6 +530,45 @@ async def test_a_step_that_comes_whole_after_part_of_it_streamed_is_not_said_twi
     assert _said(again) == "back" and len(h.fakes) == 2
 
 
+@pytest.mark.parametrize("after", [5, 3], ids=["thinking-done", "thinking-open"])
+async def test_a_stream_claude_code_retries_after_only_thinking_carries_on_to_the_reply(
+    tmp_path: Path, after: int
+) -> None:
+    """A stream that stalls or drops after only thinking is closed by Claude Code where it is (a
+    `message_stop` with no `message_delta`, so no stop reason) and streamed again (task-0021):
+    that close is not the step's end, and the retried stream's reply is the step."""
+    h = _Harness(
+        tmp_path, [FakeStep([_THOUGHT, _text("Hello.")], retry_after=after), FakeStep([_text("more")])]
+    )
+    asked = [{"role": "user", "content": "Say hello."}]
+    chunks = await h.step(asked)
+    assert _said(chunks) == "Hello."
+    assert {"type": "stop", "reason": "end_turn"} in chunks
+    assert chunks[-1] == {
+        "type": "message",
+        "message": {"role": "assistant", "content": [_THOUGHT, _text("Hello.")]},
+    }
+    again = await h.step([*asked, _entry(chunks), {"role": "user", "content": "Go on."}])
+    assert _said(again) == "more"
+    (fake,) = h.fakes  # the same Claude Code, never interrupted
+    assert fake.asked == ["Say hello.", "Go on."] and fake.interrupts == 0
+
+
+async def test_a_stream_claude_code_retries_after_text_was_shown_is_not_said_twice(tmp_path: Path) -> None:
+    """Claude Code retries a dropped stream even when text had begun to stream: what was shown
+    can't be taken back, so it is the retried stream's error, as a restarted stream is."""
+    h = _Harness(
+        tmp_path, [FakeStep([_THOUGHT, _text("Hello there")], retry_after=7)], [FakeStep([_text("back")])]
+    )
+    asked = [{"role": "user", "content": "go"}]
+    with pytest.raises(ClaudeCodeError) as raised:
+        await h.step(asked)
+    assert raised.value.kind == "stream_retried"
+    failed = {"role": "assistant", "content": "[this reply failed here; the person saw the error]"}
+    again = await h.step([*asked, failed, {"role": "user", "content": "go"}])
+    assert _said(again) == "back" and len(h.fakes) == 2
+
+
 async def _refused(tmp_path: Path, env_file: Path) -> ClaudeCodeError:
     config = ClaudeCodeConfig(state=str(tmp_path / "s"), env_file=str(env_file))
     model = ClaudeCodeModel(config, lambda options: pytest.fail("nothing starts without a token"))

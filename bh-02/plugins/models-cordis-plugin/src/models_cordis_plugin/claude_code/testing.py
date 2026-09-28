@@ -11,7 +11,10 @@ said); `interrupt()` ends the running query with one at once. A tool the permiss
 denies is answered by the fake itself, as Claude Code does. A step can
 also fall back to a non-streamed request part-way, as Claude Code does when a stream fails
 before a block completes (CLI 2.1.282): its events stop, and the whole message comes as one
-`AssistantMessage` of a new id, stop reason and usage set, with no stream events.
+`AssistantMessage` of a new id, stop reason and usage set, with no stream events. Or it can
+retry its stream, as Claude Code does when one stalls or its connection drops before any text
+or tool call started: it closes the open block and the message itself (a `content_block_stop`,
+a `message_stop`, no `message_delta`), then streams the whole step again (CLI 2.1.282).
 """
 
 import asyncio
@@ -63,6 +66,10 @@ class FakeStep:
     # after this many events the stream is given up on, and the step comes whole, not streamed
     # (Claude Code's fallback to a non-streaming request)
     fallback_after: int | None = None
+    # after this many events the stream is closed where it is (a `content_block_stop` for a block
+    # left open, a `message_stop`, no `message_delta`) and streamed again from the start
+    # (Claude Code retrying a stalled or dropped stream)
+    retry_after: int | None = None
 
 
 def events_for(step: FakeStep, *, message_id: str = "msg_fake") -> list[dict[str, Any]]:
@@ -142,6 +149,15 @@ def events_for(step: FakeStep, *, message_id: str = "msg_fake") -> list[dict[str
     )
     events.append({"type": "message_stop"})
     return events
+
+
+def _retried(events: list[dict[str, Any]], after: int) -> list[dict[str, Any]]:
+    """The first `after` events, closed the way Claude Code closes a stream it will retry."""
+    sent = events[:after]
+    open_blocks = [e["index"] for e in sent if e["type"] == "content_block_start"]
+    closed = {e["index"] for e in sent if e["type"] == "content_block_stop"}
+    left = [{"type": "content_block_stop", "index": i} for i in open_blocks if i not in closed]
+    return [*sent, *left, {"type": "message_stop"}]
 
 
 def _blocks(step: FakeStep) -> list[Any]:
@@ -251,6 +267,8 @@ class FakeClaudeCode:
                 events = events[: step.restart_after] + events
             if step.fallback_after is not None:
                 events = events[: step.fallback_after]
+            if step.retry_after is not None:
+                events = _retried(events, step.retry_after) + events_for(step, message_id="msg_fake_retry")
             for n, event in enumerate(events):
                 if n == step.stall_after:
                     await asyncio.Event().wait()  # a slow model: until interrupted

@@ -21,8 +21,14 @@ declared to it (`declared.py`). Each call to `complete` streams exactly one mode
   and the next request rebuilds;
 - a step Claude Code could not stream (a stream that failed before a block completed, which it
   asks for again without streaming) comes as one whole `AssistantMessage` with no stream
-  events, and is folded as the step; one that comes after part of it was streamed can't be
-  shown without saying that part twice, so it fails as a restarted stream does;
+  events, and is folded as the step; one that comes after text or a call of it was streamed
+  can't be shown without saying that part twice, so it fails as a restarted stream does;
+- a stream that stalls or drops before it is done, Claude Code may close where it is (the open
+  block, then `message_stop` with no `message_delta`, so no stop reason) and stream again
+  from the start (CLI 2.1.282: before any text or call began, and on a dropped connection
+  before any block was complete): the close is not the step's end, and the stream that
+  follows is the step; its thinking shown so far stays shown, but once text or a call was
+  shown it fails as a restarted stream does;
 - a call Claude Code answers itself (one that is not declared, which the permission callback
   denies) lets it start the next model step on its own answer, before the loop's results reach
   it: that step is dropped unseen, and Claude Code is rebuilt from the loop's transcript and
@@ -594,9 +600,16 @@ class ClaudeCodeModel:
                             for chunk in step.take(event):
                                 if chunk["type"] == "text":
                                     said.append(chunk["text"])
-                                shown = shown or chunk["type"] != "usage"
+                                shown = shown or chunk["type"] in ("text", "tool_call")
                                 yield chunk
-                            if step.ended:
+                            if step.ended and step.stop is None:
+                                # no `message_delta`: Claude Code closed a stalled or dropped
+                                # stream to stream it again (module docstring)
+                                if shown:
+                                    retried = True  # its text is shown already: not said twice
+                                    break
+                                step, started = Step(), False
+                            elif step.ended:
                                 break
                         case AssistantMessage(error=error) if error is not None:
                             failure = message
@@ -606,7 +619,7 @@ class ClaudeCodeModel:
                             # the step came whole, not streamed (module docstring); a message
                             # streamed block by block has the stream's id and no stop reason yet
                             if shown:
-                                retried = True  # part of it is shown already: not said twice
+                                retried = True  # part of its text is shown already: not said twice
                                 break
                             for chunk in step.whole(whole):
                                 if chunk["type"] == "text":
