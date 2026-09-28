@@ -18,10 +18,10 @@ binds:
 ```python
 @component
 async def price_feed(*, feed: Feed) -> Effects:
-    sub: Sub = yield subscribe(feed)             # an effect: a step and its undo, as a value
+    sub: Sub = yield subscribe(feed)  # an effect: a step and its undo, as a value
     buffer: list[float] = []
-    yield background(pump(sub, buffer))          # work this component owns
-    yield bind("recent_prices", lambda n=10: buffer[-n:])   # what it provides, under a key
+    yield background(pump(sub, buffer))  # work this component owns
+    yield bind("recent_prices", lambda n=10: buffer[-n:])  # what it provides, under a key
 ```
 
 The component never touches the runtime. The runtime performs every effect, records every undo,
@@ -84,7 +84,8 @@ defines every term.
 ### Running it
 
 You need [uv](https://docs.astral.sh/uv/) and Python 3.15 (uv fetches it). The sandbox runs on
-macOS; elsewhere, pass `--no-jail`.
+macOS, and on Linux with bubblewrap installed (the `bubblewrap` package); elsewhere, pass
+`--no-jail`.
 
 ```sh
 git clone https://github.com/bruk-io/bh-02 && cd bh-02

@@ -97,7 +97,10 @@ Approval follows `kernel.confined`, and `agent:loop` does it: confined, a cell r
 asking; unconfined (`--no-jail`), every cell is put to the person through `output.confirm` (the
 approval modal, showing the code) and runs only on a yes. The kernel depends on its jail alone,
 so a new ui or model keeps the namespace. Only `brig_cordis_plugin` imports brig
-(`brig-one-adapter`), and only darwin is jailed so far.
+(`brig-one-adapter`). darwin is jailed by seatbelt (reads by denylist), Linux by bubblewrap
+(reads by allowlist: the system, the interpreter, the project; the policy, `spec_for`, is the
+same). The Linux jail's tests skip on darwin; `scripts/linux-jail-check` runs them in a
+container with bubblewrap.
 
 **The model, by name.** The model row is `models:model` (`models_cordis_plugin`): named models
 over their providers, the one its config's `default` names (`sonnet` unless a layer says

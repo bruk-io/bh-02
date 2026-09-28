@@ -14,7 +14,21 @@ import pytest
 from bh_02.bootstrap import credential_files, layers, run, unreadable
 from cordis import Row
 
-_JAILED = sys.platform == "darwin"  # brig:jail uses seatbelt, darwin only here
+# darwin's jail (seatbelt) reads by denylist: everything but the secrets. Linux's (bubblewrap)
+# reads by allowlist: the system, the interpreter and the project, so a file anywhere else is
+# absent there, not merely hidden.
+_READS_EVERYWHERE_ELSE = sys.platform == "darwin"
+_BWRAP = "/usr/bin/bwrap"
+
+
+@pytest.fixture
+def _needs_a_jail() -> None:
+    """brig:jail runs on darwin (seatbelt) and on Linux with bubblewrap installed. A fixture,
+    not `skipif`: looking for the binary at import time is an import-time side effect."""
+    if sys.platform not in ("darwin", "linux"):
+        pytest.skip(f"brig:jail runs on darwin and Linux; this is {sys.platform}")
+    if sys.platform == "linux" and not Path(_BWRAP).exists():
+        pytest.skip(f"brig:jail on Linux needs bubblewrap at {_BWRAP}; install the `bubblewrap` package")
 
 
 def _shown() -> str:
@@ -78,7 +92,7 @@ async def test_unjailed_cells_share_a_namespace_of_plain_python_and_each_is_aske
     assert not (tmp_path / "declined.txt").exists()  # a no ran nothing
 
 
-@pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
+@pytest.mark.usefixtures("_needs_a_jail")
 async def test_a_jailed_cell_does_coding_work_in_the_project_without_asking(
     composition: Callable[..., Path],
     tmp_path: Path,
@@ -124,7 +138,7 @@ async def test_a_jailed_cell_does_coding_work_in_the_project_without_asking(
         assert "[3] ['??', '??', 'greet.py', 'new.py'] 0 0  1" in out, out  # status, add, commit
 
 
-@pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
+@pytest.mark.usefixtures("_needs_a_jail")
 async def test_a_jailed_cell_cannot_rewrite_the_composition_or_leave_the_project(
     composition: Callable[..., Path],
     tmp_path: Path,
@@ -176,7 +190,7 @@ def _writes(*paths: Path) -> list[str]:
     ]
 
 
-@pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
+@pytest.mark.usefixtures("_needs_a_jail")
 async def test_a_jailed_cell_may_edit_the_project_s_guidance_but_not_what_runs_code_later(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
@@ -198,7 +212,7 @@ async def test_a_jailed_cell_may_edit_the_project_s_guidance_but_not_what_runs_c
     assert (project / "CLAUDE.md").read_text() == "x" and not (project / ".git" / "config").exists()
 
 
-@pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
+@pytest.mark.usefixtures("_needs_a_jail")
 async def test_the_jail_row_s_allow_lets_a_cell_write_one_more_self_modification_path(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
@@ -217,7 +231,7 @@ async def test_the_jail_row_s_allow_lets_a_cell_write_one_more_self_modification
     assert "[2] DENIED" in out, out  # an `allow` replaces the default: CLAUDE.md is denied again
 
 
-@pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
+@pytest.mark.usefixtures("_needs_a_jail")
 async def test_a_jailed_cell_cannot_read_the_credential_file_bh_02_names_from_another_directory(
     composition: Callable[..., Path],
     tmp_path: Path,
@@ -238,7 +252,7 @@ async def test_a_jailed_cell_cannot_read_the_credential_file_bh_02_names_from_an
     patch = _cells(
         composition,
         attempt(secret),
-        attempt(readable),  # the jail reads the rest of the filesystem: only the secret is hidden
+        attempt(readable),  # darwin: the rest of the filesystem reads, only the secret is hidden
         "import subprocess\n"
         f"r = subprocess.run(['/bin/cat', {str(secret)!r}], capture_output=True, text=True)\n"
         "print('READ' if r.returncode == 0 else 'DENIED')",
@@ -247,8 +261,45 @@ async def test_a_jailed_cell_cannot_read_the_credential_file_bh_02_names_from_an
     _answers()
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})], secrets=[str(secret)])
     out = _shown()
+    assert "[0] DENIED" in out and "[2] DENIED" in out, out
+    assert f"[1] {'READ' if _READS_EVERYWHERE_ELSE else 'DENIED'}" in out, out  # Linux: not allowlisted
+    assert "placeholder" not in out, out
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_jailed_cell_cannot_read_the_project_s_own_local_env_but_reads_beside_it(
+    composition: Callable[..., Path],
+    tmp_path: Path,
+) -> None:
+    """The credential inside the project, where a cell may write: the one case an allowlist
+    alone can't hide, so on Linux it is a mask over the file. A sibling reads in the same run,
+    in-process and from a program the cell starts; the host's file is untouched; and nothing
+    the jail made in the project outlives it."""
+    project = tmp_path / "project"
+    project.mkdir()
+    secret = project / "local.env"
+    secret.write_text("NOT_A_REAL_CREDENTIAL=placeholder\n")  # a stand-in: never the real file
+    (project / "notes.txt").write_text("fine")
+
+    def attempt(what: str) -> str:
+        return f"try:\n    {what}; print('READ')\nexcept OSError:\n    print('DENIED')"
+
+    patch = _cells(
+        composition,
+        attempt("open('local.env').read()"),
+        attempt("open('notes.txt').read()"),
+        "import subprocess\n"
+        "r = subprocess.run(['/bin/cat', 'local.env'], capture_output=True, text=True)\n"
+        "print('READ' if r.returncode == 0 else 'DENIED')",
+        extra=_jailed_in(project),
+    )
+    _answers()
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+    out = _shown()
     assert "[0] DENIED" in out and "[1] READ" in out and "[2] DENIED" in out, out
     assert "placeholder" not in out, out
+    assert secret.read_text() == "NOT_A_REAL_CREDENTIAL=placeholder\n"
+    assert sorted(p.name for p in project.iterdir()) == ["local.env", "notes.txt"]  # nothing left behind
 
 
 def test_the_credential_may_be_above_bh_02_s_install_its_environment_or_the_project() -> None:
@@ -270,7 +321,7 @@ def test_no_jailed_cell_may_read_the_sessions_state_nor_the_credential() -> None
     assert unreadable(anchors, [""]) == credential_files(anchors)  # booted without sessions
 
 
-@pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
+@pytest.mark.usefixtures("_needs_a_jail")
 async def test_a_jailed_cell_cannot_read_under_the_sessions_state_directory(
     composition: Callable[..., Path],
     tmp_path: Path,
@@ -303,7 +354,8 @@ async def test_a_jailed_cell_cannot_read_under_the_sessions_state_directory(
     secrets = unreadable([], [str(state.resolve())])
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})], secrets=secrets)
     out = _shown()
-    assert "[0] DENIED" in out and "[1] DENIED" in out and "[2] READ" in out and "[3] DENIED" in out, out
+    assert "[0] DENIED" in out and "[1] DENIED" in out and "[3] DENIED" in out, out
+    assert f"[2] {'READ' if _READS_EVERYWHERE_ELSE else 'DENIED'}" in out, out  # Linux: not allowlisted
     assert "placeholder" not in out, out
 
 

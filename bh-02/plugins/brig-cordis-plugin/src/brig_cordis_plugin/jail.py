@@ -8,7 +8,7 @@ prefix), and brig's own self-modification list (`.git/hooks`, `.git/config`, she
 CLAUDE.md, ...). What it may not read: brig's credential list under the home directory, `hide`
 under the project, and what the `layers` value names as `secrets` (bh-02's own `local.env`,
 wherever bh-02 runs from, and the sessions' state, where Claude Code keeps its tokens). No
-network: seatbelt allows only the kernel's own socket. The worker's environment is scrubbed
+network: the kernel's own socket is the one way in or out. The worker's environment is scrubbed
 to a short allowlist. brig's host process, which starts the worker from outside the jail,
 keeps bh-02's own environment: brig's launcher composes `{**os.environ, **jail.env}` by its
 spec, and `jail.env` can add keys but not remove them. So a variable of the launching shell (a
@@ -16,19 +16,35 @@ spec, and `jail.env` can add keys but not remove them. So a variable of the laun
 reach (in the jail, `ps` fails with a permission error; measured). bh-02's own token is never there: it goes
 only to the Claude Code child.
 
-darwin only for now: the Linux preset (`strict_linux`) reads by allowlist, which needs the
-interpreter's whole tree spelled out and has never been run here. Elsewhere `start` refuses and
-says to use `kernel:unjailed`.
+One policy, two platforms; only the stack and the read model differ:
+
+- darwin: brig's `scratch_darwin()` (seatbelt). Reads by denylist, which is `spec_for` as it is:
+  everything but the secrets.
+- Linux: brig's `strict_linux()` (bubblewrap). Reads by allowlist, so `allowlisted` turns the
+  policy into one: what is readable is the system tree (`/usr`, `/etc`, ...), the interpreter
+  (`sys.base_prefix`, `sys.prefix`), the directories the command names, and what the policy
+  lets a cell write. Everything else does not exist in the jail, the home directory included.
+  The secrets stay `read_denies`, now brig's carve-outs: one inside that tree (a `local.env` at
+  the project root) is masked if it exists, and one that does not exist yet is not, which
+  brig's `fs_read` grade says (`best_effort`, naming it). bubblewrap makes each absent
+  write-denied path (`.envrc`, `.vscode`, ...) an empty directory on the host for the jail to
+  mount over; the jail removes the ones it made once brig has verified the worker is gone,
+  never before (a mount point removed while the jail lives is detached inside it).
+
+Anywhere else `start` refuses and names `kernel:unjailed`.
 """
 
 import asyncio
+import contextlib
+import os
 import shutil
 import tempfile
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
+from sys import base_prefix, prefix
 from sys import path as import_path
-from sys import platform, prefix
+from sys import platform as host_platform
 from typing import Protocol, runtime_checkable
 
 from brig.core import (
@@ -39,14 +55,34 @@ from brig.core import (
     EnvMode,
     EnvPolicy,
     FsPolicy,
+    ReadModel,
     Spec,
 )
-from brig.run import Handle, IoPolicy, SubprocessLauncher, build_compile_ctx
-from brig.stack import CompiledJail, scratch_darwin
+from brig.mech.bwrap import DEFAULT_BWRAP_PATH
+from brig.run import Handle, IoPolicy, KillOutcome, SubprocessLauncher, build_compile_ctx
+from brig.stack import CompiledJail, Stack, scratch_darwin, strict_linux
 
-__all__ = ["BrigConfig", "BrigJail", "Layers", "self_modify_denied", "spec_for"]
+__all__ = [
+    "SYSTEM_READABLE",
+    "BrigConfig",
+    "BrigJail",
+    "Layers",
+    "allowlisted",
+    "made_by_the_jail",
+    "readable_roots",
+    "self_modify_denied",
+    "spec_for",
+    "stack_for",
+]
 
 _READY_TIMEOUT_S = 10.0
+
+#: The system tree a Linux jail may read: what the interpreter links against and reads at
+#: start (`/lib`, `/usr/lib`, `/etc/ld.so.cache`, locale data) and what a cell runs (`/bin/sh`,
+#: `git`, ...). Entries that do not exist on a host (`/lib64` on arm64) are dropped at start.
+SYSTEM_READABLE: tuple[str, ...] = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc")
+
+_STACKS: Mapping[str, Callable[[], Stack]] = {"darwin": scratch_darwin, "linux": strict_linux}
 
 
 @runtime_checkable
@@ -115,6 +151,52 @@ def spec_for(
     )
 
 
+def allowlisted(spec: Spec, readable: Sequence[str]) -> Spec:
+    """`spec`, reading by allowlist: `readable` is the tree a cell may read, and the policy's
+    read denies become the carve-outs inside it. The writes, the environment and the channel
+    are the policy's, unchanged."""
+    return replace(
+        spec,
+        fs=FsPolicy(
+            write_allows=spec.fs.write_allows,
+            write_denies=spec.fs.write_denies,
+            read_model=ReadModel.ALLOW_LIST,
+            read_allows=tuple(readable),
+            read_denies=spec.fs.read_denies,
+        ),
+    )
+
+
+def readable_roots(
+    *, argv: Sequence[str], interpreter: Sequence[str], system: Sequence[str]
+) -> tuple[str, ...]:
+    """What a Linux jail reads besides what it may write: the system tree, the interpreter's
+    trees (the standard library under `sys.base_prefix`, the environment under `sys.prefix`),
+    and the directory of every absolute path the command names (the worker program's own). Not
+    the host's whole `sys.path`: under pytest or `python -m` it holds the workspace root, and
+    with it the workspace's `local.env`, for nothing a stdlib-only worker needs."""
+    named = [str(Path(arg).parent) for arg in argv if arg.startswith("/")]
+    return tuple(dict.fromkeys([*system, *interpreter, *named]))
+
+
+def made_by_the_jail(absent: Sequence[str]) -> tuple[str, ...]:
+    """The directories bubblewrap creates on the host for absent write-denied paths (each path
+    and each missing parent; `absent` lists them all), deepest first: the order they can be
+    removed in once the jail is gone."""
+    return tuple(sorted(set(absent), key=lambda p: (-p.count("/"), p)))
+
+
+def stack_for(platform: str) -> Stack:
+    """brig's preset for `platform`, or a refusal that says what to use instead."""
+    try:
+        return _STACKS[platform]()
+    except KeyError:
+        raise RuntimeError(
+            f"brig:jail runs on darwin (seatbelt) and Linux (bubblewrap); this is {platform}. "
+            "Use `kernel:unjailed` for the jail row (or `bh-02 --no-jail`), knowing it confines nothing"
+        ) from None
+
+
 def self_modify_denied(allow: Sequence[str]) -> tuple[str, ...]:
     """brig's self-modification list without the names `allow` lets a cell write. A name that
     is not on the list is a mistake in the row's config, never silently ignored."""
@@ -130,41 +212,57 @@ def self_modify_denied(allow: Sequence[str]) -> tuple[str, ...]:
 
 
 class _Jailed:
-    """A program brig started: interrupt is SIGINT to its group, stop is brig's teardown."""
+    """A program brig started: interrupt is SIGINT to its group, stop is brig's teardown, then
+    the directories the jail made on the host (`made`, deepest first) once it is gone."""
 
-    def __init__(self, handle: Handle, jail_dir: str) -> None:
+    def __init__(self, handle: Handle, jail_dir: str, made: Sequence[str]) -> None:
         self._handle = handle
         self._jail_dir = jail_dir
+        self._made = made
 
     def interrupt(self) -> bool:
         return self._handle.interrupt()
 
     async def stop(self) -> None:
-        await asyncio.to_thread(self._handle.kill)
+        report = await asyncio.to_thread(self._handle.kill)
+        if all(item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE) for item in report.items):
+            # Only now: removed while the jail lived, each would stop being a mount point inside
+            # it, and the path it denies would be writable there. One the person has put
+            # something in since is not empty, and stays.
+            for path in self._made:
+                with contextlib.suppress(OSError):
+                    os.rmdir(path)
         shutil.rmtree(self._jail_dir, ignore_errors=True)
 
 
 class BrigJail:
-    """Implements `Jail` (CONTRACTS.md: jail) with brig's `scratch_darwin()` stack."""
+    """Implements `Jail` (CONTRACTS.md: jail) with brig's preset for this platform."""
 
-    def __init__(self, config: BrigConfig, layers: Layers) -> None:
+    def __init__(self, config: BrigConfig, layers: Layers, *, platform: str = host_platform) -> None:
         self._config = config
         self._layers = layers
+        self._platform = platform
         # The grades are known before anything starts: compile once against a throwaway directory.
-        with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
-            self._report: Mapping[str, str] = self._compile(probe, str(Path(probe, "k.sock")), ".")[1]
+        # A platform brig has no preset for grades nothing; `start` says what to use instead.
+        self._report: Mapping[str, str] = {}
+        if platform in _STACKS:
+            with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
+                self._report = self.compile(probe, str(Path(probe, "k.sock")), ".", ())[1]
 
     def report(self) -> Mapping[str, str]:
         return self._report
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
-        if platform != "darwin":
+        stack_for(self._platform)  # refuses on a platform brig has no preset for
+        if self._platform == "linux" and not Path(DEFAULT_BWRAP_PATH).exists():
             raise RuntimeError(
-                f"brig:jail runs on darwin here (seatbelt); this is {platform}. "
-                "Use `kernel:unjailed` for the jail row (or `bh-02 --no-jail`), knowing it confines nothing"
+                f"brig:jail runs the kernel under bubblewrap on Linux, and there is no {DEFAULT_BWRAP_PATH}: "
+                "install the `bubblewrap` package, or use `kernel:unjailed` for the jail row "
+                "(or `bh-02 --no-jail`), knowing it confines nothing"
             )
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
-        jail, self._report = self._compile(jail_dir, endpoint, cwd)
+        jail, self._report = self.compile(jail_dir, endpoint, cwd, argv)
+        made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
         handle = await asyncio.to_thread(
             SubprocessLauncher().launch,
             jail,
@@ -174,7 +272,7 @@ class BrigJail:
             jail_id=Path(jail_dir).name,
             jail_dir=jail_dir,
         )
-        started = _Jailed(handle, jail_dir)
+        started = _Jailed(handle, jail_dir, made)
         try:
             await asyncio.to_thread(handle.wait_ready, "kernel", _READY_TIMEOUT_S)
         except BaseException as error:
@@ -184,7 +282,9 @@ class BrigJail:
             raise RuntimeError(f"the jailed kernel never listened: {error}\n{detail}") from error
         return started
 
-    def _compile(self, jail_dir: str, endpoint: str, cwd: str) -> tuple[CompiledJail, Mapping[str, str]]:
+    def compile(
+        self, jail_dir: str, endpoint: str, cwd: str, argv: Sequence[str]
+    ) -> tuple[CompiledJail, Mapping[str, str]]:
         scratch = str(Path(jail_dir, "tmp"))
         Path(scratch).mkdir(parents=True, exist_ok=True)
         host = [str(Path(p).resolve()) for p in (*import_path, prefix) if p]
@@ -198,7 +298,44 @@ class BrigJail:
             host=host,
             secrets=self._layers.secrets,
         )
-        jail = scratch_darwin().compile(
-            spec, ctx=build_compile_ctx(spec, jail_dir=jail_dir, platform=platform)
-        )
+        if self._platform == "linux":
+            readable = readable_roots(argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE)
+            links = [link for arg in argv if arg.startswith("/") for link in self._linked_dirs(arg)]
+            spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()])
+        ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
+        jail = stack_for(self._platform).compile(spec, ctx=ctx)
         return jail, {axis.value: graded.grade.value for axis, graded in jail.report.axes.items()}
+
+    def _linked_dirs(self, path: str) -> list[str]:
+        """Every symlinked directory on the way to `path`, following its links. bubblewrap mounts
+        a tree at the path the Spec spells, so a tree reached through a link must be named as
+        the link too: a uv venv's `python` points into `cpython-3.15-...`, a link to the
+        `cpython-3.15.0rc2-...` that `sys.base_prefix` names (measured: without it the worker's
+        exec fails with "No such file or directory")."""
+        found: list[str] = []
+        hop = os.path.abspath(path)
+        for _ in range(40):  # the kernel's own limit on links in one lookup
+            parts = Path(hop).parts
+            at = next(
+                (Path(*parts[:i]) for i in range(2, len(parts) + 1) if Path(*parts[:i]).is_symlink()), None
+            )
+            if at is None:
+                return found
+            if at != Path(hop):
+                found.append(str(at))
+            hop = os.path.normpath(Path(at.parent, os.readlink(at), Path(hop).relative_to(at)))
+        return found
+
+    def _absent_denies(self, spec: Spec) -> list[str]:
+        """Every write-denied path under a write root that does not exist, and each of its
+        missing parents: what bubblewrap will create on the host to mount over."""
+        roots = [str(Path(r).resolve()) for r in spec.fs.write_allows]
+        absent: list[str] = []
+        for deny in spec.fs.write_denies:
+            path = Path(deny).resolve()
+            if not any(path.is_relative_to(r) and str(path) != r for r in roots):
+                continue
+            while not path.exists() and str(path) not in roots:
+                absent.append(str(path))
+                path = path.parent
+        return absent
