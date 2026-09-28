@@ -267,6 +267,32 @@ async def test_a_jailed_cell_cannot_read_the_credential_file_bh_02_names_from_an
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_jailed_kernel_starts_in_a_worktree_and_cannot_write_its_layer_in_the_project(
+    composition: Callable[..., Path],
+    tmp_path: Path,
+) -> None:
+    """A git worktree (or submodule): `.git` is a `gitdir:` file, so `.git/hooks` can't exist,
+    and on Linux bubblewrap can't make a mount point under a file; the jail denies the file
+    itself instead, and the kernel starts. And a layer file inside the project (where
+    `--patch mine.toml` usually is) can't be written, though the project can."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".git").write_text("gitdir: /nowhere\n")
+    mine = project / "mine.toml"
+    mine.write_text('[[plugin]]\nid = "jail"\nuse = "brig:jail"\n')
+    patch = _cells(
+        composition,
+        *_writes(project / "ok.txt", mine, project / ".git" / "hooks" / "pre-commit"),
+        extra=_jailed_in(project),
+    )
+    _answers()
+    await run([*layers(), patch, mine], [Row("chat", config={"prompt": "go"})])
+    out = _shown()
+    assert "[0] WROTE" in out and "[1] DENIED" in out and "[2] DENIED" in out, out
+    assert mine.read_text().endswith('"brig:jail"\n') and (project / ".git").is_file()
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
 async def test_a_jailed_cell_cannot_read_the_project_s_own_local_env_but_reads_beside_it(
     composition: Callable[..., Path],
     tmp_path: Path,

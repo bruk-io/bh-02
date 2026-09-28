@@ -1,6 +1,9 @@
 """The policy as a function, and the row. Real cells in a real jail are
 bh-02/app/tests/test_python_cells.py's: they need a kernel, which is another plugin."""
 
+import asyncio
+import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +16,7 @@ from brig_cordis_plugin import (
     allowlisted,
     jail,
     made_by_the_jail,
+    mountable,
     readable_roots,
     self_modify_denied,
     spec_for,
@@ -111,6 +115,59 @@ def test_a_linux_jail_reads_the_system_the_interpreter_and_what_the_command_name
 def test_what_the_jail_made_on_the_host_is_removed_deepest_first() -> None:
     made = made_by_the_jail(["/w/.git/hooks", "/w/.git", "/w/.envrc", "/w/.git/hooks"])
     assert made == ("/w/.git/hooks", "/w/.envrc", "/w/.git")
+
+
+def test_a_deny_under_a_file_becomes_a_deny_of_the_file() -> None:
+    """A worktree's `.git` is a `gitdir:` file: no mount point can be made under it, so its
+    carve-outs become the file itself, once."""
+    blocked = {"/w/.git/hooks": "/w/.git", "/w/.git/config": "/w/.git"}
+    denies = mountable(["/w/.git/hooks", "/w/.git/config", "/w/.envrc"], blocked)
+    assert denies == ("/w/.git", "/w/.envrc")
+
+
+_LISTEN_THEN_WRITE = """
+import os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+while True:
+    time.sleep(0.1)
+    try:
+        os.makedirs(sys.argv[2], exist_ok=True)
+        open(os.path.join(sys.argv[2], "settings.json"), "w").write("x")
+    except OSError:
+        pass
+"""
+
+
+async def test_a_second_jail_s_carve_out_outlives_the_first_jail_in_the_same_project(
+    tmp_path: Path,
+) -> None:
+    """Two kernels in one project (two sessions). The first makes the empty `.claude/` it mounts
+    over; the second, starting while it lives, binds that directory read-only over itself. When
+    the first stops it must not remove it: removed on the host, the second's bind is detached
+    and the second writes `.claude/settings.json`, which Claude Code would run hooks from.
+    Linux only, with bubblewrap: the placeholders are bubblewrap's."""
+    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
+        pytest.skip("the placeholders are bubblewrap's: Linux with /usr/bin/bwrap only")
+    project = tmp_path / "project"
+    project.mkdir()
+    claude = project / ".claude"
+    jails = [BrigJail(BrigConfig(), Layers()) for _ in range(2)]
+    started = []
+    for n, one in enumerate(jails):
+        sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+        endpoint = str(sock_dir / "k.sock")
+        argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(claude)]
+        started.append(await one.start(argv, cwd=str(project), endpoint=endpoint))
+        assert claude.is_dir(), n  # the first made it; the second found it
+    await started[0].stop()
+    await asyncio.sleep(1.0)  # the second's workload keeps trying to write under .claude
+    try:
+        assert claude.is_dir() and not (claude / "settings.json").exists()
+    finally:
+        await started[1].stop()
+    assert not (claude / "settings.json").exists()
 
 
 def test_a_platform_brig_has_no_preset_for_is_refused_by_name() -> None:

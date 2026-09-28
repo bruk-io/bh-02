@@ -36,6 +36,7 @@ Anywhere else `start` refuses and names `kernel:unjailed`.
 
 import asyncio
 import contextlib
+import fcntl
 import os
 import shutil
 import tempfile
@@ -69,6 +70,7 @@ __all__ = [
     "Layers",
     "allowlisted",
     "made_by_the_jail",
+    "mountable",
     "readable_roots",
     "self_modify_denied",
     "spec_for",
@@ -211,27 +213,52 @@ def self_modify_denied(allow: Sequence[str]) -> tuple[str, ...]:
     return tuple(name for name in SELF_MODIFY_WORKSPACE_RELATIVE if name not in allow)
 
 
+def mountable(denies: Sequence[str], blocked: Mapping[str, str]) -> tuple[str, ...]:
+    """The write denies bubblewrap can mount. An absent one under a path that exists as a FILE
+    (`.git/hooks` where `.git` is a worktree's or submodule's `gitdir:` pointer) can't have a
+    mount point made for it (bwrap: "Can't mkdir parents ... Not a directory", and the kernel
+    never starts), so `blocked` maps it to that file, which is denied instead: bound read-only
+    over itself, it can be neither rewritten nor removed, so nothing is ever created under it."""
+    return tuple(dict.fromkeys(blocked.get(deny, deny) for deny in denies))
+
+
 class _Jailed:
     """A program brig started: interrupt is SIGINT to its group, stop is brig's teardown, then
-    the directories the jail made on the host (`made`, deepest first) once it is gone."""
+    the directories the jail made on the host (`made`, deepest first) once it is gone.
 
-    def __init__(self, handle: Handle, jail_dir: str, made: Sequence[str]) -> None:
+    `lock` (Linux) is this jail's shared hold on the user's bh-02 jail lock, taken before the
+    jail looked at the filesystem and held while it runs. A placeholder is removed only by a
+    jail that can then take the lock exclusively: no other bh-02 jail is running, so none has
+    mounted over one (a second session in the same project binds the first one's `.claude/`
+    read-only, and removing it on the host detaches that bind; measured)."""
+
+    def __init__(self, handle: Handle, jail_dir: str, made: Sequence[str], lock: int | None) -> None:
         self._handle = handle
         self._jail_dir = jail_dir
         self._made = made
+        self._lock = lock
 
     def interrupt(self) -> bool:
         return self._handle.interrupt()
 
     async def stop(self) -> None:
         report = await asyncio.to_thread(self._handle.kill)
-        if all(item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE) for item in report.items):
-            # Only now: removed while the jail lived, each would stop being a mount point inside
-            # it, and the path it denies would be writable there. One the person has put
-            # something in since is not empty, and stays.
-            for path in self._made:
-                with contextlib.suppress(OSError):
-                    os.rmdir(path)
+        gone = all(item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE) for item in report.items)
+        if gone and self._made and self._lock is not None:
+            try:
+                fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                pass  # another jail runs: what it may have mounted over stays
+            else:
+                # Removed while a jail lived, each would stop being a mount point inside it,
+                # and the path it denies would be writable there. One the person has put
+                # something in since is not empty, and stays.
+                for path in self._made:
+                    with contextlib.suppress(OSError):
+                        os.rmdir(path)
+        if self._lock is not None:
+            os.close(self._lock)
+            self._lock = None
         shutil.rmtree(self._jail_dir, ignore_errors=True)
 
 
@@ -260,19 +287,27 @@ class BrigJail:
                 "install the `bubblewrap` package, or use `kernel:unjailed` for the jail row "
                 "(or `bh-02 --no-jail`), knowing it confines nothing"
             )
+        # Before anything looks at the filesystem: no placeholder may be removed from here on.
+        lock = await asyncio.to_thread(self._hold) if self._platform == "linux" else None
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
-        jail, self._report = self.compile(jail_dir, endpoint, cwd, argv)
-        made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
-        handle = await asyncio.to_thread(
-            SubprocessLauncher().launch,
-            jail,
-            argv=list(argv),
-            cwd=cwd,
-            io=IoPolicy(),
-            jail_id=Path(jail_dir).name,
-            jail_dir=jail_dir,
-        )
-        started = _Jailed(handle, jail_dir, made)
+        try:
+            jail, self._report = self.compile(jail_dir, endpoint, cwd, argv)
+            made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
+            handle = await asyncio.to_thread(
+                SubprocessLauncher().launch,
+                jail,
+                argv=list(argv),
+                cwd=cwd,
+                io=IoPolicy(),
+                jail_id=Path(jail_dir).name,
+                jail_dir=jail_dir,
+            )
+        except BaseException:
+            if lock is not None:
+                os.close(lock)
+            shutil.rmtree(jail_dir, ignore_errors=True)
+            raise
+        started = _Jailed(handle, jail_dir, made, lock)
         try:
             await asyncio.to_thread(handle.wait_ready, "kernel", _READY_TIMEOUT_S)
         except BaseException as error:
@@ -302,6 +337,8 @@ class BrigJail:
             readable = readable_roots(argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE)
             links = [link for arg in argv if arg.startswith("/") for link in self._linked_dirs(arg)]
             spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()])
+            denies = mountable(spec.fs.write_denies, self._under_a_file(spec))
+            spec = replace(spec, fs=replace(spec.fs, write_denies=denies))
         ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
         jail = stack_for(self._platform).compile(spec, ctx=ctx)
         return jail, {axis.value: graded.grade.value for axis, graded in jail.report.axes.items()}
@@ -325,6 +362,25 @@ class BrigJail:
                 found.append(str(at))
             hop = os.path.normpath(Path(at.parent, os.readlink(at), Path(hop).relative_to(at)))
         return found
+
+    def _hold(self) -> int:
+        """A shared hold on this user's bh-02 jail lock (see `_Jailed`), waiting while a jail
+        that is removing its placeholders holds it exclusively."""
+        lock = os.open(f"/tmp/bh-02-jails-{os.getuid()}.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        return lock
+
+    def _under_a_file(self, spec: Spec) -> dict[str, str]:
+        """Each absent write deny whose nearest existing ancestor is a file, mapped to that file
+        (see `mountable`)."""
+        blocked: dict[str, str] = {}
+        for deny in spec.fs.write_denies:
+            path = Path(deny)
+            while not path.exists() and path != path.parent:
+                path = path.parent
+            if str(path) != deny and path.exists() and not path.is_dir():
+                blocked[deny] = str(path)
+        return blocked
 
     def _absent_denies(self, spec: Spec) -> list[str]:
         """Every write-denied path under a write root that does not exist, and each of its

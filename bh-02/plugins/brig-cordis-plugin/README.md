@@ -53,6 +53,16 @@ Known gaps on Linux, beyond darwin's:
   (brig SPEC.md, decision-164), so nothing here does.
 - A secret created after the kernel started, at a path inside the project, is readable until
   the kernel restarts; the `fs_read` grade names each such path.
+- The placeholders are removed only when no other bh-02 jail of the same user is running (a
+  shared `flock` on `/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken
+  exclusively to clean up): a second session in the same project binds the first one's
+  placeholders read-only, and removing them would detach those binds. So with overlapping
+  sessions, and after a crash or `SIGKILL`, empty placeholder directories stay behind.
+- In a git worktree or submodule `.git` is a file, and nothing can be mounted under it, so the
+  jail denies writing the `.git` file itself (`mountable`); on darwin only `.git/hooks` and
+  `.git/config` are denied, which cannot exist under a file anyway.
+- There is no home directory in the jail: `~/.gitconfig` isn't read, so a jailed `git commit`
+  needs the repository's own `user.name` and `user.email`.
 
 One known gap: under `python -m bh_02` the project root is itself on `sys.path`. Denying it would
 make the project read-only, so it is left writable, and a module a cell writes at the root
