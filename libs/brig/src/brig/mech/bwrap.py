@@ -61,7 +61,29 @@ restrictive".
        `--tmpfs DEST --remount-ro DEST`    only true because this stage comes
        (does not exist)                    AFTER stage 5. SPEC.md §5's
                                            "submounts", literally.
-    7. `--` then the workload's argv.
+    7. per `fs.read_denies` inside a       the READ carve-outs (decision-164),
+       mounted root and existing:          last, so nothing stacks over them.
+       `--ro-bind /dev/null DEST` (file)   A file reads EACCES (bwrap mounts
+       or `--perms 0000 --tmpfs DEST       nodev); a directory is an empty,
+       --remount-ro DEST` (directory)      mode-0000, read-only tmpfs.
+    8. `--` then the workload's argv.
+
+**Read carve-outs inside the allowlist (decision-164).** An allowlist
+denies by absence, but a secret can sit INSIDE an allowed root: a
+credential file at the top of a workspace the jail may write. So
+`read_denies` is active under ALLOW_LIST too, and each entry is one of
+three cases, decided against the resolved mounted roots (read allows, the
+channel directories, write allows): OUTSIDE every root it is inert -- the
+path is already absent from the jail, which is the allowlist's own
+enforcement; INSIDE a root and existing it is masked at stage 7; INSIDE a
+root and ABSENT it is not mounted at all, and `fs_read` grades
+`best_effort` with the path named. That last case is the objection that
+rejected the denylist emulation above, met honestly rather than silently:
+a mask needs a mount point, and a mount point at an absent path is a
+directory bwrap CREATES ON THE HOST (see `write_denies` below) -- a
+`local.env/` directory where the person's next `local.env` file should go.
+So the path is left alone and the grade says a file created there after
+launch is readable.
 
 **Stage 4 moved ahead of the write roots on 2026-09-08 (decision-163), and
 it was a real hole.** A jail directory that HOLDS the workspace is the
@@ -97,7 +119,15 @@ or renamed because it is a mount point), and an absent path becomes an
 empty read-only tmpfs (nothing can be created at it, and it cannot be
 rmdir'd for the same reason). Two consequences are named rather than
 hidden: an absent denied path materialises as an empty DIRECTORY inside the
-jail, and bwrap creates the mount point to put it there. And the
+jail, and bwrap creates the mount point to put it there -- ON THE HOST, not
+only inside the jail, because the mount point is made inside the write
+root's bind of the host directory, missing parents included (measured
+2026-09-28, decision-164: a jail denied `.envrc` leaves an empty `.envrc/`
+in the host workspace, and one denied `.git/hooks` in a directory that is
+not a repository leaves `.git/hooks/`). They outlive the jail; removing
+them is the embedder's, after teardown, and never while the jail lives --
+a mount point removed on the host is detached inside the jail, which would
+unmake the carve-out. And the
 compile-to-launch window is a REFUSAL on both sides rather than a hole --
 a denied path created as a file in that window makes the `--tmpfs` fail,
 one deleted in that window makes the `--ro-bind` fail, and a failed mount
@@ -189,7 +219,10 @@ _FS_READ_DETAIL: Final[str] = (
     "outside that set is not readable because it does not exist inside the "
     "jail, so it denies by ABSENCE (ENOENT) and not by a denial message; "
     "this axis is proved by an ABSENCE probe plus the battery's positive "
-    "control (SPEC.md sec 12), never by a signature match."
+    "control (SPEC.md sec 12), never by a signature match. A read_denies "
+    "entry inside that set that exists is masked after every other mount: a "
+    "file by the null device (EACCES), a directory by an empty mode-0000 "
+    "read-only tmpfs."
 )
 
 #: Must contain the literal token "write_denies": the carve-outs are
@@ -222,6 +255,11 @@ _NETWORK_DETAIL: Final[str] = (
     "connect_proxy's, and reaching it from inside an unshared netns needs "
     "pasta or slirp4netns, SPEC.md sec 6's roster)."
 )
+
+#: What a masked FILE is bound to (stage 7, decision-164): the host's null
+#: device. bwrap binds with `nodev`, so opening it inside the jail fails with
+#: EACCES -- a read of the masked path is refused, not answered with nothing.
+_NULL: Final[str] = "/dev/null"
 
 _AXES: Final[frozenset[Axis]] = frozenset({Axis.FS_READ, Axis.FS_WRITE, Axis.NETWORK})
 
@@ -263,6 +301,14 @@ class UnknownPathExistence(ValueError):
     decision-159)."""
 
 
+class UnknownPathKind(ValueError):
+    """Raised when a `read_denies` entry stage 7 must mask is missing from
+    `ctx.path_is_dir`. A file is masked by binding `/dev/null` over it and a
+    directory by an empty tmpfs, a bind cannot cover one kind with the
+    other, and guessing is a launch that fails -- so it refuses, naming the
+    path (decision-164)."""
+
+
 class ChannelInsideWriteDeny(ValueError):
     """Raised when a LISTEN `Channel`'s resolved endpoint falls under a
     resolved `write_denies` subpath. The channel's own directory is bound
@@ -295,6 +341,18 @@ def _exists(path: str, path_exists: Mapping[str, bool]) -> bool:
         ) from None
 
 
+def _is_dir(path: str, path_is_dir: Mapping[str, bool] | None) -> bool:
+    """Whether `path` was a directory when `run` built the context, or a
+    refusal naming `path`. Never a default -- see `UnknownPathKind`."""
+    try:
+        return (path_is_dir or {})[path]
+    except KeyError:
+        raise UnknownPathKind(
+            f"no directory answer for path {path!r} in ctx.path_is_dir; bwrap "
+            "masks a file and a directory differently and cannot mask one without it"
+        ) from None
+
+
 def _parent(path: str) -> str:
     """The directory component of an absolute POSIX path.
 
@@ -321,6 +379,7 @@ def render_bwrap_prefix(
     *,
     resolved: Mapping[str, str],
     path_exists: Mapping[str, bool],
+    path_is_dir: Mapping[str, bool] | None = None,
     bwrap_path: str = DEFAULT_BWRAP_PATH,
 ) -> tuple[str, ...]:
     """Render `spec` into the bwrap argv PREFIX. Pure: no I/O, no clock.
@@ -345,14 +404,17 @@ def render_bwrap_prefix(
               `ReadModel.ALLOW_LIST` and must not grant `allowed_domains`.
         resolved: Every `Spec` path this render needs, mapped to its
               realpath'd form, keyed exactly as the `Spec` carries it.
-        path_exists: Every `write_denies` entry, mapped to whether it
-              existed when the context was built.
+        path_exists: Every `write_denies` entry, and every `read_denies`
+              entry inside a mounted root, mapped to whether it existed
+              when the context was built.
+        path_is_dir: Every `read_denies` entry stage 7 masks, mapped to
+              whether it is a directory (decision-164).
         bwrap_path: Absolute path to the `bwrap` binary.
 
     Raises:
         ReadModelUnsupported, NetworkUnsupported, UnresolvedPath,
-        UnknownPathExistence, ChannelInsideWriteDeny -- each naming its own
-        subject; see the classes' own docstrings.
+        UnknownPathExistence, UnknownPathKind, ChannelInsideWriteDeny -- each
+        naming its own subject; see the classes' own docstrings.
     """
     if spec.fs.read_model is not ReadModel.ALLOW_LIST:
         raise ReadModelUnsupported(
@@ -419,8 +481,76 @@ def render_bwrap_prefix(
         else:
             args += ["--tmpfs", path, "--remount-ro", path]
 
+    # Stage 7: the read carve-outs that exist inside a mounted root, last, so
+    # no later mount can stack over them (decision-164). The absent ones are
+    # `unmasked_read_denies`' business: not mounted, and graded.
+    for path in _masked_read_denies(spec, resolved=resolved, path_exists=path_exists):
+        if _is_dir(path, path_is_dir):
+            args += ["--perms", "0000", "--tmpfs", path, "--remount-ro", path]
+        else:
+            args += ["--ro-bind", _NULL, path]
+
     args.append("--")
     return tuple(args)
+
+
+def _mounted_roots(spec: Spec, resolved: Mapping[str, str]) -> tuple[str, ...]:
+    """Every tree this render mounts from the host, resolved: the read allows,
+    the channel directories and the write roots."""
+    return (
+        *(_resolve(path, resolved) for path in spec.fs.read_allows),
+        *(_parent(_resolve(channel.endpoint, resolved)) for channel in spec.channels),
+        *(_resolve(path, resolved) for path in spec.fs.write_allows),
+    )
+
+
+def _inside_the_jail(spec: Spec, resolved: Mapping[str, str]) -> tuple[str, ...]:
+    """The `read_denies` entries a mounted root reaches: at or under one, or an
+    ancestor of one. The rest are absent from the jail already, which is the
+    allowlist's own enforcement, and need no mount."""
+    roots = _mounted_roots(spec, resolved)
+    return tuple(
+        path
+        for path in spec.fs.read_denies
+        if any(
+            _is_subpath(_resolve(path, resolved), root)
+            or _is_subpath(root, _resolve(path, resolved))
+            for root in roots
+        )
+    )
+
+
+def _masked_read_denies(
+    spec: Spec, *, resolved: Mapping[str, str], path_exists: Mapping[str, bool]
+) -> tuple[str, ...]:
+    """The read carve-outs stage 7 masks: inside the jail, and existing."""
+    return tuple(path for path in _inside_the_jail(spec, resolved) if _exists(path, path_exists))
+
+
+def unmasked_read_denies(
+    spec: Spec, *, resolved: Mapping[str, str], path_exists: Mapping[str, bool]
+) -> tuple[str, ...]:
+    """The read carve-outs inside a mounted root that did NOT exist when the
+    context was built, so nothing masks them: a file the host creates there
+    after launch is readable in the jail. Pure; `Bwrap.compile` grades
+    `fs_read` `best_effort` naming each one (decision-164)."""
+    return tuple(
+        path for path in _inside_the_jail(spec, resolved) if not _exists(path, path_exists)
+    )
+
+
+def _fs_read_graded(unmasked: tuple[str, ...]) -> Graded:
+    """`enforced` when every read carve-out inside the jail is masked, else
+    `best_effort` naming the ones that are not."""
+    if not unmasked:
+        return Graded(Grade.ENFORCED, _FS_READ_DETAIL)
+    return Graded(
+        Grade.BEST_EFFORT,
+        f"{_FS_READ_DETAIL} Not masked, because they did not exist at launch and a "
+        "mask would need a mount point bwrap creates on the host: "
+        f"{', '.join(unmasked)}. A file created at one of these after launch is "
+        "readable inside the jail.",
+    )
 
 
 class Bwrap:
@@ -443,8 +573,10 @@ class Bwrap:
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         """Refuses on a non-linux platform (`PlatformUnsupported`) and then
-        propagates `render_bwrap_prefix`'s own four refusals UNCHANGED --
-        never catching, re-raising or swallowing one."""
+        propagates `render_bwrap_prefix`'s own refusals UNCHANGED -- never
+        catching, re-raising or swallowing one. `fs_read` is `enforced`
+        unless a read carve-out inside the jail could not be masked
+        (`unmasked_read_denies`), and then `best_effort`, naming it."""
         if ctx.platform != _LINUX:
             raise PlatformUnsupported(
                 f"bwrap only compiles for ctx.platform == {_LINUX!r}, got {ctx.platform!r}"
@@ -454,7 +586,11 @@ class Bwrap:
             spec,
             resolved=ctx.resolved_paths,
             path_exists=ctx.path_exists,
+            path_is_dir=ctx.path_is_dir,
             bwrap_path=self._bwrap_path,
+        )
+        unmasked = unmasked_read_denies(
+            spec, resolved=ctx.resolved_paths, path_exists=ctx.path_exists
         )
 
         def wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -469,7 +605,7 @@ class Bwrap:
             helpers=(),
             requires=frozenset(),
             grades={
-                Axis.FS_READ: Graded(Grade.ENFORCED, _FS_READ_DETAIL),
+                Axis.FS_READ: _fs_read_graded(unmasked),
                 Axis.FS_WRITE: Graded(Grade.ENFORCED, _FS_WRITE_DETAIL),
                 Axis.NETWORK: Graded(Grade.ENFORCED, _NETWORK_DETAIL),
             },
@@ -489,7 +625,9 @@ __all__ = (
     "PlatformUnsupported",
     "ReadModelUnsupported",
     "UnknownPathExistence",
+    "UnknownPathKind",
     "UnresolvedPath",
     "bwrap",
     "render_bwrap_prefix",
+    "unmasked_read_denies",
 )

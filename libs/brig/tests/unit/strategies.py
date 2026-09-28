@@ -127,16 +127,15 @@ def limits() -> st.SearchStrategy[Limits]:
 
 @st.composite
 def fs_policies(draw: DrawFn) -> FsPolicy:
-    """Both ReadModels. Only the active read-model field is ever populated,
-    matching task-003's rule that the inactive one must stay empty."""
+    """Both ReadModels. `read_allows` is populated only under ALLOW_LIST
+    (task-003's rule for the inactive field); `read_denies` under both, since
+    decision-164 made it ALLOW_LIST's carve-outs."""
     write_allows = draw(st.lists(paths(), max_size=5, unique=True))
     write_denies = draw(st.lists(paths(), max_size=5, unique=True))
     read_model = draw(st.sampled_from(ReadModel))
-    read_denies: list[str] = []
+    read_denies = draw(st.lists(paths(), max_size=5, unique=True))
     read_allows: list[str] = []
-    if read_model is ReadModel.DENY_LIST:
-        read_denies = draw(st.lists(paths(), max_size=5, unique=True))
-    else:
+    if read_model is ReadModel.ALLOW_LIST:
         read_allows = draw(st.lists(paths(), max_size=5, unique=True))
     return FsPolicy(
         write_allows=tuple(write_allows),
@@ -256,12 +255,12 @@ def _narrow_denies(spec: Spec, draw: Draw) -> Spec | None:
     fresh_write_deny = _fresh(draw, paths(), fs.write_denies)
     new_write_denies = (*fs.write_denies, fresh_write_deny)
 
-    new_read_denies = fs.read_denies
+    # A read deny grows under either model (decision-164: under ALLOW_LIST it
+    # is a carve-out); under ALLOW_LIST an allow may shrink besides.
+    fresh_read_deny = _fresh(draw, paths(), fs.read_denies)
+    new_read_denies = (*fs.read_denies, fresh_read_deny)
     new_read_allows = fs.read_allows
-    if fs.read_model is ReadModel.DENY_LIST:
-        fresh_read_deny = _fresh(draw, paths(), fs.read_denies)
-        new_read_denies = (*fs.read_denies, fresh_read_deny)
-    elif fs.read_allows:
+    if fs.read_model is ReadModel.ALLOW_LIST and fs.read_allows:
         dropped = draw(st.sampled_from(fs.read_allows))
         new_read_allows = tuple(p for p in fs.read_allows if p != dropped)
 
@@ -285,12 +284,11 @@ def _widen_denies(spec: Spec, draw: Draw) -> Spec | None:
 
     new_read_denies = fs.read_denies
     new_read_allows = fs.read_allows
-    if fs.read_model is ReadModel.DENY_LIST:
-        if fs.read_denies:
-            dropped = draw(st.sampled_from(fs.read_denies))
-            new_read_denies = tuple(p for p in fs.read_denies if p != dropped)
-            changed = True
-    else:
+    if fs.read_denies:  # a carve-out under ALLOW_LIST, the policy under DENY_LIST
+        dropped = draw(st.sampled_from(fs.read_denies))
+        new_read_denies = tuple(p for p in fs.read_denies if p != dropped)
+        changed = True
+    if fs.read_model is ReadModel.ALLOW_LIST:
         fresh = _fresh_allow(draw, fs.read_allows)
         new_read_allows = (*fs.read_allows, fresh)
         changed = True

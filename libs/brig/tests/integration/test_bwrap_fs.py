@@ -292,3 +292,84 @@ def test_a_path_outside_read_allows_is_absent_rather_than_denied() -> None:
     handle.wait(timeout=_WAIT_TIMEOUT_S)
     with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
         assert "SECRETVALUE" in f.read()
+
+
+@pytest.mark.integration
+def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() -> None:
+    """decision-164, observed. A credential FILE and a state DIRECTORY sit
+    inside the writable workspace, named in `read_denies`: the file reads
+    EACCES (the null device, bound `nodev`), the directory can be neither
+    listed, read beneath, written into, nor chmod'ed back open (an empty
+    mode-0000 read-only tmpfs), and a sibling file in the same workspace
+    reads in the same run -- the control that makes the refusals the
+    carve-outs' doing. The host's files are untouched."""
+    jail_dir = _new_jail_dir()
+    workspace, hooks, envrc = _seed_workspace(jail_dir)
+    secret, state = f"{workspace}/local.env", f"{workspace}/state"
+    os.makedirs(f"{state}/deep")
+    for path, text in (
+        (secret, "SECRETVALUE"),
+        (f"{state}/deep/key", "DEEPVALUE"),
+        (f"{workspace}/notes.txt", "fine"),
+    ):
+        with open(path, "w") as f:
+            f.write(text)
+    spec = Spec(
+        fs=FsPolicy(
+            read_model=ReadModel.ALLOW_LIST,
+            read_allows=_system_read_allows(),
+            write_allows=(workspace,),
+            write_denies=(hooks, envrc),
+            read_denies=(secret, state),
+        )
+    )
+    ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
+    assert bwrap.compile(spec, ctx).grades  # compiles: both carve-outs exist, so both are masked
+
+    _status, stdout, stderr = _run_in_jail(
+        jail_dir=jail_dir,
+        spec=spec,
+        script=(
+            f"cat {secret}; ls {state}; cat {state}/deep/key; echo x > {state}/new; "
+            f"chmod 755 {state}; cat {workspace}/notes.txt && echo CONTROL"
+        ),
+        label="read-carve-out",
+    )
+
+    assert "SECRETVALUE" not in stdout and "DEEPVALUE" not in stdout
+    assert f"cat: {secret}: Permission denied" in stderr, stderr
+    assert f"ls: cannot open directory '{state}': Permission denied" in stderr, stderr
+    assert f"cat: {state}/deep/key: Permission denied" in stderr, stderr
+    assert f"chmod: changing permissions of '{state}': Read-only file system" in stderr, stderr
+    assert "fine" in stdout and "CONTROL" in stdout  # the sibling read, same run
+    with open(secret) as f:
+        assert f.read() == "SECRETVALUE"  # the host's file, untouched
+    assert not os.path.exists(f"{state}/new")
+
+
+@pytest.mark.integration
+def test_an_absent_write_carve_out_is_a_directory_on_the_host_until_someone_removes_it() -> None:
+    """What the tmpfs form costs, measured (decision-164 corrected the
+    docstring that said it materialised "inside the jail"): bwrap makes the
+    mount point inside the write root's bind of the HOST directory, so an
+    absent denied `.envrc` is an empty `.envrc/` on the host, and it outlives
+    the jail. Removing it is the embedder's, after teardown."""
+    jail_dir = _new_jail_dir()
+    workspace = f"{jail_dir}/ws"
+    os.makedirs(workspace)
+    missing_parent = f"{workspace}/.cfg/hooks"  # its parent is absent too
+    envrc = f"{workspace}/.envrc"
+    spec = Spec(
+        fs=FsPolicy(
+            read_model=ReadModel.ALLOW_LIST,
+            read_allows=_system_read_allows(),
+            write_allows=(workspace,),
+            write_denies=(envrc, missing_parent),
+        )
+    )
+    status, stdout, _stderr = _run_in_jail(
+        jail_dir=jail_dir, spec=spec, script="echo CONTROL", label="materialised"
+    )
+    assert status == 0 and "CONTROL" in stdout
+    assert os.path.isdir(envrc) and not os.listdir(envrc)
+    assert os.path.isdir(missing_parent) and not os.listdir(missing_parent)

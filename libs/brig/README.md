@@ -155,6 +155,18 @@ the jail could write what it was denied (decision-163). All three are fixed,
 and the tiers are green on Linux. No GitHub Actions run has been observed
 yet — a container is not the runner image.
 
+**Read carve-outs, 2026-09-28 (decision-164).** An allowlist `Spec` may now
+carry `read_denies`: the secrets inside an allowed tree (a `local.env` at the
+top of a writable workspace). `bwrap` masks the ones that exist — a file reads
+EACCES, a directory is an empty mode-0000 read-only tmpfs — and leaves the
+absent ones alone with `fs_read` graded `best_effort`, naming them, because a
+mask's mount point would be created on the host. The same run measured what
+that means for `write_denies`: an absent carve-out's empty directory is made
+on the HOST, parents included, and outlives the jail; the embedder removes it
+after teardown, never during (a mount point removed on the host is detached
+inside the jail). `scripts/linux-jail-check` at the workspace root is this
+workspace's container run of the bwrap tiers.
+
 ## Development
 
 Requires Python >= 3.15 and [uv](https://docs.astral.sh/uv/). brig is a member of a uv

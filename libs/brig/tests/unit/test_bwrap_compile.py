@@ -41,6 +41,7 @@ from brig.mech.bwrap import (
     PlatformUnsupported,
     ReadModelUnsupported,
     UnknownPathExistence,
+    UnknownPathKind,
     UnresolvedPath,
     bwrap,
 )
@@ -557,3 +558,103 @@ def test_the_three_mechanism_linux_stack_composes_rlimits_bwrap_env_scrub() -> N
     shell_at = argv.index("/bin/sh")
 
     assert trampoline_at < bwrap_at < shell_at
+
+
+# --------------------------------------------------------------------------
+# Read carve-outs inside the allowlist (decision-164).
+# --------------------------------------------------------------------------
+
+_SECRET = "/srv/ws/local.env"
+_STATE = "/srv/ws/state"
+_ABSENT = "/srv/ws/later.env"
+_ELSEWHERE = "/home/me/.ssh"
+
+_CARVE_OUT_SPEC = Spec(
+    fs=FsPolicy(
+        read_model=ReadModel.ALLOW_LIST,
+        read_allows=("/usr",),
+        write_allows=(_WORKSPACE,),
+        read_denies=(_SECRET, _STATE, _ABSENT, _ELSEWHERE),
+    ),
+    channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+)
+
+
+def _carve_out_ctx(*, exists: dict[str, bool], is_dir: dict[str, bool]) -> CompileCtx:
+    paths = ("/usr", _WORKSPACE, _ENDPOINT, _SECRET, _STATE, _ABSENT, _ELSEWHERE)
+    return CompileCtx(
+        jail_dir=_JAIL_DIR,
+        platform="linux",
+        resolved_paths=_identity_resolved(*paths),
+        path_exists={"/usr": True, _WORKSPACE: True, _ENDPOINT: False, **exists},
+        path_is_dir=is_dir,
+    )
+
+
+@pytest.mark.unit
+def test_a_read_carve_out_inside_a_root_is_masked_last_by_its_kind() -> None:
+    """An existing file is bound to the null device, an existing directory
+    becomes an empty mode-0000 read-only tmpfs, both AFTER the write root they
+    sit in (so nothing stacks over them). One outside every root is inert: it
+    is absent from the jail already."""
+    ctx = _carve_out_ctx(
+        exists={_SECRET: True, _STATE: True, _ABSENT: True, _ELSEWHERE: True},
+        is_dir={_SECRET: False, _STATE: True, _ABSENT: False},
+    )
+    step = bwrap.compile(_CARVE_OUT_SPEC, ctx)
+    argv = step.wrap(("w",))
+    write_root_at = argv.index("--bind", argv.index("/run/brig/jail0") + 1)
+    assert argv[write_root_at : write_root_at + 3] == ("--bind", _WORKSPACE, _WORKSPACE)
+    assert argv[write_root_at + 3 :] == (
+        "--ro-bind", "/dev/null", _ABSENT,
+        "--ro-bind", "/dev/null", _SECRET,
+        "--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE,
+        "--", "w",
+    )  # fmt: skip
+    assert _ELSEWHERE not in argv
+    assert step.grades[Axis.FS_READ].grade is Grade.ENFORCED
+
+
+@pytest.mark.unit
+def test_an_absent_read_carve_out_inside_a_root_is_not_mounted_and_is_graded() -> None:
+    """A mask needs a mount point, and bwrap creates one on the HOST: a
+    `local.env/` directory where a credential file should go. So an absent
+    carve-out is left alone, and `fs_read` says so by name."""
+    ctx = _carve_out_ctx(
+        exists={_SECRET: False, _STATE: False, _ABSENT: False, _ELSEWHERE: False},
+        is_dir={},  # nothing is masked, so no kind is needed
+    )
+    step = bwrap.compile(_CARVE_OUT_SPEC, ctx)
+    assert not {_SECRET, _STATE, _ABSENT, _ELSEWHERE} & set(step.wrap(("w",)))
+    graded = step.grades[Axis.FS_READ]
+    assert graded.grade is Grade.BEST_EFFORT
+    assert _SECRET in graded.detail and _ABSENT in graded.detail
+    assert _ELSEWHERE not in graded.detail  # outside every root: absence is the enforcement
+
+
+@pytest.mark.unit
+def test_a_read_carve_out_that_holds_a_root_is_masked_too() -> None:
+    """Deny over allow in the other direction: a carve-out that is an
+    ANCESTOR of a mounted root hides it."""
+    inner = f"{_STATE}/inner"
+    spec = Spec(
+        fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=(inner,), read_denies=(_STATE,))
+    )
+    ctx = CompileCtx(
+        jail_dir=_JAIL_DIR,
+        platform="linux",
+        resolved_paths=_identity_resolved(inner, _STATE),
+        path_exists={inner: True, _STATE: True},
+        path_is_dir={_STATE: True},
+    )
+    argv = bwrap.compile(spec, ctx).wrap(("w",))
+    assert argv[-8:] == ("--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE, "--", "w")
+
+
+@pytest.mark.unit
+def test_a_carve_out_to_mask_with_no_kind_is_a_refusal_naming_it() -> None:
+    ctx = _carve_out_ctx(
+        exists={_SECRET: True, _STATE: False, _ABSENT: False, _ELSEWHERE: False}, is_dir={}
+    )
+    with pytest.raises(UnknownPathKind, match=re.escape(repr(_SECRET))):
+        bwrap.compile(_CARVE_OUT_SPEC, ctx)
