@@ -160,7 +160,7 @@ from __future__ import annotations
 from typing import Final
 
 from brig.core import Axis, EnvMode, EnvPolicy, EventKind, Grade, Graded, Spec
-from brig.mech import ArgvTransformer, CompileCtx, EventPayload, ExitOutcome, Step
+from brig.mech.contract import ArgvTransformer, CompileCtx, EventPayload, ExitOutcome, Step
 
 _ENV_UTILITY = "/usr/bin/env"
 #: decision-143 (2): the ENV grade's detail used to be the empty string, so a

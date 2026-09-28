@@ -70,7 +70,7 @@ import signal
 import sys
 
 from brig.core import Axis, EventKind, Grade, Graded, Spec
-from brig.mech import ArgvTransformer, CompileCtx, EventPayload, ExitOutcome, Step
+from brig.mech.contract import ArgvTransformer, CompileCtx, EventPayload, ExitOutcome, Step
 
 _TRAMPOLINE_MODULE = "brig.mech.trampoline"
 _CPU_FLAG = "--cpu"

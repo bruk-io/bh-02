@@ -160,7 +160,7 @@ from collections.abc import Mapping
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, ReadModel, Spec
-from brig.mech import ArgvTransformer, CompileCtx, Step
+from brig.mech.contract import ArgvTransformer, CompileCtx, Step
 
 #: Absolute, never the bare name `bwrap` (decision-026 rule 1's family, the
 #: same reason seatbelt names `/usr/bin/sandbox-exec` in full): a bare name

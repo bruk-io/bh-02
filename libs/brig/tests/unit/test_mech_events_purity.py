@@ -21,8 +21,8 @@ mechanism's `Step.wrap` points at (`python -m brig.mech.trampoline --cpu N
 -- argv...`) -- not because it is part of the "mech" CONTRACT layer SPEC.md
 §6 calls pure ("mech performs no I/O of its own during compile"). That
 claim is about `Mechanism.compile()` and the types compile() produces
-(`Step`, `EventSource`, ...), all of which live in `brig/mech/__init__.py`
-alone -- corroborated by task-031 AC#6's own plant/revert, which names
+(`Step`, `EventSource`, ...), all of which live in `brig/mech/contract.py`
+alone (in `brig/mech/__init__.py` until the workspace's task-0017 moved them) -- corroborated by task-031 AC#6's own plant/revert, which names
 `brig/mech/__init__.py` specifically, not the trampoline package.
 
 So this file does NOT silently skip the trampoline package: its two files
@@ -85,18 +85,13 @@ still a pure `spec -> Step` render -- no I/O, no clock, no subprocess -- so
 both files stay inside `test_only_the_mech_contract_layer_is_import_pure`'s
 scan below; `re` is not in `_BANNED_IMPORT_NAMES`.
 
-`rlimits.py` also imports from `brig.mech` itself (`Step`, `CompileCtx`,
-`EventPayload`, `ExitOutcome`, `ArgvTransformer` -- the contract types this
-package's own `__init__.py` defines), and `__init__.py` in turn imports
-`Rlimits`/`rlimits` from `rlimits.py` at the BOTTOM of the file, after every
-type `rlimits.py` needs is already defined. This is the ordinary "submodule
-imports from its own package's `__init__`" shape, not the *functional*
-cycle SPEC.md §13 warns splitting `Spec`'s subset algebra out would create
-(there, the extracted module and `spec.py` would need EACH OTHER's symbols;
-here, only `rlimits.py` needs `__init__.py`'s symbols, `__init__.py` needs
-only the name `rlimits.py` exports). Verified empirically, not just argued:
-`pypeeker index brig && pypeeker check --strict` is clean with this shape in
-place -- the same `no-import-cycles` rule SPEC.md §13 cites, actually run.
+Every mechanism (`rlimits.py`, `env_scrub.py`, `bwrap.py`, `connect_proxy.py`,
+`seatbelt/__init__.py`) imports the contract from `brig.mech.contract`, never from
+`brig.mech` itself. An older layout defined the contract in `brig/mech/__init__.py` and had
+the mechanisms import it back from there, with `__init__` importing them at the bottom of the
+file; newer pypeeker reports that as a `no-import-cycles` violation, which brig's gate runs.
+The pins above hold the new shape: `contract.py` imports no mechanism, and `__init__.py`
+imports only `brig.mech.*` modules (it re-exports).
 """
 
 from __future__ import annotations
@@ -137,7 +132,11 @@ def _top_level_imported_modules(source: str) -> set[str]:
 #: test_mech_module_set_is_pinned, so a new module can't silently join
 #: either.
 _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
-    "__init__.py": frozenset(
+    # The contract layer itself: every type SPEC.md §6 calls pure (`Step`,
+    # `CompileCtx`, `EventSource`, ...). It imports no mechanism, and every
+    # mechanism imports it directly, which is what keeps `no-import-cycles`
+    # on in brig's gate (task-0017 of the workspace backlog).
+    "contract.py": frozenset(
         {
             "__future__",
             "collections.abc",
@@ -147,10 +146,12 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
             "types",
             "typing",
             "brig.core",
-            # task-036/task-034/task-059/decision-159: the bottom-of-file
-            # `rlimits`/`env_scrub`/`seatbelt`/`bwrap` exports (see this
-            # module's docstring for why this is not a `no-import-cycles`
-            # violation).
+        }
+    ),
+    # Re-exports only: the contract, then each mechanism.
+    "__init__.py": frozenset(
+        {
+            "brig.mech.contract",
             "brig.mech.bwrap",
             "brig.mech.env_scrub",
             "brig.mech.rlimits",
@@ -167,14 +168,16 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
     # docstring) -- `signal`/`sys` here are pure attribute reads
     # (`signal.SIGXCPU`, `sys.executable`), never syscalls, so this file
     # stays inside the banned-import scan below.
-    "rlimits.py": frozenset({"__future__", "brig.core", "brig.mech", "re", "signal", "sys"}),
+    "rlimits.py": frozenset(
+        {"__future__", "brig.core", "brig.mech.contract", "re", "signal", "sys"}
+    ),
     # task-034: the `env_scrub` mechanism. NOT a carve-out either -- its
     # `compile()` is a pure spec -> argv render (the actual environment
     # values it forwards are read by `/bin/sh` at RUN time, never by this
     # module at compile time -- see `brig/mech/env_scrub.py`'s own module
     # docstring), so it stays inside the banned-import scan below too.
     # `typing` joins at decision-143: `_SCRUB_DETAIL` is a `Final` constant.
-    "env_scrub.py": frozenset({"__future__", "typing", "brig.core", "brig.mech"}),
+    "env_scrub.py": frozenset({"__future__", "typing", "brig.core", "brig.mech.contract"}),
     # task-058/task-059: the `seatbelt` package. NOT a carve-out (see
     # module docstring's task-058/task-059 paragraphs) -- pure, no I/O, no
     # clock -- so both files stay inside the banned-import scan below too.
@@ -186,7 +189,7 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
             "__future__",
             "re",
             "brig.core",
-            "brig.mech",
+            "brig.mech.contract",
             "brig.mech.seatbelt.profile",
             # task-079/decision-136: `_AXES_OWNING_NETWORK` /
             # `_AXES_CEDING_NETWORK` are `Final`.
@@ -205,14 +208,14 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
     # signatures, `typing` its `Final` constants, `collections.abc` the
     # `Mapping` its two ctx lookups take.
     "bwrap.py": frozenset(
-        {"__future__", "collections.abc", "re", "typing", "brig.core", "brig.mech"}
+        {"__future__", "collections.abc", "re", "typing", "brig.core", "brig.mech.contract"}
     ),
     # `connect_proxy.py` (M6). Note what is NOT here: `brig.proxy`. The
     # proxy process it starts has an empty layer row (decision-133) and
     # this mechanism may not import it, which is why the denial-signature
     # constant is duplicated and pinned equal by
     # `tests/unit/test_connect_proxy_compile.py` instead.
-    "connect_proxy.py": frozenset({"__future__", "re", "brig.core", "brig.mech"}),
+    "connect_proxy.py": frozenset({"__future__", "re", "brig.core", "brig.mech.contract"}),
 }
 
 #: task-031 AC#5's literal banned list. "open" is listed in the AC's prose
@@ -261,7 +264,7 @@ def test_mech_file_imports_exactly_the_pinned_set(relpath: str) -> None:
 def test_only_the_mech_contract_layer_is_import_pure() -> None:
     """AC#5's literal claim, stated directly rather than only implied by
     the pinned-set tests above: every NON-trampoline module under
-    brig/mech/ -- today, only __init__.py, the mech contract layer -- never
+    brig/mech/ -- the contract layer (contract.py) and every mechanism -- never
     top-level-imports open/os/io/time/random/subprocess/pathlib.
 
     Re-parses each file with ast (does NOT read from

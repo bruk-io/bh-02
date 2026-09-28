@@ -74,7 +74,7 @@ import re
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, Spec
-from brig.mech import ArgvTransformer, CompileCtx, StagedFile, Step
+from brig.mech.contract import ArgvTransformer, CompileCtx, StagedFile, Step
 from brig.mech.seatbelt.profile import ChannelInsideWriteDeny as ChannelInsideWriteDeny
 from brig.mech.seatbelt.profile import ReadModelUnsupported as ReadModelUnsupported
 from brig.mech.seatbelt.profile import UnresolvedPath as UnresolvedPath
