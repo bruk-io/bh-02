@@ -1,9 +1,10 @@
 ---
 id: task-0026
 title: CI runs the Linux jail check on every push
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-30 01:36'
+updated_date: '2026-09-30 01:41'
 labels: []
 dependencies: []
 priority: low
