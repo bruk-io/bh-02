@@ -88,9 +88,12 @@ def source_tar() -> bytes:
     ).stdout
     # A file deleted in the working tree but still in the index is listed; tar would fail on it.
     names = [n for n in listed.split(b"\0") if n and (ROOT / n.decode()).exists()]
+    # No xattrs or AppleDouble files: darwin's tar (bsdtar) adds both, and GNU tar in the
+    # container warns per file. GNU tar, on a Linux host (CI), adds neither and has no
+    # `--no-mac-metadata`, so the flags are darwin's alone.
+    quiet = ["--no-xattrs", "--no-mac-metadata"] if sys.platform == "darwin" else []
     return subprocess.run(
-        # No xattrs or AppleDouble files: darwin's tar adds both, and GNU tar warns per file.
-        ["tar", "--no-xattrs", "--no-mac-metadata", "-cf", "-", "--null", "-T", "-"],
+        ["tar", *quiet, "-cf", "-", "--null", "-T", "-"],
         cwd=ROOT, input=b"\0".join(names), check=True, capture_output=True
     ).stdout
 
