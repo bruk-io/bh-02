@@ -4,7 +4,7 @@ title: 'Make /model and /clear answer within a few seconds, or record why they c
 status: Done
 assignee: []
 created_date: '2026-09-28 12:26'
-updated_date: '2026-09-28 12:41'
+updated_date: '2026-09-30 01:37'
 labels: []
 dependencies: []
 priority: medium
@@ -33,4 +33,6 @@ Measured 2026-09-28 against the real Claude Code CLI 2.1.282 (SDK 0.2.158), haik
 - Rows back up: /model ~0.6 s (incl ~0.45 s closing the old CLI), /clear 0.35 s. With fake models the same commands cost 0.24-0.29 s.
 - Bare CLI connect with the provider's options: median 0.96 s (0.85-1.40, n=13); disconnect 0.48 s.
 Under the 5 s bar, so no code changed (AC3 has nothing to cover). The old 12-15 s most likely came from the account's 118 claude.ai connectors, removed by strict_mcp_config=True; that fits task-0014's notes but wasn't tested. Possible further gain: ClaudeSDKClient.set_model switches a running CLI (verified once, reply in ~1 s), saving ~1.5 s on /model. It would mean keeping the CLI alive across a model-row reload, a cordis design change, so it wasn't built and needs a decision. /clear has no SDK equivalent. Noise: one 11.3 s /model and one 5.8 s post-switch reply, not reproduced. A failed first reply after /clear (1 of 10 runs) is tracked separately. The token was read only by the provider from local.env; never printed or copied.
+
+Decided 2026-09-29 (Bruk): no set_model switch. ~2.5 s is fine, and cordis's rule that a layer change reloads the row stays.
 <!-- SECTION:NOTES:END -->
