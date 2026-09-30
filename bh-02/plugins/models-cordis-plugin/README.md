@@ -4,8 +4,8 @@ bh-02's model: named models over their providers, switched by name. Two rows:
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | |
-| `models:catalog` | `models`: the models there are, the one the model row names now, and why a name can't be switched to (CONTRACTS.md: models) | `loader` |
+| `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | `layers` (`credentials`: where `local.env` is looked for) |
+| `models:catalog` | `models`: the models there are, the one the model row names now, and why a name can't be switched to (CONTRACTS.md: models) | `loader`, `layers` |
 
 The model row's config (`ModelConfig`):
 - `default`: the model's name, `sonnet` unless a layer says another; `--model` and `/model` set it.
@@ -13,7 +13,8 @@ The model row's config (`ModelConfig`):
 - `extra`: models of the row's own, one table per name as in the file (a migrated layer
   writes one: an old Ollama row is an `extra` OpenAI-compatible model).
 - `state`, `env_file`, `cwd`: the claude-code provider's (below). `env_file` is also where the
-  openai provider reads a model's key.
+  openai provider reads a model's key. Unset, `local.env` is looked for where the `layers`
+  value's `credentials` say (below).
 
 ## Named models
 
@@ -64,8 +65,9 @@ imports whatever module the models file names, so name only code you trust. A fa
 can't be imported, or raises, is a model that can't be used, like any other (`Unusable`).
 
 `models` (`catalog.py`) reads the model row's config from the loader's entries and the models
-file each time it is asked, and depends on the loader alone: `/model` (the operator) and the
-status bar depend on it, never on `model`, which a switch replaces.
+file each time it is asked, and depends on the loader and `layers` (where a key's `local.env` is
+looked for) alone: `/model` (the operator) and the status bar depend on it, never on `model`,
+which a switch replaces.
 
 ## openai: any OpenAI-compatible endpoint
 
@@ -237,8 +239,13 @@ with calls parked or a step streaming reads as failed, and the session is rebuil
 ### The credential
 
 The credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` makes one), kept in the
-git-ignored `local.env` at the repository root. `local_env.py` finds that file above the
-install. `parse_env` (pure) reads it with one read, and the token goes only into the SDK options'
+git-ignored `local.env` at the repository root. Where it is looked for is not this plugin's to
+decide: both rows depend on `layers`, and its `credentials` (above bh-02's install and its
+environment, nearest first, from `bh_02.cli`) are the places searched; `token_file` takes the
+first that is a regular file, so the empty directory a Linux jail holds an absent one with never
+hides the real file, at the first read or at any later one (each Claude Code start, each
+openai request). The same list is among the jail's `secrets`, so no place searched is one a
+jailed cell can read, write or create. `parse_env` (pure) reads it with one read, and the token goes only into the SDK options'
 `env` for the Claude Code child:
 - never into bh-02's `os.environ`, so the kernel and the jail can't inherit it;
 - never on a command line.

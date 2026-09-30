@@ -300,6 +300,10 @@ async def heartbeat() -> Effects:
     yield background(forever())
 
 
+# What the model was last told as the system prompt (the project context and the tool's).
+SYSTEM: list[str] = []
+
+
 @dataclass(frozen=True)
 class Cells:
     code: tuple[str, ...] = ()
@@ -313,6 +317,7 @@ class CellScript:
         self._cells = cells
 
     async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
+        SYSTEM[:] = [m["content"] for m in messages if m["role"] == "system"]
         results = [m["content"] for m in messages if m["role"] == "tool"]
         if len(results) < len(self._cells):
             n = len(results)

@@ -170,8 +170,9 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `transcript` | `agent:transcript` | `path` (the session's `transcript.jsonl`) |
 
 `run()` adds three rows of its own after every layer, pinned on so no layer can remove them:
-`layers` (the files above, as paths, so the jail can keep a cell from rewriting them, and
-`secrets`: every `local.env` above bh-02's install and environment and beside the project,
+`layers` (the files above, as paths, so the jail can keep a cell from rewriting them;
+`credentials`: where the model rows look for `local.env`, above bh-02's install and environment,
+nearest first; and `secrets`: every one of those, the `local.env` beside and above the project,
 and the sessions' state directory, this run's and the default `~/.local/state/bh-02/sessions`
 (Claude Code's own config and tokens), which a jailed cell can't read; with `--no-jail` a cell runs with your permissions, so one you
 approve could open them: only its environment is scrubbed), `sessions` (this directory's
@@ -190,16 +191,16 @@ What the rows depend on, which is what decides what reloads when:
 ```
 commands:registry       binds Commands                     depends on nothing
 commands:operator       registers /rows ... /model         depends on Commands, Loader, Models
-context:project         binds System                       depends on nothing
-models:model            binds Model                        depends on nothing (its config; the models file, read as it starts; a credential, at the first step)
-models:catalog          binds Models                       depends on Loader
+context:project         binds System                       depends on Kernel (what its jail reads)
+models:model            binds Model                        depends on Layers (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
+models:catalog          binds Models                       depends on Loader, Layers
 agent:transcript        binds Transcript                   depends on nothing
 agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Output
 brig:jail               binds Jail                         depends on Layers
 kernel:unjailed         binds Jail                         depends on nothing
 kernel:kernel           binds Kernel (the one tool)        depends on Jail
 tui:app                 binds Input, Output, Frame         depends on nothing (its config)
-tui:status              pushes the status bar's fields     depends on Kernel, Loader, Models, Sessions, Frame
+tui:status              pushes the status bar's fields     depends on Kernel, Loader, Models, Sessions, Frame, Output
 tui:sessions            pushes the sidebar's list          depends on Sessions, Frame
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:session            runs the chat, binds Done          depends on Loop, Input, Output, Commands

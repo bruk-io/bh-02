@@ -2,7 +2,7 @@
 booted for real, headless, under a runtime."""
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,12 +24,26 @@ from tui_cordis_plugin import (
 
 
 class _Kernel:
-    def __init__(self, confined: bool, report: Mapping[str, str]) -> None:
+    def __init__(self, confined: bool, report: Mapping[str, str], notice: str = "") -> None:
         self.confined = confined
         self._report = report
+        self._notice = notice
 
     def report(self) -> Mapping[str, str]:
         return self._report
+
+    def notice(self) -> str:
+        return self._notice
+
+
+class _Output:
+    """The `output` value's `show`: the events it was given, drained."""
+
+    def __init__(self) -> None:
+        self.shown: list[Mapping[str, Any]] = []
+
+    async def show(self, events: AsyncIterator[Mapping[str, Any]]) -> None:
+        self.shown += [event async for event in events]
 
 
 @dataclass
@@ -104,6 +118,7 @@ async def test_the_status_row_pushes_the_session_the_jail_and_the_model_and_hear
             models=_Models(),
             sessions=sessions,
             frame=frame,
+            output=_Output(),
             config=StatusConfig(),
         )
     )
@@ -118,6 +133,21 @@ async def test_the_status_row_pushes_the_session_the_jail_and_the_model_and_hear
     remove()
 
 
+async def test_the_status_row_shows_what_the_jail_says_once_as_a_note_when_the_kernel_comes_up() -> None:
+    """A Linux jail's notice (the paths it holds with a mount the host can undo) is a note in the
+    conversation when the kernel comes up; a jail with nothing to say shows nothing."""
+    frame, output = Frame(lambda message: True), _Output()
+    kernel = _Kernel(
+        True, {"fs_read": "best_effort"}, notice="The jail keeps cells from reading /w/local.env"
+    )
+    rows = dict(loader=_Loader(), models=_Models(), sessions=_Sessions(), frame=frame, config=StatusConfig())
+    await drive(status(kernel=kernel, output=output, **rows))
+    assert output.shown == [{"type": "note", "text": "The jail keeps cells from reading /w/local.env"}]
+    quiet = _Output()
+    await drive(status(kernel=_Kernel(True, {}), output=quiet, **rows))
+    assert quiet.shown == []
+
+
 async def test_with_no_session_the_status_row_shows_no_session_field() -> None:
     frame = Frame(lambda message: True)
     effects = await drive(
@@ -127,6 +157,7 @@ async def test_with_no_session_the_status_row_shows_no_session_field() -> None:
             models=_Models(),
             sessions=_Sessions(),
             frame=frame,
+            output=_Output(),
             config=StatusConfig(),
         )
     )

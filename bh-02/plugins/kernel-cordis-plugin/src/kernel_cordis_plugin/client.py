@@ -49,6 +49,8 @@ class Jail(Protocol):
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
+    def notice(self) -> str: ...
+    def reads(self) -> tuple[str, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +108,15 @@ class Kernel:
 
     def report(self) -> Mapping[str, str]:
         return self._jail.report()
+
+    def notice(self) -> str:
+        """What the person should know about the jail the worker runs in ("" when nothing)."""
+        return self._jail.notice()
+
+    def reads(self) -> tuple[str, ...]:
+        """The trees a cell can read, when a jail reads by allowlist; empty when it reads
+        everything but what it hides (or is no jail at all)."""
+        return self._jail.reads()
 
     @property
     def spec(self) -> Mapping[str, Any]:

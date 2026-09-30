@@ -242,6 +242,8 @@ exclude = [
     "kernel_cordis_plugin.unjailed:_until_listening",
     "kernel_cordis_plugin.worker:*",
     "brig_cordis_plugin.jail:BrigJail.*", "brig_cordis_plugin.jail:_Jailed.*",
+    "brig_cordis_plugin.jail:remove_placeholders",
+    "brig_cordis_plugin.jail:_lives",               # whether a recorded jail's process group still runs  # rmdir what a gone jail made (its stop, or the next start's sweep)
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
     "chat_cordis_plugin.wiring:session", "models_cordis_plugin.wiring:model",
 ]

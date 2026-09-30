@@ -58,14 +58,21 @@ def resolved(config: ModelConfig) -> Named:
     return chosen(config.default, models, source)
 
 
-def _provided(named: Named, config: ModelConfig) -> Any:
-    """The provider's value for `named`: not entered yet."""
+def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any:
+    """The provider's value for `named`: not entered yet. `searched`: where `local.env` is
+    looked for when the config names no `env_file` (the `layers` value's `credentials`)."""
     if named.provider == CLAUDE_CODE:
         return ClaudeCodeModel(
-            ClaudeCodeConfig(model=named.id, state=config.state, env_file=config.env_file, cwd=config.cwd)
+            ClaudeCodeConfig(
+                model=named.id,
+                state=config.state,
+                env_file=config.env_file,
+                cwd=config.cwd,
+                searched=tuple(searched),
+            )
         )
     if named.provider == OPENAI:
-        return OpenAIModel(named, config.env_file)
+        return OpenAIModel(named, config.env_file, searched=searched)
     module, _, attribute = named.provider.partition(":")
     try:
         factory = cast(
@@ -89,11 +96,12 @@ def _provided(named: Named, config: ModelConfig) -> Any:
 
 
 @contextlib.asynccontextmanager
-async def opened(config: ModelConfig) -> AsyncIterator[Any]:
+async def opened(config: ModelConfig, searched: Sequence[str] = ()) -> AsyncIterator[Any]:
     """The `model` value, for as long as the row is up: the named model's provider, entered
-    when it is a context manager (Claude Code's process, an HTTP client), else `Unusable`."""
+    when it is a context manager (Claude Code's process, an HTTP client), else `Unusable`.
+    `searched`: where the provider looks for `local.env` (the `layers` value's `credentials`)."""
     try:
-        value = _provided(resolved(config), config)
+        value = _provided(resolved(config), config, searched)
     except ModelsError as error:
         value = Unusable(error)
     if isinstance(value, AbstractAsyncContextManager):

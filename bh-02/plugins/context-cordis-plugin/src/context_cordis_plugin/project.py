@@ -1,16 +1,18 @@
 """The `system` value: what the model is told about where it is working, read fresh each time.
 
 `describe` is the whole prompt as a function of what was found; `ProjectContext.text` finds
-it (the directory, the git branch, the project's instructions file) every time it is asked,
-so an edit to CLAUDE.md reaches the next request without reloading anything.
+it (the directory, the git branch, the project's instructions file, what the kernel's jail can
+read) every time it is asked, so an edit to CLAUDE.md reaches the next request without
+reloading anything.
 """
 
 import datetime
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
-__all__ = ["ContextConfig", "ProjectContext", "branch_of", "describe"]
+__all__ = ["ContextConfig", "ProjectContext", "Reads", "branch_of", "describe"]
 
 _INTRO = (
     "You are a coding agent working in a repository on the person's machine. Read before you "
@@ -29,12 +31,37 @@ class ContextConfig:
     max_chars: int = 20_000
 
 
-def describe(root: str, branch: str | None, today: str, guidance: tuple[str, str] | None) -> str:
-    """The system prompt, from what was found. `guidance` is (file name, its text)."""
+@runtime_checkable
+class Reads(Protocol):
+    """What the context needs of the `kernel` value (CONTRACTS.md: kernel): the trees its jail
+    lets a cell read, when that is all a cell can read (a Linux jail); empty otherwise."""
+
+    def reads(self) -> tuple[str, ...]: ...
+
+
+def describe(
+    root: str,
+    branch: str | None,
+    today: str,
+    guidance: tuple[str, str] | None,
+    reads: Sequence[str] = (),
+) -> str:
+    """The system prompt, from what was found. `guidance` is (file name, its text); `reads`, the
+    trees the kernel's jail reads when it reads by allowlist (a Linux jail), is said plainly,
+    so the model spends no steps on reads that can't succeed."""
     lines = [_INTRO, "", f"Working directory: {root}"]
     if branch:
         lines.append(f"Git branch: {branch}")
     lines.append(f"Today: {today}")
+    if reads:
+        lines += [
+            "",
+            f"The jail your code runs in reads only these trees: {', '.join(reads)}. Nothing else "
+            "exists in it, the person's home directory included (at most the path to an "
+            "interpreter installed under it): no ~/.gitconfig, ~/.ssh, dotfiles or caches, so don't "
+            "look for files outside these. git commits carry the person's name and email when git "
+            "on their machine knows them.",
+        ]
     if guidance is not None:
         name, text = guidance
         lines += ["", f"The project's own instructions ({name}):", "", text.strip()]
@@ -48,16 +75,19 @@ def branch_of(head: str) -> str | None:
 
 
 class ProjectContext:
-    """Implements `System` (CONTRACTS.md: system) over one project directory."""
+    """Implements `System` (CONTRACTS.md: system) over one project directory, and what the
+    kernel's jail can read."""
 
-    def __init__(self, config: ContextConfig) -> None:
+    def __init__(self, config: ContextConfig, kernel: Reads) -> None:
         self._config = config
+        self._kernel = kernel
 
     def text(self) -> str:
         root = Path(self._config.root).resolve()
         head = root / ".git" / "HEAD"
         branch = branch_of(head.read_text(encoding="utf-8")) if head.is_file() else None
-        return describe(str(root), branch, datetime.date.today().isoformat(), self._guidance(root))
+        today = datetime.date.today().isoformat()
+        return describe(str(root), branch, today, self._guidance(root), self._kernel.reads())
 
     def _guidance(self, root: Path) -> tuple[str, str] | None:
         for name in self._config.instructions:

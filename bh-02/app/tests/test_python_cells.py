@@ -13,6 +13,7 @@ import pytest
 
 from bh_02.bootstrap import credential_files, layers, run, unreadable
 from cordis import Row
+from models_cordis_plugin.local_env import token_file
 
 # darwin's jail (seatbelt) reads by denylist: everything but the secrets. Linux's (bubblewrap)
 # reads by allowlist: the system, the interpreter and the project, so a file anywhere else is
@@ -336,6 +337,121 @@ async def test_a_jailed_cell_cannot_read_the_project_s_own_local_env_but_reads_b
     assert sorted(p.name for p in project.iterdir()) == ["local.env", "notes.txt"]  # nothing left behind
 
 
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_jailed_cell_cannot_plant_a_credential_where_the_model_row_looks(
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bh-02 run inside its own workspace: every place the model row looks for `local.env`
+    (`credentials`, nearest first) is under the project, where a cell may write. A cell can't
+    create one where there is none (the next launch would hand its token to Claude Code), in
+    a directory of its own or one the host imports code from, by writing, by renaming a file of
+    its own there, or as a link; nor replace the one that is there. Nothing the jail made on the
+    host outlives it, and the model row still finds the real file."""
+    project = tmp_path / "project"
+    imported = project / "pkg" / "src"  # a directory the host imports code from (editable install)
+    imported.mkdir(parents=True)
+    monkeypatch.syspath_prepend(str(imported))
+    real = project / "local.env"
+    real.write_text("NOT_A_REAL_CREDENTIAL=placeholder\n")  # a stand-in: never the real file
+    credentials = [str(imported / "local.env"), str(project / "pkg" / "local.env"), str(real)]
+
+    def attempt(what: str) -> str:
+        return f"import os\ntry:\n    {what}; print('WROTE')\nexcept OSError:\n    print('DENIED')"
+
+    absent = credentials[:2]
+    cells = [
+        *(attempt(f"open({p!r}, 'w').write('X=1')") for p in absent),
+        *(attempt(f"open('mine.env', 'w').write('X=1'); os.replace('mine.env', {p!r})") for p in absent),
+        *(attempt(f"os.symlink('/tmp/elsewhere.env', {p!r})") for p in absent),
+        attempt(f"open({str(real)!r}, 'w').write('X=1')"),
+        attempt(f"open('mine.env', 'w').write('X=1'); os.replace('mine.env', {str(real)!r})"),
+    ]
+    before = sorted(str(p) for p in project.rglob("*"))
+    patch = _cells(composition, *cells, extra=_jailed_in(project))
+    _answers()
+    secrets = unreadable(credentials, [], [])
+    await run(
+        [*layers(), patch], [Row("chat", config={"prompt": "go"})], credentials=credentials, secrets=secrets
+    )
+    out = _shown()
+    assert all(f"[{n}] DENIED" in out for n in range(len(cells))), out
+    (project / "mine.env").unlink(missing_ok=True)  # the renames' source, left when each is refused
+    assert sorted(str(p) for p in project.rglob("*")) == before  # no file planted, no placeholder left
+    assert real.read_text() == "NOT_A_REAL_CREDENTIAL=placeholder\n"
+    assert token_file(None, credentials) == real
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_linux_jailed_git_commit_carries_the_person_s_own_name_without_their_home(
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Linux jail has no home directory, so `~/.gitconfig` isn't there; the person's name and
+    email (as git resolves them on the host, for the project) reach a jailed `git commit` as
+    `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, and nothing else of the person's git config does. darwin's
+    jail reads `~/.gitconfig` itself, and is unchanged."""
+    git = shutil.which("git")
+    if sys.platform != "linux" or git is None:
+        pytest.skip("Linux's jail has no home directory; darwin's reads ~/.gitconfig itself")
+    person = tmp_path / "person.gitconfig"  # the person's global config, a stand-in
+    person.write_text("[user]\n\tname = Pat Person\n\temail = pat@example.invalid\n[alias]\n\tci = commit\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(person))
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run([git, "init", "-q"], cwd=project, check=True)  # no user.name of its own
+    (project / "a.txt").write_text("a\n")
+    commit = (
+        "import subprocess\n"
+        f"subprocess.run([{git!r}, 'add', 'a.txt'], check=True)\n"
+        f"c = subprocess.run([{git!r}, 'commit', '-qm', 'a'], capture_output=True, text=True)\n"
+        f"a = subprocess.run([{git!r}, 'ci', '-m', 'b', '--allow-empty'], capture_output=True, text=True)\n"
+        f"who = subprocess.run([{git!r}, 'log', '-1', '--format=%an <%ae> / %cn <%ce>'],"
+        " capture_output=True, text=True)\n"
+        "print(c.returncode, a.returncode, who.stdout.strip())"
+    )
+    home = Path.home()
+    patch = _cells(
+        composition,
+        commit,
+        f"import os\nprint(sorted(os.listdir({str(home)!r})) if os.path.isdir({str(home)!r}) else [])",
+        extra=_jailed_in(project),
+    )
+    _answers()
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+    out = _shown()
+    # committed as the person; the alias of their config is not there (only the identity is)
+    assert "[0] 0 1 Pat Person <pat@example.invalid> / Pat Person <pat@example.invalid>" in out, out
+    # the home directory is not there: at most the way to an interpreter installed under it
+    on_the_way = {
+        Path(p).relative_to(home).parts[0]
+        for p in (sys.base_prefix, sys.prefix)
+        if Path(p).is_relative_to(home)
+    }
+    assert f"[1] {sorted(on_the_way)}" in out, out
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_the_model_is_told_what_a_linux_jail_reads_and_that_the_home_directory_is_absent(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The project context the model gets: on Linux, the trees the jail reads (the project among
+    them) and that nothing else, the home directory included, is there, so it spends no steps
+    on reads that can't succeed. darwin's jail reads everything but the secrets: nothing said."""
+    import fragile
+
+    project = tmp_path / "project"
+    project.mkdir()
+    patch = _cells(composition, "print('hi')", extra=_jailed_in(project))
+    _answers()
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+    (told,) = fragile.SYSTEM
+    if sys.platform == "linux":
+        assert "The jail your code runs in reads only" in told, told
+        assert str(project.resolve()) in told and "/usr" in told
+        assert "home directory" in told and "~/.gitconfig" in told
+    else:
+        assert "reads only" not in told and "home directory" not in told
+
+
 def test_the_credential_may_be_above_bh_02_s_install_its_environment_or_the_project() -> None:
     found = credential_files(
         [Path("/w/proj/local.env"), Path("/src/bh/app/bh_02/cli.py"), Path("/src/bh/.venv")]
@@ -346,13 +462,15 @@ def test_the_credential_may_be_above_bh_02_s_install_its_environment_or_the_proj
 
 
 def test_no_jailed_cell_may_read_the_sessions_state_nor_the_credential() -> None:
-    anchors = [Path("/w/proj/local.env"), Path("/src/bh/.venv")]
-    found = unreadable(anchors, ["/xdg/bh-02/sessions", "/home/me/.local/state/bh-02/sessions"])
+    searched = credential_files([Path("/src/bh/.venv")])
+    beside = [Path("/w/proj/local.env")]
+    found = unreadable(searched, beside, ["/xdg/bh-02/sessions", "/home/me/.local/state/bh-02/sessions"])
     assert found[-2:] == ("/xdg/bh-02/sessions", "/home/me/.local/state/bh-02/sessions")
-    assert "/src/bh/local.env" in found  # every session's claude/, this run's and the default's
-    same = unreadable(anchors, ["/home/me/.local/state/bh-02/sessions"] * 2)
+    assert "/src/bh/local.env" in found and "/w/proj/local.env" in found  # searched, and beside
+    same = unreadable(searched, beside, ["/home/me/.local/state/bh-02/sessions"] * 2)
     assert same.count("/home/me/.local/state/bh-02/sessions") == 1  # no XDG_STATE_HOME: once
-    assert unreadable(anchors, [""]) == credential_files(anchors)  # booted without sessions
+    both = (*searched, *credential_files(beside))
+    assert unreadable(searched, beside, [""]) == tuple(dict.fromkeys(both))  # booted without sessions
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -385,7 +503,7 @@ async def test_a_jailed_cell_cannot_read_under_the_sessions_state_directory(
         extra=_jailed_in(project),
     )
     _answers()
-    secrets = unreadable([], [str(state.resolve())])
+    secrets = unreadable([], [], [str(state.resolve())])
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})], secrets=secrets)
     out = _shown()
     assert "[0] DENIED" in out and "[1] DENIED" in out and "[3] DENIED" in out, out

@@ -70,6 +70,14 @@ class Unjailed:
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
 
+    def notice(self) -> str:
+        """Nothing: the status bar says it is unjailed, and every cell asks."""
+        return ""
+
+    def reads(self) -> tuple[str, ...]:
+        """No allowlist: a cell reads what the person can."""
+        return ()
+
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Process:
         log = Path(endpoint).with_name("stderr.log")
         with log.open("wb") as stderr:
