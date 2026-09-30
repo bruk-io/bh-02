@@ -587,6 +587,7 @@ async def test_a_call_cut_off_by_a_stream_claude_code_retries_is_never_shown(
         {"type": "tool_call", "id": "t1", "name": "python", "input": {"code": "1+1"}}
     ]
     assert {"type": "stop", "reason": "tool_use"} in first
+    assert first[-1]["message"]["content"] == [_call("t1")]  # nothing of the cut-off stream is replayed
     second = await h.step([*asked, _entry(first), {"role": "tool", "content": "2", "call_id": "t1"}])
     assert _said(second) == "It is 2."
     (fake,) = h.fakes

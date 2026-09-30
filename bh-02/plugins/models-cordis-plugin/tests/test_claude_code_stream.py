@@ -56,18 +56,13 @@ def test_a_call_whose_arguments_are_incomplete_is_held_until_the_step_s_end_is_k
     after = {"type": "text", "text": "and"}
     events = events_for(FakeStep([good, bad, after], stop="tool_use"))
     folded = Step()
-    before_end = [
-        c
-        for e in events
-        if e["type"] != "message_delta"
-        for c in folded.take(e)
-        if e["type"] != "message_stop"
-    ]
+    assert [e["type"] for e in events[-2:]] == ["message_delta", "message_stop"]
+    before_end = [c for e in events[:-2] for c in folded.take(e)]
     assert [c.get("id") for c in before_end if c["type"] == "tool_call"] == ["toolu_1"]
     assert not [c for c in before_end if c["type"] == "text"]  # after the held call: held too
     released = folded.take(events[-2])  # message_delta: a stop reason, so the step is finished
     assert [c["type"] for c in released] == ["tool_call", "text", "text"] and "error" in released[0]
-    assert folded.undecodable
+    assert folded.take(events[-1]) == [] and folded.undecodable
 
 
 def test_a_call_cut_off_by_a_close_with_no_stop_reason_is_never_released() -> None:
