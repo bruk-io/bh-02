@@ -28,7 +28,9 @@ declared to it (`declared.py`). Each call to `complete` streams exactly one mode
   from the start (CLI 2.1.282: before any text or call began, and on a dropped connection
   before any block was complete): the close is not the step's end, and the stream that
   follows is the step; its thinking shown so far stays shown, but once text or a call was
-  shown it fails as a restarted stream does;
+  shown it fails as a restarted stream does (a call the close cut off, its arguments
+  incomplete, was never shown: `Step` holds such a call until a stop reason says the step
+  made it);
 - a call Claude Code answers itself (one that is not declared, which the permission callback
   denies) lets it start the next model step on its own answer, before the loop's results reach
   it: that step is dropped unseen, and Claude Code is rebuilt from the loop's transcript and

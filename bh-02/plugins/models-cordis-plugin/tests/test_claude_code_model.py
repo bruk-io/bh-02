@@ -569,6 +569,61 @@ async def test_a_stream_claude_code_retries_after_text_was_shown_is_not_said_twi
     assert _said(again) == "back" and len(h.fakes) == 2
 
 
+@pytest.mark.parametrize("after", [2, 3], ids=["no-arguments-yet", "half-the-arguments"])
+async def test_a_call_cut_off_by_a_stream_claude_code_retries_is_never_shown(
+    tmp_path: Path, after: int
+) -> None:
+    """A dropped connection mid-call: Claude Code closes the call's block (a `content_block_stop`
+    with its arguments incomplete), then the message with no stop reason, and streams again
+    (task-0027). The cut-off call was never made, so it is not shown: the retried stream's call
+    is the step's one call, and it runs."""
+    h = _Harness(
+        tmp_path,
+        [FakeStep([_call("t1")], stop="tool_use", retry_after=after), FakeStep([_text("It is 2.")])],
+    )
+    asked = [{"role": "user", "content": "what is 1+1"}]
+    first = await h.step(asked)
+    assert [c for c in first if c["type"] == "tool_call"] == [
+        {"type": "tool_call", "id": "t1", "name": "python", "input": {"code": "1+1"}}
+    ]
+    assert {"type": "stop", "reason": "tool_use"} in first
+    second = await h.step([*asked, _entry(first), {"role": "tool", "content": "2", "call_id": "t1"}])
+    assert _said(second) == "It is 2."
+    (fake,) = h.fakes
+    assert fake.results == {"t1": "2"} and fake.interrupts == 0
+
+
+async def test_a_call_cut_off_by_a_retried_stream_after_text_is_not_shown_before_the_error(
+    tmp_path: Path,
+) -> None:
+    """Text already shown still makes a retried stream the step's error (task-0021), but the
+    half-streamed call that the close cut off never reaches the loop before it."""
+    h = _Harness(
+        tmp_path,
+        [FakeStep([_text("Let me run it."), _call("t1")], stop="tool_use", retry_after=7)],
+    )
+    shown: list[dict[str, Any]] = []
+    with pytest.raises(ClaudeCodeError) as raised:
+        async for chunk in h.model.complete([_SYSTEM, {"role": "user", "content": "go"}], [_SPEC]):
+            shown.append(dict(chunk))
+    assert raised.value.kind == "stream_retried"
+    assert _said(shown) == "Let me run it." and not [c for c in shown if c["type"] == "tool_call"]
+
+
+async def test_a_finished_step_whose_call_did_not_decode_shows_it_with_its_error(tmp_path: Path) -> None:
+    """A stop reason arrived, so the step is finished: its undecodable call is shown with its
+    error for the loop to classify, and Claude Code is interrupted so the loop's nudge decides."""
+    bad = {"type": "tool_use", "id": "t1", "name": "mcp__bh__python", "raw": '{"code": '}
+    h = _Harness(tmp_path, [FakeStep([_text("Running it."), bad], stop="tool_use")])
+    chunks = await h.step([{"role": "user", "content": "go"}])
+    (call,) = [c for c in chunks if c["type"] == "tool_call"]
+    assert call["id"] == "t1" and call["input"] == {} and "not valid JSON" in call["error"]
+    types = [c["type"] for c in chunks]
+    assert types.index("tool_call") < types.index("stop") and {"type": "stop", "reason": "tool_use"} in chunks
+    (fake,) = h.fakes
+    assert fake.interrupts == 1 and h.saved()["held"]["ended"] == "cut"
+
+
 async def _refused(tmp_path: Path, env_file: Path) -> ClaudeCodeError:
     config = ClaudeCodeConfig(state=str(tmp_path / "s"), env_file=str(env_file))
     model = ClaudeCodeModel(config, lambda options: pytest.fail("nothing starts without a token"))

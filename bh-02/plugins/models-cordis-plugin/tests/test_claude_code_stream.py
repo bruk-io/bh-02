@@ -47,6 +47,38 @@ def test_arguments_that_do_not_decode_are_the_call_s_error() -> None:
     assert "not valid JSON" in call["error"] and folded.undecodable
 
 
+def test_a_call_whose_arguments_are_incomplete_is_held_until_the_step_s_end_is_known() -> None:
+    """A call block closed with its arguments cut off is not a chunk yet: only a stop reason
+    says the step finished with it (Claude Code closes a stream it will retry the same way,
+    with no stop reason). A good call is not held, nor is what comes before a held one."""
+    good = {"type": "tool_use", "id": "toolu_1", "name": "mcp__bh__python", "input": {"code": "1"}}
+    bad = {"type": "tool_use", "id": "toolu_2", "name": "mcp__bh__python", "raw": '{"code": '}
+    after = {"type": "text", "text": "and"}
+    events = events_for(FakeStep([good, bad, after], stop="tool_use"))
+    folded = Step()
+    before_end = [
+        c
+        for e in events
+        if e["type"] != "message_delta"
+        for c in folded.take(e)
+        if e["type"] != "message_stop"
+    ]
+    assert [c.get("id") for c in before_end if c["type"] == "tool_call"] == ["toolu_1"]
+    assert not [c for c in before_end if c["type"] == "text"]  # after the held call: held too
+    released = folded.take(events[-2])  # message_delta: a stop reason, so the step is finished
+    assert [c["type"] for c in released] == ["tool_call", "text", "text"] and "error" in released[0]
+    assert folded.undecodable
+
+
+def test_a_call_cut_off_by_a_close_with_no_stop_reason_is_never_released() -> None:
+    call = {"type": "tool_use", "id": "toolu_1", "name": "mcp__bh__python", "input": {"code": "1+1"}}
+    events = events_for(FakeStep([call], stop="tool_use"))
+    closed = [*events[:3], {"type": "content_block_stop", "index": 0}, {"type": "message_stop"}]
+    folded = Step()
+    assert [c for e in closed for c in folded.take(e) if c["type"] != "usage"] == []
+    assert folded.ended and folded.stop is None
+
+
 def test_thinking_streams_and_keeps_its_signature_for_replay() -> None:
     thought = {"type": "thinking", "thinking": "let me see", "signature": "sig=="}
     _, chunks = _fold(FakeStep([thought, {"type": "text", "text": "ok"}]))
