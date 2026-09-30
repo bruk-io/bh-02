@@ -169,7 +169,10 @@ One Claude Code process holds a conversation. It starts on the first step and us
 `stream.py` folds each step's raw Messages API stream events (`StreamEvent.event`) into chunks:
 - text and thinking arrive as they stream;
 - a tool call arrives once its block ends, under the loop's name for it (`python`, not
-  `mcp__bh__python`);
+  `mcp__bh__python`); one whose arguments did not decode (or never began) waits, with
+  whatever follows it, for the step's stop reason, and only then arrives with its `error`.
+  Claude Code closes a stream it will retry with the open block's end and no stop reason
+  (CLI 2.1.282), so a call that connection cut off is never shown;
 - two usage parts, the first `partial`;
 - the API's own stop reason, so `stops.classify` works unchanged;
 - the assistant message as received, for replay.
