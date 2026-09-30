@@ -8,7 +8,7 @@ it is tested without an app.
 """
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping
 from typing import Any
 
 from textual.content import Content
@@ -24,6 +24,7 @@ __all__ = [
     "lifecycle_line",
     "session_forms",
     "markdown",
+    "noted",
     "settle_point",
     "stop_line",
     "tool_call_code",
@@ -296,6 +297,11 @@ def jail_forms(confined: bool, report: Mapping[str, str]) -> tuple[str, ...]:
         f"{head} {''.join(initials)}",
         f"{head} {''.join(glyph for _, glyph in graded)}",
     )
+
+
+async def noted(text: str) -> AsyncIterator[Event]:
+    """`text` as the one `note` event a reply would carry (CONTRACTS.md: event)."""
+    yield {"type": "note", "text": text}
 
 
 def session_forms(sid: str, *, resumed: bool = False) -> tuple[str, ...]:

@@ -25,6 +25,7 @@ from bh_02.bootstrap import (
     LayerError,
     NotStarted,
     Recoverable,
+    credential_files,
     layers,
     read_layers,
     run,
@@ -34,7 +35,7 @@ from bh_02.outdated import clashes, translated
 from cordis.composition import format_layer
 from cordis.loader import read_layer
 
-__all__ = ["main"]
+__all__ = ["credential_search", "main"]
 
 _MODEL_HELP = (
     "The model to start on, by name: sonnet (the default), opus, haiku, or one of yours in "
@@ -268,16 +269,26 @@ def _launch(
     """Run to the end; return the exit code and whether the composition came up. A failure
     the person should see is printed (the terminal is theirs again by then) and becomes exit
     code 1. A bug propagates as itself."""
-    # where the credential may be: beside the project, and above bh-02's install and environment
-    # (the workspace root, whatever directory bh-02 runs in); and the sessions' state, where each
-    # session's Claude Code child keeps its config and messaging peer token (this run's, and the
-    # default one when `XDG_STATE_HOME` moves this run's elsewhere): no jailed cell may read any
-    # of them. Another state root, of a run with another `XDG_STATE_HOME`, is not known here.
-    anchors = [Path.cwd() / CREDENTIAL_FILE, Path(__file__).resolve(), Path(sys.prefix).resolve()]
+    # where the credential may be: where the model rows look for it, beside the project; and the
+    # sessions' state, where each session's Claude Code child keeps its config and messaging peer
+    # token (this run's, and the default one when `XDG_STATE_HOME` moves this run's elsewhere):
+    # no jailed cell may read any of them. Another state root, of a run with another
+    # `XDG_STATE_HOME`, is not known here.
+    credentials = credential_search()
     states = [listing.root, str(sessions.default_state_root())] if listing.root else []
-    secrets = unreadable(anchors, (str(Path(state).resolve()) for state in states))
+    beside = [Path.cwd() / CREDENTIAL_FILE]
+    secrets = unreadable(credentials, beside, (str(Path(state).resolve()) for state in states))
     try:
-        asyncio.run(run(layers, trace=trace, report=report, sessions=listing, secrets=secrets))
+        asyncio.run(
+            run(
+                layers,
+                trace=trace,
+                report=report,
+                sessions=listing,
+                credentials=credentials,
+                secrets=secrets,
+            )
+        )
     except CompositionError as error:
         click.echo(f"error: {error.message}", err=True)
         return 1, not isinstance(error, NotStarted | LayerError)
@@ -289,6 +300,15 @@ def _launch(
     except KeyboardInterrupt:
         click.echo(err=True)
     return 0, True
+
+
+def credential_search() -> tuple[str, ...]:
+    """Where the model rows look for bh-02's `local.env`, nearest first: above bh-02's own
+    install and above its environment, so the workspace's own is found from any working
+    directory. The one list: the model rows read the first that is a file (the `layers`
+    value's `credentials`), and every one is a secret the jail keeps a cell from reading,
+    writing or creating. Not the project's own `local.env`: a project's may hold anything."""
+    return credential_files([Path(__file__).resolve(), Path(sys.prefix).resolve()])
 
 
 def _writer(file: TextIO, prefix: str) -> Callable[[str], None]:

@@ -15,6 +15,7 @@ from tui_cordis_plugin.status import (
     Entries,
     ModelField,
     ModelSource,
+    Notes,
     Running,
     StatusConfig,
     StatusSink,
@@ -56,6 +57,7 @@ async def status(
     models: ModelSource,
     sessions: Running,
     frame: StatusSink,
+    output: Notes,
     config: StatusConfig,
 ) -> Effects:
     """The status bar's fields that rows report (`use = "tui:status"`): the running session's
@@ -66,7 +68,13 @@ async def status(
     app; while it comes back up the bar keeps the fields' last text. The model field hears the
     composition change, so a `/model` (which reloads the model row, not this one) shows the new
     model, `starting…` until it is up: it asks `models` (which never reloads) which model and
-    provider the model row names, never `model` itself, which a switch replaces."""
+    provider the model row names, never `model` itself, which a switch replaces.
+
+    What the kernel's jail says the person should know (`kernel.notice()`: on Linux, the paths
+    it holds with a mount the host can undo) is shown once as a note in the conversation, each
+    time a kernel comes up: at the start of a session, and after a `/clear` or a new jail."""
+    if notice := kernel.notice():
+        await output.show(render.noted(notice))
     if sessions.current:
         shown = render.session_forms(sessions.current, resumed=sessions.resumed)
         yield acquire(frame.status, "session", *shown)

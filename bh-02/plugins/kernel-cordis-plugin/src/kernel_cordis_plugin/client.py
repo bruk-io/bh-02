@@ -49,6 +49,7 @@ class Jail(Protocol):
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
+    def notice(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,10 @@ class Kernel:
 
     def report(self) -> Mapping[str, str]:
         return self._jail.report()
+
+    def notice(self) -> str:
+        """What the person should know about the jail the worker runs in ("" when nothing)."""
+        return self._jail.notice()
 
     @property
     def spec(self) -> Mapping[str, Any]:

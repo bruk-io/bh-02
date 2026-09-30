@@ -112,8 +112,8 @@ file (`$XDG_CONFIG_HOME/bh-02/models.toml`, else `~/.config/bh-02/models.toml`) 
 `key`, the name of a `local.env` line the provider reads per request and sends only as the
 `Authorization` header. A model that can't be used binds anyway and each step says what is
 wrong. `models:catalog` binds `models` (the models there are, and which one the row names),
-depending on the loader alone, so `/model` (the operator) and the status bar depend on it and
-never reload with a switch. The models plugin's README has the providers' details.
+depending on the loader and `layers` alone, so `/model` (the operator) and the status bar depend
+on it and never reload with a switch. The models plugin's README has the providers' details.
 
 **The Claude provider.** Claude is the `claude-code` provider (`models_cordis_plugin.claude_code`):
 Claude through Claude Code (the Claude Agent SDK), which is the subscription's sanctioned route.
@@ -160,8 +160,13 @@ A cell never gets it:
 - `kernel:unjailed` drops every `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a launching
   Claude Code leaves) and `ANTHROPIC_*` from the worker's environment.
 - `brig:jail` scrubs the environment, and denies reading `local.env`: the project's, and every
-  `local.env` above bh-02's install and environment (`layers.secrets`, from `bh_02.cli`). So the
-  workspace's own is hidden from whatever directory bh-02 runs in. `secrets` also names the
+  place the model rows look for it (`layers.credentials`: above bh-02's install and environment,
+  from `bh_02.cli.credential_search`, the one definition of that search; `layers.secrets` names
+  them all). So the workspace's own is hidden from whatever directory bh-02 runs in, and a cell
+  can't create or replace one where the model row looks (a planted `local.env` would hand the
+  next launch's conversations to someone else's account). On Linux the jail holds each of these
+  under the project with a mount the host can undo (an editor's save renames over the file), and
+  says so as a note when the kernel comes up: the brig plugin's README has the details. `secrets` also names the
   sessions' state directory: each session's `claude/` holds the Claude Code child's config and
   its messaging peer token. That is this run's (`$XDG_STATE_HOME/bh-02/sessions`) and the
   default one (`~/.local/state/bh-02/sessions`); a third, of a run with another

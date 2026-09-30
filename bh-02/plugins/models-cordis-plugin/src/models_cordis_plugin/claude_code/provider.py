@@ -152,14 +152,16 @@ class ClaudeCodeConfig:
     reaches through Claude Code (`/model` and `--model` set it). `state`: the directory this
     conversation's Claude Code state lives in (its `CLAUDE_CONFIG_DIR`, the saved session, the
     CLI's stderr); a session's layer points it into the session's directory, and without one a
-    temporary directory is used and removed. `env_file`: where the credential is (the
-    workspace's `local.env`, found above the install, when unset). `cwd`: the project Claude Code
+    temporary directory is used and removed. `env_file`: where the credential is; when unset,
+    the first `local.env` of `searched` that is a file (the `layers` value's `credentials`:
+    above bh-02's install and its environment, nearest first). `cwd`: the project Claude Code
     is told it works in (bh-02's working directory when unset)."""
 
     model: str = "sonnet"
     state: str | None = None
     env_file: str | None = None
     cwd: str | None = None
+    searched: tuple[str, ...] = ()
 
 
 class Session(Protocol):
@@ -364,7 +366,7 @@ class ClaudeCodeModel:
     async def _start(self, system: str, specs: list[dict[str, Any]], resume: str | None) -> None:
         """Start Claude Code for this conversation: `resume` is the session to continue."""
         root = self._dir()
-        path = token_file(self._config.env_file)
+        path = token_file(self._config.env_file, self._config.searched)
         env = child_env(path, str(root / "config"))
         if env is None:
             raise ClaudeCodeError(

@@ -32,27 +32,48 @@ One policy, two stacks (`stack_for`):
   directory of each absolute path the command names (the worker's), and the writable roots.
   Nothing else exists in the jail, the home directory included, so a cell that reads a file
   outside the project gets `No such file or directory`. The policy's read denies are brig's
-  carve-outs inside that tree: the project's `local.env`, if it exists, is masked (reads fail
-  with EACCES); if it doesn't, `fs_read` grades `best_effort` naming it, because a file created
-  there after the jail started would be readable. bubblewrap makes each absent write-denied path
-  under the project (`.envrc`, `.vscode`, `.git/config`, ...) an empty directory on the host to
-  mount over, for as long as the kernel runs; the jail removes the ones it made once brig has
-  verified the worker is gone. Without `/usr/bin/bwrap`, `start` says to install `bubblewrap`
-  or use `kernel:unjailed`.
+  carve-outs inside that tree. A secret under the project (its `local.env`, and when bh-02 runs
+  inside its own workspace every place the model row looks for one: `layers.secrets` names
+  them) is held in place by a mount on its path: one that exists is masked (reads fail with
+  EACCES, and so do writes, removal and a rename over it). One that doesn't exist has nothing to
+  mask. Where the model row looks for its credential (`layers.credentials`) it is write-denied,
+  an empty read-only directory, so a cell can create nothing there (a planted `local.env` would
+  be read by the next launch; the lookup takes only a regular file, so the directory never hides
+  the real one). Anywhere else (the project's own absent `local.env`, which nothing of bh-02's
+  reads) it is left alone, and `fs_read` names it: a file created there later is readable.
+  A write deny inside another (an absent secret in a directory the
+  host imports code from) is left to the outer one (`uncovered`). bubblewrap makes each absent
+  write-denied path under the project (`.envrc`, `.vscode`, `.git/config`, an absent
+  `local.env`, ...) an empty directory on the host to mount over, for as long as the kernel
+  runs; the jail removes the ones it made once brig has verified the worker is gone. Without
+  `/usr/bin/bwrap`, `start` says to install `bubblewrap` or use `kernel:unjailed`.
 
 Anywhere else, `start` refuses and names `kernel:unjailed`. The grades are brig's own, known
 before anything starts: `fs_write`, `network` and `env` enforced, `limits` best-effort, `fs_read`
-enforced (on Linux, best-effort while a hidden path is absent). `bh-02/app/tests/test_python_cells.py`
+enforced, but on Linux best-effort whenever the jail holds a secret under a writable root
+(`graded`, below). `bh-02/app/tests/test_python_cells.py`
 runs real cells in this jail: on darwin in `scripts/check`, on Linux in `scripts/linux-jail-check`.
+
+**What the host can undo on Linux.** A mount sits on the host's directory entry. When the host
+replaces that entry (an editor saves `local.env` by writing a new file and renaming it over the
+old one; `git config` saves `.git/config` the same way) or removes it (the empty directory held
+where a secret is absent), the kernel detaches the mount inside the jail, and from then on a
+cell can read and rewrite what is at that path, and create the absent one (measured:
+`test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it`). bubblewrap
+can't prevent it, so `fs_read` grades best-effort while any secret is held that way (`held`),
+and the jail says which paths when the kernel comes up (`notice()`, which `tui:status` shows
+as a note in the conversation): edit them with bh-02 stopped, or `/restart kernel` afterwards,
+which puts a new jail over them. The same is true of every write deny the host replaces by
+rename (`.git/config` after a host `git config`): the jail holds it again only from the next
+kernel start. darwin's seatbelt matches paths, not directory entries, and has no such gap.
 
 Known gaps on Linux, beyond darwin's:
 
 - While a kernel runs, the empty placeholder directories are real on the host: `git init` in a
   project that is not a repository fails meanwhile (`.git/config` is a directory), and so does
-  creating `.envrc` by hand. Removing one while the kernel runs reopens the path inside the jail
+  creating `.envrc` by hand, and so does creating your credential in an absent `local.env` the
+  jail holds. Removing one while the kernel runs reopens the path inside the jail
   (brig SPEC.md, decision-164), so nothing here does.
-- A secret created after the kernel started, at a path inside the project, is readable until
-  the kernel restarts; the `fs_read` grade names each such path.
 - The placeholders are removed only when no other bh-02 jail of the same user is running (a
   shared `flock` on `/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken
   exclusively to clean up): a second session in the same project binds the first one's

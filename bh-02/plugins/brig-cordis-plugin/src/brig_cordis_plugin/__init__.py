@@ -6,12 +6,16 @@ from brig_cordis_plugin.jail import (
     BrigJail,
     Layers,
     allowlisted,
+    graded,
+    held,
     made_by_the_jail,
     mountable,
+    notice_for,
     readable_roots,
     self_modify_denied,
     spec_for,
     stack_for,
+    uncovered,
 )
 from brig_cordis_plugin.wiring import jail
 
@@ -21,11 +25,15 @@ __all__ = [
     "BrigJail",
     "Layers",
     "allowlisted",
+    "graded",
+    "held",
     "jail",
     "made_by_the_jail",
     "mountable",
+    "notice_for",
     "readable_roots",
     "self_modify_denied",
     "spec_for",
     "stack_for",
+    "uncovered",
 ]

@@ -13,6 +13,13 @@ from models_cordis_plugin.claude_code import ClaudeCodeError, ClaudeCodeModel
 from models_cordis_plugin.openai import OpenAIModel
 
 
+@dataclass(frozen=True)
+class _Layers:
+    """The `layers` value, as far as the model rows read it: where `local.env` is looked for."""
+
+    credentials: tuple[str, ...] = ()
+
+
 @pytest.fixture(autouse=True)
 def _own_models_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
@@ -20,10 +27,12 @@ def _own_models_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def _bound(config: ModelConfig) -> Any:
     """What the row binds under `model`, entered as the runtime would enter it."""
-    first = await drive(model(config=config))
+    first = await drive(model(config=config, layers=_Layers()))
     manager = first[0].args[0]  # the provider's value, to be entered
     entered = await manager.__aenter__()
-    effects = await drive(model(config=config), [entered])  # the runtime sends back what it entered
+    effects = await drive(
+        model(config=config, layers=_Layers()), [entered]
+    )  # the runtime sends back what it entered
     assert [e.name for e in effects] == ["enter", "bind"] and effects[1].args[0] == "model"
     assert effects[1].args[1] is entered
     return entered, manager
@@ -114,7 +123,7 @@ class _Loader:
 
 
 async def test_the_catalog_row_binds_the_models_over_the_loader() -> None:
-    effects = await drive(catalog(loader=_Loader(), config=CatalogConfig()))
+    effects = await drive(catalog(loader=_Loader(), layers=_Layers(), config=CatalogConfig()))
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "models")]
     bound = effects[0].args[1]
     assert isinstance(bound, Catalog) and bound.current() == {"name": "haiku", "provider": "claude-code"}

@@ -27,10 +27,14 @@ One policy, two platforms; only the stack and the read model differ:
   lets a cell write. Everything else does not exist in the jail, the home directory included.
   The secrets stay `read_denies`, now brig's carve-outs: one inside that tree (a `local.env` at
   the project root) is masked if it exists, and one that does not exist yet is not, which
-  brig's `fs_read` grade says (`best_effort`, naming it). bubblewrap makes each absent
-  write-denied path (`.envrc`, `.vscode`, ...) an empty directory on the host for the jail to
-  mount over; the jail removes the ones it made once brig has verified the worker is gone,
-  never before (a mount point removed while the jail lives is detached inside it).
+  brig's `fs_read` grade says (`best_effort`, naming it); an absent one where bh-02 looks for
+  its credential (`layers.credentials`) keeps its write deny, so a cell can't plant one there.
+  bubblewrap makes each absent write-denied path (`.envrc`, `.vscode`, such a `local.env`, ...)
+  an empty directory on the host for the jail to mount over; the jail removes the ones it made
+  once brig has verified the worker is gone, never before (a mount point removed while the
+  jail lives is detached inside it). A mount can be undone from the host (a file renamed over
+  a masked one, a placeholder removed), so while the jail holds a secret under a writable root
+  `fs_read` is best-effort (`graded`) and `notice()` says which paths (`held`, `notice_for`).
 
 Anywhere else `start` refuses and names `kernel:unjailed`.
 """
@@ -41,7 +45,7 @@ import fcntl
 import os
 import shutil
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from sys import base_prefix, prefix
@@ -70,12 +74,16 @@ __all__ = [
     "BrigJail",
     "Layers",
     "allowlisted",
+    "graded",
+    "held",
     "made_by_the_jail",
     "mountable",
+    "notice_for",
     "readable_roots",
     "self_modify_denied",
     "spec_for",
     "stack_for",
+    "uncovered",
 ]
 
 _READY_TIMEOUT_S = 10.0
@@ -91,10 +99,13 @@ _STACKS: Mapping[str, Callable[[], Stack]] = {"darwin": scratch_darwin, "linux":
 @runtime_checkable
 class Layers(Protocol):
     """What the jail needs of the `layers` value (CONTRACTS.md: layers): the composition's files,
-    which a cell may not write, and the credential files, which it may not read."""
+    which a cell may not write; where bh-02 looks for its credential, where a cell may create
+    nothing; and the secrets, which it may not read."""
 
     @property
     def paths(self) -> tuple[str, ...]: ...
+    @property
+    def credentials(self) -> tuple[str, ...]: ...
     @property
     def secrets(self) -> tuple[str, ...]: ...
 
@@ -158,20 +169,23 @@ def spec_for(
     )
 
 
-def allowlisted(spec: Spec, readable: Sequence[str]) -> Spec:
+def allowlisted(spec: Spec, readable: Sequence[str], hold: Collection[str] = ()) -> Spec:
     """`spec`, reading by allowlist: `readable` is the tree a cell may read, and the policy's
     read denies become the carve-outs inside it. The environment and the channel are the
     policy's, unchanged, and so are the writes but one kind: a path denied both reading and
     writing (a secret under the project) keeps only its read deny. bwrap masks an existing one
-    with a read-only `/dev/null`, which refuses writes and removal too; a write deny as well
-    would be a bind of the real file (under the mask, so harmless) or, for one that doesn't
-    exist yet, an empty directory made on the host for the session, where the person's own
-    `local.env` would go."""
+    with a read-only `/dev/null`, which refuses writes and removal too (a write deny as well
+    would be a bind of the real file, under the mask). An absent one has nothing to mask, so a
+    cell could create it: those in `hold` (absent places bh-02 looks for its credential, where a
+    planted `local.env` would be read at the next launch) keep their write deny, an empty
+    directory held read-only there for the session (`made_by_the_jail`). The rest (the project's
+    own absent `local.env`) are left alone: a directory there would be in the person's way, and
+    nothing of bh-02's reads one."""
     return replace(
         spec,
         fs=FsPolicy(
             write_allows=spec.fs.write_allows,
-            write_denies=tuple(d for d in spec.fs.write_denies if d not in spec.fs.read_denies),
+            write_denies=tuple(d for d in spec.fs.write_denies if d not in spec.fs.read_denies or d in hold),
             read_model=ReadModel.ALLOW_LIST,
             read_allows=tuple(readable),
             read_denies=spec.fs.read_denies,
@@ -189,6 +203,52 @@ def readable_roots(
     with it the workspace's `local.env`, for nothing a stdlib-only worker needs."""
     named = [str(Path(arg).parent) for arg in argv if arg.startswith("/")]
     return tuple(dict.fromkeys([*system, *interpreter, *named]))
+
+
+def uncovered(denies: Sequence[str]) -> tuple[str, ...]:
+    """The write denies that no other one contains. bubblewrap mounts each in turn, and one
+    inside a directory already bound read-only (an absent secret under a directory the host
+    imports code from) would need a mount point made on a read-only mount, which fails the
+    launch; the outer deny holds it already."""
+    return tuple(d for d in denies if not any(d.startswith(o + "/") for o in denies if o != d))
+
+
+def held(spec: Spec) -> tuple[str, ...]:
+    """The read denies a Linux jail holds with a mount on the path itself: those at or under a
+    root a cell may write (a masked `local.env`, or the empty directory an absent one is held
+    by). A mount is on the host's directory entry, so replacing that entry on the host (an
+    editor saves by renaming a new file over it) or removing it detaches the mount inside the
+    jail, and a cell can then read and rewrite what is there (measured). The rest are outside
+    every writable root, where the allowlist alone keeps them out of the jail."""
+    roots = spec.fs.write_allows
+    return tuple(d for d in spec.fs.read_denies if any(d == r or d.startswith(r + "/") for r in roots))
+
+
+def notice_for(platform: str, holds: Sequence[str]) -> str:
+    """What the person should know at the start of a session about the secrets under a root a
+    cell may write (`held`), or nothing: on darwin seatbelt matches paths, so nothing the host
+    does to them lets a cell in."""
+    if platform != "linux" or not holds:
+        return ""
+    return (
+        f"The jail keeps cells from reading {', '.join(holds)}. On Linux it does that with a mount "
+        "on each path that is there (and, where bh-02 looks for its credential, an empty directory "
+        "where there is none, so nothing can be created there until bh-02 stops), and the host "
+        "can undo a mount: a file created at one of these paths after the kernel started, or "
+        "replaced (an editor saves local.env by renaming a new file over it) or removed while it "
+        "runs, can be read and rewritten by a cell. Edit them with bh-02 stopped, or "
+        "`/restart kernel` after, which puts a new jail over them."
+    )
+
+
+def graded(report: Mapping[str, str], holds: Sequence[str]) -> dict[str, str]:
+    """brig's grades, with `fs_read` best-effort while a Linux jail holds a secret with a mount
+    (`held`): brig grades a masked path enforced, and it is, until the host replaces or
+    removes it."""
+    out = dict(report)
+    if holds and out.get("fs_read") == "enforced":
+        out["fs_read"] = "best_effort"
+    return out
 
 
 def made_by_the_jail(absent: Sequence[str]) -> tuple[str, ...]:
@@ -282,12 +342,18 @@ class BrigJail:
         # The grades are known before anything starts: compile once against a throwaway directory.
         # A platform brig has no preset for grades nothing; `start` says what to use instead.
         self._report: Mapping[str, str] = {}
+        self._notice = ""
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
                 self._report = self.compile(probe, str(Path(probe, "k.sock")), ".", ())[1]
 
     def report(self) -> Mapping[str, str]:
         return self._report
+
+    def notice(self) -> str:
+        """What the person should know about the jail the kernel runs in (`notice_for`): the
+        paths a Linux jail holds with a mount, which the host can undo. Empty on darwin."""
+        return self._notice
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
         stack_for(self._platform)  # refuses on a platform brig has no preset for
@@ -302,6 +368,7 @@ class BrigJail:
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
         try:
             jail, self._report = self.compile(jail_dir, endpoint, cwd, argv)
+            self._notice = notice_for(self._platform, held(jail.spec) if self._platform == "linux" else ())
             made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
             handle = await asyncio.to_thread(
                 SubprocessLauncher().launch,
@@ -346,12 +413,14 @@ class BrigJail:
         if self._platform == "linux":
             readable = readable_roots(argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE)
             links = [link for arg in argv if arg.startswith("/") for link in self._linked_dirs(arg)]
-            spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()])
-            denies = mountable(spec.fs.write_denies, self._under_a_file(spec))
+            hold = [c for c in self._layers.credentials if not Path(c).exists()]
+            spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()], hold)
+            denies = uncovered(mountable(spec.fs.write_denies, self._under_a_file(spec)))
             spec = replace(spec, fs=replace(spec.fs, write_denies=denies))
         ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
         jail = stack_for(self._platform).compile(spec, ctx=ctx)
-        return jail, {axis.value: graded.grade.value for axis, graded in jail.report.axes.items()}
+        report = {axis.value: grade.grade.value for axis, grade in jail.report.axes.items()}
+        return jail, graded(report, held(spec) if self._platform == "linux" else ())
 
     def _linked_dirs(self, path: str) -> list[str]:
         """Every symlinked directory on the way to `path`, following its links. bubblewrap mounts

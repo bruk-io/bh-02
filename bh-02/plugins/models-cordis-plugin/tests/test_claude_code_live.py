@@ -19,6 +19,10 @@ from models_cordis_plugin.local_env import token_file
 
 pytestmark = pytest.mark.e2e
 
+# The workspace root's `local.env`, where bh-02's own run finds it (bh_02.cli.credential_search
+# names it among the rest): only looked for and handed to the provider, never read here.
+_SEARCHED = (str(Path(__file__).resolve().parents[4] / "local.env"),)
+
 _SYSTEM = {
     "role": "system",
     "content": "You are a terse assistant in a test. Answer in as few words as you can.",
@@ -34,14 +38,14 @@ _SECRET = {
 def _asked_for(request: pytest.FixtureRequest) -> None:
     if "e2e" not in str(request.config.getoption("markexpr") or ""):
         pytest.skip("runs against the real service only when asked for: -m e2e")
-    if child_env(token_file(None), "") is None:
+    if child_env(token_file(None, _SEARCHED), "") is None:
         pytest.skip("needs CLAUDE_CODE_OAUTH_TOKEN in local.env")
 
 
 def _config(tmp_path: Path) -> ClaudeCodeConfig:
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
-    return ClaudeCodeConfig(model="sonnet", state=str(tmp_path / "claude"), cwd=str(work))
+    return ClaudeCodeConfig(model="sonnet", state=str(tmp_path / "claude"), cwd=str(work), searched=_SEARCHED)
 
 
 async def _step(
@@ -90,7 +94,9 @@ async def test_a_tool_round_trip_is_recalled_from_claude_code_s_session_and_from
         third = await _step(model, rest, [_SECRET])
         assert value in _said(third)
     # a conversation this Claude Code never saw (its state gone): written from the transcript, resumed
-    fresh = ClaudeCodeConfig(model="sonnet", state=str(tmp_path / "other"), cwd=str(tmp_path / "work"))
+    fresh = ClaudeCodeConfig(
+        model="sonnet", state=str(tmp_path / "other"), cwd=str(tmp_path / "work"), searched=_SEARCHED
+    )
     recall = [*rest, _entry(third), {"role": "user", "content": "Once more: the secret value, verbatim."}]
     async with ClaudeCodeModel(fresh) as rebuilt:
         fourth = await _step(rebuilt, recall, [_SECRET])
