@@ -46,6 +46,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -76,6 +77,7 @@ __all__ = [
     "BrigJail",
     "Layers",
     "allowlisted",
+    "git_author",
     "graded",
     "held",
     "identity",
@@ -248,6 +250,17 @@ def notice_for(platform: str, holds: Sequence[str]) -> str:
     )
 
 
+def git_author(name: str, email: str) -> tuple[tuple[str, str], ...]:
+    """The person's git identity as the variables git reads before any config file:
+    `GIT_AUTHOR_*` and `GIT_COMMITTER_*`, for what is not empty. A Linux jail has no home
+    directory, so a jailed `git commit` can't read `~/.gitconfig`; these carry the name and
+    email alone, never the rest of the person's config (aliases, credential helpers, includes)."""
+    pairs = [("NAME", name), ("EMAIL", email)]
+    return tuple(
+        (f"GIT_{who}_{what}", value) for who in ("AUTHOR", "COMMITTER") for what, value in pairs if value
+    )
+
+
 def graded(report: Mapping[str, str], holds: Sequence[str]) -> dict[str, str]:
     """brig's grades, with `fs_read` best-effort while a Linux jail holds a secret with a mount
     (`held`): brig grades a masked path enforced, and it is, until the host replaces or
@@ -417,6 +430,7 @@ class BrigJail:
         # A platform brig has no preset for grades nothing; `start` says what to use instead.
         self._report: Mapping[str, str] = {}
         self._notice = ""
+        self._reads: tuple[str, ...] = ()
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
                 self._report = self.compile(probe, str(Path(probe, "k.sock")), ".", ())[1]
@@ -428,6 +442,12 @@ class BrigJail:
         """What the person should know about the jail the kernel runs in (`notice_for`): the
         paths a Linux jail holds with a mount, which the host can undo. Empty on darwin."""
         return self._notice
+
+    def reads(self) -> tuple[str, ...]:
+        """The trees a cell can read, once the kernel has started, when that is all it can read:
+        a Linux jail's allowlist (the system, the interpreter, the worker's directory) and the
+        roots it may write. Empty on darwin, whose jail reads everything but the secrets."""
+        return self._reads
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
         stack_for(self._platform)  # refuses on a platform brig has no preset for
@@ -444,8 +464,11 @@ class BrigJail:
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
         record: str | None = None
         try:
-            jail, self._report = self.compile(jail_dir, endpoint, cwd, argv)
+            author = git_author(*self._git_identity(cwd)) if self._platform == "linux" else ()
+            jail, self._report = self.compile(jail_dir, endpoint, cwd, argv, author)
             self._notice = notice_for(self._platform, held(jail.spec) if self._platform == "linux" else ())
+            if self._platform == "linux":
+                self._reads = tuple(dict.fromkeys((*jail.spec.fs.read_allows, *jail.spec.fs.write_allows)))
             made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
             if made:  # named before bubblewrap makes them, so a crash from here on leaves a record
                 record = self._recorded(records, Path(jail_dir).name, made)
@@ -475,8 +498,15 @@ class BrigJail:
         return started
 
     def compile(
-        self, jail_dir: str, endpoint: str, cwd: str, argv: Sequence[str]
+        self,
+        jail_dir: str,
+        endpoint: str,
+        cwd: str,
+        argv: Sequence[str],
+        author: Sequence[tuple[str, str]] = (),
     ) -> tuple[CompiledJail, Mapping[str, str]]:
+        """The jail for `argv` in `cwd`, compiled, and its grades. `author` (Linux: `git_author`)
+        is set in the worker's environment besides the policy's own."""
         scratch = str(Path(jail_dir, "tmp"))
         Path(scratch).mkdir(parents=True, exist_ok=True)
         host = [str(Path(p).resolve()) for p in (*import_path, prefix) if p]
@@ -497,6 +527,7 @@ class BrigJail:
             spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()], hold)
             denies = uncovered(mountable(spec.fs.write_denies, self._instead(spec)))
             spec = replace(spec, fs=replace(spec.fs, write_denies=denies))
+            spec = replace(spec, env=replace(spec.env, set=(*spec.env.set, *author)))
         ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
         jail = stack_for(self._platform).compile(spec, ctx=ctx)
         report = {axis.value: grade.grade.value for axis, grade in jail.report.axes.items()}
@@ -521,6 +552,25 @@ class BrigJail:
                 found.append(str(at))
             hop = os.path.normpath(Path(at.parent, os.readlink(at), Path(hop).relative_to(at)))
         return found
+
+    def _git_identity(self, cwd: str) -> tuple[str, str]:
+        """`user.name` and `user.email` as git resolves them on the host for `cwd` (the
+        project's own config over the person's global one); empty when git or either is
+        missing, and then a jailed commit says what git says without them."""
+        git = shutil.which("git")
+        if git is None:
+            return "", ""
+        found = []
+        for key in ("user.name", "user.email"):
+            try:
+                done = subprocess.run(
+                    [git, "config", "--get", key], cwd=cwd, capture_output=True, text=True, timeout=5
+                )
+            except OSError, subprocess.SubprocessError:
+                found.append("")
+            else:
+                found.append(done.stdout.strip() if done.returncode == 0 else "")
+        return found[0], found[1]
 
     def _hold(self, records: str) -> int:
         """A shared hold on this user's bh-02 jail lock (see `_Jailed`), waiting while a jail

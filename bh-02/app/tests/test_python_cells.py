@@ -381,6 +381,77 @@ async def test_a_jailed_cell_cannot_plant_a_credential_where_the_model_row_looks
     assert token_file(None, credentials) == real
 
 
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_linux_jailed_git_commit_carries_the_person_s_own_name_without_their_home(
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Linux jail has no home directory, so `~/.gitconfig` isn't there; the person's name and
+    email (as git resolves them on the host, for the project) reach a jailed `git commit` as
+    `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, and nothing else of the person's git config does. darwin's
+    jail reads `~/.gitconfig` itself, and is unchanged."""
+    git = shutil.which("git")
+    if sys.platform != "linux" or git is None:
+        pytest.skip("Linux's jail has no home directory; darwin's reads ~/.gitconfig itself")
+    person = tmp_path / "person.gitconfig"  # the person's global config, a stand-in
+    person.write_text("[user]\n\tname = Pat Person\n\temail = pat@example.invalid\n[alias]\n\tci = commit\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(person))
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run([git, "init", "-q"], cwd=project, check=True)  # no user.name of its own
+    (project / "a.txt").write_text("a\n")
+    commit = (
+        "import subprocess\n"
+        f"subprocess.run([{git!r}, 'add', 'a.txt'], check=True)\n"
+        f"c = subprocess.run([{git!r}, 'commit', '-qm', 'a'], capture_output=True, text=True)\n"
+        f"a = subprocess.run([{git!r}, 'ci', '-m', 'b', '--allow-empty'], capture_output=True, text=True)\n"
+        f"who = subprocess.run([{git!r}, 'log', '-1', '--format=%an <%ae> / %cn <%ce>'],"
+        " capture_output=True, text=True)\n"
+        "print(c.returncode, a.returncode, who.stdout.strip())"
+    )
+    home = Path.home()
+    patch = _cells(
+        composition,
+        commit,
+        f"import os\nprint(sorted(os.listdir({str(home)!r})) if os.path.isdir({str(home)!r}) else [])",
+        extra=_jailed_in(project),
+    )
+    _answers()
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+    out = _shown()
+    # committed as the person; the alias of their config is not there (only the identity is)
+    assert "[0] 0 1 Pat Person <pat@example.invalid> / Pat Person <pat@example.invalid>" in out, out
+    # the home directory is not there: at most the way to an interpreter installed under it
+    on_the_way = {
+        Path(p).relative_to(home).parts[0]
+        for p in (sys.base_prefix, sys.prefix)
+        if Path(p).is_relative_to(home)
+    }
+    assert f"[1] {sorted(on_the_way)}" in out, out
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_the_model_is_told_what_a_linux_jail_reads_and_that_the_home_directory_is_absent(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The project context the model gets: on Linux, the trees the jail reads (the project among
+    them) and that nothing else, the home directory included, is there, so it spends no steps
+    on reads that can't succeed. darwin's jail reads everything but the secrets: nothing said."""
+    import fragile
+
+    project = tmp_path / "project"
+    project.mkdir()
+    patch = _cells(composition, "print('hi')", extra=_jailed_in(project))
+    _answers()
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+    (told,) = fragile.SYSTEM
+    if sys.platform == "linux":
+        assert "The jail your code runs in reads only" in told, told
+        assert str(project.resolve()) in told and "/usr" in told
+        assert "home directory" in told and "~/.gitconfig" in told
+    else:
+        assert "reads only" not in told and "home directory" not in told
+
+
 def test_the_credential_may_be_above_bh_02_s_install_its_environment_or_the_project() -> None:
     found = credential_files(
         [Path("/w/proj/local.env"), Path("/src/bh/app/bh_02/cli.py"), Path("/src/bh/.venv")]

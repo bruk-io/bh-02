@@ -15,6 +15,7 @@ from brig_cordis_plugin import (
     BrigConfig,
     BrigJail,
     allowlisted,
+    git_author,
     graded,
     held,
     identity,
@@ -166,6 +167,20 @@ def test_a_linux_jail_holds_the_secrets_under_a_writable_root_and_says_so() -> N
     report = {"fs_read": "enforced", "fs_write": "enforced"}
     assert graded(report, held(spec)) == {"fs_read": "best_effort", "fs_write": "enforced"}
     assert graded(report, ()) == report
+
+
+def test_a_linux_jail_carries_the_person_s_git_identity_and_nothing_else_of_their_config() -> None:
+    assert git_author("Pat Person", "pat@example.invalid") == (
+        ("GIT_AUTHOR_NAME", "Pat Person"),
+        ("GIT_AUTHOR_EMAIL", "pat@example.invalid"),
+        ("GIT_COMMITTER_NAME", "Pat Person"),
+        ("GIT_COMMITTER_EMAIL", "pat@example.invalid"),
+    )
+    assert git_author("", "pat@example.invalid") == (
+        ("GIT_AUTHOR_EMAIL", "pat@example.invalid"),
+        ("GIT_COMMITTER_EMAIL", "pat@example.invalid"),
+    )  # what git doesn't know is left for git to say
+    assert git_author("", "") == ()
 
 
 def test_a_deny_under_a_file_becomes_a_deny_of_the_file() -> None:

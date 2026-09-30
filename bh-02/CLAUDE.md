@@ -73,7 +73,8 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 **What the model sees and how a turn looks.** `loop.reply` yields events (text, thinking,
 tool_call, tool_result, usage, stop, note). `output.confirm` asks about a cell;
 `input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. `system`
-(`context:project`) is the working directory and the project's CLAUDE.md, read per request.
+(`context:project`) is the working directory and the project's CLAUDE.md, read per request,
+and on Linux what the kernel's jail can read (`kernel.reads()`): no home directory.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays
 a provider's message as it came.

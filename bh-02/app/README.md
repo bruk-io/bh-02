@@ -191,7 +191,7 @@ What the rows depend on, which is what decides what reloads when:
 ```
 commands:registry       binds Commands                     depends on nothing
 commands:operator       registers /rows ... /model         depends on Commands, Loader, Models
-context:project         binds System                       depends on nothing
+context:project         binds System                       depends on Kernel (what its jail reads)
 models:model            binds Model                        depends on Layers (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
 models:catalog          binds Models                       depends on Loader, Layers
 agent:transcript        binds Transcript                   depends on nothing

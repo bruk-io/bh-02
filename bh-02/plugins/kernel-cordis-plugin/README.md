@@ -5,7 +5,7 @@ composition names, and the model's one tool, `python(code)`, which runs a cell i
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` (its jail's); config: `root` (default `.`), `grace` (seconds an interrupted cell gets) | `jail` |
+| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its jail's); config: `root` (default `.`), `grace` (seconds an interrupted cell gets) | `jail` |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
 
 `python.py` is the tool, pure: its spec and `instructions_for(confined)` (what the model is

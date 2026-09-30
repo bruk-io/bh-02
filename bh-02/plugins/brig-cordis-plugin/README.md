@@ -99,8 +99,15 @@ Known gaps on Linux, beyond darwin's:
 - In a git worktree or submodule `.git` is a file, and nothing can be mounted under it, so the
   jail denies writing the `.git` file itself (`mountable`); on darwin only `.git/hooks` and
   `.git/config` are denied, which cannot exist under a file anyway.
-- There is no home directory in the jail: `~/.gitconfig` isn't read, so a jailed `git commit`
-  needs the repository's own `user.name` and `user.email`.
+- There is no home directory in the jail (at most the path to an interpreter installed under
+  it), so `~/.gitconfig` isn't read. The person's `user.name` and `user.email`, as git resolves
+  them on the host for the project, are set in the worker's environment as `GIT_AUTHOR_*` and
+  `GIT_COMMITTER_*` (`git_author`), so a jailed `git commit` is theirs; nothing else of their git
+  config (aliases, credential helpers, includes) reaches the jail, and a cell can read the two
+  values from its environment, as it could from any commit. Chosen over a generated
+  `HOME/.gitconfig` in the jail's scratch: no file, and a repository's own identity still wins
+  (the host resolved it). The model is told what the jail reads (`reads()`, which
+  `context:project` puts in the prompt) and that the home directory is not there.
 
 One known gap: under `python -m bh_02` the project root is itself on `sys.path`. Denying it would
 make the project read-only, so it is left writable, and a module a cell writes at the root
