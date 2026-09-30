@@ -19,10 +19,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, for every
-      # process without a profile that allows them, a container's included. bwrap makes its
-      # namespaces as the unprivileged user, so without this it fails ("setting up uid map:
-      # Permission denied"). A laptop's Docker Desktop VM has no such restriction.
+      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor by default, for
+      # every process without a profile that allows them, and bwrap makes its namespaces as
+      # the container's unprivileged user. Lifted here so that restriction can't be what a red
+      # run measures (a laptop's Docker Desktop VM has none). Not tried without it.
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
