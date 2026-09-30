@@ -1,0 +1,33 @@
+# The Linux jail on a real Linux kernel: brig's bwrap tests and bh-02's jailed kernel
+# (`brig:jail` over `strict_linux()`), run by scripts/linux-jail-check, the same script a
+# darwin laptop runs. The script builds the container (Ubuntu 24.04, bubblewrap, uv, Python
+# 3.15), streams in what git tracks, and runs the suite as an unprivileged user; its docstring
+# says why each `docker run` option is there.
+name: linux-jail
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-jail:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, for every
+      # process without a profile that allows them, a container's included. bwrap makes its
+      # namespaces as the unprivileged user, so without this it fails ("setting up uid map:
+      # Permission denied"). A laptop's Docker Desktop VM has no such restriction.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # The script is a PEP 723 script (`uv run --script`), so uv is all the runner needs.
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Linux jail check
+        run: scripts/linux-jail-check
