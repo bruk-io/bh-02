@@ -1,6 +1,7 @@
 """A `jail` from brig: the only package in the workspace that imports brig."""
 
 from brig_cordis_plugin.jail import (
+    MARK,
     SYSTEM_READABLE,
     BrigConfig,
     BrigJail,
@@ -16,16 +17,20 @@ from brig_cordis_plugin.jail import (
     readable_roots,
     record_text,
     recorded,
+    recorded_group,
     records_dir,
     remove_placeholders,
     self_modify_denied,
     spec_for,
     stack_for,
+    still_made,
+    told_reads,
     uncovered,
 )
 from brig_cordis_plugin.wiring import jail
 
 __all__ = [
+    "MARK",
     "SYSTEM_READABLE",
     "BrigConfig",
     "BrigJail",
@@ -42,10 +47,13 @@ __all__ = [
     "readable_roots",
     "record_text",
     "recorded",
+    "recorded_group",
     "records_dir",
     "remove_placeholders",
     "self_modify_denied",
     "spec_for",
     "stack_for",
+    "still_made",
+    "told_reads",
     "uncovered",
 ]

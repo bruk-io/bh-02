@@ -72,6 +72,7 @@ from brig.run import Handle, IoPolicy, KillOutcome, SubprocessLauncher, build_co
 from brig.stack import CompiledJail, Stack, scratch_darwin, strict_linux
 
 __all__ = [
+    "MARK",
     "SYSTEM_READABLE",
     "BrigConfig",
     "BrigJail",
@@ -87,11 +88,14 @@ __all__ = [
     "readable_roots",
     "record_text",
     "recorded",
+    "recorded_group",
     "records_dir",
     "remove_placeholders",
     "self_modify_denied",
     "spec_for",
     "stack_for",
+    "still_made",
+    "told_reads",
     "uncovered",
 ]
 
@@ -250,6 +254,15 @@ def notice_for(platform: str, holds: Sequence[str]) -> str:
     )
 
 
+def told_reads(trees: Sequence[str], own: Sequence[str]) -> tuple[str, ...]:
+    """The trees a jail reads, as the model is told them: each once, the jail's own directories
+    (its scratch and the kernel's socket, named anew at every start) as `$TMPDIR` alone, so the
+    prompt is the same from one kernel to the next (the claude-code provider starts Claude Code
+    again when it changes)."""
+    kept = [t for t in trees if not any(t == o or t.startswith(o + "/") for o in own)]
+    return (*dict.fromkeys(kept), "$TMPDIR")
+
+
 def git_author(name: str, email: str) -> tuple[tuple[str, str], ...]:
     """The person's git identity as the variables git reads before any config file:
     `GIT_AUTHOR_*` and `GIT_COMMITTER_*`, for what is not empty. A Linux jail has no home
@@ -324,18 +337,24 @@ def records_dir(environ: Mapping[str, str], home: str) -> str:
 
 
 def identity(found: os.stat_result) -> str:
-    """Which directory a placeholder is: its inode and when it changed. The inode alone is not
-    enough: a directory removed and made again at the same path can get the same one back
-    (measured, on overlayfs). The change time is as fine as the kernel's clock tick, so one
-    made again within the same few milliseconds would pass for the jail's; and a placeholder
-    something was added to and removed from since reads as changed, and is kept."""
+    """Which directory a placeholder is, where the filesystem takes no `MARK`: its inode and
+    when it changed. The inode alone is not enough: a directory removed and made again at the
+    same path can get the same one back (measured, on overlayfs). The change time is as fine as
+    the kernel's clock tick, so one made again within the same few milliseconds would pass for
+    the jail's; and a placeholder something was added to and removed from since (another jail's
+    placeholders inside it) reads as changed, and is kept."""
     return f"{found.st_ino}:{found.st_ctime_ns}"
 
 
-def record_text(made: Sequence[tuple[str, str | None]]) -> str:
+def record_text(made: Sequence[tuple[str, str | None]], group: int | None = None) -> str:
     """A jail's record of its placeholders: each path, deepest first, with its `identity` once
-    the jail was up (None before), so a later sweep removes only the directory it made."""
-    return json.dumps({"made": [[path, found] for path, found in made]}) + "\n"
+    the jail was up (None before), so a later sweep removes only the directory it made; and
+    once bubblewrap is started, its process group, so a sweep never removes what a jail still
+    alive holds."""
+    whole: dict[str, object] = {"made": [[path, found] for path, found in made]}
+    if group is not None:
+        whole["group"] = group
+    return json.dumps(whole) + "\n"
 
 
 def recorded(text: str) -> list[tuple[str, str | None]]:
@@ -348,16 +367,37 @@ def recorded(text: str) -> list[tuple[str, str | None]]:
         return []
 
 
+def recorded_group(text: str) -> int | None:
+    """The process group of the bubblewrap a record names (`record_text`); None when it names
+    none (written before bubblewrap started) or can't be read."""
+    try:
+        group = json.loads(text)["group"]
+    except ValueError, KeyError, TypeError:
+        return None
+    return group if isinstance(group, int) else None
+
+
+def still_made(was: str | None, found: str, mark: str | None) -> bool:
+    """Whether a directory is still the placeholder a jail recorded as `was`: its `MARK` (the
+    jail's id, in an extended attribute the jail set on it), or where the filesystem takes none,
+    its `identity`; None (recorded before the jail was up) takes any directory there. A mark
+    survives what is added and removed under it; the person's own directory has none."""
+    if was is None:
+        return True
+    if was.startswith("mark:"):
+        return mark == was.removeprefix("mark:")
+    return was == found
+
+
 def remove_placeholders(made: Sequence[tuple[str, str | None]]) -> None:
-    """Remove each placeholder a jail made (deepest first) that is still what it made: an empty
-    directory, the same one (`identity`) when that was recorded. One the person has put something in, or
-    replaced with one of their own, stays. Only once no jail can have mounted over it: removed
-    while a jail lives, it stops being a mount point inside it, and the path it denies is
-    writable there."""
+    """Remove each placeholder a jail made (deepest first) that is still what it made (an empty
+    directory, `still_made`). One the person has put something in, or replaced with one of their
+    own, stays. Only once no jail can have mounted over it: removed while a jail lives, it stops
+    being a mount point inside it, and the path it denies is writable there."""
     for path, was in made:
         with contextlib.suppress(OSError):
             found = os.lstat(path)
-            if stat.S_ISDIR(found.st_mode) and was in (None, identity(found)):
+            if stat.S_ISDIR(found.st_mode) and still_made(was, identity(found), _mark_of(path)):
                 os.rmdir(path)
 
 
@@ -381,6 +421,7 @@ class _Jailed:
         self._made: list[tuple[str, str | None]] = [(path, None) for path in made]
         self._lock = lock
         self._record = record
+        self._write()
 
     def interrupt(self) -> bool:
         return self._handle.interrupt()
@@ -388,10 +429,14 @@ class _Jailed:
     def placed(self) -> None:
         """Note which directory each placeholder is now the jail is up (`identity`), in the record
         too, so it is removed later only while it is still the directory the jail made."""
-        self._made = [(path, _identity(path)) for path, _ in self._made]
+        self._made = [(path, _identity(path, Path(self._jail_dir).name)) for path, _ in self._made]
+        self._write()
+
+    def _write(self) -> None:
+        """The record as it stands: the placeholders, and which bubblewrap process holds them."""
         if self._record is not None:
             with contextlib.suppress(OSError):
-                Path(self._record).write_text(record_text(self._made))
+                Path(self._record).write_text(record_text(self._made, self._handle.pgid))
 
     async def stop(self) -> None:
         report = await asyncio.to_thread(self._handle.kill)
@@ -412,9 +457,48 @@ class _Jailed:
         shutil.rmtree(self._jail_dir, ignore_errors=True)
 
 
-def _identity(path: str) -> str | None:
+def _lives(group: int) -> bool:
+    """Whether any process of the process group `group` still runs. The group outlives its
+    leader (bubblewrap's own first process exits; measured), so the group, not the pid. A pid
+    reused as a group since reads as alive, which only keeps placeholders longer."""
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+#: The extended attribute a Linux jail marks each placeholder with: the jail's id.
+MARK = "user.bh-02.placeholder"
+
+
+def _identity(path: str, jail_id: str) -> str | None:
+    """Mark the placeholder at `path` as this jail's, and say how it was recorded: `mark:<id>`,
+    or where the filesystem takes no extended attribute (or the platform has none), its
+    `identity`; None when it is gone."""
+    mark: Callable[..., None] | None = getattr(os, "setxattr", None)  # Linux only
+    if mark is not None:
+        try:
+            mark(path, MARK, jail_id.encode(), follow_symlinks=False)
+        except OSError:
+            pass
+        else:
+            return f"mark:{jail_id}"
     try:
         return identity(os.lstat(path))
+    except OSError:
+        return None
+
+
+def _mark_of(path: str) -> str | None:
+    """The jail id a placeholder is marked with (`MARK`), or None."""
+    read: Callable[..., bytes] | None = getattr(os, "getxattr", None)  # Linux only
+    if read is None:
+        return None
+    try:
+        return read(path, MARK, follow_symlinks=False).decode(errors="replace")
     except OSError:
         return None
 
@@ -444,9 +528,10 @@ class BrigJail:
         return self._notice
 
     def reads(self) -> tuple[str, ...]:
-        """The trees a cell can read, once the kernel has started, when that is all it can read:
-        a Linux jail's allowlist (the system, the interpreter, the worker's directory) and the
-        roots it may write. Empty on darwin, whose jail reads everything but the secrets."""
+        """The trees a cell can read, once the kernel has started, when that is all it can read
+        (`told_reads`): a Linux jail's allowlist (the system, the interpreter, the worker's
+        directory) and the roots it may write. Empty on darwin, whose jail reads everything but
+        the secrets."""
         return self._reads
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
@@ -468,7 +553,8 @@ class BrigJail:
             jail, self._report = self.compile(jail_dir, endpoint, cwd, argv, author)
             self._notice = notice_for(self._platform, held(jail.spec) if self._platform == "linux" else ())
             if self._platform == "linux":
-                self._reads = tuple(dict.fromkeys((*jail.spec.fs.read_allows, *jail.spec.fs.write_allows)))
+                trees = (*jail.spec.fs.read_allows, *jail.spec.fs.write_allows)
+                self._reads = told_reads(trees, (jail_dir, str(Path(endpoint).parent)))
             made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
             if made:  # named before bubblewrap makes them, so a crash from here on leaves a record
                 record = self._recorded(records, Path(jail_dir).name, made)
@@ -575,10 +661,13 @@ class BrigJail:
     def _hold(self, records: str) -> int:
         """A shared hold on this user's bh-02 jail lock (see `_Jailed`), waiting while a jail
         that is removing its placeholders holds it exclusively. Taken exclusively first when it
-        can be: then no bh-02 jail of this user runs, and every record left (a crashed session's,
-        or one that stopped while another ran) names placeholders nothing has mounted over, which
-        are removed with it. The hold is then made shared (not atomically: in between another
-        jail may take it exclusively, which only removes its own)."""
+        can be: then no bh-02 of this user holds a jail, and every record left (a crashed
+        session's, or one that stopped while another ran) names placeholders that are removed
+        with it, unless the bubblewrap process group it names still runs. The lock dies with
+        bh-02, not with its jail: a program a cell left running keeps a killed session's jail
+        alive (measured), and its mounts with it, which removing a placeholder would detach. The
+        hold is then made shared (not atomically: in between another jail may take it
+        exclusively, which only removes its own)."""
         lock = os.open(f"/tmp/bh-02-jails-{os.getuid()}.lock", os.O_RDWR | os.O_CREAT, 0o600)
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -587,7 +676,11 @@ class BrigJail:
         else:
             for left in sorted(Path(records).glob("*.json")) if Path(records).is_dir() else ():
                 with contextlib.suppress(OSError):
-                    remove_placeholders(recorded(left.read_text()))
+                    text = left.read_text()
+                    group = recorded_group(text)
+                    if group is not None and _lives(group):
+                        continue  # its bh-02 is gone, but the jail is not: what it holds stays
+                    remove_placeholders(recorded(text))
                     left.unlink()
         fcntl.flock(lock, fcntl.LOCK_SH)
         return lock

@@ -65,10 +65,16 @@ no other bh-02 jail of the same user is running (a shared `flock` on
 second session in the same project binds the first one's placeholders read-only, and removing
 them would detach those binds). Each jail records what it made before bubblewrap makes it, in
 bh-02's state directory (`$XDG_STATE_HOME/bh-02/jails/`, else `~/.local/state/bh-02/jails/`,
-one file per jail, with each directory's inode and change time once the jail is up). A session
-that crashed, or stopped while another ran, leaves its record, and the next bh-02 jail to start
-with none running removes what it names: only an empty directory still the one the jail made,
-never one the person has put something in or made again since.
+one file per jail). Once bubblewrap is started the record names its process group, and once the
+jail is up the jail marks each placeholder as its own (an extended attribute,
+`user.bh-02.placeholder`, holding the jail's id; where the filesystem takes none, the record
+keeps the directory's inode and change time instead). A session that crashed, or stopped while
+another ran, leaves its record, and the next bh-02 jail to start with none running removes what
+it names: only an empty directory still marked as that jail's, never one the person has put
+something in or made again since. The lock that says "none running" dies with bh-02, not with
+its jail: a program a cell left running keeps a killed session's bubblewrap alive, mounts and
+all (measured: `test_a_killed_session_s_jail_that_lives_on_keeps_its_placeholders`). So a record
+whose process group still runs is left alone, placeholders and all, until it has ended.
 
 On any other platform, `start` refuses and names `kernel:unjailed`. The grades are brig's own, known
 before anything starts: `fs_write`, `network` and `env` enforced, `limits` best-effort, `fs_read`
@@ -93,9 +99,14 @@ Known gaps on Linux, beyond darwin's:
 
 - Placeholders (above) are real on the host while a kernel runs, and stay until a bh-02 jail
   starts or stops with no other running. A crash in the moment between writing the record and
-  noting each directory's identity leaves a record by path alone, which removes any empty
-  directory there. An orphaned kernel (bh-02 killed, its jailed worker not) still has its
-  placeholders mounted when the next jail sweeps them; it has no host to run a cell for.
+  starting bubblewrap, or before the placeholders are marked, leaves a record by path alone,
+  which removes any empty directory there (and trusts that no jail of it runs). Without extended
+  attributes, a placeholder is known by inode and change time, which is as fine as the kernel's
+  clock tick, and one something was made and removed under since is kept.
+- A killed bh-02's jail lives on while a program a cell started runs in it (the worker exits
+  when its host goes; bubblewrap waits for the rest). Nothing here ends it: it keeps its
+  placeholders, and its record, until it ends by itself or you end it (its process group is in
+  the record).
 - In a git worktree or submodule `.git` is a file, and nothing can be mounted under it, so the
   jail denies writing the `.git` file itself (`mountable`); on darwin only `.git/hooks` and
   `.git/config` are denied, which cannot exist under a file anyway.
