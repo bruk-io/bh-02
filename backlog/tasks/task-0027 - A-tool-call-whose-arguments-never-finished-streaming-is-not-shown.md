@@ -4,6 +4,7 @@ title: A tool call whose arguments never finished streaming is not shown
 status: To Do
 assignee: []
 created_date: '2026-09-30 01:36'
+updated_date: '2026-09-30 01:40'
 labels: []
 dependencies: []
 priority: low
@@ -17,7 +18,7 @@ Found in task-0021. When Claude Code drops a connection mid-stream it closes the
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A tool call whose arguments don't parse when its block closes is not shown in the transcript or recorded as a call; a test with the fake Claude Code covers it
-- [ ] #2 The step still fails with the existing restarted-reply error in that case, and a well-formed call is shown as before
+- [ ] #1 When Claude Code closes a stream it will retry (message_stop with no stop reason) while a tool call's arguments are incomplete, that call is neither shown nor recorded; a test with the fake Claude Code covers it
+- [ ] #2 A call whose arguments genuinely didn't decode in a finished step (a stop reason arrived) is still shown and classified as today; the loop's existing undecodable-call tests pass unchanged
 - [ ] #3 scripts/check passes
 <!-- AC:END -->
