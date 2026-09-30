@@ -42,13 +42,35 @@ One policy, two stacks (`stack_for`):
   the real one). Anywhere else (the project's own absent `local.env`, which nothing of bh-02's
   reads) it is left alone, and `fs_read` names it: a file created there later is readable.
   A write deny inside another (an absent secret in a directory the
-  host imports code from) is left to the outer one (`uncovered`). bubblewrap makes each absent
-  write-denied path under the project (`.envrc`, `.vscode`, `.git/config`, an absent
-  `local.env`, ...) an empty directory on the host to mount over, for as long as the kernel
-  runs; the jail removes the ones it made once brig has verified the worker is gone. Without
-  `/usr/bin/bwrap`, `start` says to install `bubblewrap` or use `kernel:unjailed`.
+  host imports code from) is left to the outer one (`uncovered`). Without `/usr/bin/bwrap`,
+  `start` says to install `bubblewrap` or use `kernel:unjailed`.
 
-Anywhere else, `start` refuses and names `kernel:unjailed`. The grades are brig's own, known
+**Placeholders (Linux).** bubblewrap holds a write-denied path that doesn't exist with an empty,
+read-only directory mounted there, and the mount point is a real directory it makes on the host:
+a placeholder. So while a kernel runs, `.envrc/`, `.vscode/`, `.idea/`, `.claude/`, an absent
+`local.env/` where bh-02 looks for its credential, and in a project that is not a repository
+`.git/`, are empty directories in the project on the host. Where a denied path's parent is
+absent too (`.git/config` with no `.git`), the topmost absent one is held instead (`mountable`),
+so the host's `git init` works while the kernel runs: it fills the empty `.git/` on the host,
+while inside the jail `.git` stays an empty read-only directory until the next kernel start. What a placeholder gets in the way
+of, while it is there: creating that path as a file by hand (`.envrc`, your credential in
+`local.env`: stop bh-02 first). **Removing one while the kernel runs lifts its deny**: the
+mount is detached inside the jail, and a cell can then create and write the path (brig SPEC.md,
+decision-164; `test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it`),
+so nothing here removes one early, and neither should you.
+
+When they go: the jail removes the ones it made once brig has verified the worker is gone and
+no other bh-02 jail of the same user is running (a shared `flock` on
+`/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken exclusively to clean up: a
+second session in the same project binds the first one's placeholders read-only, and removing
+them would detach those binds). Each jail records what it made before bubblewrap makes it, in
+bh-02's state directory (`$XDG_STATE_HOME/bh-02/jails/`, else `~/.local/state/bh-02/jails/`,
+one file per jail, with each directory's inode and change time once the jail is up). A session
+that crashed, or stopped while another ran, leaves its record, and the next bh-02 jail to start
+with none running removes what it names: only an empty directory still the one the jail made,
+never one the person has put something in or made again since.
+
+On any other platform, `start` refuses and names `kernel:unjailed`. The grades are brig's own, known
 before anything starts: `fs_write`, `network` and `env` enforced, `limits` best-effort, `fs_read`
 enforced, but on Linux best-effort whenever the jail holds a secret under a writable root
 (`graded`, below). `bh-02/app/tests/test_python_cells.py`
@@ -69,16 +91,11 @@ kernel start. darwin's seatbelt matches paths, not directory entries, and has no
 
 Known gaps on Linux, beyond darwin's:
 
-- While a kernel runs, the empty placeholder directories are real on the host: `git init` in a
-  project that is not a repository fails meanwhile (`.git/config` is a directory), and so does
-  creating `.envrc` by hand, and so does creating your credential in an absent `local.env` the
-  jail holds. Removing one while the kernel runs reopens the path inside the jail
-  (brig SPEC.md, decision-164), so nothing here does.
-- The placeholders are removed only when no other bh-02 jail of the same user is running (a
-  shared `flock` on `/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken
-  exclusively to clean up): a second session in the same project binds the first one's
-  placeholders read-only, and removing them would detach those binds. So with overlapping
-  sessions, and after a crash or `SIGKILL`, empty placeholder directories stay behind.
+- Placeholders (above) are real on the host while a kernel runs, and stay until a bh-02 jail
+  starts or stops with no other running. A crash in the moment between writing the record and
+  noting each directory's identity leaves a record by path alone, which removes any empty
+  directory there. An orphaned kernel (bh-02 killed, its jailed worker not) still has its
+  placeholders mounted when the next jail sweeps them; it has no host to run a cell for.
 - In a git worktree or submodule `.git` is a file, and nothing can be mounted under it, so the
   jail denies writing the `.git` file itself (`mountable`); on darwin only `.git/hooks` and
   `.git/config` are denied, which cannot exist under a file anyway.

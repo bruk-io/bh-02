@@ -4,6 +4,7 @@ bh-02/app/tests/test_python_cells.py's: they need a kernel, which is another plu
 import asyncio
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,11 +17,16 @@ from brig_cordis_plugin import (
     allowlisted,
     graded,
     held,
+    identity,
     jail,
     made_by_the_jail,
     mountable,
     notice_for,
     readable_roots,
+    record_text,
+    recorded,
+    records_dir,
+    remove_placeholders,
     self_modify_denied,
     spec_for,
     stack_for,
@@ -247,6 +253,124 @@ async def test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_re
         assert absent.read_text() == "PLANTED=1"  # and the absent one was created
     finally:
         await started.stop()
+
+
+def test_a_jail_s_record_of_its_placeholders_is_in_bh_02_s_state_directory() -> None:
+    assert records_dir({"XDG_STATE_HOME": "/x"}, "/home/me") == "/x/bh-02/jails"
+    assert records_dir({}, "/home/me") == "/home/me/.local/state/bh-02/jails"
+    made = [("/w/.git/hooks", "12:1700000000000000000"), ("/w/.git", None)]
+    assert recorded(record_text(made)) == made
+    assert recorded("not json") == [] and recorded('{"made": 3}') == []  # a broken record names none
+
+
+def test_only_a_placeholder_still_as_the_jail_made_it_is_removed(tmp_path: Path) -> None:
+    """Empty and unchanged: removed, deepest first (one recorded before the jail was up, by path
+    alone). One the person put a file in, and one they replaced with a directory of their own
+    (even on the same inode), are kept."""
+    ours, early, filled, theirs = (tmp_path / n for n in ("ours", "early", "filled", "theirs"))
+    for path in (ours, early / "inner", filled, theirs):
+        path.mkdir(parents=True)
+    made = [(str(p), identity(p.stat())) for p in (ours, filled, theirs)]
+    made += [(str(early / "inner"), None), (str(early), None), (str(tmp_path / "gone"), None)]
+    (filled / "mine.txt").write_text("x")
+    theirs.rmdir()
+    time.sleep(0.05)  # the person's own comes later: a later change time, on the kernel's clock tick
+    theirs.mkdir()
+    remove_placeholders(made)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["filled", "theirs"]
+
+
+def _needs_bwrap() -> None:
+    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
+        pytest.skip("the placeholders are bubblewrap's: Linux with /usr/bin/bwrap only")
+
+
+# A bh-02 that crashes once its jailed kernel is up: no `stop`, so nothing it made is removed.
+# Its worker listens for a moment and exits, as an orphaned kernel with no host would be ended.
+_CRASH = """
+import asyncio, os, sys, tempfile
+from pathlib import Path
+from brig_cordis_plugin import BrigConfig, BrigJail
+
+class Layers:
+    paths, credentials, secrets = (), (), ()
+
+async def main():
+    sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
+    worker = (
+        "import socket, sys, time; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); "
+        "s.listen(1); time.sleep(2)"
+    )
+    argv = [sys.executable, "-I", "-c", worker, sock]
+    await BrigJail(BrigConfig(), Layers()).start(argv, cwd=sys.argv[1], endpoint=sock)
+    os._exit(9)
+
+asyncio.run(main())
+"""
+
+
+async def _crashed_in(project: Path) -> None:
+    crash = await asyncio.create_subprocess_exec(sys.executable, "-c", _CRASH, str(project))
+    assert await crash.wait() == 9
+    await asyncio.sleep(3.0)  # its orphaned worker ends, and with it the jail's mounts
+
+
+async def test_placeholders_a_crashed_session_left_are_removed_by_the_next_jail_and_only_those(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session that crashes never removes its placeholders. The next jail to start with no
+    other bh-02 jail running removes them, by the record the crashed one kept in the user's
+    state directory: only an empty directory still the one it made. `.claude/` the person has
+    put a file in, and a `.vscode/` the person made again after the crash, stay."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    await _crashed_in(project)
+    left = sorted(p.name for p in project.iterdir())
+    assert {".claude", ".vscode", ".envrc", ".git"} <= set(left), left  # what the crash left
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir())  # and its record
+    (project / ".claude" / "mine.json").write_text("{}")  # the person's, since
+    (project / ".vscode").rmdir()
+    (project / ".vscode").mkdir()  # the person's own, made again
+    one = BrigJail(BrigConfig(), Layers())
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+    await started.stop()
+    assert sorted(p.name for p in project.iterdir()) == [".claude", ".vscode"]
+    assert list((project / ".claude").iterdir()) == [project / ".claude" / "mine.json"]
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []  # no record outlives its jail
+
+
+async def test_git_init_on_the_host_works_while_a_jail_runs_in_a_project_that_is_no_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A project that isn't a repository has no `.git`, so the jail holds `.git` itself (an empty
+    directory) rather than a `.git/config` directory inside it, which would break the person's
+    own `git init`. That works on the host while the kernel runs; inside the jail `.git` stays
+    what it was held as, and the new repository outlives the jail."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    one = BrigJail(BrigConfig(), Layers())
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    git_config = project / ".git" / "config"
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(git_config)]
+    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+    try:
+        assert (project / ".git").is_dir() and not git_config.exists()  # held whole: nothing inside
+        made = await asyncio.create_subprocess_exec("git", "init", "-q", str(project))
+        assert await made.wait() == 0
+        assert git_config.is_file()
+        await asyncio.sleep(0.5)  # the workload keeps trying to write under .git/config
+        assert not (git_config / "settings.json").exists()
+    finally:
+        await started.stop()
+    assert git_config.is_file()  # the person's repository stays
 
 
 async def test_a_second_jail_s_carve_out_outlives_the_first_jail_in_the_same_project(

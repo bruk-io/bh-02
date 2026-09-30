@@ -42,8 +42,10 @@ Anywhere else `start` refuses and names `kernel:unjailed`.
 import asyncio
 import contextlib
 import fcntl
+import json
 import os
 import shutil
+import stat
 import tempfile
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -76,10 +78,15 @@ __all__ = [
     "allowlisted",
     "graded",
     "held",
+    "identity",
     "made_by_the_jail",
     "mountable",
     "notice_for",
     "readable_roots",
+    "record_text",
+    "recorded",
+    "records_dir",
+    "remove_placeholders",
     "self_modify_denied",
     "spec_for",
     "stack_for",
@@ -283,13 +290,62 @@ def self_modify_denied(allow: Sequence[str]) -> tuple[str, ...]:
     return tuple(name for name in SELF_MODIFY_WORKSPACE_RELATIVE if name not in allow)
 
 
-def mountable(denies: Sequence[str], blocked: Mapping[str, str]) -> tuple[str, ...]:
-    """The write denies bubblewrap can mount. An absent one under a path that exists as a FILE
-    (`.git/hooks` where `.git` is a worktree's or submodule's `gitdir:` pointer) can't have a
-    mount point made for it (bwrap: "Can't mkdir parents ... Not a directory", and the kernel
-    never starts), so `blocked` maps it to that file, which is denied instead: bound read-only
-    over itself, it can be neither rewritten nor removed, so nothing is ever created under it."""
-    return tuple(dict.fromkeys(blocked.get(deny, deny) for deny in denies))
+def mountable(denies: Sequence[str], instead: Mapping[str, str]) -> tuple[str, ...]:
+    """The write denies bubblewrap can mount, each once, with `instead` mapping a deny to the
+    path denied in its place. An absent one under a path that exists as a FILE (`.git/hooks`
+    where `.git` is a worktree's or submodule's `gitdir:` pointer) can't have a mount point made
+    for it (bwrap: "Can't mkdir parents ... Not a directory", and the kernel never starts), so it
+    maps to that file, bound read-only over itself: neither rewritten nor removed, so nothing is
+    ever created under it. An absent one whose parent is absent too (`.git/config` in a project
+    that is not a repository) maps to its topmost absent ancestor (`.git`): one empty directory
+    held on the host rather than a `.git/config` directory inside one, which would break the
+    person's own `git init` there while the kernel runs."""
+    return tuple(dict.fromkeys(instead.get(deny, deny) for deny in denies))
+
+
+def records_dir(environ: Mapping[str, str], home: str) -> str:
+    """Where a Linux jail records the placeholders it made, one file per jail: bh-02's state
+    directory (`$XDG_STATE_HOME/bh-02`, else `~/.local/state/bh-02`), outside every jail."""
+    state = environ.get("XDG_STATE_HOME") or str(Path(home, ".local", "state"))
+    return str(Path(state, "bh-02", "jails"))
+
+
+def identity(found: os.stat_result) -> str:
+    """Which directory a placeholder is: its inode and when it changed. The inode alone is not
+    enough: a directory removed and made again at the same path can get the same one back
+    (measured, on overlayfs). The change time is as fine as the kernel's clock tick, so one
+    made again within the same few milliseconds would pass for the jail's; and a placeholder
+    something was added to and removed from since reads as changed, and is kept."""
+    return f"{found.st_ino}:{found.st_ctime_ns}"
+
+
+def record_text(made: Sequence[tuple[str, str | None]]) -> str:
+    """A jail's record of its placeholders: each path, deepest first, with its `identity` once
+    the jail was up (None before), so a later sweep removes only the directory it made."""
+    return json.dumps({"made": [[path, found] for path, found in made]}) + "\n"
+
+
+def recorded(text: str) -> list[tuple[str, str | None]]:
+    """The placeholders a record names (`record_text`); nothing for a record that can't be read
+    as one, which is then only removed."""
+    try:
+        made = json.loads(text)["made"]
+        return [(str(path), found if isinstance(found, str) else None) for path, found in made]
+    except ValueError, KeyError, TypeError:
+        return []
+
+
+def remove_placeholders(made: Sequence[tuple[str, str | None]]) -> None:
+    """Remove each placeholder a jail made (deepest first) that is still what it made: an empty
+    directory, the same one (`identity`) when that was recorded. One the person has put something in, or
+    replaced with one of their own, stays. Only once no jail can have mounted over it: removed
+    while a jail lives, it stops being a mount point inside it, and the path it denies is
+    writable there."""
+    for path, was in made:
+        with contextlib.suppress(OSError):
+            found = os.lstat(path)
+            if stat.S_ISDIR(found.st_mode) and was in (None, identity(found)):
+                os.rmdir(path)
 
 
 class _Jailed:
@@ -300,36 +356,54 @@ class _Jailed:
     jail looked at the filesystem and held while it runs. A placeholder is removed only by a
     jail that can then take the lock exclusively: no other bh-02 jail is running, so none has
     mounted over one (a second session in the same project binds the first one's `.claude/`
-    read-only, and removing it on the host detaches that bind; measured)."""
+    read-only, and removing it on the host detaches that bind; measured). `record` is the file
+    that names them meanwhile (`records_dir`): if this jail can't remove them (another runs) or
+    never stops (bh-02 crashed), the next jail to start with none running does."""
 
-    def __init__(self, handle: Handle, jail_dir: str, made: Sequence[str], lock: int | None) -> None:
+    def __init__(
+        self, handle: Handle, jail_dir: str, made: Sequence[str], lock: int | None, record: str | None
+    ) -> None:
         self._handle = handle
         self._jail_dir = jail_dir
-        self._made = made
+        self._made: list[tuple[str, str | None]] = [(path, None) for path in made]
         self._lock = lock
+        self._record = record
 
     def interrupt(self) -> bool:
         return self._handle.interrupt()
 
+    def placed(self) -> None:
+        """Note which directory each placeholder is now the jail is up (`identity`), in the record
+        too, so it is removed later only while it is still the directory the jail made."""
+        self._made = [(path, _identity(path)) for path, _ in self._made]
+        if self._record is not None:
+            with contextlib.suppress(OSError):
+                Path(self._record).write_text(record_text(self._made))
+
     async def stop(self) -> None:
         report = await asyncio.to_thread(self._handle.kill)
         gone = all(item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE) for item in report.items)
-        if gone and self._made and self._lock is not None:
+        if gone and self._lock is not None:
             try:
                 fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                pass  # another jail runs: what it may have mounted over stays
+                pass  # another jail runs: what it may have mounted over stays, and the record
             else:
-                # Removed while a jail lived, each would stop being a mount point inside it,
-                # and the path it denies would be writable there. One the person has put
-                # something in since is not empty, and stays.
-                for path in self._made:
+                remove_placeholders(self._made)
+                if self._record is not None:
                     with contextlib.suppress(OSError):
-                        os.rmdir(path)
+                        os.unlink(self._record)
         if self._lock is not None:
             os.close(self._lock)
             self._lock = None
         shutil.rmtree(self._jail_dir, ignore_errors=True)
+
+
+def _identity(path: str) -> str | None:
+    try:
+        return identity(os.lstat(path))
+    except OSError:
+        return None
 
 
 class BrigJail:
@@ -363,13 +437,18 @@ class BrigJail:
                 "install the `bubblewrap` package, or use `kernel:unjailed` for the jail row "
                 "(or `bh-02 --no-jail`), knowing it confines nothing"
             )
-        # Before anything looks at the filesystem: no placeholder may be removed from here on.
-        lock = await asyncio.to_thread(self._hold) if self._platform == "linux" else None
+        # Before anything looks at the filesystem: no placeholder may be removed from here on
+        # (but those of jails that are gone, which `_hold` removes first when none is running).
+        records = records_dir(os.environ, str(Path.home()))
+        lock = await asyncio.to_thread(self._hold, records) if self._platform == "linux" else None
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
+        record: str | None = None
         try:
             jail, self._report = self.compile(jail_dir, endpoint, cwd, argv)
             self._notice = notice_for(self._platform, held(jail.spec) if self._platform == "linux" else ())
             made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
+            if made:  # named before bubblewrap makes them, so a crash from here on leaves a record
+                record = self._recorded(records, Path(jail_dir).name, made)
             handle = await asyncio.to_thread(
                 SubprocessLauncher().launch,
                 jail,
@@ -384,9 +463,10 @@ class BrigJail:
                 os.close(lock)
             shutil.rmtree(jail_dir, ignore_errors=True)
             raise
-        started = _Jailed(handle, jail_dir, made, lock)
+        started = _Jailed(handle, jail_dir, made, lock, record)
         try:
             await asyncio.to_thread(handle.wait_ready, "kernel", _READY_TIMEOUT_S)
+            started.placed()
         except BaseException as error:
             log = Path(jail_dir, "stderr.log")
             detail = log.read_text(errors="replace")[-2000:] if log.is_file() else ""
@@ -415,7 +495,7 @@ class BrigJail:
             links = [link for arg in argv if arg.startswith("/") for link in self._linked_dirs(arg)]
             hold = [c for c in self._layers.credentials if not Path(c).exists()]
             spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()], hold)
-            denies = uncovered(mountable(spec.fs.write_denies, self._under_a_file(spec)))
+            denies = uncovered(mountable(spec.fs.write_denies, self._instead(spec)))
             spec = replace(spec, fs=replace(spec.fs, write_denies=denies))
         ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
         jail = stack_for(self._platform).compile(spec, ctx=ctx)
@@ -442,24 +522,52 @@ class BrigJail:
             hop = os.path.normpath(Path(at.parent, os.readlink(at), Path(hop).relative_to(at)))
         return found
 
-    def _hold(self) -> int:
+    def _hold(self, records: str) -> int:
         """A shared hold on this user's bh-02 jail lock (see `_Jailed`), waiting while a jail
-        that is removing its placeholders holds it exclusively."""
+        that is removing its placeholders holds it exclusively. Taken exclusively first when it
+        can be: then no bh-02 jail of this user runs, and every record left (a crashed session's,
+        or one that stopped while another ran) names placeholders nothing has mounted over, which
+        are removed with it. The hold is then made shared (not atomically: in between another
+        jail may take it exclusively, which only removes its own)."""
         lock = os.open(f"/tmp/bh-02-jails-{os.getuid()}.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            pass
+        else:
+            for left in sorted(Path(records).glob("*.json")) if Path(records).is_dir() else ():
+                with contextlib.suppress(OSError):
+                    remove_placeholders(recorded(left.read_text()))
+                    left.unlink()
         fcntl.flock(lock, fcntl.LOCK_SH)
         return lock
 
-    def _under_a_file(self, spec: Spec) -> dict[str, str]:
-        """Each absent write deny whose nearest existing ancestor is a file, mapped to that file
-        (see `mountable`)."""
-        blocked: dict[str, str] = {}
+    def _recorded(self, records: str, jail_id: str, made: Sequence[str]) -> str | None:
+        """Write this jail's record of `made` (`record_text`) and return its path; None when the
+        state directory can't be written (then only this jail's own `stop` removes them)."""
+        record = Path(records, f"{jail_id}.json")
+        try:
+            record.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            record.write_text(record_text([(path, None) for path in made]))
+        except OSError:
+            return None
+        return str(record)
+
+    def _instead(self, spec: Spec) -> dict[str, str]:
+        """Each absent write deny whose nearest existing ancestor is a file, mapped to that file;
+        and each whose parent is absent too, under a write root, mapped to its topmost absent
+        ancestor (see `mountable`)."""
+        roots = [Path(r) for r in spec.fs.write_allows]
+        instead: dict[str, str] = {}
         for deny in spec.fs.write_denies:
-            path = Path(deny)
+            path, top = Path(deny), Path(deny)
             while not path.exists() and path != path.parent:
-                path = path.parent
+                top, path = path, path.parent
             if str(path) != deny and path.exists() and not path.is_dir():
-                blocked[deny] = str(path)
-        return blocked
+                instead[deny] = str(path)
+            elif str(top) != deny and any(top.is_relative_to(r) and top != r for r in roots):
+                instead[deny] = str(top)
+        return instead
 
     def _absent_denies(self, spec: Spec) -> list[str]:
         """Every write-denied path under a write root that does not exist, and each of its
