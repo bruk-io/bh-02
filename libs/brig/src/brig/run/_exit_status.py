@@ -89,7 +89,24 @@ import sys
 
 exit_file = sys.argv[1]
 ready_fd = int(sys.argv[2])
-argv = sys.argv[3:]
+tether_fd = None if sys.argv[3] == "-" else int(sys.argv[3])
+argv = sys.argv[4:]
+
+#: The tether's watcher (decision-167): blocks on the tether until every write end is gone,
+#: then ends its own process group, the jail's. SIGINT is ignored, because `interrupt` is for
+#: the workload; SIGTERM keeps its default, so teardown's first rung ends it like any member.
+#: Nothing it runs is exec'd, so the ignored disposition reaches nothing else.
+TETHER = (
+    "import os, signal, sys\\n"
+    "signal.signal(signal.SIGINT, signal.SIG_IGN)\\n"
+    "fd = int(sys.argv[1])\\n"
+    "try:\\n"
+    "    while os.read(fd, 512):\\n"
+    "        pass\\n"
+    "except OSError:\\n"
+    "    pass\\n"
+    "os.killpg(0, signal.SIGKILL)\\n"
+)
 
 
 def _hold(signum, frame):
@@ -108,6 +125,16 @@ for _name in ("SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT"):
     signal.signal(getattr(signal, _name), _hold)
 
 try:
+    if tether_fd is not None:
+        # Before the workload, so there is no moment it runs untethered. In this process's
+        # group (no new session): its `killpg(0, ...)` is the jail's group, and while it lives
+        # that group's number can't be handed to anyone else.
+        subprocess.Popen(
+            [sys.executable, "-c", TETHER, str(tether_fd)],
+            pass_fds=(tether_fd,),
+            stdin=subprocess.DEVNULL,
+        )
+        os.close(tether_fd)
     proc = subprocess.Popen(argv)
 except OSError as exc:
     os.write(ready_fd, ("err:%s: %s" % (type(exc).__name__, exc)).encode())
@@ -161,15 +188,22 @@ def partial_path(jail_dir: str) -> str:
     return exit_path(jail_dir) + _PARTIAL_SUFFIX
 
 
-def wrapper_argv(python: str, jail_dir: str, ready_fd: int, argv: Sequence[str]) -> tuple[str, ...]:
-    """`python -c WRAPPER_SOURCE <exit file> <ready fd> <argv...>`.
+def wrapper_argv(
+    python: str, jail_dir: str, ready_fd: int, argv: Sequence[str], tether_fd: int | None = None
+) -> tuple[str, ...]:
+    """`python -c WRAPPER_SOURCE <exit file> <ready fd> <tether fd or -> <argv...>`.
+
+    `tether_fd` (decision-167) is the read end of the launch's tether, inherited by the
+    wrapper, which hands it to the watcher it starts before the workload; `-` when the launch
+    is not tethered.
 
     `argv` is the jail's already-compiled argv and is passed through
     untouched -- the wrapper prepends nothing to it, which is what keeps
     `handle.wrap_prefix` (derived from the jail's own `wrap`) a faithful
     prefix for `exec` to reproduce.
     """
-    return (python, "-c", WRAPPER_SOURCE, exit_path(jail_dir), str(ready_fd), *argv)
+    tether = "-" if tether_fd is None else str(tether_fd)
+    return (python, "-c", WRAPPER_SOURCE, exit_path(jail_dir), str(ready_fd), tether, *argv)
 
 
 def clear_exit_status(jail_dir: str) -> None:

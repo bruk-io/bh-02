@@ -749,6 +749,20 @@ be the copy decision-152 deleted the event stream for).
 - **Grades**: `fs_read`, `fs_write` and `network` all `enforced`, and nothing
   else claimed — `limits`, `env`, `channel_exclusivity` and `control` fall to
   §7's coverage fill unless another mechanism in the stack claims them.
+  **`enforced` is against the workload, not the host (2026-09-30).** Every
+  carve-out is a mount on the host's directory entry, and the kernel detaches a
+  mount inside the jail when the host replaces or removes that entry. So two
+  things done on the host lift a `write_denies` carve-out for the rest of that
+  jail's life: renaming a file over a denied path (a host `git config` writes
+  `.git/config` by rename; editors save by rename), and removing the empty
+  directory an absent one is held by (the bullet on absent `write_denies`
+  above). The workload can then write that path (measured in bh-02:
+  `test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail`).
+  A new jail holds it again. The same is true of a masked `read_denies` file,
+  which is why an embedder that holds secrets that way may grade `fs_read`
+  lower (bh-02 does); nothing in this mechanism can see the host do it, and the
+  grade is not lowered for it: what it grades is whether the workload can get
+  past a carve-out by itself, and it can't.
   `network` is deny-**all**: the netns is the whole enforcement, so a spec
   granting `allowed_domains` is refused (`NetworkUnsupported`) rather than run
   under a claim this mechanism cannot make. Per-domain egress needs
@@ -774,7 +788,10 @@ be the copy decision-152 deleted the event stream for).
   terminal) buys nothing against an `IoPolicy` that gives the workload
   `/dev/null` and no controlling terminal. `--die-with-parent` would be a
   second, mechanism-owned control path that no grade covers and no teardown
-  rung accounts for. And no `--tmpfs /tmp`: §5 puts temp space inside
+  rung accounts for, and it would not do what its name suggests: bwrap's
+  parent is the launcher's exit wrapper, which is detached and outlives the
+  embedder. A jail that should end with its embedder is a tethered launch
+  (§8, decision-167), which every stack gets, not a bwrap flag. And no `--tmpfs /tmp`: §5 puts temp space inside
   `write_allows`, and handing the jail writable space nothing granted would
   make the `fs_write` claim false by exactly one directory.
 
@@ -943,6 +960,44 @@ allowlist control is the only test that launches twice into one directory — bu
 the defect was never platform-specific, and its regression test
 (`test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status`) runs on
 the empty stack, everywhere.
+
+**A launch may be tethered to the process that made it (2026-09-30,
+decision-167).** `launch(..., tether=fd)` takes the read end of a pipe whose
+write end the embedder keeps and nothing else holds. The exit wrapper starts a
+watcher before the workload, in the workload's own process group, that blocks
+on that fd; once every write end is closed — the embedder closed it after
+`kill`, or the kernel closed it because the embedder died, `SIGKILL` included
+— the watcher sends `SIGKILL` to its group. The rung is the ladder's last one,
+taken because nobody is left to run the others or read a `KillReport`. It
+exists because a detached jail (`start_new_session=True`, the launcher's whole
+shape) outlives an embedder that dies without calling `kill`, and a program the
+workload left running in the background kept its grants with nobody holding
+the handle (measured in bh-02: a killed harness's background program kept
+writing the project). Five things about it are constraints, not description:
+
+- **It is a pipe, not `PR_SET_PDEATHSIG`.** bwrap's `--die-with-parent` is
+  still not emitted (§6): bwrap's parent is the exit wrapper, which is detached
+  and survives the embedder, and a death signal follows the *thread* that
+  forked, which in an embedder calling `launch` from a worker thread is not the
+  embedder's life. A pipe's write end belongs to the process.
+- **The watcher is a member of the group it ends**, so the group's number can't
+  be handed to a stranger while it waits, and it outlives the wrapper: on darwin
+  the workload is the wrapper's direct child and may exit by itself the moment
+  its embedder goes, leaving a background program in a leaderless group.
+- **It ignores `SIGINT` and nothing else.** `interrupt` is for the workload;
+  `SIGTERM` keeps its default, so `kill`'s first rung ends the watcher like any
+  member and the verification rung still sees the group empty.
+- **It reaches the workload group, nothing else.** Under bwrap that is
+  everything: the namespace's init is in the group, and when it dies the kernel
+  ends every process in the namespace, one that called `setsid()` included.
+  Under seatbelt, which has no namespace, a process that left the group (a
+  `setsid()`, a double-fork daemon) is out of reach — of `kill`'s ladder too,
+  which is group-shaped. Exec siblings and `JAIL_LIFETIME` helpers are groups of
+  their own and are not tethered.
+- **It does not serialize.** An fd can't cross `to_dict`; a rehydrated `Handle`
+  has no tether and needs none, since the process that held the write end is
+  the one whose death it watched. `tether=None`, the default, launches exactly
+  as before.
 
 A launcher refuses a `CompiledJail` whose `requires` exceed its
 `capabilities`. Refusal names the missing feature.

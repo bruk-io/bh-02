@@ -117,7 +117,11 @@ the preset that composes it. It is the Linux sibling of `scratch_darwin()`:
 `env_scrub`, `limits` `best_effort` because `rlimits` reaches cpu and
 nothing else. It is deliberately **not** `SPEC.md` §7's `strict()`, which
 also names `systemd_scope` and `pasta`; neither exists, and a stack shipped
-under that name would be claiming them.
+under that name would be claiming them. Its `enforced` holds against the
+workload, not the host: a carve-out is a mount on a host directory entry, so a
+file the host renames over a denied path (`git config` rewrites `.git/config`
+that way) or a held directory the host removes is writable inside the jail
+until a new one starts (`SPEC.md` §6, bwrap's grades).
 
 Three things about it are worth knowing before you compose it, and all three
 are refusals rather than surprises:
@@ -166,6 +170,16 @@ on the HOST, parents included, and outlives the jail; the embedder removes it
 after teardown, never during (a mount point removed on the host is detached
 inside the jail). `scripts/linux-jail-check` at the workspace root is this
 workspace's container run of the bwrap tiers.
+
+**A jail can end with its embedder, 2026-09-30 (decision-167).** A launch is
+detached, so a jail outlived an embedder that died without calling `kill`, and
+a program its workload left in the background kept running with its grants.
+`launch(..., tether=fd)` takes the read end of a pipe the embedder keeps the
+write end of: when that closes (the embedder closed it, or died, `SIGKILL`
+included), a watcher in the jail's process group sends the group `SIGKILL`.
+Under `bwrap` that ends the whole pid namespace; under seatbelt a process that
+left the group (`setsid()`) is out of its reach, as it is of `kill`'s.
+`tests/integration/test_tether.py` kills a launching process to show it.
 
 ## Development
 

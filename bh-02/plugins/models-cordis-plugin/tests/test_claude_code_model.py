@@ -647,6 +647,32 @@ async def test_without_a_credential_the_step_names_the_file_it_read_and_what_is_
     assert "local.env" not in lacking.message  # the row reads other.env, so that is the file named
 
 
+async def test_a_credential_added_mid_session_is_read_at_the_next_step(tmp_path: Path) -> None:
+    """With no credential each step fails before anything starts, so the next one looks again:
+    once the person has put the file where the row looks (on Linux, after `/release` freed the
+    jail's placeholder there), the next message starts Claude Code with it. No restart."""
+    held = tmp_path / "local.env"
+    held.mkdir()  # the jail's placeholder: not a file, so not a credential
+    config = ClaudeCodeConfig(state=str(tmp_path / "state"), searched=(str(held),), cwd=str(tmp_path))
+    opened: list[FakeClaudeCode] = []
+
+    def open_(options: Any) -> FakeClaudeCode:
+        opened.append(FakeClaudeCode(options, [FakeStep([_text("Hello")])]))
+        return opened[-1]
+
+    model = ClaudeCodeModel(config, open_)
+    with pytest.raises(ClaudeCodeError) as raised:
+        async for _ in model.complete([_SYSTEM, {"role": "user", "content": "hi"}], [_SPEC]):
+            pass
+    assert raised.value.kind == "authentication_failed" and not opened
+    held.rmdir()
+    held.write_text(f"{TOKEN_VARIABLE}=sentinel-not-a-real-token\n")
+    said = [dict(c) async for c in model.complete([_SYSTEM, {"role": "user", "content": "hi"}], [_SPEC])]
+    assert _said(said) == "Hello"
+    (fake,) = opened
+    assert fake.options.env[TOKEN_VARIABLE] == "sentinel-not-a-real-token"
+
+
 def test_a_refused_credential_says_what_to_do_in_bh_02_s_words_only() -> None:
     error = failure_of("authentication_failed", "Not logged in · Please run /login")
     assert error.kind == "authentication_failed" and "claude setup-token" in error.message

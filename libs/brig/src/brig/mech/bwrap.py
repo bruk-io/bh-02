@@ -183,7 +183,10 @@ have to be rediscovered:**
 - `--die-with-parent`. A second, mechanism-owned control path that nothing
   in the report grades and no teardown rung accounts for. Control is the
   handle's, and a jail that also dies for its own reasons makes
-  `KillReport`'s verification rung answer a question it was not asked.
+  `KillReport`'s verification rung answer a question it was not asked. Nor
+  would it end the jail with its embedder: bwrap's parent is the launcher's
+  exit wrapper, which is detached and outlives it. That is a tethered launch
+  (SPEC.md section 8, decision-167), the launcher's, for every stack.
 - `--tmpfs /tmp`. SPEC.md §5: temp space is per-jail and INSIDE
   `write_allows`. Handing the jail writable space no `write_allows` entry
   named would make the `fs_write` claim false by exactly one directory.
@@ -254,7 +257,10 @@ _FS_WRITE_DETAIL: Final[str] = (
     "named: the declared LISTEN channel's own endpoint DIRECTORY, bound "
     "read-write because a jail cannot bind a socket into a directory it "
     "cannot write, and a bind mount cannot name a socket that does not "
-    "exist yet the way seatbelt's path rule can."
+    "exist yet the way seatbelt's path rule can. Every carve-out is a mount on "
+    "a host directory entry, so enforced is against the workload, not the host: a "
+    "file the host renames over a denied path, or a held directory it removes, is "
+    "writable inside the jail until a new jail starts."
 )
 
 #: Must contain the literal token "unshare": the whole network claim is the

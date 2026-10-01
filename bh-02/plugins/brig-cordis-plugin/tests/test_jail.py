@@ -2,17 +2,22 @@
 bh-02/app/tests/test_python_cells.py's: they need a kernel, which is another plugin."""
 
 import asyncio
+import contextlib
 import os
 import signal
+import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from brig_cordis_plugin import (
+    MARK,
     SYSTEM_READABLE,
     BrigConfig,
     BrigJail,
@@ -20,6 +25,7 @@ from brig_cordis_plugin import (
     git_author,
     graded,
     held,
+    holding,
     identity,
     jail,
     made_by_the_jail,
@@ -30,6 +36,7 @@ from brig_cordis_plugin import (
     recorded,
     recorded_group,
     records_dir,
+    released_for,
     remove_placeholders,
     self_modify_denied,
     spec_for,
@@ -167,11 +174,23 @@ def test_a_linux_jail_holds_the_secrets_under_a_writable_root_and_says_so() -> N
     assert held(spec) == ("/w/app/local.env", "/w/app/pkg/local.env")  # not ~/.ssh, not /src/bh
     notice = notice_for("linux", held(spec))
     assert "/w/app/local.env, /w/app/pkg/local.env" in notice and "renaming a new file over it" in notice
-    assert "`/restart kernel`" in notice
+    assert "`/restart kernel`" in notice and "`/release`" in notice
     assert notice_for("darwin", held(spec)) == "" and notice_for("linux", ()) == ""
     report = {"fs_read": "enforced", "fs_write": "enforced"}
     assert graded(report, held(spec)) == {"fs_read": "best_effort", "fs_write": "enforced"}
     assert graded(report, ()) == report
+
+
+def test_release_says_where_the_credential_can_go_now_and_what_another_session_still_holds() -> None:
+    assert holding(("/w/a/local.env", "/w/local.env", "/x/local.env"), ("/w/.envrc", "/w/local.env")) == (
+        "/w/local.env",
+    )  # only what the jail mounts over
+    free = released_for(["/w/local.env"], [])
+    assert free.startswith("Nothing holds /w/local.env until the kernel starts again")
+    assert "`/restart model`" in free and "stays held" not in free
+    still = released_for([], ["/w/local.env"])
+    assert still.startswith("/w/local.env stays held") and "/release again" in still
+    assert released_for([], []) == ""
 
 
 def test_a_linux_jail_carries_the_person_s_git_identity_and_nothing_else_of_their_config() -> None:
@@ -275,6 +294,63 @@ async def test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_re
         await started.stop()
 
 
+_LISTEN_THEN_APPEND = """
+import socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+while True:
+    time.sleep(0.1)
+    try:
+        with open(sys.argv[2], "a") as config:
+            config.write("# planted by the jail\\n")
+    except OSError:
+        pass
+"""
+
+
+async def test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What `fs_write`'s `enforced` does not cover, measured so the docs stay honest: the jail
+    holds `.git/config` read-only with a bind mount on its path. A host `git config` saves the
+    file by renaming a new one over it, which detaches that mount inside the jail, and the
+    workload can then write the file. A new jail (`/restart kernel`) holds it again."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    made = await asyncio.create_subprocess_exec("git", "init", "-q", str(project))
+    assert await made.wait() == 0
+    config = project / ".git" / "config"
+
+    async def jailed() -> Any:
+        sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+        endpoint = str(sock_dir / "k.sock")
+        argv = [sys.executable, "-I", "-c", _LISTEN_THEN_APPEND, endpoint, str(config)]
+        return await BrigJail(BrigConfig(), Layers()).start(argv, cwd=str(project), endpoint=endpoint)
+
+    started = await jailed()
+    try:
+        await asyncio.sleep(0.5)
+        assert "planted" not in config.read_text()  # held
+        git = await asyncio.create_subprocess_exec("git", "-C", str(project), "config", "user.name", "Pat")
+        assert await git.wait() == 0
+        await asyncio.sleep(0.5)
+        assert "planted" in config.read_text()  # the host's rename lifted the deny
+    finally:
+        await started.stop()
+    git = await asyncio.create_subprocess_exec("git", "-C", str(project), "config", "--unset", "user.name")
+    assert await git.wait() == 0
+    config.write_text(config.read_text().replace("# planted by the jail\n", ""))
+    started = await jailed()
+    try:
+        await asyncio.sleep(0.5)
+        assert "planted" not in config.read_text()  # a new jail holds it again
+    finally:
+        await started.stop()
+
+
 def test_a_jail_s_record_of_its_placeholders_is_in_bh_02_s_state_directory() -> None:
     assert records_dir({"XDG_STATE_HOME": "/x"}, "/home/me") == "/x/bh-02/jails"
     assert records_dir({}, "/home/me") == "/home/me/.local/state/bh-02/jails"
@@ -284,9 +360,9 @@ def test_a_jail_s_record_of_its_placeholders_is_in_bh_02_s_state_directory() -> 
 
 
 def test_only_a_placeholder_still_as_the_jail_made_it_is_removed(tmp_path: Path) -> None:
-    """Empty and unchanged: removed, deepest first (one recorded before the jail was up, by path
-    alone). One the person put a file in, and one they replaced with a directory of their own
-    (even on the same inode), are kept."""
+    """Empty and unchanged: removed, deepest first. One the person put a file in, one they
+    replaced with a directory of their own (even on the same inode), and one recorded by path
+    alone (an older record, with nothing to prove a jail made it) are kept."""
     ours, early, filled, theirs = (tmp_path / n for n in ("ours", "early", "filled", "theirs"))
     for path in (ours, early / "inner", filled, theirs):
         path.mkdir(parents=True)
@@ -297,11 +373,13 @@ def test_only_a_placeholder_still_as_the_jail_made_it_is_removed(tmp_path: Path)
     time.sleep(0.05)  # the person's own comes later: a later change time, on the kernel's clock tick
     theirs.mkdir()
     remove_placeholders(made)
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["filled", "theirs"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["early", "filled", "theirs"]
+    assert (early / "inner").is_dir()
 
 
 def test_a_placeholder_is_known_by_the_jail_s_mark_else_by_its_identity() -> None:
-    assert still_made(None, "1:2", None)  # recorded before the jail was up: by path alone
+    assert not still_made(None, "1:2", None)  # by path alone: nothing proves a jail made it
+    assert not still_made(None, "1:2", "bh-j-1")
     assert still_made("mark:bh-j-1", "1:2", "bh-j-1") and not still_made("mark:bh-j-1", "1:2", None)
     assert not still_made("mark:bh-j-1", "1:2", "bh-j-2")  # another jail's
     assert still_made("1:2", "1:2", None) and not still_made("1:2", "1:3", None)
@@ -342,10 +420,12 @@ asyncio.run(main())
 
 
 # A bh-02 killed while its kernel runs a cell's background program, which keeps trying to write
-# under `.claude/` (Claude Code would run hooks from its settings): the real kernel, in the jail.
+# under `.claude/` (Claude Code would run hooks from its settings) and says it is alive: the real
+# kernel, in the real jail. argv: the project, then "setsid" to start the program in a session
+# of its own (out of the jail's process group), else "group". It says "started" and waits to be
+# killed.
 _KILLED_WITH_A_BACKGROUND_CELL = """
-import asyncio, os, sys
-from pathlib import Path
+import asyncio, sys, time
 from brig_cordis_plugin import BrigConfig, BrigJail
 from kernel_cordis_plugin import Kernel, KernelConfig
 
@@ -353,9 +433,10 @@ class Layers:
     paths, credentials, secrets = (), (), ()
 
 LOOP = (
-    "import os, time\\n"
+    "import os, sys, time\\n"
+    "open(sys.argv[1] + '.pid', 'w').write(str(os.getpid()))\\n"
     "while True:\\n"
-    "    open('alive', 'w').write(str(time.time()))\\n"
+    "    open(sys.argv[1], 'w').write(str(time.time()))\\n"
     "    try:\\n"
     "        os.makedirs('.claude', exist_ok=True)\\n"
     "        open('.claude/settings.json', 'w').write('{}')\\n"
@@ -367,62 +448,276 @@ LOOP = (
 async def main():
     kernel = Kernel(BrigJail(BrigConfig(), Layers()), KernelConfig(root=sys.argv[1]))
     await kernel.__aenter__()
+    setsid = sys.argv[2] == "setsid"
     cell = (
         "import subprocess, sys\\n"
-        f"subprocess.Popen([sys.executable, '-c', {LOOP!r}], start_new_session=True)\\n"
+        f"subprocess.Popen([sys.executable, '-c', {LOOP!r}, 'alive'], start_new_session={setsid})\\n"
         "print('started')"
     )
     print(await kernel.run(cell), flush=True)
-    os._exit(9)
+    time.sleep(600)
 
 asyncio.run(main())
 """
 
 
-async def test_a_killed_session_s_jail_that_lives_on_keeps_its_placeholders(
+async def _killed_with_a_background_cell(project: Path, how: str) -> None:
+    """Run `_KILLED_WITH_A_BACKGROUND_CELL` in `project`, see the program write, then `SIGKILL`
+    the stand-in bh-02, as a crash or `kill -9` would end it."""
+    killed = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        _KILLED_WITH_A_BACKGROUND_CELL,
+        str(project),
+        how,
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert killed.stdout is not None
+    said = await asyncio.wait_for(killed.stdout.readline(), 30)
+    assert b"started" in said, said
+    alive = project / "alive"
+    for _ in range(50):
+        if alive.exists():
+            break
+        await asyncio.sleep(0.1)
+    killed.kill()
+    assert await killed.wait() == -signal.SIGKILL
+
+
+async def _still_writing(alive: Path) -> bool:
+    last = alive.read_text()
+    await asyncio.sleep(0.6)
+    return alive.read_text() != last
+
+
+async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what_it_left(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The sweep's lock dies with bh-02, not with its jail. Killed while a program a cell started
-    runs, bh-02's worker exits but its bubblewrap does not: the program keeps the jail alive,
-    mounts and all (measured with the real kernel). Removing its `.claude/` placeholder then would
-    detach that mount, and the program would write `.claude/settings.json` on the host, which
-    Claude Code runs hooks from. So a record names its bubblewrap process, and the next jail's
-    sweep leaves what a live one holds."""
+    """bh-02 killed with SIGKILL while a program a cell started runs in the background, in a
+    session of its own: the jail ends with bh-02 (brig's tether: the kernel closes bh-02's end,
+    and brig's watcher kills the jail's process group, bubblewrap's namespace with it, so a
+    program that left the group goes too). Its record now names a group that is gone, so the
+    next jail's sweep removes its placeholders and the record."""
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
     project.mkdir()
-    killed = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", _KILLED_WITH_A_BACKGROUND_CELL, str(project), stdout=asyncio.subprocess.PIPE
-    )
-    said, _ = await killed.communicate()
-    assert killed.returncode == 9 and b"started" in said, said
+    await _killed_with_a_background_cell(project, "setsid")
     (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
     group = recorded_group(record.read_text())
     assert group is not None
+    await asyncio.sleep(1.0)
     try:
-        await asyncio.sleep(1.0)
-        alive = project / "alive"
-        last = alive.read_text()
-        await asyncio.sleep(0.5)
-        assert alive.read_text() != last  # the program lives on, in the killed session's jail
+        assert not await _still_writing(project / "alive")  # the program is gone
+        with pytest.raises(ProcessLookupError):
+            os.killpg(group, 0)  # and the whole jail
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(group, signal.SIGKILL)
+    assert (project / ".claude").is_dir() and not list((project / ".claude").iterdir())
+    one = BrigJail(BrigConfig(), Layers())
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()  # the sweep ran
+    assert sorted(p.name for p in project.iterdir()) == ["alive", "alive.pid"]
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
+
+
+async def test_a_killed_bh_02_s_seatbelt_jail_ends_with_it_but_not_a_program_that_left_its_group(
+    tmp_path: Path,
+) -> None:
+    """darwin: bh-02 killed with SIGKILL takes a program a cell left running with it (brig's
+    tether kills the jail's process group). seatbelt has no namespace, so a program a cell
+    started in a session of its own is out of that group and lives on, as it does past a normal
+    stop (brig's teardown is group-shaped too): measured, so the README's gap stays honest."""
+    if sys.platform != "darwin":
+        pytest.skip("seatbelt is darwin's")
+    grouped, setsid = tmp_path / "grouped", tmp_path / "setsid"
+    grouped.mkdir()
+    setsid.mkdir()
+    await _killed_with_a_background_cell(grouped, "group")
+    await _killed_with_a_background_cell(setsid, "setsid")
+    programs = [int((where / "alive.pid").read_text()) for where in (grouped, setsid)]
+    await asyncio.sleep(1.0)
+    try:
+        assert not await _still_writing(grouped / "alive")
+        with pytest.raises(ProcessLookupError):
+            os.kill(programs[0], 0)
+        assert await _still_writing(setsid / "alive")  # the gap
+    finally:
+        for program in programs:  # neither outlives the test, whatever it found
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(program, signal.SIGKILL)
+
+
+async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tether ends a killed bh-02's jail at once, but not before the next jail can look
+    (and a jail brig launched some other way has none): a record whose process group runs is
+    left, placeholders and all, since removing one would detach that jail's mount. A process
+    group of the test's own stands in for the jail."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    held = project / ".claude"
+    held.mkdir(parents=True)
+    records = tmp_path / "state" / "bh-02" / "jails"
+    records.mkdir(parents=True)
+    living = await asyncio.create_subprocess_exec("sleep", "60", start_new_session=True)
+    record = records / "bh-j-living.json"
+    record.write_text(record_text([(str(held), identity(held.stat()))], living.pid))
+    try:
         one = BrigJail(BrigConfig(), Layers())
         sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
         endpoint = str(sock_dir / "k.sock")
         argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
-        await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()  # the sweep ran
-        await asyncio.sleep(1.0)  # were its placeholder removed, the program would write under it now
-        assert (project / ".claude").is_dir() and not list((project / ".claude").iterdir())
-        assert record.exists()  # kept for a sweep once that jail has ended
+        await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
+        assert held.is_dir() and record.exists()
     finally:
-        os.killpg(group, signal.SIGKILL)  # the killed session's jail, and its program
-    await asyncio.sleep(0.5)
+        living.kill()
+        await living.wait()
     one = BrigJail(BrigConfig(), Layers())
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
     await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
-    assert sorted(p.name for p in project.iterdir()) == ["alive"]  # now it is gone, so are they
+    assert not held.exists() and not record.exists()  # its group gone, so are they
+
+
+# A bh-02 that crashes the moment it would start bubblewrap: what its jail holds on the host is
+# there, and nothing of it was mounted yet.
+_CRASH_AT_LAUNCH = """
+import os, sys, tempfile
+from pathlib import Path
+import asyncio
+from brig.run import SubprocessLauncher
+from brig_cordis_plugin import BrigConfig, BrigJail
+
+class Layers:
+    paths, credentials, secrets = (), (), ()
+
+def crash(self, *args, **kwargs):
+    os._exit(9)
+
+SubprocessLauncher.launch = crash
+sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
+argv = [sys.executable, "-c", "pass"]
+asyncio.run(BrigJail(BrigConfig(), Layers()).start(argv, cwd=sys.argv[1], endpoint=sock))
+"""
+
+
+async def test_a_placeholder_is_made_and_marked_before_bubblewrap_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The jail makes each placeholder itself, marked as its own (`MARK`) the moment it is made,
+    and only then starts bubblewrap, which finds it there. So a bh-02 that dies before its jail
+    is up leaves only placeholders the next sweep can prove are a jail's, and removes."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    crash = await asyncio.create_subprocess_exec(sys.executable, "-c", _CRASH_AT_LAUNCH, str(project))
+    assert await crash.wait() == 9
+    (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
+    left = sorted(p.name for p in project.iterdir())
+    assert {".claude", ".vscode", ".envrc", ".git"} <= set(left), left
+    if sys.platform == "linux":  # os.getxattr is Linux's
+        assert {os.getxattr(project / name, MARK).decode() for name in left} == {record.stem}
+    one = BrigJail(BrigConfig(), Layers())
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
+    assert list(project.iterdir()) == [] and not record.exists()
+
+
+async def test_a_jail_that_fails_to_launch_leaves_nothing_on_the_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its placeholders are made before bubblewrap starts, so a launch that fails (or is
+    cancelled) removes them again, with its record, as a stop would."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def refused(self: object, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("no launch today")
+
+    monkeypatch.setattr("brig.run.SubprocessLauncher.launch", refused)
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    with pytest.raises(RuntimeError, match="no launch today"):
+        await BrigJail(BrigConfig(), Layers()).start(
+            [sys.executable, "-c", "pass"], cwd=str(project), endpoint=str(sock_dir / "k.sock")
+        )
+    assert list(project.iterdir()) == []
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
+
+
+async def test_a_jail_start_cancelled_while_it_launches_ends_what_the_launch_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launch runs in a thread, which a cancellation doesn't stop: the start waits for it,
+    ends the jail it started, and only then removes the placeholders and closes the tether."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    real = subprocess.Popen
+    groups: list[int] = []
+
+    def slow(args: Sequence[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        if any("brig exit wrapper" in str(arg) for arg in args):  # brig's launch, in its thread
+            time.sleep(0.5)
+            launched = real(args, **kwargs)
+            groups.append(launched.pid)  # a new session: its pid is its group
+            return launched
+        return real(args, **kwargs)
+
+    monkeypatch.setattr("subprocess.Popen", slow)
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    starting = asyncio.ensure_future(
+        BrigJail(BrigConfig(), Layers()).start(argv, cwd=str(project), endpoint=endpoint)
+    )
+    await asyncio.sleep(0.1)
+    starting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await starting
+    assert groups  # the start returned only once the launch had
+    await asyncio.sleep(1.0)
+    (group,) = groups
+    with pytest.raises(ProcessLookupError):
+        os.killpg(group, 0)
+    assert list(project.iterdir()) == []
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
+
+
+async def test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record by path alone (what a crash between writing a record and marking left, before
+    placeholders were marked as they were made): the person has since made an empty directory
+    at one of its paths. The sweep can't tell it from a placeholder, so it leaves it, and the
+    record goes."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    mine = project / "build"
+    mine.mkdir(parents=True)  # the person's, empty
+    records = tmp_path / "state" / "bh-02" / "jails"
+    records.mkdir(parents=True)
+    record = records / "bh-j-crashed.json"
+    record.write_text(record_text([(str(mine), None), (str(project / "gone"), None)]))
+    one = BrigJail(BrigConfig(), Layers())
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
+    assert mine.is_dir() and not record.exists()
 
 
 def test_a_record_names_the_jail_s_process_group() -> None:

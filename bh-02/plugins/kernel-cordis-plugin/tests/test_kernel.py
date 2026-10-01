@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from cordis import Effects, Runtime, bind, component
+from cordis.testing import drive
 from kernel_cordis_plugin import (
     PYTHON,
     UNENFORCED,
@@ -21,6 +22,7 @@ from kernel_cordis_plugin import (
     Unjailed,
     is_confined,
     kernel,
+    release,
     worker_argv,
 )
 
@@ -233,3 +235,59 @@ async def test_a_worker_whose_parent_is_gone_before_its_hello_exits() -> None:
         assert asyncio.get_running_loop().time() - started < 5  # its parent, not its deadline
     finally:
         shutil.rmtree(where, ignore_errors=True)
+
+
+class Holding(Unjailed):
+    """A jail that holds something on the host while it runs, and says what `release` freed."""
+
+    def __init__(self) -> None:
+        self.released = 0
+
+    async def release(self) -> str:
+        self.released += 1
+        return "Nothing holds /w/local.env until the kernel starts again."
+
+
+async def test_release_ends_the_worker_now_and_the_next_cell_starts_another() -> None:
+    """`/release`: the worker ends at once (so its jail lets go of what it holds on the host),
+    the jail says what it freed, and the next cell starts a new worker, told its variables went."""
+    jail = Holding()
+    async with Kernel(jail, KernelConfig()) as k:
+        await k.run("kept = 1")
+        said = await k.release()
+        assert said.startswith("The kernel is stopped")
+        assert said.endswith("Nothing holds /w/local.env until the kernel starts again.")
+        assert jail.released == 1
+        again = await k.run("'kept' in globals()")
+        assert again.startswith("(the kernel was started again") and again.endswith("False")
+
+
+async def test_release_while_a_cell_runs_leaves_it_alone_and_says_so() -> None:
+    jail = Holding()
+    async with Kernel(jail, KernelConfig()) as k:
+        running = asyncio.ensure_future(k.run("import time; time.sleep(1); 'done'"))
+        await asyncio.sleep(0.3)
+        said = await k.release()
+        assert "A cell is running" in said and jail.released == 0
+        assert await running == "'done'"
+
+
+async def test_an_unjailed_kernel_holds_nothing_to_release() -> None:
+    assert await Unjailed().release() == ""
+
+
+async def test_the_release_row_offers_slash_release_over_the_kernel() -> None:
+    registered: list[tuple[Mapping[str, Any], Any]] = []
+
+    class Commands:
+        def register(self, spec: Mapping[str, Any], run: Any) -> Any:
+            registered.append((spec, run))
+            return lambda: None
+
+    async with Kernel(Holding(), KernelConfig()) as k:
+        effects = await drive(release(kernel=k, commands=Commands()))
+        assert [e.name for e in effects] == ["acquire"]
+        effects[0].args[0](*effects[0].args[1:])
+        ((spec, run),) = registered
+        assert spec["name"] == "release" and "credential" in spec["help"]
+        assert (await run("")).startswith("The kernel is stopped")

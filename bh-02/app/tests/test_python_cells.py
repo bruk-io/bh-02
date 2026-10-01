@@ -3,16 +3,20 @@ is a fake, which calls scripted cells. A cell is plain Python: it reads and writ
 runs programs itself, the jail decides what it may touch, and unjailed every cell is asked about."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from bh_02.bootstrap import credential_files, layers, run, unreadable
+from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group
 from cordis import Row
+from kernel_cordis_plugin import Kernel, KernelConfig
 from models_cordis_plugin.local_env import token_file
 
 # darwin's jail (seatbelt) reads by denylist: everything but the secrets. Linux's (bubblewrap)
@@ -379,6 +383,61 @@ async def test_a_jailed_cell_cannot_plant_a_credential_where_the_model_row_looks
     assert sorted(str(p) for p in project.rglob("*")) == before  # no file planted, no placeholder left
     assert real.read_text() == "NOT_A_REAL_CREDENTIAL=placeholder\n"
     assert token_file(None, credentials) == real
+
+
+@dataclass(frozen=True)
+class _Layers:
+    paths: tuple[str, ...] = ()
+    credentials: tuple[str, ...] = ()
+    secrets: tuple[str, ...] = ()
+
+
+async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_cell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`/release` (the kernel's `release()`): the jail holding an absent `local.env` where the
+    model row looks ends, and with it the hold, so the person can create the file. A cell run
+    before they do holds it again (that is all `/restart kernel` would have given them); after
+    they do, the next cell's jail masks it: it can neither read nor rewrite it."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the hold is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    credential = project / "local.env"
+    jail = BrigJail(BrigConfig(), _Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    reach = (
+        "import os\n"
+        f"for how in ('r', 'w'):\n"
+        "    try:\n"
+        f"        open({str(credential)!r}, how)\n"
+        "        print(how, 'OPENED')\n"
+        "    except OSError as error:\n"
+        "        print(how, type(error).__name__)\n"
+    )
+    async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+        assert credential.is_dir()  # held: the person can't create it
+        (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
+        group = recorded_group(record.read_text())
+        assert group is not None
+        said = await kernel.release()
+        assert f"Nothing holds {credential}" in said, said
+        assert not credential.exists()
+        with pytest.raises(ProcessLookupError):
+            os.killpg(group, 0)  # the jail is gone, not only its worker
+        await kernel.run("1")
+        assert credential.is_dir()  # a cell came first: held again
+        await kernel.release()
+        await kernel.__aexit__(None, None, None)  # `/restart kernel`: stops the jail ...
+        await kernel.__aenter__()  # ... and starts one at once, which holds the path again
+        assert credential.is_dir()
+        await kernel.release()
+        credential.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n")  # never a real one
+        out = await kernel.run(reach)
+        assert "r PermissionError" in out and "w PermissionError" in out, out
+        assert str(credential) in kernel.notice()
+    assert credential.read_text() == "CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n"
+    assert token_file(None, [str(credential)]) == credential
 
 
 @pytest.mark.usefixtures("_needs_a_jail")

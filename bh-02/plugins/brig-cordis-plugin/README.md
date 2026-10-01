@@ -46,35 +46,61 @@ One policy, two stacks (`stack_for`):
   `start` says to install `bubblewrap` or use `kernel:unjailed`.
 
 **Placeholders (Linux).** bubblewrap holds a write-denied path that doesn't exist with an empty,
-read-only directory mounted there, and the mount point is a real directory it makes on the host:
-a placeholder. So while a kernel runs, `.envrc/`, `.vscode/`, `.idea/`, `.claude/`, an absent
+read-only directory mounted there, and the mount point is a real directory on the host, which
+the jail makes for it: a placeholder. So while a kernel runs, `.envrc/`, `.vscode/`, `.idea/`, `.claude/`, an absent
 `local.env/` where bh-02 looks for its credential, and in a project that is not a repository
 `.git/`, are empty directories in the project on the host. Where a denied path's parent is
 absent too (`.git/config` with no `.git`), the topmost absent one is held instead (`mountable`),
 so the host's `git init` works while the kernel runs: it fills the empty `.git/` on the host,
 while inside the jail `.git` stays an empty read-only directory until the next kernel start. What a placeholder gets in the way
 of, while it is there: creating that path as a file by hand (`.envrc`, your credential in
-`local.env`: stop bh-02 first). **Removing one while the kernel runs lifts its deny**: the
+`local.env`: `/release` first, below). **Removing one while the kernel runs lifts its deny**: the
 mount is detached inside the jail, and a cell can then create and write the path (brig SPEC.md,
 decision-164; `test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it`),
 so nothing here removes one early, and neither should you.
+
+**Adding your credential mid-session (`/release`).** Where bh-02 looks for its credential and
+there is none, the jail holds the path with a placeholder, so you can't create `local.env` there
+while the kernel runs. `/release` (the `kernel:release` row) ends the kernel's worker and its
+jail now; the jail's stop removes its placeholders (when no other bh-02 jail of yours runs), and
+`release()` sweeps what jails that are gone left, then says which of those paths are free and
+which another session's jail still holds. Create the file then, and send your message: the model
+row reads it at its next start (with no credential, every step starts afresh, so the next one
+does; a model already running keeps the one it started with until `/restart model`). The next
+cell starts a new jail, which masks the file (`/dev/null` over it): no cell reads or rewrites it.
+No cell gets a window: none runs while the path is free, and a cell that runs before you create
+the file starts a jail that holds it again (`/release` again). `/restart kernel` is not the step:
+it stops and starts the jail at once, holding the path again before you could create anything
+(`test_on_linux_release_frees_where_the_model_row_looks_until_the_next_cell`).
 
 When they go: the jail removes the ones it made once brig has verified the worker is gone and
 no other bh-02 jail of the same user is running (a shared `flock` on
 `/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken exclusively to clean up: a
 second session in the same project binds the first one's placeholders read-only, and removing
-them would detach those binds). Each jail records what it made before bubblewrap makes it, in
-bh-02's state directory (`$XDG_STATE_HOME/bh-02/jails/`, else `~/.local/state/bh-02/jails/`,
-one file per jail). Once bubblewrap is started the record names its process group, and once the
-jail is up the jail marks each placeholder as its own (an extended attribute,
-`user.bh-02.placeholder`, holding the jail's id; where the filesystem takes none, the record
-keeps the directory's inode and change time instead). A session that crashed, or stopped while
-another ran, leaves its record, and the next bh-02 jail to start with none running removes what
-it names: only an empty directory still marked as that jail's, never one the person has put
-something in or made again since. The lock that says "none running" dies with bh-02, not with
-its jail: a program a cell left running keeps a killed session's bubblewrap alive, mounts and
-all (measured: `test_a_killed_session_s_jail_that_lives_on_keeps_its_placeholders`). So a record
-whose process group still runs is left alone, placeholders and all, until it has ended.
+them would detach those binds). The jail makes its placeholders itself, before bubblewrap
+starts (which then mounts over them as it would over directories it made): first it records
+them, in bh-02's state directory (`$XDG_STATE_HOME/bh-02/jails/`, else
+`~/.local/state/bh-02/jails/`, one file per jail), then makes each and at once marks it as its
+own (an extended attribute, `user.bh-02.placeholder`, holding the jail's id; where the
+filesystem takes none, the record keeps the directory's inode and change time instead). Once
+bubblewrap is started the record names its process group. A session that crashed, or stopped
+while another ran, leaves its record, and the next bh-02 jail to start with none running removes
+what it names: only an empty directory still marked as that jail's, never one the person has
+put something in or made again since, and nothing a record names by path alone (an empty
+directory there may be the person's: `test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove`). A record whose process group still runs is left alone,
+placeholders and all, until it has ended (removing one would detach that jail's mount; the
+moment between a killed bh-02 and its jail ending, below, is such a time:
+`test_the_sweep_leaves_a_record_whose_process_group_still_runs`).
+
+**The jail ends with bh-02.** Each jail is launched tethered (brig SPEC.md section 8,
+decision-167): bh-02 holds the write end of a pipe nothing else holds, and brig's watcher, in the
+jail's process group, kills that group once the pipe closes. bh-02 closes it after stopping the
+jail; when bh-02 dies, however it dies (a crash, `kill -9`), the kernel closes it. So a program a
+cell left running in the background goes with bh-02 instead of keeping its write access to the
+project. On Linux that is the whole jail, a program in a session of its own included: killing
+the group ends bubblewrap's pid namespace, and every process in it
+(`test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what_it_left`, which then
+shows the next jail's sweep removing what the killed one left). On darwin, see the gap below.
 
 On any other platform, `start` refuses and names `kernel:unjailed`. The grades are brig's own, known
 before anything starts: `fs_write`, `network` and `env` enforced, `limits` best-effort, `fs_read`
@@ -90,23 +116,39 @@ cell can read and rewrite what is at that path, and create the absent one (measu
 `test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it`). bubblewrap
 can't prevent it, so `fs_read` grades best-effort while any secret is held that way (`held`),
 and the jail says which paths when the kernel comes up (`notice()`, which `tui:status` shows
-as a note in the conversation): edit them with bh-02 stopped, or `/restart kernel` afterwards,
-which puts a new jail over them. The same is true of every write deny the host replaces by
-rename (`.git/config` after a host `git config`): the jail holds it again only from the next
-kernel start. darwin's seatbelt matches paths, not directory entries, and has no such gap.
+as a note in the conversation): edit them after `/release` (no jail runs until the next cell),
+or `/restart kernel` afterwards, which puts a new jail over them.
+
+**`fs_write` is graded `enforced` on Linux, and holds against cells, not against the host.** A
+write deny is a mount too: an existing path bound read-only over itself (`.git/config`,
+`.git/hooks`, a layer file, a host import path), an absent one a placeholder (above). Two things
+done on the host lift one inside the running jail, until the kernel next starts:
+
+- renaming a file over a denied path: `git config`, `git remote add`, `git push -u` and
+  anything else that sets a value rewrite `.git/config` that way, and editors save by rename
+  (`.vscode/settings.json`, a layer file). A cell can then write that path, `.git/config`
+  included, until the kernel restarts
+  (`test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail`);
+- removing a placeholder: a cell can then create the path.
+
+`/restart kernel` (or `/clear`, or `/release` and the next cell) starts a new jail, which holds
+them again. The grade stays `enforced`, a decision (2026-09-30): it grades what a cell can do
+on its own, and `best_effort` would mark the jail unconfined, so every cell would ask. brig's
+SPEC.md (section 6, bwrap) says the same of its own grade. darwin's seatbelt matches paths, not
+directory entries, and has no such gap.
 
 Known gaps on Linux, beyond darwin's:
 
 - Placeholders (above) are real on the host while a kernel runs, and stay until a bh-02 jail
-  starts or stops with no other running. A crash in the moment between writing the record and
-  starting bubblewrap, or before the placeholders are marked, leaves a record by path alone,
-  which removes any empty directory there (and trusts that no jail of it runs). Without extended
+  starts or stops with no other running. One can stay for good: if bh-02 dies in the instant
+  between making a placeholder and marking it (two system calls apart; on a filesystem without
+  extended attributes, between making it and rewriting the record), it is an empty directory
+  nothing can prove a jail made, so no sweep removes it; remove it by hand (`.envrc/`,
+  `.vscode/`, ...: empty, and while no bh-02 runs). Removing an unproven one could remove the
+  person's own, which is worse. A crash anywhere else leaves only what the next sweep removes
+  (`test_a_placeholder_is_made_and_marked_before_bubblewrap_starts`). Without extended
   attributes, a placeholder is known by inode and change time, which is as fine as the kernel's
   clock tick, and one something was made and removed under since is kept.
-- A killed bh-02's jail lives on while a program a cell started runs in it (the worker exits
-  when its host goes; bubblewrap waits for the rest). Nothing here ends it: it keeps its
-  placeholders, and its record, until it ends by itself or you end it (its process group is in
-  the record).
 - In a git worktree or submodule `.git` is a file, and nothing can be mounted under it, so the
   jail denies writing the `.git` file itself (`mountable`); on darwin only `.git/hooks` and
   `.git/config` are denied, which cannot exist under a file anyway.
@@ -119,6 +161,15 @@ Known gaps on Linux, beyond darwin's:
   `HOME/.gitconfig` in the jail's scratch: no file, and a repository's own identity still wins
   (the host resolved it). The model is told what the jail reads (`reads()`, which
   `context:project` puts in the prompt) and that the home directory is not there.
+
+Known gap on darwin, beyond Linux's: seatbelt has no process namespace, so the jail's processes
+are known by their process group alone. A program a cell starts in a session of its own
+(`subprocess.Popen(..., start_new_session=True)`, `setsid`, a daemon that double-forks) leaves
+that group, and neither stopping the kernel (`/restart kernel`, quitting) nor bh-02 dying ends
+it: it keeps running, still under seatbelt and its write denies, with write access to the
+project, until it ends or you end it
+(`test_a_killed_bh_02_s_seatbelt_jail_ends_with_it_but_not_a_program_that_left_its_group`).
+A program left in the group (`Popen` as it comes, a shell's `&`, `nohup`) ends with the jail.
 
 One known gap: under `python -m bh_02` the project root is itself on `sys.path`. Denying it would
 make the project read-only, so it is left writable, and a module a cell writes at the root

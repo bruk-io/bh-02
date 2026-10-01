@@ -51,6 +51,14 @@ use = "kernel:kernel"
 id = "jail"
 use = "brig:jail"
 
+# `/release`: stops the kernel until the next cell, and with it its jail, which on Linux frees
+# what the jail holds on the host (where bh-02 looks for its credential: how to add one
+# mid-session). A row of its own over `kernel` and `commands`, so the kernel depends on its jail
+# alone.
+[[plugin]]
+id = "release"
+use = "kernel:release"
+
 # The status bar: the session's id, the model and its provider, and the kernel's jail grades
 # (usage is the app's own). A small row over `kernel`, `loader`, `models`, `sessions` and
 # `frame`, so a new kernel (/clear, a new jail) reloads this and never the app.

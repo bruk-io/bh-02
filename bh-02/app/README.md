@@ -91,7 +91,8 @@ In a session: `/help` lists the commands (Ctrl-P opens them as a palette). `/row
 running composition, `/explain ROW` what cordis knows about a row, `/restart ROW` starts one
 afresh, `/clear` starts a new conversation and an empty kernel (and clears the screen, leaving
 one note; the usage totals are the session's and stay), `/model [NAME]` lists the models or
-switches to one. A command never reaches the model; a line like `/tmp/app.py is broken` is
+switches to one, `/release` stops the kernel until the next cell (on Linux, the way to add
+your credential mid-session: the jail frees where bh-02 looks for it). A command never reaches the model; a line like `/tmp/app.py is broken` is
 not a command. Ctrl-C stops a reply, Ctrl-Q (or `/exit`) quits.
 
 The app owns the terminal while it runs, so nothing else writes there: `--trace FILE` appends
@@ -159,6 +160,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `chat` | `chat:session` | |
 | `kernel` | `kernel:kernel` | |
 | `jail` | `brig:jail` | `kernel:unjailed` with `--no-jail` |
+| `release` | `kernel:release` | |
 | `system` | `context:project` | |
 | `commands` | `commands:registry` | |
 | `operator` | `commands:operator` | `layer`, `model_row` (`model`), `forget` (the transcript) |
@@ -199,6 +201,7 @@ agent:loop              binds Loop                         depends on Model, Ker
 brig:jail               binds Jail                         depends on Layers
 kernel:unjailed         binds Jail                         depends on nothing
 kernel:kernel           binds Kernel (the one tool)        depends on Jail
+kernel:release          registers /release                 depends on Kernel, Commands
 tui:app                 binds Input, Output, Frame         depends on nothing (its config)
 tui:status              pushes the status bar's fields     depends on Kernel, Loader, Models, Sessions, Frame, Output
 tui:sessions            pushes the sidebar's list          depends on Sessions, Frame

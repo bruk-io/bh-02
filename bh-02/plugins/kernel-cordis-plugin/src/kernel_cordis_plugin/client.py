@@ -51,6 +51,7 @@ class Jail(Protocol):
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
     def reads(self) -> tuple[str, ...]: ...
+    async def release(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +140,19 @@ class Kernel:
     async def run(self, code: str) -> str:
         """Run one cell and return it as the model reads it."""
         return (await self._execute(code)).text()
+
+    async def release(self) -> str:
+        """End the worker now, and with it its jail, so the jail lets go of what it holds on the
+        host while none runs (`jail.release()` says what that freed: on Linux, where bh-02 looks
+        for its credential). The next cell starts a new worker, told its earlier variables are
+        gone. A cell that is running is left to finish, and nothing ends."""
+        if self._lock.locked():
+            return "A cell is running: stop the reply (Ctrl-C), then /release again."
+        async with self._lock:
+            await self._stop()
+        freed = await self._jail.release()
+        said = "The kernel is stopped; the next cell starts it again, without the earlier variables."
+        return f"{said} {freed}" if freed else said
 
     async def _execute(self, code: str) -> _Cell:
         async with self._lock:
