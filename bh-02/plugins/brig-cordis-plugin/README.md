@@ -71,10 +71,20 @@ jail is up the jail marks each placeholder as its own (an extended attribute,
 keeps the directory's inode and change time instead). A session that crashed, or stopped while
 another ran, leaves its record, and the next bh-02 jail to start with none running removes what
 it names: only an empty directory still marked as that jail's, never one the person has put
-something in or made again since. The lock that says "none running" dies with bh-02, not with
-its jail: a program a cell left running keeps a killed session's bubblewrap alive, mounts and
-all (measured: `test_a_killed_session_s_jail_that_lives_on_keeps_its_placeholders`). So a record
-whose process group still runs is left alone, placeholders and all, until it has ended.
+something in or made again since. A record whose process group still runs is left alone,
+placeholders and all, until it has ended (removing one would detach that jail's mount; the
+moment between a killed bh-02 and its jail ending, below, is such a time:
+`test_the_sweep_leaves_a_record_whose_process_group_still_runs`).
+
+**The jail ends with bh-02.** Each jail is launched tethered (brig SPEC.md section 8,
+decision-167): bh-02 holds the write end of a pipe nothing else holds, and brig's watcher, in the
+jail's process group, kills that group once the pipe closes. bh-02 closes it after stopping the
+jail; when bh-02 dies, however it dies (a crash, `kill -9`), the kernel closes it. So a program a
+cell left running in the background goes with bh-02 instead of keeping its write access to the
+project. On Linux that is the whole jail, a program in a session of its own included: killing
+the group ends bubblewrap's pid namespace, and every process in it
+(`test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what_it_left`, which then
+shows the next jail's sweep removing what the killed one left). On darwin, see the gap below.
 
 On any other platform, `start` refuses and names `kernel:unjailed`. The grades are brig's own, known
 before anything starts: `fs_write`, `network` and `env` enforced, `limits` best-effort, `fs_read`
@@ -103,10 +113,6 @@ Known gaps on Linux, beyond darwin's:
   which removes any empty directory there (and trusts that no jail of it runs). Without extended
   attributes, a placeholder is known by inode and change time, which is as fine as the kernel's
   clock tick, and one something was made and removed under since is kept.
-- A killed bh-02's jail lives on while a program a cell started runs in it (the worker exits
-  when its host goes; bubblewrap waits for the rest). Nothing here ends it: it keeps its
-  placeholders, and its record, until it ends by itself or you end it (its process group is in
-  the record).
 - In a git worktree or submodule `.git` is a file, and nothing can be mounted under it, so the
   jail denies writing the `.git` file itself (`mountable`); on darwin only `.git/hooks` and
   `.git/config` are denied, which cannot exist under a file anyway.
@@ -119,6 +125,15 @@ Known gaps on Linux, beyond darwin's:
   `HOME/.gitconfig` in the jail's scratch: no file, and a repository's own identity still wins
   (the host resolved it). The model is told what the jail reads (`reads()`, which
   `context:project` puts in the prompt) and that the home directory is not there.
+
+Known gap on darwin, beyond Linux's: seatbelt has no process namespace, so the jail's processes
+are known by their process group alone. A program a cell starts in a session of its own
+(`subprocess.Popen(..., start_new_session=True)`, `setsid`, a daemon that double-forks) leaves
+that group, and neither stopping the kernel (`/restart kernel`, quitting) nor bh-02 dying ends
+it: it keeps running, still under seatbelt and its write denies, with write access to the
+project, until it ends or you end it
+(`test_a_killed_bh_02_s_seatbelt_jail_ends_with_it_but_not_a_program_that_left_its_group`).
+A program left in the group (`Popen` as it comes, a shell's `&`, `nohup`) ends with the jail.
 
 One known gap: under `python -m bh_02` the project root is itself on `sys.path`. Denying it would
 make the project read-only, so it is left writable, and a module a cell writes at the root

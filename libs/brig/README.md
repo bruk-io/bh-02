@@ -167,6 +167,16 @@ after teardown, never during (a mount point removed on the host is detached
 inside the jail). `scripts/linux-jail-check` at the workspace root is this
 workspace's container run of the bwrap tiers.
 
+**A jail can end with its embedder, 2026-09-30 (decision-167).** A launch is
+detached, so a jail outlived an embedder that died without calling `kill`, and
+a program its workload left in the background kept running with its grants.
+`launch(..., tether=fd)` takes the read end of a pipe the embedder keeps the
+write end of: when that closes (the embedder closed it, or died, `SIGKILL`
+included), a watcher in the jail's process group sends the group `SIGKILL`.
+Under `bwrap` that ends the whole pid namespace; under seatbelt a process that
+left the group (`setsid()`) is out of its reach, as it is of `kill`'s.
+`tests/integration/test_tether.py` kills a launching process to show it.
+
 ## Development
 
 Requires Python >= 3.15 and [uv](https://docs.astral.sh/uv/). brig is a member of a uv

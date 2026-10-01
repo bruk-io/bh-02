@@ -36,6 +36,10 @@ One policy, two platforms; only the stack and the read model differ:
   a masked one, a placeholder removed), so while the jail holds a secret under a writable root
   `fs_read` is best-effort (`graded`) and `notice()` says which paths (`held`, `notice_for`).
 
+On both, the jail is launched tethered to bh-02 (`_Jailed`): when bh-02 ends, however it ends,
+brig kills the jail's process group, so a program a cell left running doesn't outlive it (on
+Linux, bubblewrap's whole namespace; on darwin, what stayed in the group).
+
 Anywhere else `start` refuses and names `kernel:unjailed`.
 """
 
@@ -405,6 +409,11 @@ class _Jailed:
     """A program brig started: interrupt is SIGINT to its group, stop is brig's teardown, then
     the directories the jail made on the host (`made`, deepest first) once it is gone.
 
+    `tether` is the write end of the launch's tether (brig SPEC.md section 8): held by this
+    process alone, so when bh-02 ends, however it ends (`SIGKILL` included), the kernel closes
+    it and brig's watcher kills the jail's whole process group, a program a cell left running
+    in the background with it. `stop` closes it once brig's teardown is done.
+
     `lock` (Linux) is this jail's shared hold on the user's bh-02 jail lock, taken before the
     jail looked at the filesystem and held while it runs. A placeholder is removed only by a
     jail that can then take the lock exclusively: no other bh-02 jail is running, so none has
@@ -414,9 +423,16 @@ class _Jailed:
     never stops (bh-02 crashed), the next jail to start with none running does."""
 
     def __init__(
-        self, handle: Handle, jail_dir: str, made: Sequence[str], lock: int | None, record: str | None
+        self,
+        handle: Handle,
+        jail_dir: str,
+        made: Sequence[str],
+        lock: int | None,
+        record: str | None,
+        tether: int | None = None,
     ) -> None:
         self._handle = handle
+        self._tether = tether
         self._jail_dir = jail_dir
         self._made: list[tuple[str, str | None]] = [(path, None) for path in made]
         self._lock = lock
@@ -454,6 +470,9 @@ class _Jailed:
         if self._lock is not None:
             os.close(self._lock)
             self._lock = None
+        if self._tether is not None:
+            os.close(self._tether)
+            self._tether = None
         shutil.rmtree(self._jail_dir, ignore_errors=True)
 
 
@@ -548,6 +567,9 @@ class BrigJail:
         lock = await asyncio.to_thread(self._hold, records) if self._platform == "linux" else None
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
         record: str | None = None
+        # The jail ends with this process, however it ends (`_Jailed`). os.pipe's ends are not
+        # inherited, so no other child of bh-02 (the Claude Code CLI) holds the write end.
+        watched, tether = os.pipe()
         try:
             author = git_author(*self._git_identity(cwd)) if self._platform == "linux" else ()
             jail, self._report = self.compile(jail_dir, endpoint, cwd, argv, author)
@@ -566,13 +588,17 @@ class BrigJail:
                 io=IoPolicy(),
                 jail_id=Path(jail_dir).name,
                 jail_dir=jail_dir,
+                tether=watched,
             )
         except BaseException:
             if lock is not None:
                 os.close(lock)
+            os.close(tether)
             shutil.rmtree(jail_dir, ignore_errors=True)
             raise
-        started = _Jailed(handle, jail_dir, made, lock, record)
+        finally:
+            os.close(watched)
+        started = _Jailed(handle, jail_dir, made, lock, record, tether)
         try:
             await asyncio.to_thread(handle.wait_ready, "kernel", _READY_TIMEOUT_S)
             started.placed()
@@ -664,9 +690,9 @@ class BrigJail:
         can be: then no bh-02 of this user holds a jail, and every record left (a crashed
         session's, or one that stopped while another ran) names placeholders that are removed
         with it, unless the bubblewrap process group it names still runs. The lock dies with
-        bh-02, not with its jail: a program a cell left running keeps a killed session's jail
-        alive (measured), and its mounts with it, which removing a placeholder would detach. The
-        hold is then made shared (not atomically: in between another jail may take it
+        bh-02 at once, its jail a moment later (the tether's watcher kills it), and until then
+        its mounts are there, which removing a placeholder would detach. The hold is then made
+        shared (not atomically: in between another jail may take it
         exclusively, which only removes its own)."""
         lock = os.open(f"/tmp/bh-02-jails-{os.getuid()}.lock", os.O_RDWR | os.O_CREAT, 0o600)
         try:

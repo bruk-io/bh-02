@@ -2,6 +2,7 @@
 bh-02/app/tests/test_python_cells.py's: they need a kernel, which is another plugin."""
 
 import asyncio
+import contextlib
 import os
 import signal
 import sys
@@ -342,10 +343,12 @@ asyncio.run(main())
 
 
 # A bh-02 killed while its kernel runs a cell's background program, which keeps trying to write
-# under `.claude/` (Claude Code would run hooks from its settings): the real kernel, in the jail.
+# under `.claude/` (Claude Code would run hooks from its settings) and says it is alive: the real
+# kernel, in the real jail. argv: the project, then "setsid" to start the program in a session
+# of its own (out of the jail's process group), else "group". It says "started" and waits to be
+# killed.
 _KILLED_WITH_A_BACKGROUND_CELL = """
-import asyncio, os, sys
-from pathlib import Path
+import asyncio, sys, time
 from brig_cordis_plugin import BrigConfig, BrigJail
 from kernel_cordis_plugin import Kernel, KernelConfig
 
@@ -353,9 +356,10 @@ class Layers:
     paths, credentials, secrets = (), (), ()
 
 LOOP = (
-    "import os, time\\n"
+    "import os, sys, time\\n"
+    "open(sys.argv[1] + '.pid', 'w').write(str(os.getpid()))\\n"
     "while True:\\n"
-    "    open('alive', 'w').write(str(time.time()))\\n"
+    "    open(sys.argv[1], 'w').write(str(time.time()))\\n"
     "    try:\\n"
     "        os.makedirs('.claude', exist_ok=True)\\n"
     "        open('.claude/settings.json', 'w').write('{}')\\n"
@@ -367,62 +371,136 @@ LOOP = (
 async def main():
     kernel = Kernel(BrigJail(BrigConfig(), Layers()), KernelConfig(root=sys.argv[1]))
     await kernel.__aenter__()
+    setsid = sys.argv[2] == "setsid"
     cell = (
         "import subprocess, sys\\n"
-        f"subprocess.Popen([sys.executable, '-c', {LOOP!r}], start_new_session=True)\\n"
+        f"subprocess.Popen([sys.executable, '-c', {LOOP!r}, 'alive'], start_new_session={setsid})\\n"
         "print('started')"
     )
     print(await kernel.run(cell), flush=True)
-    os._exit(9)
+    time.sleep(600)
 
 asyncio.run(main())
 """
 
 
-async def test_a_killed_session_s_jail_that_lives_on_keeps_its_placeholders(
+async def _killed_with_a_background_cell(project: Path, how: str) -> None:
+    """Run `_KILLED_WITH_A_BACKGROUND_CELL` in `project`, see the program write, then `SIGKILL`
+    the stand-in bh-02, as a crash or `kill -9` would end it."""
+    killed = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", _KILLED_WITH_A_BACKGROUND_CELL, str(project), how, stdout=asyncio.subprocess.PIPE
+    )
+    assert killed.stdout is not None
+    said = await asyncio.wait_for(killed.stdout.readline(), 30)
+    assert b"started" in said, said
+    alive = project / "alive"
+    for _ in range(50):
+        if alive.exists():
+            break
+        await asyncio.sleep(0.1)
+    killed.kill()
+    assert await killed.wait() == -signal.SIGKILL
+
+
+async def _still_writing(alive: Path) -> bool:
+    last = alive.read_text()
+    await asyncio.sleep(0.6)
+    return alive.read_text() != last
+
+
+async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what_it_left(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The sweep's lock dies with bh-02, not with its jail. Killed while a program a cell started
-    runs, bh-02's worker exits but its bubblewrap does not: the program keeps the jail alive,
-    mounts and all (measured with the real kernel). Removing its `.claude/` placeholder then would
-    detach that mount, and the program would write `.claude/settings.json` on the host, which
-    Claude Code runs hooks from. So a record names its bubblewrap process, and the next jail's
-    sweep leaves what a live one holds."""
+    """bh-02 killed with SIGKILL while a program a cell started runs in the background, in a
+    session of its own: the jail ends with bh-02 (brig's tether: the kernel closes bh-02's end,
+    and brig's watcher kills the jail's process group, bubblewrap's namespace with it, so a
+    program that left the group goes too). Its record now names a group that is gone, so the
+    next jail's sweep removes its placeholders and the record."""
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
     project.mkdir()
-    killed = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", _KILLED_WITH_A_BACKGROUND_CELL, str(project), stdout=asyncio.subprocess.PIPE
-    )
-    said, _ = await killed.communicate()
-    assert killed.returncode == 9 and b"started" in said, said
+    await _killed_with_a_background_cell(project, "setsid")
     (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
     group = recorded_group(record.read_text())
     assert group is not None
+    await asyncio.sleep(1.0)
     try:
-        await asyncio.sleep(1.0)
-        alive = project / "alive"
-        last = alive.read_text()
-        await asyncio.sleep(0.5)
-        assert alive.read_text() != last  # the program lives on, in the killed session's jail
+        assert not await _still_writing(project / "alive")  # the program is gone
+        with pytest.raises(ProcessLookupError):
+            os.killpg(group, 0)  # and the whole jail
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(group, signal.SIGKILL)
+    assert (project / ".claude").is_dir() and not list((project / ".claude").iterdir())
+    one = BrigJail(BrigConfig(), Layers())
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()  # the sweep ran
+    assert sorted(p.name for p in project.iterdir()) == ["alive", "alive.pid"]
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
+
+
+async def test_a_killed_bh_02_s_seatbelt_jail_ends_with_it_but_not_a_program_that_left_its_group(
+    tmp_path: Path,
+) -> None:
+    """darwin: bh-02 killed with SIGKILL takes a program a cell left running with it (brig's
+    tether kills the jail's process group). seatbelt has no namespace, so a program a cell
+    started in a session of its own is out of that group and lives on, as it does past a normal
+    stop (brig's teardown is group-shaped too): measured, so the README's gap stays honest."""
+    if sys.platform != "darwin":
+        pytest.skip("seatbelt is darwin's")
+    grouped, setsid = tmp_path / "grouped", tmp_path / "setsid"
+    grouped.mkdir()
+    setsid.mkdir()
+    await _killed_with_a_background_cell(grouped, "group")
+    await _killed_with_a_background_cell(setsid, "setsid")
+    escaped = int((setsid / "alive.pid").read_text())
+    await asyncio.sleep(1.0)
+    try:
+        assert not await _still_writing(grouped / "alive")
+        with pytest.raises(ProcessLookupError):
+            os.kill(int((grouped / "alive.pid").read_text()), 0)
+        assert await _still_writing(setsid / "alive")  # the gap
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(escaped, signal.SIGKILL)
+
+
+async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tether ends a killed bh-02's jail at once, but not before the next jail can look
+    (and a jail brig launched some other way has none): a record whose process group runs is
+    left, placeholders and all, since removing one would detach that jail's mount. A process
+    group of the test's own stands in for the jail."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    held = project / ".claude"
+    held.mkdir(parents=True)
+    records = tmp_path / "state" / "bh-02" / "jails"
+    records.mkdir(parents=True)
+    living = await asyncio.create_subprocess_exec("sleep", "60", start_new_session=True)
+    record = records / "bh-j-living.json"
+    record.write_text(record_text([(str(held), identity(held.stat()))], living.pid))
+    try:
         one = BrigJail(BrigConfig(), Layers())
         sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
         endpoint = str(sock_dir / "k.sock")
         argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
-        await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()  # the sweep ran
-        await asyncio.sleep(1.0)  # were its placeholder removed, the program would write under it now
-        assert (project / ".claude").is_dir() and not list((project / ".claude").iterdir())
-        assert record.exists()  # kept for a sweep once that jail has ended
+        await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
+        assert held.is_dir() and record.exists()
     finally:
-        os.killpg(group, signal.SIGKILL)  # the killed session's jail, and its program
-    await asyncio.sleep(0.5)
+        living.kill()
+        await living.wait()
     one = BrigJail(BrigConfig(), Layers())
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
     await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
-    assert sorted(p.name for p in project.iterdir()) == ["alive"]  # now it is gone, so are they
+    assert not held.exists() and not record.exists()  # its group gone, so are they
 
 
 def test_a_record_names_the_jail_s_process_group() -> None:
