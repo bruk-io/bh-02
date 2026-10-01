@@ -25,6 +25,7 @@ from brig_cordis_plugin import (
     git_author,
     graded,
     held,
+    holding,
     identity,
     jail,
     made_by_the_jail,
@@ -35,6 +36,7 @@ from brig_cordis_plugin import (
     recorded,
     recorded_group,
     records_dir,
+    released_for,
     remove_placeholders,
     self_modify_denied,
     spec_for,
@@ -172,11 +174,23 @@ def test_a_linux_jail_holds_the_secrets_under_a_writable_root_and_says_so() -> N
     assert held(spec) == ("/w/app/local.env", "/w/app/pkg/local.env")  # not ~/.ssh, not /src/bh
     notice = notice_for("linux", held(spec))
     assert "/w/app/local.env, /w/app/pkg/local.env" in notice and "renaming a new file over it" in notice
-    assert "`/restart kernel`" in notice
+    assert "`/restart kernel`" in notice and "`/release`" in notice
     assert notice_for("darwin", held(spec)) == "" and notice_for("linux", ()) == ""
     report = {"fs_read": "enforced", "fs_write": "enforced"}
     assert graded(report, held(spec)) == {"fs_read": "best_effort", "fs_write": "enforced"}
     assert graded(report, ()) == report
+
+
+def test_release_says_where_the_credential_can_go_now_and_what_another_session_still_holds() -> None:
+    assert holding(("/w/a/local.env", "/w/local.env", "/x/local.env"), ("/w/.envrc", "/w/local.env")) == (
+        "/w/local.env",
+    )  # only what the jail mounts over
+    free = released_for(["/w/local.env"], [])
+    assert free.startswith("Nothing holds /w/local.env until the kernel starts again")
+    assert "`/restart model`" in free and "stays held" not in free
+    still = released_for([], ["/w/local.env"])
+    assert still.startswith("/w/local.env stays held") and "/release again" in still
+    assert released_for([], []) == ""
 
 
 def test_a_linux_jail_carries_the_person_s_git_identity_and_nothing_else_of_their_config() -> None:

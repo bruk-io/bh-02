@@ -6,6 +6,7 @@ composition names, and the model's one tool, `python(code)`, which runs a cell i
 | Row | Binds | Consumes |
 |---|---|---|
 | `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its jail's); config: `root` (default `.`), `grace` (seconds an interrupted cell gets) | `jail` |
+| `kernel:release` | (nothing: registers `/release`) | `kernel`, `commands` |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
 
 `python.py` is the tool, pure: its spec and `instructions_for(confined)` (what the model is
@@ -30,3 +31,10 @@ won't, or that died, is started again on the next cell, which is told its variab
 Every failure it knows of comes back as the cell's text, never as an exception out of `run`: a
 worker that died, an answer it can't read (the worker is replaced), a worker the jail won't
 start again (the next cell tries again).
+
+`release()` (`/release`, the `kernel:release` row) ends the worker now, and the jail it ran
+in, then asks the jail what that freed on the host: on Linux, `brig:jail` holds where bh-02
+looks for its credential with an empty directory while it runs, and this is how the person
+adds one mid-session (the brig plugin's README). The next cell starts a new worker, told its
+variables are gone. A cell that is running is left alone, and the answer says to stop the
+reply first. `kernel:unjailed` holds nothing, so there it only stops the worker.

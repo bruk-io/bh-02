@@ -91,7 +91,8 @@ In a session: `/help` lists the commands (Ctrl-P opens them as a palette). `/row
 running composition, `/explain ROW` what cordis knows about a row, `/restart ROW` starts one
 afresh, `/clear` starts a new conversation and an empty kernel (and clears the screen, leaving
 one note; the usage totals are the session's and stay), `/model [NAME]` lists the models or
-switches to one. A command never reaches the model; a line like `/tmp/app.py is broken` is
+switches to one, `/release` stops the kernel until the next cell (on Linux, the way to add
+your credential mid-session: the jail frees where bh-02 looks for it). A command never reaches the model; a line like `/tmp/app.py is broken` is
 not a command. Ctrl-C stops a reply, Ctrl-Q (or `/exit`) quits.
 
 The app owns the terminal while it runs, so nothing else writes there: `--trace FILE` appends

@@ -54,10 +54,24 @@ absent too (`.git/config` with no `.git`), the topmost absent one is held instea
 so the host's `git init` works while the kernel runs: it fills the empty `.git/` on the host,
 while inside the jail `.git` stays an empty read-only directory until the next kernel start. What a placeholder gets in the way
 of, while it is there: creating that path as a file by hand (`.envrc`, your credential in
-`local.env`: stop bh-02 first). **Removing one while the kernel runs lifts its deny**: the
+`local.env`: `/release` first, below). **Removing one while the kernel runs lifts its deny**: the
 mount is detached inside the jail, and a cell can then create and write the path (brig SPEC.md,
 decision-164; `test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it`),
 so nothing here removes one early, and neither should you.
+
+**Adding your credential mid-session (`/release`).** Where bh-02 looks for its credential and
+there is none, the jail holds the path with a placeholder, so you can't create `local.env` there
+while the kernel runs. `/release` (the `kernel:release` row) ends the kernel's worker and its
+jail now; the jail's stop removes its placeholders (when no other bh-02 jail of yours runs), and
+`release()` sweeps what jails that are gone left, then says which of those paths are free and
+which another session's jail still holds. Create the file then, and send your message: the model
+row reads it at its next start (with no credential, every step starts afresh, so the next one
+does; a model already running keeps the one it started with until `/restart model`). The next
+cell starts a new jail, which masks the file (`/dev/null` over it): no cell reads or rewrites it.
+No cell gets a window: none runs while the path is free, and a cell that runs before you create
+the file starts a jail that holds it again (`/release` again). `/restart kernel` is not the step:
+it stops and starts the jail at once, holding the path again before you could create anything
+(`test_on_linux_release_frees_where_the_model_row_looks_until_the_next_cell`).
 
 When they go: the jail removes the ones it made once brig has verified the worker is gone and
 no other bh-02 jail of the same user is running (a shared `flock` on
@@ -102,8 +116,8 @@ cell can read and rewrite what is at that path, and create the absent one (measu
 `test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it`). bubblewrap
 can't prevent it, so `fs_read` grades best-effort while any secret is held that way (`held`),
 and the jail says which paths when the kernel comes up (`notice()`, which `tui:status` shows
-as a note in the conversation): edit them with bh-02 stopped, or `/restart kernel` afterwards,
-which puts a new jail over them. The same is true of every write deny the host replaces by
+as a note in the conversation): edit them after `/release` (no jail runs until the next cell),
+or `/restart kernel` afterwards, which puts a new jail over them. The same is true of every write deny the host replaces by
 rename (`.git/config` after a host `git config`): the jail holds it again only from the next
 kernel start. darwin's seatbelt matches paths, not directory entries, and has no such gap.
 

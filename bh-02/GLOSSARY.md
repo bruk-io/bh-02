@@ -55,6 +55,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **confined**: the kernel's jail enforces writes and network, so a cell runs without asking; unconfined, every cell is put to you first.
 - **grades**: how well each part of the jail holds (`enforced`, `best_effort`, `cooperative`, `unenforced`), shown in the status bar as ✓ and ✗.
 - **placeholder** (Linux): an empty directory the jail makes in the project, on the host, to hold a path a cell may not create (`.envrc/`, `.claude/`, `.git/` in a project that is no repository) for as long as the kernel runs; removed after. Removing one yourself meanwhile lets a cell write that path.
+- **release** (row): `kernel:release`: `/release` stops the kernel until the next cell, and with it the jail, which frees its placeholders: on Linux, how you add your credential (`local.env`) mid-session where the jail holds that path.
 - **approval**, **the modal**: the question a cell is put to you in when the kernel is unjailed: `y` runs it, `n` or Esc doesn't. It ignores keys for its first 0.4 s, so typing can't answer it.
 - **host**: the side outside the jail: bh-02's own process (and brig's host process, which starts the worker), whose import paths, environment and files a jailed cell can't reach; the kernel's `client.py` is its end of the socket.
 - **composer**: the box along the bottom of the app where you type a message or a command; the palette puts a command that takes arguments there to finish.
@@ -66,7 +67,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **status bar**: the line along the bottom: session, model, jail, usage; narrower forms when the terminal is narrow.
 - **sidebar** (row): `tui:sessions`: this directory's sessions, listed in the left panel (Ctrl-B).
 - **palette** (row): `tui:palette`: the commands, offered in the command palette (Ctrl-P).
-- **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers.
+- **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers (`/release`).
 - **operator** (row): `commands:operator`: the commands that act on the running program through the loader.
 - **system** (row and key): `context:project`: what the model is told about where it is working (the directory, its branch, CLAUDE.md).
 - **session**: one run and everything it keeps, under `$XDG_STATE_HOME/bh-02/sessions/<id>/`, so `--resume` continues it.

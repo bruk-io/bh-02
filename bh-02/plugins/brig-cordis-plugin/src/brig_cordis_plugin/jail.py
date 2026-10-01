@@ -86,6 +86,7 @@ __all__ = [
     "git_author",
     "graded",
     "held",
+    "holding",
     "identity",
     "made_by_the_jail",
     "mountable",
@@ -95,6 +96,7 @@ __all__ = [
     "recorded",
     "recorded_group",
     "records_dir",
+    "released_for",
     "remove_placeholders",
     "self_modify_denied",
     "spec_for",
@@ -250,13 +252,38 @@ def notice_for(platform: str, holds: Sequence[str]) -> str:
         return ""
     return (
         f"The jail keeps cells from reading {', '.join(holds)}. On Linux it does that with a mount "
-        "on each path that is there (and, where bh-02 looks for its credential, an empty directory "
-        "where there is none, so nothing can be created there until bh-02 stops), and the host "
-        "can undo a mount: a file created at one of these paths after the kernel started, or "
-        "replaced (an editor saves local.env by renaming a new file over it) or removed while it "
-        "runs, can be read and rewritten by a cell. Edit them with bh-02 stopped, or "
-        "`/restart kernel` after, which puts a new jail over them."
+        "on each path that is there, and, where bh-02 looks for its credential and there is none, "
+        "with an empty directory, so nothing can be created there while the kernel runs: "
+        "`/release` stops the kernel and frees it until the next cell, which is when to add your "
+        "credential. The host can undo a mount: a file created at one of these paths after the "
+        "kernel started, or replaced (an editor saves local.env by renaming a new file over it) or "
+        "removed while it runs, can be read and rewritten by a cell. Edit them after `/release`, "
+        "or `/restart kernel` after, which puts a new jail over them."
     )
+
+
+def holding(credentials: Sequence[str], denies: Sequence[str]) -> tuple[str, ...]:
+    """The places bh-02 looks for its credential that a Linux jail holds with an empty
+    directory (`allowlisted`'s `hold`): those still among its write denies, which it mounts."""
+    return tuple(c for c in credentials if c in denies)
+
+
+def released_for(free: Sequence[str], still: Sequence[str]) -> str:
+    """What `/release` tells the person: where bh-02 looks for its credential and nothing holds
+    now, and what another session's jail still holds."""
+    said = []
+    if free:
+        said.append(
+            f"Nothing holds {', '.join(free)} until the kernel starts again: create your local.env "
+            "there now, then send your message. The next kernel's jail masks it from cells (a model "
+            "already running keeps the credential it started with: `/restart model`)."
+        )
+    if still:
+        said.append(
+            f"{', '.join(still)} stays held: another bh-02 session of yours is running a jail, and "
+            "none removes a placeholder while another runs. Quit that session, then /release again."
+        )
+    return " ".join(said)
 
 
 def told_reads(trees: Sequence[str], own: Sequence[str]) -> tuple[str, ...]:
@@ -494,6 +521,9 @@ def _lives(group: int) -> bool:
 #: The extended attribute a Linux jail marks each placeholder with: the jail's id.
 MARK = "user.bh-02.placeholder"
 
+#: The user's bh-02 jail lock: shared by every running jail, taken exclusively to clean up.
+_LOCK = "/tmp/bh-02-jails-{uid}.lock"
+
 
 def _place(path: str, jail_id: str) -> str | None:
     """Make the placeholder at `path`, mark it as this jail's at once, and say how it is known:
@@ -541,6 +571,7 @@ class BrigJail:
         self._report: Mapping[str, str] = {}
         self._notice = ""
         self._reads: tuple[str, ...] = ()
+        self._holding: tuple[str, ...] = ()
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
                 self._report = self.compile(probe, str(Path(probe, "k.sock")), ".", ())[1]
@@ -552,6 +583,20 @@ class BrigJail:
         """What the person should know about the jail the kernel runs in (`notice_for`): the
         paths a Linux jail holds with a mount, which the host can undo. Empty on darwin."""
         return self._notice
+
+    async def release(self) -> str:
+        """What the person should know once the kernel has ended its worker for `/release`, with
+        no jail of this one's running: on Linux, which places bh-02 looks for its credential are
+        free now (`released_for`), after sweeping what jails that are gone left. Empty when the
+        last jail held none of them, and on darwin, where seatbelt holds a path without
+        anything on the host."""
+        if self._platform != "linux" or not self._holding:
+            return ""
+        await asyncio.to_thread(self._swept, records_dir(os.environ, str(Path.home())))
+        return released_for(
+            [p for p in self._holding if not os.path.lexists(p)],
+            [p for p in self._holding if Path(p).is_dir()],
+        )
 
     def reads(self) -> tuple[str, ...]:
         """The trees a cell can read, once the kernel has started, when that is all it can read
@@ -585,6 +630,7 @@ class BrigJail:
             if self._platform == "linux":
                 trees = (*jail.spec.fs.read_allows, *jail.spec.fs.write_allows)
                 self._reads = told_reads(trees, (jail_dir, str(Path(endpoint).parent)))
+                self._holding = holding(self._layers.credentials, jail.spec.fs.write_denies)
             made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
             if made:
                 # Recorded before anything is made, each by the mark it will carry, then made and
@@ -722,22 +768,35 @@ class BrigJail:
         its mounts are there, which removing a placeholder would detach. The hold is then made
         shared (not atomically: in between another jail may take it
         exclusively, which only removes its own)."""
-        lock = os.open(f"/tmp/bh-02-jails-{os.getuid()}.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        lock = os.open(_LOCK.format(uid=os.getuid()), os.O_RDWR | os.O_CREAT, 0o600)
+        self._sweep(lock, records)
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        return lock
+
+    def _sweep(self, lock: int, records: str) -> None:
+        """Take `lock` exclusively if it can be, and then remove what every record left in
+        `records` names, but those whose jail still runs (`_hold`)."""
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            pass
-        else:
-            for left in sorted(Path(records).glob("*.json")) if Path(records).is_dir() else ():
-                with contextlib.suppress(OSError):
-                    text = left.read_text()
-                    group = recorded_group(text)
-                    if group is not None and _lives(group):
-                        continue  # its bh-02 is gone, but the jail is not: what it holds stays
-                    remove_placeholders(recorded(text))
-                    left.unlink()
-        fcntl.flock(lock, fcntl.LOCK_SH)
-        return lock
+            return
+        for left in sorted(Path(records).glob("*.json")) if Path(records).is_dir() else ():
+            with contextlib.suppress(OSError):
+                text = left.read_text()
+                group = recorded_group(text)
+                if group is not None and _lives(group):
+                    continue  # its bh-02 is gone, but the jail is not: what it holds stays
+                remove_placeholders(recorded(text))
+                left.unlink()
+
+    def _swept(self, records: str) -> None:
+        """`_sweep` with a hold of its own, let go of at once: for `release`, with no jail of
+        this one's running."""
+        lock = os.open(_LOCK.format(uid=os.getuid()), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            self._sweep(lock, records)
+        finally:
+            os.close(lock)
 
     def _recorded(self, records: str, jail_id: str, made: Sequence[tuple[str, str]]) -> str | None:
         """Write this jail's record of `made` (`record_text`) and return its path; None when the

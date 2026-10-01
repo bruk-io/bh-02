@@ -167,7 +167,9 @@ A cell never gets it:
   can't create or replace one where the model row looks (a planted `local.env` would hand the
   next launch's conversations to someone else's account). On Linux the jail holds each of these
   under the project with a mount the host can undo (an editor's save renames over the file), and
-  says so as a note when the kernel comes up: the brig plugin's README has the details. `secrets` also names the
+  says so as a note when the kernel comes up; `/release` (`kernel:release`) stops the kernel until
+  the next cell, which frees them so the person can add a credential mid-session: the brig
+  plugin's README has the details. `secrets` also names the
   sessions' state directory: each session's `claude/` holds the Claude Code child's config and
   its messaging peer token. That is this run's (`$XDG_STATE_HOME/bh-02/sessions`) and the
   default one (`~/.local/state/bh-02/sessions`); a third, of a run with another

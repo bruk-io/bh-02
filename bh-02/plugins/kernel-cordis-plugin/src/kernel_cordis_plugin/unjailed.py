@@ -78,6 +78,10 @@ class Unjailed:
         """No allowlist: a cell reads what the person can."""
         return ()
 
+    async def release(self) -> str:
+        """Nothing: no jail holds anything on the host."""
+        return ""
+
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Process:
         log = Path(endpoint).with_name("stderr.log")
         with log.open("wb") as stderr:
