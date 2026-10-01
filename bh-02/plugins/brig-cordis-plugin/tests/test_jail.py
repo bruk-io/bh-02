@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from brig_cordis_plugin import (
+    MARK,
     SYSTEM_READABLE,
     BrigConfig,
     BrigJail,
@@ -285,9 +286,9 @@ def test_a_jail_s_record_of_its_placeholders_is_in_bh_02_s_state_directory() -> 
 
 
 def test_only_a_placeholder_still_as_the_jail_made_it_is_removed(tmp_path: Path) -> None:
-    """Empty and unchanged: removed, deepest first (one recorded before the jail was up, by path
-    alone). One the person put a file in, and one they replaced with a directory of their own
-    (even on the same inode), are kept."""
+    """Empty and unchanged: removed, deepest first. One the person put a file in, one they
+    replaced with a directory of their own (even on the same inode), and one recorded by path
+    alone (an older record, with nothing to prove a jail made it) are kept."""
     ours, early, filled, theirs = (tmp_path / n for n in ("ours", "early", "filled", "theirs"))
     for path in (ours, early / "inner", filled, theirs):
         path.mkdir(parents=True)
@@ -298,11 +299,13 @@ def test_only_a_placeholder_still_as_the_jail_made_it_is_removed(tmp_path: Path)
     time.sleep(0.05)  # the person's own comes later: a later change time, on the kernel's clock tick
     theirs.mkdir()
     remove_placeholders(made)
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["filled", "theirs"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["early", "filled", "theirs"]
+    assert (early / "inner").is_dir()
 
 
 def test_a_placeholder_is_known_by_the_jail_s_mark_else_by_its_identity() -> None:
-    assert still_made(None, "1:2", None)  # recorded before the jail was up: by path alone
+    assert not still_made(None, "1:2", None)  # by path alone: nothing proves a jail made it
+    assert not still_made(None, "1:2", "bh-j-1")
     assert still_made("mark:bh-j-1", "1:2", "bh-j-1") and not still_made("mark:bh-j-1", "1:2", None)
     assert not still_made("mark:bh-j-1", "1:2", "bh-j-2")  # another jail's
     assert still_made("1:2", "1:2", None) and not still_made("1:2", "1:3", None)
@@ -388,7 +391,12 @@ async def _killed_with_a_background_cell(project: Path, how: str) -> None:
     """Run `_KILLED_WITH_A_BACKGROUND_CELL` in `project`, see the program write, then `SIGKILL`
     the stand-in bh-02, as a crash or `kill -9` would end it."""
     killed = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", _KILLED_WITH_A_BACKGROUND_CELL, str(project), how, stdout=asyncio.subprocess.PIPE
+        sys.executable,
+        "-c",
+        _KILLED_WITH_A_BACKGROUND_CELL,
+        str(project),
+        how,
+        stdout=asyncio.subprocess.PIPE,
     )
     assert killed.stdout is not None
     said = await asyncio.wait_for(killed.stdout.readline(), 30)
@@ -501,6 +509,77 @@ async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
     await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
     assert not held.exists() and not record.exists()  # its group gone, so are they
+
+
+# A bh-02 that crashes the moment it would start bubblewrap: what its jail holds on the host is
+# there, and nothing of it was mounted yet.
+_CRASH_AT_LAUNCH = """
+import os, sys, tempfile
+from pathlib import Path
+import asyncio
+from brig.run import SubprocessLauncher
+from brig_cordis_plugin import BrigConfig, BrigJail
+
+class Layers:
+    paths, credentials, secrets = (), (), ()
+
+def crash(self, *args, **kwargs):
+    os._exit(9)
+
+SubprocessLauncher.launch = crash
+sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
+argv = [sys.executable, "-c", "pass"]
+asyncio.run(BrigJail(BrigConfig(), Layers()).start(argv, cwd=sys.argv[1], endpoint=sock))
+"""
+
+
+async def test_a_placeholder_is_made_and_marked_before_bubblewrap_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The jail makes each placeholder itself, marked as its own (`MARK`) the moment it is made,
+    and only then starts bubblewrap, which finds it there. So a bh-02 that dies before its jail
+    is up leaves only placeholders the next sweep can prove are a jail's, and removes."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    crash = await asyncio.create_subprocess_exec(sys.executable, "-c", _CRASH_AT_LAUNCH, str(project))
+    assert await crash.wait() == 9
+    (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
+    left = sorted(p.name for p in project.iterdir())
+    assert {".claude", ".vscode", ".envrc", ".git"} <= set(left), left
+    if sys.platform == "linux":  # os.getxattr is Linux's
+        assert {os.getxattr(project / name, MARK).decode() for name in left} == {record.stem}
+    one = BrigJail(BrigConfig(), Layers())
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
+    assert list(project.iterdir()) == [] and not record.exists()
+
+
+async def test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record by path alone (what a crash between writing a record and marking left, before
+    placeholders were marked as they were made): the person has since made an empty directory
+    at one of its paths. The sweep can't tell it from a placeholder, so it leaves it, and the
+    record goes."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    mine = project / "build"
+    mine.mkdir(parents=True)  # the person's, empty
+    records = tmp_path / "state" / "bh-02" / "jails"
+    records.mkdir(parents=True)
+    record = records / "bh-j-crashed.json"
+    record.write_text(record_text([(str(mine), None), (str(project / "gone"), None)]))
+    one = BrigJail(BrigConfig(), Layers())
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
+    assert mine.is_dir() and not record.exists()
 
 
 def test_a_record_names_the_jail_s_process_group() -> None:

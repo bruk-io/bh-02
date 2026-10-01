@@ -46,8 +46,8 @@ One policy, two stacks (`stack_for`):
   `start` says to install `bubblewrap` or use `kernel:unjailed`.
 
 **Placeholders (Linux).** bubblewrap holds a write-denied path that doesn't exist with an empty,
-read-only directory mounted there, and the mount point is a real directory it makes on the host:
-a placeholder. So while a kernel runs, `.envrc/`, `.vscode/`, `.idea/`, `.claude/`, an absent
+read-only directory mounted there, and the mount point is a real directory on the host, which
+the jail makes for it: a placeholder. So while a kernel runs, `.envrc/`, `.vscode/`, `.idea/`, `.claude/`, an absent
 `local.env/` where bh-02 looks for its credential, and in a project that is not a repository
 `.git/`, are empty directories in the project on the host. Where a denied path's parent is
 absent too (`.git/config` with no `.git`), the topmost absent one is held instead (`mountable`),
@@ -63,15 +63,17 @@ When they go: the jail removes the ones it made once brig has verified the worke
 no other bh-02 jail of the same user is running (a shared `flock` on
 `/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken exclusively to clean up: a
 second session in the same project binds the first one's placeholders read-only, and removing
-them would detach those binds). Each jail records what it made before bubblewrap makes it, in
-bh-02's state directory (`$XDG_STATE_HOME/bh-02/jails/`, else `~/.local/state/bh-02/jails/`,
-one file per jail). Once bubblewrap is started the record names its process group, and once the
-jail is up the jail marks each placeholder as its own (an extended attribute,
-`user.bh-02.placeholder`, holding the jail's id; where the filesystem takes none, the record
-keeps the directory's inode and change time instead). A session that crashed, or stopped while
-another ran, leaves its record, and the next bh-02 jail to start with none running removes what
-it names: only an empty directory still marked as that jail's, never one the person has put
-something in or made again since. A record whose process group still runs is left alone,
+them would detach those binds). The jail makes its placeholders itself, before bubblewrap
+starts (which then mounts over them as it would over directories it made): first it records
+them, in bh-02's state directory (`$XDG_STATE_HOME/bh-02/jails/`, else
+`~/.local/state/bh-02/jails/`, one file per jail), then makes each and at once marks it as its
+own (an extended attribute, `user.bh-02.placeholder`, holding the jail's id; where the
+filesystem takes none, the record keeps the directory's inode and change time instead). Once
+bubblewrap is started the record names its process group. A session that crashed, or stopped
+while another ran, leaves its record, and the next bh-02 jail to start with none running removes
+what it names: only an empty directory still marked as that jail's, never one the person has
+put something in or made again since, and nothing a record names by path alone (an empty
+directory there may be the person's: `test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove`). A record whose process group still runs is left alone,
 placeholders and all, until it has ended (removing one would detach that jail's mount; the
 moment between a killed bh-02 and its jail ending, below, is such a time:
 `test_the_sweep_leaves_a_record_whose_process_group_still_runs`).
@@ -108,9 +110,13 @@ kernel start. darwin's seatbelt matches paths, not directory entries, and has no
 Known gaps on Linux, beyond darwin's:
 
 - Placeholders (above) are real on the host while a kernel runs, and stay until a bh-02 jail
-  starts or stops with no other running. A crash in the moment between writing the record and
-  starting bubblewrap, or before the placeholders are marked, leaves a record by path alone,
-  which removes any empty directory there (and trusts that no jail of it runs). Without extended
+  starts or stops with no other running. One can stay for good: if bh-02 dies in the instant
+  between making a placeholder and marking it (two system calls apart; on a filesystem without
+  extended attributes, between making it and rewriting the record), it is an empty directory
+  nothing can prove a jail made, so no sweep removes it; remove it by hand (`.envrc/`,
+  `.vscode/`, ...: empty, and while no bh-02 runs). Removing an unproven one could remove the
+  person's own, which is worse. A crash anywhere else leaves only what the next sweep removes
+  (`test_a_placeholder_is_made_and_marked_before_bubblewrap_starts`). Without extended
   attributes, a placeholder is known by inode and change time, which is as fine as the kernel's
   clock tick, and one something was made and removed under since is kept.
 - In a git worktree or submodule `.git` is a file, and nothing can be mounted under it, so the
