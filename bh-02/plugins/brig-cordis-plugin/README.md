@@ -117,9 +117,25 @@ cell can read and rewrite what is at that path, and create the absent one (measu
 can't prevent it, so `fs_read` grades best-effort while any secret is held that way (`held`),
 and the jail says which paths when the kernel comes up (`notice()`, which `tui:status` shows
 as a note in the conversation): edit them after `/release` (no jail runs until the next cell),
-or `/restart kernel` afterwards, which puts a new jail over them. The same is true of every write deny the host replaces by
-rename (`.git/config` after a host `git config`): the jail holds it again only from the next
-kernel start. darwin's seatbelt matches paths, not directory entries, and has no such gap.
+or `/restart kernel` afterwards, which puts a new jail over them.
+
+**`fs_write` is graded `enforced` on Linux, and holds against cells, not against the host.** A
+write deny is a mount too: an existing path bound read-only over itself (`.git/config`,
+`.git/hooks`, a layer file, a host import path), an absent one a placeholder (above). Two things
+done on the host lift one inside the running jail, until the kernel next starts:
+
+- renaming a file over a denied path: `git config`, `git remote add`, `git push -u` and
+  anything else that sets a value rewrite `.git/config` that way, and editors save by rename
+  (`.vscode/settings.json`, a layer file). A cell can then write that path, `.git/config`
+  included, until the kernel restarts
+  (`test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail`);
+- removing a placeholder: a cell can then create the path.
+
+`/restart kernel` (or `/clear`, or `/release` and the next cell) starts a new jail, which holds
+them again. The grade stays `enforced`, a decision (2026-09-30): it grades what a cell can do
+on its own, and `best_effort` would mark the jail unconfined, so every cell would ask. brig's
+SPEC.md (section 6, bwrap) says the same of its own grade. darwin's seatbelt matches paths, not
+directory entries, and has no such gap.
 
 Known gaps on Linux, beyond darwin's:
 

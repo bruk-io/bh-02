@@ -257,7 +257,10 @@ _FS_WRITE_DETAIL: Final[str] = (
     "named: the declared LISTEN channel's own endpoint DIRECTORY, bound "
     "read-write because a jail cannot bind a socket into a directory it "
     "cannot write, and a bind mount cannot name a socket that does not "
-    "exist yet the way seatbelt's path rule can."
+    "exist yet the way seatbelt's path rule can. Every carve-out is a mount on "
+    "a host directory entry, so enforced is against the workload, not the host: a "
+    "file the host renames over a denied path, or a held directory it removes, is "
+    "writable inside the jail until a new jail starts."
 )
 
 #: Must contain the literal token "unshare": the whole network claim is the

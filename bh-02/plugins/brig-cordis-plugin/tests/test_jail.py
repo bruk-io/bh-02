@@ -294,6 +294,63 @@ async def test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_re
         await started.stop()
 
 
+_LISTEN_THEN_APPEND = """
+import socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+while True:
+    time.sleep(0.1)
+    try:
+        with open(sys.argv[2], "a") as config:
+            config.write("# planted by the jail\\n")
+    except OSError:
+        pass
+"""
+
+
+async def test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What `fs_write`'s `enforced` does not cover, measured so the docs stay honest: the jail
+    holds `.git/config` read-only with a bind mount on its path. A host `git config` saves the
+    file by renaming a new one over it, which detaches that mount inside the jail, and the
+    workload can then write the file. A new jail (`/restart kernel`) holds it again."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    made = await asyncio.create_subprocess_exec("git", "init", "-q", str(project))
+    assert await made.wait() == 0
+    config = project / ".git" / "config"
+
+    async def jailed() -> Any:
+        sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+        endpoint = str(sock_dir / "k.sock")
+        argv = [sys.executable, "-I", "-c", _LISTEN_THEN_APPEND, endpoint, str(config)]
+        return await BrigJail(BrigConfig(), Layers()).start(argv, cwd=str(project), endpoint=endpoint)
+
+    started = await jailed()
+    try:
+        await asyncio.sleep(0.5)
+        assert "planted" not in config.read_text()  # held
+        git = await asyncio.create_subprocess_exec("git", "-C", str(project), "config", "user.name", "Pat")
+        assert await git.wait() == 0
+        await asyncio.sleep(0.5)
+        assert "planted" in config.read_text()  # the host's rename lifted the deny
+    finally:
+        await started.stop()
+    git = await asyncio.create_subprocess_exec("git", "-C", str(project), "config", "--unset", "user.name")
+    assert await git.wait() == 0
+    config.write_text(config.read_text().replace("# planted by the jail\n", ""))
+    started = await jailed()
+    try:
+        await asyncio.sleep(0.5)
+        assert "planted" not in config.read_text()  # a new jail holds it again
+    finally:
+        await started.stop()
+
+
 def test_a_jail_s_record_of_its_placeholders_is_in_bh_02_s_state_directory() -> None:
     assert records_dir({"XDG_STATE_HOME": "/x"}, "/home/me") == "/x/bh-02/jails"
     assert records_dir({}, "/home/me") == "/home/me/.local/state/bh-02/jails"

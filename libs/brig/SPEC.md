@@ -749,6 +749,20 @@ be the copy decision-152 deleted the event stream for).
 - **Grades**: `fs_read`, `fs_write` and `network` all `enforced`, and nothing
   else claimed — `limits`, `env`, `channel_exclusivity` and `control` fall to
   §7's coverage fill unless another mechanism in the stack claims them.
+  **`enforced` is against the workload, not the host (2026-09-30).** Every
+  carve-out is a mount on the host's directory entry, and the kernel detaches a
+  mount inside the jail when the host replaces or removes that entry. So two
+  things done on the host lift a `write_denies` carve-out for the rest of that
+  jail's life: renaming a file over a denied path (a host `git config` writes
+  `.git/config` by rename; editors save by rename), and removing the empty
+  directory an absent one is held by (the bullet on absent `write_denies`
+  above). The workload can then write that path (measured in bh-02:
+  `test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail`).
+  A new jail holds it again. The same is true of a masked `read_denies` file,
+  which is why an embedder that holds secrets that way may grade `fs_read`
+  lower (bh-02 does); nothing in this mechanism can see the host do it, and the
+  grade is not lowered for it: what it grades is whether the workload can get
+  past a carve-out by itself, and it can't.
   `network` is deny-**all**: the netns is the whole enforcement, so a spec
   granting `allowed_domains` is refused (`NetworkUnsupported`) rather than run
   under a claim this mechanism cannot make. Per-domain egress needs

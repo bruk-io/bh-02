@@ -117,7 +117,11 @@ the preset that composes it. It is the Linux sibling of `scratch_darwin()`:
 `env_scrub`, `limits` `best_effort` because `rlimits` reaches cpu and
 nothing else. It is deliberately **not** `SPEC.md` §7's `strict()`, which
 also names `systemd_scope` and `pasta`; neither exists, and a stack shipped
-under that name would be claiming them.
+under that name would be claiming them. Its `enforced` holds against the
+workload, not the host: a carve-out is a mount on a host directory entry, so a
+file the host renames over a denied path (`git config` rewrites `.git/config`
+that way) or a held directory the host removes is writable inside the jail
+until a new one starts (`SPEC.md` §6, bwrap's grades).
 
 Three things about it are worth knowing before you compose it, and all three
 are refusals rather than surprises:
