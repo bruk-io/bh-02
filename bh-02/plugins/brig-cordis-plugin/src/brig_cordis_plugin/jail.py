@@ -454,15 +454,7 @@ class _Jailed:
         report = await asyncio.to_thread(self._handle.kill)
         gone = all(item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE) for item in report.items)
         if gone and self._lock is not None:
-            try:
-                fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                pass  # another jail runs: what it may have mounted over stays, and the record
-            else:
-                remove_placeholders(self._made)
-                if self._record is not None:
-                    with contextlib.suppress(OSError):
-                        os.unlink(self._record)
+            _clear_up(self._lock, self._made, self._record)
         if self._lock is not None:
             os.close(self._lock)
             self._lock = None
@@ -470,6 +462,20 @@ class _Jailed:
             os.close(self._tether)
             self._tether = None
         shutil.rmtree(self._jail_dir, ignore_errors=True)
+
+
+def _clear_up(lock: int, made: Sequence[tuple[str, str | None]], record: str | None) -> None:
+    """Remove what a jail that is gone made (`made`) and its record, if `lock` can be taken
+    exclusively: no other bh-02 jail runs, so none has mounted over them. Else they stay, with
+    the record, for the next jail to start with none running."""
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return  # another jail runs: what it may have mounted over stays, and the record
+    remove_placeholders(made)
+    if record is not None:
+        with contextlib.suppress(OSError):
+            os.unlink(record)
 
 
 def _lives(group: int) -> bool:
@@ -568,6 +574,7 @@ class BrigJail:
         lock = await asyncio.to_thread(self._hold, records) if self._platform == "linux" else None
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
         record: str | None = None
+        placed: list[tuple[str, str]] = []
         # The jail ends with this process, however it ends (`_Jailed`). os.pipe's ends are not
         # inherited, so no other child of bh-02 (the Claude Code CLI) holds the write end.
         watched, tether = os.pipe()
@@ -579,7 +586,6 @@ class BrigJail:
                 trees = (*jail.spec.fs.read_allows, *jail.spec.fs.write_allows)
                 self._reads = told_reads(trees, (jail_dir, str(Path(endpoint).parent)))
             made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
-            placed: list[tuple[str, str]] = []
             if made:
                 # Recorded before anything is made, each by the mark it will carry, then made and
                 # marked one by one, parents first, and recorded as made: a crash at any point
@@ -592,18 +598,29 @@ class BrigJail:
                         placed.insert(0, (path, known))
                 if record is not None:
                     self._recorded(records, jail_id, placed)
-            handle = await asyncio.to_thread(
-                SubprocessLauncher().launch,
-                jail,
-                argv=list(argv),
-                cwd=cwd,
-                io=IoPolicy(),
-                jail_id=Path(jail_dir).name,
-                jail_dir=jail_dir,
-                tether=watched,
+            launching = asyncio.ensure_future(
+                asyncio.to_thread(
+                    SubprocessLauncher().launch,
+                    jail,
+                    argv=list(argv),
+                    cwd=cwd,
+                    io=IoPolicy(),
+                    jail_id=Path(jail_dir).name,
+                    jail_dir=jail_dir,
+                    tether=watched,
+                )
             )
+            try:
+                handle = await asyncio.shield(launching)
+            except asyncio.CancelledError:
+                # The launch's thread runs on whatever happens here: wait for it before its fds
+                # are closed and its placeholders removed, and end what it started.
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread((await launching).kill)
+                raise
         except BaseException:
             if lock is not None:
+                _clear_up(lock, placed, record)  # bubblewrap never ran: nothing is mounted on them
                 os.close(lock)
             os.close(tether)
             shutil.rmtree(jail_dir, ignore_errors=True)

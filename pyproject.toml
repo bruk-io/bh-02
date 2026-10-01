@@ -245,6 +245,7 @@ exclude = [
     "brig_cordis_plugin.jail:remove_placeholders",  # rmdir what a gone jail made (its stop, or the next start's sweep)
     "brig_cordis_plugin.jail:_lives",               # whether a recorded jail's process group still runs
     "brig_cordis_plugin.jail:_place",               # mkdir a placeholder and mark it, before bubblewrap starts
+    "brig_cordis_plugin.jail:_clear_up",            # take the jail lock alone, then remove_placeholders
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
     "chat_cordis_plugin.wiring:session", "models_cordis_plugin.wiring:model",
 ]

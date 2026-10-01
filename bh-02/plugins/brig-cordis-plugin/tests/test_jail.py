@@ -5,11 +5,14 @@ import asyncio
 import contextlib
 import os
 import signal
+import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -556,6 +559,69 @@ async def test_a_placeholder_is_made_and_marked_before_bubblewrap_starts(
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
     await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
     assert list(project.iterdir()) == [] and not record.exists()
+
+
+async def test_a_jail_that_fails_to_launch_leaves_nothing_on_the_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its placeholders are made before bubblewrap starts, so a launch that fails (or is
+    cancelled) removes them again, with its record, as a stop would."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def refused(self: object, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("no launch today")
+
+    monkeypatch.setattr("brig.run.SubprocessLauncher.launch", refused)
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    with pytest.raises(RuntimeError, match="no launch today"):
+        await BrigJail(BrigConfig(), Layers()).start(
+            [sys.executable, "-c", "pass"], cwd=str(project), endpoint=str(sock_dir / "k.sock")
+        )
+    assert list(project.iterdir()) == []
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
+
+
+async def test_a_jail_start_cancelled_while_it_launches_ends_what_the_launch_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launch runs in a thread, which a cancellation doesn't stop: the start waits for it,
+    ends the jail it started, and only then removes the placeholders and closes the tether."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    real = subprocess.Popen
+    groups: list[int] = []
+
+    def slow(args: Sequence[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        if any("brig exit wrapper" in str(arg) for arg in args):  # brig's launch, in its thread
+            time.sleep(0.5)
+            launched = real(args, **kwargs)
+            groups.append(launched.pid)  # a new session: its pid is its group
+            return launched
+        return real(args, **kwargs)
+
+    monkeypatch.setattr("subprocess.Popen", slow)
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    starting = asyncio.ensure_future(
+        BrigJail(BrigConfig(), Layers()).start(argv, cwd=str(project), endpoint=endpoint)
+    )
+    await asyncio.sleep(0.1)
+    starting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await starting
+    assert groups  # the start returned only once the launch had
+    await asyncio.sleep(1.0)
+    (group,) = groups
+    with pytest.raises(ProcessLookupError):
+        os.killpg(group, 0)
+    assert list(project.iterdir()) == []
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
 
 
 async def test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove(
