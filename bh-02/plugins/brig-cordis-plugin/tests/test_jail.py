@@ -538,16 +538,17 @@ async def test_a_killed_bh_02_s_seatbelt_jail_ends_with_it_but_not_a_program_tha
     setsid.mkdir()
     await _killed_with_a_background_cell(grouped, "group")
     await _killed_with_a_background_cell(setsid, "setsid")
-    escaped = int((setsid / "alive.pid").read_text())
+    programs = [int((where / "alive.pid").read_text()) for where in (grouped, setsid)]
     await asyncio.sleep(1.0)
     try:
         assert not await _still_writing(grouped / "alive")
         with pytest.raises(ProcessLookupError):
-            os.kill(int((grouped / "alive.pid").read_text()), 0)
+            os.kill(programs[0], 0)
         assert await _still_writing(setsid / "alive")  # the gap
     finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(escaped, signal.SIGKILL)
+        for program in programs:  # neither outlives the test, whatever it found
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(program, signal.SIGKILL)
 
 
 async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(

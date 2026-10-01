@@ -160,6 +160,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `chat` | `chat:session` | |
 | `kernel` | `kernel:kernel` | |
 | `jail` | `brig:jail` | `kernel:unjailed` with `--no-jail` |
+| `release` | `kernel:release` | |
 | `system` | `context:project` | |
 | `commands` | `commands:registry` | |
 | `operator` | `commands:operator` | `layer`, `model_row` (`model`), `forget` (the transcript) |
@@ -200,6 +201,7 @@ agent:loop              binds Loop                         depends on Model, Ker
 brig:jail               binds Jail                         depends on Layers
 kernel:unjailed         binds Jail                         depends on nothing
 kernel:kernel           binds Kernel (the one tool)        depends on Jail
+kernel:release          registers /release                 depends on Kernel, Commands
 tui:app                 binds Input, Output, Frame         depends on nothing (its config)
 tui:status              pushes the status bar's fields     depends on Kernel, Loader, Models, Sessions, Frame, Output
 tui:sessions            pushes the sidebar's list          depends on Sessions, Frame

@@ -428,6 +428,10 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_c
         await kernel.run("1")
         assert credential.is_dir()  # a cell came first: held again
         await kernel.release()
+        await kernel.__aexit__(None, None, None)  # `/restart kernel`: stops the jail ...
+        await kernel.__aenter__()  # ... and starts one at once, which holds the path again
+        assert credential.is_dir()
+        await kernel.release()
         credential.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n")  # never a real one
         out = await kernel.run(reach)
         assert "r PermissionError" in out and "w PermissionError" in out, out
