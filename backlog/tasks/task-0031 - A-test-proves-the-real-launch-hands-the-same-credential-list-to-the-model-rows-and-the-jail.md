@@ -3,9 +3,10 @@ id: task-0031
 title: >-
   A test proves the real launch hands the same credential list to the model rows
   and the jail
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-30 14:48'
+updated_date: '2026-10-01 00:46'
 labels: []
 dependencies: []
 priority: low
