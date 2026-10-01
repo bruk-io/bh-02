@@ -1,9 +1,15 @@
 """Where bh-02's credential is looked for, and what no jailed cell may read: one list, from the
 anchors bh-02 really runs with (its own install and its environment), never a stand-in."""
 
+import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+from click.testing import CliRunner
+
+from bh_02 import main
 from bh_02.bootstrap import CREDENTIAL_FILE, unreadable
 from bh_02.cli import credential_search
 from models_cordis_plugin.local_env import token_file
@@ -42,3 +48,28 @@ def test_the_model_row_reads_only_what_the_layers_value_names(tmp_path: Path) ->
     named.parent.mkdir()
     named.write_text("NOT_A_REAL_CREDENTIAL=placeholder\n")
     assert token_file(None, layers.credentials) == named
+
+
+def test_the_bh_02_command_boots_with_every_searched_path_among_the_secrets(
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launch itself, not only how the lists are built: `bh-02` boots a composition whose
+    `layers` value names what the model rows search (`credentials`, exactly `credential_search`)
+    and keeps every one of those paths among the jail's `secrets`. A launch that handed either
+    side another list would reopen the planted-credential hole (task-0023)."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    seen = tmp_path / "seen.json"
+    patch = composition(
+        '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:one_message_recorded_ui"\n'
+        f'[[plugin]]\nid = "probe"\nuse = "fragile:layers_seen"\nconfig = {{ out = "{seen}" }}\n'
+    )
+    result = CliRunner().invoke(main, ["--no-jail", "--patch", str(patch)])
+    assert result.exit_code == 0, result.output
+    booted = json.loads(seen.read_text())
+    assert booted["credentials"] == list(credential_search())  # what the model rows search
+    assert [path for path in booted["credentials"] if path not in booted["secrets"]] == []
+    assert str(work / CREDENTIAL_FILE) in booted["secrets"]  # and the project's own, beside it
