@@ -618,6 +618,62 @@ async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_cell_r
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_layer_file_in_a_directory_of_the_project_can_t_be_swapped_by_moving_that_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `--patch` layer at `conf/mine.toml`, watched by a real loader. The person's save by
+    rename applies; a cell can neither rewrite the file nor rename `conf` away and make a new
+    `conf/mine.toml` for the loader to read (on Linux `conf` is pinned; on darwin the jail
+    denies the path, whatever directory is there)."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    (project / "conf").mkdir(parents=True)
+    mine = project / "conf" / "mine.toml"
+
+    def row(name: str) -> str:
+        return f'[[plugin]]\nid = "{name}"\nuse = "nowhere:{name}"\ndisabled = true\n'
+
+    async def until(rows: set[str]) -> set[str]:
+        for _ in range(100):
+            if set(booted.loader.rows) == rows:
+                break
+            await asyncio.sleep(0.02)
+        return set(booted.loader.rows)
+
+    mine.write_text(row("one"))
+    booted = await boot([mine], watch=0.05)
+    swap = (
+        "import os\n"
+        "for step in ('rename', 'mkdir', 'write'):\n"
+        "    try:\n"
+        "        if step == 'rename':\n"
+        "            os.rename('conf', 'conf-moved')\n"
+        "        elif step == 'mkdir':\n"
+        "            os.makedirs('conf', exist_ok=True)\n"
+        "        else:\n"
+        f"            open('conf/mine.toml', 'w').write({row('planted')!r})\n"
+        "        print(step, 'DONE')\n"
+        "    except OSError as error:\n"
+        "        print(step, 'DENIED', type(error).__name__)\n"
+    )
+    try:
+        jail = BrigJail(BrigConfig(), _Layers(paths=(str(mine.resolve()),)))
+        async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+            saved = project / "conf" / "mine.toml.tmp"
+            saved.write_text(row("two"))
+            saved.replace(mine)  # the person's save, by rename
+            assert await until({"two"}) == {"two"}  # applies
+            out = await kernel.run(swap)
+            assert "write DENIED" in out, out
+            await asyncio.sleep(0.3)  # the loader looks every 0.05 s
+            assert set(booted.loader.rows) == {"two"}, out  # nothing of the cell's applied
+            if sys.platform == "linux":
+                assert "rename DENIED" in out and mine.read_text() == row("two"), out
+    finally:
+        await booted.runtime.shutdown()
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
 async def test_a_linux_jailed_git_commit_carries_the_person_s_own_name_without_their_home(
     composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
