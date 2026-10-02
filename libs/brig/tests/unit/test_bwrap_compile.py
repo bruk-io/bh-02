@@ -44,6 +44,7 @@ from brig.mech.bwrap import (
     UnknownPathKind,
     UnresolvedPath,
     bwrap,
+    pins,
 )
 from brig.mech.env_scrub import env_scrub
 from brig.mech.rlimits import rlimits
@@ -58,12 +59,14 @@ def _ctx(
     resolved: dict[str, str] | None = None,
     exists: dict[str, bool] | None = None,
     platform: str = "linux",
+    is_dir: dict[str, bool] | None = None,
 ) -> CompileCtx:
     return CompileCtx(
         jail_dir=_JAIL_DIR,
         platform=platform,
         resolved_paths=resolved or {},
         path_exists=exists or {},
+        path_is_dir=is_dir or {},
     )
 
 
@@ -78,6 +81,7 @@ def _identity_resolved(*paths: str) -> dict[str, str]:
 #: model, one write root, two carve-outs (one that exists, one that does
 #: not -- the two `write_denies` forms), and one LISTEN channel.
 _WORKSPACE = "/srv/ws"
+_GIT = "/srv/ws/.git"
 _HOOKS = "/srv/ws/.git/hooks"
 _ENVRC = "/srv/ws/.envrc"
 _ENDPOINT = "/run/brig/jail0/agent.sock"
@@ -91,11 +95,12 @@ _SPEC = Spec(
     ),
     channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
 )
-_SPEC_RESOLVED = _identity_resolved("/bin", "/usr", _WORKSPACE, _HOOKS, _ENVRC, _ENDPOINT)
+_SPEC_RESOLVED = _identity_resolved("/bin", "/usr", _WORKSPACE, _GIT, _HOOKS, _ENVRC, _ENDPOINT)
 _SPEC_EXISTS = {
     "/bin": True,
     "/usr": True,
     _WORKSPACE: True,
+    _GIT: True,
     _HOOKS: True,
     _ENVRC: False,
     _ENDPOINT: False,
@@ -103,7 +108,7 @@ _SPEC_EXISTS = {
 
 
 def _spec_ctx() -> CompileCtx:
-    return _ctx(resolved=_SPEC_RESOLVED, exists=_SPEC_EXISTS)
+    return _ctx(resolved=_SPEC_RESOLVED, exists=_SPEC_EXISTS, is_dir={_GIT: True})
 
 
 # --------------------------------------------------------------------------
@@ -168,6 +173,12 @@ def test_golden_argv_for_the_reference_spec() -> None:
         "--bind",
         _WORKSPACE,
         _WORKSPACE,
+        # Stage 5a: the pins -- decision-168. `.git` is between the write
+        # root and the `.git/hooks` carve-out, so it is bound over itself:
+        # a mount point the workload can't rename away to make a new one.
+        "--bind",
+        _GIT,
+        _GIT,
         # Stage 6: the carve-outs, AFTER stage 5 -- deny-over-allow by
         # mount order. `.envrc` does not exist, so it is the tmpfs form;
         # `.git/hooks` does, so it is the read-only bind form.
@@ -241,9 +252,11 @@ def test_a_carve_out_inside_the_channel_directory_still_wins() -> None:
         ),
         channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
     )
+    git = f"{workspace}/.git"
     ctx = _ctx(
-        resolved=_identity_resolved("/usr", workspace, hooks, endpoint),
-        exists={"/usr": True, workspace: True, hooks: True, endpoint: False},
+        resolved=_identity_resolved("/usr", workspace, git, hooks, endpoint),
+        exists={"/usr": True, workspace: True, git: True, hooks: True, endpoint: False},
+        is_dir={git: True},
     )
 
     argv = bwrap.compile(spec, ctx).wrap(())
@@ -591,7 +604,7 @@ def _carve_out_ctx(*, exists: dict[str, bool], is_dir: dict[str, bool]) -> Compi
         platform="linux",
         resolved_paths=_identity_resolved(*paths),
         path_exists={"/usr": True, _WORKSPACE: True, _ENDPOINT: False, **exists},
-        path_is_dir=is_dir,
+        path_is_dir=is_dir or {},
     )
 
 
@@ -682,9 +695,43 @@ def test_a_write_carve_out_no_writable_tree_reaches_is_not_mounted() -> None:
         channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
     )
     ctx = _ctx(
-        resolved=_identity_resolved("/usr", _WORKSPACE, layer, _HOOKS, _ENDPOINT),
-        exists={_HOOKS: True},  # the outside one is never asked about
+        resolved=_identity_resolved("/usr", _WORKSPACE, layer, _GIT, _HOOKS, _ENDPOINT),
+        exists={_GIT: True, _HOOKS: True},  # the outside one is never asked about
+        is_dir={_GIT: True},
     )
     argv = bwrap.compile(spec, ctx).wrap(("w",))
     assert layer not in argv
     assert argv[-7:-4] == ("--ro-bind", _HOOKS, _HOOKS)
+
+
+@pytest.mark.unit
+def test_pins_are_the_directories_between_a_write_root_and_each_carve_out() -> None:
+    """decision-168, lexically: shallowest first, once each, none for a
+    carve-out directly in a root or outside every root."""
+    assert pins(
+        ("/w",), ("/w/.git/config", "/w/.git/hooks", "/w/a/b/c.toml", "/w/.envrc", "/x/y/z")
+    ) == (
+        "/w/.git",
+        "/w/a",
+        "/w/a/b",
+    )
+
+
+@pytest.mark.unit
+def test_an_absent_directory_between_a_root_and_a_carve_out_is_not_pinned() -> None:
+    """bwrap makes the mount point's missing parents itself; only one that
+    exists is bound over itself, and a pin with no existence answer is
+    refused, never guessed."""
+    spec = Spec(
+        fs=FsPolicy(
+            read_model=ReadModel.ALLOW_LIST,
+            read_allows=("/usr",),
+            write_allows=(_WORKSPACE,),
+            write_denies=(_HOOKS,),
+        ),
+    )
+    resolved = _identity_resolved("/usr", _WORKSPACE, _GIT, _HOOKS)
+    absent = _ctx(resolved=resolved, exists={_GIT: False, _HOOKS: False}, is_dir={_GIT: False})
+    assert _GIT not in bwrap.compile(spec, absent).wrap(())
+    with pytest.raises(UnknownPathExistence, match=re.escape(_GIT)):
+        bwrap.compile(spec, _ctx(resolved=resolved, exists={_HOOKS: True}))

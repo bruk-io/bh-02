@@ -398,3 +398,32 @@ def test_an_absent_write_carve_out_is_a_directory_on_the_host_until_someone_remo
     assert status == 0 and "CONTROL" in stdout
     assert os.path.isdir(envrc) and not os.listdir(envrc)
     assert os.path.isdir(missing_parent) and not os.listdir(missing_parent)
+
+
+@pytest.mark.integration
+def test_the_directory_a_carve_out_is_in_can_t_be_renamed_away_and_made_again() -> None:
+    """decision-168. `.git/hooks` is held by a mount, which can't be renamed or
+    removed; `.git` itself is writable, and until it was pinned the workload
+    could rename it away and make a new `.git/hooks` with nothing over it
+    (measured). Pinned (bound over itself), the rename is refused, and
+    writing inside `.git` still works."""
+    jail_dir = _new_jail_dir()
+    workspace, hooks, envrc = _seed_workspace(jail_dir)
+    spec = _spec_for(workspace, hooks, envrc)
+
+    status, stdout, stderr = _run_in_jail(
+        jail_dir=jail_dir,
+        spec=spec,
+        script=(
+            f"cd {workspace}; echo ok > .git/HEAD && echo INSIDE; "
+            "mv .git .git-moved && echo MOVED; mkdir -p .git/hooks && echo x > .git/hooks/post-checkout"
+            " && echo PLANTED; echo DONE"
+        ),
+        label="pinned",
+    )
+
+    assert "INSIDE" in stdout and "DONE" in stdout, (stdout, stderr)
+    assert "MOVED" not in stdout and "PLANTED" not in stdout, (stdout, stderr)
+    assert os.path.isdir(hooks) and not os.path.exists(f"{workspace}/.git-moved")
+    assert not os.path.exists(f"{hooks}/post-checkout")
+    assert status == 0

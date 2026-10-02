@@ -498,6 +498,43 @@ async def test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_n
     assert "planted" not in config.read_text() and "Pat" in config.read_text()
 
 
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_cell_can_t_put_its_own_git_config_in_place_by_moving_the_directory_it_is_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`.git/config` is denied, `.git` is not (a jailed `git commit` writes in it). Renaming
+    `.git` away and making a new one would put a config of the cell's own (`core.hooksPath`)
+    where the person's next host `git` reads it. On Linux the jail pins every directory between
+    the project and a denied path (a mount point can't be renamed or removed); darwin's seatbelt
+    denies the path whatever directory it ends up in."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    config = project / ".git" / "config"
+    was = config.read_text()
+    swap = (
+        "import os\n"
+        "for step in ('rename', 'mkdir', 'write'):\n"
+        "    try:\n"
+        "        if step == 'rename':\n"
+        "            os.rename('.git', '.git-moved')\n"
+        "        elif step == 'mkdir':\n"
+        "            os.makedirs('.git', exist_ok=True)\n"
+        "        else:\n"
+        "            open('.git/config', 'a').write('[core]\\n\\thooksPath = /tmp/evil\\n')\n"
+        "        print(step, 'DONE')\n"
+        "    except OSError as error:\n"
+        "        print(step, 'DENIED', type(error).__name__)\n"
+    )
+    async with Kernel(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+        out = await kernel.run(swap)
+    assert "write DENIED" in out, out
+    assert "hooksPath" not in config.read_text() if config.exists() else True
+    if sys.platform == "linux":
+        assert "rename DENIED" in out and config.read_text() == was, out  # .git stays where it is
+
+
 async def test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing(tmp_path: Path) -> None:
     """seatbelt matches paths, not directory entries: after a host `git config` renames a new
     `.git/config` into place, the same jail still refuses a cell's write, and nothing restarts."""

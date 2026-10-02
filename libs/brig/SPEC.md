@@ -712,6 +712,24 @@ be the copy decision-152 deleted the event stream for).
   lives — a mount point removed on the host is detached inside the jail, and
   the jail then writes the very path it was denied (measured: `rmdir` of the
   host's `.envrc/` mid-run, then a write at `.envrc` from inside succeeded).
+- **Every directory between a write root and a carve-out is pinned
+  (2026-10-01, decision-168), and until it was, the workload could put a
+  carve-out out of the way itself.** A carve-out's own mount can't be renamed
+  or removed, but the directory it is in is writable: renaming `.git` to
+  `.git-moved` took the `.git/config` and `.git/hooks` mounts with it, and the
+  workload then made a new `.git/config` of its own where the host's next
+  `git` reads it (`core.hooksPath`: code run on the host; measured in bh-02).
+  Each such directory that exists is now bound over itself, read-write, before
+  the carve-outs (stage 5a): a mount point, so it can't be renamed or removed,
+  and as writable as before (a jailed `git commit` still works). The cost: a
+  rename between a pinned directory and the rest of its write root crosses a
+  mount and fails with `EXDEV` (`mv` copies instead; `os.rename` does not). An
+  absent directory there is not pinned: bwrap makes it, as the mount point's
+  parent, on the host (above), and the embedder that cares holds the topmost
+  absent one instead (bh-02 does). `pins` names them lexically and `run`'s
+  `build_compile_ctx` observes whether each exists; a pin with no answer is
+  `UnknownPathExistence`, never a guess. darwin's seatbelt needs no pin: it
+  denies the path, whatever directory ends up there.
 - **The channel directory is mounted BEFORE the write roots (2026-09-08,
   decision-163), and until it was, a `write_denies` carve-out inside a jail
   directory was compiled and then silently unmade.** The endpoint's directory

@@ -164,6 +164,18 @@ SPEC.md (section 6, bwrap) says what its own grade covers. darwin's seatbelt mat
 directory entries, and has no such gap: a host `git config` there changes nothing for the jail
 (`test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing`).
 
+**The directory a denied path is in stays put (Linux).** `.git/config` is held by a mount, but
+`.git` is writable (a jailed `git commit` writes in it), and a cell could rename `.git` away,
+taking the mount with it, and make a new `.git/config` of its own, `core.hooksPath` and all
+(measured). brig now binds every existing directory between the project and a denied path over
+itself (brig SPEC.md section 6, decision-168), so `.git` (and a layer file's directory, and a
+host import path's) can't be renamed or removed by a cell, and is as writable as before
+(`test_a_cell_can_t_put_its_own_git_config_in_place_by_moving_the_directory_it_is_in`). What
+it costs: `os.rename` between such a directory and the rest of the project fails with `EXDEV`
+(`mv` and `shutil.move` copy instead). On darwin the cell can rename `.git` away, which
+displaces the repository but plants nothing: seatbelt denies `.git/config` and `.git/hooks`
+by path, wherever the directory came from.
+
 Known gaps on Linux, beyond darwin's:
 
 - Placeholders (above) are real on the host while a kernel runs, and stay until a bh-02 jail

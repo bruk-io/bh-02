@@ -182,6 +182,14 @@ Under `bwrap` that ends the whole pid namespace; under seatbelt a process that
 left the group (`setsid()`) is out of its reach, as it is of `kill`'s.
 `tests/integration/test_tether.py` kills a launching process to show it.
 
+**A carve-out's directory stays put, 2026-10-01 (decision-168).** Under `bwrap`
+a carve-out is a mount, which can't be renamed or removed, but the directory it
+was in could be: the workload renamed `.git` away and made a new `.git/config`
+of its own. Every existing directory between a write root and a carve-out is
+now bound over itself, read-write (a mount point too), so it stays where it is;
+a rename from it to elsewhere in the root fails with `EXDEV`.
+`tests/integration/test_bwrap_fs.py` shows the rename refused.
+
 ## Development
 
 Requires Python >= 3.15 and [uv](https://docs.astral.sh/uv/). brig is a member of a uv
