@@ -1,9 +1,10 @@
 ---
 id: task-0033
 title: On Linux a cell can't write .git/config after a host git command rewrites it
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-01 02:33'
+updated_date: '2026-10-02 01:37'
 labels: []
 dependencies: []
 priority: high
