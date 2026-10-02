@@ -27,7 +27,10 @@ shown, and `print` is the observation channel.
 `client.py`'s `Kernel` is the host end: entering starts the worker through the jail (its
 socket in a short `/tmp` directory, since a socket path must fit in ~100 bytes), leaving stops
 it. Cancelling `run` interrupts the cell and waits `grace` seconds for it to end; a worker that
-won't, or that died, is started again on the next cell, which is told its variables are gone.
+won't, or that died, is started again on the next cell, which is told its variables are gone,
+and why when its jail ended it (`started.ended()`: a Linux `brig:jail` ends itself when the host
+undoes one of its mounts). A worker that died between cells is noticed before the next cell is
+sent, so that cell runs in the new one.
 Every failure it knows of comes back as the cell's text, never as an exception out of `run`: a
 worker that died, an answer it can't read (the worker is replaced), a worker the jail won't
 start again (the next cell tries again).

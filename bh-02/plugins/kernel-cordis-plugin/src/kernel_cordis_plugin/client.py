@@ -8,7 +8,7 @@ worker that died, an answer too long or garbled to read, a worker that won't sta
 comes back as the cell's text, never as an exception. Interrupting a cell (cancelling `run`) sends SIGINT
 through the jail, which the worker turns into `KeyboardInterrupt` in the cell, and waits for the
 cell to say it ended: the namespace survives. A worker that dies is started again on the next
-cell, and that cell is told its earlier variables are gone.
+cell, and that cell is told its earlier variables are gone, and why, when the jail ended it.
 """
 
 import asyncio
@@ -37,9 +37,12 @@ _LINE_LIMIT = 1 << 20
 
 @runtime_checkable
 class Jailed(Protocol):
-    """A program a jail started: it can be interrupted and stopped."""
+    """A program a jail started: it can be interrupted and stopped, and says why, when the jail
+    ended it itself (`ended`: a Linux `brig:jail` whose hold on a path the host undid; "" when
+    it did not)."""
 
     def interrupt(self) -> bool: ...
+    def ended(self) -> str: ...
     async def stop(self) -> None: ...
 
 
@@ -102,6 +105,7 @@ class Kernel:
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._restarted = False
+        self._why = ""
 
     @property
     def confined(self) -> bool:
@@ -156,6 +160,10 @@ class Kernel:
 
     async def _execute(self, code: str) -> _Cell:
         async with self._lock:
+            if self._reader is not None and self._reader.at_eof():
+                # the worker ended between cells (its jail ended it): start it again for this one
+                self._why = self._ended()
+                await self._stop()
             if self._writer is None:
                 try:
                     await self._start()
@@ -168,14 +176,18 @@ class Kernel:
                         "person (`/restart kernel` starts the row afresh)",
                     )
                 self._restarted = True
-            note = "(the kernel was started again; variables from earlier cells are gone)\n"
+            why, self._why = (f", because {self._why}" if self._why else ""), ""
+            note = f"(the kernel was started again{why}; variables from earlier cells are gone)\n"
             prefix, self._restarted = (note if self._restarted else ""), False
             try:
                 cell = await self._exchange(code)
             except ConnectionError:
+                why = self._ended()
                 await self._stop()
+                said = f" because {why}" if why else ""
                 return _Cell(
-                    prefix, "the kernel process ended during this cell; it will start again on the next"
+                    prefix,
+                    f"the kernel process ended during this cell{said}; it will start again on the next",
                 )
             except ValueError as error:
                 # a line over the limit, or one that is not JSON: what follows can't be trusted
@@ -187,6 +199,10 @@ class Kernel:
                     "kernel will start again on the next cell, without the earlier variables",
                 )
             return _Cell(prefix + cell.output, cell.error) if prefix else cell
+
+    def _ended(self) -> str:
+        """Why the jail ended the worker itself, or ""."""
+        return self._process.ended() if self._process is not None else ""
 
     async def _exchange(self, code: str) -> _Cell:
         self._send({"op": "exec", "code": code})

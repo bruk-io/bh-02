@@ -246,6 +246,7 @@ exclude = [
     "brig_cordis_plugin.jail:_lives",               # whether a recorded jail's process group still runs
     "brig_cordis_plugin.jail:_place",               # mkdir a placeholder and mark it, before bubblewrap starts
     "brig_cordis_plugin.jail:_clear_up",            # take the jail lock alone, then remove_placeholders
+    "brig_cordis_plugin.tripwire:Tripwire.*",       # inotify on the held paths' directories; kills the jail at a lift
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
     "chat_cordis_plugin.wiring:session", "models_cordis_plugin.wiring:model",
 ]

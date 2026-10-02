@@ -712,6 +712,24 @@ be the copy decision-152 deleted the event stream for).
   lives — a mount point removed on the host is detached inside the jail, and
   the jail then writes the very path it was denied (measured: `rmdir` of the
   host's `.envrc/` mid-run, then a write at `.envrc` from inside succeeded).
+- **Every directory between a write root and a carve-out is pinned
+  (2026-10-01, decision-168), and until it was, the workload could put a
+  carve-out out of the way itself.** A carve-out's own mount can't be renamed
+  or removed, but the directory it is in is writable: renaming `.git` to
+  `.git-moved` took the `.git/config` and `.git/hooks` mounts with it, and the
+  workload then made a new `.git/config` of its own where the host's next
+  `git` reads it (`core.hooksPath`: code run on the host; measured in bh-02).
+  Each such directory that exists is now bound over itself, read-write, before
+  the carve-outs (stage 5a): a mount point, so it can't be renamed or removed,
+  and as writable as before (a jailed `git commit` still works). The cost: a
+  rename between a pinned directory and the rest of its write root crosses a
+  mount and fails with `EXDEV` (`mv` copies instead; `os.rename` does not). An
+  absent directory there is not pinned: bwrap makes it, as the mount point's
+  parent, on the host (above), and the embedder that cares holds the topmost
+  absent one instead (bh-02 does). `pins` names them lexically and `run`'s
+  `build_compile_ctx` observes whether each exists; a pin with no answer is
+  `UnknownPathExistence`, never a guess. darwin's seatbelt needs no pin: it
+  denies the path, whatever directory ends up there.
 - **The channel directory is mounted BEFORE the write roots (2026-09-08,
   decision-163), and until it was, a `write_denies` carve-out inside a jail
   directory was compiled and then silently unmade.** The endpoint's directory
@@ -756,13 +774,17 @@ be the copy decision-152 deleted the event stream for).
   jail's life: renaming a file over a denied path (a host `git config` writes
   `.git/config` by rename; editors save by rename), and removing the empty
   directory an absent one is held by (the bullet on absent `write_denies`
-  above). The workload can then write that path (measured in bh-02:
-  `test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail`).
-  A new jail holds it again. The same is true of a masked `read_denies` file,
-  which is why an embedder that holds secrets that way may grade `fs_read`
-  lower (bh-02 does); nothing in this mechanism can see the host do it, and the
-  grade is not lowered for it: what it grades is whether the workload can get
-  past a carve-out by itself, and it can't.
+  above). The workload can then write that path (measured in bh-02, before its
+  tripwire). A new jail holds it again. The same is true of a masked
+  `read_denies` file, which is why an embedder that holds secrets that way may
+  grade `fs_read` lower (bh-02 does); nothing in this mechanism can see the host
+  do it, and the grade is not lowered for it: what it grades is whether the
+  workload can get past a carve-out by itself, and it can't. Seeing it is the
+  embedder's: bh-02 watches each carve-out's directory with inotify and ends the
+  jail at the first such change (its brig-cordis-plugin README, "When the host
+  undoes a mount", has the window that leaves). The mount can't be put back from
+  outside: the host can't enter the jail's mount namespace (`EPERM`, measured;
+  bwrap nests it in a user namespace of its own).
   `network` is deny-**all**: the netns is the whole enforcement, so a spec
   granting `allowed_domains` is refused (`NetworkUnsupported`) rather than run
   under a claim this mechanism cannot make. Per-domain egress needs

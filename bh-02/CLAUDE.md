@@ -60,7 +60,8 @@ nothing. Keep registrations commutative: each takes its own entry, never an orde
 The shell's base layer is the whole harness (CodeAct always); each later file (the session's
 own `session.toml`, `--patch`) is a patch over it. The loader watches every layer
 file: editing one, by hand or by `/model`, reshapes the running composition (a jailed cell
-can't write one: the jail denies them). The layer files are the only way the composition's
+can't write one: the jail denies them, and on Linux a save by rename ends the jail so the next
+cell's holds the new file). The layer files are the only way the composition's
 *shape* changes durably; the loader's `restart(row)` (`/restart`, `/clear`) gives a row a fresh
 fiber, and can't outlive the session. The shell pins three rows of its own after every layer
 (`disabled = false`, so no layer can remove them): `layers`, `sessions` (this directory's
@@ -167,7 +168,10 @@ A cell never gets it:
   can't create or replace one where the model row looks (a planted `local.env` would hand the
   next launch's conversations to someone else's account). On Linux the jail holds each of these
   under the project with a mount the host can undo (an editor's save renames over the file), and
-  says so as a note when the kernel comes up; `/release` (`kernel:release`) stops the kernel until
+  says so as a note when the kernel comes up. The same is true of every write deny there
+  (`.git/config`, a layer file): when the host undoes one, the jail ends itself at once and the
+  next cell's jail holds it again (a few milliseconds' window, measured in the brig plugin's
+  README); `/release` (`kernel:release`) stops the kernel until
   the next cell, which frees them so the person can add a credential mid-session: the brig
   plugin's README has the details. `secrets` also names the
   sessions' state directory: each session's `claude/` holds the Claude Code child's config and

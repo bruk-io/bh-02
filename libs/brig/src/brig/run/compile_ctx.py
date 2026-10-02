@@ -8,7 +8,8 @@ filesystem, `mech` may not go and get one, and `run` is the layer that may.
 
 1. `resolved_paths` -- every `Spec` path a mechanism's render might need
    resolved (`fs.write_allows`, `fs.write_denies`, `fs.read_denies`,
-   `fs.read_allows`, and every channel's `endpoint`), mapped to its
+   `fs.read_allows`, every channel's `endpoint`, and every directory between
+   a write root and a write deny, which `bwrap` pins), mapped to its
    `os.path.realpath` form, keyed EXACTLY as the `Spec` carries the path
    (never the resolved form as the key -- a mechanism's render looks up by
    the raw `Spec` value it already has in hand). `seatbelt` (task-058/
@@ -64,6 +65,7 @@ from collections.abc import Iterator
 
 from brig.core import Spec
 from brig.mech import CompileCtx
+from brig.mech.bwrap import pins
 
 
 def _spec_paths(spec: Spec) -> Iterator[str]:
@@ -77,6 +79,7 @@ def _spec_paths(spec: Spec) -> Iterator[str]:
     yield from spec.fs.read_allows
     for channel in spec.channels:
         yield channel.endpoint
+    yield from pins(spec.fs.write_allows, spec.fs.write_denies)
 
 
 def build_compile_ctx(spec: Spec, *, jail_dir: str, platform: str) -> CompileCtx:

@@ -2,6 +2,7 @@
 is a fake, which calls scripted cells. A cell is plain Python: it reads and writes files and
 runs programs itself, the jail decides what it may touch, and unjailed every cell is asked about."""
 
+import asyncio
 import json
 import os
 import shutil
@@ -16,6 +17,7 @@ import pytest
 from bh_02.bootstrap import credential_files, layers, run, unreadable
 from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group
 from cordis import Row
+from cordis.loader import boot
 from kernel_cordis_plugin import Kernel, KernelConfig
 from models_cordis_plugin.local_env import token_file
 
@@ -438,6 +440,237 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_c
         assert str(credential) in kernel.notice()
     assert credential.read_text() == "CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n"
     assert token_file(None, [str(credential)]) == credential
+
+
+def _append_to(path: Path, mode: str = "a", text: str = "# planted by a cell\n") -> str:
+    """A cell that tries to write `path`, and says whether it could."""
+    return (
+        "try:\n"
+        f"    with open({str(path)!r}, {mode!r}) as f:\n"
+        f"        f.write({text!r})\n"
+        "    print('WROTE')\n"
+        "except OSError as error:\n"
+        "    print('DENIED', type(error).__name__)\n"
+    )
+
+
+async def _ended(group: int, within: float = 2.0) -> None:
+    """Wait until the process group `group` has no process left, or `within` seconds pass."""
+    for _ in range(int(within / 0.02)):
+        try:
+            os.killpg(group, 0)
+        except ProcessLookupError:
+            return
+        await asyncio.sleep(0.02)
+
+
+def _group(state: Path) -> int:
+    """The process group of the one running jail recorded under the state directory `state`."""
+    (record,) = (state / "bh-02" / "jails").iterdir()
+    group = recorded_group(record.read_text())
+    assert group is not None
+    return group
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_next_holds_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host `git config` saves `.git/config` by renaming a new file over it, which detaches the
+    jail's read-only mount on that path. The jail sees it happen and ends itself, so the next
+    cell runs in a new jail, which holds the path again, and is told why its variables are gone."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the mounts are bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    config = project / ".git" / "config"
+    jail = BrigJail(BrigConfig(), _Layers())
+    async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+        assert "DENIED" in await kernel.run(_append_to(config))
+        group = _group(tmp_path / "state")
+        subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)  # by rename
+        await _ended(group)
+        out = await kernel.run(_append_to(config))
+        assert "DENIED" in out, out  # a new jail holds it again
+        assert "started again" in out and str(config) in out, out  # and the cell says why
+    assert "planted" not in config.read_text() and "Pat" in config.read_text()
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_cell_can_t_put_its_own_git_config_in_place_by_moving_the_directory_it_is_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`.git/config` is denied, `.git` is not (a jailed `git commit` writes in it). Renaming
+    `.git` away and making a new one would put a config of the cell's own (`core.hooksPath`)
+    where the person's next host `git` reads it. On Linux the jail pins every directory between
+    the project and a denied path (a mount point can't be renamed or removed); darwin's seatbelt
+    denies the path whatever directory it ends up in."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    config = project / ".git" / "config"
+    was = config.read_text()
+    swap = (
+        "import os\n"
+        "for step in ('rename', 'mkdir', 'write'):\n"
+        "    try:\n"
+        "        if step == 'rename':\n"
+        "            os.rename('.git', '.git-moved')\n"
+        "        elif step == 'mkdir':\n"
+        "            os.makedirs('.git', exist_ok=True)\n"
+        "        else:\n"
+        "            open('.git/config', 'a').write('[core]\\n\\thooksPath = /tmp/evil\\n')\n"
+        "        print(step, 'DONE')\n"
+        "    except OSError as error:\n"
+        "        print(step, 'DENIED', type(error).__name__)\n"
+    )
+    async with Kernel(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+        out = await kernel.run(swap)
+    assert "write DENIED" in out, out
+    assert "hooksPath" not in config.read_text() if config.exists() else True
+    if sys.platform == "linux":
+        assert "rename DENIED" in out and config.read_text() == was, out  # .git stays where it is
+
+
+async def test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing(tmp_path: Path) -> None:
+    """seatbelt matches paths, not directory entries: after a host `git config` renames a new
+    `.git/config` into place, the same jail still refuses a cell's write, and nothing restarts."""
+    if sys.platform != "darwin":
+        pytest.skip("seatbelt is darwin's")
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    config = project / ".git" / "config"
+    async with Kernel(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+        assert "DENIED" in await kernel.run("x = 1\n" + _append_to(config))
+        subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)
+        out = await kernel.run("print(x)\n" + _append_to(config))
+        assert "DENIED" in out and "started again" not in out and out.startswith("1"), out
+    assert "planted" not in config.read_text()
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_on_linux_a_cell_running_when_the_host_renames_over_a_denied_path_ends_and_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The jail ends at once, a running cell with it (a program in it could write the path from
+    then on), and the cell's answer, which the person sees, says what the host did."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the mounts are bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    config = project / ".git" / "config"
+    async with Kernel(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+        running = asyncio.ensure_future(kernel.run("import time\ntime.sleep(5)\nprint('slept')"))
+        await asyncio.sleep(1.0)
+        subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)
+        out = await asyncio.wait_for(running, 10)
+        assert "slept" not in out and "ended during this cell" in out and str(config) in out, out
+        assert "DENIED" in await kernel.run(_append_to(config))
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_cell_rewrites_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `--patch` layer inside the project, watched by a real loader. The person saves it the
+    way an editor does (a new file renamed over it): the loader applies their change, and the
+    jail, whose mount on the file that rename detached, ends; the next cell's jail holds the
+    new file, so its rewrite is refused and the loader never sees one."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the mounts are bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    mine = project / "mine.toml"
+
+    def row(name: str) -> str:
+        return f'[[plugin]]\nid = "{name}"\nuse = "nowhere:{name}"\ndisabled = true\n'
+
+    mine.write_text(row("one"))
+    booted = await boot([mine], watch=0.05)
+    try:
+        jail = BrigJail(BrigConfig(), _Layers(paths=(str(mine.resolve()),)))
+        async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+            rewrite = _append_to(mine, "w", row("planted"))
+            assert "DENIED" in await kernel.run(rewrite)
+            group = _group(tmp_path / "state")
+            saved = project / "mine.toml.tmp"
+            saved.write_text(row("two"))
+            saved.replace(mine)  # the person's save
+            await _ended(group)
+            for _ in range(100):
+                if set(booted.loader.rows) == {"two"}:
+                    break
+                await asyncio.sleep(0.02)
+            assert set(booted.loader.rows) == {"two"}  # the person's edit applies
+            out = await kernel.run(rewrite)
+            assert "DENIED" in out, out
+            await asyncio.sleep(0.3)  # the loader looks every 0.05 s
+            assert set(booted.loader.rows) == {"two"} and mine.read_text() == row("two")
+    finally:
+        await booted.runtime.shutdown()
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_layer_file_in_a_directory_of_the_project_can_t_be_swapped_by_moving_that_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `--patch` layer at `conf/mine.toml`, watched by a real loader. The person's save by
+    rename applies; a cell can neither rewrite the file nor rename `conf` away and make a new
+    `conf/mine.toml` for the loader to read (on Linux `conf` is pinned; on darwin the jail
+    denies the path, whatever directory is there)."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    (project / "conf").mkdir(parents=True)
+    mine = project / "conf" / "mine.toml"
+
+    def row(name: str) -> str:
+        return f'[[plugin]]\nid = "{name}"\nuse = "nowhere:{name}"\ndisabled = true\n'
+
+    async def until(rows: set[str]) -> set[str]:
+        for _ in range(100):
+            if set(booted.loader.rows) == rows:
+                break
+            await asyncio.sleep(0.02)
+        return set(booted.loader.rows)
+
+    mine.write_text(row("one"))
+    booted = await boot([mine], watch=0.05)
+    swap = (
+        "import os\n"
+        "for step in ('rename', 'mkdir', 'write'):\n"
+        "    try:\n"
+        "        if step == 'rename':\n"
+        "            os.rename('conf', 'conf-moved')\n"
+        "        elif step == 'mkdir':\n"
+        "            os.makedirs('conf', exist_ok=True)\n"
+        "        else:\n"
+        f"            open('conf/mine.toml', 'w').write({row('planted')!r})\n"
+        "        print(step, 'DONE')\n"
+        "    except OSError as error:\n"
+        "        print(step, 'DENIED', type(error).__name__)\n"
+    )
+    try:
+        jail = BrigJail(BrigConfig(), _Layers(paths=(str(mine.resolve()),)))
+        async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+            saved = project / "conf" / "mine.toml.tmp"
+            saved.write_text(row("two"))
+            saved.replace(mine)  # the person's save, by rename
+            assert await until({"two"}) == {"two"}  # applies
+            out = await kernel.run(swap)
+            assert "write DENIED" in out, out
+            await asyncio.sleep(0.3)  # the loader looks every 0.05 s
+            assert set(booted.loader.rows) == {"two"}, out  # nothing of the cell's applied
+            if sys.platform == "linux":
+                assert "rename DENIED" in out and mine.read_text() == row("two"), out
+    finally:
+        await booted.runtime.shutdown()
 
 
 @pytest.mark.usefixtures("_needs_a_jail")

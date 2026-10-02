@@ -34,8 +34,13 @@ One policy, two platforms; only the stack and the read model differ:
   before bubblewrap starts; the jail removes the ones it made once brig has verified the worker
   is gone, never before (a mount point removed while the
   jail lives is detached inside it). A mount can be undone from the host (a file renamed over
-  a masked one, a placeholder removed), so while the jail holds a secret under a writable root
-  `fs_read` is best-effort (`graded`) and `notice()` says which paths (`held`, `notice_for`).
+  a denied or masked one, as a host `git config` does to `.git/config`; a placeholder removed),
+  and from then on a cell could write or read that path. So the jail watches every path it
+  holds (`tripwired`, `tripwire.Tripwire`) and ends itself at the first such change: the next
+  cell's jail holds the path again, and the cell says why (`ended`). Until it has ended (a few
+  milliseconds; measured in the README) a program already running in it can get one write or
+  read in, so while the jail holds a secret under a writable root `fs_read` stays best-effort
+  (`graded`) and `notice()` says which paths (`held`, `notice_for`).
 
 On both, the jail is launched tethered to bh-02 (`_Jailed`): when bh-02 ends, however it ends,
 brig kills the jail's process group, so a program a cell left running doesn't outlive it (on
@@ -75,6 +80,7 @@ from brig.core import (
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH
 from brig.run import Handle, IoPolicy, KillOutcome, SubprocessLauncher, build_compile_ctx
 from brig.stack import CompiledJail, Stack, scratch_darwin, strict_linux
+from brig_cordis_plugin.tripwire import Tripwire
 
 __all__ = [
     "MARK",
@@ -103,6 +109,7 @@ __all__ = [
     "stack_for",
     "still_made",
     "told_reads",
+    "tripwired",
     "uncovered",
 ]
 
@@ -244,6 +251,16 @@ def held(spec: Spec) -> tuple[str, ...]:
     return tuple(d for d in spec.fs.read_denies if any(d == r or d.startswith(r + "/") for r in roots))
 
 
+def tripwired(spec: Spec) -> tuple[str, ...]:
+    """The paths a Linux jail holds with a mount that the host can undo: every write deny under
+    a root a cell may write (an existing path bound read-only over itself, or a placeholder) and
+    every secret held there (`held`). Replacing, moving or removing one on the host ends the jail
+    (`Tripwire`); a deny outside every writable root is not mounted at all."""
+    roots = spec.fs.write_allows
+    under = [d for d in spec.fs.write_denies if any(d.startswith(r + "/") for r in roots)]
+    return tuple(dict.fromkeys([*under, *held(spec)]))
+
+
 def notice_for(platform: str, holds: Sequence[str]) -> str:
     """What the person should know at the start of a session about the secrets under a root a
     cell may write (`held`), or nothing: on darwin seatbelt matches paths, so nothing the host
@@ -255,10 +272,11 @@ def notice_for(platform: str, holds: Sequence[str]) -> str:
         "on each path that is there, and, where bh-02 looks for its credential and there is none, "
         "with an empty directory, so nothing can be created there while the kernel runs: "
         "`/release` stops the kernel and frees it until the next cell, which is when to add your "
-        "credential. The host can undo a mount: a file created at one of these paths after the "
-        "kernel started, or replaced (an editor saves local.env by renaming a new file over it) or "
-        "removed while it runs, can be read and rewritten by a cell. Edit them after `/release`, "
-        "or `/restart kernel` after, which puts a new jail over them."
+        "credential. The host can undo a mount: when a file is created at one of these paths, or "
+        "replaced (an editor saves local.env by renaming a new file over it) or removed while the "
+        "kernel runs, bh-02 ends the jail at once (a running cell with it) and the next cell's jail "
+        "holds the path again. A program a cell left running can still read or rewrite it in the "
+        "milliseconds that takes, so edit them after `/release`."
     )
 
 
@@ -443,6 +461,10 @@ class _Jailed:
     it and brig's watcher kills the jail's whole process group, a program a cell left running
     in the background with it. `stop` closes it once brig's teardown is done.
 
+    `wire` (Linux) watches the paths the jail holds with a mount and ends the jail when the host
+    undoes one (`Tripwire`); `ended` says so. `stop` stops it first: removing the placeholders
+    would read as the host undoing them.
+
     `lock` (Linux) is this jail's shared hold on the user's bh-02 jail lock, taken before the
     jail looked at the filesystem and held while it runs. A placeholder is removed only by a
     jail that can then take the lock exclusively: no other bh-02 jail is running, so none has
@@ -459,8 +481,10 @@ class _Jailed:
         lock: int | None,
         record: str | None,
         tether: int | None = None,
+        wire: Tripwire | None = None,
     ) -> None:
         self._handle = handle
+        self._wire = wire
         self._tether = tether
         self._jail_dir = jail_dir
         self._made: list[tuple[str, str | None]] = list(made)
@@ -471,6 +495,10 @@ class _Jailed:
     def interrupt(self) -> bool:
         return self._handle.interrupt()
 
+    def ended(self) -> str:
+        """Why the jail ended its program itself (the host undid a mount, `tripped_for`), or ""."""
+        return self._wire.tripped if self._wire is not None else ""
+
     def _write(self) -> None:
         """The record as it stands: the placeholders, and which bubblewrap process holds them."""
         if self._record is not None:
@@ -478,6 +506,8 @@ class _Jailed:
                 Path(self._record).write_text(record_text(self._made, self._handle.pgid))
 
     async def stop(self) -> None:
+        if self._wire is not None:
+            await asyncio.to_thread(self._wire.stop)
         report = await asyncio.to_thread(self._handle.kill)
         gone = all(item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE) for item in report.items)
         if gone and self._lock is not None:
@@ -620,6 +650,7 @@ class BrigJail:
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
         record: str | None = None
         placed: list[tuple[str, str]] = []
+        wire: Tripwire | None = None
         # The jail ends with this process, however it ends (`_Jailed`). os.pipe's ends are not
         # inherited, so no other child of bh-02 (the Claude Code CLI) holds the write end.
         watched, tether = os.pipe()
@@ -644,6 +675,10 @@ class BrigJail:
                         placed.insert(0, (path, known))
                 if record is not None:
                     self._recorded(records, jail_id, placed)
+            if self._platform == "linux":
+                # After the placeholders are made, before bubblewrap mounts over them: from here
+                # on, the host undoing a mount is seen.
+                wire = Tripwire(tripwired(jail.spec))
             launching = asyncio.ensure_future(
                 asyncio.to_thread(
                     SubprocessLauncher().launch,
@@ -665,6 +700,8 @@ class BrigJail:
                     await asyncio.to_thread((await launching).kill)
                 raise
         except BaseException:
+            if wire is not None:
+                wire.stop()
             if lock is not None:
                 _clear_up(lock, placed, record)  # bubblewrap never ran: nothing is mounted on them
                 os.close(lock)
@@ -673,7 +710,9 @@ class BrigJail:
             raise
         finally:
             os.close(watched)
-        started = _Jailed(handle, jail_dir, placed, lock, record, tether)
+        if wire is not None:
+            wire.arm(handle.pgid)
+        started = _Jailed(handle, jail_dir, placed, lock, record, tether, wire)
         try:
             await asyncio.to_thread(handle.wait_ready, "kernel", _READY_TIMEOUT_S)
         except BaseException as error:

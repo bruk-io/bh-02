@@ -56,6 +56,14 @@ restrictive".
                                            -- decision-163.
     5. `--bind SRC DEST` per               the writable roots, layered over
        `fs.write_allows`                   the two stages above.
+    5a. `--bind DIR DIR` per existing      the PINS (decision-168): each
+        directory between a write root     directory between a write root and
+        and a carve-out it reaches         a carve-out, bound over itself so
+                                           it is a mount point too. A mount
+                                           point can't be renamed or removed;
+                                           its parent could be, and a new one
+                                           made in its place, with no
+                                           carve-out under it.
     6. per `fs.write_denies`:              the carve-outs INSIDE the write
        `--ro-bind SRC DEST` (exists) or    roots -- deny-over-allow, which is
        `--tmpfs DEST --remount-ro DEST`    only true because this stage comes
@@ -502,6 +510,18 @@ def render_bwrap_prefix(
     # read_denies names, say).
     channel_dirs = (_parent(_resolve(c.endpoint, resolved)) for c in spec.channels)
     writable = (*channel_dirs, *(_resolve(path, resolved) for path in spec.fs.write_allows))
+
+    # Stage 5a: the pins (decision-168), before the carve-outs so none
+    # stacks over one. A carve-out's own mount can't be renamed away, but
+    # the directory it is in could be (`mv .git .git-moved`, then a new
+    # `.git/config` of the workload's own where a host `git` reads it:
+    # measured). Each existing directory between a write root and a
+    # carve-out is bound over itself, read-write: a mount point, so it
+    # stays where it is, and writable as before.
+    for path in pins(spec.fs.write_allows, spec.fs.write_denies):
+        if _exists(path, path_exists) and _is_dir(path, path_is_dir):
+            args += ["--bind", _resolve(path, resolved), path]
+
     for path, resolved_deny in zip(spec.fs.write_denies, resolved_write_denies, strict=True):
         if not _overlaps(resolved_deny, writable):
             continue
@@ -528,6 +548,20 @@ def render_bwrap_prefix(
     # read-only root; the mounts above keep their own flags.
     args += ["--remount-ro", "/", "--"]
     return tuple(args)
+
+
+def pins(write_allows: tuple[str, ...], write_denies: tuple[str, ...]) -> tuple[str, ...]:
+    """Every directory strictly between a write root and a `write_denies`
+    entry under it, as the `Spec` spells them, shallowest first, once each
+    (decision-168). Lexical: whether each exists is `ctx.path_exists`', which
+    `run`'s `build_compile_ctx` observes for exactly these."""
+    found: list[str] = []
+    for deny in write_denies:
+        for root in write_allows:
+            if root != "/" and deny.startswith(root + "/"):
+                parts = deny[len(root) + 1 :].split("/")[:-1]
+                found += [root + "/" + "/".join(parts[: i + 1]) for i in range(len(parts))]
+    return tuple(sorted(dict.fromkeys(found), key=lambda path: (path.count("/"), path)))
 
 
 def _mounted_roots(spec: Spec, resolved: Mapping[str, str]) -> tuple[str, ...]:
@@ -663,6 +697,7 @@ __all__ = (
     "UnknownPathKind",
     "UnresolvedPath",
     "bwrap",
+    "pins",
     "render_bwrap_prefix",
     "unmasked_read_denies",
 )

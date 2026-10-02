@@ -186,7 +186,12 @@ A row's `id` is its role; `use` is `plugin:component`, a `cordis.plugins` entry 
 points come from installed metadata, so a new plugin needs `uv sync` before a layer can name
 it. The layer files are live: edit one (by hand, or by `/model`; a jailed cell can't write
 one) and the rows that changed are swapped, their dependents reloaded in place,
-everything else left alone; a bad edit is reported and changes nothing.
+everything else left alone; a bad edit is reported and changes nothing. On Linux, saving a
+layer file inside the project by rename (most editors do) ends the kernel's jail, because the
+rename lifts the jail's hold on it; the next cell's jail holds the new file, and the cell says
+why its variables are gone. A program a cell left running can get a write in during the few
+milliseconds that takes: stop the reply (or `/release`) before editing a layer while one runs
+(brig-cordis-plugin's README, "When the host undoes a mount").
 
 What the rows depend on, which is what decides what reloads when:
 

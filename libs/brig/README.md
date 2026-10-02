@@ -121,7 +121,8 @@ under that name would be claiming them. Its `enforced` holds against the
 workload, not the host: a carve-out is a mount on a host directory entry, so a
 file the host renames over a denied path (`git config` rewrites `.git/config`
 that way) or a held directory the host removes is writable inside the jail
-until a new one starts (`SPEC.md` §6, bwrap's grades).
+until a new one starts (`SPEC.md` §6, bwrap's grades). Ending the jail when
+that happens is the embedder's to do (bh-02's brig-cordis-plugin does).
 
 Three things about it are worth knowing before you compose it, and all three
 are refusals rather than surprises:
@@ -180,6 +181,14 @@ included), a watcher in the jail's process group sends the group `SIGKILL`.
 Under `bwrap` that ends the whole pid namespace; under seatbelt a process that
 left the group (`setsid()`) is out of its reach, as it is of `kill`'s.
 `tests/integration/test_tether.py` kills a launching process to show it.
+
+**A carve-out's directory stays put, 2026-10-01 (decision-168).** Under `bwrap`
+a carve-out is a mount, which can't be renamed or removed, but the directory it
+was in could be: the workload renamed `.git` away and made a new `.git/config`
+of its own. Every existing directory between a write root and a carve-out is
+now bound over itself, read-write (a mount point too), so it stays where it is;
+a rename from it to elsewhere in the root fails with `EXDEV`.
+`tests/integration/test_bwrap_fs.py` shows the rename refused.
 
 ## Development
 
