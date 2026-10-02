@@ -47,6 +47,10 @@ class _Process:
             return True
         return False
 
+    def ended(self) -> str:
+        """Nothing ends the worker of its own accord here."""
+        return ""
+
     async def stopped(self) -> None:
         """Return once the process has ended, however it ended."""
         await self._process.wait()

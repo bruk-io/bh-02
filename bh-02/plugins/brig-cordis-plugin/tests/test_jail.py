@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import os
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -21,13 +22,16 @@ from brig_cordis_plugin import (
     SYSTEM_READABLE,
     BrigConfig,
     BrigJail,
+    Tripwire,
     allowlisted,
+    decoded,
     git_author,
     graded,
     held,
     holding,
     identity,
     jail,
+    lifted,
     made_by_the_jail,
     mountable,
     notice_for,
@@ -43,7 +47,9 @@ from brig_cordis_plugin import (
     stack_for,
     still_made,
     told_reads,
+    tripwired,
     uncovered,
+    wires,
 )
 from cordis.testing import drive
 
@@ -174,7 +180,7 @@ def test_a_linux_jail_holds_the_secrets_under_a_writable_root_and_says_so() -> N
     assert held(spec) == ("/w/app/local.env", "/w/app/pkg/local.env")  # not ~/.ssh, not /src/bh
     notice = notice_for("linux", held(spec))
     assert "/w/app/local.env, /w/app/pkg/local.env" in notice and "renaming a new file over it" in notice
-    assert "`/restart kernel`" in notice and "`/release`" in notice
+    assert "bh-02 ends the jail at once" in notice and "`/release`" in notice
     assert notice_for("darwin", held(spec)) == "" and notice_for("linux", ()) == ""
     report = {"fs_read": "enforced", "fs_write": "enforced"}
     assert graded(report, held(spec)) == {"fs_read": "best_effort", "fs_write": "enforced"}
@@ -250,46 +256,81 @@ while True:
 """
 
 
-async def test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it(
-    tmp_path: Path,
+async def _gone(group: int, within: float = 2.0) -> bool:
+    """Whether process group `group` has no process left within `within` seconds."""
+    for _ in range(int(within / 0.02)):
+        try:
+            os.killpg(group, 0)
+        except ProcessLookupError:
+            return True
+        await asyncio.sleep(0.02)
+    return False
+
+
+def _recorded_group(tmp_path: Path) -> int:
+    """The process group of the one running jail recorded under `tmp_path`'s state directory."""
+    (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
+    group = recorded_group(record.read_text())
+    assert group is not None
+    return group
+
+
+async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """What bubblewrap can't close, measured so the grade and the notice stay honest: the jail
-    holds a secret under the project with a mount on its path (a `/dev/null` over the file, an
-    empty directory where there is none). Replace the file on the host the way an editor saves
-    (a new file renamed over it), or remove the empty directory, and the mount is detached
-    inside the jail: the workload reads the new file, and creates the absent one. Until then it
-    can do neither. So `fs_read` is best-effort and the jail names both paths in its notice."""
-    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
-        pytest.skip("the mounts are bubblewrap's: Linux with /usr/bin/bwrap only")
+    """The jail holds a secret under the project with a mount on its path (a `/dev/null` over the
+    file, an empty directory where there is none). Replacing the file on the host the way an
+    editor saves (a new file renamed over it), or removing the empty directory, detaches that
+    mount inside the jail (measured before the tripwire: the workload then read the new file and
+    created the absent one), so the jail ends itself at once and says why. A new jail holds both
+    again. `fs_read` stays best-effort: a file created on the host at an absent secret that is
+    not held is still readable."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
     (project / "pkg").mkdir(parents=True)
     secret, absent, seen = project / "local.env", project / "pkg" / "local.env", project / "seen"
     secret.write_text("OLD=1\n")  # a stand-in: never the real file
     one = BrigJail(BrigConfig(), Layers(credentials=(str(absent),), secrets=(str(absent),)))
-    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
-    endpoint = str(sock_dir / "k.sock")
-    argv = [
-        sys.executable,
-        "-I",
-        "-c",
-        _LISTEN_THEN_READ_AND_PLANT,
-        endpoint,
-        str(secret),
-        str(absent),
-        str(seen),
-    ]
-    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+
+    async def jailed() -> Any:
+        sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+        endpoint = str(sock_dir / "k.sock")
+        argv = [
+            sys.executable,
+            "-I",
+            "-c",
+            _LISTEN_THEN_READ_AND_PLANT,
+            endpoint,
+            *map(str, (secret, absent, seen)),
+        ]
+        return await one.start(argv, cwd=str(project), endpoint=endpoint)
+
+    started = await jailed()
     try:
         assert one.report()["fs_read"] == "best_effort"
         assert f"{secret}, {absent}" in one.notice()
         await asyncio.sleep(0.5)
-        assert not seen.exists() and absent.is_dir()  # held: neither read nor created
+        assert not seen.exists() and absent.is_dir() and started.ended() == ""  # held
+        group = _recorded_group(tmp_path)
         (project / "saved.tmp").write_text("NEW=1\n")
         (project / "saved.tmp").replace(secret)  # an editor's save
+        assert await _gone(group)  # the jail ended itself
+        assert str(secret) in started.ended() and "the next one holds it again" in started.ended()
+    finally:
+        await started.stop()
+    started = await jailed()
+    try:
+        group = _recorded_group(tmp_path)
         absent.rmdir()  # a placeholder removed by hand
-        await asyncio.sleep(1.0)
-        assert seen.read_text() == "NEW=1\n"  # the new file reads inside the jail
-        assert absent.read_text() == "PLANTED=1"  # and the absent one was created
+        assert await _gone(group)
+        assert str(absent) in started.ended()
+    finally:
+        await started.stop()
+    started = await jailed()
+    try:
+        await asyncio.sleep(0.5)
+        assert not seen.exists() and absent.is_dir()  # a new jail holds both again
     finally:
         await started.stop()
 
@@ -309,13 +350,13 @@ while True:
 """
 
 
-async def test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail(
+async def test_a_linux_jail_ends_when_the_host_renames_over_a_write_deny_and_a_new_one_holds_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """What `fs_write`'s `enforced` does not cover, measured so the docs stay honest: the jail
-    holds `.git/config` read-only with a bind mount on its path. A host `git config` saves the
-    file by renaming a new one over it, which detaches that mount inside the jail, and the
-    workload can then write the file. A new jail (`/restart kernel`) holds it again."""
+    """The jail holds `.git/config` read-only with a bind mount on its path. A host `git config`
+    saves the file by renaming a new one over it, which detaches that mount inside the jail
+    (measured before the tripwire: the workload then wrote the file), so the jail ends itself at
+    once and says why. A new jail (the next cell's) holds it again."""
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
@@ -333,20 +374,18 @@ async def test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new
     started = await jailed()
     try:
         await asyncio.sleep(0.5)
-        assert "planted" not in config.read_text()  # held
+        assert "planted" not in config.read_text() and started.ended() == ""  # held
+        group = _recorded_group(tmp_path)
         git = await asyncio.create_subprocess_exec("git", "-C", str(project), "config", "user.name", "Pat")
         assert await git.wait() == 0
-        await asyncio.sleep(0.5)
-        assert "planted" in config.read_text()  # the host's rename lifted the deny
+        assert await _gone(group)  # the jail ended itself
+        assert str(config) in started.ended()
     finally:
         await started.stop()
-    git = await asyncio.create_subprocess_exec("git", "-C", str(project), "config", "--unset", "user.name")
-    assert await git.wait() == 0
-    config.write_text(config.read_text().replace("# planted by the jail\n", ""))
     started = await jailed()
     try:
         await asyncio.sleep(0.5)
-        assert "planted" not in config.read_text()  # a new jail holds it again
+        assert "planted" not in config.read_text() and "Pat" in config.read_text()  # held again
     finally:
         await started.stop()
 
@@ -862,3 +901,70 @@ def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_projec
     assert argv.count(str(secret.resolve())) == 1  # the mask alone: no write deny under it
     assert graded["fs_read"] == "best_effort"
     assert graded["fs_write"] == graded["network"] == "enforced"
+
+
+def test_the_tripwire_watches_each_held_path_s_directory_by_name() -> None:
+    held = ("/w/.git/config", "/w/.git/hooks", "/w/mine.toml", "/w/local.env", "/w/mine.toml")
+    assert wires(held) == {"/w/.git": ("config", "hooks"), "/w": ("mine.toml", "local.env")}
+
+
+def test_what_lifts_a_hold_is_the_host_replacing_moving_or_removing_a_held_name() -> None:
+    """Renamed over (`MOVED_TO`), renamed away (`MOVED_FROM`), removed, created; the directory
+    itself gone; the queue overflowed. Not a write to a held file, not git's lock beside one,
+    nor anything to a name not held."""
+    watched = {"/w/.git": ("config", "hooks"), "/w": ("mine.toml",)}
+    moved_to, moved_from, create, delete, delete_self, overflow = 0x80, 0x40, 0x100, 0x200, 0x400, 0x4000
+    assert lifted([("/w/.git", moved_to, "config")], watched) == ("/w/.git/config",)
+    assert lifted([("/w", moved_from, "mine.toml")], watched) == ("/w/mine.toml",)
+    assert lifted([("/w/.git", delete | 0x40000000, "hooks")], watched) == ("/w/.git/hooks",)
+    assert lifted([("/w/.git", create, "config.lock")], watched) == ()  # git's lock: see `lifted`
+    assert lifted([("/w/.git", delete_self, "")], watched) == ("/w/.git/config", "/w/.git/hooks")
+    assert len(lifted([("", overflow, "")], watched)) == 3
+    assert lifted([("/w", create, "notes.txt"), ("/w/.git", create, "index.lock")], watched) == ()
+    assert lifted([("/w", moved_to, "mine.toml~"), ("/w/.git", 0x2, "config")], watched) == ()
+
+
+def test_inotify_records_are_read_as_descriptor_mask_and_name() -> None:
+    record = struct.pack("iIII", 3, 0x80, 7, 16) + b"config".ljust(16, b"\0")
+    bare = struct.pack("iIII", 1, 0x400, 0, 0)
+    assert decoded(record + bare) == [(3, 0x80, "config"), (1, 0x400, "")]
+
+
+def test_a_linux_jail_trips_on_every_write_deny_under_a_writable_root_and_every_held_secret() -> None:
+    policy = spec_for(
+        root="/w/app",
+        endpoint="/tmp/k/k.sock",
+        scratch="/tmp/j/tmp",
+        home="/home/me",
+        config=BrigConfig(),
+        layers=("/w/app/mine.toml", "/elsewhere/chat.toml"),
+        host=(),
+    )
+    paths = tripwired(policy)
+    assert {"/w/app/mine.toml", "/w/app/.git/config", "/w/app/local.env"} <= set(paths)
+    assert "/elsewhere/chat.toml" not in paths  # outside every writable root: nothing is mounted
+
+
+async def test_on_linux_the_tripwire_ends_a_process_group_when_a_held_file_is_renamed_over(
+    tmp_path: Path,
+) -> None:
+    """The shell, without bubblewrap: a held file renamed over ends the group and says why;
+    a file beside it changing does nothing."""
+    if sys.platform != "linux":
+        pytest.skip("inotify is Linux's")
+    held = tmp_path / "config"
+    held.write_text("a")
+    victim = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    wire = Tripwire([str(held)])
+    wire.arm(victim.pid)
+    try:
+        (tmp_path / "beside").write_text("b")  # not held: nothing happens
+        await asyncio.sleep(0.1)
+        assert victim.poll() is None and wire.tripped == ""
+        (tmp_path / "config.new").write_text("c")
+        (tmp_path / "config.new").replace(held)
+        assert await asyncio.to_thread(victim.wait, 2) == -signal.SIGKILL
+        assert str(held) in wire.tripped
+    finally:
+        wire.stop()
+        victim.kill()

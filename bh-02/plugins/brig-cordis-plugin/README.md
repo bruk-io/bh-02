@@ -54,10 +54,10 @@ absent too (`.git/config` with no `.git`), the topmost absent one is held instea
 so the host's `git init` works while the kernel runs: it fills the empty `.git/` on the host,
 while inside the jail `.git` stays an empty read-only directory until the next kernel start. What a placeholder gets in the way
 of, while it is there: creating that path as a file by hand (`.envrc`, your credential in
-`local.env`: `/release` first, below). **Removing one while the kernel runs lifts its deny**: the
-mount is detached inside the jail, and a cell can then create and write the path (brig SPEC.md,
-decision-164; `test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it`),
-so nothing here removes one early, and neither should you.
+`local.env`: `/release` first, below). **Removing one while the kernel runs ends the jail**: the
+mount is detached inside the jail (brig SPEC.md, decision-164), so the jail ends itself and the
+next cell's holds the path again (below, "When the host undoes a mount"); nothing here removes
+one early, and neither should you.
 
 **Adding your credential mid-session (`/release`).** Where bh-02 looks for its credential and
 there is none, the jail holds the path with a placeholder, so you can't create `local.env` there
@@ -108,34 +108,61 @@ enforced, but on Linux best-effort whenever the jail holds a secret under a writ
 (`graded`, below). `bh-02/app/tests/test_python_cells.py`
 runs real cells in this jail: on darwin in `scripts/check`, on Linux in `scripts/linux-jail-check`.
 
-**What the host can undo on Linux.** A mount sits on the host's directory entry. When the host
-replaces that entry (an editor saves `local.env` by writing a new file and renaming it over the
-old one; `git config` saves `.git/config` the same way) or removes it (the empty directory held
-where a secret is absent), the kernel detaches the mount inside the jail, and from then on a
-cell can read and rewrite what is at that path, and create the absent one (measured:
-`test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it`). bubblewrap
-can't prevent it, so `fs_read` grades best-effort while any secret is held that way (`held`),
-and the jail says which paths when the kernel comes up (`notice()`, which `tui:status` shows
-as a note in the conversation): edit them after `/release` (no jail runs until the next cell),
-or `/restart kernel` afterwards, which puts a new jail over them.
+**When the host undoes a mount (Linux): the jail ends.** Every hold is a mount on the host's
+directory entry: a write deny an existing path bound read-only over itself (`.git/config`,
+`.git/hooks`, a layer file, a host import path) or a placeholder (above), a secret a
+`/dev/null` over the file. When the host replaces that entry (`git config`, `git remote add`,
+`git push -u` and anything else that sets a value write `.git/config.lock` and rename it over
+`.git/config`; editors and `sed -i` save a layer file or `local.env` by renaming a new file over
+it), renames it away, removes it (a placeholder) or creates it (an absent secret), the kernel
+detaches the mount inside the jail, and from then on a cell could write, read or create that
+path (measured before this existed: a cell wrote `.git/config` after a host `git config`, for the
+rest of the session). A held *directory* is not affected by what happens inside it: saving
+`.vscode/settings.json` by rename leaves the hold on `.vscode` in place.
 
-**`fs_write` is graded `enforced` on Linux, and holds against cells, not against the host.** A
-write deny is a mount too: an existing path bound read-only over itself (`.git/config`,
-`.git/hooks`, a layer file, a host import path), an absent one a placeholder (above). Two things
-done on the host lift one inside the running jail, until the kernel next starts:
+So the jail watches the directory of every path it holds (`tripwired`: each write deny under a
+writable root, and each held secret), with inotify from bh-02, set up after its placeholders are
+made and before bubblewrap mounts over them (`tripwire.py`). At the first such change it kills
+the jail's process group, a running cell and anything a cell left in the background with it.
+The next cell starts a new jail, which holds the path again, and its answer, which the person
+sees in the conversation, starts `(the kernel was started again, because something on the host
+replaced or removed .../.git/config (a git config, an editor's save), which lifts the jail's
+hold on it, so bh-02 ended the jail; the next one holds it again; variables from earlier cells
+are gone)`. A cell that was running ends with `the kernel process ended during this cell
+because ...`. The cost: the kernel's variables, at every such host change while it runs.
+`/release` first (no jail runs until the next cell) costs the same and leaves no window.
 
-- renaming a file over a denied path: `git config`, `git remote add`, `git push -u` and
-  anything else that sets a value rewrite `.git/config` that way, and editors save by rename
-  (`.vscode/settings.json`, a layer file). A cell can then write that path, `.git/config`
-  included, until the kernel restarts
-  (`test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail`);
-- removing a placeholder: a cell can then create the path.
+The window, measured in `scripts/linux-jail-check`'s container (aarch64, bubblewrap 0.9), from
+the host's rename (or the start of a host `git config`) to the jail's process group being gone,
+over two runs of 20 each: a median of 0.9 to 2.3 ms and a worst of 1.4 to 10 ms with bh-02's
+process otherwise idle; a median of 20 to 72 ms and a worst of 35 to 186 ms with another thread
+in bh-02's process busy on the CPU (the watcher thread needs the interpreter lock; the figure
+also includes the measuring loop waiting for it, so it is an upper bound). In that window, a
+program a cell left running that tries the path in a tight loop gets its write in: 19 or 20
+times in 20, both over a renamed-over `.git/config` and into `.git/config.lock` while a host
+`git config` writes it (the
+lock is an ordinary new file in `.git`, which a cell may write, and git renames it into place:
+no mount can hold a file that doesn't exist yet). A cell that is not running at that moment
+never gets in: the next one finds the path held
+(`test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_next_holds_it`,
+`test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_cell_rewrites_it`: your own
+save of a layer file still reloads). So before you run a host git command that writes
+`.git/config`, or save a layer file, while a cell's background program runs, stop the reply,
+or `/release`.
 
-`/restart kernel` (or `/clear`, or `/release` and the next cell) starts a new jail, which holds
-them again. The grade stays `enforced`, a decision (2026-09-30): it grades what a cell can do
-on its own, and `best_effort` would mark the jail unconfined, so every cell would ask. brig's
-SPEC.md (section 6, bwrap) says the same of its own grade. darwin's seatbelt matches paths, not
-directory entries, and has no such gap.
+What was tried and could not hold the path instead: binding the parent read-only with writable
+carve-outs (a jailed `git commit` then fails: it creates `.git/index.lock`; measured), and
+putting the mount back from outside (entering the jail's mount namespace is refused, `EPERM`,
+because bubblewrap nests it in a user namespace bh-02 has no capabilities in; measured).
+
+**`fs_write` is graded `enforced` on Linux** (a decision, 2026-09-30): it grades what a cell can
+do on its own, and `best_effort` would mark the jail unconfined, so every cell would ask. A host
+change ends the jail rather than lowering the grade; the window above is what remains. `fs_read`
+stays best-effort while a secret is held under a writable root (`held`), and the jail names
+those paths when the kernel comes up (`notice()`, which `tui:status` shows as a note). brig's
+SPEC.md (section 6, bwrap) says what its own grade covers. darwin's seatbelt matches paths, not
+directory entries, and has no such gap: a host `git config` there changes nothing for the jail
+(`test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing`).
 
 Known gaps on Linux, beyond darwin's:
 

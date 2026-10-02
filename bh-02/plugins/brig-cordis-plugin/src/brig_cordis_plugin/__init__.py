@@ -27,8 +27,10 @@ from brig_cordis_plugin.jail import (
     stack_for,
     still_made,
     told_reads,
+    tripwired,
     uncovered,
 )
+from brig_cordis_plugin.tripwire import Tripwire, decoded, lifted, tripped_for, wires
 from brig_cordis_plugin.wiring import jail
 
 __all__ = [
@@ -36,14 +38,17 @@ __all__ = [
     "SYSTEM_READABLE",
     "BrigConfig",
     "BrigJail",
+    "Tripwire",
     "Layers",
     "allowlisted",
+    "decoded",
     "git_author",
     "graded",
     "held",
     "holding",
     "identity",
     "jail",
+    "lifted",
     "made_by_the_jail",
     "mountable",
     "notice_for",
@@ -59,5 +64,8 @@ __all__ = [
     "stack_for",
     "still_made",
     "told_reads",
+    "tripped_for",
+    "tripwired",
     "uncovered",
+    "wires",
 ]

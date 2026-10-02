@@ -756,13 +756,17 @@ be the copy decision-152 deleted the event stream for).
   jail's life: renaming a file over a denied path (a host `git config` writes
   `.git/config` by rename; editors save by rename), and removing the empty
   directory an absent one is held by (the bullet on absent `write_denies`
-  above). The workload can then write that path (measured in bh-02:
-  `test_a_linux_write_deny_ends_when_the_host_renames_over_it_until_a_new_jail`).
-  A new jail holds it again. The same is true of a masked `read_denies` file,
-  which is why an embedder that holds secrets that way may grade `fs_read`
-  lower (bh-02 does); nothing in this mechanism can see the host do it, and the
-  grade is not lowered for it: what it grades is whether the workload can get
-  past a carve-out by itself, and it can't.
+  above). The workload can then write that path (measured in bh-02, before its
+  tripwire). A new jail holds it again. The same is true of a masked
+  `read_denies` file, which is why an embedder that holds secrets that way may
+  grade `fs_read` lower (bh-02 does); nothing in this mechanism can see the host
+  do it, and the grade is not lowered for it: what it grades is whether the
+  workload can get past a carve-out by itself, and it can't. Seeing it is the
+  embedder's: bh-02 watches each carve-out's directory with inotify and ends the
+  jail at the first such change (its brig-cordis-plugin README, "When the host
+  undoes a mount", has the window that leaves). The mount can't be put back from
+  outside: the host can't enter the jail's mount namespace (`EPERM`, measured;
+  bwrap nests it in a user namespace of its own).
   `network` is deny-**all**: the netns is the whole enforcement, so a spec
   granting `allowed_domains` is refused (`NetworkUnsupported`) rather than run
   under a claim this mechanism cannot make. Per-domain egress needs
