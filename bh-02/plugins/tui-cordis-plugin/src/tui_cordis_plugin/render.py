@@ -267,11 +267,15 @@ def waiting_line(rows: Iterable[str]) -> str:
 
 
 def approval_title(request: Event) -> str:
-    """The question an approval asks: run this cell, and how long it is, in one line."""
-    name = str(request.get("name", "?"))
+    """The question an approval asks: run this cell, and how long it is, in one line; or the
+    request's own `title`, when it asks about something other than a cell."""
     input: Mapping[str, Any] = request.get("input") or {}
     lines = str(input.get("code") or "").strip().splitlines()
-    return f"Run this {name} cell ({len(lines)} line{'s' if len(lines) != 1 else ''})?"
+    size = f"{len(lines)} line{'s' if len(lines) != 1 else ''}"
+    if title := str(request.get("title") or ""):
+        question = title.removesuffix("?")
+        return f"{question} ({size}){title[len(question) :]}" if lines else title
+    return f"Run this {request.get('name', '?')} cell ({size})?"
 
 
 def approval_lines(request: Event) -> list[str]:

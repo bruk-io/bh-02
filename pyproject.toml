@@ -100,6 +100,8 @@ src = [
     "bh-02/plugins/commands-cordis-plugin/tests",
     "bh-02/plugins/context-cordis-plugin/src",
     "bh-02/plugins/context-cordis-plugin/tests",
+    "bh-02/plugins/extensions-cordis-plugin/src",
+    "bh-02/plugins/extensions-cordis-plugin/tests",
     "bh-02/plugins/kernel-cordis-plugin/src",
     "bh-02/plugins/kernel-cordis-plugin/tests",
     "bh-02/plugins/models-cordis-plugin/src",
@@ -149,6 +151,9 @@ shell = [
     # bh_02.outdated: an earlier bh-02's layers in today's row names (cordis's `Row`)
     "bh_02.bootstrap", "bh_02.cli", "bh_02.outdated", "bh_02.sessions", "bh_02.testing",
     "warden.bootstrap", "warden.cli",
+    # the extensions' worker: a program of its own, run in the jail, whose whole job is a cordis
+    # runtime of the components the model wrote
+    "extensions_cordis_plugin.worker",
 ]
 
 [tool.pypeeker.worker-stdlib-only]
@@ -165,9 +170,16 @@ extra-impure = ["itertools.count", "importlib.resources.files", "threading.Condi
 # guard is not something the rule models. Exact and per-module; nothing else inherits it.
 allow = [
     "bh_02.__main__", "warden.__main__",
-    # the kernel's worker, run by path (`python -I worker.py SOCKET`) inside a jail
-    "kernel_cordis_plugin.worker",
+    # the kernel's worker and the extensions' worker, each run by path (`python -I worker.py
+    # SOCKET`) inside a jail
+    "kernel_cordis_plugin.worker", "extensions_cordis_plugin.worker",
 ]
+
+# A function may not mutate module-level state. The extensions' worker puts each model-written
+# module in `sys.modules` while it loads (cordis's scan finds a component by its module's name)
+# and takes it out when it unloads; nothing else may.
+[tool.pypeeker.no-hidden-global-mutation]
+allow = ["extensions_cordis_plugin.worker:_Extensions.load", "extensions_cordis_plugin.worker:_Extensions.unload"]
 
 # Purity is the default, and the exclude list is the budget: every function in the apps and
 # their plugins is pure unless it is named below, with the reason. Adding a name is a design
@@ -242,6 +254,12 @@ exclude = [
     "kernel_cordis_plugin.unjailed:_until_listening",
     "kernel_cordis_plugin.worker:*",
     "brig_cordis_plugin.jail:BrigJail.*", "brig_cordis_plugin.jail:_Jailed.*",
+    # the model's extensions: the directory they are written to, read every `watch` seconds, and
+    # the status file the model reads; a socket to a worker a jail started, the worker program
+    # itself (a cordis runtime of model-written modules), and the tests' plain-subprocess jail
+    "extensions_cordis_plugin.host:Extensions.*",
+    "extensions_cordis_plugin.worker:*",
+    "extensions_cordis_plugin.testing:*",
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
     "chat_cordis_plugin.wiring:session", "models_cordis_plugin.wiring:model",
 ]

@@ -168,6 +168,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `model` | `models:model` (`default`: `sonnet`) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
 | `models` | `models:catalog` | |
 | `transcript` | `agent:transcript` | `path` (the session's `transcript.jsonl`) |
+| `extensions` | `extensions:extensions` | |
 
 `run()` adds three rows of its own after every layer, pinned on so no layer can remove them:
 `layers` (the files above, as paths, so the jail can keep a cell from rewriting them, and
@@ -203,6 +204,7 @@ tui:status              pushes the status bar's fields     depends on Kernel, Lo
 tui:sessions            pushes the sidebar's list          depends on Sessions, Frame
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:session            runs the chat, binds Done          depends on Loop, Input, Output, Commands
+extensions:extensions   loads the model's own plugins      depends on Jail, Commands, Frame, System, Output
 ```
 
 Swap the model or the ui and the kernel keeps its namespace, because the kernel depends on the
@@ -227,7 +229,8 @@ other plugin; the gate proves it.
 | `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's one tool, `python`, only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are | `loader` (catalog) |
 | `agent-cordis-plugin` | `loop` (`loop`: turns classified after harness, bounded nudges, each call a cell, put to the person first when the kernel is unconfined), `transcript` | `model`, `kernel`, `transcript`, `system`, `output` (`confirm`) |
 | `chat-cordis-plugin` | runs `session` (a turn interruptible) and binds `done` | `loop`, `input`, `output`, `commands` |
-| `context-cordis-plugin` | `system`: who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of, the working directory, branch and CLAUDE.md/AGENTS.md, read fresh | |
+| `context-cordis-plugin` | `system`: who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of, the working directory, branch and CLAUDE.md/AGENTS.md, read fresh; a broker other rows add sections to | |
+| `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system` | `jail`, `commands`, `frame`, `system`, `output` |
 | `kernel-cordis-plugin` | `kernel`: a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, a cell run); `jail`: `unjailed` | `jail` |
 | `brig-cordis-plugin` | `jail`: brig's `scratch_darwin()`; the only importer of brig | `layers` |
 | `commands-cordis-plugin` | `commands` (the broker); the operator's commands over the loader | `commands`, `loader`, `models` (operator) |
@@ -258,6 +261,18 @@ question ignores keys, so the rest of a message you were typing can't answer it;
 dropped. Only the worker's environment is scrubbed of `CLAUDE*` and
 `ANTHROPIC_*`: an approved cell can still read `local.env`, or the environment of any process
 you own, the Claude Code child's included.
+
+## The model's own plugins
+
+The model can extend bh-02 itself, while it runs: it writes a module of cordis components to
+`.bh-02/plugins/NAME.py` in the project, and the `extensions` row loads it within half a second,
+again whenever it changes, and unloads it when it is deleted. An extension can add a slash
+command for you, a status-bar field, or text in the model's own prompt, and nothing else: it
+runs in a worker the `jail` row starts, as confined as a cell, and reaches bh-02 only through
+those three keys, each of which only adds. Jailed, it loads without asking, as a cell runs
+without asking; with `--no-jail` each one is put to you first, with its source. The status bar's
+`ext:` field lists them (`ext: todo ✓`), and `.bh-02/plugins/status.json` is what the model
+reads to see whether one loaded. The plugin's README has the details.
 
 ## Writing a plugin
 

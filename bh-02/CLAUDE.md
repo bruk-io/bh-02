@@ -45,8 +45,9 @@ shape, in `CONTRACTS.md`:
 `kernel`, a persistent Python namespace whose `spec` is `python(code)`, and `agent:loop` offers
 that one spec through the provider's standard tool calling and runs every call as a cell
 (`kernel.run`). Inside a cell there is only Python: the namespace holds what cells put there,
-and nothing a cell does reaches back into bh-02; a cell reads and writes files with
-`open`/`pathlib` and runs programs with `subprocess`, and the jail decides what it may touch.
+and nothing a cell does reaches back into bh-02 but the extensions it writes (below); a cell
+reads and writes files with `open`/`pathlib` and runs programs with `subprocess`, and the jail
+decides what it may touch.
 Replacing a binding reloads every dependent (cordis's rule, and why history lives in
 `transcript`, a row of its own).
 
@@ -101,6 +102,19 @@ asking; unconfined (`--no-jail`), every cell is put to the person through `outpu
 approval modal, showing the code) and runs only on a yes. The kernel depends on its jail alone,
 so a new ui or model keeps the namespace. Only `brig_cordis_plugin` imports brig
 (`brig-one-adapter`), and only darwin is jailed so far.
+
+**The model's own plugins.** `extensions:extensions` loads the cordis components the model
+writes to `.bh-02/plugins/NAME.py` while bh-02 runs (looked at every half second; changed,
+loaded afresh; deleted, unloaded), so the model can evolve the harness without anyone editing
+a layer. They run in a second worker the `jail` row starts (`extensions_cordis_plugin.worker`,
+a cordis runtime of its own, listed in `cordis-in-wiring-only`'s `shell`), never in bh-02's
+process: jailed, they load without asking, as cells run; unjailed, each load goes through
+`output.confirm` with its source. An extension reaches bh-02 only through three keys bound in
+that worker, each of which only adds (`commands.register`, `frame.status`, `system.add`); the
+host registers what arrives into the real keys and keeps the removers. Its own `system` section
+tells the model how, and `.bh-02/plugins/status.json` tells it how each load went. Don't give an
+extension a key that replaces or reaches the composition (the loader, `jail`, `model`): the
+worker's process boundary is what keeps a model's plugin as contained as its cells.
 
 **The model, by name.** The model row is `models:model` (`models_cordis_plugin`): named models
 over their providers, the one its config's `default` names (`sonnet` unless a layer says

@@ -126,6 +126,10 @@ def test_an_approval_names_the_cell_and_shows_its_code_whole() -> None:
     empty = {"name": "python", "input": {"code": ""}}
     assert render.approval_title(empty) == "Run this python cell (0 lines)?"
     assert render.approval_lines(empty) == []
+    # a request about something other than a cell (an extension to load) asks its own question
+    asked = {"name": "extension", "title": "Load extension todo, unjailed?", "input": {"code": "x = 1"}}
+    assert render.approval_title(asked) == "Load extension todo, unjailed (1 line)?"
+    assert render.approval_lines(asked) == ["x = 1"]
 
 
 def test_the_jail_in_a_status_bar() -> None:

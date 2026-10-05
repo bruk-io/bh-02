@@ -44,6 +44,18 @@ def test_the_context_is_read_fresh_from_the_project(tmp_path: Path) -> None:
     assert "Git branch: main" in text
 
 
+def test_a_row_adds_a_section_read_fresh_and_its_remover_takes_it_out(tmp_path: Path) -> None:
+    context = ProjectContext(ContextConfig(root=str(tmp_path)))
+    said = ["first"]
+    remove = context.add(lambda: said[-1])
+    context.add(lambda: "")  # a section with nothing to say adds nothing
+    assert context.text().endswith("\n\nfirst")
+    said.append("second")
+    assert context.text().endswith("\n\nsecond")  # read each time, not when added
+    remove()
+    assert "second" not in context.text() and not context.text().endswith("\n")
+
+
 async def test_the_row_binds_the_context_under_system() -> None:
     effects = await drive(project(config=ContextConfig()))
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "system")]

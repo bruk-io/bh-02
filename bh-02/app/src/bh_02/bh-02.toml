@@ -82,3 +82,12 @@ use = "commands:operator"
 [[plugin]]
 id = "palette"
 use = "tui:palette"
+
+# The model's own extensions: cordis components it writes to the project's `.bh-02/plugins/`,
+# loaded while bh-02 runs into a worker the `jail` row starts, so they run as confined as its
+# cells (jailed, they load without asking; unjailed, each is put to the person first). What they
+# add, slash commands, status fields and sections of the model's prompt, goes into `commands`,
+# `frame` and `system`, and leaves with them. Its own section tells the model how.
+[[plugin]]
+id = "extensions"
+use = "extensions:extensions"

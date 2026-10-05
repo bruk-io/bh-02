@@ -3,12 +3,17 @@
 `describe` is the whole prompt as a function of what was found; `ProjectContext.text` finds
 it (the directory, the git branch, the project's instructions file) every time it is asked,
 so an edit to CLAUDE.md reaches the next request without reloading anything.
+
+It is also a broker (paper 6.2): a row with something to tell the model `acquire`s a section
+(`add`), read with the rest each time, and its remover takes it out again when the row leaves.
 """
 
 import datetime
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from cordis_helpers import Hooks
 
 __all__ = ["ContextConfig", "ProjectContext", "branch_of", "describe"]
 
@@ -39,8 +44,15 @@ class ContextConfig:
     max_chars: int = 20_000
 
 
-def describe(root: str, branch: str | None, today: str, guidance: tuple[str, str] | None) -> str:
-    """The system prompt, from what was found. `guidance` is (file name, its text)."""
+def describe(
+    root: str,
+    branch: str | None,
+    today: str,
+    guidance: tuple[str, str] | None,
+    sections: Sequence[str] = (),
+) -> str:
+    """The system prompt, from what was found. `guidance` is (file name, its text); `sections`
+    are what rows added (`ProjectContext.add`), each as it reads now."""
     lines = [_INTRO, "", _HARNESS, "", f"Working directory: {root}"]
     if branch:
         lines.append(f"Git branch: {branch}")
@@ -55,6 +67,9 @@ def describe(root: str, branch: str | None, today: str, guidance: tuple[str, str
             "",
             text.strip(),
         ]
+    for section in sections:
+        if section.strip():
+            lines += ["", section.strip()]
     return "\n".join(lines)
 
 
@@ -69,12 +84,20 @@ class ProjectContext:
 
     def __init__(self, config: ContextConfig) -> None:
         self._config = config
+        self._sections: Hooks[Callable[[], str]] = Hooks()
+
+    def add(self, section: Callable[[], str]) -> Callable[[], None]:
+        """Add `section` to the prompt, read each time the prompt is; returns its remover. A row
+        `acquire`s one, so it leaves the prompt with the row."""
+        return self._sections.add(section)
 
     def text(self) -> str:
         root = Path(self._config.root).resolve()
         head = root / ".git" / "HEAD"
         branch = branch_of(head.read_text(encoding="utf-8")) if head.is_file() else None
-        return describe(str(root), branch, datetime.date.today().isoformat(), self._guidance(root))
+        today = datetime.date.today().isoformat()
+        sections = [section() for section in self._sections]
+        return describe(str(root), branch, today, self._guidance(root), sections)
 
     def _guidance(self, root: Path) -> tuple[str, str] | None:
         for name in self._config.instructions:

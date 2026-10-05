@@ -123,6 +123,11 @@ config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }   # let cells wri
 A new part is a plugin: a package with components, registered as a `cordis.plugins` entry point,
 named by a row. [`bh-02/CLAUDE.md`](bh-02/CLAUDE.md) walks through adding one.
 
+The model can extend bh-02 too, while it runs: a module of cordis components it writes to
+`.bh-02/plugins/` in the project is loaded at once, in a jail of its own, and can add a slash
+command, a status-bar field or text in the model's own prompt, each taken back when the file
+changes or goes ([`extensions-cordis-plugin`](bh-02/plugins/extensions-cordis-plugin)).
+
 ## warden: the same pattern, no model
 
 [`examples/warden`](examples/warden) supervises processes. Each process is a row that registers
