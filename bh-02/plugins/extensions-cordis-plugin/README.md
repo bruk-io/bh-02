@@ -21,6 +21,7 @@ extensions load again in every later session there.
 ```python
 from cordis import Effects, acquire, component
 
+
 @component
 async def todo(*, commands, system) -> Effects:
     items: list[str] = []
@@ -45,7 +46,17 @@ What an extension reaches of bh-02, each only to add to it, each returning its r
 
 A component may also `bind` keys of its own, which another extension's components can depend
 on. It can't replace a row, rebind one of bh-02's keys or reach the loader: those don't exist
-where it runs.
+where it runs. Whatever it added leaves with it, through `acquire` or not: the worker takes back
+any entry an extension never removed (a field pushed from background work) when it unloads.
+
+What the model is told (`watch.instructions`, the row's `system` section) is enough cordis to
+write one and no more, since it goes out with every request: the lifecycle rule (a component
+runs while what it needs is bound, starts again when that is replaced, and is undone in reverse
+when it leaves), the effects it uses (`acquire`, `bind`, `enter`, `background`), Protocol
+contracts, the three keys, and how to try a component in a cell before writing its file
+(`asyncio.run(cordis.testing.drive(todo(commands=fake, system=fake)))`, cordis being importable
+there). The rest it can read: cordis's README, whose path it is given when bh-02 runs from the
+workspace (an editable install), and `help(cordis.background)` and the like.
 
 The model hears how each one went in its prompt (`watch.instructions`: how to extend, then each
 extension's state) and in `.bh-02/plugins/status.json`, written as each load ends, so a cell can

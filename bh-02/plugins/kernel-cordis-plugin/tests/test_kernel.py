@@ -19,10 +19,33 @@ from kernel_cordis_plugin import (
     Kernel,
     KernelConfig,
     Unjailed,
+    instructions_for,
     is_confined,
     kernel,
     worker_argv,
 )
+
+
+def test_the_model_is_told_its_tool_is_a_persistent_kernel_and_how_to_use_it() -> None:
+    told = instructions_for(True)
+    assert told.startswith("Your one tool is `python`, the CodeAct tool bh-02 ships with")
+    # how long the namespace lasts, and what empties it
+    assert "lasts as long as this run of bh-02" in told and "across a /model switch" in told
+    assert "a resumed session too" in told and "after /clear" in told
+    # the ways a cell's output can go missing, measured against a real worker below
+    assert "capture_output=True" in told and "never reaches you" in told and "input() fails" in told
+    assert "capture_output=True" in PYTHON["description"]
+    assert told.endswith("Cells run without asking.") and instructions_for(False).endswith(
+        "say what they do."
+    )
+
+
+async def test_a_program_s_own_output_reaches_a_cell_only_when_captured(tmp_path: Path) -> None:
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("import subprocess; subprocess.run(['echo', 'lost']).returncode") == "0"
+        said = await k.run("print(subprocess.run(['echo', 'kept'], capture_output=True, text=True).stdout)")
+        assert said == "kept"
+        assert "EOFError" in await k.run("input()")
 
 
 class Confined(Unjailed):

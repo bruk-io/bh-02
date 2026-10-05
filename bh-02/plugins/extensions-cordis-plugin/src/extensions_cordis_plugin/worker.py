@@ -56,12 +56,13 @@ _SETTLE_S = 10.0  # how long a load waits for its rows to come up before saying 
 
 
 class _Bridge:
-    """The socket's writing end, and the commands extensions registered, by id."""
+    """The socket's writing end, every entry extensions added (by id, with whose it is), and
+    the commands among them."""
 
     def __init__(self, writer: asyncio.StreamWriter) -> None:
         self._writer = writer
         self._ids = itertools.count(1)
-        self._live: set[int] = set()
+        self._live: dict[int, str] = {}  # entry: the extension that added it
         self.runs: dict[int, Run] = {}
 
     def send(self, message: Mapping[str, Any]) -> None:
@@ -72,18 +73,25 @@ class _Bridge:
     ) -> Callable[[], None]:
         """Send an entry the host is to add; returns its remover, which sends its removal once."""
         entry = next(self._ids)
-        self._live.add(entry)
+        self._live[entry] = extension
         if run is not None:
             self.runs[entry] = run
         self.send({"op": "add", "id": entry, "extension": extension, "kind": kind, **fields})
 
         def remove() -> None:
-            if entry in self._live:
-                self._live.discard(entry)
+            if self._live.pop(entry, None) is not None:
                 self.runs.pop(entry, None)
                 self.send({"op": "remove", "id": entry})
 
         return remove
+
+    def clear(self, extension: str) -> None:
+        """Take back whatever `extension` added and never removed (a field pushed from
+        background work, say, rather than through `acquire`): it leaves with the extension."""
+        for entry in [entry for entry, owner in self._live.items() if owner == extension]:
+            del self._live[entry]
+            self.runs.pop(entry, None)
+            self.send({"op": "remove", "id": entry})
 
 
 def _text(value: object, what: str) -> str:
@@ -240,6 +248,7 @@ class _Extensions:
         if (held := self._loaded.pop(name, None)) is not None:
             fiber, module = held
             await fiber.retire()
+            self._bridge.clear(name)
             modules.pop(module, None)
 
     async def run(self, command: int, args: str) -> str:

@@ -187,6 +187,35 @@ async def test_what_kept_an_extension_from_loading_is_said_where_the_model_reads
         assert h.frame.fields()["extensions"] == "ext: broken ✗ empty ✗ half ✗"
 
 
+async def test_background_work_updates_a_field_and_what_it_pushed_leaves_with_it(tmp_path: Path) -> None:
+    ticking = (
+        "import asyncio\n"
+        "from cordis import Effects, background, component\n\n"
+        "@component\n"
+        "async def ticks(*, frame) -> Effects:\n"
+        "    async def tick() -> None:\n"
+        "        n, remove = 0, None\n"
+        "        while True:\n"
+        "            n += 1\n"
+        "            pushed = frame.status('n', f'tick {n}')\n"  # not through acquire
+        "            if remove:\n"
+        "                remove()\n"
+        "            remove = pushed\n"
+        "            await asyncio.sleep(0.02)\n\n"
+        "    yield background(tick())\n"
+    )
+    async with _running(tmp_path) as h:
+        h.write("ticks", ticking)
+        await h.extensions.look()
+        assert h.extensions.statuses["ticks"].ok
+        async with asyncio.timeout(10):
+            while h.frame.fields().get("ticks:n") in (None, "tick 1", "tick 2"):
+                await asyncio.sleep(0.02)
+        (tmp_path / ".bh-02" / "plugins" / "ticks.py").unlink()
+        await h.extensions.look()
+        assert h.frame.fields() == {}  # the last push, never acquired, went with its extension
+
+
 async def test_a_command_name_bh_02_already_has_is_refused_and_said(tmp_path: Path) -> None:
     async with _running(tmp_path) as h:
         h.commands.runs["model"] = lambda args: asyncio.sleep(0, "the real /model")

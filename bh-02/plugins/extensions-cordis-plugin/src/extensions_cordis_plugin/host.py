@@ -22,6 +22,7 @@ in a new worker, at the next change in the directory.
 import asyncio
 import contextlib
 import functools
+import importlib.util
 import itertools
 import json
 import shutil
@@ -175,6 +176,11 @@ class Extensions:
         self._socket_dir: str | None = None
         self._watcher: asyncio.Task[None] | None = None
         self._field: Callable[[], None] | None = None
+        # cordis's own design doc, to point the model at: beside the package in the workspace
+        # (an editable install); an installed wheel carries none, and the model is not pointed
+        cordis = importlib.util.find_spec("cordis")
+        readme = Path(cordis.origin).parents[2] / "README.md" if cordis and cordis.origin else None
+        self._reference = str(readme) if readme is not None and readme.is_file() else None
 
     @property
     def directory(self) -> Path:
@@ -189,7 +195,8 @@ class Extensions:
     def section(self) -> str:
         """What the model is told about extending bh-02, and how its extensions are: a section
         of its prompt (`system.add`), read per request."""
-        return instructions(self._config.path, is_confined(self._jail.report()), self._statuses)
+        confined = is_confined(self._jail.report())
+        return instructions(self._config.path, confined, self._statuses, self._reference)
 
     async def __aenter__(self) -> Extensions:
         await self.look()  # what is there already loads before the row is up

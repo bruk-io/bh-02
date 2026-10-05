@@ -8,8 +8,12 @@ composition names, and the model's one tool, `python(code)`, which runs a cell i
 | `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`; config: `root` (default `.`), `grace` (seconds an interrupted cell gets) | `jail` |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
 
-`python.py` is the tool, pure: its spec and `instructions_for(confined)` (what the model is
-told: one tool, plain Python, and where it runs). `confined` is what the loop reads to decide
+`python.py` is the tool, pure: its spec and `instructions_for(confined)`, what the model is
+told: that `python` is the CodeAct tool bh-02 ships, a cell in a kernel that lasts as long as
+this run of bh-02 (a /model switch keeps it; a start, a resume, /clear or a dead worker empties
+it); how to use it (build up state, print what matters under the 20,000-character cut, capture
+a program's output with `subprocess.run(..., capture_output=True, text=True, timeout=...)`,
+since one not captured never reaches the cell, and no stdin); and where its code runs. `confined` is what the loop reads to decide
 whether a cell is put to the person first (`agent:loop`): the kernel itself never asks, so it
 depends on its jail alone and a new ui or model keeps the namespace.
 

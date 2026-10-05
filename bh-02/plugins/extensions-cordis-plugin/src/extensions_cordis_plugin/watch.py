@@ -98,18 +98,23 @@ def _summary(name: str, status: Status, where: str) -> str:
     return f"- {name}: loaded, but not all of it is up{commands}; {where}/status.json has why"
 
 
-def instructions(where: str, confined: bool, statuses: Mapping[str, Status]) -> str:
-    """What the model is told about extending bh-02 (a section of its system prompt): how, what
-    an extension reaches, and the state of each one there is. `where` is the extensions
-    directory, relative to the project."""
+def instructions(
+    where: str, confined: bool, statuses: Mapping[str, Status], reference: str | None = None
+) -> str:
+    """What the model is told about extending bh-02 (a section of its system prompt): how, the
+    part of cordis an extension uses, what it reaches of bh-02, and the state of each one there
+    is. `where` is the extensions directory, relative to the project; `reference` is cordis's
+    own design doc, when there is one to point at."""
     consent = (
-        "Extensions run in a jail of their own, as your cells do: the project is their working "
+        "Extensions run in a jail of their own, as your `python` cells (below) do: the project "
+        "is their working "
         "directory and the only place they can write, and they cannot reach the network or "
         "read credentials. Nobody is asked first."
         if confined
         else "bh-02 is running unjailed, so an extension would run with the person's own "
         "permissions: each is shown to the person, who decides whether it loads."
     )
+    more = f"cordis's design in full is {reference}; " if reference else ""
     lines = [
         "You can extend bh-02 yourself, while it runs. An extension is a Python module you "
         f"write at {where}/NAME.py (NAME: lowercase letters, digits and _). bh-02 loads it "
@@ -117,24 +122,44 @@ def instructions(where: str, confined: bool, statuses: Mapping[str, Status]) -> 
         "when you delete the file; it stays with the project, so it loads again in every later "
         f"session here. {consent}",
         "",
-        "An extension is cordis components: async generator functions marked @component, whose "
-        "keyword-only parameters are the keys they need. A component yields effects, and every "
-        "effect is undone when its module changes or is deleted, so state it keeps in memory "
-        "starts afresh then (keep what must last in a file). For example:",
+        "An extension is cordis components, the same kind of part bh-02 itself is made of. A "
+        "component is an async generator function marked @component: its keyword-only "
+        "parameters are the keys it needs, and it yields effects. It runs only while every key "
+        "it needs is bound, and starts again when one is replaced. When it leaves (its module "
+        "changed or was deleted, a key it needs went), its effects are undone in reverse; a "
+        "setup that raises undoes what it had done. So what it keeps in memory starts afresh "
+        "then: keep what must last in a file. For example:",
         "",
         _EXAMPLE,
         "",
-        "What an extension reaches of bh-02, each only to add to it; each call returns its "
-        "remover, so make it through `acquire`:",
+        "The effects, all from cordis, each yielded:",
+        "- `acquire(fn, *args)` calls `fn` and keeps the remover it returns, called when the "
+        "component leaves: how you register anything.",
+        "- `bind(key, value)` provides `value` under `key`, for another extension's component to "
+        "depend on by naming a parameter `key`.",
+        "- `enter(cm)` enters an async context manager and holds it while the component lives.",
+        "- `background(coro)` runs work the component owns, cancelled when it leaves: anything "
+        "that keeps going, such as a status field it updates.",
+        "Annotate a parameter with a typing Protocol and cordis checks the value against it "
+        "before the component starts.",
+        "",
+        "What an extension reaches of bh-02, each only to add to it, each call returning its remover:",
         "- `commands.register(spec, run)`: a slash command for the person. `spec` has `name` "
         "(lowercase, no slash), `help` and `usage`; `run` is async, the command's argument text "
         "in, the text to show the person out. What a command shows reaches the person, not you.",
-        "- `frame.status(field, text)`: text in the status bar; push again to change it.",
+        "- `frame.status(field, text)`: text in the status bar. The latest push of a field shows: "
+        "to change it from background work, push the new text, then call the old remover.",
         "- `system.add(text)`: text added to this prompt for your later turns.",
-        "A component may also `bind(key, value)` (from cordis) for another extension's "
-        f"component to depend on by that key. Whether each extension loaded, and each "
-        f"component's traceback when one failed, is in {where}/status.json a moment after "
-        "your write.",
+        "Whatever an extension added leaves with it, through `acquire` or not.",
+        "",
+        "Try a component in a `python` cell before you write its file: cordis is importable there "
+        "(`import asyncio, cordis.testing`), and "
+        "`asyncio.run(cordis.testing.drive(todo(commands=fake, system=fake)))` runs it with the "
+        "fakes you pass (any object with the methods it calls: a types.SimpleNamespace will do) "
+        "and returns the effects it yielded, unperformed (an effect's `.name` and `.args`). "
+        f"{more}help(cordis.background) and the like say more. Whether each extension "
+        f"loaded, and each component's traceback when one failed, is in {where}/status.json a "
+        "moment after your write.",
     ]
     if statuses:
         lines += ["", "Extensions now:"]

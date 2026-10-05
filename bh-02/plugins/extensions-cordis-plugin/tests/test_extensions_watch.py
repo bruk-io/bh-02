@@ -65,3 +65,13 @@ def test_the_status_bar_and_the_status_file_say_how_each_one_is() -> None:
     assert written["todo"]["state"] == "active"
     refused = Status(rows={"x.x": "active"}, problems=("/model was not added: taken",))
     assert not refused.ok and status_file({"x": refused})["x"]["state"] == "partly up"
+
+
+def test_the_model_is_told_the_part_of_cordis_an_extension_uses_and_how_to_try_one() -> None:
+    told = instructions(".bh-02/plugins", True, {}, "/src/libs/cordis/README.md")
+    assert "It runs only while every key it needs is bound" in told
+    for effect in ("`acquire(fn, *args)`", "`bind(key, value)`", "`enter(cm)`", "`background(coro)`"):
+        assert effect in told
+    assert "asyncio.run(cordis.testing.drive(todo(commands=fake, system=fake)))" in told
+    assert "cordis's design in full is /src/libs/cordis/README.md" in told
+    assert "design in full" not in instructions(".bh-02/plugins", True, {})  # nothing to point at

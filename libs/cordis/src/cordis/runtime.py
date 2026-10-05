@@ -597,6 +597,8 @@ def bind_step(ctx: Context, key: Key, value: object) -> Result[None]:
 
 
 def bind(key: Key, value: object) -> Effect[None]:
+    """Provide `value` under `key` for components that depend on it; undone by unbinding it,
+    which unloads them first. Yield it: `yield bind("net", client)`."""
     return effect(bind_step, key, value)
 
 
@@ -616,6 +618,8 @@ async def enter_step[T](ctx: Context, cm: AbstractAsyncContextManager[T]) -> Res
 
 
 def enter[T](cm: AbstractAsyncContextManager[T]) -> Effect[T]:
+    """Enter an async context manager and hold it while the component lives; its exit is the
+    undo. Yields back what entering gave: `client = yield enter(NetClient(port))`."""
     return effect(enter_step, cm)
 
 
@@ -675,6 +679,8 @@ def background_step(ctx: Context, coro: Awaitable[None]) -> Result[asyncio.Task[
 
 
 def background(coro: Awaitable[None]) -> Effect[asyncio.Task[None]]:
+    """Run `coro` as work this component owns, cancelled when it leaves; a failure is kept on
+    the component (`explain()` shows it). Yields back the task: `yield background(poll())`."""
     return effect(background_step, coro)
 
 
@@ -696,6 +702,9 @@ async def acquire_step(ctx: Context, fn: Callable[..., Any], *args: Any, **kwarg
 
 
 def acquire(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Effect[None]:
+    """Call `fn(*args, **kwargs)`, whose return value is its own undo (a registration that
+    returns its remover, called when the component leaves): `yield acquire(commands.register,
+    spec, run)`. `fn` may be async; it may return None when there is nothing to undo."""
     return effect(acquire_step, fn, *args, **kwargs)
 
 
@@ -730,6 +739,8 @@ def _stop_hearing(rt: Runtime, listener: Callable[[Event], None]) -> None:
 
 
 def observe(fn: Callable[[Event], None]) -> Effect[None]:
+    """Hear every lifecycle event (a component loading, active, failed, ...) while the component
+    lives; `fn` is called with each `Event`."""
     return effect(observe_step, fn)
 
 
@@ -767,4 +778,6 @@ def performer_step(ctx: Context) -> Result[Performer]:
 
 
 def performer() -> Effect[Performer]:
+    """Get a `Performer` for this component's own fiber, to perform effects after setup (from
+    background work); each one's undo runs when the component leaves."""
     return effect(performer_step)

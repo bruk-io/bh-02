@@ -75,9 +75,13 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 tool_call, tool_result, usage, stop, note). `output.confirm` asks about a cell;
 `input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. `system`
 (`context:project`) is who the model is (the model in bh-02, not Claude Code), what bh-02 is
-made of, the working directory and the project's CLAUDE.md, read per request; the claude-code
-provider adds a note that Claude Code's own opening line and its `mcp__bh__` tool names don't
-mean the model is in Claude Code.
+made of, the working directory and the project's CLAUDE.md, read per request, then the
+sections rows add (`system.add`: the extensions row's is how to extend bh-02 and the part of
+cordis that takes). The loop follows it with `kernel.instructions()`: that `python` is the
+CodeAct tool bh-02 ships, a kernel that lasts as long as this run of bh-02, and how to use it
+(build up state; capture a program's output, which otherwise never reaches the cell; give it a
+timeout). The claude-code provider adds a note that Claude Code's own opening line and its
+`mcp__bh__` tool names don't mean the model is in Claude Code.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays
 a provider's message as it came.
