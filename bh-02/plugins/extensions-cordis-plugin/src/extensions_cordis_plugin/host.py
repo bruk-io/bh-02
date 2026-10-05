@@ -2,10 +2,10 @@
 
 The model writes a module of cordis components into the project's extensions directory
 (`.bh-02/plugins/NAME.py`); this notices (it looks every `watch` seconds), and loads it into a
-worker the `jail` row starts (`worker.py`), so the model's code runs as confined as its cells
+worker the `jail` row starts (`worker.py`), so the model's code runs as confined as its inputs
 do, never in bh-02's own process. A changed file is loaded afresh, a deleted one unloaded.
 When the jail confines nothing (`--no-jail`), each load is put to the person first, with the
-source, exactly as an unjailed cell is.
+source, exactly as an unjailed input is.
 
 What an extension adds reaches bh-02 as data over the worker's socket: a slash command, which
 this registers in `commands` and runs by asking the worker; a status-bar field, pushed into
@@ -14,7 +14,7 @@ Each is kept with its remover, and taken back when the worker says so or the wor
 
 The model hears how each extension went in two places: its prompt (`section`, read per
 request) and `status.json` in the extensions directory, written as soon as a load ends, so a
-cell can read it at once. The worker starts with the first extension there is to load; one that
+input can read it at once. The worker starts with the first extension there is to load; one that
 ends (an extension may end it) takes every extension down with it, and they are loaded again,
 in a new worker, at the next change in the directory.
 """

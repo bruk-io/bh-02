@@ -44,7 +44,7 @@ async def loop(
     config: LoopConfig,
 ) -> Effects:
     """Fills the `loop` row from a raw model: `use = "agent:loop"`. The model's one tool is
-    the kernel's `python(code)`; an unconfined kernel's cells are put to the person through
+    the kernel's `python(code)`; an unconfined kernel's inputs are put to the person through
     `output.confirm` first. A new ui reloads this row, which holds nothing: the transcript and
     the kernel's namespace are rows of their own."""
     yield bind("loop", LoopModel(model, kernel, transcript, config.max_nudges, system, output))

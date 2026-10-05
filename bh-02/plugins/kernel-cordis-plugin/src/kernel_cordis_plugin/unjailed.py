@@ -1,8 +1,8 @@
 """A `jail` that confines nothing: the worker as a plain subprocess, and a report that says so.
 
 For a platform brig can't jail, or a person who chooses not to. Every axis is reported
-`unenforced`, so the kernel is not `confined`: a cell can do anything the person running
-bh-02 can, and agent:loop puts each cell to the person before it runs.
+`unenforced`, so the kernel is not `confined`: an input can do anything the person running
+bh-02 can, and agent:loop puts each input to the person before it runs.
 """
 
 import asyncio
@@ -23,12 +23,12 @@ _READY_TIMEOUT_S = 10.0
 # nobody has reaped yet (the worker exits on its own when the host disconnects).
 _GONE = (ProcessLookupError, PermissionError)
 _STOP_GRACE_S = 2.0
-# Claude credentials are the host's, never a cell's: bh-02's own (CLAUDE_CODE_OAUTH_TOKEN, which
+# Claude credentials are the host's, never an input's: bh-02's own (CLAUDE_CODE_OAUTH_TOKEN, which
 # bh-02 reads from local.env and never puts in its environment, but a person may export), any
 # ANTHROPIC_* of the person's shell, and whatever a Claude Code that launched bh-02 left in it
 # (CLAUDECODE, CLAUDE_PID, CLAUDE_CODE_* such as a messaging token). The worker needs none of
-# them. Unjailed confines nothing else, so this keeps a secret out of `os.environ` in a cell,
-# not out of reach: the cell can still read local.env itself, or the environment of any process
+# them. Unjailed confines nothing else, so this keeps a secret out of `os.environ` in an input,
+# not out of reach: the input can still read local.env itself, or the environment of any process
 # of the same user (`ps eww`), the Claude Code child's included.
 _HOST_ONLY = ("ANTHROPIC_", "CLAUDE")
 

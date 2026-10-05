@@ -55,7 +55,7 @@ _UPDATED_HEADER = (
 @click.option("--patch", "patches", multiple=True, type=_PATCH_TYPE, help=_PATCH_HELP)
 @click.option("--trace", default=None, type=_TRACE_TYPE, metavar="FILE", help=_TRACE_HELP)
 @click.option(
-    "--no-jail", is_flag=True, help="Run the kernel unjailed, with your own permissions; every cell asks."
+    "--no-jail", is_flag=True, help="Run the kernel unjailed, with your own permissions; every input asks."
 )
 @click.option(
     "--resume",
@@ -271,7 +271,7 @@ def _launch(
     # where the credential may be: beside the project, and above bh-02's install and environment
     # (the workspace root, whatever directory bh-02 runs in); and the sessions' state, where each
     # session's Claude Code child keeps its config and messaging peer token (this run's, and the
-    # default one when `XDG_STATE_HOME` moves this run's elsewhere): no jailed cell may read any
+    # default one when `XDG_STATE_HOME` moves this run's elsewhere): no jailed input may read any
     # of them. Another state root, of a run with another `XDG_STATE_HOME`, is not known here.
     anchors = [Path.cwd() / CREDENTIAL_FILE, Path(__file__).resolve(), Path(sys.prefix).resolve()]
     states = [listing.root, str(sessions.default_state_root())] if listing.root else []

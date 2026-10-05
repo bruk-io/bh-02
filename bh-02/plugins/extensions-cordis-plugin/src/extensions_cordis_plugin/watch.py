@@ -82,7 +82,7 @@ def changes(
 
 def is_confined(report: Mapping[str, str]) -> bool:
     """Whether a jail's report says what runs in it can write only where it was allowed and
-    reach no network: the kernel's rule, so extensions load without asking exactly when cells
+    reach no network: the kernel's rule, so extensions load without asking exactly when inputs
     run without asking."""
     return all(report.get(axis) == "enforced" for axis in _CONFINING)
 
@@ -95,7 +95,7 @@ def instructions(
     is the extensions directory, relative to the project; `reference` is cordis's own design
     doc, when there is one to point at."""
     consent = (
-        "Extensions run in a jail of their own, as your `python` cells (below) do: the project "
+        "Extensions run in a jail of their own, as your `python` REPL (below) does: the project "
         "is their working "
         "directory and the only place they can write, and they cannot reach the network or "
         "read credentials. Nobody is asked first."
@@ -141,7 +141,7 @@ def instructions(
         "- `system.add(text)`: text added to this prompt for your later turns.",
         "Whatever an extension added leaves with it, through `acquire` or not.",
         "",
-        "Try a component in a `python` cell before you write its file: cordis is importable there "
+        "Try a component in your REPL before you write its file: cordis is importable there "
         "(`import asyncio, cordis.testing`), and "
         "`asyncio.run(cordis.testing.drive(todo(commands=fake, system=fake)))` runs it with the "
         "fakes you pass (any object with the methods it calls: a types.SimpleNamespace will do) "
@@ -172,7 +172,7 @@ def status_forms(statuses: Mapping[str, Status]) -> tuple[str, ...]:
 
 
 def status_file(statuses: Mapping[str, Status]) -> dict[str, Any]:
-    """`status.json`'s content: each extension's state, for the model to read in a cell."""
+    """`status.json`'s content: each extension's state, for the model to read in an input."""
     return {
         name: {
             "state": "loading" if s.loading else "active" if s.ok else "failed" if s.error else "partly up",

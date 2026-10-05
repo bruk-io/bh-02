@@ -1,6 +1,6 @@
 """The one tool booted from the shipped layers: a real loop, kernel and jail; only the model
-is a fake, which calls scripted cells. A cell is plain Python: it reads and writes files and
-runs programs itself, the jail decides what it may touch, and unjailed every cell is asked about."""
+is a fake, which calls scripted inputs. An input is plain Python: it reads and writes files and
+runs programs itself, the jail decides what it may touch, and unjailed every input is asked about."""
 
 import json
 import shutil
@@ -24,7 +24,7 @@ def _shown() -> str:
 
 
 def _asked() -> list[str]:
-    """The code of every cell the person was asked about."""
+    """The code of every input the person was asked about."""
     import fragile
 
     return [str(request["input"]["code"]) for request in fragile.ASKED]
@@ -36,10 +36,10 @@ def _answers(*these: bool) -> None:
     fragile.answers(*these)
 
 
-def _cells(composition: Callable[..., Path], *cells: str, extra: str = "") -> Path:
-    code = json.dumps(list(cells))
+def _inputs(composition: Callable[..., Path], *inputs: str, extra: str = "") -> Path:
+    code = json.dumps(list(inputs))
     return composition(
-        f'[[plugin]]\nid = "model"\nuse = "fragile:cell_model"\nconfig = {{ code = {code} }}\n' + extra,
+        f'[[plugin]]\nid = "model"\nuse = "fragile:input_model"\nconfig = {{ code = {code} }}\n' + extra,
         one_reply=True,
     )
 
@@ -53,11 +53,11 @@ def _jailed_in(project: Path) -> str:
     )
 
 
-async def test_unjailed_cells_share_a_namespace_of_plain_python_and_each_is_asked_about(
+async def test_unjailed_inputs_share_a_namespace_of_plain_python_and_each_is_asked_about(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
     (tmp_path / "note.txt").write_text("read with open()")
-    cells = (
+    inputs = (
         "x = 6 * 7",
         "x",
         f"open({str(tmp_path / 'note.txt')!r}).read()",
@@ -65,21 +65,21 @@ async def test_unjailed_cells_share_a_namespace_of_plain_python_and_each_is_aske
         "undefined_name",
         f"open({str(tmp_path / 'declined.txt')!r}, 'w').write('x')",
     )
-    patch = _cells(composition, *cells)
+    patch = _inputs(composition, *inputs)
     _answers(True, True, True, True, True, False)
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
-    assert _asked() == list(cells)  # every cell, with its code, before it ran
-    assert "[1] 42" in out  # the namespace outlived the cell that set it
+    assert _asked() == list(inputs)  # every input, with its code, before it ran
+    assert "[1] 42" in out  # the namespace outlived the input that set it
     assert "[2] 'read with open()'" in out  # a file, read with plain Python
-    assert "[3] ['x']" in out  # nothing in the namespace but what cells put there
+    assert "[3] ['x']" in out  # nothing in the namespace but what inputs put there
     assert "[4] Traceback" in out and "NameError" in out
-    assert "[5] denied: the person said no to this cell" in out
+    assert "[5] denied: the person said no to this input" in out
     assert not (tmp_path / "declined.txt").exists()  # a no ran nothing
 
 
 @pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
-async def test_a_jailed_cell_does_coding_work_in_the_project_without_asking(
+async def test_a_jailed_input_does_coding_work_in_the_project_without_asking(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
@@ -94,7 +94,7 @@ async def test_a_jailed_cell_does_coding_work_in_the_project_without_asking(
         subprocess.run([git, "init", "-q"], cwd=project, check=True)
         subprocess.run([git, "config", "user.email", "t@example.invalid"], cwd=project, check=True)
         subprocess.run([git, "config", "user.name", "t"], cwd=project, check=True)
-    cells = [
+    inputs = [
         "from pathlib import Path\nPath('new.py').write_text('X = 1\\n')\n"
         "print(sorted(p.name for p in Path('.').glob('*.py')))",
         "p = Path('greet.py')\np.write_text(p.read_text().replace(\"'hi'\", \"'hello'\"))\n"
@@ -104,28 +104,28 @@ async def test_a_jailed_cell_does_coding_work_in_the_project_without_asking(
         " capture_output=True, text=True, check=True).stdout)",
     ]
     if git:
-        cells.append(
+        inputs.append(
             f"s = subprocess.run([{git!r}, 'status', '--short'], capture_output=True, text=True)\n"
             f"a = subprocess.run([{git!r}, 'add', '-A'], capture_output=True, text=True)\n"
             f"c = subprocess.run([{git!r}, 'commit', '-qm', 'edit'], capture_output=True, text=True)\n"
             f"n = subprocess.run([{git!r}, 'rev-list', '--count', 'HEAD'], capture_output=True, text=True)\n"
             "print(sorted(s.stdout.split()), a.returncode, c.returncode, c.stderr.strip(), n.stdout.strip())"
         )
-    patch = _cells(composition, *cells, extra=_jailed_in(project))
+    patch = _inputs(composition, *inputs, extra=_jailed_in(project))
     _answers()
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
-    assert _asked() == []  # confined: no cell was asked about
+    assert _asked() == []  # confined: no input was asked about
     assert "[0] ['greet.py', 'new.py']" in out, out
     assert "return 'hello'" in out and (project / "greet.py").read_text().endswith("return 'hello'\n")
-    assert "[2] hello" in out, out  # a program the cell started, in the jail, ran the edited code
+    assert "[2] hello" in out, out  # a program the input started, in the jail, ran the edited code
     assert (project / "new.py").read_text() == "X = 1\n"
     if git:
         assert "[3] ['??', '??', 'greet.py', 'new.py'] 0 0  1" in out, out  # status, add, commit
 
 
 @pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
-async def test_a_jailed_cell_cannot_rewrite_the_composition_or_leave_the_project(
+async def test_a_jailed_input_cannot_rewrite_the_composition_or_leave_the_project(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
@@ -149,7 +149,7 @@ async def test_a_jailed_cell_cannot_rewrite_the_composition_or_leave_the_project
     credentials = (
         f"import os\ntry:\n    os.listdir({str(ssh)!r}); print('WROTE')\nexcept OSError:\n    print('DENIED')"
     )
-    patch = _cells(
+    patch = _inputs(
         composition,
         attempt(project / "ok.txt"),
         attempt(outside),
@@ -177,19 +177,19 @@ def _writes(*paths: Path) -> list[str]:
 
 
 @pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
-async def test_a_jailed_cell_may_edit_the_project_s_guidance_but_not_what_runs_code_later(
+async def test_a_jailed_input_may_edit_the_project_s_guidance_but_not_what_runs_code_later(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
     project = tmp_path / "project"
     (project / ".git").mkdir(parents=True)
     (project / ".claude").mkdir()
-    cells = _writes(
+    inputs = _writes(
         project / "CLAUDE.md",
         project / "AGENTS.md",
         project / ".git" / "config",
         project / ".claude" / "x.json",
     )
-    patch = _cells(composition, *cells, extra=_jailed_in(project))
+    patch = _inputs(composition, *inputs, extra=_jailed_in(project))
     _answers()
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
@@ -199,16 +199,16 @@ async def test_a_jailed_cell_may_edit_the_project_s_guidance_but_not_what_runs_c
 
 
 @pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
-async def test_the_jail_row_s_allow_lets_a_cell_write_one_more_self_modification_path(
+async def test_the_jail_row_s_allow_lets_an_input_write_one_more_self_modification_path(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
     project = tmp_path / "project"
     (project / ".git" / "hooks").mkdir(parents=True)
-    cells = _writes(
+    inputs = _writes(
         project / ".git" / "config", project / ".git" / "hooks" / "pre-commit", project / "CLAUDE.md"
     )
     jail = _jailed_in(project) + 'config = { allow = [".git/config"] }\n'
-    patch = _cells(composition, *cells, extra=jail)
+    patch = _inputs(composition, *inputs, extra=jail)
     _answers()
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
@@ -218,12 +218,12 @@ async def test_the_jail_row_s_allow_lets_a_cell_write_one_more_self_modification
 
 
 @pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
-async def test_a_jailed_cell_cannot_read_the_credential_file_bh_02_names_from_another_directory(
+async def test_a_jailed_input_cannot_read_the_credential_file_bh_02_names_from_another_directory(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
     """bh-02 runs in a project far from the workspace whose `local.env` holds its credential: a
-    cell can't open that file, nor have a program it starts read it."""
+    input can't open that file, nor have a program it starts read it."""
     project, workspace = tmp_path / "project", tmp_path / "workspace"
     project.mkdir()
     workspace.mkdir()
@@ -235,7 +235,7 @@ async def test_a_jailed_cell_cannot_read_the_credential_file_bh_02_names_from_an
     def attempt(path: Path) -> str:
         return f"try:\n    open({str(path)!r}).read(); print('READ')\nexcept OSError:\n    print('DENIED')"
 
-    patch = _cells(
+    patch = _inputs(
         composition,
         attempt(secret),
         attempt(readable),  # the jail reads the rest of the filesystem: only the secret is hidden
@@ -260,7 +260,7 @@ def test_the_credential_may_be_above_bh_02_s_install_its_environment_or_the_proj
     assert len(found) == len(set(found))  # each once
 
 
-def test_no_jailed_cell_may_read_the_sessions_state_nor_the_credential() -> None:
+def test_no_jailed_input_may_read_the_sessions_state_nor_the_credential() -> None:
     anchors = [Path("/w/proj/local.env"), Path("/src/bh/.venv")]
     found = unreadable(anchors, ["/xdg/bh-02/sessions", "/home/me/.local/state/bh-02/sessions"])
     assert found[-2:] == ("/xdg/bh-02/sessions", "/home/me/.local/state/bh-02/sessions")
@@ -271,11 +271,11 @@ def test_no_jailed_cell_may_read_the_sessions_state_nor_the_credential() -> None
 
 
 @pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
-async def test_a_jailed_cell_cannot_read_under_the_sessions_state_directory(
+async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
-    """The sessions' state is a directory in `secrets`: a cell can't list it nor open a file
+    """The sessions' state is a directory in `secrets`: an input can't list it nor open a file
     deep under it (the shape of the Claude Code child's peer-token file), in-process or from a
     program it starts; a sibling directory stays readable."""
     project, state, beside = tmp_path / "project", tmp_path / "state", tmp_path / "beside"
@@ -289,7 +289,7 @@ async def test_a_jailed_cell_cannot_read_under_the_sessions_state_directory(
     def attempt(what: str) -> str:
         return f"try:\n    {what}; print('READ')\nexcept OSError:\n    print('DENIED')"
 
-    patch = _cells(
+    patch = _inputs(
         composition,
         attempt(f"open({str(token)!r}).read()"),
         attempt(f"__import__('os').listdir({str(state)!r})"),
@@ -307,13 +307,13 @@ async def test_a_jailed_cell_cannot_read_under_the_sessions_state_directory(
     assert "placeholder" not in out, out
 
 
-async def test_the_harness_owned_loop_offers_only_python_and_runs_the_cell(
+async def test_the_harness_owned_loop_offers_only_python_and_runs_the_input(
     composition: Callable[..., Path],
 ) -> None:
     """The shipped loop (agent:loop) with only the model scripted: the loop reads
-    the kernel, so it is offered one tool, and the cell runs there (asked about: unjailed)."""
+    the kernel, so it is offered one tool, and the input runs there (asked about: unjailed)."""
     patch = composition(
-        '[[plugin]]\nid = "model"\nuse = "fragile:one_cell_model"\n',
+        '[[plugin]]\nid = "model"\nuse = "fragile:one_input_model"\n',
         one_reply=True,
     )
     _answers(True)
@@ -321,5 +321,5 @@ async def test_the_harness_owned_loop_offers_only_python_and_runs_the_cell(
         [*layers(), patch],
         [Row("chat", config={"prompt": "go"})],
     )
-    assert "offered ['python']; the cell said 42" in _shown()
+    assert "offered ['python']; the input said 42" in _shown()
     assert _asked() == ["print(6 * 7)"]

@@ -1,7 +1,7 @@
 """Claude Code, through the Claude Agent SDK, as a `model`: one model step per call.
 
 bh-02's own `agent:loop` runs the loop (CONTRACTS.md: model): it classifies each step,
-nudges, runs every call as a cell in the kernel (which asks the person when unjailed) and keeps the
+nudges, runs every call as an input in the kernel (which asks the person when unjailed) and keeps the
 transcript. Claude Code is the subscription's sanctioned way to the model, and nothing else: it
 runs no built-in tool, loads no settings, CLAUDE.md or connector, and the tools it knows are only
 declared to it (`declared.py`). Each call to `complete` streams exactly one model step:

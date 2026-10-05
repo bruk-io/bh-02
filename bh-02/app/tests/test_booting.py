@@ -116,7 +116,7 @@ async def test_an_unrelated_providers_background_work_does_not_keep_an_interacti
     await asyncio.wait_for(run([*layers(), patch]), 2)
 
 
-async def test_cancelling_a_run_while_a_row_starts_cleans_up_promptly() -> None:
+async def test_caninputing_a_run_while_a_row_starts_cleans_up_promptly() -> None:
     """Ctrl-C during a slow startup must unwind, not wait for the slow piece to finish."""
     started = asyncio.Event()
 

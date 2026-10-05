@@ -14,7 +14,7 @@ it, `.bh-02/plugins`), `watch` (how often it is looked at, 0.5 s).
 ## What the model does
 
 It writes `.bh-02/plugins/NAME.py` (NAME: lowercase letters, digits, `_`), a module of cordis
-components, from a cell like any other file. bh-02 loads it within a `watch`, loads it afresh
+components, from an input like any other file. bh-02 loads it within a `watch`, loads it afresh
 when it changes, and unloads it when it is deleted. The directory is the project's, so the
 extensions load again in every later session there.
 
@@ -53,13 +53,13 @@ What the model is told (`watch.instructions`, the row's `system` section) is eno
 write one and no more, since it goes out with every request: the lifecycle rule (a component
 runs while what it needs is bound, starts again when that is replaced, and is undone in reverse
 when it leaves), the effects it uses (`acquire`, `bind`, `enter`, `background`), Protocol
-contracts, the three keys, and how to try a component in a cell before writing its file
+contracts, the three keys, and how to try a component in an input before writing its file
 (`asyncio.run(cordis.testing.drive(todo(commands=fake, system=fake)))`, cordis being importable
 there). The rest it can read: cordis's README, whose path it is given when bh-02 runs from the
 workspace (an editable install), and `help(cordis.background)` and the like.
 
 The model hears how each one went in its prompt (`watch.instructions`: how to extend, then each
-extension's state) and in `.bh-02/plugins/status.json`, written as each load ends, so a cell can
+extension's state) and in `.bh-02/plugins/status.json`, written as each load ends, so an input can
 read it at once: per extension, `state` (`active`, `partly up`, `failed`, `loading`), each
 component's state (`active`, `waiting on: KEY`, `failed:` and the traceback from the
 extension's own frames), the module's `error`, its `commands`, and `problems` (a registration
@@ -69,10 +69,10 @@ bh-02 refused). The status bar's `extensions` field shows the same to the person
 ## Where it runs, and who is asked
 
 Not in bh-02's process. `host.py` starts `worker.py` through the `jail` row, the same jail the
-kernel's cells run in: with `brig:jail` an extension can write only inside the project, can't
+kernel's inputs run in: with `brig:jail` an extension can write only inside the project, can't
 reach the network, and can't read `local.env` or the sessions' state. So an extension loads
-without asking, exactly as a cell runs without asking; the model's plugins are as contained as
-its cells. With `--no-jail` (`kernel:unjailed`) an extension would run with the person's own
+without asking, exactly as an input runs without asking; the model's plugins are as contained as
+its inputs. With `--no-jail` (`kernel:unjailed`) an extension would run with the person's own
 permissions, so each load is put to the person through `output.confirm`, the source shown
 whole (`Load the model's extension todo into bh-02, unjailed (12 lines)?`), and a no leaves it
 unloaded until the file changes.

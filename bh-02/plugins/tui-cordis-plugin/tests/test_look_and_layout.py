@@ -163,7 +163,7 @@ def test_a_step_a_later_one_made_needless_is_undone_the_session_first() -> None:
     fields = {"session": ("20260923-011910-58d9", "58d9"), "model": "default", "jail": enforced}
     assert fit(fields, 78) == "session: 20260923-011910-58d9 │ model: default │ jail: jailed w✓ n✓ r✓ e✓"
     with_usage = fields | {"usage": frame.usage_forms(frame.Usage(1234, 56, 0.01))}
-    assert fit(with_usage, 118) == (  # the whole id here would be 121 cells: its short form stays
+    assert fit(with_usage, 118) == (  # the whole id here would be 121 inputs: its short form stays
         "session: 58d9 │ model: default │ jail: jailed fs_write ✓ network ✓ fs_read ✓ env ✓ │ "
         "usage: 1.2k/56 $0.01"
     )

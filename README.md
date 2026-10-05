@@ -94,9 +94,10 @@ echo 'CLAUDE_CODE_OAUTH_TOKEN=<the token>' > local.env && chmod 600 local.env   
 cd ~/some/project && ~/path/to/bh-02/.venv/bin/bh-02
 ```
 
-The model acts in Python cells. In the sandbox a cell runs without asking: it can write inside
+The model acts in Python, at a REPL of its own that persists for the session. In the sandbox its
+code runs without asking: it can write inside
 the project, but it can't reach the network, read credentials, or touch what could run code later
-(`.git/hooks`, shell rc files, bh-02's own layers). With `--no-jail`, every cell asks first.
+(`.git/hooks`, shell rc files, bh-02's own layers). With `--no-jail`, every input asks first.
 Ctrl-C stops a reply, Ctrl-P opens the command palette, `bh-02 --resume` continues a session.
 
 `sonnet`, `opus` and `haiku` are built in. Add any OpenAI-compatible model (OpenAI, OpenRouter,
@@ -117,7 +118,7 @@ A layer of your own changes a row, applied with `bh-02 --patch mine.toml`:
 ```toml
 [[plugin]]
 id = "jail"
-config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }   # let cells write .git/config too
+config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }   # let inputs write .git/config too
 ```
 
 A new part is a plugin: a package with components, registered as a `cordis.plugins` entry point,

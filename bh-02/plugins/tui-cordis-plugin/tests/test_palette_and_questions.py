@@ -106,7 +106,7 @@ async def test_the_activity_bar_opens_the_palette() -> None:
         assert isinstance(app.screen, CommandPalette)
 
 
-async def test_the_modal_shows_a_cell_highlighted() -> None:
+async def test_the_modal_shows_an_input_highlighted() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         code = "import os\n" + "\n".join(f"print({n})" for n in range(60))
@@ -118,14 +118,14 @@ async def test_the_modal_shows_a_cell_highlighted() -> None:
         assert source == render.code(code)  # highlighted as the transcript does, in theme tokens
         assert all(str(span.style).startswith(("$", "bold", "italic")) for span in source.spans)
         title = str(app.screen.query_one("#approval-title", Static).content)
-        assert title.startswith("Run this python cell (61 lines)?")
+        assert title.startswith("Run this python code (61 lines)?")
         await pilot.press("ctrl+p")  # no palette over a question
         await _settle(pilot)
         assert isinstance(app.screen, ApprovalScreen)
 
 
 @pytest.mark.parametrize("size", [(80, 24), (120, 40)])
-async def test_a_long_cell_scrolls_inside_the_modal_and_the_keys_stay_on_screen(
+async def test_a_long_input_scrolls_inside_the_modal_and_the_keys_stay_on_screen(
     size: tuple[int, int],
 ) -> None:
     app = BhApp()
@@ -149,7 +149,7 @@ async def test_a_long_cell_scrolls_inside_the_modal_and_the_keys_stay_on_screen(
         assert await asyncio.wait_for(answer, 1) is True
 
 
-async def test_an_empty_cell_shows_its_question_and_keys() -> None:
+async def test_an_empty_input_shows_its_question_and_keys() -> None:
     """With no code to scroll, the title and the keys stay in the box and it grows around them
     (docked, an auto-height box would collapse to its border and hide the question)."""
     app = BhApp()
@@ -162,14 +162,14 @@ async def test_an_empty_cell_shows_its_question_and_keys() -> None:
         for part in (title, keys):
             assert part.region.height >= 1 and inside.contains_region(part.region)
         assert title.region.bottom <= keys.region.y  # the question, then the keys
-        assert "Run this python cell (0 lines)?" in str(title.render())
+        assert "Run this python code (0 lines)?" in str(title.render())
         await _armed(pilot)
         await pilot.press("y")
         assert await asyncio.wait_for(answer, 1) is True
 
 
 async def test_keys_typed_as_the_modal_comes_up_answer_nothing_and_reach_nothing() -> None:
-    """A person typing "Run now" as a cell is put to them: the `n` must not decline it. For a
+    """A person typing "Run now" as an input is put to them: the `n` must not decline it. For a
     moment after it is shown the modal drops y, n and Escape (and every other key: it holds
     focus, so the composer beneath gets none of them); then y answers as always. A longer
     grace than the shipped one, so a loaded machine's slow key presses still land inside it."""
@@ -316,7 +316,7 @@ async def test_ctrl_c_after_a_line_is_sent_is_held_for_its_turn() -> None:
         await asyncio.wait_for(app.bridge.interrupted(), 1)
 
 
-async def test_an_enter_cancelled_before_the_app_is_up_takes_the_app_down() -> None:
+async def test_an_enter_caninputed_before_the_app_is_up_takes_the_app_down() -> None:
     before = set(asyncio.all_tasks())
     app = BhApp()
 

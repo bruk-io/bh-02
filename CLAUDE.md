@@ -43,7 +43,7 @@ scripts/model-friction [--examples N] [--json]            # where models trip in
 uv run bh-02                                              # the harness: a CodeAct session in a TUI, Claude through Claude Code on the subscription
 uv run bh-02 --resume [ID]                                # continue this directory's newest session (or ID: whole, its start, or its last part)
 uv run bh-02 sessions                                     # this directory's sessions, newest first
-uv run bh-02 --no-jail                                    # the kernel runs with your permissions; every cell asks
+uv run bh-02 --no-jail                                    # the kernel runs with your permissions; every input asks
 uv run bh-02 --model opus                                 # choose the model by name (sonnet, the default, opus, haiku, or yours in ~/.config/bh-02/models.toml; a session keeps it; /model lists and switches)
 uv run bh-02 --patch mine.toml                            # a layer of your own over the shipped composition
 uv run bh-02 update-layer mine.toml                       # rewrite a layer that names rows bh-02 renamed or dropped (keeps mine.toml.bak)

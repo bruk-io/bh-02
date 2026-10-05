@@ -28,7 +28,7 @@ from models_cordis_plugin.claude_code.testing import FakeClaudeCode, FakeStep
 
 _SPEC = {
     "name": "python",
-    "description": "Run a cell.",
+    "description": "Run an input.",
     "parameters": {"type": "object", "properties": {"code": {"type": "string"}}},
 }
 _SYSTEM = {"role": "system", "content": "You are a test."}
@@ -172,7 +172,7 @@ async def test_closing_a_step_mid_stream_interrupts_claude_code_and_the_next_lin
     assert _said(after) == "sure" and len(h.fakes) == 1 and fake.asked[-1] == "something else"
 
 
-async def test_a_cancelled_step_interrupts_and_the_next_step_still_reads_the_stream(tmp_path: Path) -> None:
+async def test_a_caninputed_step_interrupts_and_the_next_step_still_reads_the_stream(tmp_path: Path) -> None:
     """A Ctrl-C cancels the reply's task mid-await (chat's `_interruptible`), inside this
     model's read of Claude Code's stream, not only at a yield; the loop then closes it."""
     h = _Harness(tmp_path, [FakeStep([_text("Once upon a time")], stall_after=4)])

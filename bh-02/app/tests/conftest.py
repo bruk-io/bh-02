@@ -153,7 +153,7 @@ ANSWERS: list[bool] = []
 
 
 def answers(*these: bool) -> None:
-    """What a recording ui says to each question (a cell to approve), in order; no after them."""
+    """What a recording ui says to each question (an input to approve), in order; no after them."""
     ANSWERS[:] = these
     ASKED.clear()
 
@@ -301,22 +301,22 @@ async def heartbeat() -> Effects:
 
 
 @dataclass(frozen=True)
-class Cells:
+class Inputs:
     code: tuple[str, ...] = ()
 
 
-class CellScript:
-    """A model that acts only in code: it calls each scripted cell in turn, through the
+class InputScript:
+    """A model that acts only in code: it calls each scripted input in turn, through the
     loop (which asks about it when the kernel is unjailed), then shows every result."""
 
-    def __init__(self, cells: tuple[str, ...]) -> None:
-        self._cells = cells
+    def __init__(self, inputs: tuple[str, ...]) -> None:
+        self._inputs = inputs
 
     async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
         results = [m["content"] for m in messages if m["role"] == "tool"]
-        if len(results) < len(self._cells):
+        if len(results) < len(self._inputs):
             n = len(results)
-            yield {"type": "tool_call", "id": f"c{n}", "name": "python", "input": {"code": self._cells[n]}}
+            yield {"type": "tool_call", "id": f"c{n}", "name": "python", "input": {"code": self._inputs[n]}}
             yield {"type": "stop", "reason": "tool_use"}
             return
         yield {"type": "text", "text": "".join(f"[{n}] {r}\\n" for n, r in enumerate(results))}
@@ -324,12 +324,12 @@ class CellScript:
 
 
 @component(provides=("model",))
-async def cell_model(*, config: Cells) -> Effects:
-    yield bind("model", CellScript(tuple(config.code)))
+async def input_model(*, config: Inputs) -> Effects:
+    yield bind("model", InputScript(tuple(config.code)))
 
 
-class OneCell:
-    """A model that asks for one python cell, then answers with what the cell printed."""
+class OneInput:
+    """A model that asks for one python input, then answers with what the input printed."""
 
     async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
         offered = [t["name"] for t in tools]
@@ -338,13 +338,13 @@ class OneCell:
             yield {"type": "tool_call", "id": "c1", "name": "python", "input": {"code": "print(6 * 7)"}}
             yield {"type": "stop", "reason": "stop"}
             return
-        yield {"type": "text", "text": f"offered {offered}; the cell said {results[-1]['content'].strip()}"}
+        yield {"type": "text", "text": f"offered {offered}; the input said {results[-1]['content'].strip()}"}
         yield {"type": "stop", "reason": "stop"}
 
 
 @component(provides=("model",))
-async def one_cell_model() -> Effects:
-    yield bind("model", OneCell())
+async def one_input_model() -> Effects:
+    yield bind("model", OneInput())
 '''
 
 

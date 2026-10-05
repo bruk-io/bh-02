@@ -43,11 +43,11 @@ shape, in `CONTRACTS.md`:
 
 **The model has one tool, and it carries code.** The kernel is the tool: `kernel:kernel` binds
 `kernel`, a persistent Python namespace whose `spec` is `python(code)`, and `agent:loop` offers
-that one spec through the provider's standard tool calling and runs every call as a cell
-(`kernel.run`). Inside a cell there is only Python: the namespace holds what cells put there,
-and nothing a cell does reaches back into bh-02 but the extensions it writes (below); a cell
-reads and writes files with `open`/`pathlib` and runs programs with `subprocess`, and the jail
-decides what it may touch.
+that one spec through the provider's standard tool calling and runs every call as an input to it
+(`kernel.run`). To the model the kernel is a Python REPL of its own that persists: the namespace
+holds what its inputs put there, and nothing an input does reaches back into bh-02 but the
+extensions it writes (below); an input reads and writes files with `open`/`pathlib` and runs
+programs with `subprocess`, and the jail decides what it may touch.
 Replacing a binding reloads every dependent (cordis's rule, and why history lives in
 `transcript`, a row of its own).
 
@@ -60,7 +60,7 @@ nothing. Keep registrations commutative: each takes its own entry, never an orde
 
 The shell's base layer is the whole harness (CodeAct always); each later file (the session's
 own `session.toml`, `--patch`) is a patch over it. The loader watches every layer
-file: editing one, by hand or by `/model`, reshapes the running composition (a jailed cell
+file: editing one, by hand or by `/model`, reshapes the running composition (a jailed input
 can't write one: the jail denies them). The layer files are the only way the composition's
 *shape* changes durably; the loader's `restart(row)` (`/restart`, `/clear`) gives a row a fresh
 fiber, and can't outlive the session. The shell pins three rows of its own after every layer
@@ -72,15 +72,15 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 `done` across a restart of the chat row, so a session survives `/model`.
 
 **What the model sees and how a turn looks.** `loop.reply` yields events (text, thinking,
-tool_call, tool_result, usage, stop, note). `output.confirm` asks about a cell;
+tool_call, tool_result, usage, stop, note). `output.confirm` asks about the model's code;
 `input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. `system`
 (`context:project`) is who the model is (the model in bh-02, not Claude Code), what bh-02 is
 made of, the working directory and the project's CLAUDE.md, read per request, then the
 sections rows add (`system.add`: the extensions row's is how to extend bh-02 and the part of
 cordis that takes). The loop follows it with `kernel.instructions()`: that `python` is the
-CodeAct tool bh-02 ships, a kernel that lasts as long as this run of bh-02, and how to use it
-(build up state; capture a program's output, which otherwise never reaches the cell; give it a
-timeout). The claude-code provider adds a note that Claude Code's own opening line and its
+CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
+and how to use it (build up state; capture a program's output, which otherwise never reaches the
+model; give it a timeout; it is plain Python, not IPython). The claude-code provider adds a note that Claude Code's own opening line and its
 `mcp__bh__` tool names don't mean the model is in Claude Code.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays
@@ -99,10 +99,10 @@ installed script in a pty with a fake model from `bh_02.testing`: `run_test()` a
 what only a real launch does.
 
 **CodeAct, the kernel and the jail.** The kernel (`kernel:kernel`) is a stdlib-only worker
-(`worker.py`, run by path, its one channel a Unix socket that carries a cell in and its output
+(`worker.py`, run by path, its one channel a Unix socket that carries an input in and its output
 back; `worker-stdlib-only`) started by the `jail` row (`brig:jail`, or `kernel:unjailed`).
-Approval follows `kernel.confined`, and `agent:loop` does it: confined, a cell runs without
-asking; unconfined (`--no-jail`), every cell is put to the person through `output.confirm` (the
+Approval follows `kernel.confined`, and `agent:loop` does it: confined, an input runs without
+asking; unconfined (`--no-jail`), every input is put to the person through `output.confirm` (the
 approval modal, showing the code) and runs only on a yes. The kernel depends on its jail alone,
 so a new ui or model keeps the namespace. Only `brig_cordis_plugin` imports brig
 (`brig-one-adapter`), and only darwin is jailed so far.
@@ -112,13 +112,13 @@ writes to `.bh-02/plugins/NAME.py` while bh-02 runs (looked at every half second
 loaded afresh; deleted, unloaded), so the model can evolve the harness without anyone editing
 a layer. They run in a second worker the `jail` row starts (`extensions_cordis_plugin.worker`,
 a cordis runtime of its own, listed in `cordis-in-wiring-only`'s `shell`), never in bh-02's
-process: jailed, they load without asking, as cells run; unjailed, each load goes through
+process: jailed, they load without asking, as inputs run; unjailed, each load goes through
 `output.confirm` with its source. An extension reaches bh-02 only through three keys bound in
 that worker, each of which only adds (`commands.register`, `frame.status`, `system.add`); the
 host registers what arrives into the real keys and keeps the removers. Its own `system` section
 tells the model how, and `.bh-02/plugins/status.json` tells it how each load went. Don't give an
 extension a key that replaces or reaches the composition (the loader, `jail`, `model`): the
-worker's process boundary is what keeps a model's plugin as contained as its cells.
+worker's process boundary is what keeps a model's plugin as contained as its inputs.
 
 **The model, by name.** The model row is `models:model` (`models_cordis_plugin`): named models
 over their providers, the one its config's `default` names (`sonnet` unless a layer says
@@ -137,7 +137,7 @@ never reload with a switch. The models plugin's README has the providers' detail
 Claude through Claude Code (the Claude Agent SDK), which is the subscription's sanctioned route.
 It is a `model` under bh-02's own `agent:loop`, the same shape as the `openai` provider, and pi's
 shape (`pi-claude-agent-sdk`): every model step reaches the loop as one step. The loop
-classifies it, nudges, runs every call as a cell in the kernel (asking the person first when it is
+classifies it, nudges, runs every call as an input in the kernel (asking the person first when it is
 unjailed) and keeps the transcript (a session's `transcript.jsonl`). So approval is in one place
 for every provider, and nothing about the loop depends on which one runs.
 
@@ -174,7 +174,7 @@ git-ignored `local.env` at the repository root, so `uv run bh-02` needs no `--en
 - **Never set or read `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, and never print, log or
   commit the token.**
 
-A cell never gets it:
+The kernel never gets it:
 - `kernel:unjailed` drops every `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a launching
   Claude Code leaves) and `ANTHROPIC_*` from the worker's environment.
 - `brig:jail` scrubs the environment, and denies reading `local.env`: the project's, and every
@@ -184,7 +184,7 @@ A cell never gets it:
   its messaging peer token. That is this run's (`$XDG_STATE_HOME/bh-02/sessions`) and the
   default one (`~/.local/state/bh-02/sessions`); a third, of a run with another
   `XDG_STATE_HOME`, is not known to this one and is not hidden.
-- An approved `--no-jail` cell runs with the person's permissions and could open `local.env`
+- An approved `--no-jail` input runs with the person's permissions and could open `local.env`
   itself; only its environment is scrubbed.
 
 Without a token the row still binds, and each step answers with an `authentication_failed` error
@@ -203,5 +203,5 @@ In the root gate (`pypeeker_rules/apps.py`, options in the root `pyproject.toml`
 terminal, so the interface stays swappable; anything the user sees during a run goes through the
 `ui` (its `output`); names in `sys` that are not terminal I/O, such as `argv`, `executable`, `path`, may be
 imported by name anywhere; the kernel's worker is exempt from `print-input` because its stdout is
-the cell's output), `cordis-in-wiring-only` (`*.wiring` plus the `shell` list),
+what an input printed), `cordis-in-wiring-only` (`*.wiring` plus the `shell` list),
 `worker-stdlib-only`, `brig-one-adapter`.

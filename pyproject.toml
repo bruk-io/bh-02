@@ -140,7 +140,7 @@ mode = "library"  # what a package __init__ re-exports is protected public API (
 [tool.pypeeker.terminal-io]
 allowed = ["tui_cordis_plugin", "bh_02.cli", "warden.cli"]
 
-# The kernel's worker is a separate program whose stdout is the cell's output.
+# The kernel's worker is a separate program whose stdout is the input's output.
 [tool.pypeeker.print-input]
 allowed = ["kernel_cordis_plugin.worker"]
 
@@ -177,12 +177,12 @@ allow = [
 
 # A function may not mutate module-level state. The extensions' worker puts each model-written
 # module in `sys.modules` while it loads (cordis's scan finds a component by its module's name)
-# and takes it out when it unloads; the kernel's worker puts each cell's source in `linecache`
+# and takes it out when it unloads; the kernel's worker puts each input's source in `linecache`
 # (where a traceback looks for a line, so the model sees the line that failed); nothing else may.
 [tool.pypeeker.no-hidden-global-mutation]
 allow = [
     "extensions_cordis_plugin.worker:_Extensions.load", "extensions_cordis_plugin.worker:_Extensions.unload",
-    "kernel_cordis_plugin.worker:_Kernel._cell",
+    "kernel_cordis_plugin.worker:_Kernel._run",
 ]
 
 # Purity is the default, and the exclude list is the budget: every function in the apps and
@@ -276,8 +276,8 @@ allow = [
     "*_cordis_plugin.wiring:*",
     "bh_02.bootstrap:harness", "bh_02.bootstrap:layer_files", "bh_02.bootstrap:session_list",
     "bh_02.testing:echo", "bh_02.testing:bomb", "bh_02.testing:showcase", "bh_02.testing:slow_start",
-    "bh_02.testing:echo_model", "bh_02.testing:slow_model", "bh_02.testing:cells_model",
-    "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:cells_provider",
+    "bh_02.testing:echo_model", "bh_02.testing:slow_model", "bh_02.testing:repl_model",
+    "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:repl_provider",
     # registered by decorator or by [project.scripts], never called by name
     "bh_02.cli:sessions_command", "bh_02.cli:update_layer_command", "models_cordis_plugin.claude_code.detach:main",
 ]

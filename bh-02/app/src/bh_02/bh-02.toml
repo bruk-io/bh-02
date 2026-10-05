@@ -1,12 +1,12 @@
 # The shipped composition: bh-02 is a CodeAct harness in a Textual app. bh-02's own loop drives
 # Claude through Claude Code (the Claude Agent SDK, on the subscription), one model step at a
-# time; the model has one tool, `python(code)`, through standard tool calling, and its cells run
+# time; the model has one tool, `python(code)`, through standard tool calling, and its inputs run
 # in a persistent kernel inside a brig jail. A row's id is its role; `use`
 # is which plugin fills it, as `plugin:component` (a `cordis.plugins` entry point) or
 # `module:attribute`. Order carries no meaning: dependencies decide what activates when.
 # A session's own layer and `bh-02 --patch mine.toml` are layers over this one.
 
-# The model: bh-02's own loop (`agent:loop`: steps classified, each call run as a cell in the
+# The model: bh-02's own loop (`agent:loop`: steps classified, each call run as an input in the
 # kernel) over one model, named: `sonnet` (Claude through Claude Code, which only carries the
 # steps; credential: CLAUDE_CODE_OAUTH_TOKEN in local.env, which the row reads itself) unless
 # the row's `default` says another. `opus` and `haiku` are built in too, and the models file
@@ -41,7 +41,7 @@ id = "chat"
 use = "chat:session"
 
 # The kernel: a persistent Python namespace, and the model's one tool, `python(code)`. Jailed,
-# its cells run without asking; unjailed (`kernel:unjailed` below), each cell asks first.
+# its inputs run without asking; unjailed (`kernel:unjailed` below), each input asks first.
 [[plugin]]
 id = "kernel"
 use = "kernel:kernel"
@@ -85,7 +85,7 @@ use = "tui:palette"
 
 # The model's own extensions: cordis components it writes to the project's `.bh-02/plugins/`,
 # loaded while bh-02 runs into a worker the `jail` row starts, so they run as confined as its
-# cells (jailed, they load without asking; unjailed, each is put to the person first). What they
+# inputs (jailed, they load without asking; unjailed, each is put to the person first). What they
 # add, slash commands, status fields and sections of the model's prompt, goes into `commands`,
 # `frame` and `system`, and leaves with them. Its own section tells the model how.
 [[plugin]]

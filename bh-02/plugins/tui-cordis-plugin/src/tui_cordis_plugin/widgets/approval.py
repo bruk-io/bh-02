@@ -1,9 +1,9 @@
 """The approval modal: a call put to the person, with any code it carries shown whole and
 highlighted. A modal traps focus: keys reach only it until it is answered or withdrawn.
 
-It answers nothing for its first `GRACE` seconds. A person typing a message when a cell comes
+It answers nothing for its first `GRACE` seconds. A person typing a message when an input comes
 up would otherwise answer it with whatever they typed next (the `n` of "Run now", declining the
-cell). Keys pressed in that moment are dropped: the modal holds focus, so they never reach the
+input). Keys pressed in that moment are dropped: the modal holds focus, so they never reach the
 composer beneath either, and once it is answered the composer has exactly what was typed before
 it came up. Ctrl-C, the app's own priority binding, still stops the turn at once.
 """
@@ -61,7 +61,7 @@ class ApprovalScreen(ModalScreen[bool]):
         padding: 1 0 0 0;
     }
     /* with code, the title and the keys are docked, so they always show; the code takes what
-       is left and scrolls within it, however long the cell and however small the terminal.
+       is left and scrolls within it, however long the input and however small the terminal.
        Without code they stay in the flow: an auto-height box counts only undocked children, so
        docking both would collapse it to its border and hide the question. */
     ApprovalScreen > #approval.-code #approval-title {

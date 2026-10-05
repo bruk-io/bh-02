@@ -32,17 +32,17 @@ SIGNALS = {
     "no_such_tool": "called a tool that does not exist (Claude Code's Bash, Read, Edit, ...): it thought it was elsewhere",
     "no_code": "called python without a `code` string",
     "nudged": "a step the loop had to send back (cut off at the output limit, empty, or a call that did not decode)",
-    "error": "a cell that raised",
-    "forgotten_name": "a NameError for a name the kernel never had: usually one an earlier session or kernel defined",
-    "uncaptured_output": "ran a program without capturing its output, so the cell saw nothing of it",
+    "error": "an input that raised",
+    "forgotten_name": "a NameError for a name the REPL never had: usually one an earlier session or REPL defined",
+    "uncaptured_output": "ran a program without capturing its output, so the input saw nothing of it",
     "timeout": "a program that ran out of its timeout",
-    "cut_output": "a cell whose output was cut at 20,000 characters",
-    "kernel_restarted": "the kernel died and was started again",
-    "declined": "a cell the person said no to (unjailed)",
-    "interrupted": "a turn the person stopped mid-cell",
+    "cut_output": "an input whose output was cut at 20,000 characters",
+    "repl_restarted": "the REPL died and was started again",
+    "declined": "an input the person said no to (unjailed)",
+    "interrupted": "a turn the person stopped mid-input",
     "claude_code": "the model's own text mentions Claude Code",
-    "extension_written": "a cell that wrote into .bh-02/plugins (the model extending bh-02)",
-    "startup_file": "a cell that wrote .bh-02/kernel.py (the model keeping its helpers)",
+    "extension_written": "an input that wrote into .bh-02/plugins (the model extending bh-02)",
+    "startup_file": "an input that wrote .bh-02/kernel.py (the model keeping its helpers)",
 }
 _PROGRAM = re.compile(r"\b(?:subprocess\.(?:run|call|check_call|Popen)|os\.system)\(")
 _CAPTURED = re.compile(r"capture_output\s*=\s*True|stdout\s*=|check_output\(")
@@ -63,7 +63,7 @@ class Finding:
 class Totals:
     sessions: int
     turns: int
-    cells: int
+    inputs: int
 
 
 def _short(text: str, width: int = 160) -> str:
@@ -93,7 +93,7 @@ def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
         elif role == "tool":
             call = calls.get(str(message.get("call_id")), {})
             code = str((call.get("input") or {}).get("code") or "")
-            yield from _cell(session, code, content)
+            yield from _one_input(session, code, content)
         if role == "assistant":
             for call in message.get("tool_calls") or ():
                 code = str((call.get("input") or {}).get("code") or "")
@@ -103,7 +103,7 @@ def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
                     yield Finding("startup_file", session, _short(code))
 
 
-def _cell(session: str, code: str, result: str) -> Iterator[Finding]:
+def _one_input(session: str, code: str, result: str) -> Iterator[Finding]:
     if result.startswith("error: there is no tool named"):
         yield Finding("no_such_tool", session, _short(result))
         return
@@ -116,13 +116,13 @@ def _cell(session: str, code: str, result: str) -> Iterator[Finding]:
     if result.startswith(("interrupted: the person stopped", "not run: the person stopped")):
         yield Finding("interrupted", session, _short(code))
         return
-    if result.startswith("(the kernel was started again"):
-        yield Finding("kernel_restarted", session, _short(code))
+    if result.startswith("(the REPL was started again"):
+        yield Finding("repl_restarted", session, _short(code))
     if "Traceback (most recent call last)" in result or result.startswith("SyntaxError"):
         kinds = _EXCEPTION.findall(result)
         kind = kinds[-1] if kinds else "SyntaxError" if "SyntaxError" in result else "?"
         yield Finding("error", session, f"{kind}: {_short(code, 100)}")
-        if "has not been defined in this kernel" in result:
+        if "has not been defined in this REPL" in result:
             yield Finding("forgotten_name", session, _short(code))
         if kind.endswith("TimeoutExpired"):
             yield Finding("timeout", session, _short(code))
@@ -154,13 +154,13 @@ def _transcripts(root: Path) -> Iterator[tuple[str, list[Message]]]:
 
 def _report(found: Sequence[Finding], totals: Totals, examples: int) -> str:
     lines = [
-        f"{totals.sessions} sessions, {totals.turns} replies, {totals.cells} cells",
+        f"{totals.sessions} sessions, {totals.turns} replies, {totals.inputs} inputs",
         "",
-        f"{'signal':<20}{'count':>7}{'per 100 cells':>15}{'sessions':>10}  what it means",
+        f"{'signal':<20}{'count':>7}{'per 100 inputs':>15}{'sessions':>10}  what it means",
     ]
     for signal, meaning in SIGNALS.items():
         hits = [f for f in found if f.signal == signal]
-        rate = f"{100 * len(hits) / totals.cells:.1f}" if totals.cells else "-"
+        rate = f"{100 * len(hits) / totals.inputs:.1f}" if totals.inputs else "-"
         sessions = len({f.session for f in hits})
         lines.append(f"{signal:<20}{len(hits):>7}{rate:>15}{sessions:>10}  {meaning}")
     errors: dict[str, int] = {}
@@ -190,17 +190,17 @@ def main(argv: Sequence[str]) -> int:
         print(f"no sessions at {root}; run bh-02, or say where with --sessions DIR", file=sys.stderr)
         return 1
     found: list[Finding] = []
-    sessions = turns = cells = 0
+    sessions = turns = inputs = 0
     for session, messages in _transcripts(root):
         sessions += 1
         turns += sum(1 for m in messages if m.get("role") == "user" and not m.get("feedback"))
-        cells += sum(1 for m in messages if m.get("role") == "tool")
+        inputs += sum(1 for m in messages if m.get("role") == "tool")
         found.extend(findings(session, messages))
     if args.json:
         for f in found:
             print(json.dumps({"signal": f.signal, "session": f.session, "detail": f.detail}))
     else:
-        print(_report(found, Totals(sessions, turns, cells), args.examples))
+        print(_report(found, Totals(sessions, turns, inputs), args.examples))
     return 0
 
 

@@ -37,7 +37,7 @@ _OLLAMA_HOST, _OLLAMA_MODEL = "http://localhost:11434", "llama3.2"
 _RENAMED_USES = {
     "bh_02.testing:echo_completion": "bh_02.testing:echo_model",
     "bh_02.testing:slow_completion": "bh_02.testing:slow_model",
-    "bh_02.testing:cells_completion": "bh_02.testing:cells_model",
+    "bh_02.testing:cells_completion": "bh_02.testing:repl_model",
 }
 # The one status row, which the three status-bar rows became (the session's id: from `sessions`).
 _STATUS = "status"
@@ -50,7 +50,7 @@ _MERGED_IDS = frozenset({"jail_status", "model_status"})
 _STATUS_KEYS = {"row": "model_row"}
 _STATUS_GONE = frozenset({"default", "default_model"})
 # Rows an earlier bh-02 had and this one does not, by id or by the plugin they named, and why.
-_ONE_TOOL = "python is the one tool (the kernel's), and unjailed each cell is approved in the modal"
+_ONE_TOOL = "python is the one tool (the kernel's), and unjailed each input is approved in the modal"
 _REMOVED_IDS = {
     "tools": _ONE_TOOL,
     "fs": _ONE_TOOL,

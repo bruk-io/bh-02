@@ -20,7 +20,7 @@ def test_what_to_load_is_what_is_new_or_changed_and_what_to_unload_is_what_is_go
     assert changes(after, after) == ((), ())
 
 
-def test_extensions_load_without_asking_exactly_when_cells_run_without_asking() -> None:
+def test_extensions_load_without_asking_exactly_when_inputs_run_without_asking() -> None:
     assert is_confined({"fs_write": "enforced", "network": "enforced", "fs_read": "best_effort"})
     assert not is_confined({"fs_write": "enforced", "network": "unenforced"})
     assert not is_confined({})

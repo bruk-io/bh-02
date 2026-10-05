@@ -4,7 +4,7 @@
 that only a real launch parses, a terminal left in raw mode, a child process painting over
 the screen), so these start the installed script the way a person does. The model is a fake
 from `bh_02.testing`, so no credential is needed: a `loop` fake, named by a `--patch` layer,
-replaces the whole loop; a fake model (`fake`, `slow`, `cells`, a models file's entries naming
+replaces the whole loop; a fake model (`fake`, `slow`, `inputs`, a models file's entries naming
 a `bh_02.testing` provider) is chosen with `--model` under the shipped loop and model row, so
 `/model` switches between them as it would between Claude and an OpenAI model. The kernel runs
 unjailed so the tests don't depend on the platform. Deselect with `-m "not real_launch"`.
@@ -171,7 +171,7 @@ _MODELS = {
     "fake-2": "echo_provider",
     "slow": "slow_provider",
     "slow-2": "slow_provider",
-    "cells": "cells_provider",
+    "inputs": "repl_provider",
 }
 
 
@@ -188,7 +188,7 @@ def _models_file(config: Path, more: str = "") -> None:
 @pytest.fixture
 def launch(tmp_path: Path) -> Iterator[Launch]:
     """Launch `bh-02 --no-jail`, in a temporary project, state and config dir, on a fake: a
-    fake model by name (`fake`, `slow`, `cells`: `--model NAME`), or a `loop` fake from
+    fake model by name (`fake`, `slow`, `inputs`: `--model NAME`), or a `loop` fake from
     `bh_02.testing` (`echo`, `showcase`, ...: `--patch`, over the `fake` model)."""
     work, state, config = tmp_path / "work", tmp_path / "state", tmp_path / "config"
     work.mkdir()
@@ -327,38 +327,38 @@ def test_a_crash_in_the_app_is_reported_after_the_terminal_is_restored(launch: L
     assert "error: the app crashed (exit code 1)" in after  # and bh-02's one line, after it
 
 
-def test_a_cell_asks_in_a_modal_and_its_output_comes_back(launch: Launch) -> None:
-    app = launch("cells")
+def test_an_input_asks_in_a_modal_and_its_output_comes_back(launch: Launch) -> None:
+    app = launch("inputs")
     ready = app.wait_for(_READY, 60)
     app.type("print(6 * 7)")
-    asked = app.wait_for("Run this python cell (1 line)?", after=ready)
+    asked = app.wait_for("Run this python code (1 line)?", after=ready)
     app.answer(b"y")
-    answered = app.wait_for("the cell said: 42", after=asked)
+    answered = app.wait_for("the input said: 42", after=asked)
     app.type("import time; time.sleep(30)")
-    asked = app.wait_for("Run this python cell (1 line)?", after=answered)
+    asked = app.wait_for("Run this python code (1 line)?", after=answered)
     app.answer(b"y")
     app.wait_for("⏺ python", after=asked)
-    app.press(b"\x03")  # Ctrl-C while the cell runs: the turn stops, the app stays
+    app.press(b"\x03")  # Ctrl-C while the input runs: the turn stops, the app stays
     app.wait_for("stopped: interrupted", 10, after=asked)
     app.press(b"\x11")
     assert app.exit_code() == 0
 
 
-def test_an_unjailed_cell_runs_on_a_yes_and_not_at_all_on_a_no(launch: Launch, tmp_path: Path) -> None:
-    """`--no-jail`: every cell is put to the person with its code and the keys drawn; a yes runs
+def test_an_unjailed_input_runs_on_a_yes_and_not_at_all_on_a_no(launch: Launch, tmp_path: Path) -> None:
+    """`--no-jail`: every input is put to the person with its code and the keys drawn; a yes runs
     it (it writes a file in the project with plain Python), a no runs nothing."""
-    app = launch("cells")
+    app = launch("inputs")
     ready = app.wait_for(_READY, 60)
     app.type("open('y.txt', 'w').write('yes')")
-    asked = app.wait_for("Run this python cell (1 line)?", 10, after=ready)
+    asked = app.wait_for("Run this python code (1 line)?", 10, after=ready)
     app.wait_for("y  allow     n / Esc  decline", 10, after=asked)
     app.answer(b"y")
-    answered = app.wait_for("the cell said: 3", 10, after=asked)
+    answered = app.wait_for("the input said: 3", 10, after=asked)
     app.type("open('n.txt', 'w').write('no')")
-    asked = app.wait_for("Run this python cell (1 line)?", 10, after=answered)
+    asked = app.wait_for("Run this python code (1 line)?", 10, after=answered)
     app.wait_for("y  allow     n / Esc  decline", 10, after=asked)
     app.answer(b"n")
-    app.wait_for("the cell said: denied: the person said no to this cell", 10, after=asked)
+    app.wait_for("the input said: denied: the person said no to this input", 10, after=asked)
     work = tmp_path / "work"
     assert (work / "y.txt").read_text() == "yes" and not (work / "n.txt").exists()
     app.press(b"\x11")
@@ -366,25 +366,25 @@ def test_an_unjailed_cell_runs_on_a_yes_and_not_at_all_on_a_no(launch: Launch, t
 
 
 def test_keys_typed_as_the_modal_comes_up_do_not_answer_it(launch: Launch, tmp_path: Path) -> None:
-    """A person still typing when a cell is put to them ("Run n..."): the `n` must not decline
+    """A person still typing when an input is put to them ("Run n..."): the `n` must not decline
     it, and none of it lands in the composer; the modal answers once it has been up a moment."""
-    app = launch("cells")
+    app = launch("inputs")
     ready = app.wait_for(_READY, 60)
     app.type("open('ahead.txt', 'w').write('ran')")
-    asked = app.wait_for("Run this python cell (1 line)?", 10, after=ready)
+    asked = app.wait_for("Run this python code (1 line)?", 10, after=ready)
     app.press(b"Run n")  # at once: the modal is on screen, but has only just come up
     app.press(b"\x1b")  # Escape, too
     app.settle(GRACE + 0.5)
     assert "denied" not in app.text()[asked:]  # nothing answered it
     app.press(b"y")
-    app.wait_for("the cell said: 3", 10, after=asked)
+    app.wait_for("the input said: 3", 10, after=asked)
     assert (tmp_path / "work" / "ahead.txt").read_text() == "ran"
     answered = len(app.text())
     app.type("print('next')")  # the composer is empty: this is the whole of the next message
-    app.wait_for("Run this python cell (1 line)?", 10, after=answered)
+    app.wait_for("Run this python code (1 line)?", 10, after=answered)
     assert "Run nprint" not in app.text()[answered:]
     app.answer(b"y")
-    app.wait_for("the cell said: next", 10, after=answered)
+    app.wait_for("the input said: next", 10, after=answered)
     app.press(b"\x11")
     assert app.exit_code() == 0
 
@@ -502,11 +502,11 @@ def test_a_patch_that_cannot_be_read_is_one_line_not_a_traceback(launch: Launch,
 
 
 def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tmp_path: Path) -> None:
-    """Ctrl-C while a cell waits for approval: the modal comes down as a no, the turn stops, the
-    transcript tells the model the cell never ran, and the next turn runs as usual. (The Ctrl-C
+    """Ctrl-C while an input waits for approval: the modal comes down as a no, the turn stops, the
+    transcript tells the model the input never ran, and the next turn runs as usual. (The Ctrl-C
     held between a line and its turn is a race a pty cannot aim at; the bridge's and Pilot tests
     pin it.)"""
-    app = launch("cells")
+    app = launch("inputs")
     ready = app.wait_for(_READY, 60)
     app.type("import time; time.sleep(30)")
     asked = app.wait_for("Ctrl-C  stop the turn", 10, after=ready)
@@ -514,9 +514,9 @@ def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tm
     stopped = app.wait_for("stopped: interrupted", 10, after=asked)
     assert "Nothing is running." not in app.text()[ready:]
     app.type("print(6 * 7)")
-    app.wait_for("Run this python cell (1 line)?", 10, after=stopped)
+    app.wait_for("Run this python code (1 line)?", 10, after=stopped)
     app.answer(b"y")
-    app.wait_for("the cell said: 42", 10, after=stopped)
+    app.wait_for("the input said: 42", 10, after=stopped)
     app.press(b"\x11")
     assert app.exit_code() == 0
     (transcript,) = (tmp_path / "state").glob("bh-02/sessions/*/transcript.jsonl")
@@ -705,7 +705,7 @@ def test_model_switches_by_name_between_a_fake_and_an_openai_model_on_a_stub_ser
 ) -> None:
     """`/model` lists the models, the current one marked; `/model stub` moves the conversation
     to an OpenAI-compatible model (a stand-in server on a real socket, streaming SSE), whose
-    python call runs as a cell like any model's (the model row, up before the app heard it,
+    python call runs as an input like any model's (the model row, up before the app heard it,
     notes its first reload); `/model fake` moves it back, the transcript
     carried across both providers. `fake` (a factory model) stands in for claude-code, which
     needs the real CLI here; Claude's own turns reaching an openai model are the models
@@ -727,9 +727,9 @@ def test_model_switches_by_name_between_a_fake_and_an_openai_model_on_a_stub_ser
         app.type("hi stub")
         heard = app.wait_for("[stub-1] heard: hi stub", 20, after=switched)
         app.type("call print(6 * 7)")
-        app.wait_for("Run this python cell", 10, after=heard)  # the cell, put to the person (unjailed)
+        app.wait_for("Run this python code", 10, after=heard)  # the input, put to the person (unjailed)
         app.answer(b"y")
-        ran = app.wait_for("the cell said: 42", 20, after=heard)
+        ran = app.wait_for("the input said: 42", 20, after=heard)
         app.type("/model fake")
         back = app.wait_for("model: fake", 20, after=ran)  # its provider too, when the bar has room
         app.type("again")
@@ -770,8 +770,8 @@ def test_a_patch_that_sets_the_model_row_s_config_keeps_its_model_and_says_so(tm
         app.close()
 
 
-def test_a_keyed_model_s_key_never_reaches_a_cell_s_environment(tmp_path: Path) -> None:
-    """A model's key goes only into its requests' Authorization header: an unjailed cell (whose
+def test_a_keyed_model_s_key_never_reaches_an_input_s_environment(tmp_path: Path) -> None:
+    """A model's key goes only into its requests' Authorization header: an unjailed input (whose
     environment is scrubbed of Claude's names alone) finds neither its name nor its value."""
     work, state, config = tmp_path / "work", tmp_path / "state", tmp_path / "config"
     work.mkdir()
@@ -790,9 +790,9 @@ def test_a_keyed_model_s_key_never_reaches_a_cell_s_environment(tmp_path: Path) 
             app.type(
                 'call import os; print("VERIFY_STUB_KEY" in os.environ, "fake-verify-key" in str(os.environ))'
             )
-            app.wait_for("Run this python cell", 10, after=ready)
+            app.wait_for("Run this python code", 10, after=ready)
             app.answer(b"y")
-            app.wait_for("the cell said: False False", 20, after=ready)
+            app.wait_for("the input said: False False", 20, after=ready)
             app.press(b"\x11")
             assert app.exit_code() == 0
         finally:

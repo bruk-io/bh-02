@@ -5,7 +5,7 @@ server-sent events the way the API does (a role delta, content in pieces, a tool
 name first and its arguments in pieces, `finish_reason`, a usage-only event, `[DONE]`), and
 keeps every request it was sent. What it answers depends on the conversation's last message:
 
-- a tool result: `the cell said: <result>` (a python call's round trip);
+- a tool result: `the input said: <result>` (a python call's round trip);
 - `call <code>`: one call of the offered tool with `<code>` as its `code`;
 - `broken call`: a call whose arguments are not JSON;
 - `status <n>`: that HTTP status with the API's JSON error;
@@ -53,7 +53,7 @@ def _events(body: Json) -> Iterator[dict[str, Any] | str]:
     said = str(last.get("content") or "")
     yield _chunk(model, {"role": "assistant", "content": ""})
     if last.get("role") == "tool":
-        for part in ("the cell ", f"said: {said.strip()}"):
+        for part in ("the input ", f"said: {said.strip()}"):
             yield _chunk(model, {"content": part})
         finish = "stop"
     elif said.startswith("call ") or said == "broken call":

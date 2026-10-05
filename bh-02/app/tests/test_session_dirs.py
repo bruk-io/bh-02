@@ -528,6 +528,6 @@ def test_the_sessions_value_lists_a_broken_record_after_the_sessions(tmp_path: P
 
 def test_with_xdg_state_home_set_the_default_state_root_is_still_known(state: Path) -> None:
     """A run with `XDG_STATE_HOME` set keeps its sessions there, and still knows the default
-    root, which `bh_02.cli` hides from a jailed cell too (a default run's sessions)."""
+    root, which `bh_02.cli` hides from a jailed input too (a default run's sessions)."""
     assert state_root() == state
     assert default_state_root() == Path.home() / ".local" / "state" / "bh-02" / "sessions"

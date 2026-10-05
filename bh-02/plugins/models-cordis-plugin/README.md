@@ -125,7 +125,7 @@ that can't name Claude Code's session directory); the sections below say when ea
 
 bh-02's loop does all of the following:
 - classifies each step (`stops.classify`) and nudges;
-- runs every call as a cell in the kernel, asking the person first when the kernel is unjailed;
+- runs every call as an input in the kernel, asking the person first when the kernel is unjailed;
 - keeps the transcript.
 
 Claude Code does none of that. It runs with no built-in tool (`tools=[]`), no settings file
