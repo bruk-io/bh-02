@@ -96,7 +96,9 @@ async def test_an_answer_is_one_query_and_claude_code_is_started_locked_down(tmp
     (fake,) = h.fakes
     assert fake.asked == ["hi"] and fake.interrupts == 0
     options = fake.options
-    assert options.system_prompt == "You are a test."
+    note, system = options.system_prompt.split("\n\n")
+    assert system == "You are a test."  # the request's, after a note on what Claude Code's own line means
+    assert "you are not working in it" in note and "`python` as `mcp__bh__python`" in note
     assert options.tools == [] and options.setting_sources == [] and options.strict_mcp_config
     assert options.include_partial_messages and options.model == "sonnet"
     assert str(options.cli_path).endswith("claude-code-detached")
@@ -381,7 +383,7 @@ async def test_a_changed_system_prompt_restarts_claude_code_on_its_own_session(t
     second = await h.step([*asked, _entry(first), {"role": "user", "content": "b"}], system=moved)
     old, new = h.fakes
     assert _said(second) == "two" and old.disconnected
-    assert new.options.resume == "fake-session" and new.options.system_prompt == moved["content"]
+    assert new.options.resume == "fake-session" and new.options.system_prompt.endswith(moved["content"])
     assert new.asked == ["b"]
 
 

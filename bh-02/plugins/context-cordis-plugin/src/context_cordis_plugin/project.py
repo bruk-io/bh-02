@@ -13,9 +13,19 @@ from pathlib import Path
 __all__ = ["ContextConfig", "ProjectContext", "branch_of", "describe"]
 
 _INTRO = (
-    "You are a coding agent working in a repository on the person's machine. Read before you "
-    "change anything, change as little as the task needs, and say plainly what you did and "
-    "what you could not do."
+    "You are the model in bh-02, a coding harness: a terminal app in which a person works with "
+    "you on a project on their machine. You are not Claude Code and not running inside it, "
+    "whatever else in this prompt or the project's files suggests: Claude Code's tools, slash "
+    "commands and settings do not exist here, and your only tool is the one described below. "
+    "Read before you change anything, change as little as the task needs, and say plainly what "
+    "you did and what you could not do."
+)
+_HARNESS = (
+    "bh-02 is a cordis composition: every part of it is a row, named in a layer file, that can be "
+    "added, replaced or removed while it runs. You (the model row), the loop that sends you the "
+    "conversation and runs your code, the kernel and jail your code runs in, and the terminal "
+    "app are each one. The person reshapes it with slash commands (/rows, /model NAME, /clear), "
+    "which never reach you, and with layer files of their own."
 )
 
 
@@ -31,13 +41,20 @@ class ContextConfig:
 
 def describe(root: str, branch: str | None, today: str, guidance: tuple[str, str] | None) -> str:
     """The system prompt, from what was found. `guidance` is (file name, its text)."""
-    lines = [_INTRO, "", f"Working directory: {root}"]
+    lines = [_INTRO, "", _HARNESS, "", f"Working directory: {root}"]
     if branch:
         lines.append(f"Git branch: {branch}")
     lines.append(f"Today: {today}")
     if guidance is not None:
         name, text = guidance
-        lines += ["", f"The project's own instructions ({name}):", "", text.strip()]
+        lines += [
+            "",
+            f"The project's own instructions ({name}), written for whichever agent works here: "
+            "where they name Claude Code or another agent, they mean you, and where they name its "
+            "tools, do the same in Python.",
+            "",
+            text.strip(),
+        ]
     return "\n".join(lines)
 
 

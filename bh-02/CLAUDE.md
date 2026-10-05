@@ -73,7 +73,10 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 **What the model sees and how a turn looks.** `loop.reply` yields events (text, thinking,
 tool_call, tool_result, usage, stop, note). `output.confirm` asks about a cell;
 `input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. `system`
-(`context:project`) is the working directory and the project's CLAUDE.md, read per request.
+(`context:project`) is who the model is (the model in bh-02, not Claude Code), what bh-02 is
+made of, the working directory and the project's CLAUDE.md, read per request; the claude-code
+provider adds a note that Claude Code's own opening line and its `mcp__bh__` tool names don't
+mean the model is in Claude Code.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays
 a provider's message as it came.

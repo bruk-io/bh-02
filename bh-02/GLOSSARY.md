@@ -67,7 +67,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **palette** (row): `tui:palette`: the commands, offered in the command palette (Ctrl-P).
 - **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers.
 - **operator** (row): `commands:operator`: the commands that act on the running program through the loader.
-- **system** (row and key): `context:project`: what the model is told about where it is working (the directory, its branch, CLAUDE.md).
+- **system** (row and key): `context:project`: what the model is told about where it is working (that it is the model in bh-02, not Claude Code; the directory, its branch, CLAUDE.md).
 - **session**: one run and everything it keeps, under `$XDG_STATE_HOME/bh-02/sessions/<id>/`, so `--resume` continues it.
 - **sessions** (key), **layers** (key), **harness** (row): rows the shell adds itself, **pinned** after every layer so no layer can remove them: this directory's sessions and the running one; the layer files and the paths no cell may read; the wait for the chat's `done`.
 - **done** (key): what the chat binds; the shell waits on it, and follows it across a restart of the chat row.
