@@ -54,10 +54,13 @@ class Jail(Protocol):
 @dataclass(frozen=True, slots=True)
 class KernelConfig:
     """`root` is the working directory cells run in; `grace` how long an interrupted cell gets
-    to say it ended before the worker is stopped and started again."""
+    to say it ended before the worker is stopped and started again; `startup` the project's own
+    file (relative to `root`) a new kernel runs before its first cell, when its cells are
+    confined: the model's helpers, kept across sessions."""
 
     root: str = "."
     grace: float = 5.0
+    startup: str = ".bh-02/kernel.py"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +76,21 @@ class _Cell:
         if self.error:
             parts.append(self.error)
         return "\n".join(parts) or "(no output)"
+
+
+def _startup_cell(path: str) -> str:
+    """The cell that runs the startup file at `path` in the namespace and prints, last, the
+    public names it defined."""
+    return "\n".join(
+        [
+            "import pathlib as _bh_path",
+            "_bh_before = set(globals())",
+            f"_bh_source = _bh_path.Path({path!r}).read_text(encoding='utf-8')",
+            f"exec(compile(_bh_source, {path!r}, 'exec'), globals())",
+            "print(', '.join(sorted(n for n in set(globals()) - _bh_before if not n.startswith('_'))))",
+            "del _bh_path, _bh_before, _bh_source",
+        ]
+    )
 
 
 def worker_argv(endpoint: str) -> list[str]:
@@ -98,7 +116,8 @@ class Kernel:
         self._process: Jailed | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
-        self._restarted = False
+        self._restarted = False  # a worker started again, not the row's first
+        self._fresh = False  # a worker no cell has run in yet
 
     @property
     def confined(self) -> bool:
@@ -114,7 +133,7 @@ class Kernel:
 
     def instructions(self) -> str:
         """What the model is told about the tool and where its code runs, read per request."""
-        return instructions_for(self.confined)
+        return instructions_for(self.confined, self._config.startup)
 
     async def __aenter__(self) -> Kernel:
         await self._start()
@@ -143,9 +162,10 @@ class Kernel:
                         "person (`/restart kernel` starts the row afresh)",
                     )
                 self._restarted = True
-            note = "(the kernel was started again; variables from earlier cells are gone)\n"
-            prefix, self._restarted = (note if self._restarted else ""), False
+            prefix = ""
             try:
+                if self._fresh:
+                    prefix, self._fresh, self._restarted = await self._opening(), False, False
                 cell = await self._exchange(code)
             except ConnectionError:
                 await self._stop()
@@ -162,6 +182,28 @@ class Kernel:
                     "kernel will start again on the next cell, without the earlier variables",
                 )
             return _Cell(prefix + cell.output, cell.error) if prefix else cell
+
+    async def _opening(self) -> str:
+        """What a new kernel's first cell is told before its own output, when there is anything
+        to tell: that the worker was started again, and what the startup file did. Jailed, the
+        file runs here; unjailed, it would run unasked with the person's permissions, so the
+        model is told to run it as a cell of its own."""
+        notes = (
+            ["the kernel was started again; variables from earlier cells are gone"] if self._restarted else []
+        )
+        startup = self._config.startup
+        if (Path(self._config.root) / startup).is_file():
+            if not self.confined:
+                notes.append(
+                    f"{startup} was not run: cells here are put to the person, so run it as a cell "
+                    f"of your own if you want it: exec(open({startup!r}).read())"
+                )
+            elif (ran := await self._exchange(_startup_cell(startup))).error:
+                notes.append(f"{startup} ran first and failed, so what it defines is missing:\n{ran.error}")
+            else:
+                lines = ran.output.strip().splitlines()
+                notes.append(f"{startup} ran first and defined: {lines[-1] if lines else 'nothing'}")
+        return f"({'. '.join(notes)})\n" if notes else ""
 
     async def _exchange(self, code: str) -> _Cell:
         self._send({"op": "exec", "code": code})
@@ -211,6 +253,7 @@ class Kernel:
         self._process = await self._jail.start(worker_argv(endpoint), cwd=root, endpoint=endpoint)
         self._reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)
         self._send({"op": "hello"})
+        self._fresh = True
 
     async def _stop(self) -> None:
         if self._writer is not None:

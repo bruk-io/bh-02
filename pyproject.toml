@@ -177,9 +177,13 @@ allow = [
 
 # A function may not mutate module-level state. The extensions' worker puts each model-written
 # module in `sys.modules` while it loads (cordis's scan finds a component by its module's name)
-# and takes it out when it unloads; nothing else may.
+# and takes it out when it unloads; the kernel's worker puts each cell's source in `linecache`
+# (where a traceback looks for a line, so the model sees the line that failed); nothing else may.
 [tool.pypeeker.no-hidden-global-mutation]
-allow = ["extensions_cordis_plugin.worker:_Extensions.load", "extensions_cordis_plugin.worker:_Extensions.unload"]
+allow = [
+    "extensions_cordis_plugin.worker:_Extensions.load", "extensions_cordis_plugin.worker:_Extensions.unload",
+    "kernel_cordis_plugin.worker:_Kernel._cell",
+]
 
 # Purity is the default, and the exclude list is the budget: every function in the apps and
 # their plugins is pure unless it is named below, with the reason. Adding a name is a design

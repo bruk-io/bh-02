@@ -20,10 +20,12 @@ import ast
 import contextlib
 import io
 import json
+import linecache
 import os
 import queue
 import signal
 import socket
+import tempfile
 import threading
 import time
 import traceback
@@ -33,13 +35,16 @@ from typing import Any
 __all__ = ["cell_traceback", "main", "split_last_expression"]
 
 _MAX_OUTPUT = 20_000
+_HEAD = 6_000  # of an output cut to `_MAX_OUTPUT`, how much is its start; the rest is its end
+_CELL = "<cell"  # how every cell's file name starts: the third cell is `<cell 3>`
 _HELLO_S = 60.0  # the host says hello within milliseconds of the worker listening
 _LOOK_S = 0.5  # how often a worker waiting for its hello checks that its parent is still there
 
 
-def split_last_expression(code: str) -> tuple[ast.Module, ast.Expression | None]:
-    """The cell's statements, and its last line when that is an expression (shown, notebook style)."""
-    tree = ast.parse(code, "<cell>", "exec")
+def split_last_expression(code: str, name: str = "<cell>") -> tuple[ast.Module, ast.Expression | None]:
+    """The cell's statements, and its last line when that is an expression (shown, notebook
+    style). `name` is the cell's file name, which a syntax error names."""
+    tree = ast.parse(code, name, "exec")
     last = tree.body[-1] if tree.body else None
     if isinstance(last, ast.Expr):
         tree.body.pop()
@@ -48,11 +53,11 @@ def split_last_expression(code: str) -> tuple[ast.Module, ast.Expression | None]
 
 
 def cell_traceback(exc: BaseException) -> str:
-    """Format a failed cell's exception from its first `<cell>` frame on: the worker's own
-    frames (the `exec` that ran the cell) say nothing about the cell. Keep every frame if none
-    is the cell's."""
+    """Format a failed cell's exception from its first cell frame (`<cell 3>`) on: the worker's
+    own frames (the `exec` that ran the cell) say nothing about the cell. Keep every frame if
+    none is a cell's."""
     tb = exc.__traceback__
-    while tb is not None and tb.tb_frame.f_code.co_filename != "<cell>":
+    while tb is not None and not tb.tb_frame.f_code.co_filename.startswith(_CELL):
         tb = tb.tb_next
     return "".join(traceback.format_exception(type(exc), exc, tb or exc.__traceback__)).rstrip()
 
@@ -85,6 +90,9 @@ class _Kernel:
         self._channel = channel
         self._namespace: dict[str, Any] = {"__name__": "__kernel__"}
         self.running = False
+        self._cells = 0
+        self._had: set[str] = set()  # every name the namespace has held since the worker started
+        self._saved: str | None = None  # where a cut output is kept whole: made at the first cut
 
     def serve(self) -> None:
         while (message := self._channel.inbox.get()) is not None:
@@ -94,32 +102,59 @@ class _Kernel:
     def _cell(self, code: str) -> dict[str, Any]:
         out = io.StringIO()
         error: str | None = None
+        self._cells += 1
+        name = f"{_CELL} {self._cells}>"
+        # The cell's source where a traceback looks for it (no modification time, so it is never
+        # dropped as stale), kept for later cells: a function defined here and failing there
+        # shows its own line, and which cell it came from.
+        linecache.cache[name] = (len(code), None, code.splitlines(keepends=True), name)
         self.running = True
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-                body, last = split_last_expression(code)
-                exec(compile(body, "<cell>", "exec"), self._namespace)
+                body, last = split_last_expression(code, name)
+                exec(compile(body, name, "exec"), self._namespace)
                 if last is not None:
-                    value = eval(compile(last, "<cell>", "eval"), self._namespace)
+                    value = eval(compile(last, name, "eval"), self._namespace)
                     if value is not None:
                         print(repr(value))
         except KeyboardInterrupt:
             error = "KeyboardInterrupt: the cell was interrupted; the namespace is as it was left"
         except SyntaxError as exc:
             error = f"SyntaxError: {exc}"
+        except NameError as exc:
+            error = cell_traceback(exc)
+            if exc.name is not None and exc.name not in self._had:
+                error += (
+                    f"\n({exc.name!r} has not been defined in this kernel, which has run "
+                    f"{self._cells} cell{'s' if self._cells != 1 else ''} since it started. If an "
+                    "earlier cell defined it before then (in an earlier session, or before /clear "
+                    "or a restart), define it again.)"
+                )
         except BaseException as exc:
             error = cell_traceback(exc)
         finally:
             self.running = False
-        return {"op": "done", "output": _capped(out.getvalue()), "error": error and _capped(error)}
+            self._had.update(self._namespace)
+        output = self._capped(out.getvalue(), "")
+        return {"op": "done", "output": output, "error": error and self._capped(error, "-error")}
 
-
-def _capped(text: str) -> str:
-    """At most `_MAX_OUTPUT` characters of `text`, and how many more there were: the host reads
-    one line per message, so neither what a cell printed nor its traceback may be unbounded."""
-    if len(text) <= _MAX_OUTPUT:
-        return text
-    return text[:_MAX_OUTPUT] + f"\n... [{len(text) - _MAX_OUTPUT} more chars]"
+    def _capped(self, text: str, kind: str) -> str:
+        """At most `_MAX_OUTPUT` characters of `text`: the host reads one line per message, so
+        neither what a cell printed nor its traceback may be unbounded. A longer one keeps its
+        start and its end (where a test run's summary and a traceback's error are), says how
+        much was cut, and is saved whole to a file the next cell can read."""
+        if len(text) <= _MAX_OUTPUT:
+            return text
+        try:
+            self._saved = self._saved or tempfile.mkdtemp(prefix="bh-02-cells-")
+            path = os.path.join(self._saved, f"cell-{self._cells}{kind}.txt")
+            with open(path, "w", encoding="utf-8") as whole:
+                whole.write(text)
+            where = f"; all of it is in {path}"
+        except OSError:
+            where = ""
+        cut = len(text) - _MAX_OUTPUT
+        return f"{text[:_HEAD]}\n... [{cut} characters cut here{where}] ...\n{text[-(_MAX_OUTPUT - _HEAD) :]}"
 
 
 def main(argv: Sequence[str]) -> None:

@@ -3,6 +3,7 @@ that come back as the cell's text."""
 
 import asyncio
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -24,6 +25,46 @@ from kernel_cordis_plugin import (
     kernel,
     worker_argv,
 )
+
+
+async def test_a_traceback_shows_each_line_and_the_cell_it_came_from() -> None:
+    async with Kernel(Unjailed(), KernelConfig()) as k:
+        await k.run("def parse(line):\n    key, value = line.split('=')\n    return key, value")
+        failed = await k.run("pairs = [parse(l) for l in ['a=1', 'c']]")
+        assert 'File "<cell 2>", line 1, in <module>\n    pairs = [parse(l)' in failed
+        assert "File \"<cell 1>\", line 2, in parse\n    key, value = line.split('=')" in failed
+
+
+async def test_a_name_this_kernel_never_had_says_the_kernel_is_new() -> None:
+    async with Kernel(Unjailed(), KernelConfig()) as k:
+        missing = await k.run("helper()")
+        assert "NameError" in missing and "'helper' has not been defined in this kernel" in missing
+        assert "earlier session, or before /clear or a restart" in missing
+        await k.run("helper = 1")
+        await k.run("del helper")
+        again = await k.run("helper")
+        assert "NameError" in again and "has not been defined" not in again  # it had been: no hint
+
+
+async def test_the_project_s_startup_file_runs_first_when_cells_are_confined(tmp_path: Path) -> None:
+    (tmp_path / ".bh-02").mkdir()
+    (tmp_path / ".bh-02" / "kernel.py").write_text("def sh(cmd):\n    return cmd\n\nTOOLS = 2\n_hidden = 1\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run("sh('ls')")
+        assert first == "(.bh-02/kernel.py ran first and defined: TOOLS, sh)\n'ls'"
+        assert await k.run("TOOLS") == "2"  # told once, then plain cells
+    (tmp_path / ".bh-02" / "kernel.py").write_text("raise RuntimeError('broken helper')\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        failed = await k.run("1")
+        assert (
+            failed.startswith("(.bh-02/kernel.py ran first and failed")
+            and "RuntimeError: broken helper" in failed
+        )
+        assert failed.endswith(")\n1")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:  # unjailed: not unasked
+        told = await k.run("1")
+        assert told.startswith("(.bh-02/kernel.py was not run: cells here are put to the person")
+        assert "exec(open('.bh-02/kernel.py').read())" in told and "broken" not in told
 
 
 def test_the_model_is_told_its_tool_is_a_persistent_kernel_and_how_to_use_it() -> None:
@@ -81,10 +122,15 @@ async def test_a_cell_too_long_to_send_whole_comes_back_capped_and_the_kernel_ca
     overrun the host's line limit and leave the stream out of step for every later cell."""
     async with Kernel(Unjailed(), KernelConfig()) as k:
         await k.run("kept = 1")
-        emoji = await k.run("print('\\N{GRINNING FACE}' * 30000)")
-        assert emoji.startswith("\N{GRINNING FACE}" * 100) and emoji.endswith("[10001 more chars]")
+        emoji = await k.run("print('\\N{GRINNING FACE}' * 30000 + 'the end')")
+        # the start and the end are kept (a summary is last), and the whole is saved for a cell
+        assert emoji.startswith("\N{GRINNING FACE}" * 100) and emoji.endswith("the end")
+        cut = re.search(r"\[10008 characters cut here; all of it is in (\S+)\]", emoji)
+        assert cut is not None and len(emoji) < 20_200
+        assert Path(cut.group(1)).read_text(encoding="utf-8").startswith("\N{GRINNING FACE}" * 30000)
         huge = await k.run("raise Exception('x' * 100000)")
-        assert huge.startswith("Traceback") and "more chars]" in huge and len(huge) < 21_000
+        assert huge.startswith("Traceback") and "characters cut here" in huge and len(huge) < 20_200
+        assert huge.endswith("x" * 100)  # the end of the error, where its message is
         assert await k.run("kept + 1") == "2"  # the same worker, its namespace intact
 
 
@@ -153,10 +199,10 @@ async def test_errors_come_back_as_text_and_a_dead_worker_is_started_again() -> 
     async with Kernel(Unjailed(), KernelConfig()) as k:
         failed = await k.run("1/0")
         assert "ZeroDivisionError" in failed
-        assert "worker.py" not in failed and 'File "<cell>", line 1' in failed  # the cell's own
+        assert "worker.py" not in failed and 'File "<cell 1>", line 1' in failed  # the cell's own
         deep = await k.run("def f():\n    open('/nonexistent/x')\nf()")
         assert deep.startswith("Traceback (most recent call last):")
-        assert "worker.py" not in deep and deep.count('File "<cell>"') == 2
+        assert "worker.py" not in deep and deep.count('File "<cell 2>"') == 2
         missing = await k.run("undefined_name")
         assert "NameError" in missing and "undefined_name" in missing
         await k.run("x = 1")

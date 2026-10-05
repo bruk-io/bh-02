@@ -32,22 +32,20 @@ def test_the_model_is_told_how_to_extend_bh_02_and_how_each_extension_is() -> No
     assert ".bh-02/plugins/NAME.py" in told and "Nobody is asked first" in told
     for offered in ("commands.register(spec, run)", "frame.status(field, text)", "system.add(text)"):
         assert offered in told
-    assert "Extensions now" not in told
+    assert "Extensions here" not in told
     unjailed = instructions(".bh-02/plugins", False, {})
     assert "each is shown to the person, who decides whether it loads" in unjailed
     statuses = {
         "todo": Status(rows={"todo.todo": "active"}, commands=("/todo",)),
         "notes": Status(error="Traceback ...\nSyntaxError: '(' was never closed"),
-        "half": Status(rows={"half.a": "active", "half.b": "waiting on: x"}),
         "slow": Status(loading=True),
     }
-    lines = instructions(".bh-02/plugins", True, statuses).split("Extensions now:\n")[1].splitlines()
-    assert lines == [
-        "- half: loaded, but not all of it is up; .bh-02/plugins/status.json has why",
-        "- notes: not loaded (SyntaxError: '(' was never closed); .bh-02/plugins/status.json has why",
-        "- slow: loading",
-        "- todo: active (/todo)",
-    ]
+    told = instructions(".bh-02/plugins", True, statuses)
+    assert told.endswith(
+        "Extensions here: notes, slow, todo. How each one is, is in .bh-02/plugins/status.json."
+    )
+    # names only: an extension loading, failing or coming up leaves the prompt as it was
+    assert told == instructions(".bh-02/plugins", True, dict.fromkeys(statuses, Status()))
 
 
 def test_the_status_bar_and_the_status_file_say_how_each_one_is() -> None:

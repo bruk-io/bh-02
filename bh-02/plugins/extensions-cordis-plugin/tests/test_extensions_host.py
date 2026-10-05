@@ -130,7 +130,9 @@ async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_
         assert await h.commands.runs["todo"]("") == "milk"  # its state lives in the worker
         assert h.frame.fields() == {"todo:count": "todo: 0", "extensions": "ext: todo ✓"}
         assert h.system.texts() == ["The person keeps a to-do list with /todo."]
-        assert "- todo: active (/todo)" in h.extensions.section()
+        assert h.extensions.section().endswith(
+            "Extensions here: todo. How each one is, is in .bh-02/plugins/status.json."
+        )
         assert h.status()["todo"] == {
             "state": "active",
             "rows": {"todo.todo": "active"},
@@ -182,8 +184,7 @@ async def test_what_kept_an_extension_from_loading_is_said_where_the_model_reads
             and "RuntimeError: boom" in half["rows"]["half.fails"]
         )
         assert 'half.py", line 13, in fails' in half["rows"]["half.fails"]  # the model's own frame
-        section = h.extensions.section()
-        assert "- broken: not loaded (SyntaxError: invalid syntax)" in section
+        assert "Extensions here: broken, empty, half." in h.extensions.section()
         assert h.frame.fields()["extensions"] == "ext: broken ✗ empty ✗ half ✗"
 
 

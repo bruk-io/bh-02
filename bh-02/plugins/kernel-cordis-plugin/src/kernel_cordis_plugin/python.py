@@ -41,24 +41,36 @@ _KERNEL = (
 )
 _USE = (
     "How to use it:",
-    "- Build up state: read a file once into a variable, define a helper once (a function that "
-    "runs the tests and prints only the failures, say) and call it in later cells.",
+    "- Build up state: define a helper once (a function that runs the tests and prints only the "
+    "failures, say) and call it in later cells. A variable holds what was read, not the file: "
+    "read a file again after you change it.",
     "- There is nothing in the namespace but Python and what your cells put there: read and edit "
-    "files with open() or pathlib; there is no other file tool.",
-    "- print() what you need to see; a cell's last expression is shown too, as in a notebook. A "
-    "cell's output is cut at 20,000 characters, so print what matters, not whole files.",
+    "files with open() or pathlib; there is no other file tool. os.chdir() moves every later "
+    "cell too, so prefer paths (and subprocess's cwd=).",
+    "- print() what you need to see; a cell's last expression is shown too, as in a notebook. "
+    "Output over 20,000 characters keeps its start and its end, and is saved whole to a file the "
+    "cut names: print what matters, and read the file for the middle.",
     "- Run programs with subprocess.run([...], capture_output=True, text=True, timeout=...) and "
     "print what they said: a program's own output (os.system, a subprocess not captured) never "
     "reaches you, and a cell runs until it ends, so give anything slow a timeout.",
-    "- There is no stdin (input() fails). A cell that raises answers with its traceback: read it "
-    "and fix the code. The person can interrupt a running cell (KeyboardInterrupt); the "
-    "namespace stays as it was.",
+    "- There is no stdin (input() fails). A cell that raises answers with its traceback, each "
+    "frame with its source line and the cell it is in (`<cell 3>`): read it and fix the code. "
+    "The person can interrupt a running cell (KeyboardInterrupt); the namespace stays as it was.",
+    "- Several calls in one message run in order, each a cell of its own. The person sees every "
+    "cell and its output as it runs, so say what a result means rather than repeat it.",
 )
 
 
-def instructions_for(confined: bool) -> str:
+def instructions_for(confined: bool, startup: str = ".bh-02/kernel.py") -> str:
     """What the model is told about acting in code: the one tool, the kernel it runs in and
-    how long that lasts, how to use it, and where its code runs."""
+    how long that lasts, the project's startup file (`startup`), how to use it, and where its
+    code runs."""
+    keep = f"Helpers worth having in every session go in {startup}, which you can write and grow: " + (
+        "a new kernel runs it before its first cell and says what it defined."
+        if confined
+        else "when it is there, a new kernel says so, and you run it as a cell of your own "
+        "(here every cell is put to the person, so it does not run unasked)."
+    )
     where = (
         "Your code runs in a jail: it can write only inside the project directory, cannot reach "
         "the network, and cannot read credentials. Inside the project it also cannot write what "
@@ -68,4 +80,4 @@ def instructions_for(confined: bool) -> str:
         else "Your code runs unjailed, with the person's own permissions: each cell is shown to "
         "the person and runs only if they approve it, so keep cells small and say what they do."
     )
-    return "\n".join([_KERNEL, "", *_USE, "", where])
+    return "\n".join([f"{_KERNEL} {keep}", "", *_USE, "", where])

@@ -87,24 +87,13 @@ def is_confined(report: Mapping[str, str]) -> bool:
     return all(report.get(axis) == "enforced" for axis in _CONFINING)
 
 
-def _summary(name: str, status: Status, where: str) -> str:
-    if status.loading:
-        return f"- {name}: loading"
-    if status.error is not None:
-        return f"- {name}: not loaded ({status.error.splitlines()[-1]}); {where}/status.json has why"
-    commands = f" ({', '.join(status.commands)})" if status.commands else ""
-    if status.ok:
-        return f"- {name}: active{commands}"
-    return f"- {name}: loaded, but not all of it is up{commands}; {where}/status.json has why"
-
-
 def instructions(
     where: str, confined: bool, statuses: Mapping[str, Status], reference: str | None = None
 ) -> str:
     """What the model is told about extending bh-02 (a section of its system prompt): how, the
-    part of cordis an extension uses, what it reaches of bh-02, and the state of each one there
-    is. `where` is the extensions directory, relative to the project; `reference` is cordis's
-    own design doc, when there is one to point at."""
+    part of cordis an extension uses, what it reaches of bh-02, and which ones there are. `where`
+    is the extensions directory, relative to the project; `reference` is cordis's own design
+    doc, when there is one to point at."""
     consent = (
         "Extensions run in a jail of their own, as your `python` cells (below) do: the project "
         "is their working "
@@ -162,8 +151,13 @@ def instructions(
         "moment after your write.",
     ]
     if statuses:
-        lines += ["", "Extensions now:"]
-        lines += [_summary(name, statuses[name], where) for name in sorted(statuses)]
+        # Names only: how each one is goes in status.json, so a load ending, or failing, does not
+        # change this prompt (with Claude, a changed prompt restarts Claude Code and costs the
+        # conversation its prompt cache).
+        lines += [
+            "",
+            f"Extensions here: {', '.join(sorted(statuses))}. How each one is, is in {where}/status.json.",
+        ]
     return "\n".join(lines)
 
 
