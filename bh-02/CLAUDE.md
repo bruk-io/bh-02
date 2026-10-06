@@ -86,7 +86,9 @@ of `[[section]]`s, each `files` (patterns) and `function` (a full module path gi
 that match, returning text): bh-02's own (`context_cordis_plugin/context.toml`: the guidance
 files, AGENTS.md and CLAUDE.md, yours and the project's, and rule files, each read by a function
 in `context_cordis_plugin.sections`), then `~/.config/bh-02/context.toml`, then the project's
-`.bh-02/context.toml`, which the model can write and so may name only bh-02's own functions. The loop follows it with `kernel.instructions()`: that `python` is the
+`.bh-02/context.toml`, which the model can write and so may name only bh-02's own functions and
+non-hidden files in the project; nothing is read through any section that the jail keeps from the
+model (a link out of the project, a `local.env`). The loop follows it with `kernel.instructions()`: that `python` is the
 CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is

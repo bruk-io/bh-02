@@ -12,15 +12,21 @@ the model's next message; so is a file a section's patterns match, added, moved 
 (`_Search`: a search keeps the time each directory it looked in last changed, and looks again
 when one of them has).
 
-A file inside the project may name only bh-02's own functions (`context_cordis_plugin.sections`):
-the model can write there, and a function it named would run in bh-02, outside the jail.
+A file inside the project is the model's to write, and bh-02 reads what it names in its own
+process, outside the jail. So it may name only bh-02's own functions
+(`context_cordis_plugin.sections`), only files in the project that are not hidden (no `~`, `/`,
+`..` or part starting with `.`), and may not `replace` the sections before it. And whatever file
+a section names, bh-02 reads nothing through it that the model could not read itself (`_kept`):
+a file reached from the project stays in it, none is read under a secret's name (`local.env`,
+`.env`, `*.env`), and a symlink in the project (where the model can make one) counts only when it
+points at another file the section found.
 """
 
 import importlib
 import os
 import re
 import tomllib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Any
@@ -32,6 +38,7 @@ _SHIPPED = Path(__file__).with_name("context.toml")
 _MAGIC = re.compile(r"[*?\[]")
 # Directories a search does not go into, unless its pattern names them: hidden ones, and what
 # tools make, fetch or keep.
+_SECRET = re.compile(r"^\.env(\..*)?$|\.env$")  # local.env, .env, .env.local, prod.env: never read
 _SKIPPED = frozenset({"node_modules", "__pycache__", "venv", "build", "dist", "target", "vendor"})
 _LOOKED = 20_000  # directories one search looks in at most, so a project as big as a home ends
 
@@ -40,11 +47,13 @@ type Function = Callable[..., Any]
 
 @dataclass(frozen=True, slots=True)
 class Section:
-    """One `[[section]]`: its file patterns, its function, and the context file it came from."""
+    """One `[[section]]`: its file patterns, its function, the context file it came from, and
+    whether that file is the person's (or bh-02's) rather than the project's."""
 
     files: tuple[str, ...]
     function: str
     source: str
+    trusted: bool = True
 
 
 def parse(text: str, source: str, *, trusted: bool) -> tuple[tuple[Section, ...], bool]:
@@ -57,6 +66,11 @@ def parse(text: str, source: str, *, trusted: bool) -> tuple[tuple[Section, ...]
         raise ValueError(f"{source} is not TOML: {error}") from None
     if set(read) - {"section", "replace"} or not isinstance(read.get("replace", False), bool):
         raise ValueError(f"{source} may hold only [[section]]s and `replace = true`; it has {sorted(read)}")
+    if not trusted and read.get("replace", False):
+        raise ValueError(
+            f"{source} is the project's, which the model can write, so it may only add sections, "
+            "not `replace` yours"
+        )
     sections: list[Section] = []
     for table in read.get("section", []):
         files = table.get("files", []) if isinstance(table, dict) else None
@@ -75,13 +89,22 @@ def parse(text: str, source: str, *, trusted: bool) -> tuple[tuple[Section, ...]
                 '{ files = ["AGENTS.md"], function = "context_cordis_plugin.sections:place" }; '
                 f"got {table!r}"
             )
+        outside = [
+            f for f in files if f.startswith(("~", "/")) or any(p.startswith(".") for p in PurePath(f).parts)
+        ]
+        if not trusted and outside:
+            raise ValueError(
+                f"{source} is the project's, which the model can write, so it may name only files "
+                f"in the project that are not hidden (no ~, /, .. or part starting with .), not "
+                f"{', '.join(outside)}"
+            )
         if not trusted and not function.startswith(_OWN):
             raise ValueError(
                 f"{source} is the project's, which the model can write, so it may name only "
                 f"bh-02's own functions ({_OWN}place, rules, whole, named), not {function}: a "
                 "function of yours goes in your ~/.config/bh-02/context.toml"
             )
-        sections.append(Section(tuple(files), function, source))
+        sections.append(Section(tuple(files), function, source, trusted))
     return tuple(sections), bool(read.get("replace", False))
 
 
@@ -129,7 +152,11 @@ class ContextFiles:
             if self._read.get(path, (None,))[0] != stamp:
                 self._read[path] = (
                     stamp,
-                    _parsed(path, trusted=not path.is_relative_to(root)) if stamp else ((), False),
+                    _parsed(
+                        path, trusted=path == _SHIPPED or not path.resolve().is_relative_to(root.resolve())
+                    )
+                    if stamp
+                    else ((), False),
                 )
                 self._searched.clear()  # the sections may have changed: search afresh
             read = self._read[path][1]
@@ -141,7 +168,7 @@ class ContextFiles:
         return sections, problems
 
     def _found(self, section: Section, root: Path, home: Path) -> tuple[Path, ...]:
-        found: dict[Path, None] = {}
+        found: dict[Path, bool] = {}  # each file, and whether it was reached from the project
         for pattern in section.files:
             if pattern.startswith(("~", "/")):
                 path = Path(str(home) + pattern[1:]) if pattern.startswith("~") else Path(pattern)
@@ -154,8 +181,41 @@ class ContextFiles:
                     searched = self._searched[(root, pattern)] = _search(root, pattern)
                 matches = searched.found
             for path in matches:
-                found.setdefault(path, None)
-        return tuple(found)
+                found.setdefault(path, not pattern.startswith(("~", "/")))
+        resolved = {path: (path.parent.resolve() / path.name, path.resolve()) for path in found}
+        return _kept(tuple(found.items()), resolved, root.resolve(), trusted=section.trusted)
+
+
+def _kept(
+    found: Sequence[tuple[Path, bool]],
+    resolved: Mapping[Path, tuple[Path, Path]],
+    root: Path,
+    *,
+    trusted: bool,
+) -> tuple[Path, ...]:
+    """What of a section's files it may read, in order: never more than the model itself could.
+    `found`: each file, and whether it was reached from the project (a relative pattern);
+    `resolved`: each file's place (its directories' links followed) and what it finally is (its
+    own link followed too). One reached from the project must be in it; a link in the project,
+    which the model could have made, must lead to another file the section found (a CLAUDE.md
+    linking to the AGENTS.md beside it stays), while one of the person's own, outside it, is
+    theirs to follow; none named like a secret is read; and, for the project's own file, none
+    hidden."""
+    places = {place for place, _ in resolved.values()}
+    kept: list[Path] = []
+    for path, from_project in found:
+        place, real = resolved[path]
+        inside = place.is_relative_to(root)
+        if from_project and not inside:
+            continue
+        if inside and real != place and real not in places:
+            continue
+        if _SECRET.search(place.name) or _SECRET.search(real.name):
+            continue
+        if not trusted and any(part.startswith(".") for part in place.relative_to(root).parts):
+            continue
+        kept.append(path)
+    return tuple(kept)
 
 
 def _parsed(path: Path, *, trusted: bool) -> tuple[tuple[Section, ...], bool] | str:

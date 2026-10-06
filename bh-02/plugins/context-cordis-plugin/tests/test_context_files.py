@@ -9,6 +9,7 @@ import pytest
 from context_cordis_plugin import ContextConfig, ContextFiles, ProjectContext, parse
 
 _NAMED = "context_cordis_plugin.sections:named"
+_WHOLE = "context_cordis_plugin.sections:whole"
 
 
 def _write(path: Path, text: str) -> Path:
@@ -51,6 +52,42 @@ def test_the_project_s_file_may_name_only_bh_02_s_own_functions() -> None:
         parse('[[section]]\nfunction = "os:system"\n', "mine.toml", trusted=True)[0][0].function
         == "os:system"
     )
+
+
+def test_the_project_s_file_may_name_only_files_in_it_and_only_add() -> None:
+    """Whatever the project's file names, bh-02 reads outside the jail, so it names no file the
+    jail keeps from the model: none outside the project, none hidden; and it cannot drop yours."""
+    for pattern in ("../local.env", "~/.ssh/id_rsa", "/etc/passwd", ".git/config", "docs/.private/*.md"):
+        toml = f'[[section]]\nfiles = ["{pattern}"]\nfunction = "{_NAMED}"\n'
+        with pytest.raises(ValueError, match="may name only files in the project that are not hidden"):
+            parse(toml, ".bh-02/context.toml", trusted=False)
+        assert parse(toml, "mine.toml", trusted=True)[0][0].files == (pattern,)
+    with pytest.raises(ValueError, match="may only add sections, not `replace` yours"):
+        parse("replace = true", ".bh-02/context.toml", trusted=False)
+
+
+def test_nothing_is_read_through_a_section_that_the_model_could_not_read(tmp_path: Path) -> None:
+    """A link the model makes in the project, or a secret's name, reads nothing; a link from one
+    guidance file to another, or one of the person's own outside the project, still reads."""
+    context, root, home = _context(tmp_path)
+    _write(tmp_path / "local.env", "FAKE-BESIDE")
+    _write(home / ".ssh/id_test", "FAKE-KEY")
+    _write(root / "local.env", "FAKE-INSIDE")
+    (root / "CLAUDE.local.md").symlink_to("../local.env")
+    (root / "AGENTS.local.md").symlink_to(home / ".ssh/id_test")
+    _write(root / "src/AGENTS.md", "x")
+    (root / "src/CLAUDE.md").symlink_to(home / ".ssh/id_test")  # where the search finds it
+    _write(root / "AGENTS.md", "The project's.")
+    (root / "CLAUDE.md").symlink_to("AGENTS.md")
+    _write(home / "dotfiles/AGENTS.md", "Mine, kept in my dotfiles.")
+    (home / "AGENTS.md").symlink_to(home / "dotfiles/AGENTS.md")
+    _write(
+        home / ".config/bh-02/context.toml", f'[[section]]\nfiles = ["local.env"]\nfunction = "{_WHOLE}"\n'
+    )
+    text = context.text()
+    assert "FAKE" not in text
+    assert "src/CLAUDE.md" not in text and "src/AGENTS.md" in text
+    assert "From AGENTS.md:\n\nThe project's." in text and "Mine, kept in my dotfiles." in text
 
 
 def test_bh_02_s_own_file_reads_the_guidance_and_the_rules(tmp_path: Path) -> None:
@@ -111,40 +148,47 @@ def test_a_section_that_fails_says_so_and_the_rest_still_say_theirs(tmp_path: Pa
 
 
 def test_a_file_a_wildcard_matches_is_found_at_the_next_reading_added_or_removed(tmp_path: Path) -> None:
-    files, root = ContextFiles((".bh-02/context.toml",), 20_000), tmp_path
+    files, root, home = ContextFiles(("~/mine.toml",), 20_000), tmp_path / "p", tmp_path
     _write(
-        root / ".bh-02/context.toml",
+        home / "mine.toml",
         'replace = true\n[[section]]\nfiles = ["docs/**/*.md", ".claude/rules/*.md"]\n'
         f'function = "{_NAMED}"\n',
     )
     _write(root / "docs/a.md", "a")
-    assert files.text(root, tmp_path).endswith("docs/a.md.")
+    assert files.text(root, home).endswith("docs/a.md.")
     _write(root / "docs/b.md", "b")
     _write(root / "docs/deep/c.md", "c")  # in a directory that was not there to look in
-    assert files.text(root, tmp_path).endswith("docs/a.md, docs/b.md, docs/deep/c.md.")
+    assert files.text(root, home).endswith("docs/a.md, docs/b.md, docs/deep/c.md.")
     (root / "docs/a.md").unlink()
-    assert files.text(root, tmp_path).endswith("docs/b.md, docs/deep/c.md.")
+    assert files.text(root, home).endswith("docs/b.md, docs/deep/c.md.")
     _write(root / ".claude/rules/new.md", "r")  # under directories that were not there at all
-    assert ".claude/rules/new.md" in files.text(root, tmp_path)
+    assert ".claude/rules/new.md" in files.text(root, home)
 
 
 def test_a_search_looks_again_only_when_a_directory_it_looked_in_changed(tmp_path: Path) -> None:
     """Each reading costs a `stat` of each directory looked in, not a walk: shown by a file whose
     directory's time is put back, which the search does not see."""
-    files, root = ContextFiles((".bh-02/context.toml",), 20_000), tmp_path
+    files, root, home = ContextFiles(("~/mine.toml",), 20_000), tmp_path / "p", tmp_path
     _write(
-        root / ".bh-02/context.toml",
+        home / "mine.toml",
         f'replace = true\n[[section]]\nfiles = ["docs/*.md"]\nfunction = "{_NAMED}"\n',
     )
     _write(root / "docs/a.md", "a")
-    files.text(root, tmp_path)
+    files.text(root, home)
     was = (root / "docs").stat()
     _write(root / "docs/hidden.md", "h")
     os.utime(root / "docs", ns=(was.st_atime_ns, was.st_mtime_ns))
-    assert "hidden.md" not in files.text(root, tmp_path)
+    assert "hidden.md" not in files.text(root, home)
 
 
 def test_the_context_files_say_at_most_max_chars(tmp_path: Path) -> None:
     context, root, _ = _context(tmp_path, max_chars=40)
     _write(root / "AGENTS.md", "x" * 500)
     assert "more chars of project context]" in context.text()
+
+
+def test_your_file_inside_the_project_is_the_project_s(tmp_path: Path) -> None:
+    """Run in your home, the model can write your file too, so it is held to the project's terms."""
+    files, home = ContextFiles(("~/.config/bh-02/context.toml",), 20_000), tmp_path
+    _write(home / ".config/bh-02/context.toml", '[[section]]\nfunction = "os:system"\n')
+    assert "may name only bh-02's own functions" in files.text(home, home)

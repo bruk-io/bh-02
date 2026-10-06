@@ -46,9 +46,19 @@ function = "context_cordis_plugin.sections:place"
 The sections are read in order from bh-02's own file (`context.toml`, in the package), then each
 of `files`: yours, then the project's. Each appends its sections; `replace = true` at a file's
 top starts the list afresh. A file is read again whenever it changes, so a section added
-reaches the model's next message. **The project's file may name only bh-02's own functions**
-(`context_cordis_plugin.sections:*`): the model can write it, and a function it named would run
-in bh-02's process, outside the jail. A function of your own goes in your file.
+reaches the model's next message.
+
+**The project's file is held to what the model may do itself**, because the model can write it
+and bh-02 acts on it in its own process, outside the jail. So it may name only bh-02's own
+functions (`context_cordis_plugin.sections:*`), and only files in the project that are not
+hidden (no `~`, `/`, `..` or part starting with `.`), and it may not `replace` the sections
+before it. A function or a file outside the project of your own goes in your file. A file of
+yours inside the project (bh-02 run in your home) is the project's, on the same terms. And
+whichever file a section came from, nothing is read through it that the jail keeps from the
+model: a file reached from the project must be in it, a link in the project counts only when it
+leads to another file the section found (a CLAUDE.md linking to the AGENTS.md beside it), and a
+file named like a secret (`local.env`, `.env`, `*.env`) is never read. A link of your own,
+outside the project (`~/AGENTS.md` into your dotfiles), is yours to follow.
 
 bh-02's own functions (`sections.py`):
 
