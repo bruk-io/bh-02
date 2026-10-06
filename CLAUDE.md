@@ -39,7 +39,7 @@ uv run mypy                                               # strict; checked path
 scripts/arch-check                                        # every pypeeker gate (root, then libs/*); applies autofixes first, --no-fix to only report
 uv run pytest -m "not real_launch"                        # skip the tests that launch the real app in a pty
 scripts/sync-tokens [--check] [--bh-01 PATH]              # bh-01's token CSS -> bh-02's Textual theme (reads ../bh-01)
-scripts/model-friction [--examples N] [--json]            # where models trip in bh-02 sessions here: wrong tools, errors, lost output, nudges
+scripts/model-friction [--model NAME] [--examples N] [--json]  # where models trip in bh-02 sessions here: wrong tools, shell habits, errors, lost output, nudges
 uv run bh-02                                              # the harness: a CodeAct session in a TUI, Claude through Claude Code on the subscription
 uv tool install --editable ./bh-02/app                    # bh-02 as a command on your PATH, every plugin from this checkout (--reinstall after a pull that adds one)
 uv run bh-02 --resume [ID]                                # continue this directory's newest session (or ID: whole, its start, or its last part)

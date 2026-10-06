@@ -8,7 +8,9 @@ worker that died, an answer too long or garbled to read, a worker that won't sta
 comes back as the input's text, never as an exception. Interrupting an input (cancelling `run`) sends SIGINT
 through the jail, which the worker turns into `KeyboardInterrupt` in the input, and waits for the
 input to say it ended: the namespace survives. A worker that dies is started again on the next
-input, and that input is told its earlier variables are gone.
+input, and that input is told its earlier variables are gone. An input that runs `cat`, `sed`
+or `ls` through a shell is told, once for each kind of work, how Python does it here
+(`python.shell_note`).
 """
 
 import asyncio
@@ -23,7 +25,7 @@ from sys import executable
 from types import TracebackType
 from typing import Any, Protocol, runtime_checkable
 
-from kernel_cordis_plugin.python import PYTHON, instructions_for
+from kernel_cordis_plugin.python import PYTHON, instructions_for, shell_note, shelled
 
 __all__ = ["Jail", "Jailed", "Kernel", "KernelConfig", "is_confined", "worker_argv"]
 
@@ -118,6 +120,7 @@ class Kernel:
         self._writer: asyncio.StreamWriter | None = None
         self._restarted = False  # a worker started again, not the row's first
         self._fresh = False  # a worker no input has run in yet
+        self._told: set[str] = set()  # the kinds of shell work the model was told Python does (shell_note)
 
     @property
     def confined(self) -> bool:
@@ -145,8 +148,13 @@ class Kernel:
         await self._stop()
 
     async def run(self, code: str) -> str:
-        """Run one input and return it as the model reads it."""
-        return (await self._execute(code)).text()
+        """Run one input and return it as the model reads it: what it printed and its error,
+        then, the first time an input runs a kind of shell command Python does itself (`cat`,
+        `sed`, `ls`), how Python does that here (`shell_note`)."""
+        text = (await self._execute(code)).text()
+        new = [(command, kind) for command, kind in shelled(code) if kind not in self._told]
+        self._told.update(kind for _, kind in new)
+        return f"{text}\n{note}" if (note := shell_note(new)) else text
 
     async def _execute(self, code: str) -> _Output:
         async with self._lock:

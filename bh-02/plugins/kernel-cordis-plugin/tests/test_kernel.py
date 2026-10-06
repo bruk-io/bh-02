@@ -79,6 +79,9 @@ def test_the_model_is_told_its_tool_is_a_repl_of_its_own_that_persists_and_how_t
     # the ways an input's output can go missing, measured against a real worker below
     assert "capture_output=True" in told and "never reaches you" in told and "input() fails" in told
     assert "capture_output=True" in PYTHON["description"]
+    # CodeAct, not a shell: the habit a model trained on shell tools brings
+    assert "Work in Python, not through a shell" in PYTHON["description"]
+    assert "Work in Python, not through a shell" in told and "keep what they found in variables" in told
     assert told.endswith("Inputs run without asking.") and instructions_for(False).endswith(
         "say what they do."
     )
@@ -90,6 +93,24 @@ async def test_a_program_s_own_output_reaches_an_input_only_when_captured(tmp_pa
         said = await k.run("print(subprocess.run(['echo', 'kept'], capture_output=True, text=True).stdout)")
         assert said == "kept"
         assert "EOFError" in await k.run("input()")
+
+
+async def test_an_input_that_uses_the_shell_for_file_work_is_told_once_how_python_does_it(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a.txt").write_text("one\ntwo\n")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        shown = (
+            "import subprocess\n"
+            "print(subprocess.run(['cat', 'a.txt'], capture_output=True, text=True).stdout)"
+        )
+        first = await k.run(shown)
+        assert first.startswith("one\ntwo\n(this input ran `cat` through a shell.")
+        assert "read a file with Path(p).read_text()" in first
+        assert await k.run(shown.replace("cat", "head")) == "one\ntwo"  # reading was said: once a kind
+        quiet = await k.run("subprocess.run(['ls'], capture_output=True).returncode")
+        assert quiet.startswith("0\n(this input ran `ls` through a shell.")  # listing was not
+        assert await k.run("subprocess.run(['git', '--version'], capture_output=True).returncode") == "0"
 
 
 class Confined(Unjailed):
@@ -109,7 +130,7 @@ async def test_the_namespace_persists_and_the_last_expression_is_shown() -> None
 async def test_the_kernel_is_the_one_tool_and_its_namespace_holds_only_what_inputs_put_there() -> None:
     async with Kernel(Unjailed(), KernelConfig()) as k:
         assert k.spec == PYTHON and k.spec["name"] == "python"
-        assert "open() or pathlib" in k.instructions() and "unjailed" in k.instructions()
+        assert "Path(p).read_text()" in k.instructions() and "unjailed" in k.instructions()
         names = await k.run("sorted(n for n in globals() if not n.startswith('__'))")
         assert names == "[]"  # no functions of the host's: an input is plain Python
 

@@ -83,8 +83,10 @@ made of, the working directory and the project's CLAUDE.md, read per request, th
 sections rows add (`system.add`: the extensions row's is how to extend bh-02 and the part of
 cordis that takes). The loop follows it with `kernel.instructions()`: that `python` is the
 CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
-and how to use it (build up state; capture a program's output, which otherwise never reaches the
-model; give it a timeout; it is plain Python, not IPython). The claude-code provider adds a note that Claude Code's own opening line and its
+and how to use it (work in Python, not through a shell, with an example input; build up state;
+capture a program's output, which otherwise never reaches the model; give it a timeout; it is
+plain Python, not IPython). The first input that runs `cat`, `sed`, `ls` or the like through a
+shell is told, once for each kind of work, how Python does it (`shell_note`). The claude-code provider adds a note that Claude Code's own opening line and its
 `mcp__bh__` tool names don't mean the model is in Claude Code.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays

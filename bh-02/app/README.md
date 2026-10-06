@@ -244,7 +244,9 @@ bh-02 offers the model exactly one tool, `python(code)`, over the provider's sta
 calling (../harness/ARCHITECTURE.MD: "one tool, and it carries code"). To the model it is a
 Python REPL of its own that persists, and each call is one input to it: plain Python (not IPython),
 with nothing of bh-02's in the namespace, and nothing an input does calls back into bh-02. An input reads and edits files with `open` or `pathlib` and runs programs (`python`, `git`,
-a test runner) with `subprocess`, in the project directory. The namespace outlives a model
+a test runner) with `subprocess`, in the project directory. The model is told to work in Python
+rather than through a shell, and an input that runs `cat`, `sed` or `ls` through one is told how
+Python does that, once for each kind of work. The namespace outlives a model
 swap; Ctrl-C interrupts the running input and keeps the namespace.
 
 The kernel is a worker process started by the `jail` row. `brig:jail` confines it: writes
