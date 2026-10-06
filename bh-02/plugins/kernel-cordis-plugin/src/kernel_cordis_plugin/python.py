@@ -9,21 +9,32 @@ jail decides what it may touch.
 What the model is told follows the jail (`confined`): a confined REPL is contained, so its
 inputs run without asking; an unconfined one can do anything the person can, so the loop shows
 each input to the person and runs it only on a yes.
+
+A model trained on shell tools tends to use the REPL as one: each input a single `cat`, `sed`
+or `ls` through subprocess, its output printed whole. `programs` is what an input runs,
+`shelled` the part of it Python does itself, and
+`shell_note` is what the kernel adds to that input's result, once for each kind of work: how
+Python does it here, where the result stays in a variable for the next input.
 """
 
-from collections.abc import Mapping
+import ast
+import itertools
+import os
+import shlex
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
-__all__ = ["PYTHON", "instructions_for"]
+__all__ = ["PYTHON", "instructions_for", "programs", "shell_note", "shelled"]
 
 PYTHON: Mapping[str, Any] = {
     "name": "python",
     "description": (
         "Your own Python REPL, which persists: `code` runs as if typed at its prompt, in the "
-        "project directory, and variables, imports and functions stay for later calls. print() "
-        "what you want to see; a last expression is shown too. Read and write files with open() "
-        "or pathlib; run programs with subprocess.run([...], capture_output=True, text=True) and "
-        "print what they said."
+        "project directory, and variables, imports and functions stay for later calls. Work in "
+        "Python, not through a shell: read, search and edit files with pathlib and re, keep what "
+        "you find in variables, and do several steps in one input. Run programs (tests, git, "
+        "builds) with subprocess.run([...], capture_output=True, text=True, timeout=...) and work "
+        "with what they print. print() what you want to see; a last expression is shown too."
     ),
     "parameters": {
         "type": "object",
@@ -42,21 +53,45 @@ _REPL = (
     "not), after /clear, and if the process dies (the next input says so): then define again "
     "what you need rather than assume it."
 )
+_EXAMPLE = """    import re, subprocess
+    from pathlib import Path
+    files = subprocess.run(["git", "ls-files", "*.py"], capture_output=True, text=True).stdout.split()
+    uses = [(f, n, line.strip()) for f in files
+            for n, line in enumerate(Path(f).read_text().splitlines(), 1)
+            if re.search(r"\\bretries\\b", line)]
+    print(len(uses), "lines in", len({f for f, _, _ in uses}), "files"); print(*uses[:20], sep="\\n")
+
+and a later input, with `uses` still there, edits one of those files:
+
+    p = Path(uses[0][0])
+    text = p.read_text()
+    assert text.count("retries = 3") == 1, text.count("retries = 3")
+    p.write_text(text.replace("retries = 3", "retries = 5"))"""
 _USE = (
     "How to use it:",
+    "- Work in Python, not through a shell: there is no shell tool, and an input that only runs "
+    "cat, grep, sed or ls through subprocess and prints what it said leaves the REPL unused. "
+    "Read a file with Path(p).read_text(), list files with Path(d).rglob('*.py') (or `git "
+    "ls-files`, which leaves out what git ignores), search with re over the lines, and edit by "
+    "replacing text you checked occurs once. Do several steps in one input, and keep what they "
+    "found in variables for the next. One input finds every line that names `retries`:",
+    "",
+    _EXAMPLE,
+    "",
     "- Build up state: define a helper once (a function that runs the tests and prints only the "
     "failures, say) and call it later. A variable holds what was read, not the file: read a "
     "file again after you change it.",
     "- It is plain Python, not IPython or a notebook: no `!command` or `%magic`, and no "
-    "top-level `await` (use asyncio.run). Read and edit files with open() or pathlib; there is "
-    "no other file tool. os.chdir() moves every later input too, so prefer paths (and "
-    "subprocess's cwd=).",
+    "top-level `await` (use asyncio.run). os.chdir() moves every later input too, so prefer "
+    "paths (and subprocess's cwd=).",
     "- print() what you need to see; an input's last expression is shown too, as at a REPL "
     "prompt. Output over 20,000 characters keeps its start and its end, and is saved whole to a "
     "file the cut names: print what matters, and read the file for the middle.",
-    "- Run programs with subprocess.run([...], capture_output=True, text=True, timeout=...) and "
-    "print what they said: a program's own output (os.system, a subprocess not captured) never "
-    "reaches you, and an input runs until it ends, so give anything slow a timeout.",
+    "- Run the programs Python can't replace (tests, git, a build) with subprocess.run([...], "
+    "capture_output=True, text=True, timeout=...), and treat what they print as data: keep it, "
+    "filter it, print what matters. A program's own output (os.system, a subprocess not "
+    "captured) never reaches you, and an input runs until it ends, so give anything slow a "
+    "timeout.",
     "- There is no stdin (input() fails). An input that raises answers with its traceback, each "
     "frame with its source line and the input it is in (`<input 3>`, the REPL's third): read it "
     "and fix the code. The person can interrupt a running input (KeyboardInterrupt); what the "
@@ -85,3 +120,142 @@ def instructions_for(confined: bool, startup: str = ".bh-02/kernel.py") -> str:
         "the person and runs only if they approve it, so keep inputs small and say what they do."
     )
     return "\n".join([f"{_REPL} {keep}", "", *_USE, "", where])
+
+
+# The shell commands an input may run for work Python does itself, by kind of work, and how
+# Python does each kind here. Searching (grep, rg) is not one: a program that knows what git
+# ignores is fair to run, and its hits are data for the next step.
+_KINDS = {
+    "read": ("cat", "head", "tail", "wc"),
+    "edit": ("sed", "awk"),
+    "write": ("tee",),
+    "list": ("ls", "find", "tree"),
+    "files": ("mkdir", "touch", "cp", "mv", "rm"),
+}
+_KIND_OF = {command: kind for kind, commands in _KINDS.items() for command in commands}
+_INSTEAD = {
+    "read": "read a file with Path(p).read_text(), and slice its .splitlines() for a part",
+    "edit": "edit a file with text = Path(p).read_text(), check text.count(old) == 1, then "
+    "Path(p).write_text(text.replace(old, new))",
+    "write": "write a file with Path(p).write_text(text), or open(p, 'a') to append",
+    "list": "list files with Path(d).iterdir() or Path(d).rglob('*.py')",
+    "files": "make, copy, move and remove files with Path(d).mkdir(parents=True, exist_ok=True), "
+    "shutil.copy, Path.rename and Path.unlink (shutil.rmtree for a directory)",
+}
+_RUNNERS = {
+    "subprocess": {"run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput"},
+    "os": {"system", "popen"},
+}
+_SHELLS = {"sh", "bash", "zsh"}
+_SEPARATORS = {"|", "||", "&&", ";", "&", "(", ")"}
+
+
+def programs(code: str) -> tuple[tuple[str, bool], ...]:
+    """Each program `code` runs through subprocess or os (each command of a shell line), by
+    name, with whether its output is sent to a file, in the order they appear: () for none, and
+    for code that does not parse."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError, ValueError:
+        return ()
+    return tuple(found for line in _command_lines(tree) for found in _split(line))
+
+
+def shelled(code: str) -> tuple[tuple[str, str], ...]:
+    """The shell commands `code` runs for work Python does itself, as (command, kind of work),
+    each command once, in the order they appear."""
+    found: dict[str, str] = {}
+    for name, redirected in programs(code):
+        kind = "write" if redirected else _KIND_OF.get(name)
+        if kind is not None:
+            found.setdefault(name, kind)
+    return tuple(found.items())
+
+
+def shell_note(found: Sequence[tuple[str, str]]) -> str:
+    """What follows the output of an input that ran `found` (from `shelled`): how Python does
+    that work here. '' for none."""
+    if not found:
+        return ""
+    names = [f"`{command}`" for command, _ in found]
+    commands = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    ways = "; ".join(dict.fromkeys(_INSTEAD[kind] for _, kind in found))
+    return (
+        f"(this input ran {commands} through a shell. Python does that itself here, and keeps the "
+        f"result in a variable for the next input: {ways}. Keep subprocess for programs such as "
+        "tests, git and builds.)"
+    )
+
+
+def _command_lines(tree: ast.AST) -> Iterator[str]:
+    """Each command an input runs through subprocess or os, as shell text: a string as written
+    (an f-string up to its first field), a list's leading words quoted, `sh -c`'s script."""
+    modules = {"subprocess": "subprocess", "os": "os"}  # a name in the input -> the module
+    functions: dict[str, tuple[str, str]] = {}  # an imported function's name -> (module, function)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules |= {a.asname or a.name: a.name for a in node.names if a.name in _RUNNERS}
+        elif isinstance(node, ast.ImportFrom) and node.module in _RUNNERS:
+            functions |= {a.asname or a.name: (node.module, a.name) for a in node.names}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            module, name = modules.get(func.value.id, ""), func.attr
+        elif isinstance(func, ast.Name) and func.id in functions:
+            module, name = functions[func.id]
+        else:
+            continue
+        if name not in _RUNNERS.get(module, ()):
+            continue
+        given = node.args[0] if node.args else None
+        given = given or next((k.value for k in node.keywords if k.arg in ("args", "cmd", "command")), None)
+        if isinstance(given, ast.List | ast.Tuple):
+            words: list[str] = []
+            for element in given.elts:
+                if not (isinstance(element, ast.Constant) and isinstance(element.value, str)):
+                    break
+                words.append(element.value)
+            if len(words) > 2 and os.path.basename(words[0]) in _SHELLS and words[1] in ("-c", "-lc"):
+                yield words[2]
+            elif words:
+                yield shlex.join(words)
+        elif isinstance(given, ast.Constant) and isinstance(given.value, str):
+            yield given.value
+        elif isinstance(given, ast.JoinedStr):
+            parts = []
+            for part in given.values:
+                if not (isinstance(part, ast.Constant) and isinstance(part.value, str)):
+                    break
+                parts.append(part.value)
+            yield "".join(parts)
+
+
+def _split(text: str) -> Iterator[tuple[str, bool]]:
+    """Each command in shell text, by name, and whether its output is sent to a file (`>` or
+    `>>`, not to /dev/null). A here-document's lines are its text, not commands."""
+    ending: str | None = None  # the line that ends the here-document being read
+    for line in text.splitlines():
+        if ending is not None:
+            ending = None if line.strip() == ending else ending
+            continue
+        try:
+            lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = True
+            words = list(lexer)
+        except ValueError:  # an unclosed quote: the words as they split
+            words = line.split()
+        ending = next(
+            (after.lstrip("-") for before, after in itertools.pairwise(words) if before == "<<"), None
+        )
+        segment: list[str] = []
+        for word in [*words, ";"]:
+            if word not in _SEPARATORS:
+                segment.append(word)
+                continue
+            names = [w for w in segment if not (w.partition("=")[0].isidentifier() and "=" in w)]
+            if names:
+                targets = [after for before, after in itertools.pairwise(segment) if before in (">", ">>")]
+                yield os.path.basename(names[0]), any(t != "/dev/null" for t in targets)
+            segment = []

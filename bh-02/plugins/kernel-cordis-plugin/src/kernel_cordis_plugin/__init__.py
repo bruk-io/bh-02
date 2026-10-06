@@ -2,7 +2,7 @@
 and the model's one tool, `python(code)`, which runs an input in it."""
 
 from kernel_cordis_plugin.client import Jail, Jailed, Kernel, KernelConfig, is_confined, worker_argv
-from kernel_cordis_plugin.python import PYTHON, instructions_for
+from kernel_cordis_plugin.python import PYTHON, instructions_for, programs, shell_note, shelled
 from kernel_cordis_plugin.unjailed import UNENFORCED, Unjailed
 from kernel_cordis_plugin.wiring import kernel, unjailed
 
@@ -17,6 +17,9 @@ __all__ = [
     "instructions_for",
     "is_confined",
     "kernel",
+    "programs",
+    "shell_note",
+    "shelled",
     "unjailed",
     "worker_argv",
 ]

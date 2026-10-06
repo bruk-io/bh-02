@@ -8,14 +8,18 @@ the conversation since its last /clear. Run it after using bh-02 for a while: th
 come up most are where the prompt, the kernel or the loop should change next.
 
     scripts/model-friction                 # every session here
+    scripts/model-friction --model qwen    # only the sessions that started on one model
     scripts/model-friction --examples 5    # more examples per signal
     scripts/model-friction --json          # the findings, for another tool
 
 The signals match the texts bh-02 itself writes (the loop's refusals and nudges, the kernel's
-notes), so a change to one of those texts is a change here too. Standard library only.
+notes), so a change to one of those texts is a change here too. What an input runs is read the
+way the kernel reads it (`kernel_cordis_plugin.programs` and `shelled`), so run this from the
+repository; the rest is the standard library.
 """
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -25,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kernel_cordis_plugin import programs, shelled
+
 type Message = Mapping[str, Any]
 
 # What each signal means, in the order the report lists them.
@@ -32,6 +38,8 @@ SIGNALS = {
     "no_such_tool": "called a tool that does not exist (Claude Code's Bash, Read, Edit, ...): it thought it was elsewhere",
     "no_code": "called python without a `code` string",
     "nudged": "a step the loop had to send back (cut off at the output limit, empty, or a call that did not decode)",
+    "shell_shaped": "an input that only ran programs and printed what they said: the REPL used as a shell",
+    "shell_for_files": "ran cat, sed, ls or the like through a shell, for work Python does itself",
     "error": "an input that raised",
     "forgotten_name": "a NameError for a name the REPL never had: usually one an earlier session or REPL defined",
     "uncaptured_output": "ran a program without capturing its output, so the input saw nothing of it",
@@ -48,6 +56,9 @@ _PROGRAM = re.compile(r"\b(?:subprocess\.(?:run|call|check_call|Popen)|os\.syste
 _CAPTURED = re.compile(r"capture_output\s*=\s*True|stdout\s*=|check_output\(")
 _EXCEPTION = re.compile(r"^(\w+(?:\.\w+)*(?:Error|Exception|Exit|Interrupt|Expired)):", re.M)
 _WRITES = re.compile(r"write_text\(|open\([^)]*['\"][wa]")
+_NOTE = re.compile(r"\n\(this input ran .+ through a shell\..*\)\Z", re.S)  # the kernel's shell_note
+# What makes an input more than a shell command and a print: logic of its own.
+_COMPOSING = (ast.comprehension, ast.Compare, ast.BoolOp, ast.IfExp, ast.Lambda)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +114,25 @@ def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
                     yield Finding("startup_file", session, _short(code))
 
 
+def _shell_shaped(code: str) -> bool:
+    """An input whose statements (its imports aside) only run programs and print or keep what
+    they said, with no logic of its own: no loop, condition, comprehension or definition."""
+    try:
+        body = [s for s in ast.parse(code).body if not isinstance(s, ast.Import | ast.ImportFrom)]
+    except SyntaxError, ValueError:
+        return False
+    return bool(body and programs(code)) and all(
+        isinstance(s, ast.Expr | ast.Assign) and not any(isinstance(n, _COMPOSING) for n in ast.walk(s))
+        for s in body
+    )
+
+
 def _one_input(session: str, code: str, result: str) -> Iterator[Finding]:
+    if _shell_shaped(code):
+        yield Finding("shell_shaped", session, _short(code))
+    if found := shelled(code):
+        yield Finding("shell_for_files", session, f"{', '.join(c for c, _ in found)}: {_short(code, 100)}")
+    result = _NOTE.sub("", result)
     if result.startswith("error: there is no tool named"):
         yield Finding("no_such_tool", session, _short(result))
         return
@@ -140,8 +169,19 @@ def _sessions_dir(given: str | None) -> Path:
     return Path(state) / "bh-02" / "sessions"
 
 
-def _transcripts(root: Path) -> Iterator[tuple[str, list[Message]]]:
+def _started_on(session: Path) -> str | None:
+    """The model a session started on (its meta.json's `stack`), or None when it can't be read."""
+    try:
+        meta = json.loads((session / "meta.json").read_text(encoding="utf-8"))
+    except OSError, ValueError:
+        return None
+    return meta.get("stack") if isinstance(meta, dict) else None
+
+
+def _transcripts(root: Path, model: str | None) -> Iterator[tuple[str, list[Message]]]:
     for path in sorted(root.glob("*/transcript.jsonl")):
+        if model is not None and _started_on(path.parent) != model:
+            continue
         messages: list[Message] = []
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             try:
@@ -182,6 +222,7 @@ def _report(found: Sequence[Finding], totals: Totals, examples: int) -> str:
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--sessions", help="bh-02's sessions directory (default: its state directory's)")
+    parser.add_argument("--model", help="only the sessions that started on this model (by its name)")
     parser.add_argument("--examples", type=int, default=3, help="examples per signal (default 3)")
     parser.add_argument("--json", action="store_true", help="print the findings as JSON lines")
     args = parser.parse_args(argv)
@@ -191,7 +232,7 @@ def main(argv: Sequence[str]) -> int:
         return 1
     found: list[Finding] = []
     sessions = turns = inputs = 0
-    for session, messages in _transcripts(root):
+    for session, messages in _transcripts(root, args.model):
         sessions += 1
         turns += sum(1 for m in messages if m.get("role") == "user" and not m.get("feedback"))
         inputs += sum(1 for m in messages if m.get("role") == "tool")
