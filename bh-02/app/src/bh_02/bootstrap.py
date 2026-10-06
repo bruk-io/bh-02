@@ -98,8 +98,8 @@ async def layer_files(*, config: _LayerFiles) -> Effects:
 
 @component(provides=("sessions",))
 async def session_list(*, config: Listing) -> Effects:
-    """Binds this directory's sessions and the running one (CONTRACTS.md: sessions), mounted
-    by `run()` as a row of its own, so a row can read them without knowing where they live."""
+    """Binds the running session (CONTRACTS.md: sessions), mounted by `run()` as a row of its
+    own, so the status bar can show its id without knowing where sessions live."""
     yield bind("sessions", config)
 
 
@@ -160,8 +160,8 @@ async def run(
 
     Adds three rows of its own after `overrides`, pinned on: `layers`, which binds the layer
     files' paths and `secrets`, where the credential file may be and the sessions' state
-    (CONTRACTS.md: layers; the jail denies an input both), `sessions`, which binds this
-    directory's sessions and the running one (`sessions`; the default lists none), and
+    (CONTRACTS.md: layers; the jail denies an input both), `sessions`, which binds the running
+    session (`sessions`; the default is none), and
     `harness`, whose only job is to declare bh-02's dependency on `done`, so a chat row that
     never binds it is an ordinary "waiting on" stall and a `done` of the wrong shape is an
     ordinary contract violation -- both diagnosed by cordis itself, not by this function.

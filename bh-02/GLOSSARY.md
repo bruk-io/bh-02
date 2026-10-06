@@ -69,7 +69,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **system** (row and key): `context:project`: what the model is told about where it is working (that it is the model in bh-02, not Claude Code; the directory, its branch, CLAUDE.md), and the sections other rows add to it.
 - **extension**: a plugin the model writes itself, `.bh-02/plugins/NAME.py` in the project: cordis components bh-02 loads while it runs, jailed, which can add a command, a status field or prompt text and nothing else. **extensions** (row): `extensions:extensions`, which loads them.
 - **session**: one run and everything it keeps, under `$XDG_STATE_HOME/bh-02/sessions/<id>/`, so `--resume` continues it.
-- **sessions** (key), **layers** (key), **harness** (row): rows the shell adds itself, **pinned** after every layer so no layer can remove them: this directory's sessions and the running one; the layer files and the paths no input may read; the wait for the chat's `done`.
+- **sessions** (key), **layers** (key), **harness** (row): rows the shell adds itself, **pinned** after every layer so no layer can remove them: the running session, whose id the status bar shows; the layer files and the paths no input may read; the wait for the chat's `done`.
 - **done** (key): what the chat binds; the shell waits on it, and follows it across a restart of the chat row.
 - **usage**: tokens and cost, per turn and summed for the session, in the status bar.
 - **credential**: `CLAUDE_CODE_OAUTH_TOKEN` in `local.env` at the repository root, read by the model row alone; an OpenAI-compatible model's `key` names another line of the same file.

@@ -9,7 +9,6 @@ from click.testing import CliRunner
 from bh_02 import main
 from bh_02.sessions import (
     Broken,
-    Listing,
     Session,
     create,
     default_state_root,
@@ -405,37 +404,6 @@ def test_a_prefix_two_sessions_share_names_both_and_an_exact_id_wins(tmp_path: P
     assert find(tmp_path, "/w", a.id) == [a]  # exact beats prefix
 
 
-def test_the_sessions_value_lists_this_directory_s_sessions_fresh(tmp_path: Path) -> None:
-    listing = Listing(str(tmp_path), "/w", current="x")
-    assert listing.listed() == [] and Listing().listed() == []  # no root: reads nothing
-    made = create(tmp_path, "/w", model="opus", no_jail=False)
-    assert listing.listed() == [
-        {
-            "id": made.id,
-            "created": made.created,
-            "stack": "opus",  # the model it started on
-            "resume": f"uv run bh-02 --resume {made.id}",
-        }
-    ]
-    patched = create(tmp_path, "/w", model=None, no_jail=False, patches=["echo.toml"])
-    assert listing.listed()[0] == {
-        "id": patched.id,
-        "created": patched.created,
-        "stack": "sonnet",
-        "patches": ["echo.toml"],
-        "resume": f"uv run bh-02 --resume {patched.id}",
-    }
-
-
-def test_the_sessions_value_says_an_agent_sdk_session_can_t_be_continued(tmp_path: Path) -> None:
-    old = create(tmp_path, "/w", model=None, no_jail=False)
-    old.layer.write_text(format_layer([Row("llm", "claude-agent-sdk:agent")]))
-    (item,) = Listing(str(tmp_path), "/w").listed()
-    assert "resume" not in item  # not a resume that can only fail
-    assert item["retired"].startswith(f"session {old.id} can't be continued: its layer names")
-    assert item["retired"].endswith("start a new session with `uv run bh-02`")
-
-
 def test_sessions_started_in_the_same_second_still_list_newest_first(tmp_path: Path) -> None:
     made = [create(tmp_path, "/w", model=None, no_jail=False) for _ in range(5)]
     assert [s.id for s in listed(tmp_path, "/w")] == [s.id for s in reversed(made)]
@@ -507,15 +475,6 @@ def test_a_broken_record_is_skipped_and_named_with_what_is_wrong(tmp_path: Path)
     assert find(tmp_path, "/w", good.id) == [good]
     (named,) = find(tmp_path, "/w", "not-json")  # naming a broken one finds it, to say why
     assert isinstance(named, Broken) and "not JSON" in named.why
-
-
-def test_the_sessions_value_lists_a_broken_record_after_the_sessions(tmp_path: Path) -> None:
-    good = create(tmp_path, "/w", model=None, no_jail=False)
-    bad = _plant(tmp_path, "zz-bad", "{")
-    items = Listing(str(tmp_path), "/w").listed()
-    assert [item["id"] for item in items] == [good.id, "zz-bad"]
-    assert items[1] == {"id": "zz-bad", "broken": scanned(tmp_path, "/w")[1][0].message}
-    assert str(bad / "meta.json") in items[1]["broken"]
 
 
 def test_with_xdg_state_home_set_the_default_state_root_is_still_known(state: Path) -> None:

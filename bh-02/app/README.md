@@ -175,8 +175,8 @@ stand-in server (`-m "not real_launch"` deselects it).
 `secrets`: every `local.env` above bh-02's install and environment and beside the project,
 and the sessions' state directory, this run's and the default `~/.local/state/bh-02/sessions`
 (Claude Code's own config and tokens), which a jailed input can't read; with `--no-jail` an input runs with your permissions, so one you
-approve could open them: only its environment is scrubbed), `sessions` (this directory's
-sessions and the running one, whose id the status bar shows) and `harness` (which follows the chat row's `done`, across a
+approve could open them: only its environment is scrubbed), `sessions` (the running session,
+whose id the status bar shows) and `harness` (which follows the chat row's `done`, across a
 restart of the chat row).
 
 A row's `id` is its role; `use` is `plugin:component`, a `cordis.plugins` entry point, or

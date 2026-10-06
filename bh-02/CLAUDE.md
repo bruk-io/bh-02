@@ -68,8 +68,8 @@ file: editing one, by hand or by `/model`, reshapes the running composition (a j
 can't write one: the jail denies them). The layer files are the only way the composition's
 *shape* changes durably; the loader's `restart(row)` (`/restart`, `/clear`) gives a row a fresh
 fiber, and can't outlive the session. The shell pins three rows of its own after every layer
-(`disabled = false`, so no layer can remove them): `layers`, `sessions` (this directory's
-sessions and the running one, whose id the status bar shows) and `harness`.
+(`disabled = false`, so no layer can remove them): `layers`, `sessions` (the running session,
+whose id the status bar shows) and `harness`.
 A session is a directory under `$XDG_STATE_HOME/bh-02/sessions/` whose `session.toml` carries
 every per-run choice, so a resume is booting with it again. An
 override's `config` replaces the row's, it doesn't merge. The bootstrap follows the chat row's
