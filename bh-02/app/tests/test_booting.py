@@ -1,6 +1,8 @@
 """Booting the shipped layers and patched ones the way the CLI does."""
 
 import asyncio
+import importlib.metadata
+import re
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
@@ -9,6 +11,23 @@ import pytest
 from bh_02 import CompositionError, layers, run
 from cordis import Effects, Inspection, Row, Runtime, State, bind, boot, component
 from cordis.loader import read_layer, resolve
+
+
+def test_the_app_depends_on_every_plugin_its_shipped_layer_names() -> None:
+    """`uv sync --all-packages` installs every member, so a plugin the shipped layer names but
+    the app does not depend on still resolves here; installed on its own (`uv tool install`),
+    its row would come up unresolved. The app's own requirements must carry every one."""
+    plugins = {
+        ep.name: ep.dist.name for ep in importlib.metadata.entry_points(group="cordis.plugins") if ep.dist
+    }
+    required = {
+        re.split(r"[\s;<>=!~\[]", req, maxsplit=1)[0] for req in importlib.metadata.requires("bh-02") or ()
+    }
+    named = {
+        row.use.partition(":")[0] for layer in layers() for row in read_layer(str(layer)) if row.use
+    } & set(plugins)
+    assert "extensions" in named
+    assert {name: plugins[name] for name in named if plugins[name] not in required} == {}
 
 
 def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
