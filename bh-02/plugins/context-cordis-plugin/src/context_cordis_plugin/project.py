@@ -1,9 +1,10 @@
-"""The `system` value: what the model is told about where it is working, read fresh each time.
+"""The `system` value: what the model is told about who and where it is, read fresh each time.
 
-`describe` is the whole prompt as a function of what was found; `ProjectContext.text` finds
-it (the directory, the git branch, the project's instructions file) every time it is asked,
-so an edit to CLAUDE.md reaches the model with its next message without reloading anything
-(the loop tells it as a change, keeping the prompt the conversation began with).
+Organised as Claude Code's is: who the model is and what bh-02 is first (bh-02's own), then the
+project context: where it is working (the directory, the git branch, the date), then what the
+context files say (`context_file`: the guidance and rule files people write for an agent, each
+read by a section's function), then the sections other rows add. `describe` is the whole prompt
+as a function of what was found; `ProjectContext.text` finds it every time it is asked.
 
 It is also a broker (paper 6.2): a row with something to tell the model `acquire`s a section
 (`add`), read with the rest each time, and its remover takes it out again when the row leaves.
@@ -14,6 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from context_cordis_plugin.context_file import ContextFiles
 from cordis_helpers import Hooks
 
 __all__ = ["ContextConfig", "ProjectContext", "branch_of", "describe"]
@@ -38,37 +40,24 @@ _HARNESS = (
 
 @dataclass(frozen=True, slots=True)
 class ContextConfig:
-    """`root` is the project; `instructions` are the files, in order, whose first found is its
-    own guidance to an agent; `max_chars` caps how much of it is sent."""
+    """`root`: the project. `files`: the context files read after bh-02's own, each adding its
+    sections (`~` for the person's home; a relative one is the project's, which may name only
+    bh-02's own functions). `max_chars`: how much the context files' sections may say, all of
+    them together. `home`: the person's home; theirs when unset."""
 
     root: str = "."
-    instructions: Sequence[str] = ("CLAUDE.md", "AGENTS.md")
+    files: Sequence[str] = ("~/.config/bh-02/context.toml", ".bh-02/context.toml")
     max_chars: int = 20_000
+    home: str | None = None
 
 
-def describe(
-    root: str,
-    branch: str | None,
-    today: str,
-    guidance: tuple[str, str] | None,
-    sections: Sequence[str] = (),
-) -> str:
-    """The system prompt, from what was found. `guidance` is (file name, its text); `sections`
-    are what rows added (`ProjectContext.add`), each as it reads now."""
+def describe(root: str, branch: str | None, today: str, sections: Sequence[str] = ()) -> str:
+    """The system prompt, from what was found. `sections` are what rows added
+    (`ProjectContext.add`: the project's guidance, how to extend bh-02, ...), each as it reads now."""
     lines = [_INTRO, "", _HARNESS, "", f"Working directory: {root}"]
     if branch:
         lines.append(f"Git branch: {branch}")
     lines.append(f"Today: {today}")
-    if guidance is not None:
-        name, text = guidance
-        lines += [
-            "",
-            f"The project's own instructions ({name}), written for whichever agent works here: "
-            "where they name Claude Code or another agent, they mean you, and where they name its "
-            "tools, do the same in Python.",
-            "",
-            text.strip(),
-        ]
     for section in sections:
         if section.strip():
             lines += ["", section.strip()]
@@ -87,6 +76,7 @@ class ProjectContext:
     def __init__(self, config: ContextConfig) -> None:
         self._config = config
         self._sections: Hooks[Callable[[], str]] = Hooks()
+        self._files = ContextFiles(config.files, config.max_chars)
 
     def add(self, section: Callable[[], str]) -> Callable[[], None]:
         """Add `section` to the prompt, read each time the prompt is; returns its remover. A row
@@ -98,16 +88,6 @@ class ProjectContext:
         head = root / ".git" / "HEAD"
         branch = branch_of(head.read_text(encoding="utf-8")) if head.is_file() else None
         today = datetime.date.today().isoformat()
-        sections = [section() for section in self._sections]
-        return describe(str(root), branch, today, self._guidance(root), sections)
-
-    def _guidance(self, root: Path) -> tuple[str, str] | None:
-        for name in self._config.instructions:
-            path = root / name
-            if path.is_file():
-                text = path.read_text(encoding="utf-8", errors="replace")
-                cap = self._config.max_chars
-                return name, text if len(text) <= cap else text[
-                    :cap
-                ] + f"\n... [{len(text) - cap} more chars]"
-        return None
+        home = Path(self._config.home or Path.home()).resolve()
+        sections = [self._files.text(root, home), *(section() for section in self._sections)]
+        return describe(str(root), branch, today, sections)

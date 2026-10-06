@@ -78,10 +78,15 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 **What the model sees and how a turn looks.** `loop.reply` yields events (text, thinking,
 tool_call, tool_result, usage, stop, note). `output.confirm` asks about the model's code;
 `input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. `system`
-(`context:project`) is who the model is (the model in bh-02, not Claude Code), what bh-02 is
-made of, the working directory and the project's CLAUDE.md, then the
-sections rows add (`system.add`: the extensions row's is how to extend bh-02 and the part of
-cordis that takes). The loop follows it with `kernel.instructions()`: that `python` is the
+(`context:project`) is organised as Claude Code's is: who the model is (the model in bh-02, not
+Claude Code) and what bh-02 is made of, then the project context: the working directory, branch
+and date, what the context files say, and the sections rows add (`system.add`: the extensions
+row's is how to extend bh-02 and the part of cordis that takes). A context file is TOML, a list
+of `[[section]]`s, each `files` (patterns) and `function` (a full module path given the files
+that match, returning text): bh-02's own (`context_cordis_plugin/context.toml`: the guidance
+files, AGENTS.md and CLAUDE.md, yours and the project's, and rule files, each read by a function
+in `context_cordis_plugin.sections`), then `~/.config/bh-02/context.toml`, then the project's
+`.bh-02/context.toml`, which the model can write and so may name only bh-02's own functions. The loop follows it with `kernel.instructions()`: that `python` is the
 CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
