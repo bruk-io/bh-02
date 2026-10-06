@@ -58,9 +58,11 @@ contracts, the three keys, and how to try a component in an input before writing
 there). The rest it can read: cordis's README, whose path it is given when bh-02 runs from the
 workspace (an editable install), and `help(cordis.background)` and the like.
 
-The model hears how each one went in its prompt (`watch.instructions`: how to extend, then each
-extension's state) and in `.bh-02/plugins/status.json`, written as each load ends, so an input can
-read it at once: per extension, `state` (`active`, `partly up`, `failed`, `loading`), each
+The model's prompt (`watch.instructions`) says how to extend bh-02 and names the extensions
+there are, nothing more: how each one is lives in `.bh-02/plugins/status.json`, so a load ending
+or failing never changes the prompt (with Claude, a changed prompt restarts Claude Code and costs
+the conversation its prompt cache). The file is written as each load ends, so an input can read
+it at once: per extension, `state` (`active`, `partly up`, `failed`, `loading`), each
 component's state (`active`, `waiting on: KEY`, `failed:` and the traceback from the
 extension's own frames), the module's `error`, its `commands`, and `problems` (a registration
 bh-02 refused). The status bar's `extensions` field shows the same to the person
