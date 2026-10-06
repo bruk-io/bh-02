@@ -18,10 +18,10 @@ binds:
 ```python
 @component
 async def price_feed(*, feed: Feed) -> Effects:
-    sub: Sub = yield subscribe(feed)             # an effect: a step and its undo, as a value
+    sub: Sub = yield subscribe(feed)  # an effect: a step and its undo, as a value
     buffer: list[float] = []
-    yield background(pump(sub, buffer))          # work this component owns
-    yield bind("recent_prices", lambda n=10: buffer[-n:])   # what it provides, under a key
+    yield background(pump(sub, buffer))  # work this component owns
+    yield bind("recent_prices", lambda n=10: buffer[-n:])  # what it provides, under a key
 ```
 
 The component never touches the runtime. The runtime performs every effect, records every undo,
