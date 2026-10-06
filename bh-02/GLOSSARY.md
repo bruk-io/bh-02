@@ -66,7 +66,8 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **palette** (row): `tui:palette`: the commands, offered in the command palette (Ctrl-P).
 - **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers.
 - **operator** (row): `commands:operator`: the commands that act on the running program through the loader.
-- **system** (row and key): `context:project`: what the model is told about where it is working (that it is the model in bh-02, not Claude Code; the directory, its branch, CLAUDE.md), and the sections other rows add to it.
+- **system** (row and key): `context:project`: what the model is told about where it is working (that it is the model in bh-02, not Claude Code; the directory, its branch), and the sections other rows add to it.
+- **context file**: TOML listing the project context's `[[section]]`s, each `files` (patterns) and `function` (a module path given the files that match): bh-02's own, then `~/.config/bh-02/context.toml`, then the project's `.bh-02/context.toml` (bh-02's own functions only); read again when it changes.
 - **extension**: a plugin the model writes itself, `.bh-02/plugins/NAME.py` in the project: cordis components bh-02 loads while it runs, jailed, which can add a command, a status field or prompt text and nothing else. **extensions** (row): `extensions:extensions`, which loads them.
 - **session**: one run and everything it keeps, under `$XDG_STATE_HOME/bh-02/sessions/<id>/`, so `--resume` continues it.
 - **sessions** (key), **layers** (key), **harness** (row): rows the shell adds itself, **pinned** after every layer so no layer can remove them: the running session, whose id the status bar shows; the layer files and the paths no input may read; the wait for the chat's `done`.

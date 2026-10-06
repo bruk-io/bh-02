@@ -251,7 +251,12 @@ exclude = [
     # the stand-in OpenAI-compatible server tests run the provider against: its socket
     "models_cordis_plugin.openai.testing:_Handler.*",
     # I/O at the edges: the project's files
-    "context_cordis_plugin.project:ProjectContext.text", "context_cordis_plugin.project:ProjectContext._guidance",
+    "context_cordis_plugin.project:ProjectContext.text",
+    # the context files, the files their sections name, and the functions that read those
+    "context_cordis_plugin.context_file:ContextFiles.*", "context_cordis_plugin.context_file:_parsed",
+    "context_cordis_plugin.context_file:_function", "context_cordis_plugin.context_file:_search",
+    "context_cordis_plugin.sections:place", "context_cordis_plugin.sections:rules",
+    "context_cordis_plugin.sections:whole", "context_cordis_plugin.sections:_text",
     # the kernel: a socket to a process a jail started, the process itself, and the worker program
     "kernel_cordis_plugin.client:Kernel.*",
     "kernel_cordis_plugin.unjailed:_Process.*", "kernel_cordis_plugin.unjailed:Unjailed.start",

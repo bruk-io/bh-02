@@ -6,12 +6,18 @@ offered through the provider's standard tool calling; every call runs as an inpu
 A kernel that is not `confined` runs with the person's own permissions, so the loop puts each
 of its inputs to the person first (`output.confirm`) and runs it only on a yes: one place for
 every model provider, and the loop knows whether a stopped call ever reached the kernel.
+
+Every request begins with the system prompt the conversation began with, kept in its transcript,
+so a model server's cache of the conversation stays good. When the prompt reads differently (an
+extension loaded, the branch switched, CLAUDE.md edited), the new reading is kept after it and
+the model is told what changed (`prompt.changes`) on the next message it reads.
 """
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
+from agent_cordis_plugin.prompt import changes
 from agent_cordis_plugin.stops import ACT, ANSWERED, FEEDBACK, REFUSED, classify
 
 __all__ = [
@@ -82,6 +88,8 @@ DECLINED = "denied: the person said no to this input, so it did not run; ask the
 # person stopped it, or the model failed (a 429, a dropped connection).
 STOPPED = "[the person stopped this reply here]"
 FAILED = "[this reply failed here; the person saw the error]"
+# What the person is shown when the model is told its instructions changed.
+_TOLD = "told the model its instructions changed since the conversation began"
 
 
 def refusal(call: Json, spec: Json) -> str | None:
@@ -110,6 +118,12 @@ class LoopModel:
     assistant's answer; a model step that fails (it raises: rate limited, cut off) the same,
     with `FAILED`. Otherwise the next request would carry that message unanswered, and the
     model would answer it too, doing the stopped work again before the next one.
+
+    The system prompt (`system.text()`, then the kernel's instructions) is read before each
+    message the model reads, but sent as the conversation began with it: a `system` entry in the
+    transcript, the first one. A later reading that differs is kept as another `system` entry
+    and told on that message (`prompt.changes`), so the conversation's start never changes
+    under a model server's cache.
     """
 
     def __init__(
@@ -136,16 +150,38 @@ class LoopModel:
             {"name": call["name"], "input": call["input"]}
         )
 
-    def _request(self) -> list[Json]:
-        """The messages for one request: the system prompt, read fresh, then the transcript."""
+    def _prompt(self) -> str:
+        """The system prompt as it reads now."""
         parts = [self._system.text() if self._system else "", self._kernel.instructions()]
-        prompt = "\n\n".join(part for part in parts if part.strip())
-        head: list[Json] = [{"role": "system", "content": prompt}] if prompt else []
-        return [*head, *self._transcript.messages]
+        return "\n\n".join(part for part in parts if part.strip())
+
+    def _told(self) -> str:
+        """Bring what the transcript says the model was told up to date, before a message it is
+        about to read: the first prompt is kept as the conversation's start, a later one that
+        reads differently after it, and what changed is returned to go with that message ('' when
+        nothing did)."""
+        now = self._prompt()
+        kept = [m for m in self._transcript.messages if m.get("role") == "system"]
+        last = str(kept[-1].get("content") or "") if kept else None
+        if now == (last or ""):
+            return ""
+        self._transcript.append({"role": "system", "content": now})
+        return changes(last, now) if last is not None else ""
+
+    def _request(self) -> list[Json]:
+        """The messages for one request: the prompt the conversation began with, then the
+        conversation. The prompts kept after the first were told as notes, so they stay out."""
+        messages = self._transcript.messages
+        first = next((m for m in messages if m.get("role") == "system"), None)
+        head: list[Json] = [{"role": "system", "content": first["content"]}] if first else []
+        return [*head, *(m for m in messages if m.get("role") != "system")]
 
     async def reply(self, message: str) -> AsyncIterator[Json]:
         """Run turns until one is answered, yielding what happens (CONTRACTS.md: event)."""
-        self._transcript.append({"role": "user", "content": message})
+        note = self._told()
+        self._transcript.append({"role": "user", "content": f"{note}\n\n{message}" if note else message})
+        if note:
+            yield {"type": "note", "text": _TOLD}
         nudges = 0
         while True:
             turn = _Turn()
@@ -178,7 +214,9 @@ class LoopModel:
                             running = True
                             result = await self._kernel.run(call["input"]["code"])
                             running = False
-                        self._transcript.append({"role": "tool", "content": result, "call_id": call["id"]})
+                        note = self._told()
+                        told = f"{result}\n\n{note}" if note else result
+                        self._transcript.append({"role": "tool", "content": told, "call_id": call["id"]})
                         answered += 1
                         yield {
                             "type": "tool_result",
@@ -186,6 +224,8 @@ class LoopModel:
                             "content": result,
                             "is_error": False,
                         }
+                        if note:
+                            yield {"type": "note", "text": _TOLD}
                 finally:
                     # Interrupted part-way: every call the transcript holds still gets an answer,
                     # or the next request would carry a call no result follows. Only the one in
@@ -198,7 +238,11 @@ class LoopModel:
             if stop in (ANSWERED, REFUSED) or nudges >= self._max_nudges:
                 return
             nudges += 1
-            self._transcript.append({"role": "user", "content": FEEDBACK[stop], "feedback": stop})
+            note = self._told()
+            said = f"{FEEDBACK[stop]}\n\n{note}" if note else FEEDBACK[stop]
+            self._transcript.append({"role": "user", "content": said, "feedback": stop})
+            if note:
+                yield {"type": "note", "text": _TOLD}
 
 
 class _Turn:

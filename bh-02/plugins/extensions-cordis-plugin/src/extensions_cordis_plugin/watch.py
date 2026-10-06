@@ -152,8 +152,7 @@ def instructions(
     ]
     if statuses:
         # Names only: how each one is goes in status.json, so a load ending, or failing, does not
-        # change this prompt (with Claude, a changed prompt restarts Claude Code and costs the
-        # conversation its prompt cache).
+        # change this prompt: each change is a note the loop sends the model with its next message.
         lines += [
             "",
             f"Extensions here: {', '.join(sorted(statuses))}. How each one is, is in {where}/status.json.",

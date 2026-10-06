@@ -50,6 +50,7 @@ SIGNALS = {
     "interrupted": "a turn the person stopped mid-input",
     "claude_code": "the model's own text mentions Claude Code",
     "extension_written": "an input that wrote into .bh-02/plugins (the model extending bh-02)",
+    "instructions_changed": "the model was told its instructions changed mid-conversation (an extension, a branch, CLAUDE.md)",
     "startup_file": "an input that wrote .bh-02/kernel.py (the model keeping its helpers)",
 }
 _PROGRAM = re.compile(r"\b(?:subprocess\.(?:run|call|check_call|Popen)|os\.system)\(")
@@ -57,6 +58,7 @@ _CAPTURED = re.compile(r"capture_output\s*=\s*True|stdout\s*=|check_output\(")
 _EXCEPTION = re.compile(r"^(\w+(?:\.\w+)*(?:Error|Exception|Exit|Interrupt|Expired)):", re.M)
 _WRITES = re.compile(r"write_text\(|open\([^)]*['\"][wa]")
 _NOTE = re.compile(r"\n\(this input ran .+ through a shell\..*\)\Z", re.S)  # the kernel's shell_note
+_CHANGED = "(bh-02: your instructions have changed since this conversation began."  # the loop's note
 # What makes an input more than a shell command and a print: logic of its own.
 _COMPOSING = (ast.comprehension, ast.Compare, ast.BoolOp, ast.IfExp, ast.Lambda)
 
@@ -97,6 +99,8 @@ def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
     calls = _calls(messages)
     for message in messages:
         role, content = message.get("role"), str(message.get("content") or "")
+        if role in ("user", "tool") and _CHANGED in content:
+            yield Finding("instructions_changed", session, _short(content.split(_CHANGED, 1)[1]))
         if role == "user" and message.get("feedback"):
             yield Finding("nudged", session, str(message["feedback"]))
         elif role == "assistant" and "Claude Code" in content:
@@ -132,7 +136,7 @@ def _one_input(session: str, code: str, result: str) -> Iterator[Finding]:
         yield Finding("shell_shaped", session, _short(code))
     if found := shelled(code):
         yield Finding("shell_for_files", session, f"{', '.join(c for c, _ in found)}: {_short(code, 100)}")
-    result = _NOTE.sub("", result)
+    result = _NOTE.sub("", result.split(f"\n\n{_CHANGED}", 1)[0])
     if result.startswith("error: there is no tool named"):
         yield Finding("no_such_tool", session, _short(result))
         return

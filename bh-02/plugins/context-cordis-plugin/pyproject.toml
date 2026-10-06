@@ -1,7 +1,7 @@
 [project]
 name = "context-cordis-plugin"
 version = "0.1.0"
-description = "What the model is told about where it is working: the directory, the branch, the project's own instructions."
+description = "What the model is told about who and where it is: bh-02, the directory, the branch, and the sections other rows add."
 requires-python = ">=3.15"
 dependencies = [
     "cordis",

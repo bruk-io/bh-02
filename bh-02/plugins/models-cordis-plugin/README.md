@@ -220,8 +220,9 @@ A transcript that ends in tool results, not a user line, is continued with a one
 (`CONTINUE`).
 
 A changed system prompt or tool set restarts the process on its own session before the next user
-line, never while calls are parked. `context:project`'s text has the date and branch in it, so a
-change mid-reply takes effect at the next reply.
+line, never while calls are parked. `agent:loop` sends a conversation the prompt it began with
+and tells later changes (the date, the branch, an extension) as notes, so within a conversation
+this is a new tool set's restart, not a new prompt's.
 
 ### State, per session
 

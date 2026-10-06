@@ -1,4 +1,4 @@
-"""The row: the project's context, bound under `system`."""
+"""The row: who the model is and where it is working, bound under `system`."""
 
 from context_cordis_plugin.project import ContextConfig, ProjectContext
 from cordis import Effects, bind, component

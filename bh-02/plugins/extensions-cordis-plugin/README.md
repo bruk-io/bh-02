@@ -41,8 +41,8 @@ What an extension reaches of bh-02, each only to add to it, each returning its r
   `usage`; `run`: async, argument text in, text out). A name bh-02 already has is refused.
 - `frame.status(field, text, *shorter)`: a status-bar field, pushed as `NAME:field`, so it
   can't cover another row's.
-- `system.add(text)`: text in the model's own prompt, from its next request (with Claude, a
-  changed prompt takes effect at the next reply).
+- `system.add(text)`: text in the model's own prompt, told with the next message the model reads
+  (the loop keeps the prompt a conversation began with and tells a change as a note).
 
 A component may also `bind` keys of its own, which another extension's components can depend
 on. It can't replace a row, rebind one of bh-02's keys or reach the loader: those don't exist
@@ -60,8 +60,8 @@ workspace (an editable install), and `help(cordis.background)` and the like.
 
 The model's prompt (`watch.instructions`) says how to extend bh-02 and names the extensions
 there are, nothing more: how each one is lives in `.bh-02/plugins/status.json`, so a load ending
-or failing never changes the prompt (with Claude, a changed prompt restarts Claude Code and costs
-the conversation its prompt cache). The file is written as each load ends, so an input can read
+or failing never changes the prompt (each change is a note the loop sends the model, so only an
+extension appearing or going is one). The file is written as each load ends, so an input can read
 it at once: per extension, `state` (`active`, `partly up`, `failed`, `loading`), each
 component's state (`active`, `waiting on: KEY`, `failed:` and the traceback from the
 extension's own frames), the module's `error`, its `commands`, and `problems` (a registration
