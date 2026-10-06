@@ -154,7 +154,7 @@ The techniques above, and where to read them in real code:
 | Technique | Implemented in | What it shows |
 |---|---|---|
 | **A resource's lifetime is a row's** (`enter`) | `warden:supervised`, `kernel:kernel`, `tui:app` | a process starts when its row loads and is terminated when it unloads; the kernel's worker lives exactly as long as the `kernel` row; the terminal app's lifetime is the `ui` row's |
-| **A broker** (`acquire`, the remover as undo) | warden's `processes`; bh-02's `commands` and `frame` | each supervised process registers itself; slash commands register into `commands`; the status bar, sidebar and palette are entries rows `acquire` in the app's `frame`, gone when their row goes |
+| **A broker** (`acquire`, the remover as undo) | warden's `processes`; bh-02's `commands` and `frame` | each supervised process registers itself; slash commands register into `commands`; the status bar and palette are entries rows `acquire` in the app's `frame`, gone when their row goes |
 | **One key, swappable providers** | bh-02's `model`, `jail`, `ui` rows | Claude or any OpenAI-compatible model behind `model`; brig's sandbox or none behind `jail`; tests put fakes in the same rows with `--patch` (`bh_02.testing`) |
 | **Reshaping by editing a layer** | `/model` (bh-02); adding a process (warden) | `/model opus` writes the session's layer file and the loader swaps one row; a new `[[plugin]]` block in warden's layer starts one more process, touching nothing else |
 | **An operator over the loader** | `commands:operator` | `/rows`, `/explain`, `/restart` and `/clear` act on the running program through the loader's handle, queued as the operator row's own background work so a restart never cancels the command asking for it |

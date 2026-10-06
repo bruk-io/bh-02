@@ -60,6 +60,11 @@ _REMOVED_IDS = {
     "session": "the status row shows the session's id itself",
 }
 _REMOVED_USES = ("tools:", "fs:", "codeact:", "tui:approver", "bh_02.bootstrap:layer_guard")
+# The sidebar: the shipped `sidebar` row, filled by `tui:sessions`, which listed this
+# directory's sessions. A `sidebar` row that names a plugin of the person's own still runs, so
+# only a change to the shipped row (no `use`) or a row using `tui:sessions` is dropped.
+_NO_SIDEBAR = "bh-02 has no sidebar now (`bh-02 sessions` lists this directory's sessions)"
+_SIDEBAR, _SIDEBAR_USE = "sidebar", "tui:sessions"
 
 
 def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
@@ -80,7 +85,8 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       the change says how to turn off the whole bar instead (a `status` row already in the
       layer keeps its own `disabled`). A status row with nothing left to say is not written.
     - A row bh-02 no longer has is dropped: the tool rows before the one tool, a session's
-      `session` row, and a fixed field (`tui:status` with a `field` or `text`, whatever its id).
+      `session` row, the sidebar (a change to the shipped `sidebar` row, or any row using
+      `tui:sessions`), and a fixed field (`tui:status` with a `field` or `text`, whatever its id).
     - The model row's providers are `models:model`'s now (`_model_row`): `claude-code:completion`
       (or a model row naming no plugin, which was it) names its model as `default`, an id that
       is no built-in name as an `extra` model of its own; `ollama:completion` is an `extra`
@@ -205,6 +211,10 @@ def _removed(row: Row) -> str | None:
         return _REMOVED_IDS[row.id]
     if row.use is not None and row.use.startswith(_REMOVED_USES):
         return f"{row.use} is gone: {_ONE_TOOL}"
+    if row.use == _SIDEBAR_USE:
+        return f"{row.use} is gone: {_NO_SIDEBAR}"
+    if row.id == _SIDEBAR and row.use is None:
+        return _NO_SIDEBAR
     if row.use == _STATUS_USE and {"field", "text"} & set(row.config or {}):
         return "tui:status is now the status bar's one row (session, model, jail), not a fixed field"
     return None

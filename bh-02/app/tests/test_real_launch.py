@@ -126,6 +126,13 @@ class Launched:
         assert self.process.returncode is not None, f"still running; the screen said:\n{self.text()[-3000:]}"
         return self.process.returncode
 
+    def resize(self, cols: int) -> None:
+        """Make the terminal `cols` wide, as dragging its window's edge does. The script runs in
+        a session of its own, so the terminal is not its controlling one and the kernel signals
+        nobody: SIGWINCH is sent here, and the app reads the new size from the terminal."""
+        fcntl.ioctl(self._master, termios.TIOCSWINSZ, struct.pack("HHHH", _ROWS, cols, 0, 0))
+        os.kill(self.process.pid, signal.SIGWINCH)
+
     def hang_up(self) -> None:
         """Close the terminal, as closing its window does."""
         os.close(self._master)
@@ -409,55 +416,6 @@ def test_a_layer_that_cannot_be_reloaded_is_reported_after_the_app_exits(
     assert app.text().count("reload failed") == 1, app.text()[-2000:]
 
 
-def test_the_sidebar_lists_this_directory_s_sessions_and_choosing_one_says_how_to_resume(
-    launch: Launch,
-) -> None:
-    first = launch("echo")
-    first.wait_for(_READY, 60)
-    first.press(b"\x11")
-    assert first.exit_code() == 0
-    older = re.findall(r"session (\S+)  \(uv run bh-02 --resume", first.text())[-1]
-    app = launch("echo")
-    ready = app.wait_for(_READY, 60)
-    app.wait_for(older, after=0)  # the earlier session, listed in the sidebar
-    app.wait_for(" current ", after=0)  # the running one wears the badge
-    app.press(b"\t")  # from the composer, Tab wraps round to the sidebar's list
-    time.sleep(0.5)
-    app.press(b"\x1b[H")  # Home: the first entry, the running session (newest first)
-    time.sleep(0.3)
-    app.press(b"\r")
-    app.wait_for("is this one; after you leave", after=ready)
-    app.press(b"\x11")
-    assert app.exit_code() == 0
-
-
-def test_a_broken_session_record_is_named_once_and_the_app_still_starts(
-    launch: Launch, tmp_path: Path
-) -> None:
-    """One meta.json that is not JSON and one with a wrong-typed value, for this directory:
-    the app starts, lists them as broken in the sidebar, names each once in the transcript
-    (the sidebar folds on a narrow screen), and runs a turn as usual."""
-    sessions = tmp_path / "state" / "bh-02" / "sessions"
-    work = str((tmp_path / "work").resolve())
-    wrong_type = {"id": "20260101-000000-beef", "cwd": work, "stack": "claude", "created": 5}
-    for name, meta in {
-        "20260101-000000-dead": '{"id": "20260101-000000-dead", "cwd": ',
-        "20260101-000000-beef": json.dumps(wrong_type),
-    }.items():
-        (sessions / name).mkdir(parents=True)
-        (sessions / name / "meta.json").write_text(meta)
-    app = launch("echo", cols=320)  # each note on one line, so no token is wrapped
-    ready = app.wait_for(_READY, 60)
-    app.wait_for("broken · Enter says why", after=0)
-    app.wait_for("20260101-000000-dead/meta.json can't be read (not JSON", after=0)
-    app.wait_for("`created` is missing, empty or not a string", after=0)
-    app.type("hello")
-    app.wait_for("echo: HELLO", after=ready)
-    app.press(b"\x11")
-    assert app.exit_code() == 0
-    assert "Traceback" not in app.text()
-
-
 def test_the_screen_is_drawn_in_bh_01_s_dark_theme(launch: Launch) -> None:
     """The generated theme survives a real launch's stylesheet parse and is what is drawn."""
     app = launch("echo", truecolor=True)
@@ -465,7 +423,7 @@ def test_the_screen_is_drawn_in_bh_01_s_dark_theme(launch: Launch) -> None:
     app.wait_for("jail: unjailed")
     written = app.written()
     assert _sgr("48", "bh-bg") in written  # behind everything
-    assert _sgr("38", "bh-primary") in written  # mandarin: the current view, the focused composer
+    assert _sgr("38", "bh-ring") in written  # mandarin: the focused composer's border
     app.press(b"\x11")
     assert app.exit_code() == 0
 
@@ -527,15 +485,10 @@ def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tm
     assert results[1] == "42"
 
 
-def test_a_narrow_screen_folds_the_sidebar_keeps_every_jail_grade_and_ctrl_b_unfolds_it(
-    launch: Launch,
-) -> None:
+def test_a_narrow_screen_keeps_every_jail_grade_named(launch: Launch) -> None:
     app = launch("echo", cols=90)
-    ready = app.wait_for(_READY, 60)
-    shown = app.wait_for("jail: unjailed fs_write ✗ network ✗ fs_read ✗ env ✗")  # every grade, named
-    assert "SESSIONS" not in app.text()
-    app.press(b"\x02")  # Ctrl-B
-    app.wait_for("SESSIONS", 10, after=max(ready, shown))
+    app.wait_for(_READY, 60)
+    app.wait_for("jail: unjailed fs_write ✗ network ✗ fs_read ✗ env ✗")  # every grade, named
     app.press(b"\x11")
     assert app.exit_code() == 0
 
@@ -598,8 +551,8 @@ def test_a_resumed_session_s_usage_adds_to_what_it_had(launch: Launch) -> None:
 def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
     """`/clear` answers `cleared` (CONTRACTS.md: event): the old turns leave the screen and one
     note says why. `/model` keeps them. What was written stays in the pty's stream, so each
-    check reads what follows a Ctrl-B, which folds or unfolds the sidebar and makes the app
-    draw the transcript again at its new width: only what the transcript holds then."""
+    check reads what follows a resize of the terminal, which makes the app draw the transcript
+    again at its new width: only what the transcript holds then."""
     app = launch("fake")
     ready = app.wait_for(_READY, 60)
     app.type("hello there")
@@ -607,23 +560,23 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
     app.type("/model fake-2")
     app.wait_for("↻ chat reloaded", 20, after=replied)
     app.settle(1.0)
-    folded = len(app.text())
-    app.press(b"\x02")  # Ctrl-B: folded, the composer keeps focus
-    app.wait_for("echo: HELLO THERE", 10, after=folded)  # /model: the conversation is still shown
+    narrowed = len(app.text())
+    app.resize(_COLS - 20)
+    app.wait_for("echo: HELLO THERE", 10, after=narrowed)  # /model: the conversation is still shown
     app.type("/clear")
     cleared = app.wait_for(
-        "the conversation was cleared; starting afresh: loop, transcript, kernel", 10, after=folded
+        "the conversation was cleared; starting afresh: loop, transcript, kernel", 10, after=narrowed
     )
     app.wait_for("↻ status reloaded", 20, after=cleared)  # the last row /clear restarts
     app.settle(1.0)
     app.type("again")  # the model's transcript was forgotten too: this is its first message
     app.wait_for("echo: AGAIN (message 1)", 20, after=cleared)
     # the kernel's restart reloads status: the jail field keeps its text meanwhile
-    bars = re.findall(r"session: [^\n]*", app.text()[folded:])  # every status bar drawn since
+    bars = re.findall(r"session: [^\n]*", app.text()[narrowed:])  # every status bar drawn since
     assert bars and all("jail: unjailed" in bar for bar in bars)
-    unfolded = len(app.text())
-    app.press(b"\x02")  # Ctrl-B: unfolded, drawn again
-    top = app.wait_for("the conversation was cleared", 10, after=unfolded)  # its first block now
+    widened = len(app.text())
+    app.resize(_COLS)  # drawn again
+    top = app.wait_for("the conversation was cleared", 10, after=widened)  # its first block now
     app.wait_for("↻ status reloaded", 10, after=top)  # to its last: the whole transcript
     app.settle()
     assert "HELLO THERE" not in app.text()[cleared:]

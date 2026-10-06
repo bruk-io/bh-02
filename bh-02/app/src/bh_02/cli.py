@@ -91,7 +91,7 @@ def main(
         click.echo(f"error: {error.message}", err=True)
         sys.exit(1)
     # the status bar shows the session's id from here, marked as resumed on a resume
-    listing = sessions.Listing(str(sessions.state_root()), str(Path.cwd()), session.id, resume is not None)
+    listing = sessions.Listing(str(sessions.state_root()), session.id, resume is not None)
     code, started = _run([*layers(), session.layer, *patches], trace, listing)
     if not started and resume is None:
         sessions.discard(session)  # a run that never came up made no session worth listing

@@ -58,12 +58,6 @@ use = "brig:jail"
 id = "status"
 use = "tui:status"
 
-# This directory's sessions in the sidebar, the running one marked: a row over `sessions`
-# (bound by the shell's own pinned row) and `frame`.
-[[plugin]]
-id = "sidebar"
-use = "tui:sessions"
-
 [[plugin]]
 id = "system"
 use = "context:project"

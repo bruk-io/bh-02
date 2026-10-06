@@ -1,4 +1,4 @@
-"""Under Pilot: the command palette (Ctrl-P and the activity bar), the approval modal (code
+"""Under Pilot: the command palette (Ctrl-P), the approval modal (code
 highlighted, questions one at a time, withdrawn wherever it is, Ctrl-C answers no), and
 `running` cancelled before the app is up."""
 
@@ -96,14 +96,6 @@ async def test_exit_from_the_palette_leaves() -> None:
         await pilot.press(*"exit", "enter")
         await _settle(pilot)
         assert app.return_code == 0
-
-
-async def test_the_activity_bar_opens_the_palette() -> None:
-    app = BhApp()
-    async with app.run_test(size=_SIZE) as pilot:
-        assert await pilot.click("#activity-palette")
-        await _settle(pilot)
-        assert isinstance(app.screen, CommandPalette)
 
 
 async def test_the_modal_shows_an_input_highlighted() -> None:

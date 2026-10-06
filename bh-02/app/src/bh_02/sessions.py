@@ -15,7 +15,7 @@ Claude Agent SDK stack bh-02 no longer has is `retired`: it lists, but can't be 
 
 `session_layer`, `with_model`, `retired` and `resume_command` (and the private helpers) are
 pure; the rest reads or writes the state directory. `Listing` is the `sessions` value
-(CONTRACTS.md) the shell binds for the ui.
+(CONTRACTS.md) the shell binds for the status bar.
 """
 
 import datetime
@@ -23,7 +23,7 @@ import json
 import os
 import secrets
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -282,8 +282,8 @@ def scanned(root: Path, cwd: str) -> tuple[list[Session], list[Broken]]:
 
     A broken record is one whose meta.json is not JSON, lacks a key, or has a value of the
     wrong type; one whose `cwd` can't be read may be any directory's, so it is reported here
-    too. A meta.json that vanishes while listing (a session being discarded) is neither: the
-    sidebar reads this while the app runs, and a race is not a broken file.
+    too. A meta.json that vanishes while listing (a session another run is discarding) is
+    neither: a race is not a broken file.
     """
     found: list[Session] = []
     broken: list[Broken] = []
@@ -362,52 +362,16 @@ def resume_command(stack: str, session_id: str | None = None) -> str:
     return "uv run bh-02 --resume" if session_id is None else f"uv run bh-02 --resume {session_id}"
 
 
-def _summary(session: Session, why_retired: str | None = None) -> dict[str, Any]:
-    """A session as the `sessions` value lists it (CONTRACTS.md): id, created, stack, the
-    patches it started with, if any, and how to continue it, or why it can't be."""
-    summary: dict[str, Any] = {"id": session.id, "created": session.created, "stack": session.stack}
-    if session.patches:
-        summary["patches"] = list(session.patches)
-    if why_retired is None:
-        summary["resume"] = resume_command(session.stack, session.id)
-    else:
-        summary["retired"] = (
-            f"session {session.id} can't be continued: {why_retired}; start a new session with "
-            f"`{resume_command('claude').removesuffix(' --resume')}`"
-        )
-    return summary
-
-
-def _why_retired(session: Session) -> str | None:
-    """Why a listed session can't be resumed, read from its layer; a layer that can't be read
-    says so when it is resumed, not here."""
-    try:
-        return retired(read_layer(str(session.layer)))
-    except OSError, ValueError, TypeError:  # unreadable, not TOML, or not a layer's shape
-        return None
-
-
 @dataclass(frozen=True, slots=True)
 class Listing:
-    """The `sessions` value (CONTRACTS.md): this directory's sessions, and which one is running.
+    """The `sessions` value (CONTRACTS.md): the running session, which the status bar shows.
 
-    A record that can't be read is listed after them as `{id, broken}` (`broken`: what is
-    wrong and what to do), so the sidebar says which one it is rather than failing.
-
-    `root` empty lists nothing (a composition booted without a session, as tests do), so a
-    run that was not given a state directory never reads the person's own. `resumed`: the
-    running session was continued (`--resume`), which the status bar marks.
+    `current` is its id, empty when the composition runs without a session (as tests boot
+    one); `resumed`: it was continued (`--resume`), which the status bar marks. `root` is the
+    state directory the sessions are kept in, empty without one: the command line names it
+    among what no jailed input may read.
     """
 
     root: str = ""
-    cwd: str = ""
     current: str = ""
     resumed: bool = False
-
-    def listed(self) -> list[Mapping[str, Any]]:
-        """This directory's sessions, newest first, read fresh, then any broken records."""
-        if not self.root:
-            return []
-        found, broken = scanned(Path(self.root), self.cwd)
-        listed = [_summary(session, _why_retired(session)) for session in found]
-        return [*listed, *({"id": b.id, "broken": b.message} for b in broken)]

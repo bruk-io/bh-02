@@ -67,15 +67,8 @@ class Pushed:
         FIELDS[field] = text
         return None
 
-    def sessions(self, listed: Any) -> Any:
-        SESSIONS[:] = list(listed())  # read once, at the push: what the sidebar would show then
-        return None
-
     def commands(self, specs: Any) -> Any:
         return None
-
-
-SESSIONS: list[Any] = []
 
 
 class Drop:

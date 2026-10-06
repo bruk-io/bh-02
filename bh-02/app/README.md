@@ -22,7 +22,8 @@ uv run bh-02 update-layer mine.toml                # rewrite a layer in today's 
 **Layer files from an earlier bh-02.** Some of bh-02's rows were renamed (`llm` is `loop`,
 `mode` is `chat`), the three status-bar rows (`jail_status`, `model_status`, a session's
 `session`) are one `status` row, and the rows from before the one tool (`tools`, `fs`,
-`approve`, `actions`, `guard`) are gone. A session's own layer is brought up to date on
+`approve`, `actions`, `guard`) are gone, as is the sidebar's (`sidebar`, or any row using
+`tui:sessions`; `bh-02 sessions` lists the sessions). A session's own layer is brought up to date on
 `--resume`, silently. A `--patch` file is yours, so a run naming old rows stops before the app
 starts (exit code 1, no session made), listing each row and what to change
 (`mine.toml: row 'llm' is now 'loop'; rename its id`) and the command that does it: `bh-02
@@ -96,9 +97,9 @@ not a command. Ctrl-C stops a reply, Ctrl-Q (or `/exit`) quits.
 
 The app owns the terminal while it runs, so nothing else writes there: `--trace FILE` appends
 lifecycle lines to a file, a layer file that could not be reloaded is reported after the app
-exits, and the kernel's and brig's children log to files. The session's id is in the status bar, and the sidebar lists this directory's sessions
-(the running one marked; choosing one says how to resume it). A narrow status bar shows the
-id's last part (`58d9`), which `--resume` takes as well. A session is labelled with its stack,
+exits, and the kernel's and brig's children log to files. The session's id is in the status
+bar, and `bh-02 sessions` lists this directory's sessions, newest first. A narrow status bar
+shows the id's last part (`58d9`), which `--resume` takes as well. A session is labelled with its stack,
 the model it started on (`sonnet`; an earlier bh-02's session: `claude` or `ollama`), and the names of any
 `--patch` files it started with (`patched: echo.toml`): the stack is not always the model that
 answered, since `/model` switches and a patch can replace the `loop` row, and a resume with
@@ -108,9 +109,9 @@ a usage error from click, exit code 2), and no session is made for the run; a ne
 run whose composition never starts (`could not start`) leaves no session either, while a
 resumed one that can't start is kept. A session record whose `meta.json` can't be read (not
 JSON, a key missing, a value of the wrong type) is skipped, never fatal: `bh-02 sessions`
-names it on stderr, `--resume` passes over it (and says what is wrong if you name it), and the
-app lists it as broken in the sidebar and names it once in the transcript. On exit it prints the session's id and how to continue
-it: `bh-02 --resume` when it is the newest here, else `bh-02 --resume <id>`.
+names it on stderr, and `--resume` passes over it (and says what is wrong if you name it). On
+exit bh-02 prints the session's id and how to continue it: `bh-02 --resume` when it is the
+newest here, else `bh-02 --resume <id>`.
 
 **Fake models for real launches.** `bh_02.testing` (a shell module in the gate, so it may know
 cordis without putting test rows into a plugin) has `echo`, `repl_model` (each message is a
@@ -162,7 +163,6 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `system` | `context:project` | |
 | `commands` | `commands:registry` | |
 | `operator` | `commands:operator` | `layer`, `model_row` (`model`), `forget` (the transcript) |
-| `sidebar` | `tui:sessions` | |
 | `status` | `tui:status` | |
 | `palette` | `tui:palette` | |
 | `model` | `models:model` (`default`: `sonnet`) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
@@ -175,9 +175,9 @@ stand-in server (`-m "not real_launch"` deselects it).
 `secrets`: every `local.env` above bh-02's install and environment and beside the project,
 and the sessions' state directory, this run's and the default `~/.local/state/bh-02/sessions`
 (Claude Code's own config and tokens), which a jailed input can't read; with `--no-jail` an input runs with your permissions, so one you
-approve could open them: only its environment is scrubbed), `sessions` (this directory's
-sessions, for the sidebar) and `harness` (which follows the chat row's `done`, across a restart of
-the chat row).
+approve could open them: only its environment is scrubbed), `sessions` (the running session,
+whose id the status bar shows) and `harness` (which follows the chat row's `done`, across a
+restart of the chat row).
 
 A row's `id` is its role; `use` is `plugin:component`, a `cordis.plugins` entry point, or
 `module:attribute`. Order in a file means nothing; dependencies decide what starts when. Entry
@@ -201,7 +201,6 @@ kernel:unjailed         binds Jail                         depends on nothing
 kernel:kernel           binds Kernel (the one tool)        depends on Jail
 tui:app                 binds Input, Output, Frame         depends on nothing (its config)
 tui:status              pushes the status bar's fields     depends on Kernel, Loader, Models, Sessions, Frame
-tui:sessions            pushes the sidebar's list          depends on Sessions, Frame
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:session            runs the chat, binds Done          depends on Loop, Input, Output, Commands
 extensions:extensions   loads the model's own plugins      depends on Jail, Commands, Frame, System, Output
@@ -225,7 +224,7 @@ other plugin; the gate proves it.
 
 | Package | Binds / registers | Consumes |
 |---|---|---|
-| `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `sessions`; `palette`) | `frame` and what each row reports on |
+| `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `palette`) | `frame` and what each row reports on |
 | `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's one tool, `python`, only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are | `loader` (catalog) |
 | `agent-cordis-plugin` | `loop` (`loop`: turns classified after harness, bounded nudges, each call an input, put to the person first when the kernel is unconfined), `transcript` | `model`, `kernel`, `transcript`, `system`, `output` (`confirm`) |
 | `chat-cordis-plugin` | runs `session` (a turn interruptible) and binds `done` | `loop`, `input`, `output`, `commands` |
