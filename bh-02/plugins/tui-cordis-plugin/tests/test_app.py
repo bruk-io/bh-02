@@ -3,22 +3,13 @@ approval modal, the status bar; and `running`, which is how the ui row runs it."
 
 import asyncio
 import re
-import threading
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import OptionList
 
 from tui_cordis_plugin import AppCrashed, BhApp, running, theme
 from tui_cordis_plugin.messages import Asked, Noted, RowsUp, Shown, TurnEnded
-from tui_cordis_plugin.widgets import (
-    ActivityBar,
-    ApprovalScreen,
-    Composer,
-    SidebarPanel,
-    StatusBar,
-    Transcript,
-)
+from tui_cordis_plugin.widgets import ApprovalScreen, Composer, StatusBar, Transcript
 
 _SIZE = (120, 36)
 
@@ -28,11 +19,13 @@ def _blocks(app: BhApp) -> list[tuple[str, str]]:
     return app.query_one(Transcript).blocks()
 
 
-async def test_the_layout_carries_bh_01_s_names_and_bh_01_s_dark_theme() -> None:
+async def test_the_conversation_fills_the_width_over_the_status_bar_in_bh_01_s_dark_theme() -> None:
     app = BhApp()
-    async with app.run_test(size=_SIZE):
-        for widget in (ActivityBar, SidebarPanel, Transcript, Composer, StatusBar):
-            assert app.query_one(widget) is not None
+    async with app.run_test(size=_SIZE) as pilot:
+        await pilot.pause()
+        transcript, composer, bar = (app.query_one(widget) for widget in (Transcript, Composer, StatusBar))
+        assert transcript.region.width == composer.region.width == bar.region.width == _SIZE[0]
+        assert transcript.region.y < composer.region.y < bar.region.y == _SIZE[1] - 1
         assert app.theme == theme.NAME
         assert isinstance(app.focused, Composer)
 
@@ -40,7 +33,7 @@ async def test_the_layout_carries_bh_01_s_names_and_bh_01_s_dark_theme() -> None
 def test_every_custom_token_a_widget_names_has_a_default() -> None:
     """A real launch parses every stylesheet at startup and dies on an undefined `$token`,
     which `run_test()` does not notice."""
-    sheets = [cls.DEFAULT_CSS for cls in (ActivityBar, SidebarPanel, Transcript, Composer, StatusBar)]
+    sheets = [cls.DEFAULT_CSS for cls in (Transcript, Composer, StatusBar)]
     named = {
         name for css in [*sheets, ApprovalScreen.DEFAULT_CSS] for name in re.findall(r"\$(bh-[\w-]+)", css)
     }
@@ -145,33 +138,16 @@ async def test_a_question_nobody_waits_for_is_taken_down() -> None:
         assert not isinstance(app.screen, ApprovalScreen)
 
 
-async def test_the_status_bar_and_sidebar_show_what_rows_push() -> None:
+async def test_the_status_bar_shows_what_rows_push() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         remove = app.frame.status("jail", "jailed fs_write ✓")
         app.frame.status("session", "20260922-1")
-        app.frame.sessions(lambda: [{"id": "20260922-1"}])
         await pilot.pause()
-        await app.workers.wait_for_complete()  # the sessions are read on a thread
         assert str(app.query_one(StatusBar).content) == "session: 20260922-1  │  jail: jailed fs_write ✓"
-        assert [item["id"] for item in app.query_one(SidebarPanel).items] == ["20260922-1"]
         remove()
         await pilot.pause()
         assert str(app.query_one(StatusBar).content) == "session: 20260922-1"
-
-
-async def test_a_broken_session_record_is_listed_and_named_in_the_transcript_once() -> None:
-    broken = {"id": "20260101-dead", "broken": "session record /s/meta.json can't be read (not JSON)"}
-    app = BhApp()
-    async with app.run_test(size=_SIZE) as pilot:
-        app.frame.sessions(lambda: [{"id": "20260922-1"}, broken])
-        for _ in range(3):  # the sidebar is read again each time a sessions entry changes
-            app.frame.sessions(lambda: [])()
-            await pilot.pause()
-            await app.workers.wait_for_complete()
-        assert [item["id"] for item in app.query_one(SidebarPanel).items] == ["20260922-1", "20260101-dead"]
-        notes = [text for kind, text in _blocks(app) if kind == "failure"]
-        assert notes == [broken["broken"]]
 
 
 async def test_running_enters_once_the_app_is_up_and_leaving_ends_its_input() -> None:
@@ -205,124 +181,6 @@ async def test_a_crash_ends_the_app_and_reaches_whoever_reads_next(
             await asyncio.wait_for(app.bridge.line(), 2)
     assert "crashed (exit code 1)" in raised.value.message
     assert "cannot draw this" in capsys.readouterr().err  # Textual's own traceback
-
-
-def _options(app: BhApp) -> list[str]:
-    """The sidebar's session entries as plain text, one per option."""
-    listed = app.query_one("#sessions", OptionList)
-    return [str(listed.get_option_at_index(i).prompt) for i in range(listed.option_count)]
-
-
-async def test_the_sidebar_lists_sessions_once_marks_the_running_one_and_says_how_to_resume() -> None:
-    app = BhApp()
-    items = [
-        {"id": "20260922-2", "created": "2026-09-22T10:05:00", "stack": "claude", "current": True},
-        {"id": "20260922-1", "created": "2026-09-21T09:00:00", "stack": "ollama", "current": False},
-    ]
-    async with app.run_test(size=_SIZE) as pilot:
-        assert _options(app) == ["(none listed)"]
-        app.frame.sessions(lambda: items)
-        for n in range(5):  # status pushes redraw the frame; the list stays one list
-            app.frame.status(f"f{n}", "x")
-        await pilot.pause()
-        assert _options(app) == [
-            "20260922-2\n2026-09-22 10:05 · claude\n current ",
-            "20260922-1\n2026-09-21 09:00 · ollama",
-        ]
-        app.query_one("#sessions", OptionList).focus()
-        await pilot.press("home", "down", "enter")
-        await pilot.pause()
-        note = "to continue session 20260922-1, leave (Ctrl-Q) and run `bh-02 --resume 20260922-1`"
-        assert ("note", note) in _blocks(app)
-        await pilot.press("up", "enter")
-        await pilot.pause()
-        assert any("is this one" in text for kind, text in _blocks(app) if kind == "note")
-
-
-async def test_the_sidebar_reads_the_sessions_again_when_it_is_focused() -> None:
-    app = BhApp()
-    items = [{"id": "20260922-1", "created": "2026-09-21T09:00:00", "stack": "claude"}]
-    async with app.run_test(size=_SIZE) as pilot:
-        app.frame.sessions(lambda: list(items))
-        await pilot.pause()
-        await app.workers.wait_for_complete()
-        assert [i["id"] for i in app.query_one(SidebarPanel).items] == ["20260922-1"]
-        items.insert(0, {"id": "20260922-2", "created": "2026-09-22T10:05:00", "stack": "claude"})
-        app.query_one("#sessions", OptionList).focus()  # started since, from another terminal
-        await pilot.pause()
-        await app.workers.wait_for_complete()
-        assert [i["id"] for i in app.query_one(SidebarPanel).items] == ["20260922-2", "20260922-1"]
-
-
-async def test_on_a_narrow_screen_ctrl_b_opens_the_sidebar_ready_to_choose_a_session() -> None:
-    """80x24: Ctrl-B, Down, Down, Enter says how to continue the session chosen, with no Tab."""
-    app = BhApp()
-    items = [
-        {"id": f"20260923-01223{n}-aaa{n}", "created": f"2026-09-23T01:22:3{n}", "stack": "claude"}
-        for n in (5, 4, 3)
-    ]
-    async with app.run_test(size=(80, 24)) as pilot:
-        app.frame.sessions(lambda: [{**items[0], "current": True}, *items[1:]])
-        await pilot.pause()
-        await pilot.press("ctrl+b")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        await pilot.press("down", "down", "enter")
-        await pilot.pause()
-        notes = [text for kind, text in _blocks(app) if kind == "note"]
-        assert any("bh-02 --resume 20260923-01223" in text for text in notes), notes
-
-
-async def test_the_sessions_are_read_off_the_loop() -> None:
-    """Reading them scans the state directory; the loop (cordis's too) goes on meanwhile."""
-    app = BhApp()
-    reading = threading.Event()
-    threads: list[threading.Thread] = []
-
-    def slow() -> list[dict[str, str]]:
-        threads.append(threading.current_thread())
-        reading.wait(5)
-        return [{"id": "20260922-1"}]
-
-    async with app.run_test(size=_SIZE) as pilot:
-        app.frame.sessions(slow)
-        await pilot.pause()
-        ticked = asyncio.get_running_loop().create_future()
-        asyncio.get_running_loop().call_soon(ticked.set_result, None)
-        await asyncio.wait_for(ticked, 1)  # the loop is not held while the reader waits
-        assert app.query_one(SidebarPanel).items == ()
-        reading.set()
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        assert [i["id"] for i in app.query_one(SidebarPanel).items] == ["20260922-1"]
-        assert threads and threads[0] is not threading.main_thread()
-
-
-async def test_status_changes_do_not_read_the_sessions_again() -> None:
-    """Usage pushes the status bar twice per event; the sessions reader scans disk, so only a
-    sessions entry changing (or the sidebar shown or focused) reads it."""
-    app = BhApp()
-    reads = 0
-
-    def listed() -> list[dict[str, str]]:
-        nonlocal reads
-        reads += 1
-        return [{"id": "20260922-1", "created": "2026-09-21T09:00:00", "stack": "claude"}]
-
-    async with app.run_test(size=_SIZE) as pilot:
-        app.frame.sessions(listed)
-        await pilot.pause()
-        before = reads
-        assert before >= 1
-        for n in range(10):
-            remove = app.frame.status("usage", f"{n} in")
-            remove()
-        app.frame.status("usage", "done")
-        await pilot.pause()
-        assert reads == before and "usage: done" in str(app.query_one(StatusBar).content)
-        app.frame.sessions(lambda: [])  # another sessions entry: read again
-        await pilot.pause()
-        assert reads == before + 1
 
 
 async def test_a_message_typed_while_the_model_comes_back_up_says_it_waits_and_is_read_after() -> None:

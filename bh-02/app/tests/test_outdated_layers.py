@@ -105,6 +105,39 @@ def test_the_rows_bh_02_no_longer_has_are_dropped_with_why() -> None:
     assert changes[3].startswith("row 'approve' was removed: python is the one tool")
 
 
+_NO_SIDEBAR = "bh-02 has no sidebar now (`bh-02 sessions` lists this directory's sessions)"
+
+
+def test_the_sidebar_is_dropped_with_why_but_a_sidebar_row_of_your_own_stays() -> None:
+    """The shipped `sidebar` row (`tui:sessions`) is gone: a change to it, or any row using
+    `tui:sessions`, is dropped. A row called `sidebar` that names a plugin of the person's own
+    is theirs, and still runs."""
+    rows, changes = translated([Row("sidebar", disabled=True), Row("listed", "tui:sessions")])
+    assert rows == []
+    assert changes == [
+        f"row 'sidebar' was removed: {_NO_SIDEBAR}; delete it",
+        f"row 'listed' was removed: tui:sessions is gone: {_NO_SIDEBAR}; delete it",
+    ]
+    own = [Row("sidebar", "mine:panel")]
+    assert translated(own) == (own, [])
+
+
+def test_a_patch_naming_the_sidebar_is_refused_and_update_layer_drops_it(state: Path) -> None:
+    patch = state / "quiet.toml"
+    patch.write_text('[[plugin]]\nid = "sidebar"\ndisabled = true\n')  # how the sidebar was turned off
+    result = CliRunner().invoke(main, ["--no-jail", "--patch", str(patch)])
+    assert result.exit_code == 1 and "Traceback" not in result.output
+    assert result.stderr.splitlines() == [
+        "error: a --patch file names rows this bh-02 renamed or no longer has:",
+        f"  {patch}: row 'sidebar' was removed: {_NO_SIDEBAR}; delete it",
+        f"run `bh-02 update-layer {patch}` to rewrite it (the original is kept beside it as .bak), "
+        "then run again",
+    ]
+    assert "no sessions" in CliRunner().invoke(main, ["sessions"]).stderr  # none left behind
+    assert CliRunner().invoke(main, ["update-layer", str(patch)]).exit_code == 0
+    assert read_layer(patch) == []
+
+
 def test_an_old_fixed_field_is_dropped_even_under_the_status_row_s_id() -> None:
     """A fixed field an earlier bh-02 wrote as `id = "status"` is not today's status row: its
     `field` and `text` would fail the status row's config at boot, so it is removed, with why."""

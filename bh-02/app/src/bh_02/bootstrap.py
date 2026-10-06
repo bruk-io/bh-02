@@ -99,7 +99,7 @@ async def layer_files(*, config: _LayerFiles) -> Effects:
 @component(provides=("sessions",))
 async def session_list(*, config: Listing) -> Effects:
     """Binds this directory's sessions and the running one (CONTRACTS.md: sessions), mounted
-    by `run()` as a row of its own, so the ui can list them without knowing where they live."""
+    by `run()` as a row of its own, so a row can read them without knowing where they live."""
     yield bind("sessions", config)
 
 

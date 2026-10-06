@@ -1,17 +1,16 @@
 """The look and the layout: every stylesheet parses against each theme (as a real launch
-parses them), the themes are live under Pilot, the sidebar folds away on a narrow screen, and
-the status bar shortens its fields in a fixed order and never drops the jail."""
+parses them), the themes are live under Pilot, and the status bar shortens its fields in a
+fixed order and never drops the jail."""
 
 import pytest
 from rich.cells import cell_len
 from textual.color import Color
 from textual.css.errors import UnresolvedVariableError
 from textual.css.stylesheet import Stylesheet
-from textual.widgets import OptionList
 
 from tui_cordis_plugin import BhApp, bh01_theme, frame, render, theme, widgets
 from tui_cordis_plugin.messages import Asked
-from tui_cordis_plugin.widgets import ApprovalScreen, Composer, SidebarPanel, StatusBar
+from tui_cordis_plugin.widgets import ApprovalScreen, Composer, StatusBar
 from tui_cordis_plugin.widgets.status_bar import fit
 
 _THEMES = [each.name for each in theme.themes()]
@@ -75,25 +74,6 @@ async def test_the_dark_theme_is_live_and_the_light_one_restyles_everything_moun
         dialog = app.screen.query_one("#approval")
         assert dialog.styles.background == Color.parse(bh01_theme.LIGHT_VARIABLES["bh-surface-overlay"])
         assert 0 < app.screen.styles.background.a < 1  # the conversation shows through
-
-
-async def test_a_narrow_screen_hides_the_sidebar_and_ctrl_b_toggles_it() -> None:
-    app = BhApp()
-    async with app.run_test(size=(90, 30)) as pilot:
-        sidebar = app.query_one(SidebarPanel)
-        assert isinstance(app.focused, Composer)  # Ctrl-B works from where focus starts
-        assert not sidebar.display
-        await pilot.press("ctrl+b")
-        assert sidebar.display and sidebar.region.width > 0
-        assert isinstance(app.focused, OptionList) and app.focused in sidebar.query(OptionList)
-        await pilot.press("ctrl+b")
-        assert not sidebar.display and isinstance(app.focused, Composer)
-    app = BhApp()
-    async with app.run_test(size=(120, 30)) as pilot:
-        sidebar = app.query_one(SidebarPanel)
-        assert sidebar.display
-        await pilot.press("ctrl+b")
-        assert not sidebar.display
 
 
 _FIELDS = {

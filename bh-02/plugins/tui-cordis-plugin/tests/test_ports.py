@@ -459,21 +459,15 @@ def test_a_status_field_removed_while_rows_come_up_stays_until_pushed_again_or_r
     assert "x" not in frame.fields()
 
 
-def test_frame_lists_sessions_and_offers_commands_read_afresh() -> None:
+def test_frame_offers_commands_read_afresh() -> None:
     frame = Frame(Posted())
-    listed = [{"id": "1"}, {"id": "2"}]
-    remove = frame.sessions(lambda: listed)
     registered = [{"name": "clear", "help": "start afresh", "usage": ""}]
     withdraw = frame.commands(lambda: registered)
-    assert [s["id"] for s in frame.listed_sessions()] == ["1", "2"]
     assert [c["name"] for c in frame.offered_commands()] == ["clear"]
     registered.append({"name": "model", "help": "switch", "usage": "[NAME]"})  # registered later
     assert [c["name"] for c in frame.offered_commands()] == ["clear", "model"]
-    listed.insert(0, {"id": "3"})  # a session started since, from another terminal
-    assert [s["id"] for s in frame.listed_sessions()] == ["3", "1", "2"]
-    remove()
     withdraw()
-    assert frame.listed_sessions() == [] and frame.offered_commands() == []
+    assert frame.offered_commands() == []
 
 
 async def test_a_ctrl_c_before_the_turn_listens_is_held_for_it() -> None:

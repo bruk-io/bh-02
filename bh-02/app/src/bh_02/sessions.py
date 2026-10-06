@@ -282,8 +282,8 @@ def scanned(root: Path, cwd: str) -> tuple[list[Session], list[Broken]]:
 
     A broken record is one whose meta.json is not JSON, lacks a key, or has a value of the
     wrong type; one whose `cwd` can't be read may be any directory's, so it is reported here
-    too. A meta.json that vanishes while listing (a session being discarded) is neither: the
-    sidebar reads this while the app runs, and a race is not a broken file.
+    too. A meta.json that vanishes while listing (a session another run is discarding) is
+    neither: a race is not a broken file.
     """
     found: list[Session] = []
     broken: list[Broken] = []
@@ -392,7 +392,7 @@ class Listing:
     """The `sessions` value (CONTRACTS.md): this directory's sessions, and which one is running.
 
     A record that can't be read is listed after them as `{id, broken}` (`broken`: what is
-    wrong and what to do), so the sidebar says which one it is rather than failing.
+    wrong and what to do), so one bad `meta.json` is named rather than failing the list.
 
     `root` empty lists nothing (a composition booted without a session, as tests do), so a
     run that was not given a state directory never reads the person's own. `resumed`: the

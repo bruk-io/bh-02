@@ -207,6 +207,16 @@ def test_a_session_started_earlier_drops_its_session_row(tmp_path: Path) -> None
     assert read_layer(session.layer) == rows
 
 
+def test_a_session_layer_naming_the_sidebar_drops_it(tmp_path: Path) -> None:
+    """bh-02 never wrote a `sidebar` row into a session's layer, but a hand edit could have
+    (turning it off); with no `sidebar` row shipped, it would stop the resume, so it goes."""
+    session = create(tmp_path, "/work/a", model=None, no_jail=False)
+    rows = read_layer(session.layer)
+    session.layer.write_text(format_layer([*rows, Row("sidebar", disabled=True)]))
+    update(session)
+    assert read_layer(session.layer) == rows
+
+
 def test_a_session_layer_in_old_row_names_is_brought_up_to_date(tmp_path: Path) -> None:
     """A layer as an earlier bh-02 wrote it (its `session` row, the superseded `model_status`)
     and then hand-edited in the old names (`llm`, `jail_status`): a resume reads it in today's
@@ -457,24 +467,6 @@ def test_resume_takes_a_prefix_or_the_last_part_and_refuses_an_ambiguous_one(
     ambiguous = runner.invoke(main, ["--resume", first[:common]])
     assert ambiguous.exit_code == 2 and "give more of one" in ambiguous.stderr
     assert first in ambiguous.stderr and second in ambiguous.stderr
-
-
-def test_the_sidebar_row_lists_this_directory_s_sessions_with_the_running_one_marked(
-    composition: Callable[..., Path], state: Path
-) -> None:
-    patch = composition(
-        '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
-        '[[plugin]]\nid = "ui"\nuse = "fragile:one_message_ui"\n'
-    )
-    runner = CliRunner()
-    first = runner.invoke(main, ["--patch", str(patch)])
-    second = runner.invoke(main, ["--patch", str(patch)])
-    import fragile
-
-    older, running = (run.stderr.split()[1] for run in (first, second))  # "session ID  (...)"
-    assert sorted((item["id"], item["current"]) for item in fragile.SESSIONS) == sorted(
-        [(running, True), (older, False)]
-    )
 
 
 def _plant(root: Path, name: str, content: str) -> Path:

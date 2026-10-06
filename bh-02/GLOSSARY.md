@@ -33,7 +33,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **bh-02**: the coding harness: a terminal app where a model works by writing Python.
 - **the shell**: `bh_02` (`app/`): the `bh-02` command, which reads the layers, boots them and waits for the chat to end.
 - **layer files**: `bh-02.toml` (the whole harness), a session's `session.toml`, and your `--patch` files, applied in that order.
-- **stack**: what a session started on, as `bh-02 sessions` and the sidebar list it: the model's name (an earlier bh-02's session: `claude` or `ollama`).
+- **stack**: what a session started on, as `bh-02 sessions` lists it: the model's name (an earlier bh-02's session: `claude` or `ollama`).
 - **loop** (row and key): the agent loop, `agent:loop`: sends the conversation to the model, runs each call it makes as an input, and nudges a turn that didn't count.
 - **model** (row and key), **the model row**: the model itself, one step at a time (`models:model`), the one its `default` names. `/model NAME` switches it by name; `--model NAME` picks it at launch. An earlier bh-02 called it `completion`.
 - **named model**: a name the model row can take, with its provider and id: the built-ins `sonnet`, `opus` and `haiku`, and yours in the models file.
@@ -60,10 +60,9 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **ui** (row): `tui:app`, the Textual app. It binds `input`, `output` and `frame`, and depends on nothing, so it never reloads.
 - **input**, **output** (keys): what the chat reads your lines from and shows replies, notes and questions through; the ui binds both.
 - **port**: a word in the tui plugin's code (`ports.py`): the values the ui binds for other rows, `input`, `output` and `frame`.
-- **frame** (key): the app around the conversation, which rows push into: status bar fields, sidebar sessions, palette commands. A broker.
+- **frame** (key): the app around the conversation, which rows push into: status bar fields and palette commands. A broker.
 - **status** (row): `tui:status`: the status bar's session id, model and jail grades. The `usage` field is the ui's own.
 - **status bar**: the line along the bottom: session, model, jail, usage; narrower forms when the terminal is narrow.
-- **sidebar** (row): `tui:sessions`: this directory's sessions, listed in the left panel (Ctrl-B).
 - **palette** (row): `tui:palette`: the commands, offered in the command palette (Ctrl-P).
 - **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers.
 - **operator** (row): `commands:operator`: the commands that act on the running program through the loader.
@@ -75,6 +74,6 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **usage**: tokens and cost, per turn and summed for the session, in the status bar.
 - **credential**: `CLAUDE_CODE_OAUTH_TOKEN` in `local.env` at the repository root, read by the model row alone; an OpenAI-compatible model's `key` names another line of the same file.
 - **fakes**: stand-in models in `bh_02.testing` (`echo`, `repl_model`, ...) that a `--patch` names, or (`echo_provider`, ...) a models file's model names as its provider, for tests without a login.
-- **update-layer**: `bh-02 update-layer FILE`: rewrites a layer that names rows bh-02 renamed (`llm`, `mode`, `completion`) or merged (`jail_status`, `model_status`) or dropped, keeping `FILE.bak`.
+- **update-layer**: `bh-02 update-layer FILE`: rewrites a layer that names rows bh-02 renamed (`llm`, `mode`, `completion`) or merged (`jail_status`, `model_status`) or dropped (`tools`, `sidebar`, ...), keeping `FILE.bak`.
 - **gate**: the architecture check (pypeeker) that `scripts/check` runs: which packages may import which, and what must stay pure.
 - **value half**, **wiring**: a plugin's two parts: the plain library (no cordis), and `wiring.py`, the components that bind it.

@@ -1,13 +1,11 @@
 """The rows: the app as `input`, `output` and `frame` (`output.confirm` asks in a modal); and
-the rows that push into the app's frame: the status bar's fields, the sessions in the sidebar,
-the palette's commands."""
+the rows that push into the app's frame: the status bar's fields and the palette's commands."""
 
 from cordis import Effects, acquire, bind, component, enter, observe
 from tui_cordis_plugin import frame, render
 from tui_cordis_plugin.app import BhApp, running
 from tui_cordis_plugin.history import History, Replay, replayable
 from tui_cordis_plugin.ports import TuiInput, TuiOutput
-from tui_cordis_plugin.sessions import SessionSink, SessionSource, listing
 from tui_cordis_plugin.status import (
     CommandSink,
     CommandSource,
@@ -21,7 +19,7 @@ from tui_cordis_plugin.status import (
     TuiConfig,
 )
 
-__all__ = ["palette", "session_list", "status", "tui"]
+__all__ = ["palette", "status", "tui"]
 
 
 @component(name="app", provides=("input", "output", "frame"))
@@ -74,16 +72,6 @@ async def status(
     field = ModelField(frame.status, loader, config.model_row, models.current)
     yield acquire(field.show)
     yield observe(field.lifecycle)
-
-
-@component(name="sessions")
-async def session_list(*, sessions: SessionSource, frame: SessionSink) -> Effects:
-    """Lists this directory's sessions in the sidebar, the running one marked:
-    `use = "tui:sessions"`. A row of its own over `sessions` and `frame`, as `status` is.
-
-    It pushes a reader, not a list: the sidebar reads the directory each time it shows or
-    is focused, so a session started later from another terminal is listed too."""
-    yield acquire(frame.sessions, listing(sessions))
 
 
 @component

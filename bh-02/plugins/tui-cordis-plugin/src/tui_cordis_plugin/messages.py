@@ -52,8 +52,8 @@ class Asked(Message):
 
 
 class FrameChanged(Message):
-    """Something a row pushed into the frame changed; `what` is its kind (`status`,
-    `commands`, `sessions`), so the app redraws only what that kind shows."""
+    """Something a row pushed into the frame changed; `what` is its kind (`status` or
+    `commands`), so the app redraws only what that kind shows."""
 
     def __init__(self, what: str) -> None:
         super().__init__()

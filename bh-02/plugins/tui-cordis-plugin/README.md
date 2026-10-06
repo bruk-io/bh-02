@@ -2,11 +2,10 @@
 
 bh-02's ui: a Textual app bound as `input`, `output` (whose `confirm` asks about the model's code in a
 modal) and `frame` by `tui:app`, and small rows that push into the app's frame: the status
-bar's fields (`tui:status`: the session's id, the model, the jail's grades), the palette's commands
-(`tui:palette`), and `tui:sessions`, which lists this directory's sessions in the sidebar
-with the running one marked (it pushes a reader, which the sidebar calls each time it shows
-or is focused, so a session started since from another terminal is listed). Imports nothing
-from any other plugin; the shapes are in `../../CONTRACTS.md`.
+bar's fields (`tui:status`: the session's id, the model, the jail's grades) and the palette's
+commands (`tui:palette`). The screen is the conversation (the transcript over the composer),
+the whole width, and the status bar along the bottom. Imports nothing from any other plugin;
+the shapes are in `../../CONTRACTS.md`.
 
 - **Value half** (no cordis): `app.py` (the `BhApp` and `running`, which runs it on the event loop
   cordis already runs), `ports.py` (`TuiInput`, `TuiOutput` and `Frame`, the values the ui binds as `input`,
@@ -16,10 +15,8 @@ from any other plugin; the shapes are in `../../CONTRACTS.md`.
   `frame.py` (the usage and model fields and the palette's entries, pure), `status.py` (what
   the frame's rows need, and `ModelField`), `theme.py` (the themes the app registers),
   `bh01_theme.py` (every colour: generated, never edited), `tokens.py` (bh-01's token CSS to
-  that module's source, pure), `sessions.py` (what `tui:sessions` needs, and how a session
-  reads in the sidebar, pure), `widgets/` (one module per widget: `ActivityBar`,
-  `SidebarPanel`, `Transcript`, `Composer`, `StatusBar`, `ApprovalScreen`, and the palette's
-  `CommandsProvider`).
+  that module's source, pure), `widgets/` (one module per widget: `Transcript`, `Composer`,
+  `StatusBar`, `ApprovalScreen`, and the palette's `CommandsProvider`).
 - **`wiring.py`**: the rows. `tui:app` depends on its config alone, so no reload elsewhere
   restarts the app and loses the transcript.
 
@@ -41,7 +38,7 @@ half-typed around a question is less surprising cut short than finished with str
 Ctrl-C still stops the turn at once.
 
 The frame. `tui:palette` pushes the `commands` broker's `specs` method itself, which the
-palette (Ctrl-P, or the activity bar's `≡`) calls each time it opens, so a command registered
+palette (Ctrl-P) calls each time it opens, so a command registered
 after the push is offered with no reload; choosing one sends `/name` through the input as if
 typed, or puts `/name ` in the composer when it takes arguments; a spec's `choices` (read each
 time it opens too) are entries of their own that run at once (`/model haiku`, one per model).
@@ -108,11 +105,7 @@ otherwise), and a test fails when the committed module is not what the snapshot 
 roles, never colours; mandarin (`$bh-primary`, `$bh-ring`) is for what can be acted on or is
 selected. Every stylesheet is parsed against each theme in a test, as a real launch does.
 
-Below 100 columns the sidebar is hidden; Ctrl-B shows it and focuses its list (Up, Down and
-Enter choose a session), or hides it and puts focus back in the composer. The sessions it lists
-are read on a thread (the readers scan the state directory), never on the event loop cordis shares.
-Each session reads as its id, when and on what model it started (an earlier bh-02's session: its
-stack, `claude` or `ollama`), and any `--patch` files it started with. The status bar shows its fields in a fixed order (session, model, jail, usage,
+The status bar shows its fields in a fixed order (session, model, jail, usage,
 then any other). Each field is pushed with its shorter forms (`frame.status(field, text,
 *shorter)`: the status row's short form of the session id, `frame.usage_forms`, `render.jail_forms`), so the bar
 never parses text back. When they don't fit it gives up room a step at a time: narrower
@@ -122,8 +115,8 @@ r✓ e✓`, then `w✓n✓r✓e✓`), its grades as glyphs alone (`jailed ✓✓
 network, fs_read, env). Once the line fits, each field gets back the fullest form that still
 fits, the session's first, so a step a later one made needless is undone. Only when the
 shortest forms don't fit is the widest field cut at a word's end with `…`, then fields dropped
-(any other, session, model, usage). The jail's field is never cut or dropped. Muted text in the frame (the bar, the sidebar's
-heading, the usage chip, the modal's keys) is `$bh-text 70%`, not bh-01's `text-muted`, which
+(any other, session, model, usage). The jail's field is never cut or dropped. Muted text in the frame (the bar, the usage chip,
+the modal's keys) is `$bh-text 70%`, not bh-01's `text-muted`, which
 measures about 2.2 to 2.6:1 on these surfaces; 70% is 5.2:1 or better in both themes. The
 approval modal's background is translucent, so the conversation shows through around it; its
 code is highlighted as the transcript's is (`render.code`, in theme tokens).

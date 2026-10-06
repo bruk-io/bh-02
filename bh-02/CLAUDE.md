@@ -69,7 +69,7 @@ can't write one: the jail denies them). The layer files are the only way the com
 *shape* changes durably; the loader's `restart(row)` (`/restart`, `/clear`) gives a row a fresh
 fiber, and can't outlive the session. The shell pins three rows of its own after every layer
 (`disabled = false`, so no layer can remove them): `layers`, `sessions` (this directory's
-sessions and the running one, which `tui:sessions` lists in the sidebar) and `harness`.
+sessions and the running one, whose id the status bar shows) and `harness`.
 A session is a directory under `$XDG_STATE_HOME/bh-02/sessions/` whose `session.toml` carries
 every per-run choice, so a resume is booting with it again. An
 override's `config` replaces the row's, it doesn't merge. The bootstrap follows the chat row's
@@ -91,7 +91,7 @@ The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reload
 a provider's message as it came.
 
 **The TUI.** `tui:app` runs a Textual app on cordis's own event loop and binds `input`, `output`
-and `frame` (the app's frame: status fields, commands, sessions, each pushed with a remover).
+and `frame` (the app's frame: status fields and commands, each pushed with a remover).
 It depends on its config alone, so it never reloads with anything else. The app owns the
 terminal: a child process that inherits fd 2 paints over it, so every child's stderr goes to
 a file (the kernel's and brig's do), `--trace` takes a file, and anything

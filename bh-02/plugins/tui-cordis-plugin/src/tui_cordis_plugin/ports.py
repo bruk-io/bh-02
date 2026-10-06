@@ -518,16 +518,6 @@ class Frame:
         """
         return self._push("commands", specs)
 
-    def sessions(self, listed: Callable[[], Sequence[Mapping[str, Any]]]) -> Remover:
-        """List sessions (`id`, `created`, ...) in the sidebar until the remover is called.
-
-        `listed` is read each time the sidebar shows or is focused (and whenever a sessions
-        entry is pushed or removed), so the list is the directory's as it is then, not as it
-        was at the push. A status change (usage, every turn) does not read it: it scans disk.
-        The app calls it on a worker thread, not the loop, so it must not touch loop state.
-        """
-        return self._push("sessions", listed)
-
     def fields(self) -> dict[str, str]:
         """The status bar's fields as their full text, in the order first pushed; the latest
         push per field wins."""
@@ -539,23 +529,6 @@ class Frame:
         for field, forms in self._pushed("status"):
             shown[field] = forms
         return shown
-
-    def listed_sessions(self) -> list[Mapping[str, Any]]:
-        """Every session listed now, in push order (each source read afresh)."""
-        return self.session_listing()()
-
-    def session_listing(self) -> Callable[[], list[Mapping[str, Any]]]:
-        """A function that reads every sessions source pushed now, in push order.
-
-        The sources are taken here, on the app's loop (pushes change them there); the function
-        reads them, which scans disk, so the app calls it on a thread of its own.
-        """
-        sources = list(self._pushed("sessions"))
-
-        def listed() -> list[Mapping[str, Any]]:
-            return [item for source in sources for item in source()]
-
-        return listed
 
     def offered_commands(self) -> list[Mapping[str, Any]]:
         """Every command spec offered now, in push order (each source read afresh)."""

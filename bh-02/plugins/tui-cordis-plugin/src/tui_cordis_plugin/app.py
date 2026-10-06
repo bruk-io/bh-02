@@ -1,19 +1,14 @@
 """The Textual app, and `running`, which runs it on the event loop already running cordis.
 
-Layout, in bh-01's words: an ActivityBar on the left, a SidebarPanel, the conversation
-(Transcript over Composer) and a StatusBar along the bottom. The app owns the screen: its
-input, output and frame post it messages (`messages.py`) and it draws them.
-
-Below 100 columns the SidebarPanel is hidden (the screen's `-narrow` breakpoint); Ctrl-B shows
-or hides it at any width, and the person's choice then holds. Showing it focuses its list;
-hiding it puts focus back in the composer. The sessions it lists are read on a thread (reading
-scans the state directory), never on the loop, which is cordis's too.
+Layout, in bh-01's words: the conversation (Transcript over Composer), the whole width, and a
+StatusBar along the bottom. The app owns the screen: its input, output and frame post it
+messages (`messages.py`) and it draws them.
 
 Leaving: Ctrl-Q, or `/exit` or `/quit` in the composer. The terminal going away (its window
 closed: SIGHUP, or, with no controlling terminal, stdin at end of file) leaves the same way, so
 the composition unwinds rather than the process dying where it stands or spinning on a dead
 fd. Ctrl-C interrupts the running turn and never quits; with no turn running it says how to
-leave. Ctrl-P (or the activity bar's `≡`) opens the command palette.
+leave. Ctrl-P opens the command palette.
 
 Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
 withdraws its own (shown or queued), and Ctrl-C with one up answers every open question no.
@@ -36,10 +31,8 @@ from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
-from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
 from textual.timer import Timer
 
 from tui_cordis_plugin import frame, render, theme
@@ -56,14 +49,11 @@ from tui_cordis_plugin.messages import (
     Withdrawn,
 )
 from tui_cordis_plugin.ports import AppCrashed, Bridge, Frame
-from tui_cordis_plugin.sessions import resume_note
 from tui_cordis_plugin.widgets import (
     GRACE,
-    ActivityBar,
     ApprovalScreen,
     CommandsProvider,
     Composer,
-    SidebarPanel,
     StatusBar,
     Transcript,
 )
@@ -71,7 +61,6 @@ from tui_cordis_plugin.widgets import (
 __all__ = ["BhApp", "running"]
 
 EXIT_COMMANDS = frozenset({"/exit", "/quit"})
-_WIDE = 100  # columns from which the sidebar shows by itself
 _HOW_TO_LEAVE = "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running turn; Ctrl-P lists commands."
 
 type _Question = tuple[Mapping[str, Any], asyncio.Future[bool]]
@@ -99,22 +88,10 @@ class BhApp(App[None]):
     BINDINGS = [
         Binding("ctrl+c", "interrupt", "Interrupt", priority=True, show=False),
         Binding("ctrl+q", "quit", "Quit", priority=True, show=False),
-        Binding("ctrl+b", "toggle_sidebar", "Sidebar", show=False),
     ]
-    HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (_WIDE, "-wide")]
-    # No `Screen { background: ... }` here: app CSS outranks every DEFAULT_CSS, and `Screen`
-    # matches the approval modal too, which would lose its translucent background.
-    CSS = """
-    #main {
-        height: 1fr;
-    }
-    #conversation {
-        width: 1fr;
-    }
-    Screen.-narrow #sidebar {
-        display: none;
-    }
-    """
+    # No app `CSS`: each widget styles itself (its DEFAULT_CSS). App CSS outranks every
+    # DEFAULT_CSS, and a `Screen { background: ... }` here would match the approval modal too,
+    # which would lose its translucent background.
 
     def __init__(
         self, *, history: History | None = None, replay: Replay | None = None, grace: float = GRACE
@@ -132,7 +109,6 @@ class BhApp(App[None]):
         self.ready = asyncio.Event()
         self._asking: tuple[ApprovalScreen, asyncio.Future[bool]] | None = None
         self._queued: deque[_Question] = deque()
-        self._broken_noted: set[str] = set()  # broken session records the transcript has named
         self._releasing: Timer | None = None  # the grace before kept status fields go
         self._replying = 0  # replies streaming now (started, not yet ended)
         self._typed: list[str] = []  # lines typed while one streams, drawn once it ends
@@ -142,19 +118,11 @@ class BhApp(App[None]):
         return dict(theme.VARIABLES)
 
     def compose(self) -> ComposeResult:
-        with Horizontal(id="main"):
-            yield ActivityBar(id="activity-bar")
-            yield SidebarPanel(id="sidebar")
-            with Vertical(id="conversation"):
-                yield Transcript(id="transcript")
-                yield Composer(id="composer")
+        yield Transcript(id="transcript")
+        yield Composer(id="composer")
         yield StatusBar(id="status-bar")
 
     def on_mount(self) -> None:
-        # The breakpoint classes come with the first Resize, after the first frame is drawn;
-        # set them now so a narrow terminal never shows the sidebar for a frame.
-        self.screen.set_class(self.size.width < _WIDE, "-narrow")
-        self.screen.set_class(self.size.width >= _WIDE, "-wide")
         self.query_one(Composer).focus()
         if self.replay is not None:
             self.query_one(Transcript).replay(self.replay)
@@ -162,7 +130,6 @@ class BhApp(App[None]):
         if self.history is not None and self.history.warning is not None:
             self.query_one(Transcript).note(self.history.warning, "failure")  # nor trimmed
         self.query_one(Transcript).note(_HOW_TO_LEAVE)
-        self.query_one(SidebarPanel).show_sessions([])
         stdin = sys.__stdin__
         if not self.is_headless and stdin is not None and stdin.isatty():
             self.set_interval(_HANGUP_EVERY, functools.partial(self._watch_terminal, stdin.fileno()))
@@ -280,12 +247,10 @@ class BhApp(App[None]):
             self.history = None
 
     def on_frame_changed(self, message: FrameChanged) -> None:
-        """Redraw what the changed kind of entry shows: the status bar, or the sessions (read
-        from disk, so not for a status change, which comes twice per usage event)."""
+        """Redraw the status bar when a status field changed; commands need no redraw (the
+        palette reads them each time it opens)."""
         if message.what == "status":
             self.query_one(StatusBar).show_fields(self.frame.forms())
-        elif message.what == "sessions":
-            self._list_sessions()
 
     def on_rows_up(self, message: RowsUp) -> None:
         """Rows that came back up: drop the status fields kept meanwhile, once they have all
@@ -298,25 +263,6 @@ class BhApp(App[None]):
         self._releasing = None
         if not self.bridge.settling:
             self.frame.release()
-
-    def on_descendant_focus(self, event: events.DescendantFocus) -> None:
-        """The sidebar's list, focused: read the sessions again (one may have started since)."""
-        sidebar = self.query_one(SidebarPanel)
-        if sidebar in event.widget.ancestors_with_self:
-            self._list_sessions()
-
-    @work(exclusive=True, group="sessions")
-    async def _list_sessions(self) -> None:
-        """List the sessions as the rows' readers say now, read on a thread: they scan the
-        state directory, which must not stall the loop (cordis's too). A newer listing
-        cancels one still reading. A broken record is named in the transcript too, once (the
-        sidebar is folded on a narrow screen)."""
-        listed = await asyncio.to_thread(self.frame.session_listing())
-        self.query_one(SidebarPanel).show_sessions(listed)
-        for item in listed:
-            if item.get("broken") and str(item.get("id")) not in self._broken_noted:
-                self._broken_noted.add(str(item.get("id")))
-                self.query_one(Transcript).note(resume_note(item), "failure")
 
     def on_asked(self, message: Asked) -> None:
         """Queue a question; the answer resolves the asker's future. An asker that stops
@@ -368,19 +314,6 @@ class BhApp(App[None]):
         if screen is not self.screen:
             screen.pop_until_active()
         screen.dismiss(False)
-
-    def action_toggle_sidebar(self) -> None:
-        """Ctrl-B: show the sidebar if it is hidden (a narrow screen hides it) and focus its
-        list, else hide it and focus the composer. Over a modal, focus stays where it is."""
-        sidebar = self.query_one(SidebarPanel)
-        sidebar.display = not sidebar.display
-        self._list_sessions()
-        if len(self.screen_stack) > 1:
-            return
-        if sidebar.display:
-            sidebar.focus_list()
-        else:
-            self.query_one(Composer).focus()
 
     def action_interrupt(self) -> None:
         """Ctrl-C: stop the running turn and take its questions down as a no; with nothing
