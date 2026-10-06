@@ -19,7 +19,9 @@ gate's `brig-one-adapter`).
   An `allow` in a layer replaces the default, so name every file it should let through;
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
   what `layers` names as `secrets` (bh-02's `local.env`, the sessions' state);
-- **network**: none; seatbelt allows only the kernel's own LISTEN socket;
+- **network**: none; seatbelt allows only the program's own LISTEN socket. The `jail` row starts
+  two programs, each with a jail of its own compiled from this one policy: the kernel's worker,
+  and the extensions' worker (`extensions:extensions`), where the model's own plugins run;
 - **env**: scrubbed to `env`.
 
 The grades are brig's own (`fs_read`, `fs_write`, `network`, `env` enforced; `limits`

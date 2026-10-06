@@ -41,6 +41,7 @@ uv run pytest -m "not real_launch"                        # skip the tests that 
 scripts/sync-tokens [--check] [--bh-01 PATH]              # bh-01's token CSS -> bh-02's Textual theme (reads ../bh-01)
 scripts/model-friction [--examples N] [--json]            # where models trip in bh-02 sessions here: wrong tools, errors, lost output, nudges
 uv run bh-02                                              # the harness: a CodeAct session in a TUI, Claude through Claude Code on the subscription
+uv tool install --editable ./bh-02/app                    # bh-02 as a command on your PATH, every plugin from this checkout (--reinstall after a pull that adds one)
 uv run bh-02 --resume [ID]                                # continue this directory's newest session (or ID: whole, its start, or its last part)
 uv run bh-02 sessions                                     # this directory's sessions, newest first
 uv run bh-02 --no-jail                                    # the kernel runs with your permissions; every input asks
@@ -96,7 +97,7 @@ Root-gate rules that apply everywhere (area-specific ones are in the area CLAUDE
 - **`cordis-public-api`**: outside cordis, import from `cordis`, `cordis.loader`, `cordis.composition` or `cordis.testing`, never deeper.
 - **`plugin-layering`**: a gate's units are every package under its `src/` paths; none may import another; `cordis` and `cordis_helpers` are what all may import. A package's own `__init__` re-export is fine; another package's tests are not (fakes live in a package's own `testing` module).
 - **`init-reexport-only`**: a package `__init__.py` defines nothing; it re-exports.
-- **`import-time-side-effects`** and **`no-hidden-global-mutation`**: importing a module builds and mutates nothing (each app's `__main__` and the kernel worker are allowed, listed by name in the rule's `allow`), and no function mutates module-level state.
+- **`import-time-side-effects`** and **`no-hidden-global-mutation`**: importing a module builds and mutates nothing (each app's `__main__`, the kernel's worker and the extensions' worker are allowed, listed by name in the rule's `allow`), and no function mutates module-level state (the rule's `allow` names the few that must, each with why: the two workers' writes to `sys.modules` and `linecache`).
 - **`under-exposed-access`**: no reaching into another module's `_names`, and that includes tests. Test through the public API, or add what's missing to it.
 - **`over-exposed-module-symbol`**: a public name used only inside its own module should be `_private`. A name that is public on purpose but unused in-repo (a component a layer names as a string, a click command, a console script) goes in that rule's `allow` list. Test patterns are there because pypeeker names a test module by its path under `tests/`.
 
