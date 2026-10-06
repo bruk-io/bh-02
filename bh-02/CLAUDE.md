@@ -16,8 +16,12 @@ for the libraries it uses, `src/<name>_cordis_plugin/` with a `wiring.py` and `p
 the gate's units are globs over the directories, so nothing else needs registering. Two things
 are judgement and stay by hand in the root `pyproject.toml`: purity-budget entries
 (`no-impure-functions`) and any `over-exposed-module-symbol` allow entries beyond
-`*_cordis_plugin.wiring:*`. Then `uv sync --all-packages`: entry points are read from installed
-metadata, and a stale one shows up as an unresolved row, not an import error.
+`*_cordis_plugin.wiring:*`. A plugin the shipped layer names also goes in the app's own
+`dependencies` and `[tool.uv.sources]` (`app/pyproject.toml`): `uv sync --all-packages` installs
+every member either way, but `uv tool install ./bh-02/app` installs only what the app depends on
+(`test_booting.py` checks every plugin the layer names is there). Then `uv sync --all-packages`:
+entry points are read from installed metadata, and a stale one shows up as an unresolved row,
+not an import error.
 
 ## How the family stays apart
 

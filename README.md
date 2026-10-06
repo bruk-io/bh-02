@@ -94,6 +94,17 @@ echo 'CLAUDE_CODE_OAUTH_TOKEN=<the token>' > local.env && chmod 600 local.env   
 cd ~/some/project && ~/path/to/bh-02/.venv/bin/bh-02
 ```
 
+Or install it as a command on your `PATH`, from the checkout:
+
+```sh
+uv tool install --editable ./bh-02/app    # every plugin installed from the checkout, so a git pull updates it
+cd ~/some/project && bh-02
+```
+
+The plugins and libraries are installed from the checkout itself, so `local.env` at its root is
+still found. After a pull that adds a plugin or changes a dependency, run the same command with
+`--reinstall`.
+
 The model acts in Python, at a REPL of its own that persists for the session. In the sandbox its
 code runs without asking: it can write inside
 the project, but it can't reach the network, read credentials, or touch what could run code later

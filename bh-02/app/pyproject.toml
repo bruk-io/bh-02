@@ -15,6 +15,7 @@ dependencies = [
     "brig-cordis-plugin",
     "context-cordis-plugin",
     "commands-cordis-plugin",
+    "extensions-cordis-plugin",
 ]
 
 [project.scripts]
@@ -30,6 +31,7 @@ kernel-cordis-plugin = { workspace = true }
 brig-cordis-plugin = { workspace = true }
 context-cordis-plugin = { workspace = true }
 commands-cordis-plugin = { workspace = true }
+extensions-cordis-plugin = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
