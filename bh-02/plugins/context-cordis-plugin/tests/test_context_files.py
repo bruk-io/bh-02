@@ -1,5 +1,6 @@
 """The context files: their sections, whom they trust, and the project context they make."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -109,18 +110,38 @@ def test_a_section_that_fails_says_so_and_the_rest_still_say_theirs(tmp_path: Pa
     assert "From AGENTS.md:\n\nStill here." in text
 
 
-def test_a_wildcard_is_searched_once_until_a_context_file_changes(tmp_path: Path) -> None:
+def test_a_file_a_wildcard_matches_is_found_at_the_next_reading_added_or_removed(tmp_path: Path) -> None:
     files, root = ContextFiles((".bh-02/context.toml",), 20_000), tmp_path
-    toml = _write(
+    _write(
         root / ".bh-02/context.toml",
-        f'replace = true\n[[section]]\nfiles = ["docs/*.md"]\nfunction = "{_NAMED}"\n',
+        'replace = true\n[[section]]\nfiles = ["docs/**/*.md", ".claude/rules/*.md"]\n'
+        f'function = "{_NAMED}"\n',
     )
     _write(root / "docs/a.md", "a")
     assert files.text(root, tmp_path).endswith("docs/a.md.")
     _write(root / "docs/b.md", "b")
-    assert "docs/b.md" not in files.text(root, tmp_path)  # searched once
-    toml.write_text(toml.read_text() + "\n")  # a context file changed: search afresh
-    assert files.text(root, tmp_path).endswith("docs/a.md, docs/b.md.")
+    _write(root / "docs/deep/c.md", "c")  # in a directory that was not there to look in
+    assert files.text(root, tmp_path).endswith("docs/a.md, docs/b.md, docs/deep/c.md.")
+    (root / "docs/a.md").unlink()
+    assert files.text(root, tmp_path).endswith("docs/b.md, docs/deep/c.md.")
+    _write(root / ".claude/rules/new.md", "r")  # under directories that were not there at all
+    assert ".claude/rules/new.md" in files.text(root, tmp_path)
+
+
+def test_a_search_looks_again_only_when_a_directory_it_looked_in_changed(tmp_path: Path) -> None:
+    """Each reading costs a `stat` of each directory looked in, not a walk: shown by a file whose
+    directory's time is put back, which the search does not see."""
+    files, root = ContextFiles((".bh-02/context.toml",), 20_000), tmp_path
+    _write(
+        root / ".bh-02/context.toml",
+        f'replace = true\n[[section]]\nfiles = ["docs/*.md"]\nfunction = "{_NAMED}"\n',
+    )
+    _write(root / "docs/a.md", "a")
+    files.text(root, tmp_path)
+    was = (root / "docs").stat()
+    _write(root / "docs/hidden.md", "h")
+    os.utime(root / "docs", ns=(was.st_atime_ns, was.st_mtime_ns))
+    assert "hidden.md" not in files.text(root, tmp_path)
 
 
 def test_the_context_files_say_at_most_max_chars(tmp_path: Path) -> None:

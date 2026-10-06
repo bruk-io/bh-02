@@ -8,7 +8,9 @@ returning text). bh-02's own (`context.toml`, beside this module) is read first,
 `ContextConfig.files`: the person's (`~/.config/bh-02/context.toml`), then the project's
 (`.bh-02/context.toml`). Each appends its sections, or starts the list afresh with
 `replace = true` at its top. A file is read again when it changes, so a section added reaches
-the model's next message.
+the model's next message; so is a file a section's patterns match, added, moved or removed
+(`_Search`: a search keeps the time each directory it looked in last changed, and looks again
+when one of them has).
 
 A file inside the project may name only bh-02's own functions (`context_cordis_plugin.sections`):
 the model can write there, and a function it named would run in bh-02, outside the jail.
@@ -86,15 +88,16 @@ def parse(text: str, source: str, *, trusted: bool) -> tuple[tuple[Section, ...]
 class ContextFiles:
     """The project context, made each time the prompt is read: the sections (bh-02's, then
     each of `files`, each read again when it changes), each section's files (a pattern with no
-    wildcard looked for each time; one with a wildcard searched for once, and again when a
-    context file changes), and each section's function given them. A file that can't be read,
+    wildcard looked for each time; one with a wildcard searched for again when a directory the
+    last search looked in has changed since, a file in it added, moved or removed), and each
+    section's function given them. A file that can't be read,
     or a function that fails, says so in one line, and the rest still say theirs."""
 
     def __init__(self, files: Sequence[str], max_chars: int) -> None:
         self._files = files
         self._max_chars = max_chars
         self._read: dict[Path, tuple[int, tuple[tuple[Section, ...], bool] | str]] = {}
-        self._searched: dict[tuple[Path, str], tuple[Path, ...]] = {}
+        self._searched: dict[tuple[Path, str], _Search] = {}
 
     def text(self, root: Path, home: Path) -> str:
         sections, parts = self._sections(root, home)
@@ -146,9 +149,10 @@ class ContextFiles:
             elif not _MAGIC.search(pattern):
                 matches = [root / pattern] if (root / pattern).is_file() else []
             else:
-                if (root, pattern) not in self._searched:
-                    self._searched[(root, pattern)] = _search(root, pattern)
-                matches = self._searched[(root, pattern)]
+                searched = self._searched.get((root, pattern))
+                if searched is None or not _unchanged(searched):
+                    searched = self._searched[(root, pattern)] = _search(root, pattern)
+                matches = searched.found
             for path in matches:
                 found.setdefault(path, None)
         return tuple(found)
@@ -169,16 +173,51 @@ def _function(name: str) -> Function:
     return function  # type: ignore[no-any-return]
 
 
-def _search(root: Path, pattern: str) -> tuple[Path, ...]:
-    """The files under `root` matching `pattern`, sorted. The pattern's leading parts with no
-    wildcard are walked into whatever they are (`.claude/rules`); below them, hidden directories
-    and those tools fill are skipped, and at most `_LOOKED` directories are looked in."""
+@dataclass(frozen=True, slots=True)
+class _Search:
+    """What one search found, and each directory it looked in with the time that directory
+    last changed then: a file added, moved or removed in one changes it."""
+
+    found: tuple[Path, ...]
+    looked: tuple[tuple[Path, int], ...]
+
+
+def _unchanged(searched: _Search) -> bool:
+    """Whether every directory a search looked in is as it was: one `stat` each, no walk."""
+    try:
+        return all(where.stat().st_mtime_ns == when for where, when in searched.looked)
+    except OSError:  # one is gone
+        return False
+
+
+def _search(root: Path, pattern: str) -> _Search:
+    """The files under `root` matching `pattern`, sorted, and the directories looked in. The
+    pattern's leading parts with no wildcard are walked into whatever they are (`.claude/rules`);
+    below them, hidden directories and those tools fill are skipped, and at most `_LOOKED`
+    directories are looked in. Each directory's time is taken before it is listed, so a change
+    made while it is read still shows as one. When those leading parts are not there yet, the
+    nearest directory above them that is stands in, so their appearing shows too."""
     parts = PurePath(pattern).parts
     lead = next((n for n, part in enumerate(parts) if _MAGIC.search(part)), len(parts))
+    base = root.joinpath(*parts[:lead])
+    if not base.is_dir():
+        near = next((p for p in (base, *base.parents) if p.is_dir() and p.is_relative_to(root)), None)
+        return _Search((), ((near, near.stat().st_mtime_ns),) if near else ())
     found: list[Path] = []
-    for looked, (here, dirs, files) in enumerate(os.walk(root.joinpath(*parts[:lead])), 1):
-        if looked > _LOOKED:
-            break
-        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in _SKIPPED]
-        found += [p for f in files if (p := Path(here, f)).relative_to(root).full_match(pattern)]
-    return tuple(sorted(found))
+    looked: list[tuple[Path, int]] = []
+    todo = [base]
+    while todo and len(looked) < _LOOKED:
+        here = todo.pop()
+        try:
+            when = here.stat().st_mtime_ns
+            entries = list(os.scandir(here))
+        except OSError:
+            continue
+        looked.append((here, when))
+        for entry in entries:
+            if entry.is_dir(follow_symlinks=False):
+                if not entry.name.startswith(".") and entry.name not in _SKIPPED:
+                    todo.append(Path(entry.path))
+            elif entry.is_file() and (path := Path(entry.path)).relative_to(root).full_match(pattern):
+                found.append(path)
+    return _Search(tuple(sorted(found)), tuple(looked))

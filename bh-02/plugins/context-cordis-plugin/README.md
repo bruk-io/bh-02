@@ -30,11 +30,13 @@ function = "context_cordis_plugin.sections:place"
 ```
 
 - `files`: patterns from the project's root (`*`, `**/` for any depth; `**/AGENTS.md` matches the
-  root's too); `~/...` and `/...` are paths of their own, with no wildcard. A pattern with no
-  wildcard is looked for each time the prompt is read; one with a wildcard is searched for once,
-  and again when a context file changes (`/restart system` searches afresh too). A search walks
-  into what the pattern names (`.claude/rules/`), and below that skips hidden directories and
-  those tools fill (`node_modules`, `build`, `dist`, `target`, `vendor`, virtualenvs).
+  root's too); `~/...` and `/...` are paths of their own, with no wildcard. Each time the prompt
+  is read, a pattern with no wildcard is looked for, and one with a wildcard is searched for again
+  only if a directory the last search looked in has changed since (a file in it added, moved or
+  removed): one `stat` per directory, not a walk, so a new guide or rule reaches the model's next
+  message. A search walks into what the pattern names (`.claude/rules/`, watching the nearest
+  directory above it until it is there), and below that skips hidden directories and those tools
+  fill (`node_modules`, `build`, `dist`, `target`, `vendor`, virtualenvs).
 - `function`: a full module path, `package.module:function`, called as
   `function(files, root=root, home=home) -> str` with the files that matched, in the order of
   the patterns, each once; it returns what the model is told ('' for nothing). It runs each
