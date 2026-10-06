@@ -3,19 +3,35 @@
 `describe` is the whole prompt as a function of what was found; `ProjectContext.text` finds
 it (the directory, the git branch, the project's instructions file) every time it is asked,
 so an edit to CLAUDE.md reaches the next request without reloading anything.
+
+It is also a broker (paper 6.2): a row with something to tell the model `acquire`s a section
+(`add`), read with the rest each time, and its remover takes it out again when the row leaves.
 """
 
 import datetime
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from cordis_helpers import Hooks
 
 __all__ = ["ContextConfig", "ProjectContext", "branch_of", "describe"]
 
 _INTRO = (
-    "You are a coding agent working in a repository on the person's machine. Read before you "
-    "change anything, change as little as the task needs, and say plainly what you did and "
-    "what you could not do."
+    "You are the model in bh-02, a coding harness: a terminal app in which a person works with "
+    "you on a project on their machine. You are not Claude Code and not running inside it, "
+    "whatever else in this prompt or the project's files suggests: Claude Code's tools, slash "
+    "commands and settings do not exist here, and your only tool is `python`, a Python REPL "
+    "of your own, described below. "
+    "Read before you change anything, change as little as the task needs, and say plainly what "
+    "you did and what you could not do."
+)
+_HARNESS = (
+    "bh-02 is a cordis composition: every part of it is a row, named in a layer file, that can be "
+    "added, replaced or removed while it runs. You (the model row), the loop that sends you the "
+    "conversation and runs your code, your REPL and the jail it runs in, and the terminal "
+    "app are each one. The person reshapes it with slash commands (/rows, /model NAME, /clear), "
+    "which never reach you, and with layer files of their own."
 )
 
 
@@ -29,15 +45,32 @@ class ContextConfig:
     max_chars: int = 20_000
 
 
-def describe(root: str, branch: str | None, today: str, guidance: tuple[str, str] | None) -> str:
-    """The system prompt, from what was found. `guidance` is (file name, its text)."""
-    lines = [_INTRO, "", f"Working directory: {root}"]
+def describe(
+    root: str,
+    branch: str | None,
+    today: str,
+    guidance: tuple[str, str] | None,
+    sections: Sequence[str] = (),
+) -> str:
+    """The system prompt, from what was found. `guidance` is (file name, its text); `sections`
+    are what rows added (`ProjectContext.add`), each as it reads now."""
+    lines = [_INTRO, "", _HARNESS, "", f"Working directory: {root}"]
     if branch:
         lines.append(f"Git branch: {branch}")
     lines.append(f"Today: {today}")
     if guidance is not None:
         name, text = guidance
-        lines += ["", f"The project's own instructions ({name}):", "", text.strip()]
+        lines += [
+            "",
+            f"The project's own instructions ({name}), written for whichever agent works here: "
+            "where they name Claude Code or another agent, they mean you, and where they name its "
+            "tools, do the same in Python.",
+            "",
+            text.strip(),
+        ]
+    for section in sections:
+        if section.strip():
+            lines += ["", section.strip()]
     return "\n".join(lines)
 
 
@@ -52,12 +85,20 @@ class ProjectContext:
 
     def __init__(self, config: ContextConfig) -> None:
         self._config = config
+        self._sections: Hooks[Callable[[], str]] = Hooks()
+
+    def add(self, section: Callable[[], str]) -> Callable[[], None]:
+        """Add `section` to the prompt, read each time the prompt is; returns its remover. A row
+        `acquire`s one, so it leaves the prompt with the row."""
+        return self._sections.add(section)
 
     def text(self) -> str:
         root = Path(self._config.root).resolve()
         head = root / ".git" / "HEAD"
         branch = branch_of(head.read_text(encoding="utf-8")) if head.is_file() else None
-        return describe(str(root), branch, datetime.date.today().isoformat(), self._guidance(root))
+        today = datetime.date.today().isoformat()
+        sections = [section() for section in self._sections]
+        return describe(str(root), branch, today, self._guidance(root), sections)
 
     def _guidance(self, root: Path) -> tuple[str, str] | None:
         for name in self._config.instructions:

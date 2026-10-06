@@ -1,5 +1,5 @@
-"""The policy as a function, and the row. Real cells in a real jail are
-bh-02/app/tests/test_python_cells.py's: they need a kernel, which is another plugin."""
+"""The policy as a function, and the row. Real inputs in a real jail are
+bh-02/app/tests/test_python_repl.py's: they need a kernel, which is another plugin."""
 
 from dataclasses import dataclass
 

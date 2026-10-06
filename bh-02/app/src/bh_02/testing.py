@@ -7,12 +7,12 @@ putting test rows into a plugin. Most bind `loop` (CONTRACTS.md), replacing the 
     id = "loop"
     use = "bh_02.testing:echo"
 
-`echo_model`, `slow_model` and `cells_model` bind `model` instead, so the shipped loop, its
+`echo_model`, `slow_model` and `repl_model` bind `model` instead, so the shipped loop, its
 transcript and the session's own layer (`/clear`, a resume) run as they do with Claude, only
 the one turn being fake. Each takes whatever `config` the row already had, since a patch that
 only names `use` keeps it (the session layer gives `model` a `state`).
 
-`echo_provider`, `slow_provider` and `cells_provider` are providers, not rows: a models file
+`echo_provider`, `slow_provider` and `repl_provider` are providers, not rows: a models file
 names one for a model of its own (`provider = "bh_02.testing:echo_provider"`), so `/model`
 switches between it and any other model under the shipped `models:model` row, as it would
 between Claude and an OpenAI model.
@@ -26,8 +26,8 @@ from cordis import Effects, bind, component
 
 __all__ = [
     "bomb",
-    "cells_model",
-    "cells_provider",
+    "repl_model",
+    "repl_provider",
     "echo",
     "echo_model",
     "echo_provider",
@@ -128,39 +128,39 @@ def slow_provider(table: Mapping[str, Any]) -> _SlowStart:
     return _SlowStart(str(table.get("id") or "slow"))
 
 
-class _Cells:
+class _Repl:
     """Each message the person sends is one call of the offered tool, `python`, with the message
-    as its code; once the cell has answered, the turn says what it printed."""
+    as its code; once the input has answered, the turn says what it printed."""
 
     async def complete(
         self, messages: Sequence[Mapping[str, Any]], tools: Sequence[Mapping[str, Any]]
     ) -> AsyncIterator[dict[str, Any]]:
         last = messages[-1]
         if last.get("role") == "tool":
-            yield {"type": "text", "text": f"the cell said: {str(last['content']).strip()}"}
+            yield {"type": "text", "text": f"the input said: {str(last['content']).strip()}"}
             yield {"type": "stop", "reason": "end_turn"}
             return
         code = str(last.get("content", ""))
         yield {
             "type": "tool_call",
-            "id": f"cell{len(messages)}",
+            "id": f"input{len(messages)}",
             "name": tools[0]["name"],
             "input": {"code": code},
         }
         yield {"type": "stop", "reason": "tool_use"}
 
 
-def cells_provider(table: Mapping[str, Any]) -> _Cells:
-    """A provider a models file names: `cells_model`'s model, every message a python cell."""
-    return _Cells()
+def repl_provider(table: Mapping[str, Any]) -> _Repl:
+    """A provider a models file names: `repl_model`'s model, every message a python input."""
+    return _Repl()
 
 
 @component(provides=("model",))
-async def cells_model(*, config: Mapping[str, Any] | None = None) -> Effects:
-    """A model whose every message is a python cell, under the shipped loop: `id = "model"`,
-    `use = "bh_02.testing:cells_model"`. Exercises the loop, the kernel, the jail and
+async def repl_model(*, config: Mapping[str, Any] | None = None) -> Effects:
+    """A model whose every message is a python input, under the shipped loop: `id = "model"`,
+    `use = "bh_02.testing:repl_model"`. Exercises the loop, the kernel, the jail and
     (unconfined, `--no-jail`) the approval modal on the real screen."""
-    yield bind("model", _Cells())
+    yield bind("model", _Repl())
 
 
 _DIFF = (
@@ -189,7 +189,7 @@ class _Showcase:
             return
         yield {"type": "thinking", "text": "The person wants a tour.\n"}
         yield {"type": "thinking", "text": "Show every kind of event."}
-        yield {"type": "text", "text": "## A tour\nFirst a `cell`, then a **diff**:\n"}
+        yield {"type": "text", "text": "## A tour\nFirst a `input`, then a **diff**:\n"}
         yield {"type": "text", "text": "```python\nfor n in range(3):\n    print(n)\n```\n"}
         call = {"id": "t1", "name": "python", "input": {"code": "import this  # " + "long " * 30}}
         yield {"type": "tool_call", **call}

@@ -62,7 +62,7 @@ async def test_a_python_call_round_trips_through_the_transcript() -> None:
                 {"role": "tool", "content": "42\n", "call_id": call["id"]},
             ]
             second = await _step(model, transcript)
-    assert "".join(c["text"] for c in second if c["type"] == "text") == "the cell said: 42"
+    assert "".join(c["text"] for c in second if c["type"] == "text") == "the input said: 42"
     replayed = stub.requests[1]["body"]["messages"]
     assert replayed[1] == message  # the assistant turn went back as it came
     assert replayed[2] == {"role": "tool", "tool_call_id": call["id"], "content": "42\n"}

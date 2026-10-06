@@ -47,7 +47,7 @@ PYTHON: Json = {"name": "python", "description": "Run Python.", "parameters": {"
 
 
 class Shouting:
-    """A `kernel` value whose cells upper-case their code, confined unless told otherwise; the
+    """A `kernel` value whose inputs upper-case their code, confined unless told otherwise; the
     loop needs only `spec`, `confined`, `instructions()` and `run()`."""
 
     def __init__(self, confined: bool = True) -> None:
@@ -112,7 +112,7 @@ async def test_a_text_turn_is_one_model_step_and_two_transcript_entries() -> Non
     assert messages == ({"role": "user", "content": "hi"},)
 
 
-async def test_a_tool_turn_runs_the_call_as_a_cell_and_asks_again() -> None:
+async def test_a_tool_turn_runs_the_call_as_an_input_and_asks_again() -> None:
     scripted = Scripted([text("let me "), call("c1", "python", code="quiet")], [text("QUIET it is")])
     history = MemoryTranscript()
     assert await _collect(LoopModel(scripted, Shouting(), history), "shout for me") == "let me QUIET it is"
@@ -121,7 +121,7 @@ async def test_a_tool_turn_runs_the_call_as_a_cell_and_asks_again() -> None:
     assert scripted.requests[1][0][-1]["content"] == "QUIET"  # the result went back to the model
 
 
-async def test_an_unconfined_cell_is_put_to_the_person_and_a_no_runs_nothing() -> None:
+async def test_an_unconfined_input_is_put_to_the_person_and_a_no_runs_nothing() -> None:
     scripted = Scripted([call("c1", "python", code="x"), call("c2", "python", code="y")], [text("fine")])
     kernel, person, history = Shouting(confined=False), Person(False, True), MemoryTranscript()
     assert await _collect(LoopModel(scripted, kernel, history, output=person), "go") == "fine"
@@ -133,7 +133,7 @@ async def test_an_unconfined_cell_is_put_to_the_person_and_a_no_runs_nothing() -
     assert kernel.ran == ["y"]  # the no reached the model as text, and the yes ran
 
 
-async def test_a_confined_cell_is_never_asked_about_and_with_nobody_to_ask_nothing_runs() -> None:
+async def test_a_confined_input_is_never_asked_about_and_with_nobody_to_ask_nothing_runs() -> None:
     person = Person()
     scripted = Scripted([call("c1", "python", code="x")], [text("ok")])
     await _collect(LoopModel(scripted, Shouting(), MemoryTranscript(), output=person), "go")
@@ -303,7 +303,7 @@ async def test_an_interrupted_call_still_gets_an_answer_in_the_transcript() -> N
     assert tools[1]["content"].startswith("not run")  # c2 never started
 
 
-async def test_a_turn_stopped_at_the_approval_question_says_the_cell_never_ran() -> None:
+async def test_a_turn_stopped_at_the_approval_question_says_the_input_never_ran() -> None:
     kernel, history = Shouting(confined=False), MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "python", code="b")])
 
@@ -405,7 +405,7 @@ async def test_a_reply_closed_mid_stream_answers_its_message_with_what_it_said_a
     assert story.requests[1][-1]["content"] == "say NEXT-OK"
 
 
-async def test_a_reply_cancelled_while_its_model_waits_answers_its_message_too() -> None:
+async def test_a_reply_caninputed_while_its_model_waits_answers_its_message_too() -> None:
     story, history = _Story(), MemoryTranscript()
     model = LoopModel(story, Shouting(), history)
     shown: list[Json] = []
@@ -444,7 +444,7 @@ async def test_a_reply_stopped_before_it_said_anything_is_still_answered() -> No
     assert history.messages[-1] == {"role": "assistant", "content": STOPPED}
 
 
-async def test_a_call_that_is_not_a_cell_is_answered_as_text_and_runs_nothing() -> None:
+async def test_a_call_that_is_not_an_input_is_answered_as_text_and_runs_nothing() -> None:
     """A model (a small local one, say) that invents a tool, or calls python without code, reads
     why in the result; nothing reaches the kernel and the reply carries on."""
     kernel = Shouting()
@@ -459,7 +459,7 @@ async def test_a_call_that_is_not_a_cell_is_answered_as_text_and_runs_nothing() 
     assert kernel.ran == []
 
 
-def test_only_a_python_call_with_code_is_a_cell() -> None:
+def test_only_a_python_call_with_code_is_a_input() -> None:
     assert refusal({"id": "c", "name": "python", "input": {"code": "1"}}, PYTHON) is None
     assert refusal({"id": "c", "name": "python", "input": {"code": 1}}, PYTHON) is not None
     assert refusal({"id": "c", "name": "write_file", "input": {"code": "1"}}, PYTHON) is not None

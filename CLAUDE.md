@@ -39,10 +39,11 @@ uv run mypy                                               # strict; checked path
 scripts/arch-check                                        # every pypeeker gate (root, then libs/*); applies autofixes first, --no-fix to only report
 uv run pytest -m "not real_launch"                        # skip the tests that launch the real app in a pty
 scripts/sync-tokens [--check] [--bh-01 PATH]              # bh-01's token CSS -> bh-02's Textual theme (reads ../bh-01)
+scripts/model-friction [--examples N] [--json]            # where models trip in bh-02 sessions here: wrong tools, errors, lost output, nudges
 uv run bh-02                                              # the harness: a CodeAct session in a TUI, Claude through Claude Code on the subscription
 uv run bh-02 --resume [ID]                                # continue this directory's newest session (or ID: whole, its start, or its last part)
 uv run bh-02 sessions                                     # this directory's sessions, newest first
-uv run bh-02 --no-jail                                    # the kernel runs with your permissions; every cell asks
+uv run bh-02 --no-jail                                    # the kernel runs with your permissions; every input asks
 uv run bh-02 --model opus                                 # choose the model by name (sonnet, the default, opus, haiku, or yours in ~/.config/bh-02/models.toml; a session keeps it; /model lists and switches)
 uv run bh-02 --patch mine.toml                            # a layer of your own over the shipped composition
 uv run bh-02 update-layer mine.toml                       # rewrite a layer that names rows bh-02 renamed or dropped (keeps mine.toml.bak)

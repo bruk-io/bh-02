@@ -80,7 +80,7 @@ def test_an_old_layer_reads_in_today_s_names_and_says_what_changed() -> None:
         "but 'status' cannot turn off one part, so the status bar stays on: to turn off all of "
         "it (session, model and jail), give 'status' `disabled = true`",
         "row 'mode' is now 'chat'; rename its id",
-        "row 'actions' was removed: python is the one tool (the kernel's), and unjailed each cell "
+        "row 'actions' was removed: python is the one tool (the kernel's), and unjailed each input "
         "is approved in the modal; delete it",
         "row 'operator': its config names a renamed row; make it "
         'config = { clear = ["loop", "transcript", "kernel"] }',

@@ -1,6 +1,6 @@
 # tui-cordis-plugin
 
-bh-02's ui: a Textual app bound as `input`, `output` (whose `confirm` asks about a cell in a
+bh-02's ui: a Textual app bound as `input`, `output` (whose `confirm` asks about the model's code in a
 modal) and `frame` by `tui:app`, and small rows that push into the app's frame: the status
 bar's fields (`tui:status`: the session's id, the model, the jail's grades), the palette's commands
 (`tui:palette`), and `tui:sessions`, which lists this directory's sessions in the sidebar
@@ -78,7 +78,7 @@ and re-draws only the open one, so a chunk costs the same at line 2,000 as at li
 test times it). Text with no newlines settles by size: a piece longer than 2,000 characters is
 cut at its last line end or space, which ends a line there on screen (a paragraph that long is
 drawn as two), so a long paragraph costs the same at its end as at its start too. Thinking folds to one line once the reply moves on. A result or a call hangs
-beside its marker and a cell's code has a left border, so wrapped lines keep their gutter.
+beside its marker and an input's code has a left border, so wrapped lines keep their gutter.
 
 **History.** With `history` in its config (a session's layer sets `{"history":
 "<session>/events.jsonl"}`), the app appends every entry the transcript draws to that file

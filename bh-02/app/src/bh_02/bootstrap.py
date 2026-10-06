@@ -60,9 +60,9 @@ async def harness(*, done: _ChatDone) -> Effects:
 @dataclass(frozen=True, slots=True)
 class _LayerFiles:
     """The composition's own files (CONTRACTS.md: layers): every layer the loader is watching
-    (`paths`), and what no cell may read (`secrets`): the credential files bh-02 may have been
+    (`paths`), and what no input may read (`secrets`): the credential files bh-02 may have been
     started with and the sessions' state (Claude Code's own config and tokens). The jail keeps a
-    cell from rewriting the first and from reading the second."""
+    input from rewriting the first and from reading the second."""
 
     paths: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
@@ -82,7 +82,7 @@ def credential_files(anchors: Iterable[Path]) -> tuple[str, ...]:
 
 
 def unreadable(anchors: Iterable[Path], states: Iterable[str]) -> tuple[str, ...]:
-    """What no jailed cell may read (the `layers` value's `secrets`): every place the credential
+    """What no jailed input may read (the `layers` value's `secrets`): every place the credential
     may be (`credential_files`), and `states`, the sessions' state directories (this run's and
     the default one), where each session's Claude Code child keeps its config and messaging
     peer token. An empty state (a composition booted without sessions) adds nothing."""
@@ -92,7 +92,7 @@ def unreadable(anchors: Iterable[Path], states: Iterable[str]) -> tuple[str, ...
 @component(provides=("layers",))
 async def layer_files(*, config: _LayerFiles) -> Effects:
     """Binds the layer files `run()` was given, mounted by `run()` as a row of its own, so a
-    jail can keep a cell from rewriting the program it runs in."""
+    jail can keep an input from rewriting the program it runs in."""
     yield bind("layers", config)
 
 
@@ -160,7 +160,7 @@ async def run(
 
     Adds three rows of its own after `overrides`, pinned on: `layers`, which binds the layer
     files' paths and `secrets`, where the credential file may be and the sessions' state
-    (CONTRACTS.md: layers; the jail denies a cell both), `sessions`, which binds this
+    (CONTRACTS.md: layers; the jail denies an input both), `sessions`, which binds this
     directory's sessions and the running one (`sessions`; the default lists none), and
     `harness`, whose only job is to declare bh-02's dependency on `done`, so a chat row that
     never binds it is an ordinary "waiting on" stall and a `done` of the wrong shape is an

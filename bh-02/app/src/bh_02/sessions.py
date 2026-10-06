@@ -1,6 +1,6 @@
 """Sessions: every interactive run is a directory that can be listed and resumed.
 
-A session is where one conversation lives, outside the project (so a jailed cell can't touch
+A session is where one conversation lives, outside the project (so a jailed input can't touch
 it): `meta.json` (which directory, which stack, when), `session.toml`, the session's own
 layer file, `transcript.jsonl`, the loop's history (what a resume sends the model again), and
 `events.jsonl`, what the ui showed (so a resume shows it again). The session's layer is the
@@ -240,7 +240,7 @@ def models_file() -> Path:
 
 def default_state_root() -> Path:
     """`~/.local/state/bh-02/sessions`: where sessions live when `XDG_STATE_HOME` is not set,
-    so a run with it set still keeps a jailed cell out of a default run's sessions."""
+    so a run with it set still keeps a jailed input out of a default run's sessions."""
     return Path.home() / ".local" / "state" / "bh-02" / "sessions"
 
 

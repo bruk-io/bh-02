@@ -1,14 +1,14 @@
 """The `kernel` value: the host's end of the worker's socket, the process a jail started, and
-the model's one tool, `python(code)`, which runs a cell in it.
+the model's one tool, `python(code)`, which runs an input in it.
 
-A cell is one request and one answer: the worker runs the code and says it is done. Whether
+An input is one request and one answer: the worker runs the code and says it is done. Whether
 the person is asked first is the loop's to do (a kernel that is not `confined`), so the kernel
 depends on its jail alone and a new ui keeps the namespace. Every failure the kernel knows of (a
 worker that died, an answer too long or garbled to read, a worker that won't start again)
-comes back as the cell's text, never as an exception. Interrupting a cell (cancelling `run`) sends SIGINT
-through the jail, which the worker turns into `KeyboardInterrupt` in the cell, and waits for the
-cell to say it ended: the namespace survives. A worker that dies is started again on the next
-cell, and that cell is told its earlier variables are gone.
+comes back as the input's text, never as an exception. Interrupting an input (cancelling `run`) sends SIGINT
+through the jail, which the worker turns into `KeyboardInterrupt` in the input, and waits for the
+input to say it ended: the namespace survives. A worker that dies is started again on the next
+input, and that input is told its earlier variables are gone.
 """
 
 import asyncio
@@ -28,7 +28,7 @@ from kernel_cordis_plugin.python import PYTHON, instructions_for
 __all__ = ["Jail", "Jailed", "Kernel", "KernelConfig", "is_confined", "worker_argv"]
 
 _WORKER = Path(__file__).with_name("worker.py")
-_CONFINING = ("fs_write", "network")  # the axes a jail must enforce for its cells to count as confined
+_CONFINING = ("fs_write", "network")  # the axes a jail must enforce for its inputs to count as confined
 # The longest line the worker sends: its output and its error are capped at 20,000 characters
 # each, and JSON escapes a character to at most 12 bytes (a surrogate pair, `\ud83d\ude00`),
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
@@ -53,26 +53,44 @@ class Jail(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class KernelConfig:
-    """`root` is the working directory cells run in; `grace` how long an interrupted cell gets
-    to say it ended before the worker is stopped and started again."""
+    """`root` is the working directory inputs run in; `grace` how long an interrupted input gets
+    to say it ended before the worker is stopped and started again; `startup` the project's own
+    file (relative to `root`) a new kernel runs before its first input, when its inputs are
+    confined: the model's helpers, kept across sessions."""
 
     root: str = "."
     grace: float = 5.0
+    startup: str = ".bh-02/kernel.py"
 
 
 @dataclass(frozen=True, slots=True)
-class _Cell:
-    """What running one cell produced: what it printed, and the error it ended with, if any."""
+class _Output:
+    """What running one input produced: what it printed, and the error it ended with, if any."""
 
     output: str
     error: str | None = None
 
     def text(self) -> str:
-        """The cell as the model reads it."""
+        """The input as the model reads it."""
         parts = [self.output.rstrip("\n")] if self.output.strip() else []
         if self.error:
             parts.append(self.error)
         return "\n".join(parts) or "(no output)"
+
+
+def _startup_input(path: str) -> str:
+    """The input that runs the startup file at `path` in the namespace and prints, last, the
+    public names it defined."""
+    return "\n".join(
+        [
+            "import pathlib as _bh_path",
+            "_bh_before = set(globals())",
+            f"_bh_source = _bh_path.Path({path!r}).read_text(encoding='utf-8')",
+            f"exec(compile(_bh_source, {path!r}, 'exec'), globals())",
+            "print(', '.join(sorted(n for n in set(globals()) - _bh_before if not n.startswith('_'))))",
+            "del _bh_path, _bh_before, _bh_source",
+        ]
+    )
 
 
 def worker_argv(endpoint: str) -> list[str]:
@@ -81,7 +99,7 @@ def worker_argv(endpoint: str) -> list[str]:
 
 
 def is_confined(report: Mapping[str, str]) -> bool:
-    """Whether a jail's report says a cell can write only where it was allowed and reach no network."""
+    """Whether a jail's report says an input can write only where it was allowed and reach no network."""
     return all(report.get(axis) == "enforced" for axis in _CONFINING)
 
 
@@ -98,7 +116,8 @@ class Kernel:
         self._process: Jailed | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
-        self._restarted = False
+        self._restarted = False  # a worker started again, not the row's first
+        self._fresh = False  # a worker no input has run in yet
 
     @property
     def confined(self) -> bool:
@@ -114,7 +133,7 @@ class Kernel:
 
     def instructions(self) -> str:
         """What the model is told about the tool and where its code runs, read per request."""
-        return instructions_for(self.confined)
+        return instructions_for(self.confined, self._config.startup)
 
     async def __aenter__(self) -> Kernel:
         await self._start()
@@ -126,44 +145,65 @@ class Kernel:
         await self._stop()
 
     async def run(self, code: str) -> str:
-        """Run one cell and return it as the model reads it."""
+        """Run one input and return it as the model reads it."""
         return (await self._execute(code)).text()
 
-    async def _execute(self, code: str) -> _Cell:
+    async def _execute(self, code: str) -> _Output:
         async with self._lock:
             if self._writer is None:
                 try:
                     await self._start()
-                except Exception as error:  # the jail would not start it: the cell says so
+                except Exception as error:  # the jail would not start it: the input says so
                     await self._stop()
-                    return _Cell(
+                    return _Output(
                         "",
-                        f"error: the kernel could not be started again ({error}), so this cell did "
-                        "not run; the next cell tries again, and if it keeps failing, tell the "
+                        f"error: the REPL could not be started again ({error}), so this input did "
+                        "not run; the next input tries again, and if it keeps failing, tell the "
                         "person (`/restart kernel` starts the row afresh)",
                     )
                 self._restarted = True
-            note = "(the kernel was started again; variables from earlier cells are gone)\n"
-            prefix, self._restarted = (note if self._restarted else ""), False
+            prefix = ""
             try:
-                cell = await self._exchange(code)
+                if self._fresh:
+                    prefix, self._fresh, self._restarted = await self._opening(), False, False
+                ran = await self._exchange(code)
             except ConnectionError:
                 await self._stop()
-                return _Cell(
-                    prefix, "the kernel process ended during this cell; it will start again on the next"
+                return _Output(
+                    prefix, "the REPL's process ended during this input; a new one starts with the next"
                 )
             except ValueError as error:
                 # a line over the limit, or one that is not JSON: what follows can't be trusted
-                # to line up with a cell, so the worker is replaced rather than read on
+                # to line up with an input, so the worker is replaced rather than read on
                 await self._stop()
-                return _Cell(
+                return _Output(
                     prefix,
-                    f"error: the kernel's answer to this cell could not be read ({error}); the "
-                    "kernel will start again on the next cell, without the earlier variables",
+                    f"error: the REPL's answer to this input could not be read ({error}); a new "
+                    "REPL starts with the next input, without the earlier variables",
                 )
-            return _Cell(prefix + cell.output, cell.error) if prefix else cell
+            return _Output(prefix + ran.output, ran.error) if prefix else ran
 
-    async def _exchange(self, code: str) -> _Cell:
+    async def _opening(self) -> str:
+        """What a new kernel's first input is told before its own output, when there is anything
+        to tell: that the worker was started again, and what the startup file did. Jailed, the
+        file runs here; unjailed, it would run unasked with the person's permissions, so the
+        model is told to run it as an input of its own."""
+        notes = ["the REPL was started again; what earlier inputs defined is gone"] if self._restarted else []
+        startup = self._config.startup
+        if (Path(self._config.root) / startup).is_file():
+            if not self.confined:
+                notes.append(
+                    f"{startup} was not run: inputs here are put to the person, so run it as an input "
+                    f"of your own if you want it: exec(open({startup!r}).read())"
+                )
+            elif (ran := await self._exchange(_startup_input(startup))).error:
+                notes.append(f"{startup} ran first and failed, so what it defines is missing:\n{ran.error}")
+            else:
+                lines = ran.output.strip().splitlines()
+                notes.append(f"{startup} ran first and defined: {lines[-1] if lines else 'nothing'}")
+        return f"({'. '.join(notes)})\n" if notes else ""
+
+    async def _exchange(self, code: str) -> _Output:
         self._send({"op": "exec", "code": code})
         try:
             return await self._until_done()
@@ -171,15 +211,15 @@ class Kernel:
             await self._interrupt()
             raise
 
-    async def _until_done(self) -> _Cell:
-        """Read the worker until the cell ends."""
+    async def _until_done(self) -> _Output:
+        """Read the worker until the input ends."""
         while True:
             message = await self._receive()
             if message.get("op") == "done":
-                return _Cell(str(message.get("output", "")), message.get("error"))
+                return _Output(str(message.get("output", "")), message.get("error"))
 
     async def _interrupt(self) -> None:
-        """Stop the running cell and wait for it to end; a worker that won't is restarted."""
+        """Stop the running input and wait for it to end; a worker that won't is restarted."""
         if self._process is None:
             return
         self._process.interrupt()
@@ -211,6 +251,7 @@ class Kernel:
         self._process = await self._jail.start(worker_argv(endpoint), cwd=root, endpoint=endpoint)
         self._reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)
         self._send({"op": "hello"})
+        self._fresh = True
 
     async def _stop(self) -> None:
         if self._writer is not None:

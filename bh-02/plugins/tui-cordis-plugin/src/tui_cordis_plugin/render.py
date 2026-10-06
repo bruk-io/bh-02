@@ -1,7 +1,7 @@
 """What a turn's events, a lifecycle change and a jail's grades say: pure.
 
 Text for what is one line (a stop, usage, a note), `Content` for what has styled parts (a
-reply's markdown, a cell's highlighted code, a coloured diff). Every style is a theme token
+reply's markdown, an input's highlighted code, a coloured diff). Every style is a theme token
 (`$text-success`, ...), never a colour, so the theme decides how it looks; the widgets add a
 CSS class per kind. Everything here is a function of its arguments (CONTRACTS.md: event), so
 it is tested without an app.
@@ -39,7 +39,7 @@ type Event = Mapping[str, Any]
 type Fence = str | None
 
 _MAX_ARG = 60
-# Arguments that are code, shown as a block rather than cut to a glance: a cell's.
+# Arguments that are code, shown as a block rather than cut to a glance: an input's.
 _BLOCKS = ("code",)
 _MAX_CODE_LINES = 40
 _MAX_RESULT_LINES = 12
@@ -142,7 +142,7 @@ def tool_call_head(event: Event) -> str:
 
 
 def tool_call_code(event: Event) -> Content | None:
-    """The code a tool call carries (a cell's), highlighted; else None.
+    """The code a tool call carries (an input's), highlighted; else None.
     A long one is cut, and says how much was left out."""
     input: Mapping[str, Any] = event.get("input") or {}
     block = _block_key(input)
@@ -267,15 +267,19 @@ def waiting_line(rows: Iterable[str]) -> str:
 
 
 def approval_title(request: Event) -> str:
-    """The question an approval asks: run this cell, and how long it is, in one line."""
-    name = str(request.get("name", "?"))
+    """The question an approval asks: run this input, and how long it is, in one line; or the
+    request's own `title`, when it asks about something other than an input."""
     input: Mapping[str, Any] = request.get("input") or {}
     lines = str(input.get("code") or "").strip().splitlines()
-    return f"Run this {name} cell ({len(lines)} line{'s' if len(lines) != 1 else ''})?"
+    size = f"{len(lines)} line{'s' if len(lines) != 1 else ''}"
+    if title := str(request.get("title") or ""):
+        question = title.removesuffix("?")
+        return f"{question} ({size}){title[len(question) :]}" if lines else title
+    return f"Run this {request.get('name', '?')} code ({size})?"
 
 
 def approval_lines(request: Event) -> list[str]:
-    """The cell's code, whole: nobody approves code unseen."""
+    """The input's code, whole: nobody approves code unseen."""
     input: Mapping[str, Any] = request.get("input") or {}
     return str(input.get("code") or "").strip("\n").splitlines()
 

@@ -28,7 +28,7 @@ from models_cordis_plugin.claude_code.testing import FakeClaudeCode, FakeStep
 
 _SPEC = {
     "name": "python",
-    "description": "Run a cell.",
+    "description": "Run an input.",
     "parameters": {"type": "object", "properties": {"code": {"type": "string"}}},
 }
 _SYSTEM = {"role": "system", "content": "You are a test."}
@@ -96,7 +96,9 @@ async def test_an_answer_is_one_query_and_claude_code_is_started_locked_down(tmp
     (fake,) = h.fakes
     assert fake.asked == ["hi"] and fake.interrupts == 0
     options = fake.options
-    assert options.system_prompt == "You are a test."
+    note, system = options.system_prompt.split("\n\n")
+    assert system == "You are a test."  # the request's, after a note on what Claude Code's own line means
+    assert "you are not working in it" in note and "`python` as `mcp__bh__python`" in note
     assert options.tools == [] and options.setting_sources == [] and options.strict_mcp_config
     assert options.include_partial_messages and options.model == "sonnet"
     assert str(options.cli_path).endswith("claude-code-detached")
@@ -170,7 +172,7 @@ async def test_closing_a_step_mid_stream_interrupts_claude_code_and_the_next_lin
     assert _said(after) == "sure" and len(h.fakes) == 1 and fake.asked[-1] == "something else"
 
 
-async def test_a_cancelled_step_interrupts_and_the_next_step_still_reads_the_stream(tmp_path: Path) -> None:
+async def test_a_caninputed_step_interrupts_and_the_next_step_still_reads_the_stream(tmp_path: Path) -> None:
     """A Ctrl-C cancels the reply's task mid-await (chat's `_interruptible`), inside this
     model's read of Claude Code's stream, not only at a yield; the loop then closes it."""
     h = _Harness(tmp_path, [FakeStep([_text("Once upon a time")], stall_after=4)])
@@ -381,7 +383,7 @@ async def test_a_changed_system_prompt_restarts_claude_code_on_its_own_session(t
     second = await h.step([*asked, _entry(first), {"role": "user", "content": "b"}], system=moved)
     old, new = h.fakes
     assert _said(second) == "two" and old.disconnected
-    assert new.options.resume == "fake-session" and new.options.system_prompt == moved["content"]
+    assert new.options.resume == "fake-session" and new.options.system_prompt.endswith(moved["content"])
     assert new.asked == ["b"]
 
 

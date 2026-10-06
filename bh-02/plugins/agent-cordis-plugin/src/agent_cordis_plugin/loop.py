@@ -1,10 +1,10 @@
-"""The loop: a turn is one model step plus the cells it asked for, until it asks for none.
+"""The loop: a turn is one model step plus the inputs it asked for, until it asks for none.
 
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
 kernel, transcript, system, output). The model has one tool, the kernel's `python(code)`,
-offered through the provider's standard tool calling; every call runs as a cell in the kernel.
+offered through the provider's standard tool calling; every call runs as an input in the kernel.
 A kernel that is not `confined` runs with the person's own permissions, so the loop puts each
-of its cells to the person first (`output.confirm`) and runs it only on a yes: one place for
+of its inputs to the person first (`output.confirm`) and runs it only on a yes: one place for
 every model provider, and the loop knows whether a stopped call ever reached the kernel.
 """
 
@@ -40,7 +40,7 @@ class Model(Protocol):
 @runtime_checkable
 class Python(Protocol):
     """What the loop needs of the `kernel` value: the one tool's spec, what to tell the model
-    about it, whether its cells are confined, and a cell run as the model reads it."""
+    about it, whether its inputs are confined, and an input run as the model reads it."""
 
     @property
     def spec(self) -> Json: ...
@@ -52,7 +52,7 @@ class Python(Protocol):
 
 @runtime_checkable
 class Asks(Protocol):
-    """What the loop needs of the `output` value: a yes-or-no question about a cell."""
+    """What the loop needs of the `output` value: a yes-or-no question about an input."""
 
     async def confirm(self, request: Json) -> bool: ...
 
@@ -76,8 +76,8 @@ class Transcript(Protocol):
 _INTERRUPTED = "interrupted: the person stopped this call before it finished; it may have partly run"
 # A call the stop came before: at the person's approval, or queued behind the one stopped.
 _NOT_RUN = "not run: the person stopped the turn before this call started, so none of it ran"
-# What a cell the person said no to answers the model with.
-DECLINED = "denied: the person said no to this cell, so it did not run; ask them what they want instead"
+# What an input the person said no to answers the model with.
+DECLINED = "denied: the person said no to this input, so it did not run; ask them what they want instead"
 # What a turn that never finished ends with in the transcript, after what it said so far: the
 # person stopped it, or the model failed (a 429, a dropped connection).
 STOPPED = "[the person stopped this reply here]"
@@ -85,7 +85,7 @@ FAILED = "[this reply failed here; the person saw the error]"
 
 
 def refusal(call: Json, spec: Json) -> str | None:
-    """Why a call can't run as a cell (a name other than the one tool's, or no `code` string),
+    """Why a call can't run as an input (a name other than the one tool's, or no `code` string),
     as text the model reads instead of a result; None when it can run."""
     name = str(spec["name"])
     if call["name"] != name:
@@ -126,10 +126,10 @@ class LoopModel:
         self._transcript = transcript
         self._max_nudges = max_nudges
         self._system = system
-        self._output = output  # none: nobody to ask, so an unconfined cell is declined
+        self._output = output  # none: nobody to ask, so an unconfined input is declined
 
     async def _approved(self, call: Json) -> bool:
-        """Whether a cell may run: a confined one always; an unconfined one on the person's yes."""
+        """Whether an input may run: a confined one always; an unconfined one on the person's yes."""
         if self._kernel.confined:
             return True
         return self._output is not None and await self._output.confirm(

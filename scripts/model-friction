@@ -1,0 +1,208 @@
+#!/usr/bin/env -S uv run --quiet python
+"""Where models trip in bh-02: a count of the telltale moments in real sessions' transcripts.
+
+Reads every session's `transcript.jsonl` under bh-02's state directory (`$XDG_STATE_HOME/bh-02/
+sessions`, else `~/.local/state/bh-02/sessions`, or `--sessions DIR`) and counts, per signal,
+how often it happened and in how many sessions, with a few examples of each. A transcript holds
+the conversation since its last /clear. Run it after using bh-02 for a while: the signals that
+come up most are where the prompt, the kernel or the loop should change next.
+
+    scripts/model-friction                 # every session here
+    scripts/model-friction --examples 5    # more examples per signal
+    scripts/model-friction --json          # the findings, for another tool
+
+The signals match the texts bh-02 itself writes (the loop's refusals and nudges, the kernel's
+notes), so a change to one of those texts is a change here too. Standard library only.
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+type Message = Mapping[str, Any]
+
+# What each signal means, in the order the report lists them.
+SIGNALS = {
+    "no_such_tool": "called a tool that does not exist (Claude Code's Bash, Read, Edit, ...): it thought it was elsewhere",
+    "no_code": "called python without a `code` string",
+    "nudged": "a step the loop had to send back (cut off at the output limit, empty, or a call that did not decode)",
+    "error": "an input that raised",
+    "forgotten_name": "a NameError for a name the REPL never had: usually one an earlier session or REPL defined",
+    "uncaptured_output": "ran a program without capturing its output, so the input saw nothing of it",
+    "timeout": "a program that ran out of its timeout",
+    "cut_output": "an input whose output was cut at 20,000 characters",
+    "repl_restarted": "the REPL died and was started again",
+    "declined": "an input the person said no to (unjailed)",
+    "interrupted": "a turn the person stopped mid-input",
+    "claude_code": "the model's own text mentions Claude Code",
+    "extension_written": "an input that wrote into .bh-02/plugins (the model extending bh-02)",
+    "startup_file": "an input that wrote .bh-02/kernel.py (the model keeping its helpers)",
+}
+_PROGRAM = re.compile(r"\b(?:subprocess\.(?:run|call|check_call|Popen)|os\.system)\(")
+_CAPTURED = re.compile(r"capture_output\s*=\s*True|stdout\s*=|check_output\(")
+_EXCEPTION = re.compile(r"^(\w+(?:\.\w+)*(?:Error|Exception|Exit|Interrupt|Expired)):", re.M)
+_WRITES = re.compile(r"write_text\(|open\([^)]*['\"][wa]")
+
+
+@dataclass(frozen=True, slots=True)
+class Finding:
+    """One moment: which signal, in which session, and a line or two to recognise it by."""
+
+    signal: str
+    session: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class Totals:
+    sessions: int
+    turns: int
+    inputs: int
+
+
+def _short(text: str, width: int = 160) -> str:
+    one = " ".join(str(text).split())
+    return one if len(one) <= width else one[: width - 1] + "…"
+
+
+def _calls(messages: Sequence[Message]) -> dict[str, Mapping[str, Any]]:
+    """Every tool call by id, so a result can be read beside the code it answers."""
+    return {
+        str(call.get("id")): call
+        for message in messages
+        if message.get("role") == "assistant"
+        for call in message.get("tool_calls") or ()
+    }
+
+
+def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
+    """The signals in one transcript, pure: what happened, never why."""
+    calls = _calls(messages)
+    for message in messages:
+        role, content = message.get("role"), str(message.get("content") or "")
+        if role == "user" and message.get("feedback"):
+            yield Finding("nudged", session, str(message["feedback"]))
+        elif role == "assistant" and "Claude Code" in content:
+            yield Finding("claude_code", session, _short(content))
+        elif role == "tool":
+            call = calls.get(str(message.get("call_id")), {})
+            code = str((call.get("input") or {}).get("code") or "")
+            yield from _one_input(session, code, content)
+        if role == "assistant":
+            for call in message.get("tool_calls") or ():
+                code = str((call.get("input") or {}).get("code") or "")
+                if ".bh-02/plugins" in code and _WRITES.search(code):
+                    yield Finding("extension_written", session, _short(code))
+                if ".bh-02/kernel.py" in code and _WRITES.search(code):
+                    yield Finding("startup_file", session, _short(code))
+
+
+def _one_input(session: str, code: str, result: str) -> Iterator[Finding]:
+    if result.startswith("error: there is no tool named"):
+        yield Finding("no_such_tool", session, _short(result))
+        return
+    if result.startswith("error: python takes `code`"):
+        yield Finding("no_code", session, _short(result))
+        return
+    if result.startswith("denied: the person said no"):
+        yield Finding("declined", session, _short(code))
+        return
+    if result.startswith(("interrupted: the person stopped", "not run: the person stopped")):
+        yield Finding("interrupted", session, _short(code))
+        return
+    if result.startswith("(the REPL was started again"):
+        yield Finding("repl_restarted", session, _short(code))
+    if "Traceback (most recent call last)" in result or result.startswith("SyntaxError"):
+        kinds = _EXCEPTION.findall(result)
+        kind = kinds[-1] if kinds else "SyntaxError" if "SyntaxError" in result else "?"
+        yield Finding("error", session, f"{kind}: {_short(code, 100)}")
+        if "has not been defined in this REPL" in result:
+            yield Finding("forgotten_name", session, _short(code))
+        if kind.endswith("TimeoutExpired"):
+            yield Finding("timeout", session, _short(code))
+    if "characters cut here" in result or "more chars]" in result:
+        yield Finding("cut_output", session, _short(code))
+    quiet = result.strip() in ("(no output)", "0") or result.lstrip().startswith("CompletedProcess(")
+    if quiet and _PROGRAM.search(code) and not _CAPTURED.search(code):
+        yield Finding("uncaptured_output", session, _short(code))
+
+
+def _sessions_dir(given: str | None) -> Path:
+    if given:
+        return Path(given)
+    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(state) / "bh-02" / "sessions"
+
+
+def _transcripts(root: Path) -> Iterator[tuple[str, list[Message]]]:
+    for path in sorted(root.glob("*/transcript.jsonl")):
+        messages: list[Message] = []
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                if isinstance(loaded := json.loads(line), dict):
+                    messages.append(loaded)
+            except ValueError:
+                continue  # a line cut off when bh-02 was killed mid-write
+        yield path.parent.name, messages
+
+
+def _report(found: Sequence[Finding], totals: Totals, examples: int) -> str:
+    lines = [
+        f"{totals.sessions} sessions, {totals.turns} replies, {totals.inputs} inputs",
+        "",
+        f"{'signal':<20}{'count':>7}{'per 100 inputs':>15}{'sessions':>10}  what it means",
+    ]
+    for signal, meaning in SIGNALS.items():
+        hits = [f for f in found if f.signal == signal]
+        rate = f"{100 * len(hits) / totals.inputs:.1f}" if totals.inputs else "-"
+        sessions = len({f.session for f in hits})
+        lines.append(f"{signal:<20}{len(hits):>7}{rate:>15}{sessions:>10}  {meaning}")
+    errors: dict[str, int] = {}
+    for f in found:
+        if f.signal == "error":
+            kind = f.detail.split(":", 1)[0]
+            errors[kind] = errors.get(kind, 0) + 1
+    if errors:
+        common = sorted(errors.items(), key=lambda kv: -kv[1])[:8]
+        lines += ["", "errors by kind: " + ", ".join(f"{kind} {n}" for kind, n in common)]
+    for signal in SIGNALS:
+        hits = [f for f in found if f.signal == signal][-examples:]
+        if hits:
+            lines += ["", f"{signal}, the latest:"]
+            lines += [f"  {f.session[:8]}  {f.detail}" for f in hits]
+    return "\n".join(lines)
+
+
+def main(argv: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--sessions", help="bh-02's sessions directory (default: its state directory's)")
+    parser.add_argument("--examples", type=int, default=3, help="examples per signal (default 3)")
+    parser.add_argument("--json", action="store_true", help="print the findings as JSON lines")
+    args = parser.parse_args(argv)
+    root = _sessions_dir(args.sessions)
+    if not root.is_dir():
+        print(f"no sessions at {root}; run bh-02, or say where with --sessions DIR", file=sys.stderr)
+        return 1
+    found: list[Finding] = []
+    sessions = turns = inputs = 0
+    for session, messages in _transcripts(root):
+        sessions += 1
+        turns += sum(1 for m in messages if m.get("role") == "user" and not m.get("feedback"))
+        inputs += sum(1 for m in messages if m.get("role") == "tool")
+        found.extend(findings(session, messages))
+    if args.json:
+        for f in found:
+            print(json.dumps({"signal": f.signal, "session": f.session, "detail": f.detail}))
+    else:
+        print(_report(found, Totals(sessions, turns, inputs), args.examples))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

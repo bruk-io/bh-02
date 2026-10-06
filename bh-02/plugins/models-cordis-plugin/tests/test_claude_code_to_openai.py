@@ -19,7 +19,7 @@ from models_cordis_plugin.openai.testing import StubServer
 
 _SPEC = {
     "name": "python",
-    "description": "Run a cell.",
+    "description": "Run an input.",
     "parameters": {"type": "object", "properties": {"code": {"type": "string"}}},
 }
 _SYSTEM = {"role": "system", "content": "You are a test."}

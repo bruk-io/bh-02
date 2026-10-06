@@ -10,10 +10,10 @@ def _styles(content: Content) -> dict[str, str]:
     return {content.plain[span.start : span.end]: str(span.style) for span in content.spans}
 
 
-def test_a_cell_is_its_name_over_its_code_highlighted_and_other_calls_one_line() -> None:
-    cell = {"name": "python", "input": {"code": "x = 1\nprint(x)"}}
-    assert render.tool_call_head(cell) == "python"
-    code = render.tool_call_code(cell)
+def test_an_input_is_its_name_over_its_code_highlighted_and_other_calls_one_line() -> None:
+    call = {"name": "python", "input": {"code": "x = 1\nprint(x)"}}
+    assert render.tool_call_head(call) == "python"
+    code = render.tool_call_code(call)
     assert code is not None and code.plain == "x = 1\nprint(x)"
     assert _styles(code).get("print", "").startswith("$")  # highlighted, in the theme's tokens
     invented = {"name": "read_file", "input": {"path": "a.txt"}}  # a call a model made up
@@ -119,13 +119,17 @@ def test_only_a_reload_or_a_failure_is_worth_a_note() -> None:
     assert render.lifecycle_line("bind", "loop", None, seen=True) is None
 
 
-def test_an_approval_names_the_cell_and_shows_its_code_whole() -> None:
-    cell = {"name": "python", "input": {"code": "a = 1\nb = 2"}}
-    assert render.approval_title(cell) == "Run this python cell (2 lines)?"
-    assert render.approval_lines(cell) == ["a = 1", "b = 2"]
+def test_an_approval_names_the_input_and_shows_its_code_whole() -> None:
+    call = {"name": "python", "input": {"code": "a = 1\nb = 2"}}
+    assert render.approval_title(call) == "Run this python code (2 lines)?"
+    assert render.approval_lines(call) == ["a = 1", "b = 2"]
     empty = {"name": "python", "input": {"code": ""}}
-    assert render.approval_title(empty) == "Run this python cell (0 lines)?"
+    assert render.approval_title(empty) == "Run this python code (0 lines)?"
     assert render.approval_lines(empty) == []
+    # a request about something other than an input (an extension to load) asks its own question
+    asked = {"name": "extension", "title": "Load extension todo, unjailed?", "input": {"code": "x = 1"}}
+    assert render.approval_title(asked) == "Load extension todo, unjailed (1 line)?"
+    assert render.approval_lines(asked) == ["x = 1"]
 
 
 def test_the_jail_in_a_status_bar() -> None:

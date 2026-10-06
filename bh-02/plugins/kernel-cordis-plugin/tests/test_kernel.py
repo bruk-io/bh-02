@@ -1,8 +1,9 @@
 """A real worker process, started unjailed: persistence, interrupt, restart, stop, and failures
-that come back as the cell's text."""
+that come back as the input's text."""
 
 import asyncio
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -19,10 +20,76 @@ from kernel_cordis_plugin import (
     Kernel,
     KernelConfig,
     Unjailed,
+    instructions_for,
     is_confined,
     kernel,
     worker_argv,
 )
+
+
+async def test_a_traceback_shows_each_line_and_the_input_it_came_from() -> None:
+    async with Kernel(Unjailed(), KernelConfig()) as k:
+        await k.run("def parse(line):\n    key, value = line.split('=')\n    return key, value")
+        failed = await k.run("pairs = [parse(l) for l in ['a=1', 'c']]")
+        assert 'File "<input 2>", line 1, in <module>\n    pairs = [parse(l)' in failed
+        assert "File \"<input 1>\", line 2, in parse\n    key, value = line.split('=')" in failed
+
+
+async def test_a_name_this_kernel_never_had_says_the_kernel_is_new() -> None:
+    async with Kernel(Unjailed(), KernelConfig()) as k:
+        missing = await k.run("helper()")
+        assert "NameError" in missing and "'helper' has not been defined in this REPL" in missing
+        assert "earlier session, or before /clear or a restart" in missing
+        await k.run("helper = 1")
+        await k.run("del helper")
+        again = await k.run("helper")
+        assert "NameError" in again and "has not been defined" not in again  # it had been: no hint
+
+
+async def test_the_project_s_startup_file_runs_first_when_inputs_are_confined(tmp_path: Path) -> None:
+    (tmp_path / ".bh-02").mkdir()
+    (tmp_path / ".bh-02" / "kernel.py").write_text("def sh(cmd):\n    return cmd\n\nTOOLS = 2\n_hidden = 1\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run("sh('ls')")
+        assert first == "(.bh-02/kernel.py ran first and defined: TOOLS, sh)\n'ls'"
+        assert await k.run("TOOLS") == "2"  # told once, then plain inputs
+    (tmp_path / ".bh-02" / "kernel.py").write_text("raise RuntimeError('broken helper')\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        failed = await k.run("1")
+        assert (
+            failed.startswith("(.bh-02/kernel.py ran first and failed")
+            and "RuntimeError: broken helper" in failed
+        )
+        assert failed.endswith(")\n1")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:  # unjailed: not unasked
+        told = await k.run("1")
+        assert told.startswith("(.bh-02/kernel.py was not run: inputs here are put to the person")
+        assert "exec(open('.bh-02/kernel.py').read())" in told and "broken" not in told
+
+
+def test_the_model_is_told_its_tool_is_a_repl_of_its_own_that_persists_and_how_to_use_it() -> None:
+    told = instructions_for(True)
+    assert told.startswith("Your one tool is `python`: a Python REPL of your own")
+    assert "Your own Python REPL, which persists" in PYTHON["description"]
+    # how long it lasts, and what empties it
+    assert "persists for this run of bh-02" in told and "across a /model switch" in told
+    # not a notebook: the habits a model brings from one fail here
+    assert "not IPython or a notebook: no `!command` or `%magic`, and no top-level `await`" in told
+    assert "a resumed session too" in told and "after /clear" in told
+    # the ways an input's output can go missing, measured against a real worker below
+    assert "capture_output=True" in told and "never reaches you" in told and "input() fails" in told
+    assert "capture_output=True" in PYTHON["description"]
+    assert told.endswith("Inputs run without asking.") and instructions_for(False).endswith(
+        "say what they do."
+    )
+
+
+async def test_a_program_s_own_output_reaches_an_input_only_when_captured(tmp_path: Path) -> None:
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("import subprocess; subprocess.run(['echo', 'lost']).returncode") == "0"
+        said = await k.run("print(subprocess.run(['echo', 'kept'], capture_output=True, text=True).stdout)")
+        assert said == "kept"
+        assert "EOFError" in await k.run("input()")
 
 
 class Confined(Unjailed):
@@ -39,12 +106,12 @@ async def test_the_namespace_persists_and_the_last_expression_is_shown() -> None
         assert await k.run("print('hello')\nx + 22") == "hello\n42"
 
 
-async def test_the_kernel_is_the_one_tool_and_its_namespace_holds_only_what_cells_put_there() -> None:
+async def test_the_kernel_is_the_one_tool_and_its_namespace_holds_only_what_inputs_put_there() -> None:
     async with Kernel(Unjailed(), KernelConfig()) as k:
         assert k.spec == PYTHON and k.spec["name"] == "python"
         assert "open() or pathlib" in k.instructions() and "unjailed" in k.instructions()
         names = await k.run("sorted(n for n in globals() if not n.startswith('__'))")
-        assert names == "[]"  # no functions of the host's: a cell is plain Python
+        assert names == "[]"  # no functions of the host's: an input is plain Python
 
 
 async def test_a_confined_kernel_says_so_and_tells_the_model_it_runs_in_a_jail() -> None:
@@ -53,21 +120,26 @@ async def test_a_confined_kernel_says_so_and_tells_the_model_it_runs_in_a_jail()
         assert await k.run("6 * 7") == "42"
 
 
-async def test_a_cell_too_long_to_send_whole_comes_back_capped_and_the_kernel_carries_on() -> None:
+async def test_an_input_too_long_to_send_whole_comes_back_capped_and_the_kernel_carries_on() -> None:
     """20,000 emoji are 240 KB as JSON, and a traceback has no length of its own: both used to
-    overrun the host's line limit and leave the stream out of step for every later cell."""
+    overrun the host's line limit and leave the stream out of step for every later input."""
     async with Kernel(Unjailed(), KernelConfig()) as k:
         await k.run("kept = 1")
-        emoji = await k.run("print('\\N{GRINNING FACE}' * 30000)")
-        assert emoji.startswith("\N{GRINNING FACE}" * 100) and emoji.endswith("[10001 more chars]")
+        emoji = await k.run("print('\\N{GRINNING FACE}' * 30000 + 'the end')")
+        # the start and the end are kept (a summary is last), and the whole is saved for an input
+        assert emoji.startswith("\N{GRINNING FACE}" * 100) and emoji.endswith("the end")
+        cut = re.search(r"\[10008 characters cut here; all of it is in (\S+)\]", emoji)
+        assert cut is not None and len(emoji) < 20_200
+        assert Path(cut.group(1)).read_text(encoding="utf-8").startswith("\N{GRINNING FACE}" * 30000)
         huge = await k.run("raise Exception('x' * 100000)")
-        assert huge.startswith("Traceback") and "more chars]" in huge and len(huge) < 21_000
+        assert huge.startswith("Traceback") and "characters cut here" in huge and len(huge) < 20_200
+        assert huge.endswith("x" * 100)  # the end of the error, where its message is
         assert await k.run("kept + 1") == "2"  # the same worker, its namespace intact
 
 
 async def test_an_answer_that_cannot_be_read_restarts_the_kernel_instead_of_raising() -> None:
     """A worker that sends what the host can't read (here, a line that is not JSON) is replaced,
-    and the cell says so: nothing escapes `run` to end the session."""
+    and the input says so: nothing escapes `run` to end the session."""
     async with Kernel(Unjailed(), KernelConfig()) as k:
         await k.run("x = 1")
         garbled = await k.run(
@@ -75,12 +147,12 @@ async def test_an_answer_that_cannot_be_read_restarts_the_kernel_instead_of_rais
             "channel = next(o for o in gc.get_objects() if type(o).__name__ == '_Channel')\n"
             "channel._conn.sendall(b'not json\\n')"
         )
-        assert garbled.startswith("error: the kernel's answer to this cell could not be read"), garbled
+        assert garbled.startswith("error: the REPL's answer to this input could not be read"), garbled
         again = await k.run("'x' in globals()")
-        assert again.startswith("(the kernel was started again") and again.endswith("False")
+        assert again.startswith("(the REPL was started again") and again.endswith("False")
 
 
-async def test_a_kernel_that_cannot_start_again_says_so_as_the_cell_and_tries_again_next_time() -> None:
+async def test_a_kernel_that_cannot_start_again_says_so_as_the_input_and_tries_again_next_time() -> None:
     class Flaky(Unjailed):
         def __init__(self) -> None:
             super().__init__()
@@ -96,27 +168,29 @@ async def test_a_kernel_that_cannot_start_again_says_so_as_the_cell_and_tries_ag
         assert "ended" in await k.run("import os; os._exit(3)")
         jail.refuse = True
         refused = await k.run("1 + 1")
-        assert refused.startswith("error: the kernel could not be started again (the jail is broken)")
+        assert refused.startswith("error: the REPL could not be started again (the jail is broken)")
         jail.refuse = False
         assert (await k.run("1 + 1")).endswith("2")
 
 
-async def test_an_unjailed_cell_does_not_inherit_a_claude_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_unjailed_input_does_not_inherit_a_claude_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "not-a-real-token")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://not-a-real-endpoint")
     monkeypatch.setenv("CLAUDE_CODE_MESSAGING_TOKEN", "not-a-real-token")  # a launching Claude Code's
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("BH_02_TEST_KEPT", "yes")
     async with Kernel(Unjailed(), KernelConfig()) as k:
-        cell = await k.run(
+        ran = await k.run(
             "import os\n"
             "sorted(n for n in os.environ if n.startswith(('CLAUDE', 'ANTHROPIC_'))), "
             "os.environ.get('BH_02_TEST_KEPT')"
         )
-        assert cell == "([], 'yes')"  # Claude's variables are the host's; the rest is inherited
+        assert ran == "([], 'yes')"  # Claude's variables are the host's; the rest is inherited
 
 
-async def test_an_interrupted_cell_stops_and_the_namespace_survives() -> None:
+async def test_an_interrupted_input_stops_and_the_namespace_survives() -> None:
     async with Kernel(Unjailed(), KernelConfig()) as k:
         await k.run("kept = 'still here'")
         spinning = asyncio.create_task(k.run("while True: pass"))
@@ -130,17 +204,17 @@ async def test_errors_come_back_as_text_and_a_dead_worker_is_started_again() -> 
     async with Kernel(Unjailed(), KernelConfig()) as k:
         failed = await k.run("1/0")
         assert "ZeroDivisionError" in failed
-        assert "worker.py" not in failed and 'File "<cell>", line 1' in failed  # the cell's own
+        assert "worker.py" not in failed and 'File "<input 1>", line 1' in failed  # the input's own
         deep = await k.run("def f():\n    open('/nonexistent/x')\nf()")
         assert deep.startswith("Traceback (most recent call last):")
-        assert "worker.py" not in deep and deep.count('File "<cell>"') == 2
+        assert "worker.py" not in deep and deep.count('File "<input 2>"') == 2
         missing = await k.run("undefined_name")
         assert "NameError" in missing and "undefined_name" in missing
         await k.run("x = 1")
         died = await k.run("import os; os._exit(3)")
         assert "ended" in died
         again = await k.run("'x' in globals()")
-        assert again.startswith("(the kernel was started again") and again.endswith("False")
+        assert again.startswith("(the REPL was started again") and again.endswith("False")
 
 
 async def test_the_row_starts_the_worker_and_leaving_stops_it() -> None:
@@ -173,8 +247,8 @@ def test_confined_means_writes_and_network_are_enforced() -> None:
     assert not is_confined(UNENFORCED)
 
 
-async def test_a_worker_whose_host_goes_away_ends_even_mid_cell() -> None:
-    """If bh-02 dies while a cell spins, the worker must not outlive it."""
+async def test_a_worker_whose_host_goes_away_ends_even_mid_input() -> None:
+    """If bh-02 dies while an input spins, the worker must not outlive it."""
     short = tempfile.mkdtemp(prefix="bh-t-", dir="/tmp")  # a socket path must fit in ~100 bytes
     endpoint = str(Path(short) / "k.sock")
     started = await Unjailed().start(worker_argv(endpoint), cwd=short, endpoint=endpoint)
@@ -182,7 +256,7 @@ async def test_a_worker_whose_host_goes_away_ends_even_mid_cell() -> None:
     writer.write(b'{"op": "hello"}\n{"op": "exec", "code": "while True: pass"}\n')
     await writer.drain()
     await asyncio.sleep(0.2)
-    writer.close()  # the host goes away mid-cell
+    writer.close()  # the host goes away mid-input
     try:
         await asyncio.wait_for(started.stopped(), 5)
     finally:

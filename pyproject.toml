@@ -100,6 +100,8 @@ src = [
     "bh-02/plugins/commands-cordis-plugin/tests",
     "bh-02/plugins/context-cordis-plugin/src",
     "bh-02/plugins/context-cordis-plugin/tests",
+    "bh-02/plugins/extensions-cordis-plugin/src",
+    "bh-02/plugins/extensions-cordis-plugin/tests",
     "bh-02/plugins/kernel-cordis-plugin/src",
     "bh-02/plugins/kernel-cordis-plugin/tests",
     "bh-02/plugins/models-cordis-plugin/src",
@@ -138,7 +140,7 @@ mode = "library"  # what a package __init__ re-exports is protected public API (
 [tool.pypeeker.terminal-io]
 allowed = ["tui_cordis_plugin", "bh_02.cli", "warden.cli"]
 
-# The kernel's worker is a separate program whose stdout is the cell's output.
+# The kernel's worker is a separate program whose stdout is the input's output.
 [tool.pypeeker.print-input]
 allowed = ["kernel_cordis_plugin.worker"]
 
@@ -149,6 +151,9 @@ shell = [
     # bh_02.outdated: an earlier bh-02's layers in today's row names (cordis's `Row`)
     "bh_02.bootstrap", "bh_02.cli", "bh_02.outdated", "bh_02.sessions", "bh_02.testing",
     "warden.bootstrap", "warden.cli",
+    # the extensions' worker: a program of its own, run in the jail, whose whole job is a cordis
+    # runtime of the components the model wrote
+    "extensions_cordis_plugin.worker",
 ]
 
 [tool.pypeeker.worker-stdlib-only]
@@ -165,8 +170,19 @@ extra-impure = ["itertools.count", "importlib.resources.files", "threading.Condi
 # guard is not something the rule models. Exact and per-module; nothing else inherits it.
 allow = [
     "bh_02.__main__", "warden.__main__",
-    # the kernel's worker, run by path (`python -I worker.py SOCKET`) inside a jail
-    "kernel_cordis_plugin.worker",
+    # the kernel's worker and the extensions' worker, each run by path (`python -I worker.py
+    # SOCKET`) inside a jail
+    "kernel_cordis_plugin.worker", "extensions_cordis_plugin.worker",
+]
+
+# A function may not mutate module-level state. The extensions' worker puts each model-written
+# module in `sys.modules` while it loads (cordis's scan finds a component by its module's name)
+# and takes it out when it unloads; the kernel's worker puts each input's source in `linecache`
+# (where a traceback looks for a line, so the model sees the line that failed); nothing else may.
+[tool.pypeeker.no-hidden-global-mutation]
+allow = [
+    "extensions_cordis_plugin.worker:_Extensions.load", "extensions_cordis_plugin.worker:_Extensions.unload",
+    "kernel_cordis_plugin.worker:_Kernel._run",
 ]
 
 # Purity is the default, and the exclude list is the budget: every function in the apps and
@@ -242,6 +258,12 @@ exclude = [
     "kernel_cordis_plugin.unjailed:_until_listening",
     "kernel_cordis_plugin.worker:*",
     "brig_cordis_plugin.jail:BrigJail.*", "brig_cordis_plugin.jail:_Jailed.*",
+    # the model's extensions: the directory they are written to, read every `watch` seconds, and
+    # the status file the model reads; a socket to a worker a jail started, the worker program
+    # itself (a cordis runtime of model-written modules), and the tests' plain-subprocess jail
+    "extensions_cordis_plugin.host:Extensions.*",
+    "extensions_cordis_plugin.worker:*",
+    "extensions_cordis_plugin.testing:*",
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
     "chat_cordis_plugin.wiring:session", "models_cordis_plugin.wiring:model",
 ]
@@ -254,8 +276,8 @@ allow = [
     "*_cordis_plugin.wiring:*",
     "bh_02.bootstrap:harness", "bh_02.bootstrap:layer_files", "bh_02.bootstrap:session_list",
     "bh_02.testing:echo", "bh_02.testing:bomb", "bh_02.testing:showcase", "bh_02.testing:slow_start",
-    "bh_02.testing:echo_model", "bh_02.testing:slow_model", "bh_02.testing:cells_model",
-    "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:cells_provider",
+    "bh_02.testing:echo_model", "bh_02.testing:slow_model", "bh_02.testing:repl_model",
+    "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:repl_provider",
     # registered by decorator or by [project.scripts], never called by name
     "bh_02.cli:sessions_command", "bh_02.cli:update_layer_command", "models_cordis_plugin.claude_code.detach:main",
 ]

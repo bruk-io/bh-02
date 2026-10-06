@@ -1,7 +1,7 @@
 """Claude Code, through the Claude Agent SDK, as a `model`: one model step per call.
 
 bh-02's own `agent:loop` runs the loop (CONTRACTS.md: model): it classifies each step,
-nudges, runs every call as a cell in the kernel (which asks the person when unjailed) and keeps the
+nudges, runs every call as an input in the kernel (which asks the person when unjailed) and keeps the
 transcript. Claude Code is the subscription's sanctioned way to the model, and nothing else: it
 runs no built-in tool, loads no settings, CLAUDE.md or connector, and the tools it knows are only
 declared to it (`declared.py`). Each call to `complete` streams exactly one model step:
@@ -27,7 +27,9 @@ declared to it (`declared.py`). Each call to `complete` streams exactly one mode
   start another model request on that answer.
 
 One Claude Code process holds the conversation, started on the first step with the request's
-system message as its system prompt and the offered tools; a changed system prompt or tool set
+system message as its system prompt (after a note saying that Claude Code's own opening line, and
+its `mcp__bh__` names for the tools, don't mean the model is in Claude Code) and the offered
+tools; a changed system prompt or tool set
 restarts it (resuming its own session) before the next user line, never while calls are parked.
 What its session holds is checked against every request (`reconcile.py`); when the two differ,
 the transcript is written as a new Claude Code session and that is resumed (`records.py`). The
@@ -105,6 +107,13 @@ _ALIASES: Final[Mapping[str, str]] = {
     "opus": "claude-opus-5-5",
     "haiku": "claude-haiku-4-5-20251001",
 }
+# Claude Code opens every system prompt with a line of its own ("You are a Claude agent, built on
+# Anthropic's Claude Agent SDK." for a custom one, measured, CLI 2.1.280), and names the declared
+# tools `mcp__bh__<name>`: both read as being in Claude Code, so the prompt says what they mean here.
+_CARRIER: Final = (
+    "bh-02 reaches you through the Claude Agent SDK (Claude Code), which wrote the line before this "
+    "one: here Claude Code only carries your steps to bh-02 and back, and you are not working in it."
+)
 _MAKE_ONE: Final = f"Make a token with `claude setup-token`, put `{TOKEN_VARIABLE}=<the token>` in"
 _ERRORS: Final[Mapping[str, str]] = {
     "authentication_failed": (
@@ -219,6 +228,14 @@ class _Astray(ClaudeCodeError):
             "in a row. Send the message again; if it happens again, /clear starts a fresh "
             "conversation.",
         )
+
+
+def _carried(system: str, specs: Sequence[Json]) -> str:
+    """The system prompt Claude Code is started with: what its own opening line and its names
+    for the declared tools mean here, then the request's system prompt."""
+    named = ", ".join(f"`{spec['name']}` as `mcp__{SERVER}__{spec['name']}`" for spec in specs)
+    note = f"{_CARRIER} bh-02's tools reach you under Claude Code's names: {named}." if named else _CARRIER
+    return f"{note}\n\n{system}" if system else note
 
 
 def _text_of(message: AssistantMessage) -> str:
@@ -344,7 +361,7 @@ class ClaudeCodeModel:
         self._strayed = False
         options = ClaudeAgentOptions(
             model=self._config.model,
-            system_prompt=system,
+            system_prompt=_carried(system, specs),
             tools=[],  # no built-in tool
             setting_sources=[],  # no settings file, no CLAUDE.md
             strict_mcp_config=True,  # only the server given here: the account's connectors stay out

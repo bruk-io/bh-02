@@ -7,7 +7,7 @@ this module only puts it in widgets and gives each a CSS class, which is how it 
 Streaming never re-draws the log: a chunk grows the open `Stream` only, and a stream settles
 its text into pieces of a few lines each, so a chunk re-draws at most one piece however long
 the reply grows. Wrapped lines keep their gutter: a result is a marker column beside a body
-that wraps inside its own column, and a cell's code has a left border the height of the block.
+that wraps inside its own column, and an input's code has a left border the height of the block.
 
 A model step's usage is one line however many usage events it sends (Anthropic sends what was
 read as the turn starts, and the rest as it ends): the events are summed and the line drawn

@@ -38,7 +38,8 @@ _REFUSAL: Final = frozenset({"refusal"})
 FEEDBACK: Final[Mapping[str, str]] = {
     TRUNCATED: (
         "Your last message hit the output token limit before it finished, so nothing ran. "
-        "Try again with less in one call."
+        "Send less at once: write a long file over several inputs (open(path, 'a') appends to "
+        "it), or say less before the call."
     ),
     SILENT: "Your last message was empty. Call the tool, or say what you found.",
     UNDECODABLE: (

@@ -9,9 +9,21 @@ from cordis.testing import drive
 def test_the_prompt_says_where_and_carries_the_project_s_guidance() -> None:
     text = describe("/src/app", "main", "2026-09-22", ("CLAUDE.md", "Use uv.\n"))
     assert "Working directory: /src/app" in text and "Git branch: main" in text
-    assert text.endswith("The project's own instructions (CLAUDE.md):\n\nUse uv.")
+    assert "The project's own instructions (CLAUDE.md), written for whichever agent" in text
+    assert text.endswith("do the same in Python.\n\nUse uv.")
     bare = describe("/src/app", None, "2026-09-22", None)
     assert "Git branch" not in bare and "instructions" not in bare
+
+
+def test_the_prompt_says_the_model_is_in_bh_02_and_not_in_claude_code() -> None:
+    # A CLAUDE.md is often addressed to Claude Code, and the claude-code provider's prompt opens
+    # with Claude Code's own line: the prompt says first where the model really is.
+    text = describe("/src/app", None, "2026-09-22", ("CLAUDE.md", "Guidance to Claude Code.\n"))
+    first = text.split("\n\n")[0]
+    assert first.startswith("You are the model in bh-02, a coding harness")
+    assert "You are not Claude Code and not running inside it" in first
+    assert "bh-02 is a cordis composition" in text  # what it is made of, and that it changes live
+    assert "where they name Claude Code or another agent, they mean you" in text
 
 
 def test_a_detached_head_names_no_branch() -> None:
@@ -30,6 +42,18 @@ def test_the_context_is_read_fresh_from_the_project(tmp_path: Path) -> None:
     text = context.text()
     assert "(CLAUDE.md)" in text and "claude fir\n... [26 more chars]" in text  # the first found, capped
     assert "Git branch: main" in text
+
+
+def test_a_row_adds_a_section_read_fresh_and_its_remover_takes_it_out(tmp_path: Path) -> None:
+    context = ProjectContext(ContextConfig(root=str(tmp_path)))
+    said = ["first"]
+    remove = context.add(lambda: said[-1])
+    context.add(lambda: "")  # a section with nothing to say adds nothing
+    assert context.text().endswith("\n\nfirst")
+    said.append("second")
+    assert context.text().endswith("\n\nsecond")  # read each time, not when added
+    remove()
+    assert "second" not in context.text() and not context.text().endswith("\n")
 
 
 async def test_the_row_binds_the_context_under_system() -> None:
