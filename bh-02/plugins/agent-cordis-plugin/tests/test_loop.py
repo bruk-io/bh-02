@@ -321,27 +321,82 @@ async def test_a_turn_stopped_at_the_approval_question_says_the_input_never_ran(
     assert kernel.ran == []
 
 
-async def test_the_system_prompt_is_read_fresh_for_every_request_and_never_stored() -> None:
-    class Where:
-        def __init__(self) -> None:
-            self.text_now = "in /a"
+class _Where:
+    """A `system` value whose text the test changes, as an extension loading or a branch switch would."""
 
-        def text(self) -> str:
-            return self.text_now
+    def __init__(self) -> None:
+        self.text_now = "in /a"
 
-    class Guided(Shouting):
-        def instructions(self) -> str:
-            return "Shout when asked."
+    def text(self) -> str:
+        return self.text_now
 
-    where, scripted, history = Where(), Scripted([text("one")], [text("two")]), MemoryTranscript()
-    model = LoopModel(scripted, Guided(), history, system=where)
+
+class _Guided(Shouting):
+    def instructions(self) -> str:
+        return "Shout when asked."
+
+
+async def test_a_conversation_keeps_the_prompt_it_began_with_and_is_told_what_changed() -> None:
+    """A model server reuses its work on a conversation only up to the first token that differs,
+    so the prompt is sent as the conversation began with it; a change rides on the next message."""
+    where, history = _Where(), MemoryTranscript()
+    scripted = Scripted([text("one")], [text("two")], [text("three")], [text("four")])
+    model = LoopModel(scripted, _Guided(), history, system=where)
     await _collect(model, "first")
     where.text_now = "in /b"
-    await _collect(model, "second")
-    first, second = scripted.requests[0][0][0], scripted.requests[1][0][0]
-    assert first == {"role": "system", "content": "in /a\n\nShout when asked."}
-    assert second["content"].startswith("in /b")
-    assert all(m["role"] != "system" for m in history.messages)  # the transcript is the conversation only
+    events = [e async for e in model.reply("second")]
+    await _collect(model, "third")
+    began = {"role": "system", "content": "in /a\n\nShout when asked."}
+    assert [request[0] for request, _ in scripted.requests] == [began, began, began]
+    told = scripted.requests[1][0][-1]["content"]
+    assert told.startswith("(bh-02: your instructions have changed since this conversation began.")
+    assert "\n\nin /b\n\n" in told and told.endswith("\n\nsecond")
+    assert '(No longer in them: "in /a".)' in told  # replaced, and not by a part that starts the same
+    assert events[0] == {
+        "type": "note",
+        "text": "told the model its instructions changed since the conversation began",
+    }
+    assert scripted.requests[2][0][-1]["content"] == "third"  # told once
+    assert [m["role"] for m in history.messages] == [
+        "system",
+        "user",
+        "assistant",
+        "system",
+        "user",
+        "assistant",
+    ] + [
+        "user",
+        "assistant",
+    ]
+    # a reloaded loop (a new model, a new ui) carries on from what the transcript says it told
+    again = LoopModel(scripted, _Guided(), history, system=where)
+    await _collect(again, "fourth")
+    assert scripted.requests[3][0][0] == began and scripted.requests[3][0][-1]["content"] == "fourth"
+
+
+async def test_a_change_made_by_an_input_is_told_with_that_input_s_result() -> None:
+    where, history = _Where(), MemoryTranscript()
+
+    class Extending(_Guided):
+        async def run(self, code: str) -> str:
+            where.text_now = "in /a\n\nExtensions here: sh."  # the input wrote one, and it loaded
+            return "wrote it"
+
+    scripted = Scripted([call("c1", "python", code="write sh.py")], [text("done")])
+    events = [e async for e in LoopModel(scripted, Extending(), history, system=where).reply("go")]
+    result = next(e for e in events if e["type"] == "tool_result")
+    assert result["content"] == "wrote it"  # the person sees the input's own output
+    assert events[events.index(result) + 1]["type"] == "note"
+    sent = scripted.requests[1][0][-1]
+    assert sent["role"] == "tool" and sent["content"].startswith("wrote it\n\n(bh-02: your instructions")
+    assert "Extensions here: sh." in sent["content"]
+    assert scripted.requests[1][0][0] == scripted.requests[0][0][0]  # the start stayed as it was
+
+
+async def test_a_conversation_with_no_prompt_is_sent_none() -> None:
+    scripted, history = Scripted([text("hi")]), MemoryTranscript()
+    await _collect(LoopModel(scripted, Shouting(), history), "hello")
+    assert [m["role"] for m in scripted.requests[0][0]] == ["user"] and history.messages[0]["role"] == "user"
 
 
 async def test_a_refused_turn_never_runs_its_call_and_is_not_asked_again() -> None:

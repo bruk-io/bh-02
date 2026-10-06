@@ -11,7 +11,8 @@ Code: a CLAUDE.md is often written for Claude Code, and the claude-code provider
 with Claude Code's own line), what bh-02 is made of (cordis rows the person reshapes while it
 runs), the working directory, the git branch (from `.git/HEAD`, no subprocess), today's date,
 and the first of the project's instructions files that exists, capped, introduced as meant for
-whichever agent works there. Edit CLAUDE.md and the next request carries the edit; nothing
+whichever agent works there. Edit CLAUDE.md and the model's next message carries the edit (the
+loop tells it as a change, so the prompt the conversation began with stays as it was); nothing
 reloads. `describe` is the prompt as a pure function of what was found.
 
 `system` is also a broker: a row with something to tell the model `acquire`s a section,

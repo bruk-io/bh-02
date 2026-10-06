@@ -25,3 +25,17 @@ truncated, silent or undecodable turn is fed back with harness's own wording up 
 `max_nudges` times per reply. A turn that did not act keeps no calls on its transcript
 entry, so nothing is left for a result to answer. A provider's assistant message rides on its
 entry as `provider`, for the model to replay unchanged.
+
+Every request begins with the system prompt the conversation began with (`system.text()`, then
+`kernel.instructions()`), kept in the transcript as its first `{"role": "system"}` entry. A
+model server reuses its work on a conversation only up to the first token that differs from
+the last request, so a prompt sent fresh each time would make the whole conversation new to it
+whenever the prompt changed: minutes of prompt processing with a local model before the first
+new token, a restart of Claude Code and the loss of its cache with Claude. The loop still reads
+the prompt before each message the model reads (the person's message, an input's result, a
+nudge); when it reads differently from the last one kept, the new reading is kept as another
+`system` entry and what changed (`prompt.changes`, pure: each part, a paragraph, that is new or
+reads differently, whole, and the first line of each that is gone) goes with that message, while
+the person sees a `note`. A loop that reloads (a new model, a new ui) carries on from what the
+transcript says the model was told; `/clear` empties it, so the next conversation begins with
+the prompt as it reads then.

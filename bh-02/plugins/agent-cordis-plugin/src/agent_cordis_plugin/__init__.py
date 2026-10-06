@@ -14,6 +14,7 @@ from agent_cordis_plugin.loop import (
     Transcript,
     refusal,
 )
+from agent_cordis_plugin.prompt import changes
 from agent_cordis_plugin.stops import classify
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
 from agent_cordis_plugin.wiring import LoopConfig, TranscriptConfig, loop, transcript
@@ -32,6 +33,7 @@ __all__ = [
     "System",
     "Transcript",
     "TranscriptConfig",
+    "changes",
     "classify",
     "loop",
     "refusal",

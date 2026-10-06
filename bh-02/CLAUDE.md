@@ -79,14 +79,20 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 tool_call, tool_result, usage, stop, note). `output.confirm` asks about the model's code;
 `input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. `system`
 (`context:project`) is who the model is (the model in bh-02, not Claude Code), what bh-02 is
-made of, the working directory and the project's CLAUDE.md, read per request, then the
+made of, the working directory and the project's CLAUDE.md, then the
 sections rows add (`system.add`: the extensions row's is how to extend bh-02 and the part of
 cordis that takes). The loop follows it with `kernel.instructions()`: that `python` is the
 CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
 plain Python, not IPython). The first input that runs `cat`, `sed`, `ls` or the like through a
-shell is told, once for each kind of work, how Python does it (`shell_note`). The claude-code provider adds a note that Claude Code's own opening line and its
+shell is told, once for each kind of work, how Python does it (`shell_note`). The loop reads
+the prompt before each message the model reads but sends the one the conversation began with
+(the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
+switched, CLAUDE.md edited) is told as a note on that message (`prompt.changes`), because a
+model server reuses its work on a conversation only up to the first token that differs, and a
+changed start costs a local model minutes of prompt processing (it looks frozen) and Claude
+a restart of Claude Code and its cache. The claude-code provider adds a note that Claude Code's own opening line and its
 `mcp__bh__` tool names don't mean the model is in Claude Code.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays

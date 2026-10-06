@@ -2,7 +2,8 @@
 
 `describe` is the whole prompt as a function of what was found; `ProjectContext.text` finds
 it (the directory, the git branch, the project's instructions file) every time it is asked,
-so an edit to CLAUDE.md reaches the next request without reloading anything.
+so an edit to CLAUDE.md reaches the model with its next message without reloading anything
+(the loop tells it as a change, keeping the prompt the conversation began with).
 
 It is also a broker (paper 6.2): a row with something to tell the model `acquire`s a section
 (`add`), read with the rest each time, and its remover takes it out again when the row leaves.
