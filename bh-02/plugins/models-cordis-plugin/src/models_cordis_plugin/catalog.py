@@ -29,11 +29,13 @@ class Entries(Protocol):
 
 
 class Catalog:
-    """The `models` value over one loader and the model row's id (module docstring)."""
+    """The `models` value over one loader and the model row's id (module docstring); `searched`
+    is where `local.env` is looked for (the `layers` value's `credentials`)."""
 
-    def __init__(self, loader: Entries, row: str = "model") -> None:
+    def __init__(self, loader: Entries, row: str = "model", searched: Sequence[str] = ()) -> None:
         self._loader = loader
         self._row = row
+        self._searched = tuple(searched)
 
     def _entry(self) -> Any:
         return next((e for e in self._loader.entries() if getattr(e, "id", None) == self._row), None)
@@ -112,7 +114,7 @@ class Catalog:
             )
         if (why := problem(found)) is not None:
             return why
-        return missing_key(found, config.env_file) if found.provider == OPENAI else None
+        return missing_key(found, config.env_file, self._searched) if found.provider == OPENAI else None
 
 
 def _listed(named: Named, current: bool) -> dict[str, Any]:

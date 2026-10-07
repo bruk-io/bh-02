@@ -248,10 +248,14 @@ def test_rule2_deny_list_with_read_allows_raises() -> None:
 
 
 @pytest.mark.unit
-def test_rule3_allow_list_with_read_denies_raises() -> None:
-    with pytest.raises(ValueError) as excinfo:
-        FsPolicy(read_model=ReadModel.ALLOW_LIST, read_denies=("/a",))
-    assert "FsPolicy.read_denies" in str(excinfo.value)
+def test_rule3_allow_list_carries_read_denies_as_carve_outs() -> None:
+    """decision-164 retired the old rule 3: under ALLOW_LIST, `read_denies` is
+    the carve-outs subtracted from the allowed tree, so it is active under
+    both models and normalized like every other path tuple."""
+    fs = FsPolicy(
+        read_model=ReadModel.ALLOW_LIST, read_allows=("/w",), read_denies=("/w/s/", "/w/s")
+    )
+    assert fs.read_denies == ("/w/s",)
 
 
 @pytest.mark.unit

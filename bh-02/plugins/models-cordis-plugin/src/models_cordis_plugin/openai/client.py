@@ -51,10 +51,10 @@ class _Headers(dict[str, str]):
     __str__ = __repr__
 
 
-def authorization(named: Named, env_file: str | None) -> dict[str, str]:
+def authorization(named: Named, env_file: str | None, searched: Sequence[str] = ()) -> dict[str, str]:
     """The request's headers: JSON, and `Authorization: Bearer <key>` when the model names a
-    key, read from local.env now. A key named but not there is a `ModelsError` saying where
-    to put it."""
+    key, read from local.env now (`env_file`, else the first file of `searched`). A key named
+    but not there is a `ModelsError` saying where to put it."""
     headers = _Headers({"Content-Type": "application/json", "Accept": "text/event-stream"})
     if named.table.get("key") is None:
         return headers
@@ -67,7 +67,7 @@ def authorization(named: Named, env_file: str | None) -> dict[str, str]:
         )
     if (why := withheld(named)) is not None:  # `named.problem` says so first; this is the last wall
         raise ModelsError("model_config", why)
-    path = token_file(env_file)
+    path = token_file(env_file, searched)
     # read into the header at once: no local of this frame holds the key (a crash prints locals)
     headers["Authorization"] = "Bearer " + (
         parse_env(path.read_text(encoding="utf-8")).get(key, "")
@@ -89,14 +89,14 @@ def _no_key_line(name: str, key: str, path: Path | None) -> str:
     )
 
 
-def missing_key(named: Named, env_file: str | None) -> str | None:
+def missing_key(named: Named, env_file: str | None, searched: Sequence[str] = ()) -> str | None:
     """Why `named`'s key can't be sent (it names a line local.env doesn't have), said so the
     person can fix it; None when the model names no key or the line is there. Never quotes
     the key: it only asks whether the line is there."""
     key = key_name(named.table.get("key"))
     if key is None:
         return None
-    path = token_file(env_file)
+    path = token_file(env_file, searched)
     if path is not None and path.is_file() and parse_env(path.read_text(encoding="utf-8")).get(key):
         return None
     return _no_key_line(named.name, key, path) + f" then /model {named.name} again."
@@ -107,10 +107,16 @@ class OpenAIModel:
     manager: its HTTP client is closed when the row leaves."""
 
     def __init__(
-        self, named: Named, env_file: str | None = None, transport: httpx2.AsyncBaseTransport | None = None
+        self,
+        named: Named,
+        env_file: str | None = None,
+        transport: httpx2.AsyncBaseTransport | None = None,
+        *,
+        searched: Sequence[str] = (),
     ) -> None:
         self._named = named
         self._env_file = env_file
+        self._searched = tuple(searched)
         self._client = httpx2.AsyncClient(timeout=_TIMEOUT, transport=transport)
         url = str(named.table["base_url"]).rstrip("/") + "/chat/completions"
         self._where = Where(named.name, url, named.id, key_name(named.table.get("key")), named.source)
@@ -126,7 +132,7 @@ class OpenAIModel:
         """Stream one step's chunks (CONTRACTS.md: chunk)."""
         where = self._where
         try:
-            headers = authorization(self._named, self._env_file)
+            headers = authorization(self._named, self._env_file, self._searched)
             for usage in (True, False) if self._usage else (False,):
                 body = request_for(self._named.id, messages, tools, self._named.table, usage=usage)
                 async with self._client.stream("POST", where.url, json=body, headers=headers) as response:

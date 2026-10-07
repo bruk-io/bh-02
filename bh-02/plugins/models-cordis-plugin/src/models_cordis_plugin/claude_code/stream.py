@@ -5,7 +5,16 @@ through as a `StreamEvent` whose `event` is the event as a plain dict (`message_
 `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`,
 `message_stop`). `Step` folds them, purely: text and thinking as they stream, a tool call once
 its block ends, then usage, the API's own stop reason and the assistant message as received
-(every block, thinking signatures included), which `agent:loop` keeps for replay.
+(every block, thinking signatures included), which `agent:loop` keeps for replay. A step that
+comes whole instead (Claude Code's fallback to a non-streamed request) is folded by `whole`.
+
+A call whose arguments did not decode (or never began) when its block ended is held, with
+everything after it, until the step's stop reason arrives (`message_delta`): only then is it a
+call the step made, shown with its `error` for the loop to classify. Claude Code closes a
+stream it will retry the same way, the open block then `message_stop`, but with no stop
+reason (CLI 2.1.282); what is held then was never said, and is never shown. A call that
+decoded is shown at its block's end, not held: a JSON object cut off part-way never decodes,
+so one that does was streamed whole.
 
 Tool names come as Claude Code sent them to the API (`mcp__bh__python`): the chunk carries the
 name the loop knows (`python`), the message keeps the name as sent, so a rebuilt Claude
@@ -93,6 +102,7 @@ class Step:
     """
 
     def __init__(self) -> None:
+        self.id = ""  # the message's id (`message_start`)
         self.model = ""  # the model id the API answered with (`message_start`)
         self.stop: str | None = None
         self.ended = False  # `message_stop` seen
@@ -101,12 +111,14 @@ class Step:
         self._usage: dict[str, int] = {}
         self._sent: dict[str, int] = {}  # what the usage chunks so far added up to
         self._bad: set[int] = set()  # tool_use blocks whose arguments did not decode
+        self._held: list[dict[str, Any]] = []  # chunks from an incomplete call on, until a stop reason
 
     def take(self, event: Json) -> list[dict[str, Any]]:
         """Record one raw stream event; return the chunks it carries."""
         match event.get("type"):
             case "message_start":
                 message = event.get("message") or {}
+                self.id = str(message.get("id") or "")
                 self.model = str(message.get("model") or "")
                 self._count({k: v for k, v in (message.get("usage") or {}).items() if k != "output_tokens"})
                 return self._used()
@@ -118,16 +130,58 @@ class Step:
                     self._json[index] = []
                 self._blocks[index] = block
                 if block.get("type") == "text" and block.get("text"):
-                    return [{"type": "text", "text": block["text"]}]
+                    return self._hold([{"type": "text", "text": block["text"]}])
             case "content_block_delta":
-                return self._delta(int(event.get("index", 0)), event.get("delta") or {})
+                return self._hold(self._delta(int(event.get("index", 0)), event.get("delta") or {}))
             case "content_block_stop":
-                return self._stopped(int(event.get("index", 0)))
+                index = int(event.get("index", 0))
+                chunks = self._stopped(index)
+                if chunks and (index in self._bad or not "".join(self._json.get(index, [])).strip()):
+                    self._held.extend(chunks)  # incomplete: made only if a stop reason comes
+                    return []
+                return self._hold(chunks)
             case "message_delta":
                 self.stop = (event.get("delta") or {}).get("stop_reason") or self.stop
                 self._count(event.get("usage") or {})
+                if self.stop is not None:
+                    held, self._held = self._held, []
+                    return held
             case "message_stop":
                 self.ended = True
+        return []
+
+    def whole(self, message: Json) -> list[dict[str, Any]]:
+        """Fold a step that came whole rather than streamed, as the Messages API returns one
+        (`id`, `model`, `content`, `stop_reason`, `usage`), and end it; return the chunks its
+        blocks carry. Its blocks replace any that streamed before the stream was given up on.
+        Claude Code does this when a stream fails before a block completes: it asks again
+        without streaming, and hands the answer over as one message (CLI 2.1.282)."""
+        self.id = str(message.get("id") or "")
+        self.model = str(message.get("model") or self.model)
+        self._blocks, self._json, self._bad, self._held = {}, {}, set(), []
+        out: list[dict[str, Any]] = []
+        for index, given in enumerate(message.get("content") or []):
+            block = dict(given)
+            self._blocks[index] = block
+            match block.get("type"):
+                case "text" if block.get("text"):
+                    out.append({"type": "text", "text": str(block["text"])})
+                case "thinking" if block.get("thinking"):
+                    out.append({"type": "thinking", "text": str(block["thinking"])})
+                case "tool_use":
+                    self._json[index] = [json.dumps(block.get("input") or {})]
+                    out.extend(self._stopped(index))
+        self._count(message.get("usage") or {})
+        self.stop = message.get("stop_reason") or self.stop
+        self.ended = True
+        return out
+
+    def _hold(self, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """`chunks`, or none while an incomplete call is held: what follows it waits with it,
+        so the chunks keep the stream's order."""
+        if not self._held:
+            return chunks
+        self._held.extend(chunks)
         return []
 
     def _count(self, usage: Json) -> None:

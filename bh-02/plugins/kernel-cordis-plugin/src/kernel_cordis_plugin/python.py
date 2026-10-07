@@ -101,9 +101,11 @@ _USE = (
 )
 
 
-def instructions_for(confined: bool, startup: str = ".bh-02/kernel.py") -> str:
+def instructions_for(confined: bool, startup: str = ".bh-02/kernel.py", reads: Sequence[str] = ()) -> str:
     """What the model is told about acting in code: the one tool, its REPL and how long that
-    lasts, the project's startup file (`startup`), how to use it, and where its code runs."""
+    lasts, the project's startup file (`startup`), how to use it, and where its code runs.
+    `reads`, the trees the jail lets code read when it reads by allowlist (a Linux jail), is said
+    plainly, so the model spends no steps on reads that can't succeed."""
     keep = f"Helpers worth having in every session go in {startup}, which you can write and grow: " + (
         "a new REPL runs it before your first input and says what it defined."
         if confined
@@ -119,6 +121,14 @@ def instructions_for(confined: bool, startup: str = ".bh-02/kernel.py") -> str:
         else "Your code runs unjailed, with the person's own permissions: each input is shown to "
         "the person and runs only if they approve it, so keep inputs small and say what they do."
     )
+    if reads:
+        where += (
+            f" The jail your code runs in reads only these trees: {', '.join(reads)}. Nothing else "
+            "exists in it, the person's home directory included (at most the path to an "
+            "interpreter installed under it): no ~/.gitconfig, ~/.ssh, dotfiles or caches, so don't "
+            "look for files outside these. git commits carry the person's name and email when git "
+            "on their machine knows them."
+        )
     return "\n".join([f"{_REPL} {keep}", "", *_USE, "", where])
 
 

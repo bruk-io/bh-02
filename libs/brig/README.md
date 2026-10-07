@@ -117,7 +117,12 @@ the preset that composes it. It is the Linux sibling of `scratch_darwin()`:
 `env_scrub`, `limits` `best_effort` because `rlimits` reaches cpu and
 nothing else. It is deliberately **not** `SPEC.md` §7's `strict()`, which
 also names `systemd_scope` and `pasta`; neither exists, and a stack shipped
-under that name would be claiming them.
+under that name would be claiming them. Its `enforced` holds against the
+workload, not the host: a carve-out is a mount on a host directory entry, so a
+file the host renames over a denied path (`git config` rewrites `.git/config`
+that way) or a held directory the host removes is writable inside the jail
+until a new one starts (`SPEC.md` §6, bwrap's grades). Ending the jail when
+that happens is the embedder's to do (bh-02's brig-cordis-plugin does).
 
 Three things about it are worth knowing before you compose it, and all three
 are refusals rather than surprises:
@@ -154,6 +159,36 @@ workspace stacked read-write over the `write_denies` carve-outs inside it and
 the jail could write what it was denied (decision-163). All three are fixed,
 and the tiers are green on Linux. No GitHub Actions run has been observed
 yet — a container is not the runner image.
+
+**Read carve-outs, 2026-09-28 (decision-164).** An allowlist `Spec` may now
+carry `read_denies`: the secrets inside an allowed tree (a `local.env` at the
+top of a writable workspace). `bwrap` masks the ones that exist — a file reads
+EACCES, a directory is an empty mode-0000 read-only tmpfs — and leaves the
+absent ones alone with `fs_read` graded `best_effort`, naming them, because a
+mask's mount point would be created on the host. The same run measured what
+that means for `write_denies`: an absent carve-out's empty directory is made
+on the HOST, parents included, and outlives the jail; the embedder removes it
+after teardown, never during (a mount point removed on the host is detached
+inside the jail). `scripts/linux-jail-check` at the workspace root is this
+workspace's container run of the bwrap tiers.
+
+**A jail can end with its embedder, 2026-09-30 (decision-167).** A launch is
+detached, so a jail outlived an embedder that died without calling `kill`, and
+a program its workload left in the background kept running with its grants.
+`launch(..., tether=fd)` takes the read end of a pipe the embedder keeps the
+write end of: when that closes (the embedder closed it, or died, `SIGKILL`
+included), a watcher in the jail's process group sends the group `SIGKILL`.
+Under `bwrap` that ends the whole pid namespace; under seatbelt a process that
+left the group (`setsid()`) is out of its reach, as it is of `kill`'s.
+`tests/integration/test_tether.py` kills a launching process to show it.
+
+**A carve-out's directory stays put, 2026-10-01 (decision-168).** Under `bwrap`
+a carve-out is a mount, which can't be renamed or removed, but the directory it
+was in could be: the workload renamed `.git` away and made a new `.git/config`
+of its own. Every existing directory between a write root and a carve-out is
+now bound over itself, read-write (a mount point too), so it stays where it is;
+a rename from it to elsewhere in the root fails with `EXDEV`.
+`tests/integration/test_bwrap_fs.py` shows the rename refused.
 
 ## Development
 

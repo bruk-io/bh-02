@@ -100,3 +100,12 @@ async def test_the_shell_hints_row_adds_its_function_to_memory() -> None:
     effects = await drive(shell_hints(memory=memory, transcript=object()))
     assert [e.name for e in effects] == ["acquire"]
     assert effects[0].args[0] == memory.add and isinstance(effects[0].args[1], ShellHints)
+
+
+def test_on_linux_the_model_is_told_what_the_jail_reads_and_that_the_home_directory_is_absent() -> None:
+    """A jail that reads by allowlist (Linux) says which trees: the model spends no steps on reads
+    that can't succeed. One that reads everything but the secrets (darwin) says nothing of it."""
+    text = instructions_for(True, reads=("/usr", "/etc", "/src/app"))
+    assert "The jail your code runs in reads only these trees: /usr, /etc, /src/app." in text
+    assert "the person's home directory included" in text and "no ~/.gitconfig, ~/.ssh" in text
+    assert "reads only these trees" not in instructions_for(True)

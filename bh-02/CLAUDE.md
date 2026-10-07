@@ -33,7 +33,7 @@ shape, in `CONTRACTS.md`:
   parameter: `session(*, loop: Loop, ...)` keys on `"loop"` and cordis checks the bound value
   against `chat`'s `Loop` before `session` runs. The loop's `Python` asks the `kernel` for
   `spec`, `instructions`, `run` and `touched`; `tui:status`'s `Confinement` asks the same
-  value for `confined` and `report`. Two consumers, two contracts.
+  value for `confined`, `report` and `notice`. Two consumers, two contracts.
 - **A provider just has the methods.** `ClaudeCodeModel.complete`, `OpenAIModel.complete`, `Kernel.run`, nothing to
   import. Data crosses as dicts (`{"type": "text", ...}`, a tool spec, a message); a package
   types the part it reads with a `TypedDict` or `Mapping`.
@@ -66,7 +66,8 @@ nothing. Keep registrations commutative: each takes its own entry, never an orde
 The shell's base layer is the whole harness (CodeAct always); each later file (the session's
 own `session.toml`, `--patch`) is a patch over it. The loader watches every layer
 file: editing one, by hand or by `/model`, reshapes the running composition (a jailed input
-can't write one: the jail denies them). The layer files are the only way the composition's
+can't write one: the jail denies them, and on Linux a save by rename ends the jail so the next
+input's holds the new file). The layer files are the only way the composition's
 *shape* changes durably; the loader's `restart(row)` (`/restart`, `/clear`) gives a row a fresh
 fiber, and can't outlive the session. The shell pins three rows of its own after every layer
 (`disabled = false`, so no layer can remove them): `layers`, `sessions` (the running session,
@@ -95,8 +96,10 @@ model (a link out of the project, a `local.env`). The loop follows it with `kern
 CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
-plain Python, not IPython). After each input, the loop asks `memory` (`agent:memory`, a broker)
-what to tell the model with its result: each function rows add there gets the input's code, its
+plain Python, not IPython), and under a Linux jail what its code can read (`kernel.reads()`:
+the system, the interpreter, the project; no home directory). After each input, the loop asks
+`memory` (`agent:memory`, a broker) what to tell the model with its result: each function rows
+add there gets the input's code, its
 result and `kernel.touched()` (the project files Python in the input opened, heard by an audit
 hook in the worker; a shell command's own reads are not heard) and may add a note, never change
 the result. `kernel:shell_hints` tells the first input that runs `cat`, `sed`, `ls` or the like
@@ -150,7 +153,10 @@ showing the code) and runs only on a yes. `agent:loop` asks it about every input
 It depends on `jail` and `output`, not `kernel`, so `/clear` leaves it up; only a layer replaces
 it (it runs in bh-02's process; an extension can't reach it). The kernel depends on its jail
 alone, so a new ui or model keeps the namespace. Only `brig_cordis_plugin` imports brig
-(`brig-one-adapter`), and only darwin is jailed so far.
+(`brig-one-adapter`). darwin is jailed by seatbelt (reads by denylist), Linux by bubblewrap
+(reads by allowlist: the system, the interpreter, the project; the policy, `spec_for`, is the
+same). The Linux jail's tests skip on darwin; `scripts/linux-jail-check` runs them in a
+container with bubblewrap.
 
 **The model's own plugins.** `extensions:extensions` loads the cordis components the model
 writes to `.bh-02/plugins/NAME.py` while bh-02 runs (looked at every half second; changed,
@@ -182,8 +188,8 @@ project, a link into it). The built-ins and `extra` still work, and `models.prob
 and the error of a name only that file could name say why and where the file must be instead.
 A model that can't be used binds anyway and each step says what is wrong. `models:catalog`
 binds `models` (the models there are, and which one the row names), depending on the loader
-alone, so `/model` (the operator) and the status bar depend on it and never reload with a
-switch. The models plugin's README has the providers' details.
+and `layers` alone, so `/model` (the operator) and the status bar depend on it and never reload
+with a switch. The models plugin's README has the providers' details.
 
 **The Claude provider.** Claude is the `claude-code` provider (`models_cordis_plugin.claude_code`):
 Claude through Claude Code (the Claude Agent SDK), which is the subscription's sanctioned route.
@@ -230,8 +236,18 @@ The kernel never gets it:
 - `kernel:unjailed` drops every `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a launching
   Claude Code leaves) and `ANTHROPIC_*` from the worker's environment.
 - `brig:jail` scrubs the environment, and denies reading `local.env`: the project's, and every
-  `local.env` above bh-02's install and environment (`layers.secrets`, from `bh_02.cli`). So the
-  workspace's own is hidden from whatever directory bh-02 runs in. `secrets` also names the
+  place the model rows look for it (`layers.credentials`: above bh-02's install and environment,
+  from `bh_02.cli.credential_search`, the one definition of that search; `layers.secrets` names
+  them all). So the workspace's own is hidden from whatever directory bh-02 runs in, and an input
+  can't create or replace one where the model row looks (a planted `local.env` would hand the
+  next launch's conversations to someone else's account). On Linux the jail holds each of these
+  under the project with a mount the host can undo (an editor's save renames over the file), and
+  says so as a note when the kernel comes up. The same is true of every write deny there
+  (`.git/config`, a layer file): when the host undoes one, the jail ends itself at once and the
+  next input's jail holds it again (a few milliseconds' window, measured in the brig plugin's
+  README); `/release` (`kernel:release`) stops the kernel until
+  the next input, which frees them so the person can add a credential mid-session: the brig
+  plugin's README has the details. `secrets` also names the
   sessions' state directory: each session's `claude/` holds the Claude Code child's config and
   its messaging peer token. That is this run's (`$XDG_STATE_HOME/bh-02/sessions`) and the
   default one (`~/.local/state/bh-02/sessions`); a third, of a run with another

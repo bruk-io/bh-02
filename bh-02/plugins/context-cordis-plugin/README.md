@@ -19,7 +19,11 @@ say when the model first works on it.
 
 `agent:loop` sends a conversation the prompt it began with and tells a later change as a note.
 The date is not in the prompt, which would then change every midnight: the loop tells it with
-the person's message. `describe` is the prompt as a pure function of what was found.
+the person's message. Nor is what the kernel's jail can read: when it reads by allowlist
+(Linux: `kernel.reads()` names the trees), the kernel's own instructions, which the loop sends
+after `text()`, say which trees and that nothing else is there, the person's home directory
+included, so this row depends on no kernel. `describe` is the prompt as a pure function of
+what was found.
 
 `touched(paths)` is what the context files' `on_touch` sections say about some files an input
 opened (absolute), each `(file, text)`, read fresh from the same context files as `text()`, with

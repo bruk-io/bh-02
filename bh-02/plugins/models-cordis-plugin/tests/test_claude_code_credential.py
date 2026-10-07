@@ -6,7 +6,7 @@ import traceback
 from pathlib import Path
 
 from models_cordis_plugin.claude_code import TOKEN_VARIABLE, ChildEnv, child_env, scrubbed
-from models_cordis_plugin.local_env import candidates, parse_env
+from models_cordis_plugin.local_env import parse_env, token_file
 
 _FAKE = "sentinel-not-a-real-token"
 
@@ -76,16 +76,24 @@ def test_the_child_env_never_shows_a_value_in_its_repr_or_a_traceback(tmp_path: 
     assert all(_FAKE not in repr(frame.locals) for frame in printed.stack[1:])
 
 
-def test_candidates_are_every_directory_above_each_anchor_nearest_first(tmp_path: Path) -> None:
-    anchor = tmp_path / "a" / "b" / "file.py"
-    found = candidates([anchor, tmp_path / "a" / "c"])
-    resolved = tmp_path.resolve()
-    assert found[:3] == (
-        resolved / "a" / "b" / "local.env",
-        resolved / "a" / "local.env",
-        resolved / "local.env",
-    )
-    assert len(found) == len(set(found))
+def test_the_credential_is_the_nearest_searched_file_and_never_a_directory(tmp_path: Path) -> None:
+    """On Linux the jail holds an absent searched `local.env` with an empty directory while it
+    runs: that must never hide the real file further up, at the first read or a later one (the
+    row reads it again at each Claude Code start: after /model, /clear, a failed step)."""
+    near, mid, root = (tmp_path / "a" / "b", tmp_path / "a", tmp_path)
+    searched = [str(near / "local.env"), str(mid / "local.env"), str(root / "local.env")]
+    assert token_file(None, searched) is None  # nothing there: no file
+    (root / "local.env").write_text(f"{TOKEN_VARIABLE}={_FAKE}\n")
+    (near / "local.env").mkdir(parents=True)  # a jail's placeholder, nearer
+    assert token_file(None, searched) == root / "local.env"
+    assert child_env(token_file(None, searched), "/c") is not None  # and it reads
+    (mid / "local.env").mkdir()  # another, made while the session runs
+    assert token_file(None, searched) == root / "local.env"  # read again: still the real one
+    (mid / "local.env").rmdir()
+    (mid / "local.env").write_text("OTHER=1\n")  # a real file, nearer: that one is the credential
+    assert token_file(None, searched) == mid / "local.env"
+    assert token_file(str(near / "local.env"), searched) == near / "local.env"  # env_file wins
+    assert child_env(near / "local.env", "/c") is None  # a directory named there reads as no token
 
 
 def test_the_detached_launcher_drops_every_variable_that_would_leave_the_subscription() -> None:

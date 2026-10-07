@@ -8,8 +8,8 @@ from typing import Protocol
 
 import pytest
 
-# The kernel with no jail, for tests that are not about the jail: brig runs on darwin only, and
-# a test of a model or a chat row should not depend on the platform.
+# The kernel with no jail, for tests that are not about the jail: brig runs on darwin and on
+# Linux with bubblewrap, and a test of a model or a chat row should not depend on the platform.
 UNJAILED = '[[plugin]]\nid = "jail"\nuse = "kernel:unjailed"\n'
 
 # bh-02 has no one-shot chat row, but many of its tests want one: the reply to one prompt (the
@@ -240,6 +240,19 @@ async def echo_model() -> Effects:
     yield bind("loop", Echo())
 
 
+@component
+async def layers_seen(*, layers: Any, config: Mapping[str, Any]) -> Effects:
+    """Writes the `layers` value's `credentials` and `secrets` to `config["out"]` as JSON: what
+    the model rows search and what the jail keeps a cell from, as the composition was booted."""
+    import json
+    from pathlib import Path
+
+    seen = {"credentials": list(layers.credentials), "secrets": list(layers.secrets)}
+    Path(config["out"]).write_text(json.dumps(seen))
+    return
+    yield
+
+
 @component(provides=("loop",))
 async def angry_model() -> Effects:
     yield bind("loop", Angry())
@@ -293,6 +306,10 @@ async def heartbeat() -> Effects:
     yield background(forever())
 
 
+# What the model was last told as the system prompt (the project context and the tool's).
+SYSTEM: list[str] = []
+
+
 @dataclass(frozen=True)
 class Inputs:
     code: tuple[str, ...] = ()
@@ -306,6 +323,7 @@ class InputScript:
         self._inputs = inputs
 
     async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
+        SYSTEM[:] = [m["content"] for m in messages if m["role"] == "system"]
         results = [m["content"] for m in messages if m["role"] == "tool"]
         if len(results) < len(self._inputs):
             n = len(results)

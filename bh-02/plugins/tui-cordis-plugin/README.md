@@ -43,7 +43,7 @@ after the push is offered with no reload; choosing one sends `/name` through the
 typed, or puts `/name ` in the composer when it takes arguments; a spec's `choices` (read each
 time it opens too) are entries of their own that run at once (`/model haiku`, one per model).
 `/help` and `/exit` are the ui's own entries. `tui:status` shows the running session's id (from
-the `sessions` value, `(resumed)` after it on a resume) and the kernel's jail grades, and asks
+the `sessions` value, `(resumed)` after it on a resume) and the kernel's jail grades (and, as a note in the conversation each time a kernel comes up, what its jail says the person should know: `kernel.notice()`), and asks
 the `models` value which model the model row names now and on which provider (`models.current()`;
 `config.model_row`, `model`, names the row whose lifecycle it follows): `sonnet (claude-code)`
 (narrow: `sonnet`). It observes lifecycle events to show it again at each of that row's events:

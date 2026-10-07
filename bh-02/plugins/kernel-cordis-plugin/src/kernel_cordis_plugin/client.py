@@ -10,9 +10,9 @@ worker that died, an answer too long or garbled to read, a worker that won't sta
 comes back as the input's text, never as an exception. Interrupting an input (cancelling `run`) sends SIGINT
 through the jail, which the worker turns into `KeyboardInterrupt` in the input, and waits for the
 input to say it ended: the namespace survives. A worker that dies is started again on the next
-input, and that input is told its earlier variables are gone. After each input, `touched()` is
-the project's files it opened, read or written (the worker's audit hook): what a `memory`
-function is given to say what applies to them.
+input, and that input is told its earlier variables are gone, and why, when the jail ended it.
+After each input, `touched()` is the project's files it opened, read or written (the worker's
+audit hook): what a `memory` function is given to say what applies to them.
 """
 
 import asyncio
@@ -42,9 +42,12 @@ _LINE_LIMIT = 1 << 20
 
 @runtime_checkable
 class Jailed(Protocol):
-    """A program a jail started: it can be interrupted and stopped."""
+    """A program a jail started: it can be interrupted and stopped, and says why, when the jail
+    ended it itself (`ended`: a Linux `brig:jail` whose hold on a path the host undid; "" when
+    it did not)."""
 
     def interrupt(self) -> bool: ...
+    def ended(self) -> str: ...
     async def stop(self) -> None: ...
 
 
@@ -54,6 +57,9 @@ class Jail(Protocol):
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
+    def notice(self) -> str: ...
+    def reads(self) -> tuple[str, ...]: ...
+    async def release(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +134,7 @@ class Kernel:
         self._writer: asyncio.StreamWriter | None = None
         self._restarted = False  # a worker started again, not the row's first
         self._fresh = False  # a worker no input has run in yet
+        self._why = ""  # why the jail ended the last worker itself, told with the restart
         self._touched: tuple[str, ...] = ()  # the project's files the last input opened
 
     @property
@@ -138,6 +145,15 @@ class Kernel:
     def report(self) -> Mapping[str, str]:
         return self._jail.report()
 
+    def notice(self) -> str:
+        """What the person should know about the jail the worker runs in ("" when nothing)."""
+        return self._jail.notice()
+
+    def reads(self) -> tuple[str, ...]:
+        """The trees an input can read, when a jail reads by allowlist; empty when it reads
+        everything but what it hides (or is no jail at all)."""
+        return self._jail.reads()
+
     @property
     def spec(self) -> Mapping[str, Any]:
         """The one tool, as the model is offered it."""
@@ -145,7 +161,7 @@ class Kernel:
 
     def instructions(self) -> str:
         """What the model is told about the tool and where its code runs, read per request."""
-        return instructions_for(self.confined, self._config.startup)
+        return instructions_for(self.confined, self._config.startup, self.reads())
 
     async def __aenter__(self) -> Kernel:
         await self._start()
@@ -172,8 +188,25 @@ class Kernel:
         the end."""
         return self._touched
 
+    async def release(self) -> str:
+        """End the worker now, and with it its jail, so the jail lets go of what it holds on the
+        host while none runs (`jail.release()` says what that freed: on Linux, where bh-02 looks
+        for its credential). The next input starts a new worker, told its earlier variables are
+        gone. An input that is running is left to finish, and nothing ends."""
+        if self._lock.locked():
+            return "An input is running: stop the reply (Ctrl-C), then /release again."
+        async with self._lock:
+            await self._stop()
+        freed = await self._jail.release()
+        said = "The kernel is stopped; the next input starts it again, without the earlier variables."
+        return f"{said} {freed}" if freed else said
+
     async def _execute(self, code: str) -> _Output:
         async with self._lock:
+            if self._reader is not None and self._reader.at_eof():
+                # the worker ended between inputs (its jail ended it): start it again for this one
+                self._why = self._ended()
+                await self._stop()
             if self._writer is None:
                 try:
                     await self._start()
@@ -192,9 +225,12 @@ class Kernel:
                     prefix, self._fresh, self._restarted = await self._opening(), False, False
                 ran = await self._exchange(code)
             except ConnectionError:
+                why = self._ended()
                 await self._stop()
+                said = f" because {why}" if why else ""
                 return _Output(
-                    prefix, "the REPL's process ended during this input; a new one starts with the next"
+                    prefix,
+                    f"the REPL's process ended during this input{said}; a new one starts with the next",
                 )
             except ValueError as error:
                 # a line over the limit, or one that is not JSON: what follows can't be trusted
@@ -212,7 +248,12 @@ class Kernel:
         to tell: that the worker was started again, and what the startup file did. Jailed, the
         file runs here; unjailed, it would run unasked with the person's permissions, so the
         model is told to run it as an input of its own."""
-        notes = ["the REPL was started again; what earlier inputs defined is gone"] if self._restarted else []
+        why, self._why = (f", because {self._why}" if self._why else ""), ""
+        notes = (
+            [f"the REPL was started again{why}; what earlier inputs defined is gone"]
+            if self._restarted
+            else []
+        )
         startup = self._config.startup
         if (Path(self._config.root) / startup).is_file():
             if not self.confined:
@@ -226,6 +267,10 @@ class Kernel:
                 lines = ran.output.strip().splitlines()
                 notes.append(f"{startup} ran first and defined: {lines[-1] if lines else 'nothing'}")
         return f"({'. '.join(notes)})\n" if notes else ""
+
+    def _ended(self) -> str:
+        """Why the jail ended the worker itself, or ""."""
+        return self._process.ended() if self._process is not None else ""
 
     async def _exchange(self, code: str) -> _Output:
         self._send({"op": "exec", "code": code})

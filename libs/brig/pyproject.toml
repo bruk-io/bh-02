@@ -44,10 +44,7 @@ rules = [
     "brig-layers",              # the layer DAG below (SPEC.md section 13)
     "brig-standalone",          # the standard library and itself, nothing else
     "import-time-side-effects",
-    # "no-import-cycles" is off. The pypeeker pinned here (newer than the one brig was
-    # gated with) reports `brig.mech`'s submodules importing their contract back from
-    # `brig.mech/__init__`, a shape the old one accepted (see the comment above those imports).
-    # The fix is to move the contract into a sibling module the submodules import instead.
+    "no-import-cycles",
 ]
 
 # A test helper that exists to be run BY PATH as a second process; its `if __name__` guard is

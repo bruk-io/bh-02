@@ -54,6 +54,9 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **jail** (row and key): what the kernel runs in: `brig:jail` confines it (no writes outside the project, no network, no credentials); `kernel:unjailed` (`--no-jail`) does not.
 - **confined**: the jail enforces writes and network, so an input (or an extension's load) runs without asking; unconfined, each is put to you first.
 - **grades**: how well each part of the jail holds (`enforced`, `best_effort`, `cooperative`, `unenforced`), shown in the status bar as ✓ and ✗.
+- **placeholder** (Linux): an empty directory the jail makes in the project, on the host, to hold a path an input may not create (`.envrc/`, `.claude/`, `.git/` in a project that is no repository) for as long as the kernel runs; removed after. Removing one yourself meanwhile ends the jail (see **tripwire**).
+- **tripwire** (Linux): the jail watching every path it holds with a mount; when the host replaces, moves or removes one (a host `git config` rewrites `.git/config` that way; editors save by rename), which lifts that hold, the jail ends itself at once and the next input's jail holds the path again, telling you why the kernel's variables are gone.
+- **release** (row): `kernel:release`: `/release` stops the kernel until the next input, and with it the jail, which frees its placeholders: on Linux, how you add your credential (`local.env`) mid-session where the jail holds that path.
 - **approval** (row and key): `kernel:approval`, the one place that decides whether the model's code runs: an input (the loop asks) or an extension to load (the extensions row asks). Confined, at once; unconfined, it asks you in the modal. Only a layer replaces it.
 - **the modal**: the question the model's code is put to you in when it is unjailed: `y` runs it, `n` or Esc doesn't. It ignores keys for its first 0.4 s, so typing can't answer it.
 - **host**: the side outside the jail: bh-02's own process (and brig's host process, which starts the worker), whose import paths, environment and files a jailed input can't reach; the kernel's `client.py` is its end of the socket.
@@ -65,7 +68,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **status** (row): `tui:status`: the status bar's session id, model and jail grades. The `usage` field is the ui's own.
 - **status bar**: the line along the bottom: session, model, jail, usage; narrower forms when the terminal is narrow.
 - **palette** (row): `tui:palette`: the commands, offered in the command palette (Ctrl-P).
-- **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers.
+- **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers (`/release`).
 - **operator** (row): `commands:operator`: the commands that act on the running program through the loader.
 - **system** (row and key): `context:project`: what the model is told about where it is working (that it is the model in bh-02, not Claude Code; the directory, its branch), and the sections other rows add to it.
 - **context file**: TOML listing the project context's `[[section]]`s, each `files` (patterns) and `function` (a module path given the files that match), and optionally `on_touch` (one given them with the files an input opened): bh-02's own, then yours (`$XDG_CONFIG_HOME/bh-02/context.toml`, else `~/.config/bh-02/context.toml`), then the project's `.bh-02/context.toml` (bh-02's own functions and the project's non-hidden files only); read again when it changes.

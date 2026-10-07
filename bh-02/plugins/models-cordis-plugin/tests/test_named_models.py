@@ -254,3 +254,24 @@ def test_switching_to_a_model_whose_key_line_is_missing_is_refused_saying_where_
     assert "(keep that file out of git), then /model keyed again." in why
     env.write_text("KEYED_KEY=sk-stand-in\n")
     assert values.check("keyed") is None
+
+
+def test_a_key_is_read_from_the_nearest_searched_file_past_a_jail_s_placeholder(tmp_path: Path) -> None:
+    """The openai provider reads its key per request, from the first searched `local.env` that
+    is a file: a Linux jail's placeholder directory nearer up never hides it, and `/model`'s
+    check looks in the same place."""
+    near, root = tmp_path / "a", tmp_path
+    searched = [str(near / "local.env"), str(root / "local.env")]
+    (near / "local.env").mkdir(parents=True)
+    (root / "local.env").write_text("KEYED_KEY=sk-stand-in\n")  # a stand-in: never a real key
+    table = {"provider": "openai", "id": "x", "base_url": "https://h/v1", "key": "KEYED_KEY"}
+    (named,) = [m for m in combined({"keyed": table}, "/c/models.toml", {}) if m.name == "keyed"]
+    assert authorization(named, None, searched)["Authorization"] == "Bearer sk-stand-in"
+    assert authorization(named, None, searched)["Authorization"] == "Bearer sk-stand-in"  # each request
+    models = tmp_path / "models.toml"
+    models.write_text(
+        '[keyed]\nprovider = "openai"\nid = "x"\nbase_url = "https://h/v1"\nkey = "KEYED_KEY"\n'
+    )
+    values = Catalog(_Loader(_Entry("model", "models:model", {"models": str(models)})), searched=searched)
+    assert values.check("keyed") is None
+    assert Catalog(_Loader(_Entry("model", "models:model", {"models": str(models)}))).check("keyed")

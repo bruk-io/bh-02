@@ -6,12 +6,13 @@ composition names, and the model's one tool, `python(code)`, which runs an input
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the project's file a new kernel runs first, default `.bh-02/kernel.py`) | `jail` |
+| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its jail's), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the project's file a new kernel runs first, default `.bh-02/kernel.py`) | `jail` |
 | `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when confined, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
+| `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
 | `kernel:shell_hints` | adds `ShellHints` to `memory` | `memory` (`add`), `transcript` (its lifetime only) |
 
-`python.py` is the tool, pure: its spec and `instructions_for(confined, startup)`, what the
+`python.py` is the tool, pure: its spec and `instructions_for(confined, startup, reads)`, what the
 model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
 long as this run of bh-02 (a /model switch keeps it; a start, a resume, /clear or a dead worker
 empties it), and that helpers worth keeping go in the startup file; how to use it (work in
@@ -19,7 +20,9 @@ Python, not through a shell, shown by an input that searches and keeps what it f
 one that edits with it; build up state and re-read what changed, print what matters, run
 programs with `subprocess.run(..., capture_output=True, text=True, timeout=...)` and treat what
 they print as data, since one not captured never reaches the input, no stdin, the person sees
-every input); and where its code runs. A model trained on shell tools tends to use the REPL as
+every input); and where its code runs, and under a jail that reads by allowlist (Linux) the
+trees it reads (`reads`, the kernel's `reads()`) and that nothing else, the home directory
+included, is there. A model trained on shell tools tends to use the REPL as
 one, an input a single `cat`, `sed` or `ls`: `programs(code)` is what an input runs (read with
 `ast`, each command of a shell line), `shelled(code)` the part of it Python does itself (reading,
 editing, writing, listing and moving files; searching with `grep` or `rg` is not one, nor are
@@ -77,8 +80,10 @@ calls it at most twice, at any depth: the import system's frames are told by the
 `client.py`'s `Kernel` is the host end: entering starts the worker through the jail (its
 socket in a short `/tmp` directory, since a socket path must fit in ~100 bytes), leaving stops
 it. Cancelling `run` interrupts the input and waits `grace` seconds for it to end; a worker that
-won't, or that died, is started again on the next input, which is told its variables are gone.
-After each input, `touched()` is the files under `root` it opened (what the loop gives
+won't, or that died, is started again on the next input, which is told its variables are gone,
+and why when its jail ended it (`started.ended()`: a Linux `brig:jail` ends itself when the host
+undoes one of its mounts). A worker that died between inputs is noticed before the next input
+is sent, so that input runs in the new one. After each input, `touched()` is the files under `root` it opened (what the loop gives
 `memory`'s functions). A new kernel's first input is also told what the startup file (`startup`, the model's own
 helpers, kept with the project) did: confined, the kernel runs it first and says which names it
 defined, or its traceback; unconfined, it would run unasked with the person's permissions, so
@@ -86,3 +91,10 @@ the model is told to run it as an input of its own, which the loop then puts to 
 Every failure it knows of comes back as the input's text, never as an exception out of `run`: a
 worker that died, an answer it can't read (the worker is replaced), a worker the jail won't
 start again (the next input tries again).
+
+`release()` (`/release`, the `kernel:release` row) ends the worker now, and the jail it ran
+in, then asks the jail what that freed on the host: on Linux, `brig:jail` holds where bh-02
+looks for its credential with an empty directory while it runs, and this is how the person
+adds one mid-session (the brig plugin's README). The next input starts a new worker, told its
+variables are gone. An input that is running is left alone, and the answer says to stop the
+reply first. `kernel:unjailed` holds nothing, so there it only stops the worker.

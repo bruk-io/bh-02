@@ -81,7 +81,7 @@ from __future__ import annotations
 import re
 
 from brig.core import Axis, EventKind, Grade, Graded, NetworkPolicy, Spec
-from brig.mech import (
+from brig.mech.contract import (
     ArgvTransformer,
     CompileCtx,
     EventPayload,

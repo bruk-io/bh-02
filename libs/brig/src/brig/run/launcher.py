@@ -208,6 +208,7 @@ def _spawn(
     stdout_path: str,
     stderr_path: str,
     jail_dir: str,
+    tether: int | None = None,
 ) -> subprocess.Popen[bytes]:
     """Spawn the jail's argv under the exit wrapper, detached, new group.
 
@@ -233,14 +234,14 @@ def _spawn(
             open(os.devnull, "rb") as stdin_f,
         ):
             proc = subprocess.Popen(
-                _exit_status.wrapper_argv(sys.executable, jail_dir, write_fd, wrapped_argv),
+                _exit_status.wrapper_argv(sys.executable, jail_dir, write_fd, wrapped_argv, tether),
                 cwd=cwd,
                 env=dict(env),
                 stdin=stdin_f,
                 stdout=stdout_f,
                 stderr=stderr_f,
                 start_new_session=True,
-                pass_fds=(write_fd,),
+                pass_fds=(write_fd,) if tether is None else (write_fd, tether),
             )
         os.close(write_fd)
         write_fd = -1
@@ -375,6 +376,7 @@ class SubprocessLauncher:
         io: IoPolicy,
         jail_id: str,
         jail_dir: str,
+        tether: int | None = None,
     ) -> Handle:
         """SPEC.md §8's five steps, in order:
 
@@ -386,6 +388,12 @@ class SubprocessLauncher:
            `io`, cwd and env from the jail.
         4. Stamp every sensor's `known_at_compile()` payloads.
         5. Return a `Handle` carrying them.
+
+        `tether` (decision-167, SPEC.md section 8) is the read end of a pipe whose write end
+        the caller keeps: once every write end is closed (the caller closed it, or died, however
+        it died), the workload's process group is sent `SIGKILL`. The caller keeps the read end
+        too, and may close it once this returns. `None` (the default): the jail lives until it
+        ends or is killed, whatever happens to the process that launched it.
         """
         missing = jail.requires - self.capabilities
         if missing:
@@ -428,6 +436,7 @@ class SubprocessLauncher:
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             jail_dir=jail_dir,
+            tether=tether,
         )
         pid = proc.pid
         # decision-155: read the leader's start time now, while it is

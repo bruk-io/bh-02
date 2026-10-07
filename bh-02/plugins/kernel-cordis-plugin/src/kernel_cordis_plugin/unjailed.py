@@ -47,6 +47,10 @@ class _Process:
             return True
         return False
 
+    def ended(self) -> str:
+        """Nothing ends the worker of its own accord here."""
+        return ""
+
     async def stopped(self) -> None:
         """Return once the process has ended, however it ended."""
         await self._process.wait()
@@ -69,6 +73,18 @@ class Unjailed:
 
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
+
+    def notice(self) -> str:
+        """Nothing: the status bar says it is unjailed, and every cell asks."""
+        return ""
+
+    def reads(self) -> tuple[str, ...]:
+        """No allowlist: a cell reads what the person can."""
+        return ()
+
+    async def release(self) -> str:
+        """Nothing: no jail holds anything on the host."""
+        return ""
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Process:
         log = Path(endpoint).with_name("stderr.log")

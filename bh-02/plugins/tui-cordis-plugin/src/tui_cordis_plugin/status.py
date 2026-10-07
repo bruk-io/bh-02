@@ -2,7 +2,7 @@
 `ModelField`, the status row's one piece of state (its `model` field)."""
 
 import contextlib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -15,6 +15,7 @@ __all__ = [
     "Entries",
     "ModelField",
     "ModelSource",
+    "Notes",
     "Running",
     "StatusConfig",
     "StatusSink",
@@ -57,6 +58,15 @@ class Confinement(Protocol):
     @property
     def confined(self) -> bool: ...
     def report(self) -> Mapping[str, str]: ...
+    def notice(self) -> str: ...
+
+
+@runtime_checkable
+class Notes(Protocol):
+    """What the status row needs of the `output` value (CONTRACTS.md: output): somewhere to show
+    a note in the conversation."""
+
+    async def show(self, events: AsyncIterator[Mapping[str, Any]]) -> None: ...
 
 
 @runtime_checkable
