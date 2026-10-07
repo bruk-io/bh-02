@@ -5,14 +5,17 @@ import asyncio
 import contextlib
 import os
 import signal
+import socket
 import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -220,13 +223,14 @@ def test_a_linux_jail_holds_the_secrets_under_a_writable_root_and_says_so() -> N
         host=(),
         secrets=("/w/app/pkg/local.env", "/src/bh/local.env"),
     )
-    assert held(spec) == ("/w/app/local.env", "/w/app/pkg/local.env")  # not ~/.ssh, not /src/bh
-    notice = notice_for("linux", held(spec))
+    holds = held(spec, ())  # both there, so both masked
+    assert holds == ("/w/app/local.env", "/w/app/pkg/local.env")  # not ~/.ssh, not /src/bh
+    notice = notice_for("linux", holds)
     assert "/w/app/local.env, /w/app/pkg/local.env" in notice and "renaming a new file over it" in notice
     assert "bh-02 ends the jail at once" in notice and "`/release`" in notice
-    assert notice_for("darwin", held(spec)) == "" and notice_for("linux", ()) == ""
+    assert notice_for("darwin", holds) == "" and notice_for("linux", ()) == ""
     report = {"fs_read": "enforced", "fs_write": "enforced"}
-    assert graded(report, held(spec)) == {"fs_read": "best_effort", "fs_write": "enforced"}
+    assert graded(report, holds) == {"fs_read": "best_effort", "fs_write": "enforced"}
     assert graded(report, ()) == report
 
 
@@ -475,6 +479,109 @@ def test_the_model_is_told_the_trees_a_jail_reads_the_same_at_every_start() -> N
 def _needs_bwrap() -> None:
     if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
         pytest.skip("the placeholders are bubblewrap's: Linux with /usr/bin/bwrap only")
+
+
+class _Plain:
+    """What brig's launch returns, for a jail whose program runs as a plain process: there is no
+    bubblewrap, so nothing is mounted, and what is tested is the jail's own work around it (its
+    placeholders, record, lock, tripwire, facts and release). The program is in a session of its
+    own, as brig's is, so its process group is what the jail and its tripwire end."""
+
+    def __init__(self, jail: Any, argv: Sequence[str], cwd: str) -> None:
+        self._endpoint = jail.spec.channels[0].endpoint
+        self._process = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, start_new_session=True)
+        self.pgid = self._process.pid
+        # reaped as it ends, however it ends (the tripwire kills its group), so a group that
+        # ended is gone and not a zombie that `os.killpg(group, 0)` still finds
+        threading.Thread(target=self._process.wait, daemon=True).start()
+
+    def wait_ready(self, channel: str, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and self._process.poll() is None:
+            with contextlib.suppress(OSError), socket.socket(socket.AF_UNIX) as probe:
+                probe.connect(self._endpoint)  # connect, then leave without a word (a probe)
+                return
+            time.sleep(0.02)
+        raise TimeoutError(f"{channel} never listened")
+
+    def interrupt(self) -> bool:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(self.pgid, signal.SIGINT)
+            return True
+        return False
+
+    def kill(self) -> Any:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(self.pgid, signal.SIGKILL)
+        self._process.wait()
+        return SimpleNamespace(items=())  # every item ended
+
+
+@pytest.fixture
+def _plain_launch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A Linux `brig:jail` whose program is launched plainly (`_Plain`): no bubblewrap needed,
+    nor allowed to fail as it does where it can't make namespaces. Linux only: the tripwire is
+    inotify's."""
+    if sys.platform != "linux":
+        pytest.skip("the jail's tripwire is inotify's: Linux only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+    def launch(self: object, jail: Any, *, argv: Sequence[str], cwd: str, **rest: object) -> _Plain:
+        return _Plain(jail, argv, cwd)
+
+    monkeypatch.setattr("brig.run.SubprocessLauncher.launch", launch)
+    # the jail refuses to start without bubblewrap installed; the package's `jail` is the row
+    monkeypatch.setattr(sys.modules["brig_cordis_plugin.jail"], "DEFAULT_BWRAP_PATH", sys.executable)
+
+
+def _endpoint() -> str:
+    """A socket path short enough for a Unix socket, in a directory of its own."""
+    return str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
+
+
+# Listens; once the jail has seen it listen, creates the file argv[2] (as an input may), says so
+# in argv[3], and waits.
+_LISTEN_THEN_CREATE = """
+import socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+open(sys.argv[2], "w").write("MINE=1\\n")
+open(sys.argv[3], "w").write("done")
+time.sleep(60)
+"""
+
+
+@pytest.mark.usefixtures("_plain_launch")
+async def test_an_input_creating_the_project_s_own_absent_local_env_leaves_the_jail_running(
+    tmp_path: Path,
+) -> None:
+    """The project's `local.env` is absent and not where bh-02 looks for its credential: nothing
+    holds it, and an input may create it. That must not trip the jail's own tripwire, which would
+    end the jail mid-input and blame the host. The host removing a placeholder the jail does hold
+    still ends it."""
+    project = tmp_path / "project"
+    project.mkdir()
+    created, done = project / "local.env", project / "done"
+    endpoint = _endpoint()
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_CREATE, endpoint, str(created), str(done)]
+    started = await BrigJail(BrigConfig(), Layers()).start(argv, cwd=str(project), endpoint=endpoint)
+    try:
+        group = _recorded_group(tmp_path)
+        for _ in range(250):
+            if done.exists():
+                break
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.3)  # the tripwire's thread has read the creation, if it watches it
+        assert created.read_text() == "MINE=1\n"
+        assert started.ended() == "", started.ended()
+        os.killpg(group, 0)  # still running
+        (project / ".envrc").rmdir()  # a placeholder the jail holds, removed on the host
+        assert await _gone(group)
+        assert str(project / ".envrc") in started.ended()
+    finally:
+        await started.stop()
 
 
 # A bh-02 that crashes once its jailed kernel is up: no `stop`, so nothing it made is removed.
@@ -973,6 +1080,33 @@ def test_inotify_records_are_read_as_descriptor_mask_and_name() -> None:
     assert decoded(record + bare) == [(3, 0x80, "config"), (1, 0x400, "")]
 
 
+def test_a_linux_jail_watches_an_absent_secret_only_where_no_input_may_create_it() -> None:
+    """The project's own `local.env`, absent and not where bh-02 looks for its credential: the
+    allowlist drops its write deny and nothing is mounted there, so an input may create it, and
+    that must not trip the jail's own tripwire. An absent one an input can't create (held by an
+    empty directory where bh-02 looks for its credential, or inside a directory bound read-only)
+    is still watched: only the host could create it, and the jail could then read it. One that
+    is there is masked, and watched."""
+    policy = spec_for(
+        root="/w/app",
+        endpoint="/tmp/k/k.sock",
+        scratch="/tmp/j/tmp",
+        home="/home/me",
+        config=BrigConfig(),
+        layers=(),
+        host=("/w/app/src",),  # a directory the host imports code from: bound read-only
+        secrets=("/w/app/creds/local.env", "/w/app/src/local.env"),
+    )
+    linux = allowlisted(policy, ("/usr",), hold={"/w/app/creds/local.env"})
+    absent = {"/w/app/local.env", "/w/app/creds/local.env", "/w/app/src/local.env"}
+    assert "/w/app/local.env" not in linux.fs.write_denies  # an input may create it
+    watched = tripwired(linux, absent)
+    assert "/w/app/local.env" not in watched and "/w/app/local.env" not in held(linux, absent)
+    assert {"/w/app/creds/local.env", "/w/app/src/local.env"} <= set(watched)
+    assert "/w/app/local.env" in tripwired(linux, ()) and "/w/app/local.env" in held(linux, ())  # masked
+    assert "/w/app/local.env" not in notice_for("linux", held(linux, absent))
+
+
 def test_a_linux_jail_trips_on_every_write_deny_under_a_writable_root_and_every_held_secret() -> None:
     policy = spec_for(
         root="/w/app",
@@ -983,7 +1117,7 @@ def test_a_linux_jail_trips_on_every_write_deny_under_a_writable_root_and_every_
         layers=("/w/app/mine.toml", "/elsewhere/chat.toml"),
         host=(),
     )
-    paths = tripwired(policy)
+    paths = tripwired(policy, ())
     assert {"/w/app/mine.toml", "/w/app/.git/config", "/w/app/local.env"} <= set(paths)
     assert "/elsewhere/chat.toml" not in paths  # outside every writable root: nothing is mounted
 

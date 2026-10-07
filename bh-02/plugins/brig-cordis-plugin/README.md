@@ -138,7 +138,8 @@ rest of the session). A held *directory* is not affected by what happens inside 
 `.vscode/settings.json` by rename leaves the hold on `.vscode` in place.
 
 So the jail watches the directory of every path it holds (`tripwired`: each write deny under a
-writable root, and each held secret), with inotify from bh-02, set up after its placeholders are
+writable root, and each secret it holds there, `held`: one that is there, masked, and an absent
+one no input can create, under a write deny), with inotify from bh-02, set up after its placeholders are
 made and before bubblewrap mounts over them (`tripwire.py`). At the first such change it kills
 the jail's process group, a running input and anything an input left in the background with
 it. The next input starts a new jail, which holds the path again, and its answer, which the
@@ -166,6 +167,12 @@ never gets in: the next one finds the path held
 save of a layer file still reloads). So before you run a host git command that writes
 `.git/config`, or save a layer file, while an input's background program runs, stop the reply,
 or `/release`.
+
+Not watched: an absent secret nothing holds (the project's own `local.env` where bh-02 does not
+look for its credential). An input may create it, and the tripwire can't tell an input's
+creation from the host's, so watching it would end the jail mid-input and blame the host
+(`test_an_input_creating_the_project_s_own_absent_local_env_leaves_the_jail_running`). A file
+the host creates there is readable in the jail, as brig's `fs_read` grade says.
 
 What was tried and could not hold the path instead: binding the parent read-only with writable
 carve-outs (a jailed `git commit` then fails: it creates `.git/index.lock`; measured), and

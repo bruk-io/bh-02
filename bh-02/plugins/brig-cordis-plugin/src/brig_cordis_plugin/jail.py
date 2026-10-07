@@ -39,7 +39,8 @@ One policy, two platforms; only the stack and the read model differ:
   jail lives is detached inside it). A mount can be undone from the host (a file renamed over
   a denied or masked one, as a host `git config` does to `.git/config`; a placeholder removed),
   and from then on an input could write or read that path. So the jail watches every path it
-  holds (`tripwired`, `tripwire.Tripwire`) and ends itself at the first such change: the next
+  holds (`tripwired`, `tripwire.Tripwire`; never one an input may create, as the project's own
+  absent `local.env`) and ends itself at the first such change: the next
   input's jail holds the path again, and the input says why (`ended`). Until it has ended (a few
   milliseconds; measured in the README) a program already running in it can get one write or
   read in, so while the jail holds a secret under a writable root `fs_read` stays best-effort
@@ -261,25 +262,37 @@ def uncovered(denies: Sequence[str]) -> tuple[str, ...]:
     return tuple(d for d in denies if not any(d.startswith(o + "/") for o in denies if o != d))
 
 
-def held(spec: Spec) -> tuple[str, ...]:
-    """The read denies a Linux jail holds with a mount on the path itself: those at or under a
-    root an input may write (a masked `local.env`, or the empty directory an absent one is held
-    by). A mount is on the host's directory entry, so replacing that entry on the host (an
-    editor saves by renaming a new file over it) or removing it detaches the mount inside the
-    jail, and an input can then read and rewrite what is there (measured). The rest are outside
-    every writable root, where the allowlist alone keeps them out of the jail."""
-    roots = spec.fs.write_allows
-    return tuple(d for d in spec.fs.read_denies if any(d == r or d.startswith(r + "/") for r in roots))
+def held(spec: Spec, absent: Collection[str]) -> tuple[str, ...]:
+    """The read denies a Linux jail (`spec`, `allowlisted`) holds at or under a root an input
+    may write: one that is there (not in `absent`), which bubblewrap masks with a mount on the
+    path itself, and an absent one no input can create, at or under a write deny (the empty
+    directory where bh-02 looks for its credential, or a directory bound read-only), where only
+    the host could put a file, which the jail could then read. A mount is on the host's
+    directory entry, so replacing that entry on the host (an editor saves by renaming a new file
+    over it) or removing it detaches the mount inside the jail, and an input can then read and
+    rewrite what is there (measured). Not an absent one nothing holds (the project's own
+    `local.env`): an input may create it, and a file the host creates there is readable, which
+    brig's `fs_read` grade names. The rest are outside every writable root, where the allowlist
+    alone keeps them out of the jail."""
+    roots, denies = spec.fs.write_allows, spec.fs.write_denies
+    return tuple(
+        d
+        for d in spec.fs.read_denies
+        if any(d == r or d.startswith(r + "/") for r in roots)
+        and (d not in absent or any(d == w or d.startswith(w + "/") for w in denies))
+    )
 
 
-def tripwired(spec: Spec) -> tuple[str, ...]:
+def tripwired(spec: Spec, absent: Collection[str]) -> tuple[str, ...]:
     """The paths a Linux jail holds with a mount that the host can undo: every write deny under
     a root an input may write (an existing path bound read-only over itself, or a placeholder) and
-    every secret held there (`held`). Replacing, moving or removing one on the host ends the jail
-    (`Tripwire`); a deny outside every writable root is not mounted at all."""
+    every secret held there (`held`; `absent` names the read denies that are not there). Replacing,
+    moving or removing one on the host ends the jail (`Tripwire`); a deny outside every writable
+    root is not mounted at all. Never a path an input may create: that would end the jail it
+    runs in, blaming the host."""
     roots = spec.fs.write_allows
     under = [d for d in spec.fs.write_denies if any(d.startswith(r + "/") for r in roots)]
-    return tuple(dict.fromkeys([*under, *held(spec)]))
+    return tuple(dict.fromkeys([*under, *held(spec, absent)]))
 
 
 def notice_for(platform: str, holds: Sequence[str]) -> str:
@@ -685,8 +698,11 @@ class BrigJail:
         try:
             author = git_author(*self._git_identity(cwd)) if self._platform == "linux" else ()
             jail, self._report = self.compile(jail_dir, endpoint, cwd, argv, author)
+            absent = self._absent_secrets(jail.spec)
             self._writes = tuple(w for w in jail.spec.fs.write_allows if not Path(w).is_relative_to(jail_dir))
-            self._notice = notice_for(self._platform, held(jail.spec) if self._platform == "linux" else ())
+            self._notice = notice_for(
+                self._platform, held(jail.spec, absent) if self._platform == "linux" else ()
+            )
             if self._platform == "linux":
                 trees = (*jail.spec.fs.read_allows, *jail.spec.fs.write_allows)
                 self._reads = told_reads(trees, (jail_dir, str(Path(endpoint).parent)))
@@ -707,7 +723,7 @@ class BrigJail:
             if self._platform == "linux":
                 # After the placeholders are made, before bubblewrap mounts over them: from here
                 # on, the host undoing a mount is seen.
-                wire = Tripwire(tripwired(jail.spec))
+                wire = Tripwire(tripwired(jail.spec, absent))
             launching = asyncio.ensure_future(
                 asyncio.to_thread(
                     SubprocessLauncher().launch,
@@ -786,7 +802,8 @@ class BrigJail:
         ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
         jail = stack_for(self._platform).compile(spec, ctx=ctx)
         report = {axis.value: grade.grade.value for axis, grade in jail.report.axes.items()}
-        return jail, graded(report, held(spec) if self._platform == "linux" else ())
+        holds = held(spec, self._absent_secrets(spec)) if self._platform == "linux" else ()
+        return jail, graded(report, holds)
 
     def _linked_dirs(self, path: str) -> list[str]:
         """Every symlinked directory on the way to `path`, following its links. bubblewrap mounts
@@ -893,6 +910,12 @@ class BrigJail:
             elif str(top) != deny and any(top.is_relative_to(r) and top != r for r in roots):
                 instead[deny] = str(top)
         return instead
+
+    def _absent_secrets(self, spec: Spec) -> frozenset[str]:
+        """The read denies that are not there, by the test brig's compile uses to choose what it
+        masks (`os.path.exists`): nothing masks one, so a jail holds it only where no input can
+        create it (`held`)."""
+        return frozenset(d for d in spec.fs.read_denies if not os.path.exists(d))
 
     def _absent_denies(self, spec: Spec) -> list[str]:
         """Every write-denied path under a write root that does not exist, and each of its
