@@ -4,6 +4,7 @@ kind of work a conversation, a resumed one too."""
 
 import re
 import textwrap
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -119,9 +120,9 @@ def test_shell_hints_tell_each_kind_of_shell_work_once_a_conversation() -> None:
 
 def test_a_resumed_conversation_is_not_told_again_a_kind_its_transcript_told() -> None:
     """A resumed session (or the row reloaded) starts a new `ShellHints`, but the transcript
-    holds what the model was told: a kind a shell note there named after a result is told
-    already. A note the person quoted, or a result that is one (an input printed it), told the
-    model nothing. The transcript is read once, at the first input; an empty one (a new
+    holds what the model was told: a kind a shell note in a `tool` entry named, after a blank
+    line, is told already. One the person quoted, or one an entry starts with (an input printed
+    it), is not. The transcript is read once, at the first input; an empty one (a new
     conversation, after /clear) tells every kind afresh."""
     read = "subprocess.run(['cat', 'a.txt'])"
     transcript = _Kept(
@@ -143,6 +144,20 @@ def test_a_resumed_conversation_is_not_told_again_a_kind_its_transcript_told() -
     assert hints({"code": "subprocess.run(['sed', 'p', 'f'])"}) == ""  # told now: once
     assert transcript.reads == 1
     assert ShellHints(_Kept())({"code": read}).startswith("(this input ran `cat` through a shell.")
+
+
+def test_a_long_result_line_costs_the_search_for_told_notes_little() -> None:
+    """The model's code makes a result whatever it likes, up to a line of 1 MiB. The search of a
+    resumed transcript for the shell notes it told takes time in proportion to an entry, not its
+    square: a 500 KB line repeating a note's pieces took 11 seconds, in the loop's thread, which
+    a reply and a stop wait for."""
+    note = shell_note((("cat", "read"),))
+    through, keep = note[note.index(" through") : note.index("read a file")], note[note.index(". Keep") :]
+    crafted = "one\n\n(this input ran " + (through + keep) * 3_000 + "x"
+    hints = ShellHints(_Kept({"role": "tool", "content": crafted, "call_id": "c0"}))
+    started = time.perf_counter()
+    assert hints({"code": "subprocess.run(['cat', 'f'])"}).startswith("(this input ran `cat`")
+    assert time.perf_counter() - started < 1.0
 
 
 async def test_the_shell_hints_row_adds_its_function_to_memory() -> None:

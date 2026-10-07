@@ -34,8 +34,8 @@ own output as the result, and a `note` for each memory note, by its first line. 
 row of its own, depending on nothing, so neither the loop nor a row adding to it reloads the
 other; the rows that add to it (`kernel:shell_hints`, `context:on_touch`) depend on
 `transcript`, so `/clear` starts them afresh and they tell a new conversation again; they read
-its `messages` too, so a resumed one is not told again what a `tool` entry holds after its
-result.
+its `messages` too, so a resumed one is not told again a note a `tool` entry holds (CONTRACTS.md:
+transcript).
 
 Each turn is classified by `stops.classify` (pure; the table is in its docstring, after
 ../harness/ARCHITECTURE.MD): only `act` runs calls, only `answered` ends the reply, and a

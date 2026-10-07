@@ -30,8 +30,10 @@ editing, writing, listing and moving files; searching with `grep` or `rg` is not
 tests, git and builds), and `shell_note` what such an input is told after its output, by
 `ShellHints`, the `memory` function the `kernel:shell_hints` row adds: once for each kind of work
 a conversation (the row depends on `transcript`, so `/clear` starts it afresh; at its first
-input it reads the transcript's `tool` entries for the shell notes told after a result, so a
-resumed session is not told a kind again), so it corrects a habit without nagging.
+input it reads the transcript's `tool` entries for the shell notes they hold, each a line after
+a blank line with a blank line or the entry's end after it, but not one an entry starts with, so
+a resumed session is not told a kind again; where a result ends is not marked, so a note an
+input printed that way counts too), so it corrects a habit without nagging.
 `scripts/model-friction` reads transcripts with the same two. `confined` is what the model is
 told (`instructions_for`) and whether the startup files run unasked: the kernel itself never
 asks, so it depends on its jail alone and a new ui or model keeps the namespace.

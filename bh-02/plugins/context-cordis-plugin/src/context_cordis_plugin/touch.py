@@ -7,7 +7,7 @@ Claude Code's Read, Write and Edit.
 The context files are the `system` value's own (`ProjectContext.touched`), so a layer's `files`,
 `root` and `home` on the `system` row reach the prompt and this alike, and each file is read and
 searched once. What this keeps is what it told this conversation; what the conversation was told
-before it began (a resumed session's) is in the `transcript`, after the results there.
+before it began (a resumed session's) is in the `transcript`'s `tool` entries, with the results.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -16,6 +16,10 @@ from typing import Any, Protocol, runtime_checkable
 __all__ = ["Memory", "OnTouch", "System", "Transcript"]
 
 _MAX_CHARS = 20_000  # what one input's result is told at most, as the prompt's sections by default
+# What may follow a text told whole in a `tool` entry, where its note ends (the entry's end aside):
+# the mark of a note cut short (`OnTouch`'s), or another note: bh-02's begin with "(" (a shell
+# hint, a function that failed, a change in the instructions), the context files' with "From ".
+_ENDS = ("\n... [", "\n\n(", "\n\nFrom ")
 
 
 @runtime_checkable
@@ -52,11 +56,20 @@ def _results(messages: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
 
 
 def _told_in(results: Sequence[str], text: str) -> bool:
-    """Whether `text` was told after a result in `results` (`_results`): its exact text, after a
-    blank line, with another blank line or the entry's end after it. Not when a result begins
-    with it, nor when it was cut short there (a note over `_MAX_CHARS`)."""
+    """Whether `text` was told in `results` (`_results`): its exact text, after a blank line,
+    where a note ends (the entry's end, or `_ENDS`). Not at an entry's start, nor cut short (a note
+    over `_MAX_CHARS`), nor followed by more of itself (a file cut back since: the paragraphs now
+    gone follow it). Where the result ends is not marked, so a text an input printed after a blank
+    line counts too."""
     note = f"\n\n{text}"
-    return any(result.endswith(note) or f"{note}\n\n" in result for result in results)
+    for result in results:
+        at = result.find(note)
+        while at != -1:
+            end = at + len(note)
+            if end == len(result) or result.startswith(_ENDS, end):
+                return True
+            at = result.find(note, at + 1)
+    return False
 
 
 class OnTouch:

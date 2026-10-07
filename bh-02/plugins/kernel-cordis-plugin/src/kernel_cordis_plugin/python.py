@@ -213,13 +213,13 @@ _HINT = (
     "result in a variable for the next input: {ways}. Keep subprocess for programs such as "
     "tests, git and builds.)"
 )
-# That note, told after a result in a transcript's `tool` entry: the loop puts each note after a
-# blank line, and another note or the entry's end follows it. Its ways are caught.
-_HINTED = re.compile(
-    r"\n\n"
-    + re.escape(_HINT).replace(re.escape("{commands}"), r"[^\n]*?").replace(re.escape("{ways}"), r"([^\n]*?)")
-    + r"(?=\n\n|\Z)"
-)
+# That note in a transcript's `tool` entry, a line of its own: the loop puts each note after a
+# blank line, and another note or the entry's end follows it. `_ways` takes its ways out of the
+# line with `partition`: a pattern with a group for each would take time with the square of a
+# line's length, and the model's code makes a result's lines what it likes.
+_HINT_HEAD, _HINT_REST = _HINT.split("{commands}")  # what comes before the commands
+_HINT_MIDDLE, _HINT_TAIL = _HINT_REST.split("{ways}")  # between them and the ways; after the ways
+_HINTED = re.compile(r"\n\n(" + re.escape(_HINT_HEAD) + r"[^\n]*)(?=\n\n|\Z)")
 
 
 def programs(code: str) -> tuple[tuple[str, bool], ...]:
@@ -257,18 +257,25 @@ def shell_note(found: Sequence[tuple[str, str]]) -> str:
 
 def _hinted(messages: Iterable[Mapping[str, Any]]) -> set[str]:
     """The kinds of work a conversation's transcript (`messages`) says the model was told Python
-    does: each shell note (`shell_note`) told after an input's result names its kinds by their
-    ways. A note is told when its exact text follows the result in a `tool` entry, not when a
-    result or the person quotes it."""
+    does: each shell note (`shell_note`) told with an input's result names its kinds by their
+    ways. A note is told when a `tool` entry holds it whole, a line after a blank line with a
+    blank line or the entry's end after it: not at the entry's start, and not in what the person
+    says. Where the result ends is not marked, so a note an input printed that way counts too."""
     kinds = {way: kind for kind, way in _INSTEAD.items()}
     told = (str(m.get("content") or "") for m in messages if m.get("role") == "tool")
     return {
         kinds[way]
         for content in told
-        for ways in _HINTED.findall(content)
-        for way in ways.split("; ")
+        for line in _HINTED.findall(content)
+        for way in _ways(line).split("; ")
         if way in kinds
     }
+
+
+def _ways(line: str) -> str:
+    """The ways a shell note's line (`_HINTED`'s) names, '' for a line that is not one."""
+    _, found, rest = line.partition(_HINT_MIDDLE)
+    return rest.removesuffix(_HINT_TAIL) if found and rest.endswith(_HINT_TAIL) else ""
 
 
 @runtime_checkable

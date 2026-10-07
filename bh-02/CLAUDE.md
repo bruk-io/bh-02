@@ -116,8 +116,9 @@ or CLAUDE.md, or a rule for some files, arrives whole with the first input that 
 covers (Claude Code's on-demand loading); it has no config of its own and asks the `system`
 value (`system.touched(paths)`), so the context files, and the caches of what was read and
 searched, are `context:project`'s alone. Both depend on `transcript`, so `/clear` and `/compact`
-start them afresh, and read its `messages` once, at their first input, so a resumed session is not told a
-note its transcript holds after a result; only layer rows add to `memory`, since its functions
+start them afresh, and read its `messages` once, at the first input that may need them
+(on-touch: the first that opens a file), so a resumed session is not told again a note its
+transcript's `tool` entries hold; only layer rows add to `memory`, since its functions
 run in bh-02's process. The loop reads the prompt before each message the model reads but sends
 the one the conversation began with (the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
 switched, CLAUDE.md edited) is told as a note on that message (`prompt.changes`), because a
