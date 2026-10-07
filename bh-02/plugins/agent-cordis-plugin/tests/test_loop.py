@@ -532,6 +532,28 @@ async def test_a_transcript_that_kept_each_prompt_whole_still_loads_and_resumes(
     assert latest(kept) == in_c
 
 
+async def test_a_transcript_with_an_edits_entry_that_can_t_be_applied_still_answers() -> None:
+    """A transcript damaged by hand must not cost a resumed session every message: an `edits`
+    entry that can't be applied leaves the reading before it as what the model was last told, so
+    the next change is told against that one and kept as the edits from it."""
+    began = {"role": "system", "content": f"in /a\n\n{_SHOUT}"}
+    history = MemoryTranscript()
+    for message in (
+        began,
+        {"role": "user", "content": "first", "today": _DAY},
+        {"role": "assistant", "content": "one"},
+        {"role": "system", "edits": [{"at": 0}]},
+    ):
+        history.append(message)
+    where, scripted = _Where(), Scripted([text("two")])
+    where.text_now = "in /b"
+    loop = LoopModel(scripted, _Guided(), history, Confined(), system=where, today=_today)
+    assert await _collect(loop, "second") == "two"
+    in_b = f"in /b\n\n{_SHOUT}"
+    assert scripted.requests[0][0][-1]["content"] == f"{changes(began['content'], in_b)}\n\nsecond"
+    assert latest([m for m in history.messages if m["role"] == "system"]) == in_b
+
+
 async def test_a_change_made_by_an_input_is_told_with_that_input_s_result() -> None:
     where, history = _Where(), MemoryTranscript()
 

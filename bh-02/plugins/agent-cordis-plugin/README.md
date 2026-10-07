@@ -63,7 +63,9 @@ transcript once, not once per change. What the model was last told is the first 
 each later one's edits applied in turn (`prompt.latest`, pure), which the loop works out when it
 meets a transcript it has not read and then keeps up itself. A transcript from before the loop
 kept edits has every reading whole; `latest` takes those as they are, so it resumes unchanged
-and its next change is kept as edits from its last whole reading. Only the first entry reaches a
+and its next change is kept as edits from its last whole reading. An entry whose edits `edits`
+could not have made (a transcript edited by hand or damaged) is passed over, the reading before
+it standing, so the session still answers and its next change is kept as edits from that one. Only the first entry reaches a
 model, as `{"role": "system", "content"}`; the edits are the loop's own. A loop that reloads (a
 new model, a new ui), or one over a resumed session, carries on from what the transcript says
 the model was told; `/clear` empties it, so the next conversation begins with the prompt as it

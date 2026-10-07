@@ -217,8 +217,9 @@ system entry
                         a later prompt, as what turns the one before it into this one, by
                         paragraph (split at every blank line, exactly): from paragraph `at` of the
                         one before, `drop` of them give way to `add` (`agent_cordis_plugin.edits`;
-                        `latest` applies a transcript's entries in turn to what the model was last
-                        told). The loop's own: a request carries the first alone, as
+                        `latest` applies a transcript's entries in turn, giving what the model was
+                        last told, and passes over one whose edits `edits` could not have made, a
+                        damaged file's). The loop's own: a request carries the first alone, as
                         `{"role": "system", "content": str}`, so a provider never sees `edits`
 tool call   {"id": str, "name": str, "input": Mapping}
 chunk       {"type": "text", "text": str}
