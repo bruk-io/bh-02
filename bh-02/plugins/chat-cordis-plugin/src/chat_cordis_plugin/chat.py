@@ -3,7 +3,9 @@
 `converse` is a plain function of the values this plugin declares its own contracts for
 (CONTRACTS.md: loop, input, output, and commands if it has them). Nothing here touches a
 terminal or cordis. Which lines are commands is the `commands` value's to say (`claims`): a
-slash command, or a line starting with a prefix a row claimed (`!`, a shell command).
+slash command, or a line starting with a prefix a row claimed (`!`, a shell command). What a
+command leaves for the model (`!`'s output) the `commands` value holds, not this row, so a
+restart of this row (`/model` reloads the loop, and this row with it) keeps it.
 """
 
 import asyncio
@@ -33,10 +35,12 @@ class Loop(Protocol):
 
 @runtime_checkable
 class Input(Protocol):
-    """Lines from the person, and their asking to stop the turn that is running."""
+    """Lines from the person; their asking to stop the turn that is running (`interrupted`);
+    and their having left (`closed`: no more lines will come)."""
 
     async def read(self) -> str | None: ...
     async def interrupted(self) -> None: ...
+    async def closed(self) -> None: ...
 
 
 @runtime_checkable
@@ -48,31 +52,17 @@ class Output(Protocol):
 @runtime_checkable
 class Commands(Protocol):
     """What the session needs of the `commands` value: whether a line is the harness's rather
-    than the model's, and to run one, getting what to show (text, or events: CONTRACTS.md,
-    commands)."""
+    than the model's; to run one, getting what to show (text, or events: CONTRACTS.md,
+    commands); and to take what commands left for the model's next message (`!`'s output)."""
 
     def claims(self, line: str) -> bool: ...
     async def run(self, line: str) -> str | Sequence[Event]: ...
+    def take_for_model(self) -> Sequence[str]: ...
 
 
 def _answered(answer: str | Sequence[Event]) -> list[Event]:
     """A command's answer as the events to show: text is one note; events are shown as they are."""
     return [{"type": "note", "text": answer}] if isinstance(answer, str) else list(answer)
-
-
-def _hold(held: Sequence[str], events: Iterable[Event]) -> tuple[list[str], list[Event]]:
-    """What is held for the model after a command's answer, and what of it to show: a
-    `for_model` event's text is held (and not shown) until the person's next message; a
-    `cleared` drops what was held, since a new conversation starts without it."""
-    kept, shown = list(held), []
-    for event in events:
-        if event.get("type") == "for_model":
-            kept.append(str(event.get("text", "")))
-            continue
-        if event.get("type") == "cleared":
-            kept = []
-        shown.append(event)
-    return kept, shown
 
 
 def _told(held: Sequence[str], message: str) -> str:
@@ -93,30 +83,48 @@ async def converse(loop: Loop, input: Input, output: Output, commands: Commands 
     """Read a message, show the streamed reply, repeat until there is no more input.
 
     A line `commands` claims (a `/command`, or one starting with a claimed prefix, `!`) goes to
-    it and never to the model; what it returns is shown (`_answered`: text as a note, events as
-    they are), but for what it gives the model (`for_model`: `!`'s output), which is held and
-    put in front of the person's next message (`_told`), so the model reads it with that and
-    never during a turn. The loop's contract is unchanged: it is given one message.
+    it and never to the model, and what it answers is shown (`_answered`: text as a note,
+    events as they are). It runs until it answers or the input closes (the person left: a
+    `!` command may run for minutes, and nobody is left to read its answer), which cancels it.
+    What commands left for the model (`for_model`: `!`'s output, which `commands` holds) is
+    taken and put in front of the person's next message (`_told`), so the model reads it with
+    that and never during a turn. The loop's contract is unchanged: it is given one message.
 
     A recoverable failure is shown and the chat carries on; anything else leaves, and the
     bootstrap re-raises it. Returning is how the program ends: nothing is left running, so
     the runtime is idle.
     """
-    held: list[str] = []
     while (message := await input.read()) is not None:
         if not message.strip():
             continue
         if commands is not None and commands.claims(message):
-            held, shown = _hold(held, _answered(await commands.run(message)))
-            await output.show(_each(shown))
+            answer = await _unless_closed(commands.run(message), input)
+            if answer is not None:
+                await output.show(_each(_answered(answer)))
             continue
-        told, held = _told(held, message), []
+        told = _told(commands.take_for_model() if commands is not None else (), message)
         try:
             await _interruptible(_show(loop.reply(told), output), input, output)
         except Exception as error:
             if not isinstance(error, Recoverable):
                 raise
             await output.notice(error.message)
+
+
+async def _unless_closed[T](work: Awaitable[T], input: Input) -> T | None:
+    """Run a command until it answers (its answer), or until the input closes (None): then it
+    is cancelled, and its own cleanup (a `!` command's process group ended) runs first. Ctrl-C
+    is a turn's (`interrupted`), so it does not stop a command."""
+    run = asyncio.ensure_future(work)
+    gone = asyncio.ensure_future(input.closed())
+    try:
+        await asyncio.wait({run, gone}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        gone.cancel()
+        if not run.done():
+            run.cancel()
+            await asyncio.gather(run, return_exceptions=True)
+    return None if run.cancelled() else run.result()
 
 
 async def _interruptible(turn: Awaitable[None], input: Input, output: Output) -> None:

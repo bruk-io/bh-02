@@ -3,8 +3,10 @@
 `Bridge` is what the app and the ports share: lines the person typed, Ctrl-C, pending
 questions, and whether the app has ended. Ctrl-C is never dropped while bh-02 is busy with a
 line: between a line being handed out and the turn it starts listening for Ctrl-C (or while a
-slash command runs), one interrupt is held for the next `interrupted()`, and the next `read()`
-drops it (a slash command is not interrupted, and a held Ctrl-C must not kill the next turn).
+command runs: a slash command, a `!` one), one interrupt is held for the next `interrupted()`,
+and the next `read()` drops it (a command is not interrupted, and a held Ctrl-C must not kill
+the next turn); the app says so when a held one is still unheard a moment later
+(`interrupt_held`: a command is running, not a turn starting).
 
 A line typed while nobody reads (the chat row is down because a row it depends on is coming
 back up: `/model` restarts the model, `/clear` the loop and its transcript, each of which
@@ -21,8 +23,9 @@ to the old one or starting a turn the restart would stop. A row announced that n
 
 Whatever ends the app (Ctrl-Q, `/exit`, a crash) ends the bridge, and that settles everything
 waiting on it: a pending `read()` returns None (or raises `AppCrashed` after a crash, so the
-failure reaches the command line through the chat row's `done`), `interrupted()` waiters return,
-and a pending question is answered no.
+failure reaches the command line through the chat row's `done`), `interrupted()` and `closed()`
+waiters return (a command running is cancelled on `closed()`, so bh-02 leaves at once), and a
+pending question is answered no.
 
 The ports never touch a widget: they post a message (`messages.py`) and the app draws it.
 """
@@ -78,6 +81,7 @@ class Bridge:
         self._interrupts: set[asyncio.Future[None]] = set()
         self._questions: set[asyncio.Future[bool]] = set()
         self._ended = False
+        self._closed = asyncio.Event()  # set with `_ended`, for those awaiting it (`closed()`)
         self._crash: AppCrashed | None = None
         self._draws: set[asyncio.Future[None]] = set()  # batches posted and not yet drawn
         self._busy = False  # a line was handed out and nobody has read since
@@ -233,8 +237,9 @@ class Bridge:
     def interrupt(self) -> bool:
         """Ctrl-C: settle every turn waiting on it; say whether anything was running.
 
-        A line handed out with no turn listening yet (its turn is starting, or it is a slash
-        command) is running too: the interrupt is held for the next `interrupted()`.
+        A line handed out with no turn listening yet (its turn is starting, or it is a command:
+        a slash command, a `!` one) is running too: the interrupt is held for the next
+        `interrupted()`, and the next `read()` drops it.
         """
         waiting = [w for w in self._interrupts if not w.done()]
         for waiter in waiting:
@@ -257,6 +262,10 @@ class Bridge:
             await waiter
         finally:
             self._interrupts.discard(waiter)
+
+    async def closed(self) -> None:
+        """Return once the app has ended (at once if it has): no more lines will come."""
+        await self._closed.wait()
 
     def question(self) -> asyncio.Future[bool] | None:
         """A future for the answer to one question, or None when nobody is left to ask."""
@@ -283,6 +292,7 @@ class Bridge:
         if self._ended:
             return
         self._ended, self._crash = True, crash
+        self._closed.set()
         if self._lapse is not None:
             self._lapse.cancel()
             self._lapse = None
@@ -315,7 +325,8 @@ class _Lifecycle(Protocol):
 
 
 class TuiInput:
-    """Implements `input`: lines from the composer; Ctrl-C is `interrupted()`."""
+    """Implements `input`: lines from the composer; Ctrl-C is `interrupted()`; the app ending
+    (Ctrl-Q, `/exit`, a crash) is `closed()`."""
 
     def __init__(self, bridge: Bridge) -> None:
         self._bridge = bridge
@@ -327,6 +338,10 @@ class TuiInput:
     async def interrupted(self) -> None:
         """Return when the person asks to stop the turn that is running (Ctrl-C)."""
         await self._bridge.interrupted()
+
+    async def closed(self) -> None:
+        """Return once the app has ended (`/exit`, Ctrl-Q, a crash): no more lines will come."""
+        await self._bridge.closed()
 
 
 class _Status(Protocol):

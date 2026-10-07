@@ -238,21 +238,48 @@ def test_a_bang_line_runs_in_the_shell_and_the_model_reads_its_output_with_the_n
     """`!COMMAND` (the shipped `shell-command` row): it runs as the person, in the project (the
     launch's `work`), and its output is shown; it is no message, and the model (`fake` echoes
     the last message, and says which of the conversation's it was) reads that output with the
-    next one."""
+    next one, even across a `/model` switch, which reloads the chat row: `commands` holds it."""
     app = launch("fake")
     ready = app.wait_for(_READY, 60)
     app.type("!echo shellsaid; pwd")
     shown = app.wait_for("exit status 0; the model reads this with your next message", 20, after=ready)
     assert "shellsaid" in app.text()[ready:shown] and "/work" in app.text()[ready:shown]
     assert "SHELLSAID" not in app.text()  # nothing went to the model yet
+    app.type("/model fake-2")
+    switched = app.wait_for("↻ chat reloaded", 20, after=shown)
+    app.settle(1.0)
     app.type("over to you")
-    app.wait_for("YOU", 20, after=shown)  # the model's echo, upper-cased
+    app.wait_for("YOU", 20, after=switched)  # the model's echo, upper-cased
     app.settle(0.5)
-    replied = app.text()[shown:]
-    assert "SHELLSAID" in replied  # the output, in front of the message
+    replied = app.text()[switched:]
+    assert "[fake-2] echo:" in replied and "SHELLSAID" in replied  # the output, in front of it
     assert re.search(r"\(message\s+1\)", replied), replied[-3000:]  # the `!` line was no message
     app.press(b"\x11")
     assert app.exit_code() == 0
+
+
+def test_ctrl_c_says_a_bang_command_runs_on_and_ctrl_q_leaves_at_once_ending_it(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """A `!` command may take minutes (its timeout is 120 s): Ctrl-C doesn't stop it, and says
+    so; Ctrl-Q leaves at once, not when the command ends, and ends the command with it."""
+    app = launch("fake")
+    ready = app.wait_for(_READY, 60)
+    pid = tmp_path / "work" / "shell.pid"
+    app.type(f"!echo $$ > {pid}; sleep 60; echo ended-$((6 * 7))")
+    deadline = time.monotonic() + 20
+    while not (pid.exists() and pid.read_text().strip()) and time.monotonic() < deadline:
+        app.settle(0.1)
+    shell = int(pid.read_text())
+    app.press(b"\x03")
+    app.wait_for("A command is running, and Ctrl-C stops only a turn", 10, after=ready)
+    assert _alive(shell)  # Ctrl-C did not stop it
+    left = time.monotonic()
+    app.press(b"\x11")
+    assert app.exit_code(15) == 0
+    assert time.monotonic() - left < 10, "bh-02 waited for the command"
+    assert "ended-42" not in app.text()[ready:]
+    assert not _alive(shell)  # the command ended with bh-02
 
 
 def test_the_transcript_draws_every_kind_of_event_and_a_long_reply(launch: Launch) -> None:

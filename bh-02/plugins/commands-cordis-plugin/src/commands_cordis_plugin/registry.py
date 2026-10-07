@@ -7,6 +7,12 @@ then whitespace or the end), so a pasted `/tmp/app.py is broken` still reaches t
 when it starts with a prefix a row claimed (`!`, `commands:shell_command`'s): one character
 each, kept in a registry of their own, so two rows can't claim the same one. `claims(line)` is
 how the chat row asks which lines are the harness's, so what counts is decided here alone.
+
+What a command leaves for the model (a `for_model` event in its answer: `!`'s output) is held
+here, not shown, until the chat row takes it for the person's next message
+(`take_for_model`). This row depends on nothing, so a restart of the chat row (`/model`
+reloads the loop, and the chat row with it) keeps it; a new conversation (`cleared`, `/clear`'s
+answer) drops it, and says so.
 """
 
 import re
@@ -40,8 +46,8 @@ class CommandSpec(TypedDict):
 
 type Answer = str | Sequence[Mapping[str, Any]]
 """What a command answers (CONTRACTS.md: commands): text, shown as one note, or events shown
-as they are (`/clear`'s `cleared`, then a note saying so), but for `for_model`, which the chat
-row holds for the person's next message instead of showing it."""
+as they are (`/clear`'s `cleared`, then a note saying so), but for `for_model`, which the
+`commands` value holds for the person's next message instead of answering it."""
 
 type Run = Callable[[str], Awaitable[Answer]]
 """A command: its argument text in, what to show the person out."""
@@ -68,7 +74,10 @@ def _looks_like_command(line: str) -> bool:
 
 def _prefix_problem(prefix: object) -> str | None:
     """Why `prefix` can't be claimed, or None. A prefix takes every line that starts with it
-    from the model, so it is one character no message starts with by chance."""
+    from the model, so it is one character, and never one that ordinary words start with (a
+    letter, a digit), a space or `/`. Any other symbol is accepted: which one messages don't
+    start with is the layer's author's choice (`$` starts a price, `#` and `-` Markdown, `>` a
+    quote, `{` pasted JSON), and `!` is the shipped one."""
     if not isinstance(prefix, str) or len(prefix) != 1:
         return f"a prefix is one character, such as '!'; got {prefix!r}"
     if prefix == "/":
@@ -76,9 +85,31 @@ def _prefix_problem(prefix: object) -> str | None:
     if prefix.isalnum() or not prefix.isprintable() or prefix.isspace():
         return (
             f"a line can start with {prefix!r} by chance, so claiming it would take ordinary "
-            "messages from the model; claim a symbol, such as '!'"
+            "messages from the model; claim a symbol no message starts with, such as '!'"
         )
     return None
+
+
+def _held_after(held: Sequence[str], answer: Answer) -> tuple[list[str], Answer]:
+    """What is held for the model after a command's `answer`, and what of it to answer: a
+    `for_model` event's text is held (and not answered); a `cleared` drops what was held,
+    since a new conversation starts without it, and a note after the answer says so."""
+    if isinstance(answer, str):
+        return list(held), answer
+    kept, dropped = list(held), 0
+    shown: list[Mapping[str, Any]] = []
+    for event in answer:
+        if event.get("type") == "for_model":
+            kept.append(str(event.get("text", "")))
+            continue
+        if event.get("type") == "cleared":
+            dropped, kept = dropped + len(kept), []
+        shown.append(event)
+    if dropped:
+        what = "a command's output" if dropped == 1 else f"{dropped} commands' output"
+        said = f"{what}, which was waiting for your next message, is dropped with the old conversation"
+        shown.append({"type": "note", "text": said})
+    return kept, shown
 
 
 class Commands:
@@ -87,6 +118,7 @@ class Commands:
     def __init__(self) -> None:
         self._commands: Registry[tuple[CommandSpec, Run]] = Registry("command")
         self._prefixes: Registry[tuple[CommandSpec, Run]] = Registry("prefix")
+        self._for_model: list[str] = []  # what commands left for the person's next message
 
     def register(self, spec: CommandSpec, run: Run) -> Callable[[], None]:
         """Offer `/NAME` (`spec`: name, help, usage) until the remover is called."""
@@ -113,7 +145,22 @@ class Commands:
 
     async def run(self, line: str) -> Answer:
         """Run what `line` names: the prefix it starts with, given the rest of the line, or the
-        slash command; an unknown command says so, and never reaches the model."""
+        slash command; an unknown command says so, and never reaches the model. Answer what to
+        show the person: what the command left for the model (`for_model`) is held instead,
+        until `take_for_model`."""
+        answer = await self._answer(line)
+        self._for_model, shown = _held_after(self._for_model, answer)
+        return shown
+
+    def take_for_model(self) -> list[str]:
+        """What commands left for the model since this was last asked, in the order they ran
+        (`!`'s output, framed for the model); taking it empties it. The chat row puts it in
+        front of the person's next message."""
+        taken, self._for_model = self._for_model, []
+        return taken
+
+    async def _answer(self, line: str) -> Answer:
+        """What the command `line` names answers, `for_model` and all."""
         stripped = line.strip()
         if stripped and (claimed := self._prefixes.get(stripped[0])) is not None:
             spec, run = claimed
