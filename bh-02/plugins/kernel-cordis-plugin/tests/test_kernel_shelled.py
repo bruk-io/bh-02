@@ -146,14 +146,29 @@ def test_a_resumed_conversation_is_not_told_again_a_kind_its_transcript_told() -
     assert ShellHints(_Kept())({"code": read}).startswith("(this input ran `cat` through a shell.")
 
 
-def test_a_long_result_line_costs_the_search_for_told_notes_little() -> None:
+def test_a_transcript_from_before_the_memory_broker_tells_its_shell_notes_too() -> None:
+    """Before `memory`, the kernel put the note after the result's last line, one newline and
+    no blank line, at the entry's end: a session resumed from then was told them all the same."""
+    transcript = _Kept(
+        {"role": "assistant", "content": "", "tool_calls": []},
+        {"role": "tool", "content": f"one\n{shell_note((('cat', 'read'),))}", "call_id": "c0"},
+        {"role": "tool", "content": f"(no output)\n{shell_note((('ls', 'list'),))}", "call_id": "c1"},
+    )
+    hints = ShellHints(transcript)
+    assert hints({"code": "subprocess.run(['head', 'a.txt'])"}) == ""
+    assert hints({"code": "subprocess.run(['find', '.'])"}) == ""
+    assert hints({"code": "subprocess.run(['rm', 'f'])"}).startswith("(this input ran `rm`")
+
+
+@pytest.mark.parametrize("before", ["\n\n", "\n"])
+def test_a_long_result_line_costs_the_search_for_told_notes_little(before: str) -> None:
     """The model's code makes a result whatever it likes, up to a line of 1 MiB. The search of a
     resumed transcript for the shell notes it told takes time in proportion to an entry, not its
     square: a 500 KB line repeating a note's pieces took 11 seconds, in the loop's thread, which
-    a reply and a stop wait for."""
+    a reply and a stop wait for. So after a blank line, or the one newline of an older one."""
     note = shell_note((("cat", "read"),))
     through, keep = note[note.index(" through") : note.index("read a file")], note[note.index(". Keep") :]
-    crafted = "one\n\n(this input ran " + (through + keep) * 3_000 + "x"
+    crafted = f"one{before}(this input ran " + (through + keep) * 3_000 + "x"
     hints = ShellHints(_Kept({"role": "tool", "content": crafted, "call_id": "c0"}))
     started = time.perf_counter()
     assert hints({"code": "subprocess.run(['cat', 'f'])"}).startswith("(this input ran `cat`")

@@ -214,12 +214,15 @@ _HINT = (
     "tests, git and builds.)"
 )
 # That note in a transcript's `tool` entry, a line of its own: the loop puts each note after a
-# blank line, and another note or the entry's end follows it. `_ways` takes its ways out of the
-# line with `partition`: a pattern with a group for each would take time with the square of a
-# line's length, and the model's code makes a result's lines what it likes.
+# blank line, and another note or the entry's end follows it; before the `memory` broker, the
+# kernel put it after the result's last line, one newline and no blank line, at the entry's end,
+# so one newline before it counts too (as `scripts/model-friction` reads it). `_ways` takes its
+# ways out of the line with `partition`: a pattern with a group for each would take time with the
+# square of a line's length, and the model's code makes a result's lines what it likes. Here each
+# line is tried from the newline or two before it, and given up at its own end.
 _HINT_HEAD, _HINT_REST = _HINT.split("{commands}")  # what comes before the commands
 _HINT_MIDDLE, _HINT_TAIL = _HINT_REST.split("{ways}")  # between them and the ways; after the ways
-_HINTED = re.compile(r"\n\n(" + re.escape(_HINT_HEAD) + r"[^\n]*)(?=\n\n|\Z)")
+_HINTED = re.compile(r"\n\n?(" + re.escape(_HINT_HEAD) + r"[^\n]*)(?=\n\n|\Z)")
 
 
 def programs(code: str) -> tuple[tuple[str, bool], ...]:
@@ -258,7 +261,8 @@ def shell_note(found: Sequence[tuple[str, str]]) -> str:
 def _hinted(messages: Iterable[Mapping[str, Any]]) -> set[str]:
     """The kinds of work a conversation's transcript (`messages`) says the model was told Python
     does: each shell note (`shell_note`) told with an input's result names its kinds by their
-    ways. A note is told when a `tool` entry holds it whole, a line after a blank line with a
+    ways. A note is told when a `tool` entry holds it whole, a line after a blank line (or, as
+    a transcript from before the `memory` broker has it, after a line of the result) with a
     blank line or the entry's end after it: not at the entry's start, and not in what the person
     says. Where the result ends is not marked, so a note an input printed that way counts too."""
     kinds = {way: kind for kind, way in _INSTEAD.items()}

@@ -32,8 +32,11 @@ tests, git and builds), and `shell_note` what such an input is told after its ou
 a conversation (the row depends on `transcript`, so `/clear` starts it afresh; at its first
 input it reads the transcript's `tool` entries for the shell notes they hold, each a line after
 a blank line with a blank line or the entry's end after it, but not one an entry starts with, so
-a resumed session is not told a kind again; where a result ends is not marked, so a note an
-input printed that way counts too), so it corrects a habit without nagging.
+a resumed session is not told a kind again; a transcript from before `memory` has the note after
+the result's last line, one newline and no blank line, at the entry's end, and that counts too,
+as `scripts/model-friction` reads it; the search takes time in proportion to an entry, however
+the model's code shapes its lines; where a result ends is not marked, so a note an input printed
+that way counts too), so it corrects a habit without nagging.
 `scripts/model-friction` reads transcripts with the same two. `confined` is what the model is
 told (`instructions_for`) and whether the startup files run unasked: the kernel itself never
 asks, so it depends on its jail alone and a new ui or model keeps the namespace.
