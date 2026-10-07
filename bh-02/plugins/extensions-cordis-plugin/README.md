@@ -94,6 +94,32 @@ A project that ships a `.bh-02/plugins/` (a repository cloned from someone else)
 extensions when bh-02 starts there, jailed, as the model's would be. Unjailed, each is asked
 about first.
 
+## What the host reads, and writes, there
+
+The model writes the extensions directory from the jail, and `host.py` reads it on the host,
+with the person's permissions, so it follows no link there (the kernel's rule for its startup
+files: never read a file the model could write, or reach through a link it could make, and hand
+its text to the model). A link to `local.env`, or a hard link to it, would otherwise send the
+secret to the worker as an extension's source, where an extension already loaded could keep
+it, and a SyntaxError on its first line would put that line in status.json and the prompt.
+- The directory is opened from the project's root a name at a time (`.bh-02`, then `plugins`)
+  with `O_NOFOLLOW`, and listed and read through that descriptor (`_opened`). The root itself
+  is the person's, and may be reached through a link of theirs.
+- An extension is opened beneath it with `O_NOFOLLOW` (and `O_NONBLOCK`, so a FIFO swapped in
+  never blocks), and read only when `fstat` on that descriptor says it is a regular file with
+  one name (`watch.refusal`). So a file swapped for a link after it was found, or as it is
+  opened, is not read either.
+- A file refused is not loaded (what an earlier version of it added goes), and status.json says
+  why and what to write instead: `.bh-02/plugins/leak.py is a link, which bh-02 does not follow
+  there (it could lead to a file the jail hides): write the extension itself at
+  .bh-02/plugins/leak.py, not a link to it`; a hard link says how many names it has.
+- A link on the way (`.bh-02`, or the directory itself) loads nothing: nothing in it is listed,
+  read or written, status.json included, so the row's `system` section says it instead
+  (`watch.linked`: make it a directory in the project, not a link).
+- status.json is written through the same descriptor, as a new file renamed over the old, so a
+  link the model left at `status.json` is replaced, not written through, and an input never
+  reads half of one.
+
 ## The worker
 
 `worker.py` runs by path (`python -I worker.py SOCKET`) and holds a cordis `Runtime`. An
@@ -118,9 +144,13 @@ loaded again every `watch`.
 
 ## Tests
 
-- `test_extensions_watch.py` is pure: names, changes, what the model and the status bar are told.
+- `test_extensions_watch.py` is pure: names, changes, which files may be read, what the model
+  and the status bar are told.
 - `test_extensions_host.py` runs `Extensions` against a real worker under
   `extensions_cordis_plugin.testing.PlainJail` (a plain subprocess; it confines nothing and says
   so) and fakes for the keys, `approval` among them (confined or not): an extension loaded and
   its command run, changed and deleted, the ways one fails to load, a command name bh-02 has,
-  the unjailed question, a worker an extension ends.
+  the unjailed question, a worker an extension ends, and the links it does not follow: a link to
+  a file outside, a hard link, `.bh-02` or `.bh-02/plugins` a link, a file swapped for a link
+  between being found and read (by an extension loaded just before it), and a link at
+  `status.json`.

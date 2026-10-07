@@ -143,8 +143,11 @@ an extension sends but these three kinds), `frame.status(field, text, *shorter)`
 `NAME:field`, so it can't replace another row's field) and `system.add(text)` (text, not a
 function: it crosses a socket). The extensions
 row registers each into the real key and keeps the remover, so a changed, deleted or failed
-extension takes back what it added, and nothing it does can replace a row. The plugin's README
-has the worker's wire.
+extension takes back what it added, and nothing it does can replace a row. The host reads what
+the model wrote there following no link: a link, a file with a second name, or a link on the way
+(`.bh-02`, the directory itself) is not read, since it could hand the model a file the jail
+hides, and status.json says why (for a link on the way, which nothing is written through, the
+row's `system` section does). The plugin's README has the worker's wire.
 
 **The jail and the kernel.** A `jail` starts one program and reports, per axis (`fs_read`,
 `fs_write`, `network`, `limits`, `env`, ...), a grade: `enforced`, `best_effort`,

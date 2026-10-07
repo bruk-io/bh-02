@@ -13,21 +13,33 @@ this registers in `commands` and runs by asking the worker; a status-bar field, 
 Each is kept with its remover, and taken back when the worker says so or the worker ends.
 
 The model hears how each extension went in two places: its prompt (`section`, read per
-request) and `status.json` in the extensions directory, written as soon as a load ends, so a
+request) and `status.json` in the extensions directory, written as soon as a load ends, so an
 input can read it at once. The worker starts with the first extension there is to load; one that
 ends (an extension may end it) takes every extension down with it, and they are loaded again,
 in a new worker, at the next change in the directory.
+
+The model writes the extensions directory from the jail, and this reads it on the host, so it
+follows no link there (`_opened`, `_read`): the directory is opened from the project's root one
+name at a time, with `O_NOFOLLOW`, and a file is read only if the descriptor it was opened as says
+it is a regular file with one name (`watch.refusal`). A link, or a hard link, could otherwise hand
+the model a file the jail hides (`local.env`), as an extension's source, or as the line of its
+SyntaxError in status.json. status.json is written through the same descriptor, as a new file
+renamed over the old, so a link there leads no write elsewhere either.
 """
 
 import asyncio
 import contextlib
+import errno
 import functools
 import importlib.util
 import itertools
 import json
+import os
 import shutil
+import stat
 import tempfile
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+import uuid
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from sys import executable
@@ -39,6 +51,8 @@ from extensions_cordis_plugin.watch import (
     changes,
     extension_name,
     instructions,
+    linked,
+    refusal,
     status_file,
     status_forms,
 )
@@ -63,6 +77,12 @@ _ENDED = (
     "the extensions' worker ended (an extension may have ended it, or the jail did); change a "
     "file in the extensions directory to load them all again"
 )
+# How the extensions directory is opened beneath the root, a name at a time, and an extension in
+# it: following no link, and never waiting on a FIFO the model left in a file's place.
+_ROOT = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+_DIRECTORY = _ROOT | os.O_NOFOLLOW | os.O_NONBLOCK
+_FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+_NEW = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC  # status.json's next
 
 
 @runtime_checkable
@@ -138,6 +158,10 @@ class _Gone(Exception):
     """The worker is not there to answer: it would not start, or it ended."""
 
 
+class _Refused(Exception):
+    """bh-02 does not read what the model wrote there (a link, a hard link), and says why."""
+
+
 def worker_argv(endpoint: str) -> list[str]:
     """The worker, run by path under this interpreter, isolated (-I: no PYTHON* env, no cwd on path)."""
     return [executable, "-I", str(_WORKER), endpoint]
@@ -179,6 +203,7 @@ class Extensions:
         self._socket_dir: str | None = None
         self._watcher: asyncio.Task[None] | None = None
         self._field: Callable[[], None] | None = None
+        self._refused = ""  # why nothing loads from the extensions directory: a link on the way
         # cordis's own design doc, to point the model at: beside the package in the workspace
         # (an editable install); an installed wheel carries none, and the model is not pointed
         cordis = importlib.util.find_spec("cordis")
@@ -201,7 +226,9 @@ class Extensions:
         thread while this row's watcher changes `_statuses` on the event loop, so it reads a copy
         (`statuses`, taken in one step) and nothing that needs the event loop (`confined` reads
         the jail's report, a value)."""
-        return instructions(self._config.path, self._approval.confined, self.statuses, self._reference)
+        return instructions(
+            self._config.path, self._approval.confined, self.statuses, self._reference, self._refused
+        )
 
     async def __aenter__(self) -> Extensions:
         await self.look()  # what is there already loads before the row is up
@@ -259,21 +286,83 @@ class Extensions:
             await self.look()
 
     def _found(self) -> dict[str, tuple[int, int]]:
+        """Each extension file in the extensions directory, by name, with its stamp (mtime, size)
+        as it is there: a link's own, not what it leads to (`_load` refuses one, and says why).
+        Nothing when there is no directory, or when the way to it has a link (`_refused` says
+        so, in the model's prompt: nothing is written through the link, status.json included)."""
         found: dict[str, tuple[int, int]] = {}
-        with contextlib.suppress(OSError):
-            for path in self.directory.iterdir():
-                if (name := extension_name(path.name)) is not None and path.is_file():
-                    stat = path.stat()
-                    found[name] = (stat.st_mtime_ns, stat.st_size)
+        self._refused = ""
+        try:
+            with self._opened() as directory, os.scandir(directory) as entries:
+                for entry in entries:
+                    if (name := extension_name(entry.name)) is None:
+                        continue
+                    with contextlib.suppress(OSError):  # gone since it was listed
+                        if not entry.is_dir(follow_symlinks=False):
+                            seen = entry.stat(follow_symlinks=False)
+                            found[name] = (seen.st_mtime_ns, seen.st_size)
+        except _Refused as refused:
+            self._refused = str(refused)
+        except OSError:
+            pass
         return found
+
+    @contextlib.contextmanager
+    def _opened(self) -> Iterator[int]:
+        """The extensions directory, opened from the project's root (the person's, so a link to
+        it is theirs to follow) one name at a time, following no link: the descriptor it is
+        listed, read and written through. Raises `_Refused` when a name on the way (`.bh-02`, the
+        directory itself) is a link, and OSError when there is no such directory."""
+        at = os.open(Path(self._config.root).resolve(), _ROOT)
+        try:
+            way = Path()
+            for name in Path(self._config.path).parts:
+                way /= name
+                try:
+                    below = os.open(name, _DIRECTORY, dir_fd=at)
+                except OSError:  # a link is ENOTDIR here, or ELOOP: which it was, for the model
+                    if stat.S_ISLNK(os.stat(name, dir_fd=at, follow_symlinks=False).st_mode):
+                        raise _Refused(linked(self._config.path, str(way))) from None
+                    raise
+                os.close(at)
+                at = below
+            yield at
+        finally:
+            os.close(at)
+
+    def _read(self, name: str) -> str:
+        """The extension `name`'s source, read from the descriptor it was opened as, beneath the
+        root and following no link (`_opened`, then the file with `O_NOFOLLOW`), and only when
+        that descriptor says it may be (`refusal`): so a file swapped for a link after it was
+        found, or as it is opened, is not read. Raises `_Refused` with why it is not read, or
+        OSError, or UnicodeDecodeError."""
+        file = f"{name}.py"
+        shown = str(Path(self._config.path) / file)
+        with self._opened() as directory:
+            try:
+                descriptor = os.open(file, _FILE, dir_fd=directory)
+            except OSError as error:
+                if error.errno == errno.ELOOP:  # O_NOFOLLOW's answer for a link
+                    raise _Refused(refusal(shown, stat.S_IFLNK, 1)) from None
+                raise
+            with open(descriptor, "rb") as opened:
+                found = os.fstat(opened.fileno())
+                if (why := refusal(shown, found.st_mode, found.st_nlink)) is not None:
+                    raise _Refused(why)
+                return opened.read().decode("utf-8")
 
     # -- one extension ---------------------------------------------------------------------
 
     async def _load(self, name: str) -> None:
         path = self.directory / f"{name}.py"
         try:
-            source = path.read_text(encoding="utf-8")
+            source = self._read(name)
+        except _Refused as refused:
+            await self._unload(name)  # what an earlier version added goes; this one is not read
+            self._statuses[name] = Status(error=str(refused))
+            return
         except OSError, UnicodeDecodeError:
+            await self._unload(name)
             self._statuses[name] = Status(error=f"bh-02 could not read {path} as UTF-8 text")
             return
         if not await self._approved(name, source):
@@ -319,11 +408,21 @@ class Extensions:
                 await self._ask(name, {"op": "unload", "name": name})
 
     def _publish(self) -> None:
-        """Tell the model (status.json) and the person (the status bar) how the extensions are."""
-        with contextlib.suppress(OSError):
-            if self.directory.is_dir():
-                text = json.dumps(status_file(self._statuses), indent=2) + "\n"
-                (self.directory / _STATUS).write_text(text, encoding="utf-8")
+        """Tell the model (status.json) and the person (the status bar) how the extensions are.
+        status.json is written through the directory opened following no link (`_opened`), as a
+        new file renamed over the old: a link the model left (status.json itself, or a name on
+        the way to it) leads no write elsewhere, and an input never reads half of one."""
+        text = (json.dumps(status_file(self._statuses), indent=2) + "\n").encode("utf-8")
+        with contextlib.suppress(OSError, _Refused), self._opened() as directory:
+            fresh = f".{_STATUS}.{uuid.uuid4().hex}"
+            descriptor = os.open(fresh, _NEW, 0o666, dir_fd=directory)
+            try:
+                with open(descriptor, "wb") as written:
+                    written.write(text)
+                os.replace(fresh, _STATUS, src_dir_fd=directory, dst_dir_fd=directory)
+            except OSError:
+                os.unlink(fresh, dir_fd=directory)
+                raise
         if self._field is not None:
             self._field()
             self._field = None

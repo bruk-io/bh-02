@@ -345,7 +345,11 @@ runs in a worker the `jail` row starts, as confined as an input, and reaches bh-
 those three keys, each of which only adds. Jailed, it loads without asking, as an input runs
 without asking; with `--no-jail` each one is put to you first, with its source. The status bar's
 `ext:` field lists them (`ext: todo ✓`), and `.bh-02/plugins/status.json` is what the model
-reads to see whether one loaded. The plugin's README has the details.
+reads to see whether one loaded. bh-02 reads those files with your permissions, so it follows no
+link there: a link, a file with a second name (a hard link), or a link on the way (`.bh-02`, the
+directory itself) is not read, since it could lead to a file the jail hides from the model, and
+status.json (or, for a link on the way, the model's prompt) says what to write instead. The
+plugin's README has the details.
 
 ## Writing a plugin
 

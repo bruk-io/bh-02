@@ -5,11 +5,14 @@ leaves with it."""
 import asyncio
 import contextlib
 import json
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
+import pytest
 
 from cordis.testing import drive
 from extensions_cordis_plugin import Extensions, ExtensionsConfig, extensions
@@ -313,6 +316,123 @@ async def test_an_extension_that_ends_the_worker_is_not_loaded_again_until_somet
         await h.extensions.look()
         assert len(h.jail.started) == 2 and h.extensions.statuses["todo"].ok
         assert await h.commands.runs["todo"]("again") == "again"
+
+
+_SECRET = "SECRET=not-for-the-model\n"  # a file the jail hides, such as local.env
+
+
+def _apart(tmp_path: Path) -> tuple[Path, Path]:
+    """A project, and beside it, outside it, a file of secrets (`local.env`)."""
+    project, outside = tmp_path / "project", tmp_path / "outside"
+    project.mkdir()
+    outside.mkdir()
+    secret = outside / "local.env"
+    secret.write_text(_SECRET)
+    return project, secret
+
+
+async def test_an_extension_that_is_a_link_is_not_read_and_status_json_says_why(tmp_path: Path) -> None:
+    """The model writes the extensions directory from the jail, and bh-02 reads it on the host:
+    a link there could hand the worker, and the model, a file the jail hides."""
+    project, secret = _apart(tmp_path)
+    async with _running(project) as h:
+        h.write("todo", _TODO)
+        (project / ".bh-02" / "plugins" / "leak.py").symlink_to(secret)
+        await h.extensions.look()
+        assert h.extensions.statuses["todo"].ok  # the rest load
+        assert [r["input"]["code"] for r in h.approval.requests] == [_TODO]  # never read, never put
+        assert h.status()["leak"] == {
+            "state": "failed",
+            "rows": {},
+            "error": ".bh-02/plugins/leak.py is a link, which bh-02 does not follow there (it could "
+            "lead to a file the jail hides): write the extension itself at .bh-02/plugins/leak.py, "
+            "not a link to it",
+            "commands": [],
+            "problems": [],
+        }
+        assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
+
+
+async def test_an_extension_with_a_second_name_is_not_read(tmp_path: Path) -> None:
+    """A hard link: the file in the extensions directory is the secret itself, under a name the
+    model gave it."""
+    project, secret = _apart(tmp_path)
+    async with _running(project) as h:
+        h.write("todo", _TODO)
+        os.link(secret, project / ".bh-02" / "plugins" / "leak.py")
+        await h.extensions.look()
+        assert [r["input"]["code"] for r in h.approval.requests] == [_TODO]
+        assert h.status()["leak"]["error"] == (
+            ".bh-02/plugins/leak.py has 2 names (a hard link), and bh-02 does not read one there "
+            "(another name could be a file the jail hides): write the extension at "
+            ".bh-02/plugins/leak.py as a file of its own"
+        )
+        assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
+
+
+async def test_status_json_is_written_in_place_of_a_link_never_through_it(tmp_path: Path) -> None:
+    """The host writes status.json with the person's permissions: a link the model left there
+    must not choose what it overwrites (bh-02's config, a credential, a shell's rc file)."""
+    project, secret = _apart(tmp_path)
+    plugins = project / ".bh-02" / "plugins"
+    plugins.mkdir(parents=True)
+    (plugins / "status.json").symlink_to(secret)
+    async with _running(project) as h:
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        assert secret.read_text() == _SECRET  # not overwritten
+        assert not (plugins / "status.json").is_symlink() and h.status()["todo"]["state"] == "active"
+        assert sorted(p.name for p in plugins.iterdir()) == ["status.json", "todo.py"]  # nothing left over
+
+
+@pytest.mark.parametrize("linked", [".bh-02", ".bh-02/plugins"])
+async def test_a_link_on_the_way_to_the_extensions_directory_is_not_followed(
+    tmp_path: Path, linked: str
+) -> None:
+    """`.bh-02` or `.bh-02/plugins` a link: nothing is read through it, or written there (not
+    even status.json), and the model's prompt says why, since status.json can't."""
+    project, secret = _apart(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    plugins = elsewhere / "plugins" if linked == ".bh-02" else elsewhere
+    plugins.mkdir(parents=True)
+    plugins.joinpath("leak.py").write_text(secret.read_text())
+    (project / linked).parent.mkdir(parents=True, exist_ok=True)
+    (project / linked).symlink_to(elsewhere, target_is_directory=True)
+    async with _running(project) as h:
+        assert h.approval.requests == [] and h.jail.started == [] and h.extensions.statuses == {}
+        assert [p.name for p in plugins.iterdir()] == ["leak.py"]  # no status.json through the link
+        assert h.extensions.section().endswith(
+            f"\n\n{linked} is a link, so bh-02 loads no extension from .bh-02/plugins (a link could "
+            f"lead to files the jail hides): make {linked} a directory in the project, not a link, "
+            "and write the extensions in .bh-02/plugins"
+        )
+        (project / linked).unlink()
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        assert h.extensions.statuses["todo"].ok and "is a link" not in h.extensions.section()
+
+
+async def test_a_file_swapped_for_a_link_after_it_was_found_is_not_read(tmp_path: Path) -> None:
+    """Between finding a file and reading it, the model's code can swap it for a link (here an
+    extension loaded just before it does): bh-02 reads only what it opened following no link."""
+    project, secret = _apart(tmp_path)
+    swaps = (
+        "import os\n"
+        "from cordis import Effects, bind, component\n\n"
+        f"os.symlink({str(secret)!r}, '.bh-02/plugins/swap')\n"
+        "os.replace('.bh-02/plugins/swap', '.bh-02/plugins/second.py')\n\n"
+        "@component\n"
+        "async def swapped(*, frame) -> Effects:\n"
+        "    yield bind('swapped', True)\n"
+    )
+    async with _running(project) as h:
+        h.write("second", _TODO)
+        h.write("first", swaps)  # loads first: the names are taken in order
+        await h.extensions.look()
+        assert (project / ".bh-02" / "plugins" / "second.py").is_symlink()  # swapped once found
+        assert [r["input"]["code"] for r in h.approval.requests] == [swaps]
+        assert h.status()["second"]["error"].startswith(".bh-02/plugins/second.py is a link")
+        assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
 
 
 async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -> None:

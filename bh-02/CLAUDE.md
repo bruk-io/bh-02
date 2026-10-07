@@ -212,7 +212,14 @@ asking; unjailed, the person decides). An extension reaches bh-02 only through t
 that worker, each of which only adds (`commands.register`, `frame.status`, `system.add`; never
 `commands.claim`, a line prefix, which takes every line the person starts with it); the host
 registers what arrives into the real keys and keeps the removers. Its own `system` section
-tells the model how, and `.bh-02/plugins/status.json` tells it how each load went. Don't give an
+tells the model how, and `.bh-02/plugins/status.json` tells it how each load went. The model
+writes that directory from the jail and the host reads it, so the host follows no link there
+(the rule of the startup files, again): it opens the directory from the project's root a name at
+a time with `O_NOFOLLOW`, reads a file only when the descriptor it opened says it is a regular
+file with one name (else a link, or a hard link, would hand the worker, and the model, a file the
+jail hides: as source, or as a SyntaxError's line in status.json), says why in status.json when
+it is not, and writes status.json as a new file renamed over the old; a link on the way (`.bh-02`,
+the directory itself) loads nothing, writes nothing there, and is told in the model's prompt. Don't give an
 extension a key that replaces or reaches the composition (the loader, `jail`, `model`): the
 worker's process boundary is what keeps a model's plugin as contained as its inputs.
 
