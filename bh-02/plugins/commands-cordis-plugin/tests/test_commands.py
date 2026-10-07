@@ -1,7 +1,7 @@
 """The broker, the operator over a fake loader, and the rows on a runtime."""
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -48,6 +48,45 @@ async def test_the_broker_runs_what_is_registered_and_help_lists_it() -> None:
     assert "Ctrl-D" not in help  # the key that leaves is each ui's own to say
     remove()  # a row that leaves takes its commands with it
     assert await commands.run("/echo hi") == "unknown command /echo; /help lists them"
+
+
+async def test_an_answer_that_streams_is_passed_on_and_a_failure_part_way_is_a_note() -> None:
+    """A command that takes a while answers events as they come (`/compact`); the broker passes
+    them on, a failure part-way ends them with a note as a failure before answering is, and
+    closing the answer early (Ctrl-C) closes the command's own."""
+    commands = Commands()
+    closed: list[str] = []
+
+    async def events(fail: bool) -> AsyncIterator[Mapping[str, Any]]:
+        try:
+            yield {"type": "note", "text": "working"}
+            if fail:
+                raise RuntimeError("the model went away")
+            yield {"type": "note", "text": "done"}
+        finally:
+            closed.append("closed")
+
+    async def slow(args: str) -> AsyncIterator[Mapping[str, Any]]:
+        return events(args == "fail")
+
+    commands.register({"name": "slow", "help": "takes a while", "usage": ""}, slow)
+    answer = await commands.run("/slow")
+    assert isinstance(answer, AsyncIterator)
+    assert [e async for e in answer] == [
+        {"type": "note", "text": "working"},
+        {"type": "note", "text": "done"},
+    ]
+    failed = await commands.run("/slow fail")
+    assert isinstance(failed, AsyncIterator)
+    assert [e async for e in failed] == [
+        {"type": "note", "text": "working"},
+        {"type": "note", "text": "/slow failed: the model went away"},
+    ]
+    stopped = await commands.run("/slow")
+    assert isinstance(stopped, AsyncIterator)
+    assert await anext(stopped) == {"type": "note", "text": "working"}
+    await stopped.aclose()  # type: ignore[attr-defined]
+    assert closed == ["closed", "closed", "closed"]
 
 
 @dataclass

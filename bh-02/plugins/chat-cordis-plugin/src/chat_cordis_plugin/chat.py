@@ -48,9 +48,10 @@ class Output(Protocol):
 @runtime_checkable
 class Commands(Protocol):
     """What the session needs of the `commands` value: run a slash command, get what to show
-    (text, or events: CONTRACTS.md, commands)."""
+    (text, events, or events as they come from a command that takes a while: CONTRACTS.md,
+    commands)."""
 
-    async def run(self, line: str) -> str | Sequence[Event]: ...
+    async def run(self, line: str) -> str | Sequence[Event] | AsyncIterator[Event]: ...
 
 
 def _answered(answer: str | Sequence[Event]) -> list[Event]:
@@ -82,7 +83,9 @@ async def converse(loop: Loop, input: Input, output: Output, commands: Commands 
     """Read a message, show the streamed reply, repeat until there is no more input.
 
     A `/command` line goes to `commands` and never to the model; what it returns is shown
-    (`_answered`: text as a note, events as they are).
+    (`_answered`: text as a note, events as they are). An answer that streams (a command that
+    takes a while, `/compact`) is shown as a reply is, and stopped as one is: Ctrl-C, or the
+    input ending (the ui gone), closes it, so the command stops what it runs.
 
     A recoverable failure is shown and the chat carries on; anything else leaves, and the
     bootstrap re-raises it. Returning is how the program ends: nothing is left running, so
@@ -92,7 +95,11 @@ async def converse(loop: Loop, input: Input, output: Output, commands: Commands 
         if not message.strip():
             continue
         if commands is not None and is_command(message):
-            await output.show(_each(_answered(await commands.run(message))))
+            answer = await commands.run(message)
+            if isinstance(answer, AsyncIterator):
+                await _interruptible(_show(answer, output), input, output)
+            else:
+                await output.show(_each(_answered(answer)))
             continue
         try:
             await _interruptible(_show(loop.reply(message), output), input, output)
@@ -103,8 +110,9 @@ async def converse(loop: Loop, input: Input, output: Output, commands: Commands 
 
 
 async def _interruptible(turn: Awaitable[None], input: Input, output: Output) -> None:
-    """Run a turn until it ends or the person interrupts it; an interrupted turn is cancelled
-    (its reply closed, so a provider can stop its own work) and shown as stopped."""
+    """Run a turn (or a streamed command answer) until it ends or the person interrupts it, or
+    the input ends; an interrupted turn is cancelled (its reply closed, so a provider can stop
+    its own work) and shown as stopped."""
     work = asyncio.ensure_future(turn)
     stop = asyncio.ensure_future(input.interrupted())
     try:

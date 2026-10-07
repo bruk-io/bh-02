@@ -16,12 +16,16 @@ __all__ = ["Job", "perform"]
 type Job = Callable[[], Awaitable[None]]
 
 
-async def perform(jobs: asyncio.Queue[Job], failed: Callable[[str], None]) -> None:
+async def perform(jobs: asyncio.Queue[Job], failed: Callable[[str], Awaitable[None] | None]) -> None:
     """Run the queued jobs one at a time, for as long as the row is up. A job that fails is
-    reported (`failed`, one line naming the error) and the next one still runs."""
+    reported (`failed`, one line naming the error; awaited before the next job when it returns
+    an awaitable, as a row that tells the person through `output.notice` does) and the next one
+    still runs. A `failed` that raises ends the work, which cordis keeps on the row."""
     while True:
         job = await jobs.get()
         try:
             await job()
         except Exception as error:
-            failed(f"{type(error).__name__}: {error}")
+            told = failed(f"{type(error).__name__}: {error}")
+            if told is not None:
+                await told

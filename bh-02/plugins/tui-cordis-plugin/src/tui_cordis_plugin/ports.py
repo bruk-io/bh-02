@@ -4,7 +4,8 @@
 questions, and whether the app has ended. Ctrl-C is never dropped while bh-02 is busy with a
 line: between a line being handed out and the turn it starts listening for Ctrl-C (or while a
 slash command runs), one interrupt is held for the next `interrupted()`, and the next `read()`
-drops it (a slash command is not interrupted, and a held Ctrl-C must not kill the next turn).
+drops it (a command that answers at once is not interrupted, and a held Ctrl-C must not kill
+the next turn; one whose answer streams, `/compact`, listens as a turn does, so it hears it).
 
 A line typed while nobody reads (the chat row is down because a row it depends on is coming
 back up: `/model` restarts the model, `/clear` the loop and its transcript, each of which

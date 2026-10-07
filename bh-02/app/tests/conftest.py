@@ -360,6 +360,12 @@ async def one_input_model() -> Effects:
 
 # What the compacting model was sent: each request's messages and the names of the tools offered.
 SENT: list[tuple[list[dict[str, Any]], list[str]]] = []
+# How many usage events the compacting model sends with its summary (a provider may send several).
+USAGES: list[int] = [0]
+
+
+def usages(n: int) -> None:
+    USAGES[:] = [n]
 
 
 class Compacting:
@@ -374,6 +380,8 @@ class Compacting:
         if last["role"] == "tool":
             yield {"type": "text", "text": f"ran: {str(last['content']).strip()}"}
         elif str(last["content"]).startswith("(bh-02: the person asked to compact"):
+            for _ in range(USAGES[0]):
+                yield {"type": "usage", "input_tokens": 10, "output_tokens": 1}
             yield {"type": "text", "text": "SUMMARY: x holds 42"}
         elif words.startswith("py:"):
             code = {"code": words[3:]}
@@ -388,6 +396,75 @@ class Compacting:
 @component(provides=("model",))
 async def compacting_model() -> Effects:
     yield bind("model", Compacting())
+
+
+# Set once the slow summarising model is asked for a summary: the person quits then.
+QUIT = asyncio.Event()
+# Whether the slow summarising model's summary step was closed.
+CLOSED: list[bool] = []
+
+
+class SlowSummary(Compacting):
+    """As `Compacting`, but a summary takes a minute, and the person quits (QUIT) as soon as it
+    is asked for."""
+
+    async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
+        if str(messages[-1]["content"]).startswith("(bh-02: the person asked to compact"):
+            QUIT.set()
+            try:
+                await asyncio.sleep(60)
+            finally:
+                CLOSED.append(True)
+        async for chunk in super().complete(messages, tools):
+            yield chunk
+
+
+@component(provides=("model",))
+async def slow_summary_model() -> Effects:
+    yield bind("model", SlowSummary())
+
+
+class Quitting(Scripted):
+    """Reads SCRIPT until the person quits (QUIT); from then on, as the app's input once it has
+    ended, `read()` is None and `interrupted()` returns at once."""
+
+    async def read(self) -> str | None:
+        return None if QUIT.is_set() else await super().read()
+
+    async def interrupted(self) -> None:
+        await QUIT.wait()
+
+
+@component(provides=("input", "output", "frame"))
+async def quitting_ui() -> Effects:
+    yield bind("input", Quitting())
+    yield bind("frame", Pushed())
+    yield bind("output", Record())
+
+
+# The type of every event a drawing output was shown, in order.
+DRAWN: list[str] = []
+
+
+class Drawing(Record):
+    """A recording output that gives the loop a turn after each event, as the app's output does
+    while it draws (so a restart queued meanwhile can land mid-answer)."""
+
+    async def show(self, chunks: AsyncIterator[Mapping[str, Any]]) -> None:
+        async def drawn() -> AsyncIterator[Mapping[str, Any]]:
+            async for chunk in chunks:
+                DRAWN.append(str(chunk.get("type")))
+                yield chunk
+                await asyncio.sleep(0)
+
+        await super().show(drawn())
+
+
+@component(provides=("input", "output", "frame"))
+async def drawing_ui() -> Effects:
+    yield bind("input", Scripted())
+    yield bind("frame", Pushed())
+    yield bind("output", Drawing())
 '''
 
 

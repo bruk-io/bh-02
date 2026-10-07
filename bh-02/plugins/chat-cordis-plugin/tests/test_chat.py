@@ -98,6 +98,77 @@ async def test_a_command_that_answers_with_events_has_them_shown_as_they_are() -
     assert echo.seen == []
 
 
+class Streaming:
+    """A `commands` value whose every command answers as it goes (`/compact`): a note, then
+    nothing more until `done` is set; `closed` says whether its answer was closed."""
+
+    def __init__(self) -> None:
+        self.done = asyncio.Event()
+        self.closed = False
+
+    async def run(self, line: str) -> AsyncIterator[dict[str, Any]]:
+        return self._answer(line)
+
+    async def _answer(self, line: str) -> AsyncIterator[dict[str, Any]]:
+        try:
+            yield {"type": "note", "text": f"working on {line}"}
+            await self.done.wait()
+            yield {"type": "note", "text": "done"}
+        finally:
+            self.closed = True
+
+
+async def test_a_command_that_answers_as_it_goes_is_shown_as_it_comes() -> None:
+    commands, screen = Streaming(), Screen()
+    commands.done.set()
+    await converse(Echo(), Typed("/compact", None), screen, commands)  # type: ignore[arg-type]
+    assert screen.events == [
+        {"type": "note", "text": "working on /compact"},
+        {"type": "note", "text": "done"},
+    ]
+    assert commands.closed
+
+
+async def test_ctrl_c_stops_a_command_that_answers_as_it_goes_and_the_session_carries_on() -> None:
+    """Stopped as a reply is: its answer closed, so the command stops what it runs."""
+    commands, screen, typed = Streaming(), Screen(), Typed("/compact")
+    session = asyncio.create_task(converse(Echo(), typed, screen, commands))  # type: ignore[arg-type]
+    await asyncio.sleep(0.01)
+    assert screen.events == [{"type": "note", "text": "working on /compact"}]
+    typed.interrupt()
+    await asyncio.sleep(0.01)
+    assert commands.closed
+    assert screen.events[-1] == {"type": "stop", "reason": "interrupted"}
+    typed.type(None)  # and the session is still reading
+    await asyncio.wait_for(session, 1)
+
+
+async def test_the_input_ending_stops_a_command_that_answers_as_it_goes() -> None:
+    """The ui gone (Ctrl-Q): `interrupted()` returns at once, the answer is closed and the chat
+    ends, rather than wait for the command (a summary that takes minutes)."""
+
+    class Ending(Typed):
+        """An input that, once `ended`, reads None and hears an interrupt at once, as the
+        app's does once it has ended."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.ended = asyncio.Event()
+
+        async def read(self) -> str | None:
+            return "/compact" if not self.ended.is_set() else None
+
+        async def interrupted(self) -> None:
+            await self.ended.wait()
+
+    typed, commands = Ending(), Streaming()
+    session = asyncio.create_task(converse(Echo(), typed, Screen(), commands))  # type: ignore[arg-type]
+    await asyncio.sleep(0.01)
+    typed.ended.set()
+    await asyncio.wait_for(session, 1)
+    assert commands.closed and not commands.done.is_set()
+
+
 def test_what_counts_as_a_command() -> None:
     assert is_command("/help") and is_command("  /model haiku ") and is_command("/new-thing x")
     assert not is_command("/tmp/x.py") and not is_command("/") and not is_command("hi /help")

@@ -5,12 +5,14 @@ conversation from the model's summary of it."""
 
 from agent_cordis_plugin.compact import (
     CompactConfig,
-    Unsummarised,
+    Unchanged,
     asked,
     compact_conversation,
     kept_in,
     seeded,
-    summarise,
+    summary_in,
+    summary_step,
+    unrestarted,
 )
 from agent_cordis_plugin.loop import (
     DECLINED,
@@ -47,7 +49,7 @@ __all__ = [
     "System",
     "Transcript",
     "TranscriptConfig",
-    "Unsummarised",
+    "Unchanged",
     "asked",
     "changes",
     "classify",
@@ -60,6 +62,8 @@ __all__ = [
     "remembered",
     "rewrite",
     "seeded",
-    "summarise",
+    "summary_in",
+    "summary_step",
     "transcript",
+    "unrestarted",
 ]

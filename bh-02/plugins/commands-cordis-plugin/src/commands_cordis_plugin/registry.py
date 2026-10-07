@@ -7,7 +7,7 @@ so a pasted `/tmp/app.py is broken` still reaches the model.
 """
 
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from typing import Any, NotRequired, TypedDict
 
 from cordis_helpers import Registry
@@ -35,9 +35,10 @@ class CommandSpec(TypedDict):
     choices: NotRequired[Callable[[], Sequence[Mapping[str, str]]]]
 
 
-type Answer = str | Sequence[Mapping[str, Any]]
+type Answer = str | Sequence[Mapping[str, Any]] | AsyncIterator[Mapping[str, Any]]
 """What a command answers (CONTRACTS.md: commands): text, shown as one note, or events shown
-as they are (`/clear`'s `cleared`, then a note saying so)."""
+as they are (`/clear`'s `cleared`, then a note saying so), or, from a command that takes a
+while (`/compact`), events as they come, which a chat shows and stops as it does a reply."""
 
 type Run = Callable[[str], Awaitable[Answer]]
 """A command: its argument text in, what to show the person out."""
@@ -73,9 +74,10 @@ class Commands:
         if entry is None:
             return f"unknown command /{name}; /help lists them"
         try:
-            return await entry[1](args)
+            answer = await entry[1](args)
         except Exception as error:
             return f"/{name} failed: {error}"
+        return _guarded(name, answer) if isinstance(answer, AsyncIterator) else answer
 
     def _help(self) -> str:
         rows = [("/help", "list the commands")]
@@ -84,6 +86,20 @@ class Commands:
         ]
         # no key to leave by: that is each ui's own (the app's Ctrl-Q; another ui would name its
         # own), and each ui says it; Ctrl-C stops a reply in every ui (CONTRACTS.md: input.interrupted)
-        rows += [("/exit", "leave; Ctrl-C stops a reply")]
+        rows += [("/exit", "leave; Ctrl-C stops a reply, or a command still at work")]
         width = max(len(call) for call, _ in rows)
         return "\n".join(f"{call.ljust(width)}  {what}" for call, what in sorted(rows))
+
+
+async def _guarded(name: str, events: AsyncIterator[Mapping[str, Any]]) -> AsyncIterator[Mapping[str, Any]]:
+    """A streamed answer's events as they come; one that fails part-way ends with a note saying
+    so, as a command that fails before answering does. Closed early (Ctrl-C), it closes the
+    command's own stream, so the command stops what it runs."""
+    try:
+        async for event in events:
+            yield event
+    except Exception as error:
+        yield {"type": "note", "text": f"/{name} failed: {error}"}
+    finally:
+        if isinstance(events, AsyncGenerator):
+            await events.aclose()
