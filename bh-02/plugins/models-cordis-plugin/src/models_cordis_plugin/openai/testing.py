@@ -39,10 +39,17 @@ type Json = Mapping[str, Any]
 _DATED = re.compile(r"\(Today's date: [0-9-]+\.\)\n\n")
 
 
+_CHANGED = "(End of what changed.)\n\n"  # how the loop's note on changed instructions ends
+
+
 def _said(message: Json) -> str:
-    """A message's text, without the date the loop may put first."""
+    """A message's text, without what the loop may put first: the date, and a note that the
+    model's instructions changed."""
     content = str(message.get("content") or "")
-    return content[dated.end() :] if (dated := _DATED.match(content)) else content
+    content = content[dated.end() :] if (dated := _DATED.match(content)) else content
+    return (
+        content.partition(_CHANGED)[2] if content.startswith("(bh-02: ") and _CHANGED in content else content
+    )
 
 
 def _chunk(model: str, delta: Json | None = None, finish: str | None = None, **extra: Any) -> dict[str, Any]:

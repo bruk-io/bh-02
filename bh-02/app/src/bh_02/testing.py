@@ -65,11 +65,18 @@ async def slow_start(*, config: Mapping[str, Any] | None = None) -> Effects:
     yield bind("loop", _Echo())
 
 
+_CHANGED = "(End of what changed.)\n\n"  # how the loop's note on changed instructions ends
+
+
 def _words(message: Mapping[str, Any]) -> str:
-    """What the person typed, from a user entry: its content without the date `agent:loop` puts
-    first on an entry that carries `today` (CONTRACTS.md: message)."""
+    """What the person typed, from a user entry: its content without what `agent:loop` puts
+    first, the date on an entry that carries `today` and a note that the model's instructions
+    changed (CONTRACTS.md: message)."""
     content = str(message.get("content") or "")
-    return content.partition("\n\n")[2] if message.get("today") else content
+    content = content.partition("\n\n")[2] if message.get("today") else content
+    return (
+        content.partition(_CHANGED)[2] if content.startswith("(bh-02: ") and _CHANGED in content else content
+    )
 
 
 class _EchoModel:

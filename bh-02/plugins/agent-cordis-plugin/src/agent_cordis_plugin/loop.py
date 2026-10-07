@@ -160,7 +160,10 @@ def remembered(memory: Iterable[Remember], input: Json) -> list[str]:
                 raise TypeError(f"it returned a {type(said).__name__}, not text")
         except Exception as error:  # one row's function failing must not cost the input its result
             named = getattr(fn, "__qualname__", type(fn).__qualname__)
-            said = f"(bh-02 could not make a note with {getattr(fn, '__module__', '?')}:{named}: {error})"
+            said = (
+                f"(bh-02 could not make a note with {getattr(fn, '__module__', '?')}:{named}: {error}. "
+                "The input's result is whole; tell the person this function in `memory` failed.)"
+            )
         if said.strip():
             notes.append(said.strip())
     return sorted(notes)
@@ -294,13 +297,14 @@ class LoopModel:
             if stop == ACT:
                 answered, running = 0, False  # running: the unanswered call reached the kernel
                 result: str | None = None  # the unanswered call's answer, once it has one
+                notes: list[str] = []  # and what `memory` said with it
                 try:
                     for call in turn.calls:
                         result = refusal(call, self._kernel.spec)
                         request = {"name": call["name"], "input": call["input"]}
                         if result is None and not await self._approval.approve(request):
                             result = DECLINED
-                        notes: list[str] = []
+                        notes = []
                         if result is None:
                             running = True
                             code = call["input"]["code"]
@@ -308,8 +312,16 @@ class LoopModel:
                             running = False
                             ran = {"code": code, "result": result, "touched": self._kernel.touched()}
                             # in a worker thread too (an on-touch section reads rule files), over
-                            # the functions `memory` holds now
-                            notes = await asyncio.to_thread(remembered, tuple(self._memory or ()), ran)
+                            # the functions `memory` holds now. A stop meanwhile waits for them: each
+                            # has marked what it told as told, so the answer must carry it
+                            asked = asyncio.ensure_future(
+                                asyncio.to_thread(remembered, tuple(self._memory or ()), ran)
+                            )
+                            try:
+                                notes = await asyncio.shield(asked)
+                            except asyncio.CancelledError:
+                                notes = await asked
+                                raise
                         note = await self._told()
                         told = "\n\n".join([result, *notes, *([note] if note else [])])
                         self._transcript.append({"role": "tool", "content": told, "call_id": call["id"]})
@@ -329,11 +341,12 @@ class LoopModel:
                     # Interrupted part-way: every call the transcript holds still gets an answer,
                     # or the next request would carry a call no result follows. Only the one in
                     # the kernel when the stop came may have partly run; one stopped after it had
-                    # its answer (while its notes were made or the prompt read) gets that answer.
+                    # its answer (while its notes were made or the prompt read) gets that answer,
+                    # with its notes.
                     for n, call in enumerate(turn.calls[answered:]):
                         said = _NOT_RUN
                         if n == 0 and result is not None:
-                            said = result
+                            said = "\n\n".join([result, *notes])
                         elif n == 0 and running:
                             said = _INTERRUPTED
                         self._transcript.append({"role": "tool", "content": said, "call_id": call["id"]})

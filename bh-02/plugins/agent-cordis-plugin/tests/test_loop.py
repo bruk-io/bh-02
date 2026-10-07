@@ -578,7 +578,8 @@ async def test_memory_s_notes_ride_on_the_input_s_result_and_the_person_sees_eac
     assert given == [{"code": "a", "result": "A", "touched": ("/p/a.py",)}]  # c2 never ran
     told = [m["content"] for m in history.messages if m["role"] == "tool"]
     assert told[0].startswith("A\n\n(bh-02 could not make a note with ")
-    assert "broken: no rules file)\n\nZebra rule: for /p/a.py.\nWhole rule text." in told[0]
+    assert "broken: no rules file. The input's result is whole; tell the person" in told[0]
+    assert told[0].endswith("failed.)\n\nZebra rule: for /p/a.py.\nWhole rule text.")
     assert told[1].startswith("error: there is no tool named 'nope'") and "Zebra" not in told[1]
     results = [e for e in events if e["type"] == "tool_result"]
     assert results[0]["content"] == "A"  # the person sees the input's own output
@@ -641,7 +642,7 @@ async def test_the_prompt_and_memory_are_read_off_the_event_loop_which_keeps_run
     assert threading.get_ident() not in threads
 
 
-async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_its_result() -> None:
+async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_them() -> None:
     started = threading.Event()
 
     def slow(input: Json) -> str:
@@ -662,7 +663,7 @@ async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_i
     await asyncio.gather(task, return_exceptions=True)
     tools = [m for m in history.messages if m["role"] == "tool"]
     assert [m["call_id"] for m in tools] == ["c1", "c2"]
-    assert tools[0]["content"] == "A"  # it ran to the end: its result, not "not run"
+    assert tools[0]["content"] == "A\n\na rule"  # it ran to the end: its result and its note
     assert tools[1]["content"].startswith("not run")
     assert kernel.ran == ["a"]
 
@@ -736,3 +737,38 @@ async def test_on_a_new_day_with_new_instructions_the_date_comes_first_then_what
     assert [e["text"] for e in events if e["type"] == "note"] == [
         "told the model its instructions changed since the conversation began"
     ]
+
+
+async def test_a_reply_stopped_after_an_input_s_notes_were_made_still_tells_them() -> None:
+    """A memory function marks what it told as told, so a stop while the prompt is read after
+    the input must not lose its note: the call is answered with its result and the note."""
+    reading = threading.Event()
+
+    class SlowSecond:
+        reads = 0
+
+        def text(self) -> str:
+            self.reads += 1
+            if self.reads == 2:  # the reading after the input
+                reading.set()
+                time.sleep(0.2)
+            return "in /a"
+
+    memory: Hooks[Callable[[Json], str]] = Hooks()
+    memory.add(lambda input: "a rule, told once")
+    history = MemoryTranscript()
+    loop = LoopModel(
+        Scripted([call("c1", "python", code="a")]),
+        Shouting(),
+        history,
+        Confined(),
+        system=SlowSecond(),
+        memory=memory,
+    )
+    task = asyncio.create_task(_collect(loop, "go"))
+    while not reading.is_set():
+        await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    tools = [m["content"] for m in history.messages if m["role"] == "tool"]
+    assert tools == ["A\n\na rule, told once"]
