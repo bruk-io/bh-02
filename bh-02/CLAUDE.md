@@ -55,7 +55,8 @@ programs with `subprocess`, and the jail decides what it may touch.
 Replacing a binding reloads every dependent (cordis's rule, and why history lives in
 `transcript`, a row of its own).
 
-**The broker pattern is the paper's (section 6.2).** `commands` (slash commands), `frame`
+**The broker pattern is the paper's (section 6.2).** `commands` (slash commands, and line
+prefixes a layer's row claims: `!`), `frame`
 (the app's frame), `system` (its sections) and `memory` (what the model is told with an input's
 result) are brokers: one row binds the key, contributors depend on it and `acquire` a
 registration whose return value is its remover, so adding or retiring a command reloads
@@ -80,7 +81,10 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 **What the model sees and how a turn looks.** `loop.reply` yields events (text, thinking,
 tool_call, tool_result, usage, stop, note). `approval.approve` decides whether the model's code
 runs (unjailed, by asking through `output.confirm`);
-`input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. `system`
+`input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. Which lines
+are the harness's, not the model's, `chat:session` asks `commands` (`claims`); what a command
+gives the model (`for_model`: a `!COMMAND`'s output) it holds and puts in front of the person's
+next message, so `loop.reply` is still given one message and nothing reaches a turn. `system`
 (`context:project`) is organised as Claude Code's is: who the model is (the model in bh-02, not
 Claude Code) and what bh-02 is made of, then the project context: the working directory and
 branch, what the context files say, and the sections rows add (`system.add`: the extensions
@@ -133,7 +137,9 @@ a provider's message as it came.
 and `frame` (the app's frame: status fields and commands, each pushed with a remover).
 It depends on its config alone, so it never reloads with anything else. The app owns the
 terminal: a child process that inherits fd 2 paints over it, so every child's stderr goes to
-a file (the kernel's and brig's do), `--trace` takes a file, and anything
+a file (the kernel's and brig's do) or is captured (`commands:shell_command` runs a `!COMMAND`
+line in the person's shell in a session of its own, with no stdin, and stops it at its timeout,
+since Ctrl-C stops only a turn), `--trace` takes a file, and anything
 the shell must say waits until the app has exited. A row that shows something in the frame
 depends on `frame` and `acquire`s an entry (`tui:status` is the pattern). The approval
 modal is `push_screen` with a callback, because `confirm()` is called from cordis's coroutines,
@@ -165,8 +171,9 @@ a layer. They run in a second worker the `jail` row starts (`extensions_cordis_p
 a cordis runtime of its own, listed in `cordis-in-wiring-only`'s `shell`), never in bh-02's
 process: each load goes through `approval` with its source, as an input does (jailed, without
 asking; unjailed, the person decides). An extension reaches bh-02 only through three keys bound in
-that worker, each of which only adds (`commands.register`, `frame.status`, `system.add`); the
-host registers what arrives into the real keys and keeps the removers. Its own `system` section
+that worker, each of which only adds (`commands.register`, `frame.status`, `system.add`; never
+`commands.claim`, a line prefix, which takes every line the person starts with it); the host
+registers what arrives into the real keys and keeps the removers. Its own `system` section
 tells the model how, and `.bh-02/plugins/status.json` tells it how each load went. Don't give an
 extension a key that replaces or reaches the composition (the loader, `jail`, `model`): the
 worker's process boundary is what keeps a model's plugin as contained as its inputs.

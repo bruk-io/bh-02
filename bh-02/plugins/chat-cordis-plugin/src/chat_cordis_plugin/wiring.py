@@ -11,6 +11,7 @@ __all__ = ["session"]
 
 @component(provides=("done",))
 async def session(*, loop: Loop, input: Input, output: Output, commands: Commands) -> Effects:
-    """An interactive chat: `use = "chat:session"`. `/command` lines go to `commands`."""
+    """An interactive chat: `use = "chat:session"`. A line `commands` claims (a `/command`, or
+    `!` and a shell command) goes to it; what it holds for the model goes with the next message."""
     task = yield background(converse(loop, input, output, commands))
     yield bind("done", task)

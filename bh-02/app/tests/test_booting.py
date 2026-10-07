@@ -52,6 +52,9 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     # both; it depends on the jail and the ui, never the kernel, so /clear leaves it up
     assert rows["approval"].use == "kernel:approval"
     assert resolve(rows["approval"].use or "").inject == {"jail", "output"}
+    # `!COMMAND` is a layer's row, claiming its prefix in `commands`: no extension can
+    assert rows["shell-command"].use == "commands:shell_command"
+    assert resolve(rows["shell-command"].use or "").inject == {"commands"}
     # the model row names its model by `default`, sonnet unless a layer says another; the
     # status bar asks the models row which, so it needs no default of its own
     chosen_by = resolve(rows["model"].use or "").config_type

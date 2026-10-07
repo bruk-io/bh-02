@@ -1,4 +1,5 @@
-"""Slash commands: a broker rows register commands into, and commands over the composition."""
+"""Slash commands: a broker rows register commands into (and claim line prefixes in), commands
+over the composition, and `!`, a shell command the person runs."""
 
 from commands_cordis_plugin.operations import (
     Loader,
@@ -10,7 +11,15 @@ from commands_cordis_plugin.operations import (
     rows_table,
 )
 from commands_cordis_plugin.registry import Choice, Commands, CommandSpec, Run, parse
-from commands_cordis_plugin.wiring import operator, registry, set_model, shadowing
+from commands_cordis_plugin.shell_command import (
+    Ran,
+    ShellCommandConfig,
+    answer,
+    environment,
+    run_command,
+    run_line,
+)
+from commands_cordis_plugin.wiring import operator, registry, set_model, shadowing, shell_command
 
 __all__ = [
     "Choice",
@@ -20,13 +29,20 @@ __all__ = [
     "Models",
     "Operator",
     "OperatorConfig",
+    "Ran",
     "Run",
+    "ShellCommandConfig",
+    "answer",
+    "environment",
     "model_list",
     "operator",
     "parse",
     "perform",
     "registry",
     "rows_table",
+    "run_command",
+    "run_line",
     "set_model",
     "shadowing",
+    "shell_command",
 ]

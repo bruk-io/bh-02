@@ -100,8 +100,9 @@ use = "tui:status"
 id = "system"
 use = "context:project"
 
-# Slash commands: a broker rows register commands into, and the operator's own (/rows,
-# /explain, /restart, /clear, /model), which act through the loader's handle.
+# Slash commands: a broker rows register commands into (and a layer's rows claim line prefixes
+# in), and the operator's own (/rows, /explain, /restart, /clear, /model), which act through the
+# loader's handle. The chat row asks it which lines are commands (`claims`).
 [[plugin]]
 id = "commands"
 use = "commands:registry"
@@ -109,6 +110,16 @@ use = "commands:registry"
 [[plugin]]
 id = "operator"
 use = "commands:operator"
+
+# `!COMMAND`: a line starting with `!` runs as a shell command, as you (not in the jail), in the
+# project, through your $SHELL. The app owns the terminal, so its output is captured, and Ctrl-C
+# can't stop a command, so it is stopped at its `timeout` (120 s; config: `prefix`, `cwd`,
+# `timeout`, `shell`). What it printed is shown, and the model reads it with your next message,
+# never mid-turn. The prefix is claimed in `commands`, which only a row in a layer can do: an
+# extension can't.
+[[plugin]]
+id = "shell-command"
+use = "commands:shell_command"
 
 # The command palette (Ctrl-P) offers the commands broker's commands.
 [[plugin]]

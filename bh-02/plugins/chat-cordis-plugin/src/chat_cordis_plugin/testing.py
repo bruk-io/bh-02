@@ -81,14 +81,28 @@ class Screen:
 
 
 class Noted:
-    """A `commands` value that answers every command with what it was asked, except `/clear`,
-    which answers with events (CONTRACTS.md: commands), as the operator's does."""
+    """A `commands` value that claims a line starting with `/` or `!` (or, given `claimed`, the
+    lines it names) and answers each with what it was asked; `/clear` answers with events
+    (CONTRACTS.md: commands), as the operator's does, and `!COMMAND` with a note and the output
+    the model is to read with the next message (`for_model`), as `commands:shell_command`'s does."""
 
-    def __init__(self) -> None:
+    def __init__(self, *claimed: str) -> None:
         self.ran: list[str] = []
+        self._claimed = claimed
+
+    def claims(self, line: str) -> bool:
+        if self._claimed:
+            return line in self._claimed
+        return line.lstrip().startswith(("/", "!"))
 
     async def run(self, line: str) -> str | list[Mapping[str, Any]]:
         self.ran.append(line)
         if line.strip() == "/clear":
             return [{"type": "cleared"}, {"type": "note", "text": "cleared"}]
+        if line.lstrip().startswith("!"):
+            command = line.lstrip()[1:].strip()
+            return [
+                {"type": "note", "text": f"{command} printed this"},
+                {"type": "for_model", "text": f"(the person ran {command})"},
+            ]
         return f"ran {line}"

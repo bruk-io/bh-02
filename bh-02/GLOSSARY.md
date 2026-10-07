@@ -43,9 +43,9 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **step**: one call to the model: it answers, or asks for inputs to run. A turn is one step or more.
 - **nudge**: the loop telling the model why its last step didn't count (cut off, silent, unreadable), a bounded number of times.
 - **transcript** (row and key): the conversation the model is sent again each step, kept in the session's `transcript.jsonl`.
-- **chat** (row): `chat:session`: reads your messages, shows the replies, runs slash commands; it binds `done`, which ends when you leave.
+- **chat** (row): `chat:session`: reads your messages, shows the replies, runs the lines `commands` claims (slash commands, `!`); it binds `done`, which ends when you leave.
 - **turn**: one reply to one message, however many model steps and inputs it takes.
-- **event**: one thing that happened in a turn, a dict with a `type` (`text`, `thinking`, `tool_call`, `tool_result`, `usage`, `stop`, `note`, `cleared`, `restarting`), which the ui draws; a **chunk** is the same from one model step. [`CONTRACTS.md`](CONTRACTS.md) has each shape.
+- **event**: one thing that happened in a turn, a dict with a `type` (`text`, `thinking`, `tool_call`, `tool_result`, `usage`, `stop`, `note`, `cleared`, `restarting`), which the ui draws; a **chunk** is the same from one model step. A command's answer may also carry `for_model` (`!COMMAND`'s output), which the chat never shows but puts in front of your next message to the model. [`CONTRACTS.md`](CONTRACTS.md) has each shape.
 - **python**, **the one tool**: the only tool the model is offered, `python(code)`: each call is one input to the model's REPL, the kernel.
 - **CodeAct**: working that way: the model acts by writing code, not by calling many tools.
 - **kernel** (row and key), **the REPL**: a Python process, started inside the jail, that keeps what each input defines for the rest of the run; the model is told of it as a Python REPL of its own that persists.
@@ -68,7 +68,9 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **status** (row): `tui:status`: the status bar's session id, model and jail grades. The `usage` field is the ui's own.
 - **status bar**: the line along the bottom: session, model, jail, usage; narrower forms when the terminal is narrow.
 - **palette** (row): `tui:palette`: the commands, offered in the command palette (Ctrl-P).
-- **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers (`/release`).
+- **commands** (row and key): the command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, any a row registers (`/release`), and the prefixes rows in a layer claim (`!`); it says which lines are commands.
+- **prefix**: a character a row in a layer claims in `commands`, so every line you start with it is that row's, never a message to the model (`!`); one row each, and never an extension.
+- **`!COMMAND`**, **shell command** (row `shell-command`): `commands:shell_command`: a line starting with `!` runs in your shell, as you (not in the jail), in the project; what it printed is shown, and the model reads it with your next message. Ctrl-C doesn't stop it; its timeout (120 s) does.
 - **operator** (row): `commands:operator`: the commands that act on the running program through the loader.
 - **system** (row and key): `context:project`: what the model is told about where it is working (that it is the model in bh-02, not Claude Code; the directory, its branch), and the sections other rows add to it.
 - **context file**: TOML listing the project context's `[[section]]`s, each `files` (patterns) and `function` (a module path given the files that match), and optionally `on_touch` (one given them with the files an input opened): bh-02's own, then yours (`$XDG_CONFIG_HOME/bh-02/context.toml`, else `~/.config/bh-02/context.toml`), then the project's `.bh-02/context.toml` (bh-02's own functions and the project's non-hidden files only); read again when it changes.
