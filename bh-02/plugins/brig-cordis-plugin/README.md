@@ -89,9 +89,10 @@ says which of those paths are free, which another session's jail still holds, an
 extensions' worker stopped. The jail is then `released()` until its next start, which is the
 next input's kernel worker: the extensions row starts no worker while it is (a changed file
 waits too), and once it is not, loads every extension again in a new one, so they are back
-within half a second of the next input starting the kernel. Create the file then, and send your message: the model
-row reads it at its next start (with no credential, every step starts afresh, so the next one
-does; a model already running keeps the one it started with until `/restart model`). The next
+within half a second of the next input starting the kernel. Create the file then, and send
+your message: the model row reads it at its next start (with no credential, every step starts
+afresh, so the next one does; a model already running keeps the one it started with until
+`/restart model`). The next
 input starts a new jail, which masks the file (`/dev/null` over it): no input reads or rewrites
 it. No input gets a window: none runs while the path is free, and an input that runs before you
 create the file starts a jail that holds it again (`/release` again). `/restart kernel` is not the step:
