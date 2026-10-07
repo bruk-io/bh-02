@@ -59,7 +59,8 @@ id = "chat"
 use = "chat:session"
 
 # The kernel: a persistent Python namespace, and the model's one tool, `python(code)`. Jailed,
-# its inputs run without asking; unjailed (`kernel:unjailed` below), each input asks first.
+# its inputs run without asking; unjailed (`kernel:unjailed` below), each is put to the person
+# first (the `approval` row).
 [[plugin]]
 id = "kernel"
 use = "kernel:kernel"
@@ -68,6 +69,15 @@ use = "kernel:kernel"
 [[plugin]]
 id = "jail"
 use = "brig:jail"
+
+# Whether the model's code may run: each input (the loop asks) and each extension to load (the
+# extensions row asks). At once when the jail confines it (writes and network enforced); else
+# the person is asked, through the ui's approval modal, and only a yes runs it. It depends on the
+# jail and the ui, not the kernel, so `/clear` leaves it up. It runs in bh-02's own process:
+# only a layer replaces it; an extension has no way to.
+[[plugin]]
+id = "approval"
+use = "kernel:approval"
 
 # The status bar: the session's id, the model and its provider, and the kernel's jail grades
 # (usage is the app's own). A small row over `kernel`, `loader`, `models`, `sessions` and

@@ -1,8 +1,8 @@
-"""The decisions, as pure functions: names, changes, confinement, and what is said."""
+"""The decisions, as pure functions: names, changes, and what is said."""
 
 import json
 
-from extensions_cordis_plugin import Status, changes, extension_name, instructions, is_confined
+from extensions_cordis_plugin import Status, changes, extension_name, instructions
 from extensions_cordis_plugin.watch import status_file, status_forms
 
 
@@ -18,12 +18,6 @@ def test_what_to_load_is_what_is_new_or_changed_and_what_to_unload_is_what_is_go
     after = {"a": (1, 10), "b": (2, 11), "d": (1, 3)}
     assert changes(before, after) == (("b", "d"), ("c",))
     assert changes(after, after) == ((), ())
-
-
-def test_extensions_load_without_asking_exactly_when_inputs_run_without_asking() -> None:
-    assert is_confined({"fs_write": "enforced", "network": "enforced", "fs_read": "best_effort"})
-    assert not is_confined({"fs_write": "enforced", "network": "unenforced"})
-    assert not is_confined({})
 
 
 def test_the_model_is_told_how_to_extend_bh_02_and_how_each_extension_is() -> None:

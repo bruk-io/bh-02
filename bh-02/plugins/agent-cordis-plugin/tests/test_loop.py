@@ -53,12 +53,10 @@ PYTHON: Json = {"name": "python", "description": "Run Python.", "parameters": {"
 
 
 class Shouting:
-    """A `kernel` value whose inputs upper-case their code and touch `/p/<code>.py`, confined
-    unless told otherwise; the loop needs only `spec`, `confined`, `instructions()`, `run()` and
-    `touched()`."""
+    """A `kernel` value whose inputs upper-case their code and touch `/p/<code>.py`; the loop
+    needs only `spec`, `instructions()`, `run()` and `touched()`."""
 
-    def __init__(self, confined: bool = True) -> None:
-        self.confined = confined
+    def __init__(self) -> None:
         self.ran: list[str] = []
 
     @property
@@ -76,16 +74,23 @@ class Shouting:
         return (f"/p/{self.ran[-1].lower()}.py",) if self.ran else ()
 
 
+class Confined:
+    """An `approval` over a jail that confines the kernel: every input runs, nobody is asked."""
+
+    async def approve(self, request: Json) -> bool:
+        return True
+
+
 class Person:
-    """An `output` that answers each question in turn (no once the answers run out), keeps what
-    it was asked, and can be told to wait on a question for ever."""
+    """An `approval` over no jail: the person answers each question in turn (no once the answers
+    run out), it keeps what it was asked, and it can be told to wait on a question for ever."""
 
     def __init__(self, *answers: bool, hang: bool = False) -> None:
         self.answers = list(answers)
         self.hang = hang
         self.asked: list[Json] = []
 
-    async def confirm(self, request: Json) -> bool:
+    async def approve(self, request: Json) -> bool:
         self.asked.append(request)
         if self.hang:
             await asyncio.Event().wait()
@@ -107,7 +112,7 @@ async def _collect(model: LoopModel, message: str) -> str:
 
 async def test_a_turn_shows_each_call_and_its_result_in_order() -> None:
     scripted = Scripted([text("let me "), call("c1", "python", code="quiet")], [text("done")])
-    events = [e async for e in LoopModel(scripted, Shouting(), MemoryTranscript()).reply("go")]
+    events = [e async for e in LoopModel(scripted, Shouting(), MemoryTranscript(), Confined()).reply("go")]
     assert [e["type"] for e in events] == ["text", "tool_call", "tool_result", "text", "stop"]
     assert events[-1] == {"type": "stop", "reason": "answered"}
     assert events[2] == {"type": "tool_result", "call_id": "c1", "content": "QUIET", "is_error": False}
@@ -116,7 +121,8 @@ async def test_a_turn_shows_each_call_and_its_result_in_order() -> None:
 async def test_a_text_turn_is_one_model_step_and_two_transcript_entries() -> None:
     scripted, history = Scripted([text("hel"), text("lo")]), MemoryTranscript()
     assert (
-        await _collect(LoopModel(scripted, Shouting(), history, today=lambda: "2026-10-07"), "hi") == "hello"
+        await _collect(LoopModel(scripted, Shouting(), history, Confined(), today=lambda: "2026-10-07"), "hi")
+        == "hello"
     )
     assert [m["role"] for m in history.messages] == ["user", "assistant"]
     ((messages, offered),) = scripted.requests
@@ -129,16 +135,21 @@ async def test_a_text_turn_is_one_model_step_and_two_transcript_entries() -> Non
 async def test_a_tool_turn_runs_the_call_as_an_input_and_asks_again() -> None:
     scripted = Scripted([text("let me "), call("c1", "python", code="quiet")], [text("QUIET it is")])
     history = MemoryTranscript()
-    assert await _collect(LoopModel(scripted, Shouting(), history), "shout for me") == "let me QUIET it is"
+    assert (
+        await _collect(LoopModel(scripted, Shouting(), history, Confined()), "shout for me")
+        == "let me QUIET it is"
+    )
     assert [m["role"] for m in history.messages] == ["user", "assistant", "tool", "assistant"]
     assert history.messages[2] == {"role": "tool", "content": "QUIET", "call_id": "c1"}
     assert scripted.requests[1][0][-1]["content"] == "QUIET"  # the result went back to the model
 
 
-async def test_an_unconfined_input_is_put_to_the_person_and_a_no_runs_nothing() -> None:
+async def test_each_input_is_put_to_approval_and_a_no_runs_nothing() -> None:
+    """Whether the person is asked (unjailed) or nobody is (jailed) is the approval's to decide
+    (kernel:approval); the loop asks it about every input and runs only what it says yes to."""
     scripted = Scripted([call("c1", "python", code="x"), call("c2", "python", code="y")], [text("fine")])
-    kernel, person, history = Shouting(confined=False), Person(False, True), MemoryTranscript()
-    assert await _collect(LoopModel(scripted, kernel, history, output=person), "go") == "fine"
+    kernel, person, history = Shouting(), Person(False, True), MemoryTranscript()
+    assert await _collect(LoopModel(scripted, kernel, history, person), "go") == "fine"
     assert person.asked == [
         {"name": "python", "input": {"code": "x"}},
         {"name": "python", "input": {"code": "y"}},
@@ -147,19 +158,16 @@ async def test_an_unconfined_input_is_put_to_the_person_and_a_no_runs_nothing() 
     assert kernel.ran == ["y"]  # the no reached the model as text, and the yes ran
 
 
-async def test_a_confined_input_is_never_asked_about_and_with_nobody_to_ask_nothing_runs() -> None:
-    person = Person()
-    scripted = Scripted([call("c1", "python", code="x")], [text("ok")])
-    await _collect(LoopModel(scripted, Shouting(), MemoryTranscript(), output=person), "go")
-    assert person.asked == []
-    kernel, history = Shouting(confined=False), MemoryTranscript()
-    await _collect(LoopModel(Scripted([call("c1", "python", code="x")], [text("ok")]), kernel, history), "go")
-    assert kernel.ran == [] and history.messages[2]["content"] == DECLINED
+async def test_a_call_that_is_not_an_input_is_never_put_to_approval() -> None:
+    person = Person(True)
+    scripted = Scripted([call("c1", "read_file", path="a")], [text("ok")])
+    await _collect(LoopModel(scripted, Shouting(), MemoryTranscript(), person), "go")
+    assert person.asked == []  # refused as text before anyone is asked
 
 
 async def test_a_model_failure_propagates_as_the_contract_says() -> None:
     with pytest.raises(ScriptError, match="ran out"):
-        await _collect(LoopModel(Scripted(), Shouting(), MemoryTranscript()), "hi")
+        await _collect(LoopModel(Scripted(), Shouting(), MemoryTranscript(), Confined()), "hi")
 
 
 async def test_a_failed_turn_answers_its_message_so_the_next_request_does_not_ask_it_again() -> None:
@@ -178,7 +186,7 @@ async def test_a_failed_turn_answers_its_message_so_the_next_request_does_not_as
             yield text("Teal.")
 
     failing, history = Failing(), MemoryTranscript()
-    model = LoopModel(failing, Shouting(), history)
+    model = LoopModel(failing, Shouting(), history, Confined())
     with pytest.raises(ScriptError):
         await _collect(model, "say hi")
     assert history.messages[-1] == {"role": "assistant", "content": f"Hel\n\n{FAILED}"}
@@ -204,7 +212,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
     async def kernel_and_system() -> Effects:
         yield bind("kernel", Shouting())
         yield bind("system", Nowhere())
-        yield bind("output", Person())
+        yield bind("approval", Confined())
 
     rt = Runtime()
     rt.mount(transcript, id="transcript")
@@ -244,7 +252,7 @@ def test_no_call_is_three_different_things() -> None:
 async def test_a_truncated_turn_is_fed_back_not_read_as_the_answer() -> None:
     scripted = Scripted([text("half an ans"), stop("length")], [text("whole answer"), stop("stop")])
     history = MemoryTranscript()
-    events = [e async for e in LoopModel(scripted, Shouting(), history).reply("q")]
+    events = [e async for e in LoopModel(scripted, Shouting(), history, Confined()).reply("q")]
     assert [e for e in events if e["type"] == "stop"] == [stop("truncated"), stop("answered")]
     feedback = history.messages[2]
     assert feedback["role"] == "user" and feedback["feedback"] == "truncated"
@@ -255,14 +263,19 @@ async def test_a_truncated_turn_is_fed_back_not_read_as_the_answer() -> None:
 async def test_a_cut_off_call_never_runs_and_leaves_no_call_to_answer() -> None:
     scripted = Scripted([call("c1", "python", code="x"), stop("length")], [text("ok"), stop("stop")])
     history = MemoryTranscript()
-    await _collect(LoopModel(scripted, Shouting(), history), "go")
+    await _collect(LoopModel(scripted, Shouting(), history, Confined()), "go")
     assert "tool_calls" not in history.messages[1]
     assert all(m["role"] != "tool" for m in history.messages)
 
 
 async def test_nudges_are_bounded() -> None:
     scripted = Scripted([stop("stop")], [stop("stop")], [stop("stop")])
-    events = [e async for e in LoopModel(scripted, Shouting(), MemoryTranscript(), max_nudges=1).reply("q")]
+    events = [
+        e
+        async for e in LoopModel(scripted, Shouting(), MemoryTranscript(), Confined(), max_nudges=1).reply(
+            "q"
+        )
+    ]
     assert [e["reason"] for e in events if e["type"] == "stop"] == ["silent", "silent"]
     assert len(scripted.requests) == 2  # asked once, nudged once, then the reply stops
 
@@ -271,7 +284,7 @@ async def test_the_provider_message_rides_on_its_transcript_entry() -> None:
     raw = {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "python"}}], "extra": 1}
     scripted = Scripted([call("c1", "python", code="x"), {"type": "message", "message": raw}], [text("done")])
     history = MemoryTranscript()
-    await _collect(LoopModel(scripted, Shouting(), history), "go")
+    await _collect(LoopModel(scripted, Shouting(), history, Confined()), "go")
     assert history.messages[1]["provider"] is raw
 
 
@@ -281,7 +294,7 @@ async def test_an_answered_turn_keeps_its_provider_message_so_its_thinking_is_re
     }
     scripted = Scripted([text("hi"), stop("end_turn"), {"type": "message", "message": raw}])
     history = MemoryTranscript()
-    await _collect(LoopModel(scripted, Shouting(), history), "go")
+    await _collect(LoopModel(scripted, Shouting(), history, Confined()), "go")
     assert history.messages[1]["provider"] is raw
 
 
@@ -291,7 +304,7 @@ async def test_a_turn_whose_calls_never_ran_drops_its_provider_message() -> None
     refused = [call("c2", "python", code="x"), stop("refusal"), {"type": "message", "message": raw}]
     scripted = Scripted(cut, refused)
     history = MemoryTranscript()
-    await _collect(LoopModel(scripted, Shouting(), history), "go")
+    await _collect(LoopModel(scripted, Shouting(), history, Confined()), "go")
     assistant = [m for m in history.messages if m["role"] == "assistant"]
     assert len(assistant) == 2 and all("provider" not in m for m in assistant)  # its tool_use has no result
 
@@ -306,7 +319,7 @@ async def test_an_interrupted_call_still_gets_an_answer_in_the_transcript() -> N
     history = MemoryTranscript()
 
     async def run() -> None:
-        async for _ in LoopModel(scripted, Hanging(), history).reply("go"):
+        async for _ in LoopModel(scripted, Hanging(), history, Confined()).reply("go"):
             pass
 
     task = asyncio.create_task(run())
@@ -320,11 +333,11 @@ async def test_an_interrupted_call_still_gets_an_answer_in_the_transcript() -> N
 
 
 async def test_a_turn_stopped_at_the_approval_question_says_the_input_never_ran() -> None:
-    kernel, history = Shouting(confined=False), MemoryTranscript()
+    kernel, history = Shouting(), MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "python", code="b")])
 
     async def run() -> None:
-        async for _ in LoopModel(scripted, kernel, history, output=Person(hang=True)).reply("go"):
+        async for _ in LoopModel(scripted, kernel, history, Person(hang=True)).reply("go"):
             pass
 
     task = asyncio.create_task(run())
@@ -357,7 +370,7 @@ async def test_a_conversation_keeps_the_prompt_it_began_with_and_is_told_what_ch
     so the prompt is sent as the conversation began with it; a change rides on the next message."""
     where, history = _Where(), MemoryTranscript()
     scripted = Scripted([text("one")], [text("two")], [text("three")], [text("four")])
-    model = LoopModel(scripted, _Guided(), history, system=where)
+    model = LoopModel(scripted, _Guided(), history, Confined(), system=where)
     await _collect(model, "first")
     where.text_now = "in /b"
     events = [e async for e in model.reply("second")]
@@ -385,7 +398,7 @@ async def test_a_conversation_keeps_the_prompt_it_began_with_and_is_told_what_ch
         "assistant",
     ]
     # a reloaded loop (a new model, a new ui) carries on from what the transcript says it told
-    again = LoopModel(scripted, _Guided(), history, system=where)
+    again = LoopModel(scripted, _Guided(), history, Confined(), system=where)
     await _collect(again, "fourth")
     assert scripted.requests[3][0][0] == began and scripted.requests[3][0][-1]["content"] == "fourth"
 
@@ -399,7 +412,9 @@ async def test_a_change_made_by_an_input_is_told_with_that_input_s_result() -> N
             return "wrote it"
 
     scripted = Scripted([call("c1", "python", code="write sh.py")], [text("done")])
-    events = [e async for e in LoopModel(scripted, Extending(), history, system=where).reply("go")]
+    events = [
+        e async for e in LoopModel(scripted, Extending(), history, Confined(), system=where).reply("go")
+    ]
     result = next(e for e in events if e["type"] == "tool_result")
     assert result["content"] == "wrote it"  # the person sees the input's own output
     assert events[events.index(result) + 1]["type"] == "note"
@@ -411,7 +426,7 @@ async def test_a_change_made_by_an_input_is_told_with_that_input_s_result() -> N
 
 async def test_a_conversation_with_no_prompt_is_sent_none() -> None:
     scripted, history = Scripted([text("hi")]), MemoryTranscript()
-    await _collect(LoopModel(scripted, Shouting(), history), "hello")
+    await _collect(LoopModel(scripted, Shouting(), history, Confined()), "hello")
     assert [m["role"] for m in scripted.requests[0][0]] == ["user"] and history.messages[0]["role"] == "user"
 
 
@@ -420,7 +435,7 @@ async def test_a_refused_turn_never_runs_its_call_and_is_not_asked_again() -> No
     assert classify("model_context_window_exceeded", "half", []) == "truncated"
     scripted = Scripted([text("I can't"), call("c1", "python", code="x"), stop("refusal")])
     history = MemoryTranscript()
-    events = [e async for e in LoopModel(scripted, Shouting(), history).reply("go")]
+    events = [e async for e in LoopModel(scripted, Shouting(), history, Confined()).reply("go")]
     assert [e for e in events if e["type"] == "stop"] == [stop("refused")]
     assert not any(e["type"] == "tool_result" for e in events)
     assert "tool_calls" not in history.messages[1] and len(scripted.requests) == 1
@@ -437,7 +452,7 @@ async def test_a_stopped_reply_closes_its_model_step_at_once() -> None:
             finally:
                 closed.append(True)  # an SDK stream would release its HTTP response here
 
-    reply = LoopModel(Streaming(), Shouting(), MemoryTranscript()).reply("go")
+    reply = LoopModel(Streaming(), Shouting(), MemoryTranscript(), Confined()).reply("go")
     assert (await anext(reply)) == text("a")
     await reply.aclose()  # the person pressed Ctrl-C: chat closes the reply
     assert closed == [True]
@@ -465,7 +480,7 @@ def _roles(messages: Sequence[Json]) -> list[str]:
 
 async def test_a_reply_closed_mid_stream_answers_its_message_with_what_it_said_and_that_it_stopped() -> None:
     story, history = _Story(), MemoryTranscript()
-    model = LoopModel(story, Shouting(), history)
+    model = LoopModel(story, Shouting(), history, Confined())
     reply = model.reply("tell me a long story")
     assert (await anext(reply)) == text("Once upon")
     await reply.aclose()  # the ui stopped reading and closed the reply: Ctrl-C
@@ -478,7 +493,7 @@ async def test_a_reply_closed_mid_stream_answers_its_message_with_what_it_said_a
 
 async def test_a_reply_caninputed_while_its_model_waits_answers_its_message_too() -> None:
     story, history = _Story(), MemoryTranscript()
-    model = LoopModel(story, Shouting(), history)
+    model = LoopModel(story, Shouting(), history, Confined())
     shown: list[Json] = []
 
     async def run() -> None:
@@ -505,7 +520,7 @@ async def test_a_reply_stopped_before_it_said_anything_is_still_answered() -> No
     history = MemoryTranscript()
 
     async def run() -> None:
-        async for _ in LoopModel(Silent(), Shouting(), history).reply("go"):
+        async for _ in LoopModel(Silent(), Shouting(), history, Confined()).reply("go"):
             pass
 
     task = asyncio.create_task(run())
@@ -521,7 +536,7 @@ async def test_a_call_that_is_not_an_input_is_answered_as_text_and_runs_nothing(
     kernel = Shouting()
     scripted = Scripted([call("c1", "read_file", path="a"), call("c2", "python", source="x")], [text("ok")])
     history = MemoryTranscript()
-    assert await _collect(LoopModel(scripted, kernel, history), "go") == "ok"
+    assert await _collect(LoopModel(scripted, kernel, history, Confined()), "go") == "ok"
     results = [m["content"] for m in history.messages if m["role"] == "tool"]
     assert results == [
         "error: there is no tool named 'read_file'; your one tool is python(code)",
@@ -557,7 +572,9 @@ async def test_memory_s_notes_ride_on_the_input_s_result_and_the_person_sees_eac
         memory.add(fn)
     history = MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "nope", code="b")], [text("done")])
-    events = [e async for e in LoopModel(scripted, Shouting(), history, memory=memory).reply("go")]
+    events = [
+        e async for e in LoopModel(scripted, Shouting(), history, Confined(), memory=memory).reply("go")
+    ]
     assert given == [{"code": "a", "result": "A", "touched": ("/p/a.py",)}]  # c2 never ran
     told = [m["content"] for m in history.messages if m["role"] == "tool"]
     assert told[0].startswith("A\n\n(bh-02 could not make a note with ")
@@ -617,7 +634,7 @@ async def test_the_prompt_and_memory_are_read_off_the_event_loop_which_keeps_run
         memory: Hooks[Callable[[Json], str]] = Hooks()
         memory.add(rules)
         scripted = Scripted([call("c1", "python", code="a")], [text("done")])
-        loop = LoopModel(scripted, Shouting(), MemoryTranscript(), system=Slow(), memory=memory)
+        loop = LoopModel(scripted, Shouting(), MemoryTranscript(), Confined(), system=Slow(), memory=memory)
         assert await _collect(loop, "go") == "done"
     assert len(during) == 3  # the prompt with the message, memory, the prompt with the result
     assert all(ticks >= 10 for ticks in during), during  # ~30 each when the loop runs free; 0 blocked
@@ -636,7 +653,9 @@ async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_i
     memory.add(slow)
     kernel, history = Shouting(), MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "python", code="b")])
-    task = asyncio.create_task(_collect(LoopModel(scripted, kernel, history, memory=memory), "go"))
+    task = asyncio.create_task(
+        _collect(LoopModel(scripted, kernel, history, Confined(), memory=memory), "go")
+    )
     while not started.is_set():
         await asyncio.sleep(0.01)
     task.cancel()
@@ -659,7 +678,7 @@ async def test_a_reply_stopped_while_the_prompt_is_read_keeps_the_message_answer
 
     history = MemoryTranscript()
     loop = LoopModel(
-        Scripted([text("never")]), Shouting(), history, system=Slow(), today=lambda: "2026-10-07"
+        Scripted([text("never")]), Shouting(), history, Confined(), system=Slow(), today=lambda: "2026-10-07"
     )
     task = asyncio.create_task(_collect(loop, "go"))
     while not started.is_set():
@@ -682,12 +701,14 @@ async def test_the_date_is_told_with_a_conversation_s_first_message_and_the_firs
     path = str(tmp_path / "transcript.jsonl")
     history = FileTranscript(path)
     scripted = Scripted([text("one")], [text("two")], [text("three")], [text("four")], [text("five")])
-    await _collect(LoopModel(scripted, Shouting(), history, today=lambda: day[-1]), "first")
-    await _collect(LoopModel(scripted, Shouting(), history, today=lambda: day[-1]), "second")
+    await _collect(LoopModel(scripted, Shouting(), history, Confined(), today=lambda: day[-1]), "first")
+    await _collect(LoopModel(scripted, Shouting(), history, Confined(), today=lambda: day[-1]), "second")
     day.append("2026-10-08")  # past midnight
-    model = LoopModel(scripted, Shouting(), history, today=lambda: day[-1])
+    model = LoopModel(scripted, Shouting(), history, Confined(), today=lambda: day[-1])
     await _collect(model, "third")
-    await _collect(LoopModel(scripted, Shouting(), FileTranscript(path), today=lambda: day[-1]), "fourth")
+    await _collect(
+        LoopModel(scripted, Shouting(), FileTranscript(path), Confined(), today=lambda: day[-1]), "fourth"
+    )
     assert [m for m in FileTranscript(path).messages if m["role"] == "user"] == [
         {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nfirst", "today": "2026-10-07"},
         {"role": "user", "content": "second"},
@@ -695,14 +716,16 @@ async def test_the_date_is_told_with_a_conversation_s_first_message_and_the_firs
         {"role": "user", "content": "fourth"},  # resumed the same day
     ]
     cleared = MemoryTranscript()
-    await _collect(LoopModel(scripted, Shouting(), cleared, today=lambda: day[-1]), "after /clear")
+    await _collect(
+        LoopModel(scripted, Shouting(), cleared, Confined(), today=lambda: day[-1]), "after /clear"
+    )
     assert cleared.messages[0]["content"] == "(Today's date: 2026-10-08.)\n\nafter /clear"
 
 
 async def test_on_a_new_day_with_new_instructions_the_date_comes_first_then_what_changed() -> None:
     where, day = _Where(), ["2026-10-07"]
     scripted, history = Scripted([text("one")], [text("two")]), MemoryTranscript()
-    model = LoopModel(scripted, _Guided(), history, system=where, today=lambda: day[-1])
+    model = LoopModel(scripted, _Guided(), history, Confined(), system=where, today=lambda: day[-1])
     await _collect(model, "first")
     where.text_now, day[0] = "in /b", "2026-10-08"
     events = [e async for e in model.reply("second")]

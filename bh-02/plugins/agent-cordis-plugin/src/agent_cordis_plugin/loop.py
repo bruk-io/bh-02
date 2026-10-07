@@ -1,11 +1,11 @@
 """The loop: a turn is one model step plus the inputs it asked for, until it asks for none.
 
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
-kernel, transcript, system, output, memory). The model has one tool, the kernel's `python(code)`,
+kernel, transcript, system, approval, memory). The model has one tool, the kernel's `python(code)`,
 offered through the provider's standard tool calling; every call runs as an input in the kernel.
-A kernel that is not `confined` runs with the person's own permissions, so the loop puts each
-of its inputs to the person first (`output.confirm`) and runs it only on a yes: one place for
-every model provider, and the loop knows whether a stopped call ever reached the kernel.
+Each input is put to `approval` first and runs only on its yes (at once when the jail confines
+the kernel; otherwise the person's answer): one place for every model provider, and the loop
+knows whether a stopped call ever reached the kernel.
 
 Every request begins with the system prompt the conversation began with, kept in its transcript,
 so a model server's cache of the conversation stays good. When the prompt reads differently (an
@@ -38,7 +38,7 @@ __all__ = [
     "DECLINED",
     "FAILED",
     "STOPPED",
-    "Asks",
+    "Approval",
     "Model",
     "LoopModel",
     "Memory",
@@ -62,13 +62,11 @@ class Model(Protocol):
 @runtime_checkable
 class Python(Protocol):
     """What the loop needs of the `kernel` value: the one tool's spec, what to tell the model
-    about it (`instructions()`, called in a worker thread with the prompt), whether its inputs
-    are confined, and an input run as the model reads it."""
+    about it (`instructions()`, called in a worker thread with the prompt), and an input run as
+    the model reads it."""
 
     @property
     def spec(self) -> Json: ...
-    @property
-    def confined(self) -> bool: ...
     def instructions(self) -> str: ...
     async def run(self, code: str) -> str: ...
     def touched(self) -> tuple[str, ...]: ...
@@ -87,10 +85,11 @@ class Memory(Protocol):
 
 
 @runtime_checkable
-class Asks(Protocol):
-    """What the loop needs of the `output` value: a yes-or-no question about an input."""
+class Approval(Protocol):
+    """What the loop needs of the `approval` value: whether an input may run (the person's
+    answer when the jail does not confine it)."""
 
-    async def confirm(self, request: Json) -> bool: ...
+    async def approve(self, request: Json) -> bool: ...
 
 
 @runtime_checkable
@@ -186,7 +185,8 @@ class LoopModel:
     truncated, silent or undecodable turn is fed back to the model up to `max_nudges` times
     in one reply, then shown as the reason the reply stopped. The
     provider's assistant message rides on its transcript entry as `provider`, for the
-    model to replay as it was received.
+    model to replay as it was received. An `act` turn's calls run one at a time, each only on
+    `approval.approve({"name", "input"})`'s yes; a no is that call's answer, `DECLINED`.
 
     A reply the person stops (the reply closed, or its task cancelled) while a turn streams
     still leaves the transcript whole: what the turn said so far, then `STOPPED`, as the
@@ -208,28 +208,20 @@ class LoopModel:
         model: Model,
         kernel: Python,
         transcript: Transcript,
+        approval: Approval,
         max_nudges: int = 2,
         system: System | None = None,
-        output: Asks | None = None,
         memory: Memory | None = None,
         today: Callable[[], str] = _today,
     ) -> None:
         self._model = model
         self._kernel = kernel
         self._transcript = transcript
+        self._approval = approval
         self._max_nudges = max_nudges
         self._system = system
-        self._output = output  # none: nobody to ask, so an unconfined input is declined
         self._memory = memory
         self._today = today
-
-    async def _approved(self, call: Json) -> bool:
-        """Whether an input may run: a confined one always; an unconfined one on the person's yes."""
-        if self._kernel.confined:
-            return True
-        return self._output is not None and await self._output.confirm(
-            {"name": call["name"], "input": call["input"]}
-        )
 
     def _prompt(self) -> str:
         """The system prompt as it reads now. Run in a worker thread (`_told`)."""
@@ -305,7 +297,8 @@ class LoopModel:
                 try:
                     for call in turn.calls:
                         result = refusal(call, self._kernel.spec)
-                        if result is None and not await self._approved(call):
+                        request = {"name": call["name"], "input": call["input"]}
+                        if result is None and not await self._approval.approve(request):
                             result = DECLINED
                         notes: list[str] = []
                         if result is None:

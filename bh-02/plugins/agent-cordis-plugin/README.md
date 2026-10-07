@@ -5,16 +5,17 @@ an input's result.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `confined`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `output` (`confirm`), `memory` (iterated) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (iterated) |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
 | `agent:memory` | `memory`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 
 A turn is one model step plus the inputs it asked for, until it asks for none. The model's one
 tool is the kernel's `python(code)`, offered through the provider's standard tool calling;
-every call runs as `kernel.run(code)`. When the kernel is not `confined` (`--no-jail`), each
-input is put to the person first (`output.confirm`, `{"name": "python", "input": {"code"}}`, the
-approval modal) and a no is its answer (`DECLINED`), so approval is one place for any
-model provider. A call to any other name, or one with no `code` string, is answered with
+every call runs as `kernel.run(code)`, each only on `approval`'s yes
+(`approval.approve({"name": "python", "input": {"code"}})`: at once when the jail confines the
+kernel; with `--no-jail`, the person's answer in the approval modal). A no is its answer
+(`DECLINED`), so approval is one place for any model provider, and the loop keeps no copy of
+the rule. A call to any other name, or one with no `code` string, is answered with
 text saying so (`refusal`, pure) and runs nothing. A turn stopped part-way still answers every
 call: the one in the kernel when the stop came with `interrupted: ... it may have partly run`,
 one that had its result (the stop came while its notes were made or the prompt read) with that

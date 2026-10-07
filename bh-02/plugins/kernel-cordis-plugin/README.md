@@ -1,11 +1,13 @@
 # kernel-cordis-plugin
 
 A persistent Python namespace in a process of its own, started by whatever jail the
-composition names, and the model's one tool, `python(code)`, which runs an input in it.
+composition names, and the model's one tool, `python(code)`, which runs an input in it. Also
+`approval`: the one place that decides whether the model's code runs unasked.
 
 | Row | Binds | Consumes |
 |---|---|---|
 | `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the project's file a new kernel runs first, default `.bh-02/kernel.py`) | `jail` |
+| `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when confined, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
 | `kernel:shell_hints` | adds `ShellHints` to `memory` | `memory` (`add`), `transcript` (its lifetime only) |
 
@@ -25,9 +27,20 @@ tests, git and builds), and `shell_note` what such an input is told after its ou
 `ShellHints`, the `memory` function the `kernel:shell_hints` row adds: once for each kind of work
 a conversation (the row depends on `transcript`, so `/clear` starts it afresh), so it corrects a
 habit without nagging.
-`scripts/model-friction` reads transcripts with the same two. `confined` is what the loop reads to decide
-whether an input is put to the person first (`agent:loop`): the kernel itself never asks, so it
-depends on its jail alone and a new ui or model keeps the namespace.
+`scripts/model-friction` reads transcripts with the same two. `confined` is what the model is
+told (`instructions_for`) and whether the startup file runs unasked: the kernel itself never
+asks, so it depends on its jail alone and a new ui or model keeps the namespace.
+
+`approval.py` is the rule, written once: `is_confined(report)` (the jail enforces `fs_write` and
+`network`), and `Approval`, the `approval` value over a jail and an `output`. The loop asks it
+about every input (`{"name": "python", "input": {"code"}}`) and the extensions row about every
+extension it loads; the kernel's own `confined` is `is_confined` over the same jail. Its row,
+`kernel:approval`, depends on `jail` and `output`, not `kernel`, so `/clear` (a new kernel)
+leaves it up, and the extensions row that depends on it. It is a capability, bound by one row:
+two rows' answers could not be combined, so it is not a broker. It runs in bh-02's own process,
+so only a layer replaces it; an extension has no way to bind or reach it. It answers about code
+bh-02 is about to hand to the jail, not about each effect a component yields (that is cordis's
+planned policy seam, not this).
 
 `worker.py` is the process: standard library only (the gate's `worker-stdlib-only`), run by
 path as `python -I worker.py SOCKET`, so nothing of the host crosses into a jail with it. Its

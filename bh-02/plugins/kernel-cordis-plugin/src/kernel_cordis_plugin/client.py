@@ -2,8 +2,10 @@
 the model's one tool, `python(code)`, which runs an input in it.
 
 An input is one request and one answer: the worker runs the code and says it is done. Whether
-the person is asked first is the loop's to do (a kernel that is not `confined`), so the kernel
-depends on its jail alone and a new ui keeps the namespace. Every failure the kernel knows of (a
+the person is asked first is the `approval` row's to answer and the loop's to ask, so the kernel
+depends on its jail alone and a new ui keeps the namespace. Its own `confined` (the same rule,
+`approval.is_confined`, over the same jail) decides only what the model is told and whether the
+startup file runs unasked. Every failure the kernel knows of (a
 worker that died, an answer too long or garbled to read, a worker that won't start again)
 comes back as the input's text, never as an exception. Interrupting an input (cancelling `run`) sends SIGINT
 through the jail, which the worker turns into `KeyboardInterrupt` in the input, and waits for the
@@ -26,12 +28,12 @@ from sys import executable
 from types import TracebackType
 from typing import Any, Protocol, runtime_checkable
 
+from kernel_cordis_plugin.approval import is_confined
 from kernel_cordis_plugin.python import PYTHON, instructions_for
 
-__all__ = ["Jail", "Jailed", "Kernel", "KernelConfig", "is_confined", "worker_argv"]
+__all__ = ["Jail", "Jailed", "Kernel", "KernelConfig", "worker_argv"]
 
 _WORKER = Path(__file__).with_name("worker.py")
-_CONFINING = ("fs_write", "network")  # the axes a jail must enforce for its inputs to count as confined
 # The longest line the worker sends: its output and its error are capped at 20,000 characters
 # each, and JSON escapes a character to at most 12 bytes (a surrogate pair, `\ud83d\ude00`),
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
@@ -108,11 +110,6 @@ def _inside(paths: Sequence[str], root: str) -> tuple[str, ...]:
     return tuple(p for p in paths if p.startswith(root.rstrip(os.sep) + os.sep))
 
 
-def is_confined(report: Mapping[str, str]) -> bool:
-    """Whether a jail's report says an input can write only where it was allowed and reach no network."""
-    return all(report.get(axis) == "enforced" for axis in _CONFINING)
-
-
 class Kernel:
     """Implements `kernel` (CONTRACTS.md): a persistent namespace, and the model's one tool
     (`spec`, `instructions()`, `run(code)`). An async context manager: entering starts the
@@ -132,6 +129,7 @@ class Kernel:
 
     @property
     def confined(self) -> bool:
+        """Whether the jail confines its inputs, so none is asked about (`approval`'s rule)."""
         return is_confined(self._jail.report())
 
     def report(self) -> Mapping[str, str]:

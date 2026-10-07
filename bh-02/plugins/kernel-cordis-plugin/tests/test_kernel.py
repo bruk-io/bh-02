@@ -21,7 +21,6 @@ from kernel_cordis_plugin import (
     KernelConfig,
     Unjailed,
     instructions_for,
-    is_confined,
     kernel,
     worker_argv,
 )
@@ -269,12 +268,6 @@ async def test_the_row_starts_the_worker_and_leaving_stops_it() -> None:
     else:
         raise AssertionError("the worker outlived its row")
     await rt.shutdown()
-
-
-def test_confined_means_writes_and_network_are_enforced() -> None:
-    assert is_confined({"fs_write": "enforced", "network": "enforced", "fs_read": "unenforced"})
-    assert not is_confined({"fs_write": "enforced", "network": "best_effort"})
-    assert not is_confined(UNENFORCED)
 
 
 async def test_a_worker_whose_host_goes_away_ends_even_mid_input() -> None:

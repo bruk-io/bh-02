@@ -52,9 +52,10 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **worker**: the kernel's process, the one that runs inputs; the `jail` row starts it, and a new jail starts a new worker.
 - **input** (to the REPL): one piece of code the model sent the kernel, one `python` call, and its output (not the `input` key, below).
 - **jail** (row and key): what the kernel runs in: `brig:jail` confines it (no writes outside the project, no network, no credentials); `kernel:unjailed` (`--no-jail`) does not.
-- **confined**: the kernel's jail enforces writes and network, so an input runs without asking; unconfined, every input is put to you first.
+- **confined**: the jail enforces writes and network, so an input (or an extension's load) runs without asking; unconfined, each is put to you first.
 - **grades**: how well each part of the jail holds (`enforced`, `best_effort`, `cooperative`, `unenforced`), shown in the status bar as ✓ and ✗.
-- **approval**, **the modal**: the question an input is put to you in when the kernel is unjailed: `y` runs it, `n` or Esc doesn't. It ignores keys for its first 0.4 s, so typing can't answer it.
+- **approval** (row and key): `kernel:approval`, the one place that decides whether the model's code runs: an input (the loop asks) or an extension to load (the extensions row asks). Confined, at once; unconfined, it asks you in the modal. Only a layer replaces it.
+- **the modal**: the question the model's code is put to you in when it is unjailed: `y` runs it, `n` or Esc doesn't. It ignores keys for its first 0.4 s, so typing can't answer it.
 - **host**: the side outside the jail: bh-02's own process (and brig's host process, which starts the worker), whose import paths, environment and files a jailed input can't reach; the kernel's `client.py` is its end of the socket.
 - **composer**: the box along the bottom of the app where you type a message or a command; the palette puts a command that takes arguments there to finish.
 - **ui** (row): `tui:app`, the Textual app. It binds `input`, `output` and `frame`, and depends on nothing, so it never reloads.

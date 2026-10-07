@@ -4,8 +4,8 @@ The model writes a module of cordis components into the project's extensions dir
 (`.bh-02/plugins/NAME.py`); this notices (it looks every `watch` seconds), and loads it into a
 worker the `jail` row starts (`worker.py`), so the model's code runs as confined as its inputs
 do, never in bh-02's own process. A changed file is loaded afresh, a deleted one unloaded.
-When the jail confines nothing (`--no-jail`), each load is put to the person first, with the
-source, exactly as an unjailed input is.
+Each load is put to `approval` first, with the source, exactly as an input is: at once when the
+jail confines what runs in it; otherwise (`--no-jail`) the person decides.
 
 What an extension adds reaches bh-02 as data over the worker's socket: a slash command, which
 this registers in `commands` and runs by asking the worker; a status-bar field, pushed into
@@ -39,13 +39,12 @@ from extensions_cordis_plugin.watch import (
     changes,
     extension_name,
     instructions,
-    is_confined,
     status_file,
     status_forms,
 )
 
 __all__ = [
-    "Asks",
+    "Approval",
     "Commands",
     "Extensions",
     "ExtensionsConfig",
@@ -75,10 +74,9 @@ class _Jailed(Protocol):
 
 @runtime_checkable
 class Jail(Protocol):
-    """What the extensions need of the `jail` value (CONTRACTS.md: jail)."""
+    """What the extensions need of the `jail` value (CONTRACTS.md: jail): their worker started."""
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed: ...
-    def report(self) -> Mapping[str, str]: ...
 
 
 @runtime_checkable
@@ -105,10 +103,13 @@ class System(Protocol):
 
 
 @runtime_checkable
-class Asks(Protocol):
-    """What the extensions need of the `output` value: a yes or no about code (unjailed)."""
+class Approval(Protocol):
+    """What the extensions need of the `approval` value: whether the jail confines what runs in
+    it (which the model is told), and whether an extension may load."""
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool: ...
+    @property
+    def confined(self) -> bool: ...
+    async def approve(self, request: Mapping[str, Any]) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,14 +152,14 @@ class Extensions:
         commands: Commands,
         frame: Frame,
         system: System,
-        output: Asks,
+        approval: Approval,
         config: ExtensionsConfig,
     ) -> None:
         self._jail = jail
         self._commands = commands
         self._frame = frame
         self._system = system
-        self._output = output
+        self._approval = approval
         self._config = config
         self._statuses: dict[str, Status] = {}
         self._seen: dict[str, tuple[int, int]] = {}  # each file as last loaded: (mtime_ns, size)
@@ -196,9 +197,9 @@ class Extensions:
         """What the model is told about extending bh-02, and how its extensions are: a section
         of its prompt (`system.add`), read per request. The loop reads the prompt in a worker
         thread while this row's watcher changes `_statuses` on the event loop, so it reads a copy
-        (`statuses`, taken in one step) and nothing that needs the event loop."""
-        confined = is_confined(self._jail.report())
-        return instructions(self._config.path, confined, self.statuses, self._reference)
+        (`statuses`, taken in one step) and nothing that needs the event loop (`confined` reads
+        the jail's report, a value)."""
+        return instructions(self._config.path, self._approval.confined, self.statuses, self._reference)
 
     async def __aenter__(self) -> Extensions:
         await self.look()  # what is there already loads before the row is up
@@ -273,7 +274,7 @@ class Extensions:
         except OSError, UnicodeDecodeError:
             self._statuses[name] = Status(error=f"bh-02 could not read {path} as UTF-8 text")
             return
-        if not is_confined(self._jail.report()) and not await self._approved(name, source):
+        if not await self._approved(name, source):
             await self._unload(name)  # what an earlier version added goes; this one never loads
             self._statuses[name] = Status(error="the person declined to load it")
             return
@@ -298,8 +299,9 @@ class Extensions:
         )
 
     async def _approved(self, name: str, source: str) -> bool:
-        """Unjailed, the model's code would run with the person's permissions: ask them."""
-        return await self._output.confirm(
+        """Whether an extension may load (`approval`): at once when the jail confines it;
+        unjailed, the model's code would run with the person's permissions, so they are asked."""
+        return await self._approval.approve(
             {
                 "name": "extension",
                 "title": f"Load the model's extension {name} into bh-02, unjailed?",

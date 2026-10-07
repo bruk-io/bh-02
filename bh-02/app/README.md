@@ -160,6 +160,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `chat` | `chat:session` | |
 | `kernel` | `kernel:kernel` | |
 | `jail` | `brig:jail` | `kernel:unjailed` with `--no-jail` |
+| `approval` | `kernel:approval` | |
 | `system` | `context:project` | |
 | `commands` | `commands:registry` | |
 | `operator` | `commands:operator` | `layer`, `model_row` (`model`), `forget` (the transcript) |
@@ -199,22 +200,26 @@ models:model            binds Model                        depends on nothing (i
 models:catalog          binds Models                       depends on Loader
 agent:transcript        binds Transcript                   depends on nothing
 agent:memory            binds Memory                       depends on nothing
-agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Output, Memory
+agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Approval, Memory
 kernel:shell_hints      adds the shell hints to Memory     depends on Memory, Transcript
 context:on_touch        adds the on-touch sections         depends on Memory, Transcript
 brig:jail               binds Jail                         depends on Layers
 kernel:unjailed         binds Jail                         depends on nothing
 kernel:kernel           binds Kernel (the one tool)        depends on Jail
+kernel:approval         binds Approval                     depends on Jail, Output
 tui:app                 binds Input, Output, Frame         depends on nothing (its config)
 tui:status              pushes the status bar's fields     depends on Kernel, Loader, Models, Sessions, Frame
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:session            runs the chat, binds Done          depends on Loop, Input, Output, Commands
-extensions:extensions   loads the model's own plugins      depends on Jail, Commands, Frame, System, Output
+extensions:extensions   loads the model's own plugins      depends on Jail, Commands, Frame, System, Approval
 ```
 
 Swap the model or the ui and the kernel keeps its namespace, because the kernel depends on the
-jail alone; swap the jail and a new worker starts. Retire a command and it leaves the
-`commands` broker: that is the paper's service broker, one row binds the key, the contributors
+jail alone; swap the jail and a new worker starts. `approval` is the one place that decides
+whether the model's code runs unasked (an input, an extension's load), and depends on the jail
+and the ui, not the kernel, so `/clear` leaves it up; only a layer replaces it. Retire a
+command and it leaves the `commands` broker: that is the paper's service broker, one row binds
+the key, the contributors
 register through an effect whose undo is their removal. Switch the model (`/model NAME`, which
 names it as the model row's `default` in the session's layer) and the model row reloads on the
 new model's provider, the loop against it, while `transcript`, a row of its own, keeps the
@@ -232,11 +237,11 @@ other plugin; the gate proves it.
 |---|---|---|
 | `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `palette`) | `frame` and what each row reports on |
 | `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's one tool, `python`, only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are | `loader` (catalog) |
-| `agent-cordis-plugin` | `loop` (`loop`: turns classified after harness, bounded nudges, each call an input, put to the person first when the kernel is unconfined), `transcript` | `model`, `kernel`, `transcript`, `system`, `output` (`confirm`) |
+| `agent-cordis-plugin` | `loop` (`loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes), `transcript` | `model`, `kernel`, `transcript`, `system`, `approval` (`approve`), `memory` |
 | `chat-cordis-plugin` | runs `session` (a turn interruptible) and binds `done` | `loop`, `input`, `output`, `commands` |
 | `context-cordis-plugin` | `system`: who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of, then the project context: the working directory and branch, what the context files' sections say (guidance and rule files, each read by a function), read fresh; a broker other rows add sections to | |
-| `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system` | `jail`, `commands`, `frame`, `system`, `output` |
-| `kernel-cordis-plugin` | `kernel`: a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, an input run); `jail`: `unjailed` | `jail` |
+| `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system`; each load on `approval`'s yes | `jail`, `commands`, `frame`, `system`, `approval` |
+| `kernel-cordis-plugin` | `kernel`: a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, an input run); `approval`: whether the model's code runs, at once when the jail confines it, else on the person's yes; `jail`: `unjailed` | `jail`, `output` (approval) |
 | `brig-cordis-plugin` | `jail`: brig's `scratch_darwin()`; the only importer of brig | `layers` |
 | `commands-cordis-plugin` | `commands` (the broker); the operator's commands over the loader | `commands`, `loader`, `models` (operator) |
 

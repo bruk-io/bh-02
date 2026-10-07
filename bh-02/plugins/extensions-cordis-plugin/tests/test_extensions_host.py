@@ -74,13 +74,17 @@ class _System:
 
 
 @dataclass
-class _Output:
-    answer: bool = True
-    asked: list[Mapping[str, Any]] = field(default_factory=list)
+class _Approval:
+    """An `approval` that keeps every request: confined, each goes ahead with nobody asked;
+    unconfined, each gets the person's `answer`."""
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
-        self.asked.append(request)
-        return self.answer
+    confined: bool = True
+    answer: bool = True
+    requests: list[Mapping[str, Any]] = field(default_factory=list)
+
+    async def approve(self, request: Mapping[str, Any]) -> bool:
+        self.requests.append(request)
+        return self.confined or self.answer
 
 
 @dataclass
@@ -90,7 +94,7 @@ class _Harness:
     commands: _Commands
     frame: _Frame
     system: _System
-    output: _Output
+    approval: _Approval
     extensions: Extensions
 
     def write(self, name: str, source: str) -> None:
@@ -108,16 +112,16 @@ class _Harness:
 
 @contextlib.asynccontextmanager
 async def _running(root: Path, *, confined: bool = True, answer: bool = True) -> AsyncIterator[_Harness]:
-    jail, commands, frame, system, output = (
-        PlainJail(confined=confined),
+    jail, commands, frame, system, approval = (
+        PlainJail(),
         _Commands(),
         _Frame(),
         _System(),
-        _Output(answer),
+        _Approval(confined, answer),
     )
     config = ExtensionsConfig(root=str(root), watch=3600)  # the test looks itself
-    async with Extensions(jail, commands, frame, system, output, config) as running:
-        yield _Harness(root, jail, commands, frame, system, output, running)
+    async with Extensions(jail, commands, frame, system, approval, config) as running:
+        yield _Harness(root, jail, commands, frame, system, approval, running)
 
 
 async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_bh_02(tmp_path: Path) -> None:
@@ -126,6 +130,8 @@ async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_
         h.write("todo", _TODO)
         await h.extensions.look()
         assert h.extensions.statuses["todo"].ok
+        assert [r["name"] for r in h.approval.requests] == ["extension"]  # put to approval: yes, unasked
+        assert "Nobody is asked first" in h.extensions.section()  # the model is told approval's `confined`
         assert await h.commands.runs["todo"]("milk") == "milk"
         assert await h.commands.runs["todo"]("") == "milk"  # its state lives in the worker
         assert h.frame.fields() == {"todo:count": "todo: 0", "extensions": "ext: todo ✓"}
@@ -232,15 +238,15 @@ async def test_unjailed_each_extension_is_put_to_the_person_with_its_source(tmp_
     async with _running(tmp_path, confined=False, answer=False) as h:
         h.write("todo", _TODO)
         await h.extensions.look()
-        (asked,) = h.output.asked
+        (asked,) = h.approval.requests
         assert asked["title"] == "Load the model's extension todo into bh-02, unjailed?"
         assert asked["input"] == {"code": _TODO}
         assert h.commands.runs == {} and h.jail.started == []  # declined: nothing ran
         assert h.status()["todo"]["error"] == "the person declined to load it"
         assert "each is shown to the person" in h.extensions.section()
         await h.extensions.look()
-        assert len(h.output.asked) == 1  # not asked again until the file changes
-        h.output.answer = True
+        assert len(h.approval.requests) == 1  # not asked again until the file changes
+        h.approval.answer = True
         h.write("todo", _TODO + "\n")
         await h.extensions.look()
         assert "todo" in h.commands.runs and h.extensions.statuses["todo"].ok
@@ -273,7 +279,7 @@ async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -
             commands=_Commands(),
             frame=_Frame(),
             system=_System(),
-            output=_Output(),
+            approval=_Approval(),
             config=ExtensionsConfig(),
         ),
         [SimpleNamespace(section=lambda: "told")],  # what entering would have given back

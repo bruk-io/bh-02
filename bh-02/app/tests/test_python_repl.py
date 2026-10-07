@@ -78,6 +78,25 @@ async def test_unjailed_inputs_share_a_namespace_of_plain_python_and_each_is_ask
     assert not (tmp_path / "declined.txt").exists()  # a no ran nothing
 
 
+async def test_unjailed_an_input_and_an_extension_are_both_put_to_the_person_by_the_approval_row(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The loop and the extensions row ask one `approval` row, which asks through the ui."""
+    project = tmp_path / "project"
+    plugins = project / ".bh-02" / "plugins"
+    plugins.mkdir(parents=True)
+    source = "from cordis import Effects, component\n"
+    (plugins / "todo.py").write_text(source)
+    extensions = f'[[plugin]]\nid = "extensions"\nconfig = {{ root = "{project}" }}\n'
+    patch = _inputs(composition, "6 * 7", extra=extensions)
+    _answers(False, False)  # which is asked first is a race between two rows: both are noes
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+    assert sorted(_asked()) == sorted([source, "6 * 7"])
+    assert "[0] denied: the person said no to this input" in _shown()
+    status = json.loads((plugins / "status.json").read_text())
+    assert status["todo"]["error"] == "the person declined to load it"
+
+
 @pytest.mark.skipif(not _JAILED, reason="brig:jail uses seatbelt, darwin only here")
 async def test_a_jailed_input_does_coding_work_in_the_project_without_asking(
     composition: Callable[..., Path],

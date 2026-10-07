@@ -30,7 +30,7 @@ async def test_loop_binds_a_model_over_what_it_was_given() -> None:
             kernel=kernel,
             transcript=history,
             system=object(),
-            output=object(),
+            approval=object(),
             memory=Hooks(),
             config=LoopConfig(),
         )  # type: ignore[arg-type]

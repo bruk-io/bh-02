@@ -32,8 +32,8 @@ shape, in `CONTRACTS.md`:
 - **A consumer declares what it needs** as a `runtime_checkable` Protocol of its own, on the
   parameter: `session(*, loop: Loop, ...)` keys on `"loop"` and cordis checks the bound value
   against `chat`'s `Loop` before `session` runs. The loop's `Python` asks the `kernel` for
-  `spec`, `confined`, `instructions` and `run`; `tui:status`'s `Confinement` asks the
-  same value for `confined` and `report`. Two consumers, two contracts.
+  `spec`, `instructions`, `run` and `touched`; `tui:status`'s `Confinement` asks the same
+  value for `confined` and `report`. Two consumers, two contracts.
 - **A provider just has the methods.** `ClaudeCodeModel.complete`, `OpenAIModel.complete`, `Kernel.run`, nothing to
   import. Data crosses as dicts (`{"type": "text", ...}`, a tool spec, a message); a package
   types the part it reads with a `TypedDict` or `Mapping`.
@@ -77,7 +77,8 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 `done` across a restart of the chat row, so a session survives `/model`.
 
 **What the model sees and how a turn looks.** `loop.reply` yields events (text, thinking,
-tool_call, tool_result, usage, stop, note). `output.confirm` asks about the model's code;
+tool_call, tool_result, usage, stop, note). `approval.approve` decides whether the model's code
+runs (unjailed, by asking through `output.confirm`);
 `input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. `system`
 (`context:project`) is organised as Claude Code's is: who the model is (the model in bh-02, not
 Claude Code) and what bh-02 is made of, then the project context: the working directory and
@@ -138,10 +139,15 @@ what only a real launch does.
 **CodeAct, the kernel and the jail.** The kernel (`kernel:kernel`) is a stdlib-only worker
 (`worker.py`, run by path, its one channel a Unix socket that carries an input in and its output
 back; `worker-stdlib-only`) started by the `jail` row (`brig:jail`, or `kernel:unjailed`).
-Approval follows `kernel.confined`, and `agent:loop` does it: confined, an input runs without
-asking; unconfined (`--no-jail`), every input is put to the person through `output.confirm` (the
-approval modal, showing the code) and runs only on a yes. The kernel depends on its jail alone,
-so a new ui or model keeps the namespace. Only `brig_cordis_plugin` imports brig
+Approval is one rule in one row, `kernel:approval` (key `approval`, a capability, not a broker):
+confined (the jail enforces writes and network), the model's code runs without asking;
+unconfined (`--no-jail`), it is put to the person through `output.confirm` (the approval modal,
+showing the code) and runs only on a yes. `agent:loop` asks it about every input and
+`extensions:extensions` about every load; neither keeps a copy of the rule, and the kernel's own
+`confined` (what the model is told) reads the same function, `kernel_cordis_plugin.is_confined`.
+It depends on `jail` and `output`, not `kernel`, so `/clear` leaves it up; only a layer replaces
+it (it runs in bh-02's process; an extension can't reach it). The kernel depends on its jail
+alone, so a new ui or model keeps the namespace. Only `brig_cordis_plugin` imports brig
 (`brig-one-adapter`), and only darwin is jailed so far.
 
 **The model's own plugins.** `extensions:extensions` loads the cordis components the model
@@ -149,8 +155,8 @@ writes to `.bh-02/plugins/NAME.py` while bh-02 runs (looked at every half second
 loaded afresh; deleted, unloaded), so the model can evolve the harness without anyone editing
 a layer. They run in a second worker the `jail` row starts (`extensions_cordis_plugin.worker`,
 a cordis runtime of its own, listed in `cordis-in-wiring-only`'s `shell`), never in bh-02's
-process: jailed, they load without asking, as inputs run; unjailed, each load goes through
-`output.confirm` with its source. An extension reaches bh-02 only through three keys bound in
+process: each load goes through `approval` with its source, as an input does (jailed, without
+asking; unjailed, the person decides). An extension reaches bh-02 only through three keys bound in
 that worker, each of which only adds (`commands.register`, `frame.status`, `system.add`); the
 host registers what arrives into the real keys and keeps the removers. Its own `system` section
 tells the model how, and `.bh-02/plugins/status.json` tells it how each load went. Don't give an

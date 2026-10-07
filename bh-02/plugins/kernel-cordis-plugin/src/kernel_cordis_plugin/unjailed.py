@@ -1,8 +1,8 @@
 """A `jail` that confines nothing: the worker as a plain subprocess, and a report that says so.
 
 For a platform brig can't jail, or a person who chooses not to. Every axis is reported
-`unenforced`, so the kernel is not `confined`: an input can do anything the person running
-bh-02 can, and agent:loop puts each input to the person before it runs.
+`unenforced`, so nothing is `confined`: an input can do anything the person running bh-02 can,
+and `approval` puts each input (and each extension to load) to the person before it runs.
 """
 
 import asyncio

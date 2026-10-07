@@ -1,8 +1,8 @@
 """The decisions about the model's extensions, as pure functions of what was found.
 
-Which files to load and unload (`changes`), whether a jail confines what runs in it
-(`is_confined`), what an extension's state is (`Status`), and what the model, the status bar
-and the status file are told (`instructions`, `status_forms`, `status_file`).
+Which files to load and unload (`changes`), what an extension's state is (`Status`), and what
+the model, the status bar and the status file are told (`instructions`, `status_forms`,
+`status_file`).
 """
 
 import re
@@ -15,13 +15,11 @@ __all__ = [
     "changes",
     "extension_name",
     "instructions",
-    "is_confined",
     "status_file",
     "status_forms",
 ]
 
 _NAME = re.compile(r"[a-z][a-z0-9_]*")
-_CONFINING = ("fs_write", "network")  # as the kernel's: what a jail must enforce to confine code
 
 _EXAMPLE = """    from cordis import Effects, acquire, component
 
@@ -78,13 +76,6 @@ def changes(
     load = tuple(sorted(name for name, stamp in after.items() if before.get(name) != stamp))
     unload = tuple(sorted(name for name in before if name not in after))
     return load, unload
-
-
-def is_confined(report: Mapping[str, str]) -> bool:
-    """Whether a jail's report says what runs in it can write only where it was allowed and
-    reach no network: the kernel's rule, so extensions load without asking exactly when inputs
-    run without asking."""
-    return all(report.get(axis) == "enforced" for axis in _CONFINING)
 
 
 def instructions(

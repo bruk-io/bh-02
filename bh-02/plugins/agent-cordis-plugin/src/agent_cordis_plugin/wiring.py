@@ -9,7 +9,7 @@ other.
 
 from dataclasses import dataclass
 
-from agent_cordis_plugin.loop import Asks, LoopModel, Memory, Model, Python, Remember, System, Transcript
+from agent_cordis_plugin.loop import Approval, LoopModel, Memory, Model, Python, Remember, System, Transcript
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
 from cordis import Effects, bind, component
 from cordis_helpers import Hooks
@@ -44,16 +44,16 @@ async def loop(
     kernel: Python,
     transcript: Transcript,
     system: System,
-    output: Asks,
+    approval: Approval,
     memory: Memory,
     config: LoopConfig,
 ) -> Effects:
     """Fills the `loop` row from a raw model: `use = "agent:loop"`. The model's one tool is
-    the kernel's `python(code)`; an unconfined kernel's inputs are put to the person through
-    `output.confirm` first. After each input, the functions in `memory` may add a note to its
-    result. A new ui reloads this row, which holds nothing: the transcript and the kernel's
-    namespace are rows of their own."""
-    yield bind("loop", LoopModel(model, kernel, transcript, config.max_nudges, system, output, memory))
+    the kernel's `python(code)`; each input runs only on `approval`'s yes (the person's, when
+    the jail does not confine the kernel). After each input, the functions in `memory` may add a
+    note to its result. A new ui reloads this row (through `approval`), which holds nothing: the
+    transcript and the kernel's namespace are rows of their own."""
+    yield bind("loop", LoopModel(model, kernel, transcript, approval, config.max_nudges, system, memory))
 
 
 @component(provides=("memory",))

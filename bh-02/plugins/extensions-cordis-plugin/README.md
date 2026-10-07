@@ -6,7 +6,7 @@ restart; what keeps that safe is where the code runs, not who reads it first.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame` and `system`; its own `system` section tells the model how | `jail`, `commands`, `frame`, `system`, `output` (`confirm`, unjailed) |
+| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame` and `system`; its own `system` section tells the model how | `jail` (`start`), `commands`, `frame`, `system`, `approval` (`confined`, `approve`) |
 
 Config (`ExtensionsConfig`): `root` (the project, `.`), `path` (the extensions directory under
 it, `.bh-02/plugins`), `watch` (how often it is looked at, 0.5 s).
@@ -72,12 +72,13 @@ bh-02 refused). The status bar's `extensions` field shows the same to the person
 
 Not in bh-02's process. `host.py` starts `worker.py` through the `jail` row, the same jail the
 kernel's inputs run in: with `brig:jail` an extension can write only inside the project, can't
-reach the network, and can't read `local.env` or the sessions' state. So an extension loads
-without asking, exactly as an input runs without asking; the model's plugins are as contained as
-its inputs. With `--no-jail` (`kernel:unjailed`) an extension would run with the person's own
-permissions, so each load is put to the person through `output.confirm`, the source shown
+reach the network, and can't read `local.env` or the sessions' state. Each load is put to
+`approval` (`kernel:approval`), the row that decides for inputs too, so an extension loads
+without asking exactly when an input runs without asking; the model's plugins are as contained
+as its inputs. With `--no-jail` (`kernel:unjailed`) an extension would run with the person's own
+permissions, so `approval` puts each load to the person (`output.confirm`), the source shown
 whole (`Load the model's extension todo into bh-02, unjailed (12 lines)?`), and a no leaves it
-unloaded until the file changes.
+unloaded until the file changes. What the model is told about it follows `approval.confined`.
 
 Nothing of an extension crosses into bh-02 but data over the worker's socket: a command's spec
 and, when the person runs it, its argument text out and its answer back; a field's text; a
@@ -113,10 +114,9 @@ loaded again every `watch`.
 
 ## Tests
 
-- `test_extensions_watch.py` is pure: names, changes, confinement, what the model and the
-  status bar are told.
+- `test_extensions_watch.py` is pure: names, changes, what the model and the status bar are told.
 - `test_extensions_host.py` runs `Extensions` against a real worker under
-  `extensions_cordis_plugin.testing.PlainJail` (a plain subprocess reported as confined or not;
-  it confines nothing) and fakes for the keys: an extension loaded and its command run, changed
-  and deleted, the ways one fails to load, a command name bh-02 has, the unjailed question,
-  a worker an extension ends.
+  `extensions_cordis_plugin.testing.PlainJail` (a plain subprocess; it confines nothing and says
+  so) and fakes for the keys, `approval` among them (confined or not): an extension loaded and
+  its command run, changed and deleted, the ways one fails to load, a command name bh-02 has,
+  the unjailed question, a worker an extension ends.
