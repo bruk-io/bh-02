@@ -62,7 +62,9 @@ use = "chat:session"
 
 # The kernel: a persistent Python namespace, and the model's one tool, `python(code)`. Jailed,
 # its inputs run without asking; unjailed (`kernel:unjailed` below), each is put to the person
-# first (the `approval` row).
+# first (the `approval` row). A new kernel runs its startup files first (config `startup`, by
+# default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`,
+# the only one the model may edit); unjailed, the model is told to run them as inputs instead.
 [[plugin]]
 id = "kernel"
 use = "kernel:kernel"

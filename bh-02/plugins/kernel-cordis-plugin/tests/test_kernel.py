@@ -68,6 +68,221 @@ async def test_the_project_s_startup_file_runs_first_when_inputs_are_confined(tm
         assert "exec(open('.bh-02/kernel.py').read())" in told and "broken" not in told
 
 
+def _person_s(text: str | bytes) -> Path:
+    """The person's own startup file, `$XDG_CONFIG_HOME/bh-02/kernel.py` (conftest gives each
+    test a config directory of its own, outside its `tmp_path`), holding `text`."""
+    path = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "kernel.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(text, bytes):
+        path.write_bytes(text)
+    else:
+        path.write_text(text)
+    return path
+
+
+def _project_s(root: Path, text: str) -> Path:
+    """The project's startup file, `.bh-02/kernel.py` under `root`, holding `text`."""
+    path = root / ".bh-02" / "kernel.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+async def test_the_person_s_startup_file_runs_before_the_project_s(tmp_path: Path) -> None:
+    """Both files: the person's first, so its helpers are there for the project's, which may
+    bind a name afresh; each is said with the names it defined, and leaves nothing else behind."""
+    person = _person_s("def show(x):\n    return f'<{x}>'\n\nWIDTH = 80\n")
+    _project_s(tmp_path, "def sh(cmd):\n    return show(cmd)\n\nWIDTH = 100\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run("sh('ls'), WIDTH")
+        assert first == (
+            f"({person} ran first and defined: WIDTH, show. "
+            ".bh-02/kernel.py ran next and defined: WIDTH, sh)\n('<ls>', 100)"
+        )
+        assert await k.run("[n for n in globals() if n.startswith('_bh')]") == "[]"
+        assert await k.run("show(1)") == "'<1>'"  # told once, then plain inputs
+
+
+async def test_a_startup_file_that_is_not_there_is_passed_over(tmp_path: Path) -> None:
+    person = _person_s("HELPER = 1\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # the project has none
+        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
+    person.unlink()
+    _project_s(tmp_path, "TOOLS = 2\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # the person has none
+        assert await k.run("TOOLS") == "(.bh-02/kernel.py ran first and defined: TOOLS)\n2"
+    (tmp_path / ".bh-02" / "kernel.py").unlink()
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # neither: nothing to tell
+        assert await k.run("1") == "1"
+
+
+async def test_a_failing_startup_file_says_why_and_the_next_one_still_runs(tmp_path: Path) -> None:
+    """A failure is the file's traceback, its own lines shown (the person's from the source the
+    host sent), and what ran before it stays, as at a REPL; the next file runs all the same."""
+    person = _person_s("def show(x):\n    return x\n\n\nraise RuntimeError('broken person helper')\n")
+    project = _project_s(tmp_path, "TOOLS = 2\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run("TOOLS")
+        assert first.startswith(f"({person} ran first and failed, so what it defines is missing:\n")
+        assert (
+            f'File "{person}", line 5, in <module>\n' in first
+            and "RuntimeError: broken person helper" in first
+        )
+        assert first.endswith(". .bh-02/kernel.py ran next and defined: TOOLS)\n2")
+        assert await k.run("show(3)") == "3"
+    person.write_text("HELPER = 1\n")
+    project.write_text("raise ValueError('broken project helper')\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run("HELPER")
+        assert first.startswith(
+            f"({person} ran first and defined: HELPER. .bh-02/kernel.py ran next and failed, so what "
+            "it defines is missing:\n"
+        )
+        assert "ValueError: broken project helper" in first and first.endswith(")\n1")
+    _person_s(b"HELPER = '\xff'\n")  # not UTF-8: the host can't read it, and says so
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        told = await k.run("1")
+        assert told.startswith(f"({person} could not be read ('utf-8' codec can't decode byte 0xff")
+        assert "so what it defines is missing. .bh-02/kernel.py ran next and failed" in told
+
+
+async def test_unconfined_neither_startup_file_runs_unasked(tmp_path: Path) -> None:
+    """Unjailed, a startup file would run with the person's permissions without them being
+    asked: the model is told to run each as an input of its own, which the person is asked about."""
+    person = _person_s("print('the person s ran unasked')\n")
+    _project_s(tmp_path, "print('the project s ran unasked')\n")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        told = await k.run("1")
+    assert told == (
+        f"({person} and .bh-02/kernel.py were not run: inputs here are put to the person, so run them "
+        "as an input of your own if you want them: "
+        f"exec(open({str(person)!r}).read()); exec(open('.bh-02/kernel.py').read()))\n1"
+    )
+
+
+async def test_the_person_s_startup_file_runs_in_a_jail_that_cannot_read_it(tmp_path: Path) -> None:
+    """A Linux jail reads by allowlist and has no home directory, so the person's config
+    directory is not in it: the host reads the person's file and sends its source, so it runs
+    there all the same, its lines shown in a traceback. The project's is read in the jail."""
+    person = _person_s("def show(x):\n    return 1 / x\n")
+    _project_s(tmp_path, "TOOLS = 2\n")
+    async with Kernel(Hiding(os.environ["XDG_CONFIG_HOME"]), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run(f"open({str(person)!r})")
+        assert first.startswith(
+            f"({person} ran first and defined: show. .bh-02/kernel.py ran next and defined: TOOLS)\n"
+        )
+        assert "PermissionError: [Errno 13] the jail hides it" in first  # an input can't read it
+        failed = await k.run("show(0)")
+        assert f'File "{person}", line 2, in show\n    return 1 / x' in failed
+
+
+async def test_a_person_s_file_whose_way_leads_through_the_project_is_read_only_in_the_jail(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The person's config directory is a link into the project (a dotfiles repository, say),
+    where the model can write: it could make the file a link to one the jail hides, and the host
+    would hand it over. So a person's file whose way passes through the project is read as the
+    project's is: by the worker, in the jail, which decides. Each file runs once."""
+    dotfiles = tmp_path / "dotfiles"
+    (dotfiles / "bh-02").mkdir(parents=True)
+    config = tmp_path_factory.mktemp("home") / "config"
+    config.symlink_to(dotfiles)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    person = config / "bh-02" / "kernel.py"
+    (dotfiles / "bh-02" / "kernel.py").write_text("HELPER = 1\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
+    hidden = tmp_path_factory.mktemp("hidden")
+    (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
+    (dotfiles / "bh-02" / "kernel.py").unlink()
+    (dotfiles / "bh-02" / "kernel.py").symlink_to(hidden / "secret.py")  # what a model could do
+    async with Kernel(Hiding(str(hidden)), KernelConfig(root=str(tmp_path))) as k:
+        told = await k.run("'SECRET' in globals()")
+        assert told.startswith(f"({person} ran first and failed") and "PermissionError" in told
+        assert "stand-in" not in told and told.endswith(")\nFalse")
+    (dotfiles / "bh-02" / "kernel.py").unlink()
+    (dotfiles / "bh-02" / "kernel.py").symlink_to(_project_s(tmp_path, "TOOLS = 2\n"))
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # the project's own, once
+        assert await k.run("TOOLS") == f"({person} ran first and defined: TOOLS)\n2"
+
+
+async def test_run_from_the_home_directory_the_person_s_file_is_read_in_the_jail_and_still_theirs(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bh-02 run from the home directory: the person's config directory is in the project, where
+    the model can write. Their file runs, read by the worker as the project's is (so a link the
+    model planted there leads only where the jail lets it), and the model is still told it is
+    the person's, not its own to edit."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+    person = tmp_path / ".config" / "bh-02" / "kernel.py"
+    person.parent.mkdir(parents=True)
+    person.write_text("HELPER = 1\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
+        told = k.instructions()
+        assert "go in .bh-02/kernel.py, the project's startup file" in told
+        assert f"own in {person}, which comes before it, and that file is theirs." in told
+    hidden = tmp_path_factory.mktemp("hidden")
+    (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
+    person.unlink()
+    person.symlink_to(hidden / "secret.py")  # what a model could do
+    async with Kernel(Hiding(str(hidden)), KernelConfig(root=str(tmp_path))) as k:
+        told = await k.run("'SECRET' in globals()")
+        assert told.startswith(f"({person} ran first and failed") and "PermissionError" in told
+        assert "stand-in" not in told and told.endswith(")\nFalse")
+
+
+async def test_a_startup_file_is_named_from_home_or_the_config_directory_on_the_host(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`~/` and `$XDG_CONFIG_HOME/` (that variable's value, else `~/.config`, as for the context
+    file) are the host's to expand: the jail has no home in it."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+    (home / ".config" / "bh-02").mkdir(parents=True)
+    (home / ".config" / "bh-02" / "kernel.py").write_text("A = 1\n")
+    (home / "helpers.py").write_text("B = 2\n")
+    config = KernelConfig(
+        root=str(tmp_path), startup=("$XDG_CONFIG_HOME/bh-02/kernel.py", "~/helpers.py", ".bh-02/kernel.py")
+    )
+    async with Kernel(Hiding(str(home)), config) as k:
+        assert await k.run("A + B") == (
+            f"({home}/.config/bh-02/kernel.py ran first and defined: A. "
+            f"{home}/helpers.py ran next and defined: B)\n3"
+        )
+        told = k.instructions()
+        assert f"helpers of their own in {home}/.config/bh-02/kernel.py and {home}/helpers.py" in told
+    one = KernelConfig(root=str(tmp_path), startup="~/helpers.py")  # a single string is one file
+    async with Kernel(Confined(), one) as k:
+        assert await k.run("B") == f"({home}/helpers.py ran first and defined: B)\n2"
+
+
+def test_the_model_is_told_only_the_project_s_startup_file_is_its_to_edit() -> None:
+    mine, theirs = (".bh-02/kernel.py",), ("/home/me/.config/bh-02/kernel.py",)
+    for confined in (True, False):
+        told = instructions_for(confined, mine, theirs=theirs)
+        assert "go in .bh-02/kernel.py, the project's startup file, which you can write and grow" in told
+        assert (
+            "Only the project's startup file is yours to edit: the person may keep helpers of their "
+            "own in /home/me/.config/bh-02/kernel.py, which comes before it, and that file is theirs."
+        ) in told
+    assert "Only the project's" not in instructions_for(True)  # no file of the person's to name
+    alone = instructions_for(True, (), theirs=theirs)  # only the person's
+    assert "go in" not in alone and "That file is theirs, not yours to edit." in alone
+
+
+async def test_the_kernel_tells_the_model_where_the_person_s_startup_file_is(tmp_path: Path) -> None:
+    """By its place on this machine, `$XDG_CONFIG_HOME` expanded, though there is no file yet."""
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        told = k.instructions()
+    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "kernel.py"
+    assert "go in .bh-02/kernel.py, the project's startup file" in told
+    said = "Only the project's startup file is yours to edit: the person may keep helpers of their own in"
+    assert f"{said} {person}, which comes before it" in told
+
+
 def test_the_model_is_told_its_tool_is_a_repl_of_its_own_that_persists_and_how_to_use_it() -> None:
     told = instructions_for(True)
     assert told.startswith("Your one tool is `python`: a Python REPL of your own")
@@ -226,6 +441,35 @@ class Confined(Unjailed):
 
     def report(self) -> Mapping[str, str]:
         return {**UNENFORCED, "fs_write": "enforced", "network": "enforced"}
+
+
+# The worker, run under an audit hook that refuses to open anything under a directory (the
+# first argument), wherever a link leads from: a jail with no such directory in it.
+_HIDING = """
+import os, runpy, sys
+hidden = os.path.join(os.path.realpath(sys.argv[1]), "")
+def hook(event, args):
+    if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
+        if os.path.realpath(os.fsdecode(args[0])).startswith(hidden):
+            raise PermissionError(13, "the jail hides it", os.fsdecode(args[0]))
+sys.addaudithook(hook)
+sys.argv = sys.argv[2:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+class Hiding(Confined):
+    """A confined jail with no `hidden` directory in it, as a Linux jail has no home directory
+    (and no secret) in it: the worker can open nothing under `hidden`."""
+
+    def __init__(self, hidden: str) -> None:
+        self._hidden = hidden
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Any:
+        executable, isolated, *worker = argv
+        return await super().start(
+            [executable, isolated, "-c", _HIDING, self._hidden, *worker], cwd=cwd, endpoint=endpoint
+        )
 
 
 async def test_the_namespace_persists_and_the_last_expression_is_shown() -> None:

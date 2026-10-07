@@ -273,6 +273,16 @@ rather than through a shell, and an input that runs `cat`, `sed` or `ls` through
 Python does that, once for each kind of work a conversation. The namespace outlives a model
 swap; Ctrl-C interrupts the running input and keeps the namespace.
 
+Helpers you want in every project's REPL (a `show`, a `search`) go in your own startup file,
+`$XDG_CONFIG_HOME/bh-02/kernel.py` (else `~/.config/bh-02/kernel.py`); the project's
+`.bh-02/kernel.py` runs after it, and is the only one the model is told it may edit. A new
+kernel runs both before the first input, which is told the names each defined (or its
+traceback; one failing doesn't stop the other). bh-02 reads yours itself and sends it in, since
+the Linux jail has no home directory in it, so whatever it holds the model can read; the
+project's is read inside the jail. With `--no-jail` neither runs unasked: the model is told to
+run them as inputs of its own, which you are asked about. The kernel row's `startup` config is
+the list.
+
 After each input, the loop asks `memory` what to tell the model with its result (in a worker
 thread, as it reads the prompt, so neither freezes the app): the functions
 rows add there are given the input's code, its result and the project files it opened (the

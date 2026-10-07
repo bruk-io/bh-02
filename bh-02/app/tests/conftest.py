@@ -362,7 +362,8 @@ async def one_input_model() -> Effects:
 @pytest.fixture(autouse=True)
 def _own_models_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test reads a models file of its own (none, unless it writes one), never the
-    person's `~/.config/bh-02/models.toml`."""
+    person's `~/.config/bh-02/models.toml`, and runs no startup file of the person's
+    (`~/.config/bh-02/kernel.py`) in a kernel."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
