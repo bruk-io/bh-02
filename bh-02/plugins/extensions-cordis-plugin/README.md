@@ -6,7 +6,7 @@ restart; what keeps that safe is where the code runs, not who reads it first.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame` and `system`; its own `system` section tells the model how | `jail` (`start`), `commands`, `frame`, `system`, `approval` (`confined`, `approve`) |
+| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame` and `system`; its own `system` section tells the model how | `jail` (`start`, `released`), `commands`, `frame`, `system`, `approval` (`confined`, `approve`) |
 
 Config (`ExtensionsConfig`): `root` (the project, `.`), `path` (the extensions directory under
 it, `.bh-02/plugins`), `watch` (how often it is looked at, 0.5 s).
@@ -142,6 +142,14 @@ end it: `os._exit` at import) takes every extension down; nothing loads again, a
 started, until the directory changes, so an extension that ends the worker as it loads isn't
 loaded again every `watch`.
 
+`/release` stops the worker too: on Linux the jail stops every program it started, since the
+worker's jail holds the same placeholders as the kernel's (where bh-02 looks for its
+credential, the person's to fill now). That is not an ending: while the jail is `released()`
+no worker starts, whatever changes in the directory (each extension's status says why), and
+once the next input has started the kernel, every extension there is loads again in a new
+worker, with nothing changed (`test_after_release_stops_the_worker_every_extension_loads_again_once_the_jail_runs`).
+What a command of theirs kept in memory starts afresh, as after any new worker.
+
 ## Tests
 
 - `test_extensions_watch.py` is pure: names, changes, which files may be read, what the model
@@ -150,7 +158,8 @@ loaded again every `watch`.
   `extensions_cordis_plugin.testing.PlainJail` (a plain subprocess; it confines nothing and says
   so) and fakes for the keys, `approval` among them (confined or not): an extension loaded and
   its command run, changed and deleted, the ways one fails to load, a command name bh-02 has,
-  the unjailed question, a worker an extension ends, and the links it does not follow: a link to
-  a file outside, a hard link, `.bh-02` or `.bh-02/plugins` a link, a file swapped for a link
-  between being found and read (by an extension loaded just before it), and a link at
-  `status.json`.
+  the unjailed question, a worker an extension ends, one `/release` stops (`PlainJail`'s
+  `release` stops every program it started, as a Linux `brig:jail`'s does), and the links it does
+  not follow: a link to a file outside, a hard link, `.bh-02` or `.bh-02/plugins` a link, a file
+  swapped for a link between being found and read (by an extension loaded just before it), and a
+  link at `status.json`.

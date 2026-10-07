@@ -56,9 +56,10 @@ async def approval(*, jail: Graded, output: Asks) -> Effects:
 @component
 async def release(*, kernel: _Releasing, commands: _Registrar) -> Effects:
     """Fills a `release` row: `use = "kernel:release"`. `/release` ends the kernel's worker now,
-    and its jail with it, which on Linux frees the paths the jail holds on the host (where bh-02
-    looks for its credential) until the next input starts a new one: the way to add a credential
-    mid-session. A row of its own, so the kernel depends on its jail alone."""
+    and its jail with it, and releases the jail (on Linux it stops the extensions' worker too),
+    which frees the paths the jail holds on the host (where bh-02 looks for its credential) until
+    the next input starts a new one: the way to add a credential mid-session. A row of its own,
+    so the kernel depends on its jail alone."""
 
     async def run(args: str) -> str:
         return await kernel.release()

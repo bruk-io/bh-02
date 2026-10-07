@@ -28,15 +28,28 @@ class _Started:
 
 
 class PlainJail:
-    """Implements `jail` for tests (module docstring). `started` is every program it started."""
+    """Implements `jail` for tests (module docstring). `started` is every program it started.
+    `release` stops every one of them, as a Linux `brig:jail`'s does, and the jail is released
+    until it next starts one."""
 
     def __init__(self) -> None:
         self.started: list[_Started] = []
+        self._released = False
 
     def report(self) -> Mapping[str, str]:
         return {"fs_write": "unenforced", "network": "unenforced"}
 
+    def released(self) -> bool:
+        return self._released
+
+    async def release(self) -> str:
+        self._released = True
+        for started in self.started:
+            await started.stop()
+        return ""
+
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Started:
+        self._released = False
         with Path(endpoint).with_name("stderr.log").open("wb") as stderr:
             process = await asyncio.create_subprocess_exec(
                 *argv, cwd=cwd, stdin=asyncio.subprocess.DEVNULL, stderr=stderr, start_new_session=True

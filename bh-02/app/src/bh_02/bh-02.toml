@@ -95,8 +95,9 @@ use = "kernel:approval"
 
 # `/release`: stops the kernel until the next input, and with it its jail, which on Linux frees
 # what the jail holds on the host (where bh-02 looks for its credential: how to add one
-# mid-session). A row of its own over `kernel` and `commands`, so the kernel depends on its jail
-# alone.
+# mid-session); the jail stops the extensions' worker too, and the extensions load again once
+# the next input has started the kernel. A row of its own over `kernel` and `commands`, so the
+# kernel depends on its jail alone.
 [[plugin]]
 id = "release"
 use = "kernel:release"

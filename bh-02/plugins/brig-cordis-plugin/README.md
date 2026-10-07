@@ -78,9 +78,18 @@ one early, and neither should you.
 **Adding your credential mid-session (`/release`).** Where bh-02 looks for its credential and
 there is none, the jail holds the path with a placeholder, so you can't create `local.env` there
 while the kernel runs. `/release` (the `kernel:release` row) ends the kernel's worker and its
-jail now; the jail's stop removes its placeholders (when no other bh-02 jail of yours runs), and
-`release()` sweeps what jails that are gone left, then says which of those paths are free and
-which another session's jail still holds. Create the file then, and send your message: the model
+jail now, and the jail's `release()` stops every other program it started that still runs: the
+extensions' worker, whose jail holds the same placeholders and a share of the jail lock, so
+while it ran nothing could be freed
+(`test_release_stops_every_program_the_jail_started_and_frees_what_they_held`,
+`test_on_linux_release_frees_the_credential_path_while_the_extensions_worker_runs`; a start
+under way is waited for and stopped too). Each jail's stop removes its placeholders (when no
+other bh-02 jail of yours runs), and `release()` sweeps what jails that are gone left, then
+says which of those paths are free, which another session's jail still holds, and that the
+extensions' worker stopped. The jail is then `released()` until its next start, which is the
+next input's kernel worker: the extensions row starts no worker while it is (a changed file
+waits too), and once it is not, loads every extension again in a new one, so they are back
+within half a second of the next input starting the kernel. Create the file then, and send your message: the model
 row reads it at its next start (with no credential, every step starts afresh, so the next one
 does; a model already running keeps the one it started with until `/restart model`). The next
 input starts a new jail, which masks the file (`/dev/null` over it): no input reads or rewrites

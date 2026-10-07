@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import json
 import os
+import shutil
+import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,7 +17,7 @@ from typing import Any
 import pytest
 
 from cordis.testing import drive
-from extensions_cordis_plugin import Extensions, ExtensionsConfig, extensions
+from extensions_cordis_plugin import Extensions, ExtensionsConfig, extensions, worker_argv
 from extensions_cordis_plugin.testing import PlainJail
 
 type Remover = Callable[[], None]
@@ -433,6 +435,42 @@ async def test_a_file_swapped_for_a_link_after_it_was_found_is_not_read(tmp_path
         assert [r["input"]["code"] for r in h.approval.requests] == [swaps]
         assert h.status()["second"]["error"].startswith(".bh-02/plugins/second.py is a link")
         assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
+
+
+async def test_after_release_stops_the_worker_every_extension_loads_again_once_the_jail_runs(
+    tmp_path: Path,
+) -> None:
+    """`/release` stops every program the jail started, the extensions' worker too, so what its
+    jail held on the host is free. Nothing of the extensions starts again while the jail is
+    released (not even for a changed file), or its jail would hold those paths again before the
+    person could use them. Once the next input has started the kernel's worker, the jail runs
+    again, and every extension loads again in a new worker, without anything changing."""
+    async with _running(tmp_path) as h:
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        assert await h.commands.runs["todo"]("milk") == "milk"
+        await h.jail.release()
+        for _ in range(250):  # the worker's end reaches the host as its socket closing
+            if "todo" not in h.commands.runs:
+                break
+            await asyncio.sleep(0.02)
+        await h.extensions.look()
+        assert "todo" not in h.commands.runs and "todo:count" not in h.frame.fields()
+        assert "/release" in h.status()["todo"]["error"], h.status()
+        h.write("todo", _TODO + "\n")
+        await h.extensions.look()
+        assert len(h.jail.started) == 1  # released: no worker starts, whatever changed
+        sockets = tempfile.mkdtemp(prefix="bh-x-", dir="/tmp")  # a socket path must be short
+        kernel = await h.jail.start(
+            worker_argv(f"{sockets}/k.sock"), cwd=sockets, endpoint=f"{sockets}/k.sock"
+        )
+        try:  # the next input started the kernel's worker (a stand-in): the jail runs again
+            await h.extensions.look()
+            assert len(h.jail.started) == 3 and h.extensions.statuses["todo"].ok
+            assert await h.commands.runs["todo"]("eggs") == "eggs"  # a new worker: a new list
+        finally:
+            await kernel.stop()
+            shutil.rmtree(sockets, ignore_errors=True)
 
 
 async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -> None:

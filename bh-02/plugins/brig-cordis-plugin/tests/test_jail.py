@@ -244,6 +244,9 @@ def test_release_says_where_the_credential_can_go_now_and_what_another_session_s
     still = released_for([], ["/w/local.env"])
     assert still.startswith("/w/local.env stays held") and "/release again" in still
     assert released_for([], []) == ""
+    stopped = released_for(["/w/local.env"], [], others=True)  # the extensions' worker ran too
+    assert stopped.startswith("Nothing holds") and "extensions' worker" in stopped
+    assert "next input" in released_for([], [], others=True)
 
 
 def test_a_linux_jail_carries_the_person_s_git_identity_and_nothing_else_of_their_config() -> None:
@@ -594,6 +597,84 @@ async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp
     finally:
         for each in started:
             await each.stop()
+
+
+@pytest.mark.usefixtures("_plain_launch")
+async def test_release_stops_every_program_the_jail_started_and_frees_what_they_held(tmp_path: Path) -> None:
+    """The `jail` row starts the kernel's worker and the extensions' worker, and both jails hold
+    the absent `local.env` where bh-02 looks for its credential (and take the shared jail lock).
+    The kernel stops its own worker for `/release`; the jail's `release` stops every program it
+    started that still runs, so the placeholder is removed and the path is free, and says so.
+    It stays released, so the extensions' worker waits, until the next start (the next input's
+    kernel worker)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    credential = project / "local.env"
+    one = BrigJail(BrigConfig(), Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    started = []
+    for _ in ("kernel", "extensions"):
+        endpoint = _endpoint()
+        argv = [sys.executable, "-I", "-c", _LISTEN, endpoint]
+        started.append(await one.start(argv, cwd=str(project), endpoint=endpoint))
+    kernel, extensions = started
+    try:
+        records = tmp_path / "state" / "bh-02" / "jails"
+        groups = [recorded_group(record.read_text()) for record in sorted(records.iterdir())]
+        assert credential.is_dir() and len(groups) == 2 and None not in groups
+        await kernel.stop()  # what the kernel's `release` does first
+        assert credential.is_dir()  # the extensions' jail still holds it
+        said = await one.release()
+        assert said.startswith(f"Nothing holds {credential}"), said
+        assert "stays held" not in said and "extensions' worker" in said
+        assert not credential.exists() and list(records.iterdir()) == []
+        for group in groups:
+            assert group is not None and await _gone(group)
+        assert one.released()
+        endpoint = _endpoint()
+        again = await one.start(
+            [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(project), endpoint=endpoint
+        )
+        try:
+            assert not one.released() and credential.is_dir()  # the next input's jail holds it again
+        finally:
+            await again.stop()
+    finally:
+        for each in started:
+            await each.stop()  # again: nothing more happens
+
+
+@pytest.mark.usefixtures("_plain_launch")
+async def test_release_stops_a_program_whose_start_was_under_way_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A start under way when `release` begins (the extensions' worker loading as the person
+    types `/release`) is waited for, then stopped with the rest: nothing the release freed is
+    held again by a jail that came up during it."""
+    project = tmp_path / "project"
+    project.mkdir()
+    launched: list[_Plain] = []
+
+    def slow(self: object, jail: Any, *, argv: Sequence[str], cwd: str, **rest: object) -> _Plain:
+        time.sleep(0.3)
+        launched.append(_Plain(jail, argv, cwd))
+        return launched[-1]
+
+    monkeypatch.setattr("brig.run.SubprocessLauncher.launch", slow)
+    one = BrigJail(BrigConfig(), Layers())
+    endpoint = _endpoint()
+    argv = [sys.executable, "-I", "-c", _LISTEN, endpoint]
+    starting = asyncio.ensure_future(one.start(argv, cwd=str(project), endpoint=endpoint))
+    await asyncio.sleep(0.1)  # launching
+    assert not launched and (project / ".envrc").is_dir()
+    said = await one.release()
+    started = await starting
+    try:
+        assert "extensions' worker" in said, said
+        (plain,) = launched
+        assert await _gone(plain.pgid) and one.released()
+        assert list(project.iterdir()) == []  # its placeholders went with it
+    finally:
+        await started.stop()
 
 
 @pytest.mark.usefixtures("_plain_launch")

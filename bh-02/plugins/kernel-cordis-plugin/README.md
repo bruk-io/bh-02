@@ -148,8 +148,11 @@ worker that died, an answer it can't read (the worker is replaced), a worker the
 start again (the next input tries again).
 
 `release()` (`/release`, the `kernel:release` row) ends the worker now, and the jail it ran
-in, then asks the jail what that freed on the host: on Linux, `brig:jail` holds where bh-02
-looks for its credential with an empty directory while it runs, and this is how the person
-adds one mid-session (the brig plugin's README). The next input starts a new worker, told its
-variables are gone. An input that is running is left alone, and the answer says to stop the
-reply first. `kernel:unjailed` holds nothing, so there it only stops the worker.
+in, then asks the jail to release the rest and say what that freed on the host: on Linux,
+`brig:jail` holds where bh-02 looks for its credential with an empty directory while it runs,
+stops the extensions' worker too (its jail holds the same), and this is how the person adds
+one mid-session (the brig plugin's README). The next input starts a new worker, told its
+variables are gone, and with it the jail runs again, so the extensions load again. What the
+model is told of the worker's jail (`reads()`) stays the stopped worker's until then. An input
+that is running is left alone, and the answer says to stop the reply first.
+`kernel:unjailed` holds nothing, so there it only stops the worker.

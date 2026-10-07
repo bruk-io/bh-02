@@ -91,8 +91,12 @@ class Unjailed:
         return UNENFORCED
 
     async def release(self) -> str:
-        """Nothing: no jail holds anything on the host."""
+        """Nothing: no jail holds anything on the host, so nothing is stopped."""
         return ""
+
+    def released(self) -> bool:
+        """Never: `release` stops nothing, so nothing waits for the next input."""
+        return False
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Process:
         log = Path(endpoint).with_name("stderr.log")

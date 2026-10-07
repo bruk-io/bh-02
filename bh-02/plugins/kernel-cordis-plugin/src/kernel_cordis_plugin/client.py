@@ -354,10 +354,11 @@ class Kernel:
         return self._touched
 
     async def release(self) -> str:
-        """End the worker now, and with it its jail, so the jail lets go of what it holds on the
-        host while none runs (`jail.release()` says what that freed: on Linux, where bh-02 looks
-        for its credential). The next input starts a new worker, told its earlier variables are
-        gone. An input that is running is left to finish, and nothing ends."""
+        """End the worker now, and with it its jail, then release the jail (`jail.release()`: on
+        Linux it stops the extensions' worker too, whose jail holds the same) so it lets go of
+        what it holds on the host while none runs, and say what that freed (where bh-02 looks for
+        its credential). The next input starts a new worker, told its earlier variables are gone,
+        and so ends the release. An input that is running is left to finish, and nothing ends."""
         if self._lock.locked():
             return "An input is running: stop the reply (Ctrl-C), then /release again."
         async with self._lock:

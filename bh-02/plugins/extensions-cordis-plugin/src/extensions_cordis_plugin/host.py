@@ -16,7 +16,10 @@ The model hears how each extension went in two places: its prompt (`section`, re
 request) and `status.json` in the extensions directory, written as soon as a load ends, so an
 input can read it at once. The worker starts with the first extension there is to load; one that
 ends (an extension may end it) takes every extension down with it, and they are loaded again,
-in a new worker, at the next change in the directory.
+in a new worker, at the next change in the directory. One `/release` stopped (the jail stops
+every program it started, so the paths their jails hold are free) is not one that failed: while
+the jail is `released` no worker starts, whatever changes, and once the next input has started
+the kernel every extension there is loads again, in a new worker, with nothing changed.
 
 The model writes the extensions directory from the jail, and this reads it on the host, so it
 follows no link there (`_opened`, `_read`): the directory is opened from the project's root one
@@ -84,6 +87,11 @@ _DIRECTORY = _ROOT | os.O_NOFOLLOW | os.O_NONBLOCK
 _FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _NEW = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC  # status.json's next
 
+_RELEASED = (
+    "/release stopped the extensions' worker; every extension loads again, in a new one, once the "
+    "next input has started the kernel"
+)
+
 
 @runtime_checkable
 class _Jailed(Protocol):
@@ -94,9 +102,12 @@ class _Jailed(Protocol):
 
 @runtime_checkable
 class Jail(Protocol):
-    """What the extensions need of the `jail` value (CONTRACTS.md: jail): their worker started."""
+    """What the extensions need of the `jail` value (CONTRACTS.md: jail): their worker started,
+    and whether `/release` has stopped the jail's programs until the next input (`released`),
+    when it must not start again."""
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed: ...
+    def released(self) -> bool: ...
 
 
 @runtime_checkable
@@ -190,7 +201,8 @@ class Extensions:
         self._statuses: dict[str, Status] = {}
         self._seen: dict[str, tuple[int, int]] = {}  # each file as last loaded: (mtime_ns, size)
         self._halted: dict[str, tuple[int, int]] | None = None  # the directory when the worker ended
-        self._ended = False  # the worker ended since the last look
+        self._ended = False  # the worker ended (or `/release` kept one from starting) since the last look
+        self._waiting = False  # `/release` stopped the worker: all load again once the jail runs again
         self._leaving = False
         self._entries: dict[int, _Entry] = {}
         self._problems: dict[str, list[str]] = {}
@@ -252,8 +264,13 @@ class Extensions:
         gone. The watcher does this every `watch` seconds."""
         found = self._found()
         if self._ended:
-            self._halt(found)
+            self._stopped(found)
             return
+        resumed = self._waiting
+        if self._waiting:
+            if self._jail.released():
+                return  # until the next input has started the kernel, no worker starts
+            self._waiting, self._seen, self._statuses = False, {}, {}  # a new worker: all load again
         if self._halted is not None:
             if found == self._halted:
                 return  # the worker ended: nothing loads again until something changes
@@ -265,19 +282,24 @@ class Extensions:
         for name in load:
             self._seen[name] = found[name]
             await self._load(name)
-            if self._ended:  # this one ended the worker: the rest wait for a change
-                self._halt(found)
+            if self._ended:  # this one ended the worker, or none may start: the rest wait
+                self._stopped(found)
                 return
-        if load or unload:
+        if load or unload or resumed:
             self._publish()
 
-    def _halt(self, found: Mapping[str, tuple[int, int]]) -> None:
-        """The worker ended: say so for every extension there is, and load nothing until the
-        directory differs from `found`, so an extension that ends the worker as it loads is not
-        loaded again and again."""
+    def _stopped(self, found: Mapping[str, tuple[int, int]]) -> None:
+        """The worker ended, or none could start: say so for every extension there is. When the
+        jail is `released` (`/release` stopped its programs), every one loads again once it runs
+        again (`look`); otherwise nothing loads until the directory differs from `found`, so an
+        extension that ends the worker as it loads is not loaded again and again."""
         self._ended = False
-        self._halted = dict(found)
-        self._statuses = {name: Status(error=_ENDED) for name in found}
+        if self._jail.released():
+            self._waiting = True
+            self._statuses = {name: Status(error=_RELEASED) for name in found}
+        else:
+            self._halted = dict(found)
+            self._statuses = {name: Status(error=_ENDED) for name in found}
         self._publish()
 
     async def _watch(self) -> None:
@@ -377,6 +399,7 @@ class Extensions:
             answer = await self._ask(name, {"op": "load", "name": name, "path": str(path), "source": source})
         except _Gone as gone:
             self._statuses[name] = Status(error=str(gone))
+            self._ended = self._ended or self._jail.released()  # `/release`: all wait for the jail
             return
         error = answer.get("error")
         rows = answer.get("rows") or {}
@@ -504,9 +527,15 @@ class Extensions:
         self._writer.write((json.dumps(message) + "\n").encode("utf-8"))
 
     async def _start(self) -> None:
-        """Start the worker in the jail, unless it is running."""
+        """Start the worker in the jail, unless it is running, or `/release` has stopped the
+        jail's programs until the next input (`jail.released()`, asked with nothing awaited
+        between it and the start, which would end the release)."""
         if self._writer is not None:
             return
+        if self._process is not None:  # what is left of a worker that ended: its jail's teardown
+            await self._stop()
+        if self._jail.released():
+            raise _Gone(_RELEASED)
         # A Unix socket path must fit in about 100 bytes, so it lives in a short directory of its own.
         self._socket_dir = tempfile.mkdtemp(prefix="bh-x-", dir="/tmp")
         endpoint = str(Path(self._socket_dir) / "x.sock")

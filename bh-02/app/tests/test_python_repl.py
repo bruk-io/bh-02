@@ -510,6 +510,51 @@ async def test_on_linux_the_kernel_tells_the_model_its_own_worker_s_trees_when_a
         shutil.rmtree(sockets, ignore_errors=True)
 
 
+async def test_on_linux_release_frees_the_credential_path_while_the_extensions_worker_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The model has written an extension, so the `jail` row runs a second program, the
+    extensions' worker, whose jail also holds the absent `local.env` where bh-02 looks for its
+    credential (and takes the shared jail lock). `/release` stops it too, so the path is free
+    and nothing claims another session holds it; the jail stays released, so the extensions'
+    worker does not start again before the next input. (A stand-in program here: under a Linux
+    jail an editable install's extensions' worker can't import cordis, which lives outside
+    what the jail reads.)"""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the hold is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project, elsewhere = tmp_path / "project", tmp_path / "elsewhere"
+    project.mkdir()
+    elsewhere.mkdir()
+    (elsewhere / "worker.py").write_text(_LISTENS)
+    credential = project / "local.env"
+    jail = BrigJail(BrigConfig(), _Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
+    endpoint = str(sockets / "x.sock")
+    try:
+        async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+            argv = [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint]
+            extensions = await jail.start(argv, cwd=str(project), endpoint=endpoint)
+            try:
+                records = sorted((tmp_path / "state" / "bh-02" / "jails").iterdir())
+                groups = [recorded_group(record.read_text()) for record in records]
+                assert len(groups) == 2 and credential.is_dir()
+                said = await kernel.release()
+                assert f"Nothing holds {credential}" in said and "stays held" not in said, said
+                assert not credential.exists()
+                for group in groups:
+                    assert group is not None
+                    with pytest.raises(ProcessLookupError):
+                        os.killpg(group, 0)  # both jails are gone, the extensions' worker's too
+                assert jail.released()
+                await kernel.run("1")  # the next input
+                assert not jail.released() and credential.is_dir()
+            finally:
+                await extensions.stop()
+    finally:
+        shutil.rmtree(sockets, ignore_errors=True)
+
+
 @pytest.mark.usefixtures("_needs_a_jail")
 async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

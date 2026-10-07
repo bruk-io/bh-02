@@ -308,8 +308,9 @@ The kernel never gets it:
   (`.git/config`, a layer file): when the host undoes one, the jail ends itself at once and the
   next input's jail holds it again (a few milliseconds' window, measured in the brig plugin's
   README); `/release` (`kernel:release`) stops the kernel until
-  the next input, which frees them so the person can add a credential mid-session: the brig
-  plugin's README has the details. `secrets` also names the
+  the next input, and its jail stops the extensions' worker too (`jail.released()` until then,
+  when the extensions row starts no worker, then loads every extension again), which frees them
+  so the person can add a credential mid-session: the brig plugin's README has the details. `secrets` also names the
   sessions' state directory: each session's `claude/` holds the Claude Code child's config and
   its messaging peer token. That is this run's (`$XDG_STATE_HOME/bh-02/sessions`) and the
   default one (`~/.local/state/bh-02/sessions`); a third, of a run with another

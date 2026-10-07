@@ -320,9 +320,11 @@ def holding(credentials: Sequence[str], denies: Sequence[str]) -> tuple[str, ...
     return tuple(c for c in credentials if c in denies)
 
 
-def released_for(free: Sequence[str], still: Sequence[str]) -> str:
+def released_for(free: Sequence[str], still: Sequence[str], others: bool = False) -> str:
     """What `/release` tells the person: where bh-02 looks for its credential and nothing holds
-    now, and what another session's jail still holds."""
+    now, what another session's jail still holds, and (`others`) that the release stopped a
+    program besides the kernel's worker: the extensions' worker, which starts again once the
+    next input has started the kernel."""
     said = []
     if free:
         said.append(
@@ -334,6 +336,11 @@ def released_for(free: Sequence[str], still: Sequence[str]) -> str:
         said.append(
             f"{', '.join(still)} stays held: another bh-02 session of yours is running a jail, and "
             "none removes a placeholder while another runs. Quit that session, then /release again."
+        )
+    if others:
+        said.append(
+            "The extensions' worker stopped too, and what the extensions added with it: they load "
+            "again once the next input has started the kernel."
         )
     return " ".join(said)
 
@@ -543,6 +550,7 @@ class _Jailed:
         self._made: list[tuple[str, str | None]] = list(made)
         self._lock = lock
         self._record = record
+        self._stopping: asyncio.Future[None] | None = None
         self._write()
 
     def interrupt(self) -> bool:
@@ -579,7 +587,19 @@ class _Jailed:
             with contextlib.suppress(OSError):
                 Path(self._record).write_text(record_text(self._made, self._handle.pgid))
 
+    @property
+    def stopped(self) -> bool:
+        """Whether it has been stopped, by whoever started it or by the jail's `release`."""
+        return self._stopping is not None
+
     async def stop(self) -> None:
+        """brig's teardown, then what the jail made, once: whoever started the program and the
+        jail's `release` may both stop it, and the second waits for the first."""
+        if self._stopping is None:
+            self._stopping = asyncio.ensure_future(self._teardown())
+        await asyncio.shield(self._stopping)
+
+    async def _teardown(self) -> None:
         if self._wire is not None:
             await asyncio.to_thread(self._wire.stop)
         report = await asyncio.to_thread(self._handle.kill)
@@ -677,6 +697,11 @@ class BrigJail:
         # where bh-02 looks for its credential that a jail of this one's has held: what `release`
         # says about, whichever program's jail held it
         self._holding: tuple[str, ...] = ()
+        # every program this jail started that may still run, and the starts under way: what
+        # `release` stops (it waits for a start under way, then stops what that started)
+        self._live: list[_Jailed] = []
+        self._starting: set[asyncio.Future[None]] = set()
+        self._released = False
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
                 self._report = self.compile(probe, str(Path(probe, "k.sock")), ".", ())[1]
@@ -686,21 +711,55 @@ class BrigJail:
         them. A started program's own are its `report()`."""
         return self._report
 
+    def released(self) -> bool:
+        """Whether `release` has stopped this jail's programs and none has started since. The
+        next start ends it, and the next input's is the kernel's worker; a program whose owner is
+        not the kernel (the extensions' worker) waits while it holds, or its jail would hold what
+        the release freed again before the person could use it. Never on darwin, whose `release`
+        stops nothing."""
+        return self._released
+
     async def release(self) -> str:
-        """What the person should know once the kernel has ended its worker for `/release`, with
-        no jail of this one's running: on Linux, which places bh-02 looks for its credential are
-        free now (`released_for`), after sweeping what jails that are gone left. Empty when no
-        jail of this one's held any of them, and on darwin, where seatbelt holds a path without
-        anything on the host."""
-        if self._platform != "linux" or not self._holding:
+        """For `/release`, once the kernel has stopped its own worker. On Linux: stop every
+        other program this jail started that still runs (the extensions' worker, whose jail holds
+        the same placeholders and a share of the jail lock, so while it ran nothing could be
+        freed), each stop removing what its jail made once no jail runs; sweep what jails that
+        are gone left; and say which places bh-02 looks for its credential are free now, what
+        another session's jail still holds, and that the extensions' worker stopped
+        (`released_for`). The jail is then `released` until its next start. Empty when there is
+        nothing to say, and on darwin, where seatbelt holds a path without anything on the host
+        and nothing is stopped."""
+        if self._platform != "linux":
             return ""
+        self._released = True  # before anything waits: from here on, what asks starts nothing
+        await asyncio.gather(*self._starting)  # a start under way: stopped too, once it is up
+        running = [started for started in self._live if not started.stopped]
+        for started in self._live:
+            await started.stop()
+        self._live.clear()
         await asyncio.to_thread(self._swept, records_dir(os.environ, str(Path.home())))
         return released_for(
             [p for p in self._holding if not os.path.lexists(p)],
             [p for p in self._holding if Path(p).is_dir()],
+            others=bool(running),
         )
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
+        """Start `argv` in `cwd`, in a jail of its own compiled from the policy, listening on
+        `endpoint`. A start ends a release (`released`), before anything waits."""
+        self._released = False
+        starting: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._starting.add(starting)
+        try:
+            started = await self._launched(argv, cwd=cwd, endpoint=endpoint)
+            self._live = [*(each for each in self._live if not each.stopped), started]
+            return started
+        finally:
+            self._starting.discard(starting)
+            if not starting.done():  # a `release` cancelled as it waited cancels it
+                starting.set_result(None)
+
+    async def _launched(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
         stack_for(self._platform)  # refuses on a platform brig has no preset for
         if self._platform == "linux" and not Path(DEFAULT_BWRAP_PATH).exists():
             raise RuntimeError(
