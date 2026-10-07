@@ -61,7 +61,7 @@ async def harness(*, done: _ChatDone) -> Effects:
 class _LayerFiles:
     """The composition's own files (CONTRACTS.md: layers): every layer the loader is watching
     (`paths`), where the model rows look for the credential file, nearest first
-    (`credentials`), and what no cell may read (`secrets`): every one of `credentials`, the
+    (`credentials`), and what no input may read (`secrets`): every one of `credentials`, the
     `local.env` beside and above the project, and the sessions' state (Claude Code's own config
     and tokens). The jail keeps an input from rewriting the first and from reading the last, and
     from writing or creating any secret under a root it may write."""

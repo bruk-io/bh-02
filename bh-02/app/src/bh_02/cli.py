@@ -306,7 +306,7 @@ def credential_search() -> tuple[str, ...]:
     """Where the model rows look for bh-02's `local.env`, nearest first: above bh-02's own
     install and above its environment, so the workspace's own is found from any working
     directory. The one list: the model rows read the first that is a file (the `layers`
-    value's `credentials`), and every one is a secret the jail keeps a cell from reading,
+    value's `credentials`), and every one is a secret the jail keeps an input from reading,
     writing or creating. Not the project's own `local.env`: a project's may hold anything."""
     return credential_files([Path(__file__).resolve(), Path(sys.prefix).resolve()])
 

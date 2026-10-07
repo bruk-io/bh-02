@@ -23,7 +23,7 @@ async def model(*, config: ModelConfig, layers: Credentials) -> Effects:
     with a problem) binds too, and each step says what is wrong with it.
 
     The credential file is looked for where `layers` says (`credentials`, nearest first,
-    every one a secret the jail keeps from a cell), unless the config names an `env_file`.
+    every one a secret the jail keeps from an input), unless the config names an `env_file`.
     """
     value = yield enter(opened(config, layers.credentials))
     yield bind("model", value)

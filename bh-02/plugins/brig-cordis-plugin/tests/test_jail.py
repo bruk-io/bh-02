@@ -115,7 +115,7 @@ def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
     (credentials, `hide`, `secrets`) is a carve-out inside it; writes and env are untouched,
     but for a secret under the project, whose read mask refuses writes by itself. One the jail
     must `hold` (absent, where bh-02 looks for its credential) keeps its write deny, the only
-    thing that stops a cell creating it."""
+    thing that stops an input creating it."""
     policy = spec_for(
         root="/w/app",
         endpoint="/tmp/k/k.sock",
@@ -147,7 +147,7 @@ def test_a_linux_jail_reads_the_system_the_interpreter_and_what_the_command_name
     )
     assert readable[: len(SYSTEM_READABLE)] == SYSTEM_READABLE
     assert {"/opt/py", "/w/.venv", "/w/.venv/bin", "/w/src/kernel"} <= set(readable)
-    assert "/w" not in readable  # not the workspace root, whose local.env a cell must not read
+    assert "/w" not in readable  # not the workspace root, whose local.env an input must not read
     assert len(readable) == len(set(readable))
 
 
@@ -356,7 +356,7 @@ async def test_a_linux_jail_ends_when_the_host_renames_over_a_write_deny_and_a_n
     """The jail holds `.git/config` read-only with a bind mount on its path. A host `git config`
     saves the file by renaming a new one over it, which detaches that mount inside the jail
     (measured before the tripwire: the workload then wrote the file), so the jail ends itself at
-    once and says why. A new jail (the next cell's) holds it again."""
+    once and says why. A new jail (the next input's) holds it again."""
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
@@ -458,12 +458,12 @@ asyncio.run(main())
 """
 
 
-# A bh-02 killed while its kernel runs a cell's background program, which keeps trying to write
+# A bh-02 killed while its kernel runs an input's background program, which keeps trying to write
 # under `.claude/` (Claude Code would run hooks from its settings) and says it is alive: the real
 # kernel, in the real jail. argv: the project, then "setsid" to start the program in a session
 # of its own (out of the jail's process group), else "group". It says "started" and waits to be
 # killed.
-_KILLED_WITH_A_BACKGROUND_CELL = """
+_KILLED_WITH_A_BACKGROUND_INPUT = """
 import asyncio, sys, time
 from brig_cordis_plugin import BrigConfig, BrigJail
 from kernel_cordis_plugin import Kernel, KernelConfig
@@ -488,25 +488,25 @@ async def main():
     kernel = Kernel(BrigJail(BrigConfig(), Layers()), KernelConfig(root=sys.argv[1]))
     await kernel.__aenter__()
     setsid = sys.argv[2] == "setsid"
-    cell = (
+    code = (
         "import subprocess, sys\\n"
         f"subprocess.Popen([sys.executable, '-c', {LOOP!r}, 'alive'], start_new_session={setsid})\\n"
         "print('started')"
     )
-    print(await kernel.run(cell), flush=True)
+    print(await kernel.run(code), flush=True)
     time.sleep(600)
 
 asyncio.run(main())
 """
 
 
-async def _killed_with_a_background_cell(project: Path, how: str) -> None:
-    """Run `_KILLED_WITH_A_BACKGROUND_CELL` in `project`, see the program write, then `SIGKILL`
+async def _killed_with_a_background_input(project: Path, how: str) -> None:
+    """Run `_KILLED_WITH_A_BACKGROUND_INPUT` in `project`, see the program write, then `SIGKILL`
     the stand-in bh-02, as a crash or `kill -9` would end it."""
     killed = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
-        _KILLED_WITH_A_BACKGROUND_CELL,
+        _KILLED_WITH_A_BACKGROUND_INPUT,
         str(project),
         how,
         stdout=asyncio.subprocess.PIPE,
@@ -532,7 +532,7 @@ async def _still_writing(alive: Path) -> bool:
 async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what_it_left(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """bh-02 killed with SIGKILL while a program a cell started runs in the background, in a
+    """bh-02 killed with SIGKILL while a program an input started runs in the background, in a
     session of its own: the jail ends with bh-02 (brig's tether: the kernel closes bh-02's end,
     and brig's watcher kills the jail's process group, bubblewrap's namespace with it, so a
     program that left the group goes too). Its record now names a group that is gone, so the
@@ -541,7 +541,7 @@ async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
     project.mkdir()
-    await _killed_with_a_background_cell(project, "setsid")
+    await _killed_with_a_background_input(project, "setsid")
     (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
     group = recorded_group(record.read_text())
     assert group is not None
@@ -566,8 +566,8 @@ async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what
 async def test_a_killed_bh_02_s_seatbelt_jail_ends_with_it_but_not_a_program_that_left_its_group(
     tmp_path: Path,
 ) -> None:
-    """darwin: bh-02 killed with SIGKILL takes a program a cell left running with it (brig's
-    tether kills the jail's process group). seatbelt has no namespace, so a program a cell
+    """darwin: bh-02 killed with SIGKILL takes a program an input left running with it (brig's
+    tether kills the jail's process group). seatbelt has no namespace, so a program an input
     started in a session of its own is out of that group and lives on, as it does past a normal
     stop (brig's teardown is group-shaped too): measured, so the README's gap stays honest."""
     if sys.platform != "darwin":
@@ -575,8 +575,8 @@ async def test_a_killed_bh_02_s_seatbelt_jail_ends_with_it_but_not_a_program_tha
     grouped, setsid = tmp_path / "grouped", tmp_path / "setsid"
     grouped.mkdir()
     setsid.mkdir()
-    await _killed_with_a_background_cell(grouped, "group")
-    await _killed_with_a_background_cell(setsid, "setsid")
+    await _killed_with_a_background_input(grouped, "group")
+    await _killed_with_a_background_input(setsid, "setsid")
     programs = [int((where / "alive.pid").read_text()) for where in (grouped, setsid)]
     await asyncio.sleep(1.0)
     try:
@@ -871,7 +871,7 @@ def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_projec
     tmp_path: Path,
 ) -> None:
     """The compile half of the Linux jail, which runs anywhere (the enforcement half is
-    `scripts/linux-jail-check`'s): the grades a cell is confined by, and the project's own
+    `scripts/linux-jail-check`'s): the grades an input is confined by, and the project's own
     `local.env` masked on the command line, because it exists; absent, named instead, and held
     by a read-only empty directory only where bh-02 looks for its credential. Either way
     `fs_read` is best-effort: the mount is on the host's directory entry, which the host can

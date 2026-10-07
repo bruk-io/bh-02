@@ -75,11 +75,11 @@ class Unjailed:
         return UNENFORCED
 
     def notice(self) -> str:
-        """Nothing: the status bar says it is unjailed, and every cell asks."""
+        """Nothing: the status bar says it is unjailed, and every input asks."""
         return ""
 
     def reads(self) -> tuple[str, ...]:
-        """No allowlist: a cell reads what the person can."""
+        """No allowlist: an input reads what the person can."""
         return ()
 
     async def release(self) -> str:

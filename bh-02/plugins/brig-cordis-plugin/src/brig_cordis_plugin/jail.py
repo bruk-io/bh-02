@@ -24,26 +24,26 @@ One policy, two platforms; only the stack and the read model differ:
 - Linux: brig's `strict_linux()` (bubblewrap). Reads by allowlist, so `allowlisted` turns the
   policy into one: what is readable is the system tree (`/usr`, `/etc`, ...), the interpreter
   (`sys.base_prefix`, `sys.prefix`), the directories the command names, and what the policy
-  lets a cell write. Everything else does not exist in the jail, the home directory included.
+  lets an input write. Everything else does not exist in the jail, the home directory included.
   The secrets stay `read_denies`, now brig's carve-outs: one inside that tree (a `local.env` at
   the project root) is masked if it exists, and one that does not exist yet is not, which
   brig's `fs_read` grade says (`best_effort`, naming it); an absent one where bh-02 looks for
-  its credential (`layers.credentials`) keeps its write deny, so a cell can't plant one there.
+  its credential (`layers.credentials`) keeps its write deny, so an input can't plant one there.
   bubblewrap holds each absent write-denied path (`.envrc`, `.vscode`, such a `local.env`, ...)
   by mounting over an empty directory on the host, which the jail makes (and marks as its own)
   before bubblewrap starts; the jail removes the ones it made once brig has verified the worker
   is gone, never before (a mount point removed while the
   jail lives is detached inside it). A mount can be undone from the host (a file renamed over
   a denied or masked one, as a host `git config` does to `.git/config`; a placeholder removed),
-  and from then on a cell could write or read that path. So the jail watches every path it
+  and from then on an input could write or read that path. So the jail watches every path it
   holds (`tripwired`, `tripwire.Tripwire`) and ends itself at the first such change: the next
-  cell's jail holds the path again, and the cell says why (`ended`). Until it has ended (a few
+  input's jail holds the path again, and the input says why (`ended`). Until it has ended (a few
   milliseconds; measured in the README) a program already running in it can get one write or
   read in, so while the jail holds a secret under a writable root `fs_read` stays best-effort
   (`graded`) and `notice()` says which paths (`held`, `notice_for`).
 
 On both, the jail is launched tethered to bh-02 (`_Jailed`): when bh-02 ends, however it ends,
-brig kills the jail's process group, so a program a cell left running doesn't outlive it (on
+brig kills the jail's process group, so a program an input left running doesn't outlive it (on
 Linux, bubblewrap's whole namespace; on darwin, what stayed in the group).
 
 Anywhere else `start` refuses and names `kernel:unjailed`.
@@ -116,7 +116,7 @@ __all__ = [
 _READY_TIMEOUT_S = 10.0
 
 #: The system tree a Linux jail may read: what the interpreter links against and reads at
-#: start (`/lib`, `/usr/lib`, `/etc/ld.so.cache`, locale data) and what a cell runs (`/bin/sh`,
+#: start (`/lib`, `/usr/lib`, `/etc/ld.so.cache`, locale data) and what an input runs (`/bin/sh`,
 #: `git`, ...). Entries that do not exist on a host (`/lib64` on arm64) are dropped at start.
 SYSTEM_READABLE: tuple[str, ...] = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc")
 
@@ -177,8 +177,8 @@ def spec_for(
     under = [p for p in host if p not in writable and any(p.startswith(r + "/") for r in writable)]
     selfmod = [str(Path(r, name)) for r in roots for name in self_modify_denied(config.allow)]
     hidden = [*(str(Path(root, name).resolve()) for name in config.hide), *secrets]
-    # A secret a cell may not read, it may not overwrite or remove either: one under a writable
-    # root (the project's `local.env`) is denied writing too, or a cell could replace the
+    # A secret an input may not read, it may not overwrite or remove either: one under a writable
+    # root (the project's `local.env`) is denied writing too, or an input could replace the
     # credential it can't see.
     kept = [s for s in hidden if any(s == r or s.startswith(r + "/") for r in writable)]
     denies = [*layers, *under, *selfmod, *(str(Path(root, d).resolve()) for d in config.deny), *kept]
@@ -197,13 +197,13 @@ def spec_for(
 
 
 def allowlisted(spec: Spec, readable: Sequence[str], hold: Collection[str] = ()) -> Spec:
-    """`spec`, reading by allowlist: `readable` is the tree a cell may read, and the policy's
+    """`spec`, reading by allowlist: `readable` is the tree an input may read, and the policy's
     read denies become the carve-outs inside it. The environment and the channel are the
     policy's, unchanged, and so are the writes but one kind: a path denied both reading and
     writing (a secret under the project) keeps only its read deny. bwrap masks an existing one
     with a read-only `/dev/null`, which refuses writes and removal too (a write deny as well
     would be a bind of the real file, under the mask). An absent one has nothing to mask, so a
-    cell could create it: those in `hold` (absent places bh-02 looks for its credential, where a
+    input could create it: those in `hold` (absent places bh-02 looks for its credential, where a
     planted `local.env` would be read at the next launch) keep their write deny, an empty
     directory held read-only there for the session (`made_by_the_jail`). The rest (the project's
     own absent `local.env`) are left alone: a directory there would be in the person's way, and
@@ -242,10 +242,10 @@ def uncovered(denies: Sequence[str]) -> tuple[str, ...]:
 
 def held(spec: Spec) -> tuple[str, ...]:
     """The read denies a Linux jail holds with a mount on the path itself: those at or under a
-    root a cell may write (a masked `local.env`, or the empty directory an absent one is held
+    root an input may write (a masked `local.env`, or the empty directory an absent one is held
     by). A mount is on the host's directory entry, so replacing that entry on the host (an
     editor saves by renaming a new file over it) or removing it detaches the mount inside the
-    jail, and a cell can then read and rewrite what is there (measured). The rest are outside
+    jail, and an input can then read and rewrite what is there (measured). The rest are outside
     every writable root, where the allowlist alone keeps them out of the jail."""
     roots = spec.fs.write_allows
     return tuple(d for d in spec.fs.read_denies if any(d == r or d.startswith(r + "/") for r in roots))
@@ -253,7 +253,7 @@ def held(spec: Spec) -> tuple[str, ...]:
 
 def tripwired(spec: Spec) -> tuple[str, ...]:
     """The paths a Linux jail holds with a mount that the host can undo: every write deny under
-    a root a cell may write (an existing path bound read-only over itself, or a placeholder) and
+    a root an input may write (an existing path bound read-only over itself, or a placeholder) and
     every secret held there (`held`). Replacing, moving or removing one on the host ends the jail
     (`Tripwire`); a deny outside every writable root is not mounted at all."""
     roots = spec.fs.write_allows
@@ -262,21 +262,21 @@ def tripwired(spec: Spec) -> tuple[str, ...]:
 
 
 def notice_for(platform: str, holds: Sequence[str]) -> str:
-    """What the person should know at the start of a session about the secrets under a root a
-    cell may write (`held`), or nothing: on darwin seatbelt matches paths, so nothing the host
-    does to them lets a cell in."""
+    """What the person should know at the start of a session about the secrets under a root an
+    input may write (`held`), or nothing: on darwin seatbelt matches paths, so nothing the host
+    does to them lets an input in."""
     if platform != "linux" or not holds:
         return ""
     return (
-        f"The jail keeps cells from reading {', '.join(holds)}. On Linux it does that with a mount "
+        f"The jail keeps inputs from reading {', '.join(holds)}. On Linux it does that with a mount "
         "on each path that is there, and, where bh-02 looks for its credential and there is none, "
         "with an empty directory, so nothing can be created there while the kernel runs: "
-        "`/release` stops the kernel and frees it until the next cell, which is when to add your "
+        "`/release` stops the kernel and frees it until the next input, which is when to add your "
         "credential. The host can undo a mount: when a file is created at one of these paths, or "
         "replaced (an editor saves local.env by renaming a new file over it) or removed while the "
-        "kernel runs, bh-02 ends the jail at once (a running cell with it) and the next cell's jail "
-        "holds the path again. A program a cell left running can still read or rewrite it in the "
-        "milliseconds that takes, so edit them after `/release`."
+        "kernel runs, bh-02 ends the jail at once (a running input with it) and the next input's "
+        "jail holds the path again. A program an input left running can still read or rewrite it "
+        "in the milliseconds that takes, so edit them after `/release`."
     )
 
 
@@ -293,7 +293,7 @@ def released_for(free: Sequence[str], still: Sequence[str]) -> str:
     if free:
         said.append(
             f"Nothing holds {', '.join(free)} until the kernel starts again: create your local.env "
-            "there now, then send your message. The next kernel's jail masks it from cells (a model "
+            "there now, then send your message. The next kernel's jail masks it from inputs (a model "
             "already running keeps the credential it started with: `/restart model`)."
         )
     if still:
@@ -458,7 +458,7 @@ class _Jailed:
 
     `tether` is the write end of the launch's tether (brig SPEC.md section 8): held by this
     process alone, so when bh-02 ends, however it ends (`SIGKILL` included), the kernel closes
-    it and brig's watcher kills the jail's whole process group, a program a cell left running
+    it and brig's watcher kills the jail's whole process group, a program an input left running
     in the background with it. `stop` closes it once brig's teardown is done.
 
     `wire` (Linux) watches the paths the jail holds with a mount and ends the jail when the host
@@ -629,7 +629,7 @@ class BrigJail:
         )
 
     def reads(self) -> tuple[str, ...]:
-        """The trees a cell can read, once the kernel has started, when that is all it can read
+        """The trees an input can read, once the kernel has started, when that is all it can read
         (`told_reads`): a Linux jail's allowlist (the system, the interpreter, the worker's
         directory) and the roots it may write. Empty on darwin, whose jail reads everything but
         the secrets."""

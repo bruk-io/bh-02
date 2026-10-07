@@ -1,4 +1,4 @@
-"""Where bh-02's credential is looked for, and what no jailed cell may read: one list, from the
+"""Where bh-02's credential is looked for, and what no jailed input may read: one list, from the
 anchors bh-02 really runs with (its own install and its environment), never a stand-in."""
 
 import json
@@ -24,7 +24,7 @@ class _Layers:
 
 def test_every_path_the_model_row_searches_is_a_secret(tmp_path: Path) -> None:
     """The model rows search exactly the `layers` value's `credentials`, and every one of them is
-    among the jail's `secrets` (cli: `unreadable`), so none is a place a cell could plant a
+    among the jail's `secrets` (cli: `unreadable`), so none is a place an input could plant a
     `local.env` for the next launch to hand to Claude Code. Before, the model row anchored on its
     own package and searched four directories of the plugins tree the jail never named."""
     searched = credential_search()

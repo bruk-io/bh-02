@@ -319,14 +319,14 @@ async def test_a_jailed_kernel_starts_in_a_worktree_and_cannot_write_its_layer_i
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_a_jailed_cell_cannot_read_the_project_s_own_local_env_but_reads_beside_it(
+async def test_a_jailed_input_cannot_read_the_project_s_own_local_env_but_reads_beside_it(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
-    """The credential inside the project, where a cell may write: the one case an allowlist
-    alone can't hide, so on Linux it is a mask over the file. Nor can a cell overwrite, append
+    """The credential inside the project, where an input may write: the one case an allowlist
+    alone can't hide, so on Linux it is a mask over the file. Nor can an input overwrite, append
     to, remove or rename over it. A sibling reads in the same run,
-    in-process and from a program the cell starts; the host's file is untouched; and nothing
+    in-process and from a program the input starts; the host's file is untouched; and nothing
     the jail made in the project outlives it."""
     project = tmp_path / "project"
     project.mkdir()
@@ -363,11 +363,11 @@ async def test_a_jailed_cell_cannot_read_the_project_s_own_local_env_but_reads_b
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_a_jailed_cell_cannot_plant_a_credential_where_the_model_row_looks(
+async def test_a_jailed_input_cannot_plant_a_credential_where_the_model_row_looks(
     composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """bh-02 run inside its own workspace: every place the model row looks for `local.env`
-    (`credentials`, nearest first) is under the project, where a cell may write. A cell can't
+    (`credentials`, nearest first) is under the project, where an input may write. An input can't
     create one where there is none (the next launch would hand its token to Claude Code), in
     a directory of its own or one the host imports code from, by writing, by renaming a file of
     its own there, or as a link; nor replace the one that is there. Nothing the jail made on the
@@ -384,7 +384,7 @@ async def test_a_jailed_cell_cannot_plant_a_credential_where_the_model_row_looks
         return f"import os\ntry:\n    {what}; print('WROTE')\nexcept OSError:\n    print('DENIED')"
 
     absent = credentials[:2]
-    cells = [
+    inputs = [
         *(attempt(f"open({p!r}, 'w').write('X=1')") for p in absent),
         *(attempt(f"open('mine.env', 'w').write('X=1'); os.replace('mine.env', {p!r})") for p in absent),
         *(attempt(f"os.symlink('/tmp/elsewhere.env', {p!r})") for p in absent),
@@ -392,14 +392,14 @@ async def test_a_jailed_cell_cannot_plant_a_credential_where_the_model_row_looks
         attempt(f"open('mine.env', 'w').write('X=1'); os.replace('mine.env', {str(real)!r})"),
     ]
     before = sorted(str(p) for p in project.rglob("*"))
-    patch = _inputs(composition, *cells, extra=_jailed_in(project))
+    patch = _inputs(composition, *inputs, extra=_jailed_in(project))
     _answers()
     secrets = unreadable(credentials, [], [])
     await run(
         [*layers(), patch], [Row("chat", config={"prompt": "go"})], credentials=credentials, secrets=secrets
     )
     out = _shown()
-    assert all(f"[{n}] DENIED" in out for n in range(len(cells))), out
+    assert all(f"[{n}] DENIED" in out for n in range(len(inputs))), out
     (project / "mine.env").unlink(missing_ok=True)  # the renames' source, left when each is refused
     assert sorted(str(p) for p in project.rglob("*")) == before  # no file planted, no placeholder left
     assert real.read_text() == "NOT_A_REAL_CREDENTIAL=placeholder\n"
@@ -413,13 +413,13 @@ class _Layers:
     secrets: tuple[str, ...] = ()
 
 
-async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_cell(
+async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`/release` (the kernel's `release()`): the jail holding an absent `local.env` where the
-    model row looks ends, and with it the hold, so the person can create the file. A cell run
+    model row looks ends, and with it the hold, so the person can create the file. An input run
     before they do holds it again (that is all `/restart kernel` would have given them); after
-    they do, the next cell's jail masks it: it can neither read nor rewrite it."""
+    they do, the next input's jail masks it: it can neither read nor rewrite it."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the hold is bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -447,7 +447,7 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_c
         with pytest.raises(ProcessLookupError):
             os.killpg(group, 0)  # the jail is gone, not only its worker
         await kernel.run("1")
-        assert credential.is_dir()  # a cell came first: held again
+        assert credential.is_dir()  # an input came first: held again
         await kernel.release()
         await kernel.__aexit__(None, None, None)  # `/restart kernel`: stops the jail ...
         await kernel.__aenter__()  # ... and starts one at once, which holds the path again
@@ -461,8 +461,8 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_c
     assert token_file(None, [str(credential)]) == credential
 
 
-def _append_to(path: Path, mode: str = "a", text: str = "# planted by a cell\n") -> str:
-    """A cell that tries to write `path`, and says whether it could."""
+def _append_to(path: Path, mode: str = "a", text: str = "# planted by an input\n") -> str:
+    """An input that tries to write `path`, and says whether it could."""
     return (
         "try:\n"
         f"    with open({str(path)!r}, {mode!r}) as f:\n"
@@ -497,7 +497,7 @@ async def test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_n
 ) -> None:
     """A host `git config` saves `.git/config` by renaming a new file over it, which detaches the
     jail's read-only mount on that path. The jail sees it happen and ends itself, so the next
-    cell runs in a new jail, which holds the path again, and is told why its variables are gone."""
+    input runs in a new jail, which holds the path again, and is told why its variables are gone."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the mounts are bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -513,16 +513,16 @@ async def test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_n
         await _ended(group)
         out = await kernel.run(_append_to(config))
         assert "DENIED" in out, out  # a new jail holds it again
-        assert "started again" in out and str(config) in out, out  # and the cell says why
+        assert "started again" in out and str(config) in out, out  # and the input says why
     assert "planted" not in config.read_text() and "Pat" in config.read_text()
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_a_cell_can_t_put_its_own_git_config_in_place_by_moving_the_directory_it_is_in(
+async def test_an_input_can_t_put_its_own_git_config_in_place_by_moving_the_directory_it_is_in(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`.git/config` is denied, `.git` is not (a jailed `git commit` writes in it). Renaming
-    `.git` away and making a new one would put a config of the cell's own (`core.hooksPath`)
+    `.git` away and making a new one would put a config of the input's own (`core.hooksPath`)
     where the person's next host `git` reads it. On Linux the jail pins every directory between
     the project and a denied path (a mount point can't be renamed or removed); darwin's seatbelt
     denies the path whatever directory it ends up in."""
@@ -556,7 +556,7 @@ async def test_a_cell_can_t_put_its_own_git_config_in_place_by_moving_the_direct
 
 async def test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing(tmp_path: Path) -> None:
     """seatbelt matches paths, not directory entries: after a host `git config` renames a new
-    `.git/config` into place, the same jail still refuses a cell's write, and nothing restarts."""
+    `.git/config` into place, the same jail still refuses an input's write, and nothing restarts."""
     if sys.platform != "darwin":
         pytest.skip("seatbelt is darwin's")
     project = tmp_path / "project"
@@ -572,11 +572,11 @@ async def test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing(tmp_path
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_on_linux_a_cell_running_when_the_host_renames_over_a_denied_path_ends_and_says_why(
+async def test_on_linux_an_input_running_when_the_host_renames_over_a_denied_path_ends_and_says_why(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The jail ends at once, a running cell with it (a program in it could write the path from
-    then on), and the cell's answer, which the person sees, says what the host did."""
+    """The jail ends at once, a running input with it (a program in it could write the path from
+    then on), and the input's answer, which the person sees, says what the host did."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the mounts are bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -594,12 +594,12 @@ async def test_on_linux_a_cell_running_when_the_host_renames_over_a_denied_path_
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_cell_rewrites_it(
+async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_input_rewrites_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A `--patch` layer inside the project, watched by a real loader. The person saves it the
     way an editor does (a new file renamed over it): the loader applies their change, and the
-    jail, whose mount on the file that rename detached, ends; the next cell's jail holds the
+    jail, whose mount on the file that rename detached, ends; the next input's jail holds the
     new file, so its rewrite is refused and the loader never sees one."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the mounts are bubblewrap's: Linux with /usr/bin/bwrap only")
@@ -641,7 +641,7 @@ async def test_a_layer_file_in_a_directory_of_the_project_can_t_be_swapped_by_mo
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A `--patch` layer at `conf/mine.toml`, watched by a real loader. The person's save by
-    rename applies; a cell can neither rewrite the file nor rename `conf` away and make a new
+    rename applies; an input can neither rewrite the file nor rename `conf` away and make a new
     `conf/mine.toml` for the loader to read (on Linux `conf` is pinned; on darwin the jail
     denies the path, whatever directory is there)."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -685,7 +685,7 @@ async def test_a_layer_file_in_a_directory_of_the_project_can_t_be_swapped_by_mo
             out = await kernel.run(swap)
             assert "write DENIED" in out, out
             await asyncio.sleep(0.3)  # the loader looks every 0.05 s
-            assert set(booted.loader.rows) == {"two"}, out  # nothing of the cell's applied
+            assert set(booted.loader.rows) == {"two"}, out  # nothing of the input's applied
             if sys.platform == "linux":
                 assert "rename DENIED" in out and mine.read_text() == row("two"), out
     finally:

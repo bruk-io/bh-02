@@ -3,10 +3,10 @@
 bubblewrap holds a path (a write deny, a masked secret, a placeholder) with a mount on the
 host's directory entry, and the kernel detaches that mount inside the jail when the host
 replaces the entry (a host `git config` renames a new `.git/config` over the old one; editors
-save by rename), renames it away or removes it. From then on a cell could write the path. No
+save by rename), renames it away or removes it. From then on an input could write the path. No
 mount can be put back from outside (entering the jail's mount namespace is refused: measured),
 and a read-only parent directory would break a jailed `git commit` (it creates `.git/index.lock`:
-measured), so the jail ends instead, at once, and the next cell's jail holds the path again.
+measured), so the jail ends instead, at once, and the next input's jail holds the path again.
 
 `wires` turns the held paths into what to watch (each one's directory, by name), `decoded` reads
 the kernel's inotify records, and `lifted` decides which held paths those events took away: all
@@ -59,12 +59,12 @@ def decoded(data: bytes) -> list[tuple[int, int, str]]:
 def lifted(events: Iterable[tuple[str, int, str]], watched: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
     """The held paths that `events` (directory, mask, name) undid the jail's mount on: a name
     renamed over, renamed away, removed or created; every name in a directory that was itself
-    removed or moved; and everything when the kernel's queue overflowed. A cell can do none of
+    removed or moved; and everything when the kernel's queue overflowed. An input can do none of
     these to a held name (the mount refuses it), so each is the host's.
 
     Not `<name>.lock` created (git writes `config.lock`, then renames it over `config`): ending
     the jail there too narrowed nothing measurable (a looping program still got its write into
-    the lock 17 times in 20, against 20 in 20), and a cell's own `git config` would end its jail
+    the lock 17 times in 20, against 20 in 20), and an input's own `git config` would end its jail
     with a message blaming the host."""
     out: list[str] = []
     for directory, mask, name in events:
@@ -79,7 +79,7 @@ def lifted(events: Iterable[tuple[str, int, str]], watched: Mapping[str, Sequenc
 
 
 def tripped_for(paths: Sequence[str]) -> str:
-    """Why the jail ended itself, for the person (in the cell's answer)."""
+    """Why the jail ended itself, for the person (in the input's answer)."""
     return (
         f"something on the host replaced or removed {', '.join(paths)} (a `git config`, an "
         "editor's save), which lifts the jail's hold on it, so bh-02 ended the jail; the next "

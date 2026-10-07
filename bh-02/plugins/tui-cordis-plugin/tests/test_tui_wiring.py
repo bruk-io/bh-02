@@ -138,11 +138,11 @@ async def test_the_status_row_shows_what_the_jail_says_once_as_a_note_when_the_k
     conversation when the kernel comes up; a jail with nothing to say shows nothing."""
     frame, output = Frame(lambda message: True), _Output()
     kernel = _Kernel(
-        True, {"fs_read": "best_effort"}, notice="The jail keeps cells from reading /w/local.env"
+        True, {"fs_read": "best_effort"}, notice="The jail keeps inputs from reading /w/local.env"
     )
     rows = dict(loader=_Loader(), models=_Models(), sessions=_Sessions(), frame=frame, config=StatusConfig())
     await drive(status(kernel=kernel, output=output, **rows))
-    assert output.shown == [{"type": "note", "text": "The jail keeps cells from reading /w/local.env"}]
+    assert output.shown == [{"type": "note", "text": "The jail keeps inputs from reading /w/local.env"}]
     quiet = _Output()
     await drive(status(kernel=_Kernel(True, {}), output=quiet, **rows))
     assert quiet.shown == []

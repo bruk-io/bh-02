@@ -74,7 +74,7 @@ input starts a new jail, which masks the file (`/dev/null` over it): no input re
 it. No input gets a window: none runs while the path is free, and an input that runs before you
 create the file starts a jail that holds it again (`/release` again). `/restart kernel` is not the step:
 it stops and starts the jail at once, holding the path again before you could create anything
-(`test_on_linux_release_frees_where_the_model_row_looks_until_the_next_cell`).
+(`test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input`).
 
 When they go: the jail removes the ones it made once brig has verified the worker is gone and
 no other bh-02 jail of the same user is running (a shared `flock` on
@@ -149,7 +149,7 @@ lock is an ordinary new file in `.git`, which an input may write, and git rename
 no mount can hold a file that doesn't exist yet). An input that is not running at that moment
 never gets in: the next one finds the path held
 (`test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_next_holds_it`,
-`test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_cell_rewrites_it`: your own
+`test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_input_rewrites_it`: your own
 save of a layer file still reloads). So before you run a host git command that writes
 `.git/config`, or save a layer file, while an input's background program runs, stop the reply,
 or `/release`.
@@ -174,7 +174,7 @@ taking the mount with it, and make a new `.git/config` of its own, `core.hooksPa
 (measured). brig now binds every existing directory between the project and a denied path over
 itself (brig SPEC.md section 6, decision-168), so `.git` (and a layer file's directory, and a
 host import path's) can't be renamed or removed by an input, and is as writable as before
-(`test_a_cell_can_t_put_its_own_git_config_in_place_by_moving_the_directory_it_is_in`). What
+(`test_an_input_can_t_put_its_own_git_config_in_place_by_moving_the_directory_it_is_in`). What
 it costs: `os.rename` between such a directory and the rest of the project fails with `EXDEV`
 (`mv` and `shutil.move` copy instead). On darwin an input can rename `.git` away, which
 displaces the repository but plants nothing: seatbelt denies `.git/config` and `.git/hooks`

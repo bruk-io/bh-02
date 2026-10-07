@@ -9,7 +9,7 @@ inherit it. `parse_env` is pure; `token_file` only looks for the file.
 
 Where the file is looked for is not this package's to decide: the shell names the places, nearest
 first, as the `layers` value's `credentials` (CONTRACTS.md: layers), and names every one of them
-to the jail as a secret too. So a place the model row searches is always one no jailed cell may
+to the jail as a secret too. So a place the model row searches is always one no jailed input may
 read, write or create, whatever directory bh-02 runs in.
 """
 
