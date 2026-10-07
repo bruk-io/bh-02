@@ -21,6 +21,7 @@ ONE_REPLY = (
 # An importable module of components, named by layer files as `fragile:<component>`.
 PLUGIN = '''
 import asyncio
+import threading
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -238,6 +239,41 @@ class Counting:
 @component(provides=("model",))
 async def counting_model() -> Effects:
     yield bind("model", Counting())
+
+
+class Held:
+    """A `system` whose every reading waits until `release` is set (10 s at most), as a slow
+    section function would, counting the readings begun, how many run now and the most that
+    ran at once."""
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self.begun = self.running = self.most = 0
+        self._lock = threading.Lock()
+
+    def text(self) -> str:
+        with self._lock:
+            self.begun += 1
+            self.running += 1
+            self.most = max(self.most, self.running)
+        self.release.wait(10)
+        with self._lock:
+            self.running -= 1
+        return "held"
+
+    def add(self, section: Any) -> Any:
+        return lambda: None
+
+    def touched(self, paths: Any) -> list[Any]:
+        return []
+
+
+HELD = Held()
+
+
+@component(provides=("system",))
+async def held_system() -> Effects:
+    yield bind("system", HELD)
 
 
 @component(provides=("input", "output", "frame"))

@@ -1,13 +1,15 @@
 # agent-cordis-plugin
 
 A harness-owned agent loop, the transcript it reads, `memory`, what it tells the model with
-an input's result, and `/compact`, which begins a new conversation from the model's summary.
+an input's result, `executor`, where it reads the prompt and asks `memory`, and `/compact`,
+which begins a new conversation from the model's summary.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (iterated) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (iterated), `executor` (`run`) |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
 | `agent:memory` | `memory`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
+| `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
 | `agent:compact` | registers `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300), `loop` and `transcript` (the rows it restarts) | `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `entries`, `restart`), `commands` (`register`) |
 
 A turn is one model step plus the inputs it asked for, until it asks for none. The model's one
@@ -83,23 +85,29 @@ prompt cache across conversations can reuse it. The providers send
 
 Reading the prompt (`system.text()`, whose context-file sections may read many files and search
 the project, and `kernel.instructions()`) and asking `memory` (the on-touch functions read rule
-files) run in a thread of the loop's own, not on the event loop, which cordis and the TUI
-share, so a slow section function never freezes the app. The transcript is changed only once
-each is done, so a reply stopped meanwhile leaves it whole (stopped while the person's message
-was being dated and the prompt read, the message is kept and answered as stopped, as one stopped
-in its first model step is). What runs there must not need the event loop: a section function,
-`kernel.instructions()` and a `memory` function each read and return text.
+files) run on `executor` (`executor.OneAtATime`, in a thread), not on the event loop, which
+cordis and the TUI share, so a slow section function never freezes the app. The transcript is
+changed only once each is done, so a reply stopped meanwhile leaves it whole (stopped while the
+person's message was being dated and the prompt read, the message is kept and answered as
+stopped, as one stopped in its first model step is). What runs there must not need the event
+loop: a section function, `kernel.instructions()` and a `memory` function each read and return
+text.
 
-One runs at a time, and nothing stops one part-way: a stop ends the reply's wait, and the
-reading (or the `memory` call: a stop waits for that one, so its notes are told) finishes in its
-thread. The loop keeps the one in flight, and the next waits for it before it begins, so
-stopping reply after reply while a slow prompt is read leaves one reading running, not one per
-stop, and the context plugin's caches are never used by two threads at once. The thread is a
-daemon's, not the default executor's (`asyncio.to_thread`'s): `asyncio.run` joins those as bh-02
-ends, and the interpreter at exit, so a reading left running would hold bh-02 open until it
-finished; a daemon's is left to the end of the process, and its answer to an event loop that
-has closed goes nowhere. A loop that reloads (`/model`, `/clear`) starts with none in flight, so
-its first reading may run beside one the last loop left.
+One runs at a time, and nothing stops one part-way: a stop ends the reply's wait (but for the
+`memory` call, which a stop waits for, so its notes are told), and the reading finishes in its
+thread, unused: what it returned or raised goes nowhere, logged by no one. `executor` keeps the
+call in flight, and the next waits for it before it begins, so stopping reply after reply while
+a slow prompt is read leaves one reading running, not one per stop. `executor` is a row of its
+own (`agent:executor`) that depends on nothing, like `memory`: `/model` and `/clear` reload the
+loop, a new `LoopModel`, but not `system`, whose caches take no lock, nor `executor`, so the new
+loop's first reading waits for the one the last loop left running too, and the context plugin's
+caches are used by one thread at a time. Only a new `executor` (its row restarted, or replaced
+by a layer) knows nothing of a call the last one left running, and may start one beside it. A
+`LoopModel` built without one (a test, direct use) makes its own. Each call's thread is a daemon's, not the
+default executor's (`asyncio.to_thread`'s): `asyncio.run` joins those as bh-02 ends, and the
+interpreter at exit, so a reading left running would hold bh-02 open until it finished; a
+daemon's is left to the end of the process, and its answer to an event loop that has closed
+goes nowhere.
 
 `/compact` (`agent:compact`, `compact.py`) is for a conversation grown long: a local model
 processes more prompt before each first token, and any model nears its context window. It asks

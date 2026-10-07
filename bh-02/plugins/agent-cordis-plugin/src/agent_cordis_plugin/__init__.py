@@ -1,7 +1,9 @@
 """A harness-owned agent loop: a `model` plus the kernel's one tool, `python`, provided as a `loop`.
 
-Also the transcript row, so the history outlives the loop, and `/compact`, which begins a new
-conversation from the model's summary of it."""
+Also the transcript row, so the history outlives the loop; `memory`, what the model is told with
+an input's result; `executor`, where the loop reads the prompt and asks `memory`, one call at a
+time across the loop's reloads; and `/compact`, which begins a new conversation from the model's
+summary of it."""
 
 from agent_cordis_plugin.compact import (
     CompactConfig,
@@ -12,11 +14,13 @@ from agent_cordis_plugin.compact import (
     seeded,
     summarise,
 )
+from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.loop import (
     DECLINED,
     FAILED,
     STOPPED,
     Approval,
+    Executor,
     LoopModel,
     Memory,
     Model,
@@ -29,7 +33,15 @@ from agent_cordis_plugin.loop import (
 from agent_cordis_plugin.prompt import changes, edits, latest
 from agent_cordis_plugin.stops import classify
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript, rewrite
-from agent_cordis_plugin.wiring import LoopConfig, TranscriptConfig, compact, loop, memory, transcript
+from agent_cordis_plugin.wiring import (
+    LoopConfig,
+    TranscriptConfig,
+    compact,
+    executor,
+    loop,
+    memory,
+    transcript,
+)
 
 __all__ = [
     "DECLINED",
@@ -37,12 +49,14 @@ __all__ = [
     "STOPPED",
     "Approval",
     "CompactConfig",
+    "Executor",
     "Model",
     "FileTranscript",
     "LoopConfig",
     "LoopModel",
     "Memory",
     "MemoryTranscript",
+    "OneAtATime",
     "Python",
     "System",
     "Transcript",
@@ -54,6 +68,7 @@ __all__ = [
     "compact",
     "compact_conversation",
     "edits",
+    "executor",
     "kept_in",
     "latest",
     "loop",

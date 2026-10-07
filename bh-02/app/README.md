@@ -187,6 +187,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `models` | `models:catalog` | |
 | `transcript` | `agent:transcript` | `path` (the session's `transcript.jsonl`) |
 | `memory` | `agent:memory` | |
+| `executor` | `agent:executor` | |
 | `shell-hints` | `kernel:shell_hints` | |
 | `on-touch` | `context:on_touch` | |
 | `extensions` | `extensions:extensions` | |
@@ -224,7 +225,8 @@ models:model            binds Model                        depends on Layers (wh
 models:catalog          binds Models                       depends on Loader, Layers
 agent:transcript        binds Transcript                   depends on nothing
 agent:memory            binds Memory                       depends on nothing
-agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Approval, Memory
+agent:executor          binds Executor                     depends on nothing
+agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Approval, Memory, Executor
 agent:compact           registers /compact                 depends on Model, Kernel, Loader, Commands (the transcript row's file, not Transcript)
 kernel:shell_hints      adds the shell hints to Memory     depends on Memory, Transcript
 context:on_touch        adds the on-touch sections         depends on System, Memory, Transcript
@@ -249,7 +251,8 @@ the key, the contributors
 register through an effect whose undo is their removal. Switch the model (`/model NAME`, which
 names it as the model row's `default` in the session's layer) and the model row reloads on the
 new model's provider, the loop against it, while `transcript`, a row of its own, keeps the
-conversation. `/model` and the status bar depend on `models`, not `model`, so a switch reloads
+conversation, and `executor` the reading of the prompt a stopped reply left running, which the
+new loop waits for (so does one `/clear` restarts). `/model` and the status bar depend on `models`, not `model`, so a switch reloads
 neither. A patch that gives the `model` row a `config` replaces the session layer's (its
 `state`, and the `default` `/model` writes, which then changes nothing): name a model with
 `--model` instead, or put it in the models file.
@@ -263,7 +266,7 @@ other plugin; the gate proves it.
 |---|---|---|
 | `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `palette`) | `frame` and what each row reports on |
 | `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's one tool, `python`, only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are | `layers` (`credentials`: where both look for `local.env`), `loader` (catalog) |
-| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes, its result followed by what `memory`'s functions add), `transcript` (`agent:transcript`), `memory` (`agent:memory`: the broker of what the model is told with an input's result); `agent:compact` registers `/compact`, which begins a new conversation from the model's summary, restarting the loop and the transcript | the loop: `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (its functions, after each input); compact: `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `entries`, `restart`), `commands` (`register`) |
+| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes, its result followed by what `memory`'s functions add), `transcript` (`agent:transcript`), `memory` (`agent:memory`: the broker of what the model is told with an input's result), `executor` (`agent:executor`: where the loop reads the prompt and asks `memory`, off the event loop, one call at a time across the loop's reloads); `agent:compact` registers `/compact`, which begins a new conversation from the model's summary, restarting the loop and the transcript | the loop: `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (its functions, after each input), `executor` (`run`); compact: `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `entries`, `restart`), `commands` (`register`) |
 | `chat-cordis-plugin` | runs `session` (a turn interruptible; a line `commands` claims goes to it, cancelled if the input closes, and what a command left the model, which `commands` holds, goes with the next message) and binds `done` | `loop`, `input`, `output`, `commands` (`claims`, `run`, `take_for_model`) |
 | `context-cordis-plugin` | `system` (`context:project`): who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of, then the project context: the working directory and branch, what the context files' sections say (guidance and rule files, each read by a function), read fresh; a broker other rows add sections to; and what the context files' `on_touch` sections say about the files an input opened (`touched`). `context:on_touch` adds to `memory` that guidance and those rules, each told once a conversation with the result of the first input that opens a file they cover | on-touch: `system` (`touched`), `memory` (`add`), `transcript` (`messages`: what a resumed conversation was told) |
 | `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system`; each load on `approval`'s yes | `jail`, `commands`, `frame`, `system`, `approval` |
@@ -296,8 +299,8 @@ project's is read inside the jail. With `--no-jail` neither runs unasked: the mo
 run them as inputs of its own, which you are asked about. The kernel row's `startup` config is
 the list.
 
-After each input, the loop asks `memory` what to tell the model with its result (in a worker
-thread, as it reads the prompt, so neither freezes the app): the functions
+After each input, the loop asks `memory` what to tell the model with its result (on `executor`,
+off the event loop, as it reads the prompt, so neither freezes the app): the functions
 rows add there are given the input's code, its result and the project files it opened (the
 worker hears each `open` with an audit hook, so `kernel.touched()` is what Python in the input
 read or wrote, not what a shell command did). `kernel:shell_hints` adds the shell hint above;

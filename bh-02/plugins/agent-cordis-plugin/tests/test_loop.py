@@ -1,7 +1,9 @@
 """The loop over a scripted model and a fake kernel, and the transcript outliving a model swap."""
 
 import asyncio
+import gc
 import json
+import logging
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -17,8 +19,10 @@ from agent_cordis_plugin import (
     FileTranscript,
     LoopModel,
     MemoryTranscript,
+    OneAtATime,
     changes,
     classify,
+    executor,
     latest,
     loop,
     memory,
@@ -220,6 +224,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
     rt = Runtime()
     rt.mount(transcript, id="transcript")
     rt.mount(memory, id="memory")
+    executor_fiber = rt.mount(executor, id="executor")
     rt.mount(loop, id="loop")
     kernel_fiber = rt.mount(kernel_and_system, id="kernel")
     row = rt.mount(model_row(first), id="model")
@@ -236,6 +241,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
     # one conversation (its first message told the date first)
     assert [m["content"].rpartition("\n\n")[2] for m in history.messages] == ["first", "one", "second", "two"]
     assert Inspection(rt).fiber("kernel") is kernel_fiber  # the kernel's row stayed up throughout
+    assert Inspection(rt).fiber("executor") is executor_fiber  # and so did the call in flight's
     await rt.shutdown()
 
 
@@ -949,7 +955,40 @@ async def test_replies_stopped_over_and_over_while_the_prompt_is_read_leave_one_
     assert replies == [STOPPED] * 4 + ["at last"]  # every stopped message answered as stopped
 
 
-async def test_a_stopped_reply_s_reading_that_fails_costs_the_next_reply_nothing() -> None:
+async def test_loops_sharing_an_executor_leave_one_reading_running_however_often_the_loop_reloads() -> None:
+    """/clear and /model reload the loop, a new `LoopModel` each time, but not `system`, whose
+    caches take no lock, nor the `executor` row the loop reads the prompt on: a new loop waits
+    for the reading the last one's stopped reply left running, rather than starting its own
+    beside it. A loop that kept the call in flight itself started one more reading per reload."""
+    held, shared = _Held(), OneAtATime()
+
+    def reloaded(said: str) -> LoopModel:
+        """The loop as the `loop` row builds it again, over the same `system` and `executor`."""
+        return LoopModel(
+            Scripted([text(said)]), Shouting(), MemoryTranscript(), Confined(), system=held, executor=shared
+        )
+
+    try:
+        for n in range(4):
+            task = asyncio.create_task(_collect(reloaded("never"), f"go {n}"))
+            while not held.begun:
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)  # time enough for this reply's own reading to begin, were it to
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert (held.begun, held.running, held.most) == (1, 1, 1)
+    finally:
+        held.release.set()
+    assert await _collect(reloaded("at last"), "go on") == "at last"
+    assert (held.begun, held.most) == (2, 1)  # read afresh, once the one left behind was done
+
+
+async def test_a_stopped_reply_s_reading_that_fails_costs_the_next_reply_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nobody waits for what a reading a stopped reply left running says, nor for what it
+    raised: the next reply reads afresh, and nothing is logged (an error asyncio logged would
+    reach the terminal once the app has let go of it)."""
     held = _Held(failing=1)  # the one left behind fails; the next reads
     loop = LoopModel(Scripted([text("fine")]), Shouting(), MemoryTranscript(), Confined(), system=held)
     task = asyncio.create_task(_collect(loop, "go"))
@@ -960,6 +999,9 @@ async def test_a_stopped_reply_s_reading_that_fails_costs_the_next_reply_nothing
     held.release.set()
     assert await _collect(loop, "again") == "fine"
     assert held.begun == 2
+    del task
+    gc.collect()  # a future whose exception was never retrieved says so as it is collected
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == []
 
 
 def test_a_reading_a_stopped_reply_left_running_does_not_hold_bh_02_open(

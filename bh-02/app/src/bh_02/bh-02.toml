@@ -30,6 +30,15 @@ use = "models:catalog"
 id = "transcript"
 use = "agent:transcript"
 
+# Where the loop reads the prompt (a section function may read many files and search the
+# project) and asks `memory`: off the event loop the app shares, one call at a time. Nothing
+# stops a reading part-way, so one a stopped reply left running is waited for before the next
+# begins. A row of its own that depends on nothing, so /clear and /model, which reload the loop,
+# keep it: Ctrl-C after Ctrl-C leaves one reading running, however often the loop reloads.
+[[plugin]]
+id = "executor"
+use = "agent:executor"
+
 # What the model is told with an input's result: a broker of functions rows add, each given the
 # input's code, its result and the project files it opened (`kernel.touched()`), the loop
 # calling each after every input. The shell hints (an input that ran `cat` or `sed` is told how

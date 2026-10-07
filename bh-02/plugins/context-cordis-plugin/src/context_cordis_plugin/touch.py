@@ -73,8 +73,7 @@ class OnTouch:
         self._system = system
         self._transcript = transcript
         # (file, what was said), told this conversation or checked against what was told before
-        # this began. Called in the loop's worker thread, one input's at a time, so it takes no
-        # lock.
+        # this began. Called on the loop's `executor`, one call at a time, so it takes no lock.
         self._told: set[tuple[str, str]] = set()
         # what the inputs before this began were answered with: None until the first input that
         # opens a file reads them

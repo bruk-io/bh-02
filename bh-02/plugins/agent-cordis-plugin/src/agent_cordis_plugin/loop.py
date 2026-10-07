@@ -1,11 +1,11 @@
 """The loop: a turn is one model step plus the inputs it asked for, until it asks for none.
 
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
-kernel, transcript, system, approval, memory). The model has one tool, the kernel's `python(code)`,
-offered through the provider's standard tool calling; every call runs as an input in the kernel.
-Each input is put to `approval` first and runs only on its yes (at once when the jail confines
-the kernel; otherwise the person's answer): one place for every model provider, and the loop
-knows whether a stopped call ever reached the kernel.
+kernel, transcript, system, approval, memory, executor). The model has one tool, the kernel's
+`python(code)`, offered through the provider's standard tool calling; every call runs as an
+input in the kernel. Each input is put to `approval` first and runs only on its yes (at once
+when the jail confines the kernel; otherwise the person's answer): one place for every model
+provider, and the loop knows whether a stopped call ever reached the kernel.
 
 Every request begins with the system prompt the conversation began with, kept in its transcript,
 so a model server's cache of the conversation stays good. When the prompt reads differently (an
@@ -21,22 +21,21 @@ result and the project files it opened (`kernel.touched()`), and may add a note,
 the result. A path-scoped rule arrives that way when the model first works on a file it covers.
 
 Reading the prompt (every section function, which may read many files and search the project)
-and asking `memory` (which may read rule files) both run in a thread of the loop's own
-(`LoopModel._off_loop`), never on the event loop, which the TUI shares: a slow section freezes
-nothing. One runs at a time, a reading a stopped reply left running included: the next waits for
-it rather than starting beside it, so stopping reply after reply leaves at most one in flight. The
-thread is a daemon's, not the default executor's, which `asyncio.run` and the interpreter join as
-they end: one left running never holds bh-02 open.
+and asking `memory` (which may read rule files) both run on `executor` (`executor.OneAtATime`),
+never on the event loop, which the TUI shares: a slow section freezes nothing. One runs at a
+time, a reading a stopped reply left running included: the next waits for it rather than
+starting beside it. `executor` is a row of its own that depends on nothing, so a loop reloaded
+by `/clear` or `/model` waits for the call the last loop left running too: stopping reply after
+reply leaves at most one in flight, however often the loop reloads between them.
 """
 
 import asyncio
-import contextlib
 import datetime
-import threading
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Iterator, Mapping, Sequence
 from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
+from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.prompt import changes, edits, latest
 from agent_cordis_plugin.stops import ACT, ANSWERED, FEEDBACK, REFUSED, classify
 
@@ -45,6 +44,7 @@ __all__ = [
     "FAILED",
     "STOPPED",
     "Approval",
+    "Executor",
     "Model",
     "LoopModel",
     "Memory",
@@ -69,8 +69,8 @@ class Model(Protocol):
 @runtime_checkable
 class Python(Protocol):
     """What the loop needs of the `kernel` value: the one tool's spec, what to tell the model
-    about it (`instructions()`, called in the loop's own thread with the prompt), and an input
-    run as the model reads it."""
+    about it (`instructions()`, called on `executor` with the prompt), and an input run as the
+    model reads it."""
 
     @property
     def spec(self) -> Json: ...
@@ -85,8 +85,8 @@ type Remember = Callable[[Json], str]
 @runtime_checkable
 class Memory(Protocol):
     """What the loop needs of the `memory` value: the functions that may add a note to an
-    input's result, each called as `fn({"code", "result", "touched"}) -> str`, in the loop's own
-    thread, one input's at a time and never beside a reading of the prompt."""
+    input's result, each called as `fn({"code", "result", "touched"}) -> str`, on `executor`:
+    one input's at a time, and never beside a reading of the prompt."""
 
     def __iter__(self) -> Iterator[Remember]: ...
 
@@ -102,9 +102,18 @@ class Approval(Protocol):
 @runtime_checkable
 class System(Protocol):
     """What the loop needs of the `system` value: what to tell the model about where it is,
-    read in the loop's own thread (it may read many files), one reading at a time."""
+    read on `executor` (it may read many files), one reading at a time."""
 
     def text(self) -> str: ...
+
+
+@runtime_checkable
+class Executor(Protocol):
+    """What the loop needs of the `executor` value: `fn()` run off the event loop, once the call
+    before it has ended, and its result (or what it raised). A caller stopped meanwhile only
+    stops waiting: the call runs to its end, and the next waits for it."""
+
+    async def run[T](self, fn: Callable[[], T]) -> T: ...
 
 
 @runtime_checkable
@@ -153,30 +162,6 @@ def _asked(message: str, today: str | None, note: str) -> dict[str, Any]:
     rides on the entry as `today` too, which is how a later message finds the last one told."""
     told = [*([_DATED.format(today)] if today else []), *([note] if note else []), message]
     return {"role": "user", "content": "\n\n".join(told)} | ({"today": today} if today else {})
-
-
-def _settle(loop: asyncio.AbstractEventLoop, future: asyncio.Future[Any], fn: Callable[[], object]) -> None:
-    """What the thread `LoopModel._off_loop` starts runs: `fn()`, its result or what it raised
-    handed to `future` on `loop` (`call_soon_threadsafe`: only the event loop's thread may set
-    it). An event loop closed meanwhile (bh-02 left while `fn` ran) is told nothing: nobody waits."""
-    result: object = None
-    error: BaseException | None = None
-    try:
-        result = fn()
-    except BaseException as raised:  # handed on as `asyncio.to_thread` would, to whoever awaits
-        error = raised
-    with contextlib.suppress(RuntimeError):  # 'Event loop is closed'
-        loop.call_soon_threadsafe(_settled, future, result, error)
-
-
-def _settled(future: asyncio.Future[Any], result: object, error: BaseException | None) -> None:
-    """`_settle`'s outcome, set on the event loop's own thread."""
-    if future.done():  # only ever awaited shielded, so nothing cancels it; a done one can't be set
-        return
-    if error is not None:
-        future.set_exception(error)
-    else:
-        future.set_result(result)
 
 
 def remembered(memory: Iterable[Remember], input: Json) -> list[str]:
@@ -239,7 +224,7 @@ class LoopModel:
     model would answer it too, doing the stopped work again before the next one.
 
     The system prompt (`system.text()`, then the kernel's instructions) is read before each
-    message the model reads, in a thread of its own, but sent as the conversation began with it: a
+    message the model reads, on `executor`, but sent as the conversation began with it: a
     `system` entry in the transcript, the first one, kept whole. A later reading that differs
     from the last told is kept as another `system` entry, the edits from that one
     (`prompt.edits`), and told on that message (`prompt.changes`), so the conversation's start
@@ -247,6 +232,9 @@ class LoopModel:
     once per change. The date is told on the person's message instead, when the transcript has
     told none yet or another day's (`today`, the clock; a test gives its own): first on that
     message, then any change to the instructions, then the message.
+
+    The prompt is read, and `memory` asked, on `executor` (the `executor` row's, which a reloaded
+    loop shares with the last one); a loop built without one (a test, direct use) makes its own.
     """
 
     def __init__(
@@ -259,6 +247,7 @@ class LoopModel:
         system: System | None = None,
         memory: Memory | None = None,
         today: Callable[[], str] = _today,
+        executor: Executor | None = None,
     ) -> None:
         self._model = model
         self._kernel = kernel
@@ -271,32 +260,10 @@ class LoopModel:
         # what the model was last told (`prompt.latest`), and of how many `system` entries: the
         # transcript keeps a change as edits, so this saves applying them all for every message
         self._last: tuple[int, str | None] = (0, None)
-        # the call `_off_loop` last started, which a stopped reply may have left running
-        self._working: asyncio.Future[Any] | None = None
-
-    async def _off_loop[T](self, fn: Callable[[], T]) -> T:
-        """`fn()` (reading the prompt, asking `memory`) in a thread of its own, off the event
-        loop the TUI shares, and never beside another: a call a stopped reply left running is
-        waited for first, so stopping reply after reply leaves at most one in flight, and the
-        context plugin's caches are never used by two threads at once. Nothing stops a call
-        part-way (a section function can't be): a stop ends the wait for it (shielded), and the
-        call finishes in its thread for the next to wait on, its outcome unused.
-
-        The thread is a daemon's, not the default executor's (`asyncio.to_thread`): `asyncio.run`
-        joins those as bh-02 ends, and the interpreter at exit, so one left running would hold
-        bh-02 open until it finished."""
-        while self._working is not None and not self._working.done():
-            await asyncio.wait([self._working])  # never cancels it, nor raises what it raised
-        loop = asyncio.get_running_loop()
-        working: asyncio.Future[T] = loop.create_future()
-        threading.Thread(
-            target=_settle, args=(loop, working, fn), name="bh-02 agent:loop", daemon=True
-        ).start()
-        self._working = working
-        return await asyncio.shield(working)
+        self._executor: Executor = executor if executor is not None else OneAtATime()
 
     def _prompt(self) -> str:
-        """The system prompt as it reads now. Run in the loop's own thread (`_told`)."""
+        """The system prompt as it reads now. Run on `executor` (`_told`)."""
         parts = [self._system.text() if self._system else "", self._kernel.instructions()]
         return "\n\n".join(part for part in parts if part.strip())
 
@@ -306,11 +273,11 @@ class LoopModel:
         that reads differently from the last told as the edits from it (`prompt.edits`), and
         what changed is returned to go with that message ('' when nothing did).
 
-        The prompt is read in a thread of its own (`_off_loop`), off the event loop the TUI
-        shares, and the transcript is touched only once it has been, so a reply stopped meanwhile
-        changes nothing. One reading runs at a time: one a stopped reply left running finishes,
-        unused, before the next begins."""
-        now = await self._off_loop(self._prompt)
+        The prompt is read on `executor`, off the event loop the TUI shares, and the transcript
+        is touched only once it has been, so a reply stopped meanwhile changes nothing. One
+        reading runs at a time: one a stopped reply left running (this loop's, or the one it
+        reloaded from) finishes, unused, before the next begins."""
+        now = await self._executor.run(self._prompt)
         kept = [m for m in self._transcript.messages if m.get("role") == "system"]
         if len(kept) != self._last[0]:
             # a transcript this loop has not read yet (a resume, a reloaded loop) or one another
@@ -381,7 +348,7 @@ class LoopModel:
                             # the functions `memory` holds now. A stop meanwhile waits for them: each
                             # has marked what it told as told, so the answer must carry it
                             asked = asyncio.ensure_future(
-                                self._off_loop(partial(remembered, tuple(self._memory or ()), ran))
+                                self._executor.run(partial(remembered, tuple(self._memory or ()), ran))
                             )
                             try:
                                 notes = await asyncio.shield(asked)

@@ -1,10 +1,12 @@
 """The rows: the loop, which consumes a model and provides the `loop` value; the transcript;
-`memory`, the broker of what the model is told with an input's result; and `/compact`.
+`memory`, the broker of what the model is told with an input's result; `executor`, where the
+loop reads the prompt and asks `memory`; and `/compact`.
 
 The transcript is its own row so the history outlives the loop: replace the `model` row
 and the loop reloads against the new provider while the conversation carries on. `memory` is
 its own row too, depending on nothing, so neither the loop nor a row adding to it reloads the
-other. `/compact` is a row of its own over the model, the kernel's tool spec, the loader and
+other. So is `executor`, so a reloaded loop keeps the call a stopped reply left running and waits
+for it. `/compact` is a row of its own over the model, the kernel's tool spec, the loader and
 `commands`, and depends on neither the loop nor the transcript, which it restarts.
 """
 
@@ -15,12 +17,23 @@ from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
 from agent_cordis_plugin.compact import SPEC, CompactConfig, Offered, Rows, compact_conversation
-from agent_cordis_plugin.loop import Approval, LoopModel, Memory, Model, Python, Remember, System, Transcript
+from agent_cordis_plugin.executor import OneAtATime
+from agent_cordis_plugin.loop import (
+    Approval,
+    Executor,
+    LoopModel,
+    Memory,
+    Model,
+    Python,
+    Remember,
+    System,
+    Transcript,
+)
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
 from cordis import Effects, acquire, background, bind, component
 from cordis_helpers import Hooks, Job, perform
 
-__all__ = ["LoopConfig", "TranscriptConfig", "compact", "loop", "memory", "transcript"]
+__all__ = ["LoopConfig", "TranscriptConfig", "compact", "executor", "loop", "memory", "transcript"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,24 +65,39 @@ async def loop(
     system: System,
     approval: Approval,
     memory: Memory,
+    executor: Executor,
     config: LoopConfig,
 ) -> Effects:
     """Fills the `loop` row from a raw model: `use = "agent:loop"`. The model's one tool is
     the kernel's `python(code)`; each input runs only on `approval`'s yes (the person's, when
     the jail does not confine the kernel). After each input, the functions in `memory` may add a
-    note to its result. A new ui reloads this row (through `approval`), which holds nothing: the
-    transcript and the kernel's namespace are rows of their own."""
-    yield bind("loop", LoopModel(model, kernel, transcript, approval, config.max_nudges, system, memory))
+    note to its result. The prompt is read, and `memory` asked, on `executor`. A new ui reloads
+    this row (through `approval`), which holds nothing: the transcript, the kernel's namespace
+    and the call in flight on `executor` are rows of their own."""
+    yield bind(
+        "loop",
+        LoopModel(model, kernel, transcript, approval, config.max_nudges, system, memory, executor=executor),
+    )
 
 
 @component(provides=("memory",))
 async def memory() -> Effects:
     """Fills a `memory` row: `use = "agent:memory"`. A broker (CONTRACTS.md: memory): a row
     with something to tell the model about an input `acquire`s `memory.add(fn)`, and the loop
-    calls each `fn({"code", "result", "touched"}) -> str` after every input it runs, in a worker
-    thread. Each adds a note or says nothing ('' ); none changes the result, so they compose in
-    any order."""
+    calls each `fn({"code", "result", "touched"}) -> str` after every input it runs, on
+    `executor`. Each adds a note or says nothing ('' ); none changes the result, so they compose
+    in any order."""
     yield bind("memory", Hooks[Remember]())
+
+
+@component(provides=("executor",))
+async def executor() -> Effects:
+    """Fills an `executor` row: `use = "agent:executor"`. Where the loop reads the prompt and
+    asks `memory` (CONTRACTS.md: executor): off the event loop, in a daemon thread, one call at
+    a time, a call a stopped reply left running waited for before the next begins. It depends
+    on nothing, so a loop reloaded by `/clear` or `/model` keeps it, and waits for that call
+    rather than starting beside it."""
+    yield bind("executor", OneAtATime())
 
 
 @runtime_checkable

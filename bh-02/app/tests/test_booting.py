@@ -47,6 +47,11 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     assert rows["model"].use == "models:model" and rows["models"].use == "models:catalog"
     assert "completion" not in rows
     assert rows["transcript"].use == "agent:transcript"
+    # the loop reads the prompt and asks `memory` on `executor`, a row that depends on nothing,
+    # so /clear and /model, which reload the loop, keep the call a stopped reply left running
+    assert rows["executor"].use == "agent:executor"
+    assert resolve(rows["executor"].use or "").inject == set()
+    assert "executor" in resolve(rows["loop"].use or "").inject
     assert resolve(rows["kernel"].use or "").name == "kernel"  # CodeAct, whichever model
     # one row decides whether the model's code runs unasked, for the loop and the extensions
     # both; it depends on the jail and the ui, never the kernel, so /clear leaves it up
@@ -219,6 +224,49 @@ async def test_a_session_carries_on_when_its_loop_row_is_reloaded(
     fragile.SECOND.set()
     await asyncio.wait_for(session, 5)
     assert fragile.SHOWN == ["one", "TWO"]  # the second message went to the new model
+
+
+async def test_stopping_replies_with_a_clear_or_a_model_switch_between_leaves_one_reading_running(
+    composition: Callable[..., Path],
+) -> None:
+    """Ctrl-C while a slow section function reads the project, then /clear (or /model), again
+    and again, in the shipped composition: a reading can't be stopped part-way, and /clear and
+    /model reload the loop but not `system`, whose caches take no lock. The call in flight is
+    the `executor` row's, which depends on nothing, so each new loop waits for the reading the
+    last one left running. A loop that kept it itself started one more reading per round."""
+    patch = composition(
+        '[[plugin]]\nid = "model"\nuse = "fragile:counting_model"\n'
+        '[[plugin]]\nid = "system"\nuse = "fragile:held_system"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:silent_ui"\n'
+    )
+    booted = await boot([*(str(x) for x in layers()), patch], watch=None)
+    import fragile
+
+    held = fragile.HELD
+    try:
+        try:
+            for n, reload in enumerate(
+                [("model",), ("loop", "transcript"), ("model",), ("loop", "transcript")]
+            ):
+                await booted.runtime.settle()
+                reply = booted.runtime.root.get("loop").reply(f"go {n}")
+                task = asyncio.create_task(anext(reply))
+                async with asyncio.timeout(5):
+                    while not held.begun:
+                        await asyncio.sleep(0.01)
+                await asyncio.sleep(0.05)  # time enough for this reply's own reading to begin, were it to
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                await booted.loader.restart(*reload)  # what /clear and /model do to the loop
+            assert (held.begun, held.running, held.most) == (1, 1, 1)
+        finally:
+            held.release.set()
+        await booted.runtime.settle()
+        said = [e async for e in booted.runtime.root.get("loop").reply("go on")]
+        assert {"type": "text", "text": "seen 1"} in said  # a new conversation, answered
+        assert (held.begun, held.most) == (2, 1)  # read afresh, once the one left behind was done
+    finally:
+        await booted.runtime.shutdown()
 
 
 async def test_slash_commands_act_on_the_running_session(composition: Callable[..., Path]) -> None:

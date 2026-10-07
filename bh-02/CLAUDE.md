@@ -131,12 +131,14 @@ first on the person's message, the first of a conversation and of each day
 (`(Today's date: ...)`, the entry's `today` field saying which it told, so a resume does not
 tell it again and `/clear` and `/compact` do). So the prompt reads the same from day to day,
 and a local model server that keeps its prompt cache can reuse a new session's start. The
-prompt is read, and `memory` asked, in a thread of the loop's own, never on the event loop the
+prompt is read, and `memory` asked, on `executor` (`agent:executor`), never on the event loop the
 TUI shares: a section function may read many files and search the project, and must not need the
 event loop. One runs at a time: nothing stops one part-way, so a reading a stopped reply left
-running is waited for before the next begins (Ctrl-C after Ctrl-C leaves at most one in flight),
-and the thread is a daemon's, not the default executor's, which `asyncio.run` and the
-interpreter join as they end, so one left running never holds bh-02 open. The claude-code provider
+running is waited for before the next begins. `executor` is a row of its own that depends on
+nothing, so `/clear` and `/model`, which reload the loop but not `system` (whose caches take no
+lock), keep the call in flight: Ctrl-C after Ctrl-C leaves at most one, however often the loop
+reloads between. Each call's thread is a daemon's, not the default executor's, which
+`asyncio.run` and the interpreter join as they end, so one left running never holds bh-02 open. The claude-code provider
 adds a note that Claude Code's own opening line and its `mcp__bh__` tool names don't mean the
 model is in Claude Code.
 `/compact` (`agent:compact`, a row of its own over `model`, the kernel's `spec`, the loader and

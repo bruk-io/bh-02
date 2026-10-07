@@ -37,13 +37,17 @@ before it reloaded) it reads from the transcript once, at the first input that o
 text a `tool` entry holds whole after its result is told already, so a resume does not tell it
 again; one cut short there, or changed since, is told.
 
-`agent:loop` calls `text()` in a worker thread, off the event loop the TUI runs on, one call at
-a time, so a section function that reads many files or searches a large project freezes nothing;
-it runs in that thread too, and must not need the event loop. So do the `on_touch` functions
-(`context:on_touch` is a `memory` function, which the loop calls the same way, and it calls
-`touched()` there). The loop awaits each before the next, so the one set of caches of what was
-read and searched, which `text()` and `touched()` share, is used by one thread at a time and
-takes no lock.
+`agent:loop` calls `text()` on its `executor` (`agent:executor`), in a thread off the event loop
+the TUI runs on, one call at a time, so a section function that reads many files or searches a
+large project freezes nothing; it runs in that thread too, and must not need the event loop. So
+do the `on_touch` functions (`context:on_touch` is a `memory` function, which the loop calls the
+same way, and it calls `touched()` there). `executor` waits for each call to end before the next
+begins, a reading a stopped reply left running included, and it is a row of its own that
+`/clear` and `/model` don't reload, as `system` is, so the one set of caches of what was read
+and searched, which `text()` and `touched()` share, is used by one thread at a time and takes no
+lock. Only a new `executor` (its row restarted, or replaced by a layer) can start a call beside
+one the last left running; the caches' changes are single dict operations, so the worst that
+costs is a file read or a search done twice.
 
 ## Context files
 

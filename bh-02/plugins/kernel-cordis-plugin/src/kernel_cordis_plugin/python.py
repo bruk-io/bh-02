@@ -293,8 +293,8 @@ class ShellHints:
     def __init__(self, transcript: Transcript) -> None:
         self._transcript = transcript
         # the kinds of work the model has been told Python does; None until the first input reads
-        # them from the transcript. Called in the loop's worker thread, one input's at a time, so
-        # it takes no lock.
+        # them from the transcript. Called on the loop's `executor`, one call at a time, so it
+        # takes no lock.
         self._told: set[str] | None = None
 
     def __call__(self, input: Mapping[str, Any]) -> str:

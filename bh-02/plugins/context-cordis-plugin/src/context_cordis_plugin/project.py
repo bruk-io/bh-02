@@ -11,9 +11,9 @@ person's message instead.
 It is also a broker (paper 6.2): a row with something to tell the model `acquire`s a section
 (`add`), read with the rest each time, and its remover takes it out again when the row leaves.
 
-`agent:loop` calls `text()` in a worker thread, off the event loop, one call at a time; so a
-section function (a context file's, or one a row adds) runs there too and must not need the
-event loop. `touched()` is what the context files' `on_touch` sections say about the files an
+`agent:loop` calls `text()` on its `executor`, in a thread off the event loop, one call at a
+time; so a section function (a context file's, or one a row adds) runs there too and must not
+need the event loop. `touched()` is what the context files' `on_touch` sections say about the files an
 input opened, from the same context files: the on-touch row (`touch.OnTouch`, a `memory`
 function the loop calls in a worker thread too) asks it, so a layer's `files`, `root` and `home`
 reach both and each file is read and searched once.
@@ -88,8 +88,8 @@ class ProjectContext:
         # One `ContextFiles` for the prompt (`text`) and the on-touch row (`touched`), so both
         # read the same context files and share what was read and searched. Its caches take no
         # lock: it is used by one thread at a time, since the loop reads the prompt and asks
-        # `memory` (where the on-touch row calls `touched`) each in a worker thread and awaits
-        # each before the next (`ContextFiles` says what a stopped reply may leave running).
+        # `memory` (where the on-touch row calls `touched`) each on its `executor`, one call at a
+        # time across the loop's reloads (`ContextFiles` says when two may overlap).
         self._files = ContextFiles(config.files, config.max_chars)
 
     def add(self, section: Callable[[], str]) -> Callable[[], None]:
