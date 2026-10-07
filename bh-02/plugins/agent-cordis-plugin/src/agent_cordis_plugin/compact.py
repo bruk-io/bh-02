@@ -356,7 +356,8 @@ async def compact_conversation(
     except Unchanged as why:
         return str(why)
     try:
-        messages = FileTranscript(path).messages
+        # in a thread: a long session's file takes a while to parse, and the TUI shares this loop
+        messages = await asyncio.to_thread(lambda: FileTranscript(path).messages)
     except (OSError, ValueError) as error:
         return (
             f"the conversation in {path} can't be read ({error}), so nothing changed; it is the "
@@ -372,6 +373,9 @@ async def compact_conversation(
     if worker.done():  # the row restarted meanwhile: nothing would run the restart
         return _unchanged(f"the compact row restarted while the model wrote the summary, {_AGAIN}", usage)
     try:
+        # on the loop, not in a thread: from the rewrite to queueing the restart nothing may
+        # cancel it (the person leaving), or the file would hold the new conversation and the
+        # ui's history the old; the seed is small, and copying the old file to its backup is fast
         backup = rewrite(path, seeded(summary))
     except OSError as error:
         return _unchanged(

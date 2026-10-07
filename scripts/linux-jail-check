@@ -36,6 +36,7 @@ The suite runs as that unprivileged user, not root: root ignores permission bits
 the tests expect would pass for the wrong reason, and bh-02 is not run as root.
 """
 
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -110,7 +111,7 @@ def main(line: str | None, pytest_args: tuple[str, ...]) -> None:
     click.echo(click.style(f"== image {IMAGE} (ubuntu 24.04, bubblewrap, uv, Python 3.15)", bold=True))
     subprocess.run([DOCKER, "build", "-q", "-t", IMAGE, "-"], input=DOCKERFILE.encode(), check=True)
     if line is None:
-        line = f"uv run --locked pytest {' '.join(pytest_args)}" if pytest_args else DEFAULT
+        line = f"uv run --locked pytest {shlex.join(pytest_args)}" if pytest_args else DEFAULT
     script = (
         "set -euo pipefail; tar -xf - -C /work; /usr/bin/bwrap --version; uv --version;"
         f" uv sync --locked --all-packages --quiet; uv run python -VV; {line}"
