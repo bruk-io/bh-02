@@ -35,9 +35,10 @@ use = "agent:transcript"
 # calling each after every input. The shell hints (an input that ran `cat` or `sed` is told how
 # Python does that here) and the context files' on-touch sections (a subdirectory's AGENTS.md or
 # CLAUDE.md, a rule for some files, given when an input first opens a file they cover) add to
-# it, each depending on `transcript`, so a new conversation (/clear) is told afresh. The on-touch
-# row asks `system` what the context files say, so it has no config: set `root`, `home` or
-# `files` on the `system` row and they hold for both.
+# it, each depending on `transcript`, so a new conversation (/clear) is told afresh and a resumed
+# one is not told again what its transcript holds. The on-touch row asks `system` what the
+# context files say, so it has no config: set `root`, `home` or `files` on the `system` row and
+# they hold for both.
 [[plugin]]
 id = "memory"
 use = "agent:memory"

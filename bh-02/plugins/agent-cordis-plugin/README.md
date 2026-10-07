@@ -30,7 +30,9 @@ added them in means nothing; one that fails says so in one line). The person see
 own output as the result, and a `note` for each memory note, by its first line. `memory` is a
 row of its own, depending on nothing, so neither the loop nor a row adding to it reloads the
 other; the rows that add to it (`kernel:shell_hints`, `context:on_touch`) depend on
-`transcript`, so `/clear` starts them afresh and they tell a new conversation again.
+`transcript`, so `/clear` starts them afresh and they tell a new conversation again; they read
+its `messages` too, so a resumed one is not told again what a `tool` entry holds after its
+result.
 
 Each turn is classified by `stops.classify` (pure; the table is in its docstring, after
 ../harness/ARCHITECTURE.MD): only `act` runs calls, only `answered` ends the reply, and a

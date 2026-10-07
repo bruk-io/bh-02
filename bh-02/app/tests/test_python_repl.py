@@ -915,3 +915,51 @@ async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes
     opening = json.dumps(kept[0]["content"].split("\n\n")[0])[1:-1]  # who the model is, as the file has it
     assert history.read_text().count(opening) == 1
     assert [kept[0]["content"]] == fragile.SYSTEM  # the resumed run's last request began as the first did
+
+
+async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_them_afresh(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The shipped `memory` rows over a session's transcript file. The first run's inputs are told
+    the guidance and the rule for src/db and a shell hint; a resumed run (the same file, read back:
+    `--resume`) whose inputs open that file and read through a shell again is told none of them;
+    after /clear (the file emptied and the rows started afresh, as the session layer has it) the
+    same inputs are told them again."""
+    project, home = tmp_path / "project", tmp_path / "home"
+    (project / "src" / "db").mkdir(parents=True)
+    (project / ".claude" / "rules").mkdir(parents=True)
+    home.mkdir()
+    (project / "src" / "db" / "models.py").write_text("X = 1\n")
+    (project / "src" / "db" / "CLAUDE.md").write_text("Use the session.")
+    (project / ".claude" / "rules" / "db.md").write_text("---\npaths: src/db/**\n---\nMigrations by hand.")
+    history = tmp_path / "transcript.jsonl"
+    opens = "len(open('src/db/models.py').read())"
+    cats = "import subprocess; subprocess.run(['cat', 'src/db/models.py'], capture_output=True).returncode"
+    session = (
+        f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+        f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+    )
+    first = _inputs(composition, opens, cats, extra=session)
+    _answers(True, True)
+    await run([*layers(), first], [Row("chat", config={"prompt": "go"})])
+    told = _shown()
+    assert "[0] 6\n\nFrom src/db/CLAUDE.md, guidance for work under src/db/" in told
+    assert "Migrations by hand.\n[1] 0\n\n(this input ran `cat` through a shell." in told
+
+    import fragile
+
+    fragile.SHOWN.clear()
+    code = json.dumps([opens, cats, opens, cats])
+    resumed = composition(
+        f'[[plugin]]\nid = "model"\nuse = "fragile:input_model"\nconfig = {{ code = {code} }}\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n'
+        f'[[plugin]]\nid = "operator"\nconfig = {{ forget = ["{history}"] }}\n' + session
+    )
+    fragile.script("go", "/clear", "go")
+    _answers(*[True] * 6)
+    await asyncio.wait_for(run([*layers(), resumed]), 30)
+    again, afresh = fragile.SHOWN
+    assert again.startswith(told) and again.endswith("\n[2] 6\n[3] 0\n"), again  # resumed: none again
+    assert afresh.startswith(told) and afresh.endswith("\n[2] 6\n[3] 0\n"), afresh  # /clear: told afresh
+    assert "the conversation was cleared; starting afresh: loop, transcript, kernel" in fragile.NOTES

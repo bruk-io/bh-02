@@ -1,6 +1,6 @@
 """The on-touch row: what the context files' `on_touch` sections say about the files an input
-opened, told with its result, each once a conversation. The context files are the `system`
-value's (`ProjectContext.touched`)."""
+opened, told with its result, each once a conversation, a resumed one too. The context files are
+the `system` value's (`ProjectContext.touched`)."""
 
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -8,11 +8,24 @@ from typing import Any
 
 import pytest
 
-from context_cordis_plugin import ContextConfig, OnTouch, ProjectContext, System, on_touch, parse
+from context_cordis_plugin import ContextConfig, OnTouch, ProjectContext, System, Transcript, on_touch, parse
 from cordis.testing import drive
 from cordis_helpers import Hooks
 
 _OWN = "context_cordis_plugin.sections:"
+
+
+class _Kept:
+    """A `transcript` value over the messages given, counting how often they are read."""
+
+    def __init__(self, *messages: Mapping[str, Any]) -> None:
+        self._messages = messages
+        self.reads = 0
+
+    @property
+    def messages(self) -> tuple[Mapping[str, Any], ...]:
+        self.reads += 1
+        return self._messages
 
 
 def _write(path: Path, text: str) -> Path:
@@ -26,7 +39,7 @@ def _project(tmp_path: Path, **config: Any) -> tuple[OnTouch, Path, Path]:
     home.mkdir()
     root.mkdir()
     system = ProjectContext(ContextConfig(root=str(root), home=str(home), **config))
-    return OnTouch(system), root.resolve(), home
+    return OnTouch(system, _Kept()), root.resolve(), home
 
 
 def test_a_file_opened_brings_the_guidance_and_rules_for_it_once(tmp_path: Path) -> None:
@@ -102,9 +115,9 @@ def test_the_context_files_the_system_row_names_reach_it(tmp_path: Path) -> None
     )
     _write(root / "docs/GUIDE.md", "Docs guidance.")
     opened = {"touched": (str(root.resolve() / "docs/x.md"),)}
-    assert OnTouch(ProjectContext(ContextConfig(root=str(root), home=str(home))))(opened) == ""
+    assert OnTouch(ProjectContext(ContextConfig(root=str(root), home=str(home))), _Kept())(opened) == ""
     system = ProjectContext(ContextConfig(root=str(root), home=str(home), files=("~/team.toml",)))
-    assert OnTouch(system)(opened).endswith(
+    assert OnTouch(system, _Kept())(opened).endswith(
         "work under docs/, where it wins over the guidance before it:\n\nDocs guidance."
     )
     assert system.text().endswith("Files to read when they bear on your work: docs/GUIDE.md.")
@@ -125,16 +138,42 @@ class _Said:
 def test_it_asks_the_system_value_and_tells_each_once() -> None:
     system = _Said(("/p/a.md", "A."), ("/p/b.md", "B."), ("/p/a.md", "A."))
     assert isinstance(system, System)
-    told = OnTouch(system)
+    told = OnTouch(system, _Kept())
     assert told({"touched": (Path("/p/src/x.py"),)}) == "A.\n\nB."  # each once, in order
     assert system.asked == [["/p/src/x.py"]]  # as text, as it crosses to another plugin
     assert told({"touched": ("/p/src/y.py",)}) == ""
     assert told({"code": "1"}) == "" and len(system.asked) == 2  # nothing opened: nothing asked
 
 
+def test_a_resumed_conversation_is_not_told_again_what_its_transcript_was_told() -> None:
+    """A resumed session (or the row reloaded) starts a new `OnTouch`, but the transcript holds
+    what the model was told: a text whole after a result there is told already. One the person
+    quoted, one a result begins with (an input printed it), one cut short and one that changed
+    since were not, so each is told. The transcript is read once, at the first input that opens
+    a file; an empty one (a new conversation, after /clear) tells each afresh."""
+    rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand.\n\nNever by script."
+    guide = "From src/db/CLAUDE.md, guidance for work under src/db/:\n\nUse the session."
+    long, quoted, printed = "From long.md:\n\n" + "L" * 30, "From q.md:\n\nQ.", "From p.md:\n\nP."
+    transcript = _Kept(
+        {"role": "user", "content": f"what is this?\n\n{quoted}"},
+        {"role": "tool", "content": f"6\n\n{guide}\n\n{rule}", "call_id": "c0"},
+        {"role": "tool", "content": f"{printed}\n\n(this input ran `cat` ...)", "call_id": "c1"},
+        {"role": "tool", "content": f"0\n\n{long[:20]}\n... [12 more chars of guidance]", "call_id": "c2"},
+    )
+    assert isinstance(transcript, Transcript)
+    changed = rule.replace("by hand", "by the tool")
+    said = [(f"/p/{n}.md", text) for n, text in enumerate((guide, rule, long, quoted, printed, changed))]
+    told = OnTouch(_Said(*said), transcript)
+    assert told({"code": "1"}) == "" and transcript.reads == 0  # nothing opened: nothing read
+    assert told({"touched": ("/p/src/db/x.py",)}) == "\n\n".join((long, quoted, printed, changed))
+    assert told({"touched": ("/p/src/db/y.py",)}) == "" and transcript.reads == 1
+    afresh = OnTouch(_Said(*said), _Kept())
+    assert afresh({"touched": ("/p/src/db/x.py",)}) == "\n\n".join(text for _, text in said)
+
+
 async def test_the_row_adds_its_function_to_memory(tmp_path: Path) -> None:
     memory: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
     system = ProjectContext(ContextConfig(root=str(tmp_path), home=str(tmp_path)))
-    effects = await drive(on_touch(system=system, memory=memory, transcript=object()))
+    effects = await drive(on_touch(system=system, memory=memory, transcript=_Kept()))
     assert [e.name for e in effects] == ["acquire"]
     assert effects[0].args[0] == memory.add and isinstance(effects[0].args[1], OnTouch)
