@@ -1,7 +1,8 @@
-project_name: "Bruk Habtus Harness"
+project_name: "Bruk Habtu's Harness"
 default_status: "To Do"
 statuses: ["To Do", "In Progress", "Done"]
 labels: []
+milestones: []
 date_format: yyyy-mm-dd
 max_column_width: 20
 auto_open_browser: true
@@ -12,4 +13,3 @@ zero_padded_ids: 4
 bypass_git_hooks: true
 check_active_branches: true
 active_branch_days: 30
-task_prefix: "task"
