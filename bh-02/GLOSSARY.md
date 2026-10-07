@@ -38,7 +38,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **model** (row and key), **the model row**: the model itself, one step at a time (`models:model`), the one its `default` names. `/model NAME` switches it by name; `--model NAME` picks it at launch. An earlier bh-02 called it `completion`.
 - **named model**: a name the model row can take, with its provider and id: the built-ins `sonnet`, `opus` and `haiku`, and yours in the models file.
 - **model provider** (a model's `provider` field): what reaches a model: `claude-code` (Claude through Claude Code, on the subscription) or `openai` (any OpenAI-compatible endpoint: OpenAI, OpenRouter, Groq, Ollama's `/v1`, ...). The status bar shows it after the model's name.
-- **models file**: `~/.config/bh-02/models.toml` (`$XDG_CONFIG_HOME/bh-02/models.toml`): your models, one table each (`provider`, `id`, `base_url`, and `key`, the name of a `local.env` line). `/model` lists them.
+- **models file**: `~/.config/bh-02/models.toml` (`$XDG_CONFIG_HOME/bh-02/models.toml`): your models, one table each (`provider`, `id`, `base_url`, and `key`, the name of a `local.env` line other than `CLAUDE_CODE_OAUTH_TOKEN`). `/model` lists them. It must be outside the project (not a link into it): one in it, which the model's code could write, is not read, and `/model` says why.
 - **models** (row and key): `models:catalog`: the models there are and which one the model row names, for `/model` and the status bar.
 - **step**: one call to the model: it answers, or asks for inputs to run. A turn is one step or more.
 - **nudge**: the loop telling the model why its last step didn't count (cut off, silent, unreadable), a bounded number of times.

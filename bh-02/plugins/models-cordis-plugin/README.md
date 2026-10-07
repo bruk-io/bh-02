@@ -5,7 +5,7 @@ bh-02's model: named models over their providers, switched by name. Two rows:
 | Row | Binds | Consumes |
 |---|---|---|
 | `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | |
-| `models:catalog` | `models`: the models there are, the one the model row names now, and why a name can't be switched to (CONTRACTS.md: models) | `loader` |
+| `models:catalog` | `models`: the models there are, the one the model row names now, why a name can't be switched to, and why the models file is not read (CONTRACTS.md: models) | `loader` |
 
 The model row's config (`ModelConfig`):
 - `default`: the model's name, `sonnet` unless a layer says another; `--model` and `/model` set it.
@@ -13,7 +13,8 @@ The model row's config (`ModelConfig`):
 - `extra`: models of the row's own, one table per name as in the file (a migrated layer
   writes one: an old Ollama row is an `extra` OpenAI-compatible model).
 - `state`, `env_file`, `cwd`: the claude-code provider's (below). `env_file` is also where the
-  openai provider reads a model's key.
+  openai provider reads a model's key, and a models file must be outside `cwd` as well as the
+  working directory (below).
 
 ## Named models
 
@@ -50,9 +51,10 @@ provider or setting, no id, no `base_url` or one that is not an http(s) URL with
 numeric port (a malformed one is that model's problem alone, never the catalog's), a row
 `extra` that is not one table per model or a `default` that is not a name, a `key` that is not the
 name of a line (capitals, digits and `_`: a value that isn't one may be the key itself, so it
-is never quoted back), a `max_tokens` or `temperature` of the wrong type (`ModelsError(kind, message)`,
-CONTRACTS.md: Errors). Each step raises it (`Unusable`), so a typo in the models file is a
-message in the conversation, and `/model` another model fixes it. `/model NAME` checks first
+is never quoted back) or that names `CLAUDE_CODE_OAUTH_TOKEN` (below), a `max_tokens` or
+`temperature` of the wrong type (`ModelsError(kind, message)`, CONTRACTS.md: Errors). Each step
+raises it (`Unusable`), so a typo in the models file is a message in the conversation, and
+`/model` another model fixes it. `/model NAME` checks first
 (`models.check`), so it never switches to one. The models file is read when the model row
 starts and each time `models` is asked, never watched: an edit takes effect at the next
 `/model` or launch (`/restart model` for the model already chosen).
@@ -62,6 +64,26 @@ its own). It is there for tests: bh-02's fakes (`bh_02.testing:echo_provider`) a
 this kind, so a real launch switches between a fake and any other model under this row. It
 imports whatever module the models file names, so name only code you trust. A factory that
 can't be imported, or raises, is a model that can't be used, like any other (`Unusable`).
+
+**The models file must be outside the project.** It is trusted whole: a factory it names runs
+in bh-02's own, unjailed process, and a `key` it names is read from local.env and sent to the
+table's `base_url`. The project is the working directory, which the jail lets the model's code
+write (the kernel's root), and the model row's `cwd` too when a layer sets one. A models file in
+it would let the model choose both, so it is not read (`providers.refused`, `named.in_project`),
+however it got there: bh-02 run from the home directory (`~/.config` is then in the project),
+`$XDG_CONFIG_HOME` or the row's `models` in the project, or a link into it. It counts as the
+project's when the file as named, or any place reading it goes through (each directory and link
+on the way, links followed, to where it ends), is under the project's root as named or as
+resolved: the model could repoint a link there, or swap a directory there for one, and so choose
+what is read. Whether the file is there does not matter (the model could write one). The
+built-ins and the row's `extra` still work; the reason is said where the models file's problems
+are: `models.problem`, which `/model` shows in place of where to add models, and the error of a
+name only that file could have named (`/model NAME`, and each step of a model row whose
+`default` is one).
+
+**A key never names the Claude Code token.** Wherever an `openai` table comes from, a `key` of
+`CLAUDE_CODE_OAUTH_TOKEN` is that model's problem (`named.withheld`), and the request refuses it
+again before it reads local.env (`authorization`): that token is the Claude Code CLI's alone.
 
 `models` (`catalog.py`) reads the model row's config from the loader's entries and the models
 file each time it is asked, and depends on the loader alone: `/model` (the operator) and the
@@ -278,6 +300,11 @@ Bump the pin deliberately, and run the e2e tests.
 ## Tests
 
 - `test_named_models.py`, `test_openai_wire.py` and `test_claude_code_{credential,stream,reconcile,records}.py` are pure.
+- `test_models_file_trust.py`, on files and links in temporary directories: a models file in
+  the project as named, through `$XDG_CONFIG_HOME`, from the home directory, a link to one in
+  it, a directory on its path linked into it and a link in it on the way out are not read (the
+  built-ins and `extra` still are, and the catalog, `/model NAME` and the step say why); one
+  outside is read; a key naming the Claude Code token is refused and nothing reaches the server.
 - `test_models_wiring.py` drives the rows by hand: the named model's provider, entered; a
   model that can't be used, binding anyway; a factory provider; the catalog.
 - `test_openai_stub.py` runs the openai provider against `openai.testing.StubServer`, a

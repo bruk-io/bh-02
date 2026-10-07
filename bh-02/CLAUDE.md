@@ -173,10 +173,17 @@ file (`$XDG_CONFIG_HOME/bh-02/models.toml`, else `~/.config/bh-02/models.toml`) 
 `extra` add more, one table each: `provider`, `id`, and for `openai` (any OpenAI-compatible
 `/chat/completions`: OpenAI, OpenRouter, Groq, Ollama's `/v1`, ...) `base_url` and an optional
 `key`, the name of a `local.env` line the provider reads per request and sends only as the
-`Authorization` header. A model that can't be used binds anyway and each step says what is
-wrong. `models:catalog` binds `models` (the models there are, and which one the row names),
-depending on the loader alone, so `/model` (the operator) and the status bar depend on it and
-never reload with a switch. The models plugin's README has the providers' details.
+`Authorization` header (never `CLAUDE_CODE_OAUTH_TOKEN`: a model whose key names it is refused,
+and so is its request). The models file is trusted whole (a `module:attribute` provider runs in
+bh-02's process; a key goes to its `base_url`), so one in the project (the working directory,
+and the model row's `cwd` if set), as named or anywhere its links lead, is not read: the
+model's code can write there (bh-02 run from the home directory, `$XDG_CONFIG_HOME` in the
+project, a link into it). The built-ins and `extra` still work, and `models.problem`, `/model`
+and the error of a name only that file could name say why and where the file must be instead.
+A model that can't be used binds anyway and each step says what is wrong. `models:catalog`
+binds `models` (the models there are, and which one the row names), depending on the loader
+alone, so `/model` (the operator) and the status bar depend on it and never reload with a
+switch. The models plugin's README has the providers' details.
 
 **The Claude provider.** Claude is the `claude-code` provider (`models_cordis_plugin.claude_code`):
 Claude through Claude Code (the Claude Agent SDK), which is the subscription's sanctioned route.

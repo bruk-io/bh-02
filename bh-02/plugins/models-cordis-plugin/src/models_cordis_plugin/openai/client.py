@@ -4,7 +4,8 @@ Each step is one streamed POST to `<base_url>/chat/completions` (`wire.py` build
 folds what comes back). A model's `key` names a line of `local.env`, read when a request is
 made and put only in that request's `Authorization` header: never in an environment, never in
 anything whose repr shows it, and taken out of anything the server says back before an error
-quotes it. A model with no key sends none (a local server). Usage is asked for
+quotes it. A model with no key sends none (a local server), and one whose key names the Claude
+Code token sends nothing at all (`named.withheld`: that is the CLI's alone). Usage is asked for
 (`stream_options`) until the server refuses a step for it; that step is sent again without it,
 and so is every later one. Closing the step (the person stopped the reply) closes the HTTP
 stream with it.
@@ -20,7 +21,7 @@ from typing import Any, Final
 import httpx2
 
 from models_cordis_plugin.local_env import ENV_FILE, parse_env, token_file
-from models_cordis_plugin.named import ModelsError, Named, key_name
+from models_cordis_plugin.named import ModelsError, Named, key_name, withheld
 from models_cordis_plugin.openai.wire import (
     Fold,
     Where,
@@ -64,6 +65,8 @@ def authorization(named: Named, env_file: str | None) -> dict[str, str]:
             f"model {named.name!r}: key must name a line of local.env (like OPENAI_API_KEY), not hold "
             "the key itself; move the key into local.env and name that line",
         )
+    if (why := withheld(named)) is not None:  # `named.problem` says so first; this is the last wall
+        raise ModelsError("model_config", why)
     path = token_file(env_file)
     # read into the header at once: no local of this frame holds the key (a crash prints locals)
     headers["Authorization"] = "Bearer " + (

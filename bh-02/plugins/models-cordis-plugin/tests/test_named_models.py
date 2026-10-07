@@ -224,6 +224,7 @@ def test_a_malformed_base_url_in_the_file_is_one_model_s_problem_not_the_catalog
         ({"extra": {"x": "notatable"}}, "the model row's extra: 'x' is not a table; each model is one"),
         ({"extra": "x"}, "the model row's extra is str, not a table of models"),
         ({"default": 5}, "the model row's default is 5, not a model's name"),
+        ({"cwd": 5}, "the model row's cwd is 5, not a directory"),
     ],
 )
 def test_a_row_config_of_the_wrong_shape_is_a_models_error_saying_what_to_fix(

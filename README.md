@@ -113,7 +113,9 @@ the project, but it can't reach the network, read credentials, or touch what cou
 Ctrl-C stops a reply, Ctrl-P opens the command palette, `bh-02 --resume` continues a session.
 
 `sonnet`, `opus` and `haiku` are built in. Add any OpenAI-compatible model (OpenAI, OpenRouter,
-Groq, vLLM, LM Studio, Ollama, ...) to `~/.config/bh-02/models.toml`, then `/model NAME`:
+Groq, vLLM, LM Studio, Ollama, ...) to `~/.config/bh-02/models.toml`, then `/model NAME`.
+That file must be outside the project bh-02 runs in, where the model's code can't write it:
+one inside it (bh-02 run from your home directory, say) is not read, and `/model` says why.
 
 ```toml
 [qwen]

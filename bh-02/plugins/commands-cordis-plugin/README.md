@@ -21,7 +21,8 @@ event), so the ui drops the old conversation from its screen, then a note saying
 
 `/model` lists the models (the `models` value: the built-ins, the models file's, the model
 row's own), the one the model row names marked `●`, each with its provider and id, and says
-where the models file is. `/model NAME` switches by name, across providers: it asks
+where the models file is, or, when it is in the project and so not read (`models.problem`),
+why and where it must be instead. `/model NAME` switches by name, across providers: it asks
 `models.check(NAME)` first, so a name that is no model, or a model whose table has a problem,
 is said and changes nothing; then it names NAME as the model row's `default` in the session's
 layer (`layer`, on the row `model_row`) with cordis's `read_layer`/`format_layer` and queues a

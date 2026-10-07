@@ -237,14 +237,19 @@ exclude = [
     "models_cordis_plugin.claude_code.detach:main",
     # the models file and the environment that says where it is, read when a model is chosen
     "models_cordis_plugin.named:read_models", "models_cordis_plugin.named:environ",
+    # whether the models file is in the project, which the model can write (then it is not read):
+    # the project's root resolved, and the file's links followed, each time before it is read
+    "models_cordis_plugin.named:in_project", "models_cordis_plugin.providers:refused",
     # the model row reads the models file when it starts (`known`), and the `models` value reads
     # it again each time it is asked, so a /model or the status bar never sees a stale one
     "models_cordis_plugin.providers:known", "models_cordis_plugin.providers:resolved",
     "models_cordis_plugin.providers:opened",
-    # the `models` value: each answer reads the models file afresh (through `known`); the rest
-    # of the catalog (`_config`, `_entry`, `_listed`) stays gated
+    # the `models` value: each answer reads the models file afresh (through `known`), or asks
+    # whether it is in the project (`problem`); the rest of the catalog (`_config`, `_entry`,
+    # `_listed`) stays gated
     "models_cordis_plugin.catalog:Catalog.path", "models_cordis_plugin.catalog:Catalog.listed",
     "models_cordis_plugin.catalog:Catalog.current", "models_cordis_plugin.catalog:Catalog.check",
+    "models_cordis_plugin.catalog:Catalog.problem",
     # an OpenAI-compatible model: one streamed HTTP call per step, and its key read from local.env
     "models_cordis_plugin.openai.client:authorization",
     "models_cordis_plugin.openai.client:missing_key",  # /model looks for the key's line, reads no value out

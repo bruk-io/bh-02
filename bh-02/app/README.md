@@ -81,8 +81,11 @@ key = "OPENROUTER_API_KEY"                # a line of local.env: OPENROUTER_API_
 `/model` lists them, the current one marked, and the palette offers `/model NAME` for each;
 the status bar shows `model: NAME (provider)`. A model's `key` is read from `local.env` by the
 model row itself and sent only as the request's `Authorization` header; a jailed input can't
-read the file. A name that is no model, or a table with a problem, is a message saying what to
-fix (`/model` refuses to switch to it; one chosen at launch answers each message with it). A
+read the file, and no key may name `CLAUDE_CODE_OAUTH_TOKEN`. The models file must be outside
+the project (and not a link into it), where a jailed input can't write it: one in it is not
+read, and `/model` says why (run from your home directory, `~/.config` is in the project). A
+name that is no model, or a table with a problem, is a message saying what to fix (`/model`
+refuses to switch to it; one chosen at launch answers each message with it). A
 `--patch` that sets the model row's config replaces the session's whole, so it chooses the
 model: `--model` with it is refused, and `/model` says it can't switch (set `default` in the
 patch, or run without it; `bh-02 update-layer` says so when the patch it writes is one). The

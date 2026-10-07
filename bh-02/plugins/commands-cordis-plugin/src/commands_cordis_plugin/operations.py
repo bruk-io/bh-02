@@ -39,10 +39,13 @@ class Loader(Protocol):
 @runtime_checkable
 class Models(Protocol):
     """What the operator needs of the `models` value (CONTRACTS.md: models): the models there
-    are, the one the model row names now, why a name can't be switched to, and the models file."""
+    are, the one the model row names now, why a name can't be switched to, the models file, and
+    why that file is not read."""
 
     @property
     def path(self) -> str: ...
+    @property
+    def problem(self) -> str | None: ...
     def listed(self) -> Sequence[Mapping[str, Any]]: ...
     def current(self) -> Mapping[str, str]: ...
     def check(self, name: str) -> str | None: ...
@@ -81,8 +84,9 @@ def rows_table(status: Mapping[str, str], uses: Mapping[str, str]) -> str:
     )
 
 
-def model_list(models: Sequence[Mapping[str, Any]], path: str) -> str:
-    """`/model`'s answer: every model, the current one marked, aligned, with where to add more."""
+def model_list(models: Sequence[Mapping[str, Any]], path: str, problem: str | None = None) -> str:
+    """`/model`'s answer: every model, the current one marked, aligned, with where to add more,
+    or, when the models file is not read (`problem`), why and where it must be instead."""
     width = max((len(str(m["name"])) for m in models), default=0)
     kinds = max((len(str(m["provider"])) for m in models), default=0)
     lines = []
@@ -92,7 +96,8 @@ def model_list(models: Sequence[Mapping[str, Any]], path: str) -> str:
         line = f"{mark} {str(m['name']).ljust(width)}  {str(m['provider']).ljust(kinds)}  {m['id']}{where}"
         notes = [str(m[k]) for k in ("shadows", "problem") if m.get(k)]
         lines.append(line.rstrip() + "".join(f"\n    {note}" for note in notes))
-    return "\n".join([*lines, f"/model NAME switches; add models in {path}"])
+    add = problem if problem is not None else f"add models in {path}"
+    return "\n".join([*lines, f"/model NAME switches; {add}"])
 
 
 @dataclass
@@ -182,7 +187,7 @@ class Operator:
         that isn't a usable model says why and changes nothing either."""
         row = self.config.model_row
         if not args:
-            return model_list(self.models.listed(), self.models.path)
+            return model_list(self.models.listed(), self.models.path, self.models.problem)
         if args.startswith("/") or len(args.split()) != 1:
             return f"not a model name: {args!r}; type /model and one name, e.g. /model sonnet"
         if self.config.layer is None:

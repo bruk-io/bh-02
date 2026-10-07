@@ -1,5 +1,5 @@
-"""The `models` value: the models there are, which one the model row names now, and whether
-a name can be switched to (CONTRACTS.md: models).
+"""The `models` value: the models there are, which one the model row names now, whether a
+name can be switched to, and why the models file is not read (CONTRACTS.md: models).
 
 It reads the model row's config from the loader's entries each time it is asked (the layers
 as they compose now, `/model`'s edit included) and the models file with it, so it never holds
@@ -13,7 +13,7 @@ from typing import Any, Final, Protocol, runtime_checkable
 
 from models_cordis_plugin.named import OPENAI, ModelConfig, ModelsError, Named, problem
 from models_cordis_plugin.openai import missing_key
-from models_cordis_plugin.providers import known
+from models_cordis_plugin.providers import known, refused
 
 __all__ = ["Catalog", "Entries"]
 
@@ -52,13 +52,20 @@ class Catalog:
         """The models file the model row reads (whether or not it exists)."""
         return known(self._config() or ModelConfig())[1]
 
+    @property
+    def problem(self) -> str | None:
+        """Why the models file is not read, said so the person can fix it: it is in the project,
+        which the model's code can write (the built-ins and the row's `extra` are still listed).
+        None when it is outside the project, there or not."""
+        return refused(self._config() or ModelConfig())
+
     def listed(self) -> list[dict[str, Any]]:
         """Every model, in order (the built-ins, the file's, the row's `extra`): `name`,
         `provider`, `id`, `current` (the one the model row names), `where` (an openai model's
         base_url), and `problem` or `shadows` when there is one. A models file that can't be
-        read raises its `ModelsError`."""
+        read raises its `ModelsError`; one in the project is not read (`problem` says why)."""
         config = self._config() or ModelConfig()
-        models, _ = known(config)
+        models = known(config)[0]
         current = self.current()["name"]
         return [_listed(named, named.name == current) for named in models]
 
@@ -70,7 +77,7 @@ class Catalog:
         if config is None:
             return {"name": str(getattr(entry, "use", "") or "none"), "provider": ""}
         try:
-            models, _ = known(config)
+            models = known(config)[0]
         except ModelsError:
             return {"name": str(config.default), "provider": ""}
         found = next((n for n in models if n.name == config.default), None)
@@ -91,12 +98,14 @@ class Catalog:
                 f"{_MODELS}, so it has no models to switch between"
             )
         try:
-            models, source = known(config)
+            models, source, why = known(config)
         except ModelsError as error:
             return error.message
         found = next((n for n in models if n.name == name), None)
         if found is None:
             names = ", ".join(n.name for n in models)
+            if why is not None:  # its models may be there, but are not read
+                return f"no model named {name!r}; the models are {names}; {why}"
             return (
                 f"no model named {name!r}; the models are {names}. To add one, give it a table in the "
                 f'models file {source}: [{name}] provider = "openai", id = "...", base_url = "https://.../v1"'

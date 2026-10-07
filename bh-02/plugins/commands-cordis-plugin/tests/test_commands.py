@@ -94,6 +94,7 @@ class Models:
     def __init__(self) -> None:
         self.now = "haiku"
         self.broken = False
+        self.problem: str | None = None  # why the models file is not read (it is in the project)
 
     def listed(self) -> list[dict[str, Any]]:
         if self.broken:
@@ -251,6 +252,17 @@ def test_the_model_list_marks_a_shadowed_built_in() -> None:
         "● sonnet  openai  x",
         "    shadows the built-in 'sonnet' (f)",
     ]
+
+
+async def test_the_model_list_says_why_the_models_file_is_not_read_instead_of_where_to_add() -> None:
+    """A models file in the project is not read: /model says so where it would say to add models
+    there, and still lists the models there are."""
+    models = Models()
+    models.problem = "the models file /p/.config/bh-02/models.toml is not read: it is in the project (/p)"
+    op = Operator(Loader(), models, OperatorConfig(), asyncio.Queue(), lambda *a: None)
+    said = (await dict((s["name"], f) for s, f in op.specs)["model"]("")).splitlines()
+    assert said[0] == "  sonnet  claude-code  sonnet"
+    assert said[-1] == f"/model NAME switches; {models.problem}" and "add models in" not in said[-1]
 
 
 async def test_a_failed_job_is_reported_and_the_next_one_still_runs() -> None:
