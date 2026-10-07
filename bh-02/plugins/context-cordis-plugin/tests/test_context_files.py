@@ -2,6 +2,7 @@
 
 import os
 import sys
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -181,6 +182,31 @@ def test_your_file_in_an_xdg_config_home_inside_the_project_is_the_project_s(
     text = context.text()
     assert "(bh-02 could not read the context file" in text and "may name only bh-02's own functions" in text
     assert "From AGENTS.md:\n\nStill here." in text  # the rest still say theirs
+
+
+def test_a_pipe_swapped_in_as_the_project_s_context_file_is_refused_without_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pipe with no writer, swapped in after the project's file was seen as a file, would hold
+    the reading, and with it every later reading of the prompt (they run one at a time): it is
+    refused at once, and the rest still say theirs."""
+    context, root, _ = _context(tmp_path)
+    _write(root / "AGENTS.md", "Still here.")
+    (root / ".bh-02").mkdir()
+    os.mkfifo(root / ".bh-02/context.toml")
+    is_file = Path.is_file
+    monkeypatch.setattr(  # seen as a file a moment before it was read
+        Path,
+        "is_file",
+        lambda self: (self.name, self.parent.name) == ("context.toml", ".bh-02") or is_file(self),
+    )
+    said: list[str] = []
+    reading = threading.Thread(target=lambda: said.append(context.text()), daemon=True)
+    reading.start()
+    reading.join(5)
+    assert said, "the reading waited on the pipe"
+    assert "(bh-02 could not read the context file" in said[0] and "is not a regular file" in said[0]
+    assert "From AGENTS.md:\n\nStill here." in said[0]
 
 
 def test_a_project_file_naming_another_function_is_refused_and_says_so(tmp_path: Path) -> None:

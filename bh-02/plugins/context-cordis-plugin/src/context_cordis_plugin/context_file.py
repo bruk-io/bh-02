@@ -454,8 +454,15 @@ def _rooted(path: Path, roots: Sequence[Path]) -> Path:
 
 
 def _parsed(path: Path, *, trusted: bool) -> tuple[tuple[Section, ...], bool] | str:
+    """The context file's sections, read only when what opens there is a regular file. It is
+    opened without waiting (`O_NONBLOCK`): a pipe the model left at the project's would otherwise
+    hold this reading, and every reading of the prompt after it, since they run one at a time."""
     try:
-        return parse(path.read_text(encoding="utf-8"), str(path), trusted=trusted)
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), "rb") as file:
+            if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
+                raise OSError(f"{path} is not a regular file, so bh-02 did not read it")
+            text = file.read().decode("utf-8")
+        return parse(text, str(path), trusted=trusted)
     except (OSError, ValueError) as error:
         return f"(bh-02 could not read the context file {path}: {error})"
 
