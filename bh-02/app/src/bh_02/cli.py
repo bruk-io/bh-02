@@ -9,6 +9,7 @@ a fatal error, and those notes after the run.
 
 import asyncio
 import contextlib
+import os
 import shutil
 import sys
 from collections.abc import Callable, Iterable, Sequence
@@ -25,6 +26,7 @@ from bh_02.bootstrap import (
     LayerError,
     NotStarted,
     Recoverable,
+    config_directories,
     credential_files,
     layers,
     read_layers,
@@ -273,11 +275,13 @@ def _launch(
     # sessions' state, where each session's Claude Code child keeps its config and messaging peer
     # token (this run's, and the default one when `XDG_STATE_HOME` moves this run's elsewhere):
     # no jailed input may read any of them. Another state root, of a run with another
-    # `XDG_STATE_HOME`, is not known here.
+    # `XDG_STATE_HOME`, is not known here. And bh-02's configuration (this run's and the default
+    # one), whose files the host reads and trusts: no jailed input may write there.
     credentials = credential_search()
     states = [listing.root, str(sessions.default_state_root())] if listing.root else []
     beside = [Path.cwd() / CREDENTIAL_FILE]
     secrets = unreadable(credentials, beside, (str(Path(state).resolve()) for state in states))
+    trusted = config_directories(os.environ, Path.home())
     try:
         asyncio.run(
             run(
@@ -287,6 +291,7 @@ def _launch(
                 sessions=listing,
                 credentials=credentials,
                 secrets=secrets,
+                trusted=trusted,
             )
         )
     except CompositionError as error:

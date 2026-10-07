@@ -20,9 +20,14 @@ inputs are confined: the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
 the worker, in the jail, which decides: the model can write it, and a link there could lead to a
 file the jail hides. The person's is outside the project, where a Linux jail (which reads by
 allowlist, the home directory absent) can't see it, so the host reads it and sends its source;
-but only when reading it goes nowhere in the project (`_walked`: no directory or link on the way
-is there). One in the project, or whose way passes through it, the worker reads, as it does the
-project's; it is still the person's, not the model's to edit, which is what the model is told.
+but only when reading it goes nowhere an input may write (`_walked`: no directory or link on the
+way is in the project, or in another root the jail lets an input write, `jail.writes()`). One
+that is there, or whose way passes through there, the worker reads, as it does the project's,
+and if that fails the note says why the host did not; it is still the person's, not the model's
+to edit, which is what the model is told. (The jail also keeps an input from writing in the
+person's config directory, so a session run from the home directory can't choose what a later
+one reads there: brig's `trusted`.) A startup file that ends the worker is passed over by the
+workers after it, until `/restart kernel`, and the input it cut short says which it was.
 """
 
 import asyncio
@@ -71,6 +76,7 @@ class Jail(Protocol):
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
     def reads(self) -> tuple[str, ...]: ...
+    def writes(self) -> tuple[str, ...]: ...
     async def release(self) -> str: ...
 
 
@@ -87,6 +93,15 @@ class KernelConfig:
     root: str = "."
     grace: float = 5.0
     startup: Sequence[str] = ("$XDG_CONFIG_HOME/bh-02/kernel.py", ".bh-02/kernel.py")
+
+    def __post_init__(self) -> None:
+        names = (self.startup,) if isinstance(self.startup, str) else self.startup
+        if not isinstance(names, Sequence) or not all(isinstance(name, str) for name in names):
+            raise TypeError(
+                "`startup` must be a file name or a list of them, as in "
+                '`startup = ["$XDG_CONFIG_HOME/bh-02/kernel.py", ".bh-02/kernel.py"]`, '
+                f"not {self.startup!r}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,12 +121,22 @@ class _Startup:
 class _Ready:
     """A startup file that is there: `name` as the model is told of it, `path` what the code
     that runs it opens, and `source`, its text when the host read it (None: the worker reads
-    `path`, in the jail), or `problem`, why the host could not."""
+    `path`, in the jail), or `problem`, why the host could not; `why`, when the worker reads a
+    person's file, why the host did not (said if it then fails)."""
 
     name: str
     path: str
     source: str | None = None
     problem: str = ""
+    why: str = ""
+
+
+class _StartupEnded(ConnectionError):
+    """The worker's process ended as the startup file `name` ran."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"the REPL's process ended as {name} ran")
+        self.name = name
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,11 +157,13 @@ class _Output:
 
 
 def _startup_input(path: str, source: str | None = None) -> str:
-    """The input that runs a startup file in the namespace and prints, last, the public names it
-    defined or bound afresh ("nothing" for none). `source` is its text when the host read it
-    (the person's own, which a jail that reads by allowlist can't see), registered with
-    `linecache` under `path` so a traceback shows its lines; without it the worker reads `path`
-    itself, in the jail. The input's own names are gone after it, however it ends."""
+    """The input that runs a startup file in the namespace and prints, last and on a line of its
+    own, the public names it defined or bound afresh ("nothing" for none): each its code stores
+    at the top (as the compiler says: the same object bound again counts) or that is new or
+    changed after it. `source` is its text when the host read it (the person's own, which a jail
+    that reads by allowlist can't see), registered with `linecache` under `path` so a traceback
+    shows its lines; without it the worker reads `path` itself, in the jail. Either way a UTF-8
+    byte order mark is no part of it. The input's own names are gone after it, however it ends."""
     read = (
         [
             f"    _bh_source = {source!r}",
@@ -146,7 +173,7 @@ def _startup_input(path: str, source: str | None = None) -> str:
         if source is not None
         else [
             "    import pathlib as _bh_path",
-            f"    _bh_source = _bh_path.Path({path!r}).read_text(encoding='utf-8')",
+            f"    _bh_source = _bh_path.Path({path!r}).read_text(encoding='utf-8-sig')",
         ]
     )
     return "\n".join(
@@ -154,11 +181,16 @@ def _startup_input(path: str, source: str | None = None) -> str:
             "_bh_before = dict(globals())",
             "try:",
             *read,
-            f"    exec(compile(_bh_source, {path!r}, 'exec'), globals())",
-            "    print(', '.join(sorted(n for n, v in globals().items() if not n.startswith('_')"
-            " and (n not in _bh_before or _bh_before[n] is not v))) or 'nothing')",
+            f"    _bh_code = compile(_bh_source, {path!r}, 'exec')",
+            "    exec(_bh_code, globals())",
+            "    import dis as _bh_dis",
+            "    _bh_bound = {i.argval for i in _bh_dis.get_instructions(_bh_code)"
+            " if i.opname == 'STORE_NAME'}",
+            "    print('\\n' + (', '.join(sorted(n for n, v in globals().items() if not n.startswith('_')"
+            " and (n in _bh_bound or n not in _bh_before or _bh_before[n] is not v))) or 'nothing'))",
             "finally:",
-            "    for _bh_name in ('_bh_before', '_bh_source', '_bh_path', '_bh_lines', '_bh_name'):",
+            "    for _bh_name in ('_bh_before', '_bh_source', '_bh_code', '_bh_bound', '_bh_path',"
+            " '_bh_lines', '_bh_dis', '_bh_name'):",
             "        globals().pop(_bh_name, None)",
         ]
     )
@@ -243,6 +275,8 @@ class Kernel:
         self._fresh = False  # a worker no input has run in yet
         self._why = ""  # why the jail ended the last worker itself, told with the restart
         self._touched: tuple[str, ...] = ()  # the project's files the last input opened
+        self._passed: dict[str, str] = {}  # startup files later workers pass over, and why
+        self._pending = ""  # what the next input is told of an opening cut short (Ctrl-C)
 
     @property
     def confined(self) -> bool:
@@ -333,15 +367,24 @@ class Kernel:
                         "person (`/restart kernel` starts the row afresh)",
                     )
                 self._restarted = True
-            prefix = ""
+            prefix, self._pending = (f"({self._pending})\n" if self._pending else ""), ""
             try:
                 if self._fresh:
-                    prefix, self._fresh, self._restarted = await self._opening(), False, False
+                    # never twice in one worker: an opening stopped part-way (Ctrl-C) is not rerun
+                    self._fresh = False
+                    prefix, self._restarted = prefix + await self._opening(), False
                 ran = await self._exchange(code)
-            except ConnectionError:
+            except ConnectionError as error:
                 why = self._ended()
                 await self._stop()
                 said = f" because {why}" if why else ""
+                if isinstance(error, _StartupEnded):
+                    return _Output(
+                        prefix,
+                        f"the REPL's process ended as {error.name} ran, before this input{said}, so this "
+                        f"input did not run; a new one starts with the next, without {error.name} "
+                        "(`/restart kernel` runs it again)",
+                    )
                 return _Output(
                     prefix,
                     f"the REPL's process ended during this input{said}; a new one starts with the next",
@@ -384,16 +427,36 @@ class Kernel:
                 f"want {'it' if one else 'them'}: {runs}"
             )
         for index, startup in enumerate(ready if confined else ()):
+            if startup.name in self._passed:
+                notes.append(
+                    f"{startup.name} was not run: {self._passed[startup.name]} when it last ran, so what "
+                    "it defines is missing (`/restart kernel` runs it again)"
+                )
+                continue
             if startup.problem:
                 notes.append(
                     f"{startup.name} could not be read ({startup.problem}), so what it defines is missing"
                 )
                 continue
-            ran = await self._exchange(_startup_input(startup.path, startup.source))
+            try:
+                ran = await self._exchange(_startup_input(startup.path, startup.source))
+            except ConnectionError:
+                self._passed[startup.name] = "it ended the REPL's process"
+                raise _StartupEnded(startup.name) from None
+            except asyncio.CancelledError:
+                if self._writer is None:  # it would not stop: the next worker would only run it again
+                    self._passed[startup.name] = "it would not stop at Ctrl-C"
+                else:  # the worker carries on, without the files again
+                    self._pending = (
+                        f"{startup.name} was stopped as it ran, so what it defines may be missing, and "
+                        "no startup file after it ran"
+                    )
+                raise
             when = "first" if index == 0 else "next"
             if ran.error:
+                left = f" ({startup.why})" if startup.why else ""
                 notes.append(
-                    f"{startup.name} ran {when} and failed, so what it defines is missing:\n{ran.error}"
+                    f"{startup.name} ran {when} and failed{left}, so what it defines is missing:\n{ran.error}"
                 )
             else:
                 lines = ran.output.strip().splitlines()
@@ -403,11 +466,13 @@ class Kernel:
     def _ready(self, read: bool) -> list[_Ready]:
         """The startup files that are there, in order, each once (at its first place), and how
         each is run (in a worker thread: it looks at the filesystem). The project's is the
-        worker's to read, in the jail. The person's, when reading it goes nowhere in the project,
-        the host reads (when `read`: inputs are confined, so it is about to run); one in the
-        project, or whose way passes through it, is read by the worker as the project's is."""
+        worker's to read, in the jail. The person's, when reading it goes nowhere an input may
+        write, the host reads (when `read`: inputs are confined, so it is about to run); one in
+        the project or another root the jail lets an input write (`jail.writes()`), or whose way
+        passes through one, is read by the worker as the project's is."""
         given = Path(os.path.normpath(Path(self._config.root).absolute()))
         root = given.resolve()
+        writable = (given, root, *(Path(w) for w in self._jail.writes()))
         ready: list[_Ready] = []
         seen: set[Path] = set()
         for startup in _placed(self._config.startup, root, Path.home(), os.environ):
@@ -415,20 +480,23 @@ class Kernel:
             if not startup.path.is_file() or real in seen:
                 continue
             seen.add(real)
+            way = (startup.path, *_walked(startup.path))
+            meets = next((r for p in way for r in writable if p.is_relative_to(r)), None)
             if startup.project:  # the worker reads it by its name, from the root it starts in
                 ready.append(_Ready(startup.name, startup.name))
-            elif any(
-                p.is_relative_to(r) for p in (startup.path, *_walked(startup.path)) for r in (given, root)
-            ):
-                # in the project, or reached through it (bh-02 run from the home directory, a
-                # config directory linked into the project): the model could have written it, or
-                # chosen where it leads, so the worker reads it, where the jail can see it if anywhere
-                ready.append(_Ready(startup.name, str(real if real.is_relative_to(root) else startup.path)))
+            elif meets is not None:
+                # in the project, or reached through it or another root an input may write (bh-02
+                # run from the home directory, a config directory linked into the project): the
+                # model could have written it, or chosen where it leads, so the worker reads it,
+                # where the jail can see it if anywhere
+                inside = any(real.is_relative_to(r) for r in writable)
+                why = f"its way passes through {meets}, where inputs can write, so bh-02 left it to the jail"
+                ready.append(_Ready(startup.name, str(real if inside else startup.path), why=why))
             elif not read:
                 ready.append(_Ready(startup.name, str(startup.path)))
             else:
                 try:
-                    source = startup.path.read_text(encoding="utf-8")
+                    source = startup.path.read_text(encoding="utf-8-sig")
                 except FileNotFoundError:  # gone since it was looked at
                     continue
                 except (OSError, UnicodeDecodeError) as error:
@@ -494,7 +562,7 @@ class Kernel:
         self._process = await self._jail.start(worker_argv(endpoint), cwd=root, endpoint=endpoint)
         self._reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)
         self._send({"op": "hello"})
-        self._fresh = True
+        self._fresh, self._pending = True, ""  # a new worker runs its startup files afresh
 
     async def _stop(self) -> None:
         if self._writer is not None:

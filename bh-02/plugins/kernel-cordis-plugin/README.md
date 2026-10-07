@@ -6,7 +6,7 @@ composition names, and the model's one tool, `python(code)`, which runs an input
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its jail's), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `jail` |
+| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its jail's), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `jail` (`writes()`: where the person's startup file is not read on the host) |
 | `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when confined, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
 | `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
@@ -93,24 +93,43 @@ across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/kernel.py`
 `~/.config/bh-02/kernel.py`), for the helpers they want in every project, then the project's,
 `.bh-02/kernel.py`, the model's own. A name starting `$XDG_CONFIG_HOME/` is in the person's
 config directory (that variable's value, else `~/.config`, as for the context file), one
-starting `~/` in their home, any other from `root`; a single string is one file. Confined, the
-kernel runs each that is there as an input of its own and says which names it defined (or bound
-afresh, as the project's may a helper of the person's), or its traceback; one failing doesn't
-stop the next, and one that isn't there is passed over. Unconfined, they would run unasked with
-the person's permissions, so the model is told to run them as an input of its own, which the
-loop then puts to the person. Where each is read is the point:
+starting `~/` in their home, any other from `root`; a single string is one file, and anything
+but a name or a list of names is the row's config error. Confined, the kernel runs each that is
+there as an input of its own and says which names it defined (each its code binds at the top,
+as the compiler reads it, so one bound again to the object it held counts, and any new or
+changed after it; on a line of their own, after whatever the file printed), or its traceback;
+one failing doesn't stop the next, and one that isn't there is passed over. A UTF-8 byte order
+mark is no part of either file, as `python file.py` has it. One that ends the worker
+(`os._exit`, a crash) would end every new one: the input it cut short says which file it was,
+and the workers after it pass that file over, saying so, until `/restart kernel`. Ctrl-C while
+one runs stops it, and the worker never runs the files again (a hanging file would hang every
+input); the next input says what was cut short, and one that would not stop at all (its worker
+is replaced) is passed over too. Unconfined, they would run unasked with the person's
+permissions, so the model is told to run them as an input of its own, which the loop then puts
+to the person: there every input is (the code shown), so nothing is read on the host for the
+model, and nothing needs keeping from it. Where each is read is the point:
 - The project's is read by the worker, in the jail, which decides what it may open: the model
   can write it, and a link there to a file the jail hides would otherwise hand that file over.
 - The person's is outside the project, and a Linux jail reads by allowlist, with no home
   directory in it, so the worker can't see it: the host expands its name, reads it and sends
   its source in the input (registered with `linecache`, so a traceback shows its lines). It
-  runs in the model's REPL, so whatever it holds the model can read.
-- But only when reading it goes nowhere in the project (`_walked`, as the models plugin walks
-  the models file: each directory and link on the way, as named and as resolved). A person's
-  file in the project (bh-02 run from the home directory) or whose way passes through it (a
-  config directory linked into a dotfiles repository being worked on) is read as the project's
-  is: the model could have written it, or chosen where it leads, so the worker reads it, at its
-  resolved place when that is in the project.
+  runs in the model's REPL, so whatever it holds the model can read. In a Linux jail the file
+  itself is not there: its helpers run and `inspect.getsource` shows them (through
+  `linecache`), but `open` on its path finds nothing, a helper that reads a file beside it
+  finds nothing either, and `__file__` is not set (nor for the project's: each runs as an
+  input). The model is told how to see one (`inspect.getsource(helper)`).
+- But only when reading it goes nowhere an input may write (`_walked`, as the models plugin
+  walks the models file: each directory and link on the way, as named and as resolved): the
+  project, or another root the jail lets an input write (`jail.writes()`: a `write` the person
+  added to `brig:jail`). A person's file there (bh-02 run from the home directory) or whose way
+  passes through one (a config directory linked into a dotfiles repository being worked on) is
+  read as the project's is: the model could have written it, or chosen where it leads, so the
+  worker reads it, at its resolved place when that is in such a root. If that fails (the jail
+  can't see where it leads), the note says why bh-02 did not read it.
+- Across sessions, the walk can't know what an earlier session's jail let its inputs write, so
+  the jail itself keeps them out: `brig:jail` denies writing bh-02's config directory wherever
+  it is under a writable root (`layers.trusted`, the brig plugin's README). A session run from
+  the home directory can't make the person's file a link to a key for the next session to read.
 
 Each file runs once, at its first place in the list. Whose a file is goes by how it is named, not
 by where it is read: one named from the root is the project's, one named from the person's config

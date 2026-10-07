@@ -2,6 +2,7 @@
 anchors bh-02 really runs with (its own install and its environment), never a stand-in."""
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from bh_02 import main
-from bh_02.bootstrap import CREDENTIAL_FILE, unreadable
+from bh_02.bootstrap import CREDENTIAL_FILE, config_directories, unreadable
 from bh_02.cli import credential_search
 from models_cordis_plugin.local_env import token_file
 
@@ -73,3 +74,32 @@ def test_the_bh_02_command_boots_with_every_searched_path_among_the_secrets(
     assert booted["credentials"] == list(credential_search())  # what the model rows search
     assert [path for path in booted["credentials"] if path not in booted["secrets"]] == []
     assert str(work / CREDENTIAL_FILE) in booted["secrets"]  # and the project's own, beside it
+
+
+def test_the_bh_02_command_boots_keeping_inputs_out_of_bh_02_s_config_directories(
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launch hands the jail bh-02's config directories (`layers.trusted`): this run's
+    (`$XDG_CONFIG_HOME/bh-02`) and the default one, each as named and as it resolves, so a
+    session run from the home directory can't rewrite what a later one reads and trusts there."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    linked = tmp_path / "dotfiles"
+    (linked / "bh-02").mkdir(parents=True)
+    (tmp_path / "xdg").symlink_to(linked)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    seen = tmp_path / "seen.json"
+    patch = composition(
+        '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:one_message_recorded_ui"\n'
+        f'[[plugin]]\nid = "probe"\nuse = "fragile:layers_seen"\nconfig = {{ out = "{seen}" }}\n'
+    )
+    result = CliRunner().invoke(main, ["--no-jail", "--patch", str(patch)])
+    assert result.exit_code == 0, result.output
+    trusted = json.loads(seen.read_text())["trusted"]
+    assert trusted == list(config_directories(os.environ, Path.home()))
+    default = Path.home() / ".config" / "bh-02"
+    assert trusted[:2] == [str(tmp_path / "xdg" / "bh-02"), str(linked.resolve() / "bh-02")]
+    assert str(default) in trusted  # what a run without the variable reads

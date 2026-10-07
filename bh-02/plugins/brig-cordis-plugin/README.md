@@ -16,7 +16,20 @@ gate's `brig-one-adapter`).
   settings, ...: what can run code outside the jail later) minus what `allow` names, and `deny`.
   `allow` defaults to the project's guidance files (CLAUDE.md, AGENTS.md), which editing is
   ordinary work; a name not on brig's list is a config error, since `write` is for other paths.
-  An `allow` in a layer replaces the default, so name every file it should let through;
+  An `allow` in a layer replaces the default, so name every file it should let through. Nor
+  bh-02's configuration directories (`layers.trusted`: `$XDG_CONFIG_HOME/bh-02` and
+  `~/.config/bh-02`, as named and as resolved) where one is under a writable root, as when bh-02
+  runs from the home directory: the host reads the models file, the person's context file and
+  their startup file there and trusts them, so an input there could choose what every later
+  session reads (a startup file made a link to a key the jail hides, which a session in another
+  project would read on the host and hand to its model;
+  `test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s`). On
+  Linux it is held as any write deny there is (an existing directory bound read-only over
+  itself, an absent one a placeholder, the directories above it pinned, a host change ending the
+  jail). Not when the project is that directory or inside it: the deny would leave the project
+  read-only, so bh-02 run in its own config lets the model write there, as in any project.
+  `writes()` names the roots an input may write, once the jail has started (the kernel reads
+  nothing on the host whose way passes through one);
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
   what `layers` names as `secrets` (bh-02's `local.env`, the sessions' state);
 - **network**: none; the program's own LISTEN socket is the one way in or out. The `jail` row

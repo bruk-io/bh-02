@@ -3,6 +3,7 @@ is a fake, which calls scripted inputs. An input is plain Python: it reads and w
 runs programs itself, the jail decides what it may touch, and unjailed every input is asked about."""
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from bh_02.bootstrap import credential_files, layers, run, unreadable
+from bh_02.bootstrap import config_directories, credential_files, layers, run, unreadable
 from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group
 from cordis import Row
 from cordis.loader import boot
@@ -411,6 +412,7 @@ class _Layers:
     paths: tuple[str, ...] = ()
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
+    trusted: tuple[str, ...] = ()
 
 
 async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input(
@@ -483,6 +485,66 @@ async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_hom
         f"({person} ran first and defined: show. .bh-02/kernel.py ran next and defined: TOOLS)\n"
     ), out
     assert out.endswith("\nFalse\n'<2>'"), out  # the jail can't see the person's file; its helper runs
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run from the home directory, bh-02's config directory is under a root an input may
+    write. A later session elsewhere reads the person's startup file there on the host and hands
+    its text to the model, so an input replacing it with a link to a file the jail hides (an SSH
+    key) would have the next session hand that file over, in the REPL's linecache and in the
+    failing file's traceback. The jail denies the directory (`layers.trusted`, the app's
+    `config_directories`: this run's `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`),
+    as named and as it resolves: no write, link, rename over a file, or moving its parent away."""
+    home = tmp_path / "home"
+    xdg = home / "xdg" / "bh-02"
+    xdg.mkdir(parents=True)
+    (home / ".config").mkdir()  # the default directory's parent, without a bh-02 of its own
+    person = xdg / "kernel.py"
+    person.write_text("HELPER = 1\n")
+    key = home / ".ssh" / "id_ed25519"  # a file the jail hides (brig's credential list)
+    key.parent.mkdir()
+    key.write_text("-----BEGIN STAND-IN KEY, NOT A SECRET-----\nc3RhbmQtaW4K\n")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "xdg"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    trusted = config_directories(os.environ, home)
+    assert trusted == (str(xdg), str(home / ".config" / "bh-02"))
+
+    def attempt(what: str) -> str:
+        return f"import os\ntry:\n    {what}; print('WROTE')\nexcept OSError:\n    print('DENIED')"
+
+    default = home / ".config" / "bh-02" / "kernel.py"
+    inputs = [
+        attempt(f"open({str(person)!r}, 'w').write('HELPER = 2')"),
+        attempt(f"os.symlink({str(key)!r}, 'planted'); os.replace('planted', {str(person)!r})"),
+        attempt(
+            f"os.makedirs({str(default.parent)!r}, exist_ok=True); os.symlink({str(key)!r}, {str(default)!r})"
+        ),
+        attempt(f"open({str(xdg / 'models.toml')!r}, 'w').write('[mine]')"),
+        attempt(f"open({str(xdg / 'context.toml')!r}, 'w').write('[[section]]')"),
+        attempt(f"os.rename({str(xdg.parent)!r}, 'moved')"),  # then a config directory of its own
+        attempt(f"os.rename({str(home / '.config')!r}, 'moved-too')"),
+    ]
+    jail = BrigJail(BrigConfig(), _Layers(trusted=trusted))
+    async with Kernel(jail, KernelConfig(root=str(home))) as kernel:  # session A, from home
+        said = [await kernel.run(code) for code in inputs]
+    assert said[0].startswith(f"({person} ran first and defined: HELPER)\n"), said[0]
+    assert [s.rsplit("\n", 1)[-1] for s in said] == ["DENIED"] * len(inputs), said
+    with contextlib.suppress(FileNotFoundError):
+        (home / "planted").unlink()  # the link it made in the home, before the refused rename
+    assert person.read_text() == "HELPER = 1\n" and not person.is_symlink()
+    assert not default.exists() and not (xdg / "models.toml").exists()
+    project = tmp_path / "work" / "project"  # session B, in another project
+    project.mkdir(parents=True)
+    async with Kernel(
+        BrigJail(BrigConfig(), _Layers(trusted=trusted)), KernelConfig(root=str(project))
+    ) as kernel:
+        seen = await kernel.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), HELPER")
+    assert seen == f"({person} ran first and defined: HELPER)\n('HELPER = 1\\n', 1)", seen
+    assert "STAND-IN" not in seen
 
 
 def _append_to(path: Path, mode: str = "a", text: str = "# planted by an input\n") -> str:

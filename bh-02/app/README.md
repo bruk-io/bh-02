@@ -197,8 +197,12 @@ stand-in server (`-m "not real_launch"` deselects it).
 `credentials`: where the model rows look for `local.env`, above bh-02's install and environment,
 nearest first; and `secrets`: every one of those, the `local.env` beside and above the project,
 and the sessions' state directory, this run's and the default `~/.local/state/bh-02/sessions`
-(Claude Code's own config and tokens), which a jailed input can't read; with `--no-jail` an input runs with your permissions, so one you
-approve could open them: only its environment is scrubbed), `sessions` (the running session,
+(Claude Code's own config and tokens), which a jailed input can't read; and `trusted`: bh-02's
+config directory, this run's `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`, as
+named and as resolved, where your models file, context file and startup file are, which bh-02
+reads and trusts, so a jailed input can't write there when it is in the project (bh-02 run from
+your home directory); with `--no-jail` an input runs with your permissions, so one you
+approve could open or write them: only its environment is scrubbed), `sessions` (the running session,
 whose id the status bar shows) and `harness` (which follows the chat row's `done`, across a
 restart of the chat row).
 
@@ -294,8 +298,12 @@ Helpers you want in every project's REPL (a `show`, a `search`) go in your own s
 `.bh-02/kernel.py` runs after it, and is the only one the model is told it may edit. A new
 kernel runs both before the first input, which is told the names each defined (or its
 traceback; one failing doesn't stop the other). bh-02 reads yours itself and sends it in, since
-the Linux jail has no home directory in it, so whatever it holds the model can read; the
-project's is read inside the jail. With `--no-jail` neither runs unasked: the model is told to
+the Linux jail has no home directory in it, so whatever it holds the model can read (in that
+jail its helpers run, but its file is not there to open: the model is told `inspect.getsource`
+shows one); the project's is read inside the jail, and so is yours when it is somewhere an
+input may write, or reached through there. No jailed input may write your config directory, so
+a session run from your home directory can't change what a later one runs. One that ends the
+REPL is passed over until `/restart kernel`, and the input it cut short names it. With `--no-jail` neither runs unasked: the model is told to
 run them as inputs of its own, which you are asked about. The kernel row's `startup` config is
 the list.
 
@@ -314,7 +322,7 @@ holds, so a resumed session (`--resume`) is not told again a note told with an e
 
 The kernel is a worker process started by the `jail` row. `brig:jail` confines it: writes
 only inside the project (and never to the layer files, the host's import paths, `.git/hooks`,
-`.git/config`, CLAUDE.md, ...), no network, credentials unreadable, and an environment
+`.git/config`, `.claude`, bh-02's config directory, ...), no network, credentials unreadable, and an environment
 scrubbed to a short allowlist; the programs an input starts are inside the same jail. A confined
 input runs without asking. brig's host process, which starts the worker from outside the
 jail, keeps the environment bh-02 was launched with (brig's launcher passes it on, and bh-02

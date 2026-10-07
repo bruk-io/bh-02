@@ -123,7 +123,8 @@ def instructions_for(
     lasts, the startup files (`startup`, the project's, which are the model's to write; `theirs`,
     the person's own, which run before them and are not), how to use it, and where its code
     runs. `reads`, the trees the jail lets code read when it reads by allowlist (a Linux jail), is
-    said plainly, so the model spends no steps on reads that can't succeed."""
+    said plainly, so the model spends no steps on reads that can't succeed, and so is how to see
+    a helper of the person's, whose file is usually not among them."""
     where = (
         "Your code runs in a jail: it can write only inside the project directory, cannot reach "
         "the network, and cannot read credentials. Inside the project it also cannot write what "
@@ -141,6 +142,12 @@ def instructions_for(
             "look for files outside these. git commits carry the person's name and email when git "
             "on their machine knows them."
         )
+        if confined and theirs:
+            where += (
+                " The person's startup file runs in the REPL even where your code finds no such "
+                "file (bh-02 reads it for the REPL): inspect.getsource(helper) shows one of its "
+                "helpers."
+            )
     keep = _keep(confined, (startup,) if isinstance(startup, str) else startup, theirs)
     return "\n".join([f"{_REPL} {keep}".rstrip(), "", *_USE, "", where])
 

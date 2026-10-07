@@ -82,6 +82,11 @@ class Unjailed:
         """No allowlist: an input reads what the person can."""
         return ()
 
+    def writes(self) -> tuple[str, ...]:
+        """None named: it confines no writes, so an input writes what the person can (and is put
+        to them first; nothing runs unasked here, a startup file included)."""
+        return ()
+
     async def release(self) -> str:
         """Nothing: no jail holds anything on the host."""
         return ""

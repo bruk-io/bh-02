@@ -185,9 +185,13 @@ confined (`startup`): the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
 `~/.config/bh-02/kernel.py`), which the host reads and sends in, since a Linux jail has no home
 in it, then the project's `.bh-02/kernel.py`, which only the worker reads, in the jail (never
 read a file the model can write, or reach through a link it could make, on the host and hand
-its text to the model: the link could lead to a secret). A person's file in the project, or
-whose way passes through it, is read as the project's is. `instructions()` tells the model only
-the project's is its to edit. Only `brig_cordis_plugin` imports brig
+its text to the model: the link could lead to a secret). So a person's file in the project or
+another root the jail lets an input write (`jail.writes()`), or whose way passes through one, is
+read as the project's is, and if that fails the note says why the host did not; and the jail
+denies every input writing bh-02's config directory (`layers.trusted`, below), so a session run
+from the home directory can't choose what a later one reads there. A startup file that ends the
+worker is passed over by the workers after it, until `/restart kernel`. `instructions()` tells
+the model only the project's is its to edit. Only `brig_cordis_plugin` imports brig
 (`brig-one-adapter`). darwin is jailed by seatbelt (reads by denylist), Linux by bubblewrap
 (reads by allowlist: the system, the interpreter, the project; the policy, `spec_for`, is the
 same). The Linux jail's tests skip on darwin; `scripts/linux-jail-check` runs them in a
@@ -288,8 +292,19 @@ The kernel never gets it:
   its messaging peer token. That is this run's (`$XDG_STATE_HOME/bh-02/sessions`) and the
   default one (`~/.local/state/bh-02/sessions`); a third, of a run with another
   `XDG_STATE_HOME`, is not known to this one and is not hidden.
+- `brig:jail` also denies writing bh-02's config directory where it is under a root an input may
+  write (bh-02 run from the home directory): `layers.trusted`, this run's
+  `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`, each as named and as it resolves
+  (`bh_02.bootstrap.config_directories`). The host reads what is there and trusts it (the models
+  file names a key's `local.env` line and a provider that runs in bh-02's process, the person's
+  context file names functions bh-02 runs, the person's startup file goes to the model's REPL
+  as text), so one session's input could otherwise plant something every later session reads: a
+  startup file that is a link to a key the jail hides. On Linux the directory is held like any
+  write deny there (a mount the host can undo, the directories above it pinned). Not when bh-02
+  runs in that directory or below it: denying it would leave the project read-only.
 - An approved `--no-jail` input runs with the person's permissions and could open `local.env`
-  itself; only its environment is scrubbed.
+  itself, or rewrite bh-02's config directory; only its environment is scrubbed, and every
+  input is put to the person, its code shown, before it runs.
 
 Without a token the row still binds, and each step answers with an `authentication_failed` error
 naming the variable, `local.env` and `claude setup-token`.

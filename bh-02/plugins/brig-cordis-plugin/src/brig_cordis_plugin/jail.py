@@ -5,8 +5,11 @@
 composition's layer files (an input rewriting one would reshape the program running it, outside
 the jail), every path the host imports code from (`sys.path` entries and the interpreter's
 prefix), brig's own self-modification list (`.git/hooks`, `.git/config`, shell rc files,
-CLAUDE.md, ...), and any secret below under a writable root (it may not replace what it can't
-read). What it may not read: brig's credential list under the home directory, `hide`
+CLAUDE.md, ...), any secret below under a writable root (it may not replace what it can't
+read), and bh-02's configuration directories under one (`trusted`: the person's
+`$XDG_CONFIG_HOME/bh-02` and `~/.config/bh-02`, when bh-02 runs from the home directory), whose
+models file, context file and startup file a later session reads on the host and trusts. What
+it may not read: brig's credential list under the home directory, `hide`
 under the project, and what the `layers` value names as `secrets` (bh-02's own `local.env`,
 wherever bh-02 runs from, and the sessions' state, where Claude Code keeps its tokens). No
 network: the kernel's own socket is the one way in or out. The worker's environment is scrubbed
@@ -127,7 +130,8 @@ _STACKS: Mapping[str, Callable[[], Stack]] = {"darwin": scratch_darwin, "linux":
 class Layers(Protocol):
     """What the jail needs of the `layers` value (CONTRACTS.md: layers): the composition's files,
     which an input may not write; where bh-02 looks for its credential, where an input may
-    create nothing; and the secrets, which it may not read."""
+    create nothing; the secrets, which it may not read; and bh-02's configuration directories
+    (`trusted`), whose files the host reads and trusts, which it may not write."""
 
     @property
     def paths(self) -> tuple[str, ...]: ...
@@ -135,6 +139,8 @@ class Layers(Protocol):
     def credentials(self) -> tuple[str, ...]: ...
     @property
     def secrets(self) -> tuple[str, ...]: ...
+    @property
+    def trusted(self) -> tuple[str, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,10 +170,13 @@ def spec_for(
     layers: Sequence[str],
     host: Sequence[str],
     secrets: Sequence[str] = (),
+    trusted: Sequence[str] = (),
 ) -> Spec:
     """The jail's Spec. `host` is every path the host process loads code from; any under a
     writable root is denied, as are the layer files and brig's self-modification list.
-    `secrets` (absolute) may not be read, wherever they are."""
+    `secrets` (absolute) may not be read, wherever they are. `trusted` (absolute directories:
+    bh-02's configuration, whose files the host reads and trusts) may not be written where
+    they are under a writable root."""
     roots = [str(Path(root, w).resolve()) for w in config.write]
     writable = [*roots, scratch]
     # A host import path *inside* a writable root is denied. One that *is* a root (the project
@@ -181,7 +190,19 @@ def spec_for(
     # root (the project's `local.env`) is denied writing too, or an input could replace the
     # credential it can't see.
     kept = [s for s in hidden if any(s == r or s.startswith(r + "/") for r in writable)]
-    denies = [*layers, *under, *selfmod, *(str(Path(root, d).resolve()) for d in config.deny), *kept]
+    # bh-02's configuration under a writable root (bh-02 run from the home directory): an input
+    # there could replace a file a later session reads on the host and trusts, the person's
+    # startup file with a link to one the jail hides, say. Only strictly under one: a root that is
+    # the directory or inside it (bh-02 run in its own config) would be left read-only.
+    configured = [t for t in trusted if any(t.startswith(r + "/") for r in roots)]
+    denies = [
+        *layers,
+        *under,
+        *selfmod,
+        *(str(Path(root, d).resolve()) for d in config.deny),
+        *kept,
+        *configured,
+    ]
     return Spec(
         fs=FsPolicy(
             write_allows=tuple(writable),
@@ -601,6 +622,7 @@ class BrigJail:
         self._report: Mapping[str, str] = {}
         self._notice = ""
         self._reads: tuple[str, ...] = ()
+        self._writes: tuple[str, ...] = ()
         self._holding: tuple[str, ...] = ()
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
@@ -635,6 +657,12 @@ class BrigJail:
         the secrets."""
         return self._reads
 
+    def writes(self) -> tuple[str, ...]:
+        """The directories an input may write, once the kernel has started, but the jail's own
+        scratch: the project and what `write` adds. The host reads nothing there that it hands to
+        the model (the kernel's person's startup file)."""
+        return self._writes
+
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
         stack_for(self._platform)  # refuses on a platform brig has no preset for
         if self._platform == "linux" and not Path(DEFAULT_BWRAP_PATH).exists():
@@ -657,6 +685,7 @@ class BrigJail:
         try:
             author = git_author(*self._git_identity(cwd)) if self._platform == "linux" else ()
             jail, self._report = self.compile(jail_dir, endpoint, cwd, argv, author)
+            self._writes = tuple(w for w in jail.spec.fs.write_allows if not Path(w).is_relative_to(jail_dir))
             self._notice = notice_for(self._platform, held(jail.spec) if self._platform == "linux" else ())
             if self._platform == "linux":
                 trees = (*jail.spec.fs.read_allows, *jail.spec.fs.write_allows)
@@ -744,6 +773,7 @@ class BrigJail:
             layers=self._layers.paths,
             host=host,
             secrets=self._layers.secrets,
+            trusted=self._layers.trusted,
         )
         if self._platform == "linux":
             readable = readable_roots(argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE)

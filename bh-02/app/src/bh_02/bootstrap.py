@@ -2,7 +2,8 @@
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable, Iterable
+import os
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from importlib import resources
 from importlib.resources.abc import Traversable
@@ -19,6 +20,7 @@ __all__ = [
     "LayerError",
     "NotStarted",
     "Recoverable",
+    "config_directories",
     "credential_files",
     "unreadable",
     "layers",
@@ -61,14 +63,17 @@ async def harness(*, done: _ChatDone) -> Effects:
 class _LayerFiles:
     """The composition's own files (CONTRACTS.md: layers): every layer the loader is watching
     (`paths`), where the model rows look for the credential file, nearest first
-    (`credentials`), and what no input may read (`secrets`): every one of `credentials`, the
+    (`credentials`), what no input may read (`secrets`): every one of `credentials`, the
     `local.env` beside and above the project, and the sessions' state (Claude Code's own config
-    and tokens). The jail keeps an input from rewriting the first and from reading the last, and
-    from writing or creating any secret under a root it may write."""
+    and tokens), and bh-02's configuration directories (`trusted`), whose files the host reads
+    and trusts. The jail keeps an input from rewriting the first and from reading the secrets,
+    from writing or creating any secret under a root it may write, and from writing in a
+    configuration directory under one."""
 
     paths: tuple[str, ...] = ()
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
+    trusted: tuple[str, ...] = ()
 
 
 # The file bh-02's credentials live in (CLAUDE_CODE_OAUTH_TOKEN, and any key a model names),
@@ -94,6 +99,22 @@ def unreadable(credentials: Iterable[str], anchors: Iterable[Path], states: Iter
     sessions) adds nothing."""
     found = (*credentials, *credential_files(anchors), *(state for state in states if state))
     return tuple(dict.fromkeys(found))
+
+
+def config_directories(environ: Mapping[str, str], home: Path) -> tuple[str, ...]:
+    """bh-02's configuration directories of the person's (the `layers` value's `trusted`): this
+    run's (`$XDG_CONFIG_HOME/bh-02`, else `~/.config/bh-02`) and the default one, which a run
+    without the variable reads, each as named and as it resolves (a link into a dotfiles
+    repository). The host reads what is there and trusts it (the models file, the person's
+    context file and their startup file, whose text it hands to the model's REPL), so no jailed
+    input may write there: a session run from the home directory would otherwise choose what
+    every later one reads."""
+    default = home / ".config"
+    named = (
+        Path(os.path.normpath(Path(base, "bh-02").absolute()))
+        for base in (environ.get("XDG_CONFIG_HOME") or default, default)
+    )
+    return tuple(dict.fromkeys(str(path) for each in named for path in (each, each.resolve())))
 
 
 @component(provides=("layers",))
@@ -161,6 +182,7 @@ async def run(
     sessions: Listing | None = None,
     credentials: Iterable[str] = (),
     secrets: Iterable[str] = (),
+    trusted: Iterable[str] = (),
 ) -> None:
     """Boot, wait for the chat row's own work to end (CONTRACTS.md: `done`), then unwind.
 
@@ -169,8 +191,9 @@ async def run(
     Adds three rows of its own after `overrides`, pinned on: `layers`, which binds the layer
     files' paths, `credentials`, where the model rows look for the credential file (none: a
     composition booted without them finds no credential unless its model row names an
-    `env_file`), and `secrets`, where the credential file may be and the sessions' state
-    (CONTRACTS.md: layers; the jail denies an input both), `sessions`, which binds this
+    `env_file`), `secrets`, where the credential file may be and the sessions' state
+    (CONTRACTS.md: layers; the jail denies an input both), and `trusted`, bh-02's configuration
+    directories (`config_directories`; the jail denies an input writing there), `sessions`, which binds this
     directory's sessions and the running one (`sessions`; the default lists none), and
     `harness`, whose only job is to declare bh-02's dependency on `done`, so a chat row that
     never binds it is an ordinary "waiting on" stall and a `done` of the wrong shape is an
@@ -201,6 +224,7 @@ async def run(
         "paths": [str(Path(path).resolve()) for path in paths],
         "credentials": list(credentials),
         "secrets": list(secrets),
+        "trusted": list(trusted),
     }
     booted: Booted = await boot(
         paths,

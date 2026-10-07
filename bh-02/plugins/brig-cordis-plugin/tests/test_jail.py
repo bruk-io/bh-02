@@ -59,6 +59,7 @@ class Layers:
     paths: tuple[str, ...] = ()
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
+    trusted: tuple[str, ...] = ()
 
 
 def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
@@ -93,6 +94,48 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
     assert "/src/bh/local.env" not in denies  # outside every writable root: nothing to deny
     assert dict(spec.env.set) == {"TMPDIR": "/tmp/j/tmp"} and "PATH" in spec.env.allow_names
     assert [c.endpoint for c in spec.channels] == ["/tmp/k/k.sock"]
+
+
+def _denied(spec: Any, path: str) -> bool:
+    """Whether `spec` denies writing `path`: it is a write deny, or under one."""
+    return any(path == d or path.startswith(d + "/") for d in spec.fs.write_denies)
+
+
+def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> None:
+    """Run from the home directory, the home is a root an input may write, and bh-02's config
+    directory is under it: the person's startup file, models file and context file, which a later
+    session reads on the host and trusts (a startup file replaced with a link to a file the jail
+    hides would be read there and handed to the model). So the directory is denied, this run's
+    (`$XDG_CONFIG_HOME/bh-02`) and the default one alike; one outside every writable root needs
+    no deny, and one the project is in (bh-02 run in its own config) is not denied, or the
+    project would be read-only."""
+    trusted = ("/home/me/xdg/bh-02", "/home/me/.config/bh-02", "/elsewhere/bh-02")
+
+    def home_rooted(root: str, write: Sequence[str] = (".",)) -> Any:
+        return spec_for(
+            root=root,
+            endpoint="/tmp/k/k.sock",
+            scratch="/tmp/j/tmp",
+            home="/home/me",
+            config=BrigConfig(write=write),
+            layers=(),
+            host=(),
+            trusted=trusted,
+        )
+
+    spec = home_rooted("/home/me")
+    for name in ("kernel.py", "models.toml", "context.toml"):
+        assert _denied(spec, f"/home/me/.config/bh-02/{name}"), name
+        assert _denied(spec, f"/home/me/xdg/bh-02/{name}"), name  # $XDG_CONFIG_HOME/bh-02
+    assert _denied(spec, "/home/me/.config/bh-02")  # the directory itself: no link swapped in
+    assert not _denied(spec, "/home/me/.config/gh/hosts.yml") and not _denied(spec, "/home/me/notes.md")
+    assert "/elsewhere/bh-02" not in spec.fs.write_denies  # outside every writable root
+    project = home_rooted("/home/me/src/app")  # the usual case: the home is not writable at all
+    assert not set(trusted) & set(project.fs.write_denies)
+    extra = home_rooted("/home/me/src/app", write=(".", "/home/me"))  # a root `write` adds
+    assert _denied(extra, "/home/me/.config/bh-02/kernel.py")
+    inside = home_rooted("/home/me/.config/bh-02")  # bh-02 run in its own config directory
+    assert not _denied(inside, "/home/me/.config/bh-02/notes.md")
 
 
 def test_allow_takes_names_off_brig_s_self_modification_list_and_only_those() -> None:
@@ -442,7 +485,7 @@ from pathlib import Path
 from brig_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
-    paths, credentials, secrets = (), (), ()
+    paths, credentials, secrets, trusted = (), (), (), ()
 
 async def main():
     sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
@@ -469,7 +512,7 @@ from brig_cordis_plugin import BrigConfig, BrigJail
 from kernel_cordis_plugin import Kernel, KernelConfig
 
 class Layers:
-    paths, credentials, secrets = (), (), ()
+    paths, credentials, secrets, trusted = (), (), (), ()
 
 LOOP = (
     "import os, sys, time\\n"
@@ -635,7 +678,7 @@ from brig.run import SubprocessLauncher
 from brig_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
-    paths, credentials, secrets = (), (), ()
+    paths, credentials, secrets, trusted = (), (), (), ()
 
 def crash(self, *args, **kwargs):
     os._exit(9)
