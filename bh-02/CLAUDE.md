@@ -86,7 +86,8 @@ row's is how to extend bh-02 and the part of cordis that takes). A context file 
 of `[[section]]`s, each `files` (patterns) and `function` (a full module path given the files
 that match, returning text): bh-02's own (`context_cordis_plugin/context.toml`: the guidance
 files, AGENTS.md and CLAUDE.md, yours and the project's, and rule files, each read by a function
-in `context_cordis_plugin.sections`), then `~/.config/bh-02/context.toml`, then the project's
+in `context_cordis_plugin.sections`), then yours (`$XDG_CONFIG_HOME/bh-02/context.toml`, else
+`~/.config/bh-02/context.toml`), then the project's
 `.bh-02/context.toml`, which the model can write and so may name only bh-02's own functions and
 non-hidden files in the project; nothing is read through any section that the jail keeps from the
 model (a link out of the project, a `local.env`). The loop follows it with `kernel.instructions()`: that `python` is the

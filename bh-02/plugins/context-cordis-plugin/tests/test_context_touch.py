@@ -11,6 +11,8 @@ from context_cordis_plugin import ContextConfig, OnTouch, on_touch, parse
 from cordis.testing import drive
 from cordis_helpers import Hooks
 
+_OWN = "context_cordis_plugin.sections:"
+
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,6 +70,22 @@ def test_an_on_touch_of_yours_that_fails_says_so_once(tmp_path: Path) -> None:
     said = told({"touched": (str(root / "a.py"),)})
     assert said.startswith("(bh-02 could not make the section context_cordis_plugin.sections:nope:")
     assert told({"touched": (str(root / "a.py"),)}) == ""
+
+
+def test_the_on_touch_row_reads_your_file_where_the_prompt_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It has `context:project`'s config, so the same files: yours in `$XDG_CONFIG_HOME` when that
+    is set, and then not ~/.config's."""
+    told, root, home = _project(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    for where, name in ((tmp_path / "xdg", "from_xdg"), (home / ".config", "from_dot_config")):
+        _write(
+            where / "bh-02/context.toml",
+            f'replace = true\n[[section]]\nfiles = ["x.md"]\non_touch = "{_OWN}{name}"\n',
+        )
+    said = told({"touched": (str(root / "a.py"),)})
+    assert f"{_OWN}from_xdg" in said and "from_dot_config" not in said
 
 
 async def test_the_row_adds_its_function_to_memory() -> None:

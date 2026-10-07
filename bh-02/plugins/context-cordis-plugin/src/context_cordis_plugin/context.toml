@@ -1,5 +1,6 @@
 # bh-02's own context file: the project context every session starts from, read before yours
-# (~/.config/bh-02/context.toml) and the project's (.bh-02/context.toml), which add to it.
+# ($XDG_CONFIG_HOME/bh-02/context.toml, else ~/.config/bh-02/context.toml) and the project's
+# (.bh-02/context.toml), which add to it.
 #
 # Each [[section]] is some files and the function that says what they mean to the model:
 # `files`, patterns from the project's root (`**/` for any depth; `~/` and `/` start elsewhere),

@@ -47,7 +47,8 @@ def test_the_project_s_file_may_name_only_bh_02_s_own_functions() -> None:
     """The model can write the project's file, and its functions run in bh-02, outside the jail."""
     with pytest.raises(ValueError, match="may name only bh-02's own functions") as raised:
         parse('[[section]]\nfunction = "os:system"\n', ".bh-02/context.toml", trusted=False)
-    assert "~/.config/bh-02/context.toml" in str(raised.value)  # says where one of yours goes
+    # says where one of yours goes, as the models file's docs do
+    assert "$XDG_CONFIG_HOME/bh-02/context.toml (else ~/.config/bh-02/context.toml)" in str(raised.value)
     assert (
         parse('[[section]]\nfunction = "os:system"\n', "mine.toml", trusted=True)[0][0].function
         == "os:system"
@@ -126,6 +127,51 @@ def test_your_file_adds_a_section_of_your_own_and_an_edit_reaches_the_next_readi
     text = context.text()
     assert "SHOUT" not in text and text.endswith("Files to read when they bear on your work: NOTES.md.")
     sys.modules.pop("mine", None)
+
+
+def _yours_and_the_other(root: Path, xdg: Path, dot_config: Path) -> None:
+    """A context file of yours in each place it could be, each saying which it is."""
+    _write(root / "XDG.md", "The one in XDG_CONFIG_HOME.")
+    _write(root / "DOT.md", "The one in ~/.config.")
+    _write(xdg / "bh-02/context.toml", f'[[section]]\nfiles = ["XDG.md"]\nfunction = "{_WHOLE}"\n')
+    _write(dot_config / "bh-02/context.toml", f'[[section]]\nfiles = ["DOT.md"]\nfunction = "{_WHOLE}"\n')
+
+
+def test_your_file_is_in_xdg_config_home_when_it_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """As the models file is: `$XDG_CONFIG_HOME/bh-02/context.toml`, and then not ~/.config's."""
+    context, root, home = _context(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    _yours_and_the_other(root, tmp_path / "xdg", home / ".config")
+    text = context.text()
+    assert "From XDG.md:\n\nThe one in XDG_CONFIG_HOME." in text and "DOT.md" not in text
+
+
+@pytest.mark.parametrize("xdg", [None, ""], ids=["unset", "empty"])
+def test_your_file_is_in_your_home_s_config_when_xdg_config_home_is_unset_or_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, xdg: str | None
+) -> None:
+    context, root, home = _context(tmp_path)
+    if xdg is not None:
+        monkeypatch.setenv("XDG_CONFIG_HOME", xdg)
+    _yours_and_the_other(root, tmp_path / "xdg", home / ".config")
+    text = context.text()
+    assert "From DOT.md:\n\nThe one in ~/.config." in text and "XDG.md" not in text
+
+
+def test_your_file_in_an_xdg_config_home_inside_the_project_is_the_project_s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The model can write anywhere in the project, so a config directory there puts your file on
+    the project's terms, as a home there does: wherever its name came from, where it is decides."""
+    context, root, _ = _context(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(root / "config"))
+    _write(root / "AGENTS.md", "Still here.")
+    _write(root / "config/bh-02/context.toml", '[[section]]\nfiles = ["x"]\nfunction = "os:system"\n')
+    text = context.text()
+    assert "(bh-02 could not read the context file" in text and "may name only bh-02's own functions" in text
+    assert "From AGENTS.md:\n\nStill here." in text  # the rest still say theirs
 
 
 def test_a_project_file_naming_another_function_is_refused_and_says_so(tmp_path: Path) -> None:

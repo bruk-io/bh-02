@@ -5,7 +5,7 @@ say when the model first works on it.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `context:project` | `system` (`text() -> str`, `add(section) -> remover`); config: `root` (default `.`), `files` (the context files after bh-02's own; default `["~/.config/bh-02/context.toml", ".bh-02/context.toml"]`), `max_chars` (what the context files' sections may say, all together; default 20,000), `home` | |
+| `context:project` | `system` (`text() -> str`, `add(section) -> remover`); config: `root` (default `.`), `files` (the context files after bh-02's own; default `["$XDG_CONFIG_HOME/bh-02/context.toml", ".bh-02/context.toml"]`), `max_chars` (what the context files' sections may say, all together; default 20,000), `home` | |
 | `context:on_touch` | adds `OnTouch` to `memory`; config: `context:project`'s (the same context files) | `memory` (`add`), `transcript` (its lifetime only) |
 
 `text()` is organised as Claude Code's is, and read fresh each time it is asked:
@@ -54,16 +54,20 @@ on_touch = "context_cordis_plugin.sections:place_touched"
   section may have only `on_touch`.
 
 The sections are read in order from bh-02's own file (`context.toml`, in the package), then each
-of `files`: yours, then the project's. Each appends its sections; `replace = true` at a file's
-top starts the list afresh. A file is read again whenever it changes, so a section added
-reaches the model's next message.
+of `files`: yours, `$XDG_CONFIG_HOME/bh-02/context.toml` (else `~/.config/bh-02/context.toml`),
+then the project's, `.bh-02/context.toml`. A name in `files` starting `$XDG_CONFIG_HOME/` is in
+that directory, or in `home`'s `.config` when the variable is unset or empty (as the models
+file is); one starting `~` is in `home`; any other is from the project's root. Each appends its
+sections; `replace = true` at a file's top starts the list afresh. A file is read again whenever
+it changes, so a section added reaches the model's next message.
 
 **The project's file is held to what the model may do itself**, because the model can write it
 and bh-02 acts on it in its own process, outside the jail. So it may name only bh-02's own
 functions (`context_cordis_plugin.sections:*`, as `function` and as `on_touch`), and only files in the project that are not
 hidden (no `~`, `/`, `..` or part starting with `.`), and it may not `replace` the sections
 before it. A function or a file outside the project of your own goes in your file. A file of
-yours inside the project (bh-02 run in your home) is the project's, on the same terms. And
+yours inside the project (bh-02 run in your home, or a `$XDG_CONFIG_HOME` in the project) is
+the project's, on the same terms. And
 whichever file a section came from, nothing is read through it that the jail keeps from the
 model: a file reached from the project must be in it, a link in the project counts only when it
 leads to another file the section found (a CLAUDE.md linking to the AGENTS.md beside it), and a

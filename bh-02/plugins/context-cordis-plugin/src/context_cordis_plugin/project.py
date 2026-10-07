@@ -41,12 +41,14 @@ _HARNESS = (
 @dataclass(frozen=True, slots=True)
 class ContextConfig:
     """`root`: the project. `files`: the context files read after bh-02's own, each adding its
-    sections (`~` for the person's home; a relative one is the project's, which may name only
-    bh-02's own functions). `max_chars`: how much the context files' sections may say, all of
-    them together. `home`: the person's home; theirs when unset."""
+    sections (`$XDG_CONFIG_HOME/` for the person's config directory, as for the models file:
+    that variable's value, else `home`'s `.config`; `~` for the person's home; a relative one is
+    the project's; one that is inside the project, whatever its name, may name only bh-02's own
+    functions). `max_chars`: how much the context files' sections may say, all of them together.
+    `home`: the person's home; theirs when unset."""
 
     root: str = "."
-    files: Sequence[str] = ("~/.config/bh-02/context.toml", ".bh-02/context.toml")
+    files: Sequence[str] = ("$XDG_CONFIG_HOME/bh-02/context.toml", ".bh-02/context.toml")
     max_chars: int = 20_000
     home: str | None = None
 

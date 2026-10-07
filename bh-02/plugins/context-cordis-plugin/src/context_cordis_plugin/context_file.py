@@ -8,14 +8,16 @@ returning text). A section may also have `on_touch` (another, called `on_touch(f
 root=, home=)` with those files and the ones an input just opened, returning, for each of its
 files that bears on those, the text to tell with that input's result), or only that. bh-02's
 own (`context.toml`, beside this module) is read first, then each of `ContextConfig.files`: the
-person's (`~/.config/bh-02/context.toml`), then the project's (`.bh-02/context.toml`). Each
-appends its sections, or starts the list afresh with `replace = true` at its top. A file is read
-again when it changes, so a section added reaches the model's next message; so is a file a
-section's patterns match, added, moved or removed (`_Search`: a search keeps the time each
-directory it looked in last changed, and looks again when one of them has).
+person's (`$XDG_CONFIG_HOME/bh-02/context.toml`, else `~/.config/bh-02/context.toml`:
+`_located`), then the project's (`.bh-02/context.toml`). Each appends its sections, or starts
+the list afresh with `replace = true` at its top. A file is read again when it changes, so a
+section added reaches the model's next message; so is a file a section's patterns match, added,
+moved or removed (`_Search`: a search keeps the time each directory it looked in last changed,
+and looks again when one of them has).
 
-A file inside the project is the model's to write, and bh-02 reads what it names in its own
-process, outside the jail. So it may name only bh-02's own functions
+A file inside the project is the model's to write, wherever its name came from (the person's
+too, when `$XDG_CONFIG_HOME` or their home is in the project), and bh-02 reads what it names in
+its own process, outside the jail. So it may name only bh-02's own functions
 (`context_cordis_plugin.sections`, as `function` and as `on_touch`), only files in the project
 that are not hidden (no `~`, `/`, `..` or part starting with `.`), and may not `replace` the
 sections before it. And whatever file a section names, bh-02 reads nothing through it that the
@@ -36,6 +38,7 @@ from typing import Any
 __all__ = ["ContextFiles", "Section", "parse"]
 
 _OWN = "context_cordis_plugin.sections:"  # the functions a file inside the project may name
+_CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a context file in the person's config directory
 _SHIPPED = Path(__file__).with_name("context.toml")
 _MAGIC = re.compile(r"[*?\[]")
 # Directories a search does not go into, unless its pattern names them: hidden ones, and what
@@ -111,7 +114,8 @@ def parse(text: str, source: str, *, trusted: bool) -> tuple[tuple[Section, ...]
             raise ValueError(
                 f"{source} is the project's, which the model can write, so it may name only "
                 f"bh-02's own functions ({_OWN}place, rules, whole, named, ...), not {other}: a "
-                "function of yours goes in your ~/.config/bh-02/context.toml"
+                "function of yours goes in your own context file, $XDG_CONFIG_HOME/bh-02/context.toml "
+                "(else ~/.config/bh-02/context.toml)"
             )
         sections.append(Section(tuple(files), function, source, trusted, on_touch))
     return tuple(sections), bool(read.get("replace", False))
@@ -180,7 +184,7 @@ class ContextFiles:
         sections: list[Section] = []
         problems: list[str] = []
         for name in (str(_SHIPPED), *self._files):
-            path = Path(str(home) + name[1:]) if name.startswith("~") else root / name
+            path = _located(name, root, home, os.environ)
             stamp = path.stat().st_mtime_ns if path.is_file() else 0
             if self._read.get(path, (None,))[0] != stamp:
                 self._read[path] = (
@@ -217,6 +221,16 @@ class ContextFiles:
                 found.setdefault(path, not pattern.startswith(("~", "/")))
         resolved = {path: (path.parent.resolve() / path.name, path.resolve()) for path in found}
         return _kept(tuple(found.items()), resolved, root.resolve(), trusted=section.trusted)
+
+
+def _located(name: str, root: Path, home: Path, environ: Mapping[str, str]) -> Path:
+    """Where the context file `name` is: one starting `$XDG_CONFIG_HOME/` in the person's config
+    directory (that variable's value, else `home`'s `.config`, as the models file is), one
+    starting `~` in `home`, and any other from the project's root (an absolute one is itself).
+    Whom it is trusted as is not this: that is where it turns out to be, in the project or not."""
+    if name.startswith(_CONFIG_HOME):
+        return Path(environ.get("XDG_CONFIG_HOME") or home / ".config") / name.removeprefix(_CONFIG_HOME)
+    return Path(str(home) + name[1:]) if name.startswith("~") else root / name
 
 
 def _kept(
