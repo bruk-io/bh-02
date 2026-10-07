@@ -712,6 +712,18 @@ class _Tripped:
     async def stop(self) -> None:
         await self.process.stop()
 
+    def report(self) -> Mapping[str, str]:
+        return dict(self.process.report())
+
+    def notice(self) -> str:
+        return str(self.process.notice())
+
+    def reads(self) -> tuple[str, ...]:
+        return tuple(self.process.reads())
+
+    def writes(self) -> tuple[str, ...]:
+        return tuple(self.process.writes())
+
 
 class Tripping(Confined):
     """A confined jail that can end its worker itself and say why, as a Linux `brig:jail` does
@@ -882,6 +894,18 @@ class Ending(Unjailed):
             async def stop(self) -> None:
                 jail.why = ""
                 await started.stop()
+
+            def report(self) -> Mapping[str, str]:
+                return dict(started.report())
+
+            def notice(self) -> str:
+                return str(started.notice())
+
+            def reads(self) -> tuple[str, ...]:
+                return tuple(started.reads())
+
+            def writes(self) -> tuple[str, ...]:
+                return tuple(started.writes())
 
         return Said()
 
