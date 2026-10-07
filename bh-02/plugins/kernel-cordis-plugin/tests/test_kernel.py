@@ -168,6 +168,46 @@ async def test_a_startup_file_that_ends_the_repl_is_named_and_passed_over_after(
         assert passed.endswith("\n2") and await k.run("TOOLS + 1") == "3"
 
 
+async def test_a_startup_file_that_ends_the_repl_keeps_what_the_opening_had_to_tell(tmp_path: Path) -> None:
+    """The jail ended the last worker itself (a Linux jail's tripwire), and the person's startup
+    file ends the next as it runs: the input it cut short still says the REPL was started again,
+    and why, before it says which file ended it. Else the model never learns its variables went."""
+    person = _person_s("HELPER = 1\n")
+    jail = Tripping()
+    async with Kernel(jail, KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("kept = HELPER") == f"({person} ran first and defined: HELPER)"
+        _person_s("import os\nos._exit(3)\n")
+        await jail.trip("the host undid the jail's hold on /w/local.env; the next one holds it again")
+        ended = await k.run("kept")
+    assert ended == (
+        "(the REPL was started again, because the host undid the jail's hold on /w/local.env; the "
+        "next one holds it again; what earlier inputs defined is gone)\n"
+        f"the REPL's process ended as {person} ran, before this input, so this input did not run; "
+        f"a new one starts with the next, without {person} (`/restart kernel` runs it again)"
+    ), ended
+
+
+async def test_a_startup_file_stopped_part_way_keeps_what_the_opening_had_to_tell(tmp_path: Path) -> None:
+    """The same when Ctrl-C stops the file: the input after, in the same REPL, is told why the
+    REPL was started again as well as what was cut short."""
+    person = _person_s("HELPER = 1\n")
+    jail = Tripping()
+    async with Kernel(jail, KernelConfig(root=str(tmp_path))) as k:
+        await k.run("kept = HELPER")
+        _person_s("import time\ntime.sleep(60)\n")
+        await jail.trip("the host undid the jail's hold on /w/local.env")
+        hanging = asyncio.create_task(k.run("kept"))
+        await asyncio.sleep(0.5)
+        hanging.cancel()
+        await asyncio.gather(hanging, return_exceptions=True)
+        told = await asyncio.wait_for(k.run("'kept' in globals()"), 5)
+    assert told == (
+        "(the REPL was started again, because the host undid the jail's hold on /w/local.env; what "
+        f"earlier inputs defined is gone. {person} was stopped as it ran, so what it defines may be "
+        "missing, and no startup file after it ran)\nFalse"
+    ), told
+
+
 async def test_a_startup_file_stopped_part_way_is_not_run_again_in_that_repl(tmp_path: Path) -> None:
     """Ctrl-C as a startup file runs (it hangs, say) stops it; the next input runs in the same
     REPL without running the files again, and is told what was cut short. One that won't stop
@@ -606,6 +646,45 @@ class Hiding(Confined):
         return await super().start(
             [executable, isolated, "-c", _HIDING, self._hidden, *worker], cwd=cwd, endpoint=endpoint
         )
+
+
+class _Tripped:
+    """A worker a `Tripping` jail started: `ended()` is why the jail ended it, once it has."""
+
+    def __init__(self, process: Any) -> None:
+        self.process = process
+        self.why = ""
+
+    def interrupt(self) -> bool:
+        return bool(self.process.interrupt())
+
+    def ended(self) -> str:
+        return self.why
+
+    async def stop(self) -> None:
+        await self.process.stop()
+
+
+class Tripping(Confined):
+    """A confined jail that can end its worker itself and say why, as a Linux `brig:jail` does
+    when the host undoes one of its holds (its tripwire): between inputs, so the kernel finds
+    the worker gone before the next one and tells that input why."""
+
+    def __init__(self) -> None:
+        self.started: list[_Tripped] = []
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Tripped:
+        started = _Tripped(await super().start(argv, cwd=cwd, endpoint=endpoint))
+        self.started.append(started)
+        return started
+
+    async def trip(self, why: str) -> None:
+        """End the running worker, as the tripwire does, and wait until the host's end of its
+        socket has heard it go."""
+        started = self.started[-1]
+        started.why = why
+        await started.process.stop()
+        await asyncio.sleep(0.2)  # the event loop reads the socket's end
 
 
 class Writing(Hiding):

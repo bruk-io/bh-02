@@ -103,10 +103,12 @@ changed after it; on a line of their own, after whatever the file printed), or i
 one failing doesn't stop the next, and one that isn't there is passed over. A UTF-8 byte order
 mark is no part of either file, as `python file.py` has it. One that ends the worker
 (`os._exit`, a crash) would end every new one: the input it cut short says which file it was,
-and the workers after it pass that file over, saying so, until `/restart kernel`. Ctrl-C while
-one runs stops it, and the worker never runs the files again (a hanging file would hang every
-input); the next input says what was cut short, and one that would not stop at all (its worker
-is replaced) is passed over too. Unconfined, they would run unasked with the person's
+after what the opening had to tell by then (that the REPL was started again, and why, which is
+told nowhere else, and the files before it), and the workers after it pass that file over,
+saying so, until `/restart kernel`. Ctrl-C while one runs stops it, and the worker never runs
+the files again (a hanging file would hang every input); the next input says what was cut
+short, after what the opening had to tell by then, and one that would not stop at all (its
+worker is replaced) is passed over too. Unconfined, they would run unasked with the person's
 permissions, so the model is told to run them as an input of its own, which the loop then puts
 to the person: there every input is (the code shown), so nothing is read on the host for the
 model, and nothing needs keeping from it. Where each is read is the point:

@@ -27,7 +27,8 @@ and if that fails the note says why the host did not; it is still the person's, 
 to edit, which is what the model is told. (The jail also keeps an input from writing in the
 person's config directory, so a session run from the home directory can't choose what a later
 one reads there: brig's `trusted`.) A startup file that ends the worker is passed over by the
-workers after it, until `/restart kernel`, and the input it cut short says which it was.
+workers after it, until `/restart kernel`, and the input it cut short says which it was, after
+what the opening had to tell by then (that the worker was started again, and why).
 """
 
 import asyncio
@@ -132,11 +133,14 @@ class _Ready:
 
 
 class _StartupEnded(ConnectionError):
-    """The worker's process ended as the startup file `name` ran."""
+    """The worker's process ended as the startup file `name` ran; `told`, what the opening had
+    to tell before it (`_told`: the worker started again and why, the files before it), which
+    the input it cut short still tells."""
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, told: str = "") -> None:
         super().__init__(f"the REPL's process ended as {name} ran")
         self.name = name
+        self.told = told
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +158,12 @@ class _Output:
         if self.error:
             parts.append(self.error)
         return "\n".join(parts) or "(no output)"
+
+
+def _told(notes: Sequence[str]) -> str:
+    """What an input is told before its own output: `notes`, in one parenthesis on a line of its
+    own; "" for none."""
+    return f"({'. '.join(notes)})\n" if notes else ""
 
 
 def _startup_input(path: str, source: str | None = None) -> str:
@@ -382,7 +392,7 @@ class Kernel:
                 said = f" because {why}" if why else ""
                 if isinstance(error, _StartupEnded):
                     return _Output(
-                        prefix,
+                        prefix + error.told,
                         f"the REPL's process ended as {error.name} ran, before this input{said}, so this "
                         f"input did not run; a new one starts with the next, without {error.name} "
                         "(`/restart kernel` runs it again)",
@@ -407,7 +417,9 @@ class Kernel:
         to tell: that the worker was started again, and what the startup files did. Jailed, each
         runs here, in order, whether or not the one before failed; unjailed, they would run
         unasked with the person's permissions, so the model is told to run them as an input of
-        its own."""
+        its own. A file that ends the worker, or is stopped, cuts it short, and what it had to
+        tell by then goes with that (`_StartupEnded.told`, `_pending`): the reason taken from
+        `_why` is told nowhere else."""
         why, self._why = (f", because {self._why}" if self._why else ""), ""
         notes = (
             [f"the REPL was started again{why}; what earlier inputs defined is gone"]
@@ -444,14 +456,17 @@ class Kernel:
                 ran = await self._exchange(_startup_input(startup.path, startup.source))
             except ConnectionError:
                 self._passed[startup.name] = "it ended the REPL's process"
-                raise _StartupEnded(startup.name) from None
+                raise _StartupEnded(startup.name, _told(notes)) from None
             except asyncio.CancelledError:
                 if self._writer is None:  # it would not stop: the next worker would only run it again
                     self._passed[startup.name] = "it would not stop at Ctrl-C"
-                else:  # the worker carries on, without the files again
-                    self._pending = (
-                        f"{startup.name} was stopped as it ran, so what it defines may be missing, and "
-                        "no startup file after it ran"
+                else:  # the worker carries on, without the files again: its next input is told
+                    self._pending = ". ".join(
+                        [
+                            *notes,
+                            f"{startup.name} was stopped as it ran, so what it defines may be missing, "
+                            "and no startup file after it ran",
+                        ]
                     )
                 raise
             when = "first" if index == 0 else "next"
@@ -463,7 +478,7 @@ class Kernel:
             else:
                 lines = ran.output.strip().splitlines()
                 notes.append(f"{startup.name} ran {when} and defined: {lines[-1] if lines else 'nothing'}")
-        return f"({'. '.join(notes)})\n" if notes else ""
+        return _told(notes)
 
     def _ready(self, read: bool) -> list[_Ready]:
         """The startup files that are there, in order, each once (at its first place), and how

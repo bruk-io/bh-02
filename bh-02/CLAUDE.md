@@ -195,7 +195,9 @@ another root the jail lets an input write (`jail.writes()`), or whose way passes
 read as the project's is, and if that fails the note says why the host did not; and the jail
 denies every input writing bh-02's config directory (`layers.trusted`, below), so a session run
 from the home directory can't choose what a later one reads there. A startup file that ends the
-worker is passed over by the workers after it, until `/restart kernel`. `instructions()` tells
+worker is passed over by the workers after it, until `/restart kernel`; the input it cut short
+says which, after what the opening had to tell by then (that the REPL was started again, and
+why: told nowhere else). `instructions()` tells
 the model only the project's is its to edit. Only `brig_cordis_plugin` imports brig
 (`brig-one-adapter`). darwin is jailed by seatbelt (reads by denylist), Linux by bubblewrap
 (reads by allowlist: the system, the interpreter, the project; the policy, `spec_for`, is the

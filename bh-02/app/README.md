@@ -304,7 +304,8 @@ jail its helpers run, but its file is not there to open: the model is told `insp
 shows one); the project's is read inside the jail, and so is yours when it is somewhere an
 input may write, or reached through there. No jailed input may write your config directory, so
 a session run from your home directory can't change what a later one runs. One that ends the
-REPL is passed over until `/restart kernel`, and the input it cut short names it. With `--no-jail` neither runs unasked: the model is told to
+REPL is passed over until `/restart kernel`, and the input it cut short names it, after what
+the opening had to tell by then (that the REPL was started again, and why). With `--no-jail` neither runs unasked: the model is told to
 run them as inputs of its own, which you are asked about. The kernel row's `startup` config is
 the list.
 
