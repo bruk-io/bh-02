@@ -58,6 +58,11 @@ def test_a_tool_result_and_a_feedback_line_go_back_in_the_api_s_shape() -> None:
         "role": "user",
         "content": "try again",
     }
+    dated = "(Today's date: 2026-10-07.)\n\nhi"  # the loop's own field is not the API's
+    assert replayed({"role": "user", "content": dated, "today": "2026-10-07"}) == {
+        "role": "user",
+        "content": dated,
+    }
 
 
 def test_this_api_s_own_message_is_replayed_as_it_came_and_another_provider_s_is_rebuilt() -> None:

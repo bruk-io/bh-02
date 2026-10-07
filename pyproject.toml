@@ -216,6 +216,7 @@ exclude = [
     # the loops between input, output and the model
     "chat_cordis_plugin.chat:converse",
     "agent_cordis_plugin.loop:LoopModel.reply",
+    "agent_cordis_plugin.loop:_today",                        # the clock: the date the loop tells with a message
     "agent_cordis_plugin.transcript:MemoryTranscript.append",
     # Claude Code: one process per conversation and what it holds, saved in the session's
     # state dir; the one read of local.env; a rebuilt session file; the CLI's stderr to a log;

@@ -26,6 +26,11 @@ def _held(prefix: list[dict[str, Any]], **fields: Any) -> Held:
 
 def test_a_first_line_is_sent() -> None:
     assert reconcile(Held(), [_user("hello")]) == Send("hello")
+    dated = _user("(Today's date: 2026-10-07.)\n\nhello", today="2026-10-07")  # the loop's own field
+    assert reconcile(Held(), [dated]) == Send(dated["content"])
+    held = _held([dated], emitted=_MESSAGE, said="hi", ended=CLEAN)
+    rest = [dated, {"role": "assistant", "content": "hi", "provider": _MESSAGE}, _user("again")]
+    assert reconcile(held, rest) == Send("again")
 
 
 def test_after_an_answer_the_loop_s_entry_is_accepted_and_the_next_line_sent() -> None:

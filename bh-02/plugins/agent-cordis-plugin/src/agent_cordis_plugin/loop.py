@@ -10,15 +10,24 @@ every model provider, and the loop knows whether a stopped call ever reached the
 Every request begins with the system prompt the conversation began with, kept in its transcript,
 so a model server's cache of the conversation stays good. When the prompt reads differently (an
 extension loaded, the branch switched, CLAUDE.md edited), the new reading is kept after it and
-the model is told what changed (`prompt.changes`) on the next message it reads.
+the model is told what changed (`prompt.changes`) on the next message it reads. The date is not
+in the prompt: the loop tells it with the person's message, the first of a conversation and the
+first of each new day (`(Today's date: ...)`), so the prompt reads the same from one day to the
+next.
 
 After each input it runs, the loop asks `memory`, the functions rows have added there, what to
 tell the model with that input's result (`remembered`): each is given the input's code, its
 result and the project files it opened (`kernel.touched()`), and may add a note, never change
 the result. A path-scoped rule arrives that way when the model first works on a file it covers.
+
+Reading the prompt (every section function, which may read many files and search the project)
+and asking `memory` (which may read rule files) both run in a worker thread
+(`asyncio.to_thread`), never on the event loop, which the TUI shares: a slow section freezes
+nothing. The loop awaits each, so one runs at a time.
 """
 
 import asyncio
+import datetime
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
@@ -53,7 +62,8 @@ class Model(Protocol):
 @runtime_checkable
 class Python(Protocol):
     """What the loop needs of the `kernel` value: the one tool's spec, what to tell the model
-    about it, whether its inputs are confined, and an input run as the model reads it."""
+    about it (`instructions()`, called in a worker thread with the prompt), whether its inputs
+    are confined, and an input run as the model reads it."""
 
     @property
     def spec(self) -> Json: ...
@@ -70,7 +80,8 @@ type Remember = Callable[[Json], str]
 @runtime_checkable
 class Memory(Protocol):
     """What the loop needs of the `memory` value: the functions that may add a note to an
-    input's result, each called as `fn({"code", "result", "touched"}) -> str`."""
+    input's result, each called as `fn({"code", "result", "touched"}) -> str`, in a worker
+    thread, one input's at a time."""
 
     def __iter__(self) -> Iterator[Remember]: ...
 
@@ -84,7 +95,8 @@ class Asks(Protocol):
 
 @runtime_checkable
 class System(Protocol):
-    """What the loop needs of the `system` value: what to tell the model about where it is."""
+    """What the loop needs of the `system` value: what to tell the model about where it is,
+    read in a worker thread (it may read many files), one reading at a time."""
 
     def text(self) -> str: ...
 
@@ -111,6 +123,30 @@ FAILED = "[this reply failed here; the person saw the error]"
 _TOLD = "told the model its instructions changed since the conversation began"
 _REMEMBERED = "told the model with this result: "  # then a memory note's first line
 _SHOWN = 120  # how much of that line the person is shown
+# What the model is told of the date, before the person's message: the first of a conversation,
+# and the first of each new day.
+_DATED = "(Today's date: {}.)"
+
+
+def _today() -> str:
+    """Today's date as the loop tells it (`2026-10-07`): `LoopModel`'s clock unless a test gives one."""
+    return datetime.date.today().isoformat()
+
+
+def _undated(messages: Sequence[Json], today: str) -> bool:
+    """Whether the model is yet to be told `today`: the transcript has told it no date (a new
+    conversation, or one begun before the loop told dates), or the last one it told (a user
+    entry's `today`) is another day's (a conversation run past midnight, or resumed later)."""
+    told = next((str(m["today"]) for m in reversed(messages) if m.get("today")), None)
+    return told != today
+
+
+def _asked(message: str, today: str | None, note: str) -> dict[str, Any]:
+    """The person's message as the transcript keeps it: the date first when it is told
+    (`today`), then what changed in the model's instructions (`note`), then the message. The date
+    rides on the entry as `today` too, which is how a later message finds the last one told."""
+    told = [*([_DATED.format(today)] if today else []), *([note] if note else []), message]
+    return {"role": "user", "content": "\n\n".join(told)} | ({"today": today} if today else {})
 
 
 def remembered(memory: Iterable[Remember], input: Json) -> list[str]:
@@ -159,10 +195,12 @@ class LoopModel:
     model would answer it too, doing the stopped work again before the next one.
 
     The system prompt (`system.text()`, then the kernel's instructions) is read before each
-    message the model reads, but sent as the conversation began with it: a `system` entry in the
-    transcript, the first one. A later reading that differs is kept as another `system` entry
-    and told on that message (`prompt.changes`), so the conversation's start never changes
-    under a model server's cache.
+    message the model reads, in a worker thread, but sent as the conversation began with it: a
+    `system` entry in the transcript, the first one. A later reading that differs is kept as
+    another `system` entry and told on that message (`prompt.changes`), so the conversation's
+    start never changes under a model server's cache. The date is told on the person's message
+    instead, when the transcript has told none yet or another day's (`today`, the clock; a test
+    gives its own): first on that message, then any change to the instructions, then the message.
     """
 
     def __init__(
@@ -174,6 +212,7 @@ class LoopModel:
         system: System | None = None,
         output: Asks | None = None,
         memory: Memory | None = None,
+        today: Callable[[], str] = _today,
     ) -> None:
         self._model = model
         self._kernel = kernel
@@ -182,6 +221,7 @@ class LoopModel:
         self._system = system
         self._output = output  # none: nobody to ask, so an unconfined input is declined
         self._memory = memory
+        self._today = today
 
     async def _approved(self, call: Json) -> bool:
         """Whether an input may run: a confined one always; an unconfined one on the person's yes."""
@@ -192,16 +232,22 @@ class LoopModel:
         )
 
     def _prompt(self) -> str:
-        """The system prompt as it reads now."""
+        """The system prompt as it reads now. Run in a worker thread (`_told`)."""
         parts = [self._system.text() if self._system else "", self._kernel.instructions()]
         return "\n\n".join(part for part in parts if part.strip())
 
-    def _told(self) -> str:
+    async def _told(self) -> str:
         """Bring what the transcript says the model was told up to date, before a message it is
         about to read: the first prompt is kept as the conversation's start, a later one that
         reads differently after it, and what changed is returned to go with that message ('' when
-        nothing did)."""
-        now = self._prompt()
+        nothing did).
+
+        The prompt is read in a worker thread, off the event loop the TUI shares, and the
+        transcript is touched only once it has been, so a reply stopped meanwhile changes nothing.
+        The loop awaits each reading, so one runs at a time and the context plugin's caches are
+        never used by two threads at once; the exception is a reading a stopped reply left
+        running, which finishes in its thread unused while the next may begin."""
+        now = await asyncio.to_thread(self._prompt)
         kept = [m for m in self._transcript.messages if m.get("role") == "system"]
         last = str(kept[-1].get("content") or "") if kept else None
         if now == (last or ""):
@@ -219,8 +265,17 @@ class LoopModel:
 
     async def reply(self, message: str) -> AsyncIterator[Json]:
         """Run turns until one is answered, yielding what happens (CONTRACTS.md: event)."""
-        note = self._told()
-        self._transcript.append({"role": "user", "content": f"{note}\n\n{message}" if note else message})
+        today = self._today()
+        dated = today if _undated(self._transcript.messages, today) else None
+        try:
+            note = await self._told()
+        except asyncio.CancelledError:
+            # stopped while the prompt was read: the message is kept all the same, answered as
+            # one stopped in its first model step is
+            self._transcript.append(_asked(message, dated, ""))
+            self._transcript.append({"role": "assistant", "content": STOPPED})
+            raise
+        self._transcript.append(_asked(message, dated, note))
         if note:
             yield {"type": "note", "text": _TOLD}
         nudges = 0
@@ -246,6 +301,7 @@ class LoopModel:
             self._transcript.append(turn.entry(stop))
             if stop == ACT:
                 answered, running = 0, False  # running: the unanswered call reached the kernel
+                result: str | None = None  # the unanswered call's answer, once it has one
                 try:
                     for call in turn.calls:
                         result = refusal(call, self._kernel.spec)
@@ -258,15 +314,17 @@ class LoopModel:
                             result = await self._kernel.run(code)
                             running = False
                             ran = {"code": code, "result": result, "touched": self._kernel.touched()}
-                            notes = remembered(self._memory or (), ran)
-                        note = self._told()
+                            # in a worker thread too (an on-touch section reads rule files), over
+                            # the functions `memory` holds now
+                            notes = await asyncio.to_thread(remembered, tuple(self._memory or ()), ran)
+                        note = await self._told()
                         told = "\n\n".join([result, *notes, *([note] if note else [])])
                         self._transcript.append({"role": "tool", "content": told, "call_id": call["id"]})
-                        answered += 1
+                        answered, answer, result = answered + 1, result, None
                         yield {
                             "type": "tool_result",
                             "call_id": call["id"],
-                            "content": result,
+                            "content": answer,
                             "is_error": False,
                         }
                         for said in notes:
@@ -277,16 +335,21 @@ class LoopModel:
                 finally:
                     # Interrupted part-way: every call the transcript holds still gets an answer,
                     # or the next request would carry a call no result follows. Only the one in
-                    # the kernel when the stop came may have partly run.
+                    # the kernel when the stop came may have partly run; one stopped after it had
+                    # its answer (while its notes were made or the prompt read) gets that answer.
                     for n, call in enumerate(turn.calls[answered:]):
-                        said = _INTERRUPTED if n == 0 and running else _NOT_RUN
+                        said = _NOT_RUN
+                        if n == 0 and result is not None:
+                            said = result
+                        elif n == 0 and running:
+                            said = _INTERRUPTED
                         self._transcript.append({"role": "tool", "content": said, "call_id": call["id"]})
                 continue
             yield {"type": "stop", "reason": stop}
             if stop in (ANSWERED, REFUSED) or nudges >= self._max_nudges:
                 return
             nudges += 1
-            note = self._told()
+            note = await self._told()
             said = f"{FEEDBACK[stop]}\n\n{note}" if note else FEEDBACK[stop]
             self._transcript.append({"role": "user", "content": said, "feedback": stop})
             if note:

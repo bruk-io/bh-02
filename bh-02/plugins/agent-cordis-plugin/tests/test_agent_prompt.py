@@ -2,7 +2,7 @@
 
 from agent_cordis_plugin import changes
 
-_BEGAN = "You are the model.\n\nWorking directory: /p\nGit branch: main\nToday: 2026-10-06\n\nUse python."
+_BEGAN = "You are the model.\n\nWorking directory: /p\nGit branch: main\n\nUse python."
 
 
 def test_nothing_changed_tells_nothing() -> None:
@@ -12,7 +12,7 @@ def test_nothing_changed_tells_nothing() -> None:
 def test_a_part_that_reads_differently_is_told_whole_and_not_also_as_gone() -> None:
     told = changes(_BEGAN, _BEGAN.replace("main", "feature"))
     assert told.startswith("(bh-02: your instructions have changed since this conversation began.")
-    assert "Working directory: /p\nGit branch: feature\nToday: 2026-10-06" in told
+    assert "Working directory: /p\nGit branch: feature" in told
     assert "No longer" not in told and "You are the model" not in told and "Use python" not in told
     assert told.endswith("(End of what changed.)")
 

@@ -80,8 +80,8 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 tool_call, tool_result, usage, stop, note). `output.confirm` asks about the model's code;
 `input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. `system`
 (`context:project`) is organised as Claude Code's is: who the model is (the model in bh-02, not
-Claude Code) and what bh-02 is made of, then the project context: the working directory, branch
-and date, what the context files say, and the sections rows add (`system.add`: the extensions
+Claude Code) and what bh-02 is made of, then the project context: the working directory and
+branch, what the context files say, and the sections rows add (`system.add`: the extensions
 row's is how to extend bh-02 and the part of cordis that takes). A context file is TOML, a list
 of `[[section]]`s, each `files` (patterns) and `function` (a full module path given the files
 that match, returning text): bh-02's own (`context_cordis_plugin/context.toml`: the guidance
@@ -109,8 +109,16 @@ the prompt before each message the model reads but sends the one the conversatio
 switched, CLAUDE.md edited) is told as a note on that message (`prompt.changes`), because a
 model server reuses its work on a conversation only up to the first token that differs, and a
 changed start costs a local model minutes of prompt processing (it looks frozen) and Claude
-a restart of Claude Code and its cache. The claude-code provider adds a note that Claude Code's own opening line and its
-`mcp__bh__` tool names don't mean the model is in Claude Code.
+a restart of Claude Code and its cache. The date is not in the prompt, or every midnight would
+be such a change: the loop tells it first on the person's message, the first of a conversation
+and of each day (`(Today's date: ...)`, the entry's `today` field saying which it told, so a
+resume does not tell it again and `/clear` does). So the prompt reads the same from day to day,
+and a local model server that keeps its prompt cache can reuse a new session's start. The
+prompt is read, and `memory` asked, in a worker thread (`asyncio.to_thread`), never on the event
+loop the TUI shares: a section function may read many files and search the project, and must
+not need the event loop; the loop awaits each, so one runs at a time. The claude-code provider
+adds a note that Claude Code's own opening line and its `mcp__bh__` tool names don't mean the
+model is in Claude Code.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays
 a provider's message as it came.

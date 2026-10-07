@@ -33,7 +33,7 @@ def changes(before: str, after: str) -> str:
         if op in ("replace", "delete"):
             gone += old[i1:i2]
     # A part that reads differently mostly starts the same way (the one with the working
-    # directory, the branch and the date; a CLAUDE.md section under its heading): its new reading
+    # directory and the branch; a CLAUDE.md section under its heading): its new reading
     # says enough, so it is not also named as gone.
     starts = {part.splitlines()[0] for part in now}
     named = [_named(part) for part in gone if part.splitlines()[0] not in starts]

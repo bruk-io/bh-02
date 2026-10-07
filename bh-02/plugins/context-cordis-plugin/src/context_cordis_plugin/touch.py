@@ -32,7 +32,9 @@ class OnTouch:
     def __init__(self, config: ContextConfig) -> None:
         self._config = config
         self._files = ContextFiles(config.files, config.max_chars)
-        self._told: set[tuple[str, str]] = set()  # (file, what was said), told this conversation
+        # (file, what was said), told this conversation. Called in the loop's worker thread, one
+        # input's at a time, so it and the files' caches take no lock.
+        self._told: set[tuple[str, str]] = set()
 
     def __call__(self, input: Mapping[str, Any]) -> str:
         touched = input.get("touched") or ()

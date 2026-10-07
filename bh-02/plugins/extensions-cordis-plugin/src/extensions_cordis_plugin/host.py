@@ -194,9 +194,11 @@ class Extensions:
 
     def section(self) -> str:
         """What the model is told about extending bh-02, and how its extensions are: a section
-        of its prompt (`system.add`), read per request."""
+        of its prompt (`system.add`), read per request. The loop reads the prompt in a worker
+        thread while this row's watcher changes `_statuses` on the event loop, so it reads a copy
+        (`statuses`, taken in one step) and nothing that needs the event loop."""
         confined = is_confined(self._jail.report())
-        return instructions(self._config.path, confined, self._statuses, self._reference)
+        return instructions(self._config.path, confined, self.statuses, self._reference)
 
     async def __aenter__(self) -> Extensions:
         await self.look()  # what is there already loads before the row is up

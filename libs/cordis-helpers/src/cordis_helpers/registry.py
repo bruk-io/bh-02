@@ -77,7 +77,10 @@ class Hooks[F]:
         return remove
 
     def __iter__(self) -> Iterator[F]:
-        return iter([fn for _, fn in self._hooks])  # a snapshot: a hook may add or remove hooks
+        # a snapshot, the list copied in one step: a hook may add or remove hooks, and one
+        # iterating in a worker thread must not see the list shift under it while the event loop
+        # adds or removes one (it would skip a hook, or see one twice)
+        return iter([fn for _, fn in list(self._hooks)])
 
     def __len__(self) -> int:
         return len(self._hooks)

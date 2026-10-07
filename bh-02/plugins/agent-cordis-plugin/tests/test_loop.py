@@ -1,7 +1,10 @@
 """The loop over a scripted model and a fake kernel, and the transcript outliving a model swap."""
 
 import asyncio
+import threading
+import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -10,6 +13,7 @@ from agent_cordis_plugin import (
     DECLINED,
     FAILED,
     STOPPED,
+    FileTranscript,
     LoopModel,
     MemoryTranscript,
     classify,
@@ -111,11 +115,15 @@ async def test_a_turn_shows_each_call_and_its_result_in_order() -> None:
 
 async def test_a_text_turn_is_one_model_step_and_two_transcript_entries() -> None:
     scripted, history = Scripted([text("hel"), text("lo")]), MemoryTranscript()
-    assert await _collect(LoopModel(scripted, Shouting(), history), "hi") == "hello"
+    assert (
+        await _collect(LoopModel(scripted, Shouting(), history, today=lambda: "2026-10-07"), "hi") == "hello"
+    )
     assert [m["role"] for m in history.messages] == ["user", "assistant"]
     ((messages, offered),) = scripted.requests
     assert offered == ("python",)  # the one tool, offered through tool calling
-    assert messages == ({"role": "user", "content": "hi"},)
+    assert messages == (
+        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nhi", "today": "2026-10-07"},
+    )
 
 
 async def test_a_tool_turn_runs_the_call_as_an_input_and_asks_again() -> None:
@@ -214,7 +222,8 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
     await rt.settle()
     assert await _collect(rt.root.get("loop"), "second") == "two"
     history = rt.root.get("transcript")
-    assert [m["content"] for m in history.messages] == ["first", "one", "second", "two"]  # one conversation
+    # one conversation (its first message told the date first)
+    assert [m["content"].rpartition("\n\n")[2] for m in history.messages] == ["first", "one", "second", "two"]
     assert Inspection(rt).fiber("kernel") is kernel_fiber  # the kernel's row stayed up throughout
     await rt.shutdown()
 
@@ -558,3 +567,149 @@ async def test_memory_s_notes_ride_on_the_input_s_result_and_the_person_sees_eac
     assert results[0]["content"] == "A"  # the person sees the input's own output
     notes = [e["text"] for e in events if e["type"] == "note"]
     assert "told the model with this result: Zebra rule: for /p/a.py." in notes
+
+
+class _Ticker:
+    """A task that counts while the event loop is free to run it, every 10 ms."""
+
+    def __init__(self) -> None:
+        self.ticks = 0
+        self._task: asyncio.Task[None] | None = None
+
+    async def _run(self) -> None:
+        while True:
+            await asyncio.sleep(0.01)
+            self.ticks += 1
+
+    def __enter__(self) -> _Ticker:
+        self._task = asyncio.create_task(self._run())
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        assert self._task is not None
+        self._task.cancel()
+
+
+async def test_the_prompt_and_memory_are_read_off_the_event_loop_which_keeps_running() -> None:
+    """The TUI runs on cordis's event loop: a section function that walks a big tree, or a
+    memory function that reads rule files, must not freeze it. Each runs in a worker thread,
+    and the event loop goes on ticking while it does."""
+    during: list[int] = []  # ticks counted while each slow call ran
+    threads: list[int] = []
+
+    def slowly(ticker: _Ticker) -> None:
+        threads.append(threading.get_ident())
+        before = ticker.ticks
+        time.sleep(0.3)
+        during.append(ticker.ticks - before)
+
+    with _Ticker() as ticker:
+
+        class Slow:
+            def text(self) -> str:
+                slowly(ticker)
+                return "in /a"
+
+        def rules(input: Json) -> str:
+            slowly(ticker)
+            return "a rule"
+
+        memory: Hooks[Callable[[Json], str]] = Hooks()
+        memory.add(rules)
+        scripted = Scripted([call("c1", "python", code="a")], [text("done")])
+        loop = LoopModel(scripted, Shouting(), MemoryTranscript(), system=Slow(), memory=memory)
+        assert await _collect(loop, "go") == "done"
+    assert len(during) == 3  # the prompt with the message, memory, the prompt with the result
+    assert all(ticks >= 10 for ticks in during), during  # ~30 each when the loop runs free; 0 blocked
+    assert threading.get_ident() not in threads
+
+
+async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_its_result() -> None:
+    started = threading.Event()
+
+    def slow(input: Json) -> str:
+        started.set()
+        time.sleep(0.2)
+        return "a rule"
+
+    memory: Hooks[Callable[[Json], str]] = Hooks()
+    memory.add(slow)
+    kernel, history = Shouting(), MemoryTranscript()
+    scripted = Scripted([call("c1", "python", code="a"), call("c2", "python", code="b")])
+    task = asyncio.create_task(_collect(LoopModel(scripted, kernel, history, memory=memory), "go"))
+    while not started.is_set():
+        await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    tools = [m for m in history.messages if m["role"] == "tool"]
+    assert [m["call_id"] for m in tools] == ["c1", "c2"]
+    assert tools[0]["content"] == "A"  # it ran to the end: its result, not "not run"
+    assert tools[1]["content"].startswith("not run")
+    assert kernel.ran == ["a"]
+
+
+async def test_a_reply_stopped_while_the_prompt_is_read_keeps_the_message_answered_as_stopped() -> None:
+    started = threading.Event()
+
+    class Slow:
+        def text(self) -> str:
+            started.set()
+            time.sleep(0.2)
+            return "in /a"
+
+    history = MemoryTranscript()
+    loop = LoopModel(
+        Scripted([text("never")]), Shouting(), history, system=Slow(), today=lambda: "2026-10-07"
+    )
+    task = asyncio.create_task(_collect(loop, "go"))
+    while not started.is_set():
+        await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert history.messages == (
+        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\ngo", "today": "2026-10-07"},
+        {"role": "assistant", "content": STOPPED},
+    )
+
+
+async def test_the_date_is_told_with_a_conversation_s_first_message_and_the_first_of_each_day(
+    tmp_path: Path,
+) -> None:
+    """Not in the prompt, which would then change every midnight: told on the person's message,
+    and kept on its entry as `today`, so a resumed session (the transcript is a file) does not
+    tell it again the same day, and a cleared one (an empty transcript) does."""
+    day = ["2026-10-07"]
+    path = str(tmp_path / "transcript.jsonl")
+    history = FileTranscript(path)
+    scripted = Scripted([text("one")], [text("two")], [text("three")], [text("four")], [text("five")])
+    await _collect(LoopModel(scripted, Shouting(), history, today=lambda: day[-1]), "first")
+    await _collect(LoopModel(scripted, Shouting(), history, today=lambda: day[-1]), "second")
+    day.append("2026-10-08")  # past midnight
+    model = LoopModel(scripted, Shouting(), history, today=lambda: day[-1])
+    await _collect(model, "third")
+    await _collect(LoopModel(scripted, Shouting(), FileTranscript(path), today=lambda: day[-1]), "fourth")
+    assert [m for m in FileTranscript(path).messages if m["role"] == "user"] == [
+        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nfirst", "today": "2026-10-07"},
+        {"role": "user", "content": "second"},
+        {"role": "user", "content": "(Today's date: 2026-10-08.)\n\nthird", "today": "2026-10-08"},
+        {"role": "user", "content": "fourth"},  # resumed the same day
+    ]
+    cleared = MemoryTranscript()
+    await _collect(LoopModel(scripted, Shouting(), cleared, today=lambda: day[-1]), "after /clear")
+    assert cleared.messages[0]["content"] == "(Today's date: 2026-10-08.)\n\nafter /clear"
+
+
+async def test_on_a_new_day_with_new_instructions_the_date_comes_first_then_what_changed() -> None:
+    where, day = _Where(), ["2026-10-07"]
+    scripted, history = Scripted([text("one")], [text("two")]), MemoryTranscript()
+    model = LoopModel(scripted, _Guided(), history, system=where, today=lambda: day[-1])
+    await _collect(model, "first")
+    where.text_now, day[0] = "in /b", "2026-10-08"
+    events = [e async for e in model.reply("second")]
+    sent = scripted.requests[1][0][-1]
+    assert sent["content"].startswith("(Today's date: 2026-10-08.)\n\n(bh-02: your instructions have changed")
+    assert sent["content"].endswith("(End of what changed.)\n\nsecond") and sent["today"] == "2026-10-08"
+    assert scripted.requests[1][0][0] == scripted.requests[0][0][0]  # the prompt it began with
+    assert [e["text"] for e in events if e["type"] == "note"] == [
+        "told the model its instructions changed since the conversation began"
+    ]

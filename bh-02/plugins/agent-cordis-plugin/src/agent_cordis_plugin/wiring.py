@@ -60,6 +60,7 @@ async def loop(
 async def memory() -> Effects:
     """Fills a `memory` row: `use = "agent:memory"`. A broker (CONTRACTS.md: memory): a row
     with something to tell the model about an input `acquire`s `memory.add(fn)`, and the loop
-    calls each `fn({"code", "result", "touched"}) -> str` after every input it runs. Each adds a
-    note or says nothing ('' ); none changes the result, so they compose in any order."""
+    calls each `fn({"code", "result", "touched"}) -> str` after every input it runs, in a worker
+    thread. Each adds a note or says nothing ('' ); none changes the result, so they compose in
+    any order."""
     yield bind("memory", Hooks[Remember]())

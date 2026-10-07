@@ -8,7 +8,7 @@ from models_cordis_plugin.claude_code import project_dir, records_for, session_f
 
 _NOW = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
 _TRANSCRIPT = [
-    {"role": "user", "content": "run it"},
+    {"role": "user", "content": "run it", "today": "2026-09-23"},  # the date the loop told: not Claude Code's
     {
         "role": "assistant",
         "content": "",

@@ -1,16 +1,21 @@
 """The `system` value: what the model is told about who and where it is, read fresh each time.
 
 Organised as Claude Code's is: who the model is and what bh-02 is first (bh-02's own), then the
-project context: where it is working (the directory, the git branch, the date), then what the
-context files say (`context_file`: the guidance and rule files people write for an agent, each
-read by a section's function), then the sections other rows add. `describe` is the whole prompt
-as a function of what was found; `ProjectContext.text` finds it every time it is asked.
+project context: where it is working (the directory and the git branch), then what the context
+files say (`context_file`: the guidance and rule files people write for an agent, each read by a
+section's function), then the sections other rows add. `describe` is the whole prompt as a
+function of what was found; `ProjectContext.text` finds it every time it is asked. The date is
+not in it: the prompt would read differently every midnight, so the loop tells the date with the
+person's message instead.
 
 It is also a broker (paper 6.2): a row with something to tell the model `acquire`s a section
 (`add`), read with the rest each time, and its remover takes it out again when the row leaves.
+
+`agent:loop` calls `text()` in a worker thread, off the event loop, one call at a time; so a
+section function (a context file's, or one a row adds) runs there too and must not need the
+event loop.
 """
 
-import datetime
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,13 +58,12 @@ class ContextConfig:
     home: str | None = None
 
 
-def describe(root: str, branch: str | None, today: str, sections: Sequence[str] = ()) -> str:
+def describe(root: str, branch: str | None, sections: Sequence[str] = ()) -> str:
     """The system prompt, from what was found. `sections` are what rows added
     (`ProjectContext.add`: the project's guidance, how to extend bh-02, ...), each as it reads now."""
     lines = [_INTRO, "", _HARNESS, "", f"Working directory: {root}"]
     if branch:
         lines.append(f"Git branch: {branch}")
-    lines.append(f"Today: {today}")
     for section in sections:
         if section.strip():
             lines += ["", section.strip()]
@@ -89,7 +93,8 @@ class ProjectContext:
         root = Path(self._config.root).resolve()
         head = root / ".git" / "HEAD"
         branch = branch_of(head.read_text(encoding="utf-8")) if head.is_file() else None
-        today = datetime.date.today().isoformat()
         home = Path(self._config.home or Path.home()).resolve()
+        # the sections rows have added now: a snapshot, as the event loop may add or remove one
+        # while this runs in the loop's worker thread
         sections = [self._files.text(root, home), *(section() for section in self._sections)]
-        return describe(str(root), branch, today, sections)
+        return describe(str(root), branch, sections)

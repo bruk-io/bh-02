@@ -13,12 +13,19 @@ say when the model first works on it.
 1. **who the model is**, bh-02's own: the model in bh-02, not Claude Code (a CLAUDE.md is often
    written for Claude Code, and the claude-code provider's prompt opens with Claude Code's own
    line), and what bh-02 is made of (cordis rows the person reshapes while it runs);
-2. **the project context**: the working directory, the git branch (from `.git/HEAD`, no
-   subprocess) and today's date; then what the context files' sections say; then the sections
-   other rows add (`add`).
+2. **the project context**: the working directory and the git branch (from `.git/HEAD`, no
+   subprocess); then what the context files' sections say; then the sections other rows add
+   (`add`).
 
 `agent:loop` sends a conversation the prompt it began with and tells a later change as a note.
-`describe` is the prompt as a pure function of what was found.
+The date is not in the prompt, which would then change every midnight: the loop tells it with
+the person's message. `describe` is the prompt as a pure function of what was found.
+
+`agent:loop` calls `text()` in a worker thread, off the event loop the TUI runs on, one call at
+a time, so a section function that reads many files or searches a large project freezes nothing;
+it runs in that thread too, and must not need the event loop. So do the `on_touch` functions
+(`context:on_touch` is a `memory` function, which the loop calls the same way). The caches of
+what was read and searched take no lock, since no two calls run at once.
 
 ## Context files
 
@@ -43,8 +50,8 @@ on_touch = "context_cordis_plugin.sections:place_touched"
 - `function`: a full module path, `package.module:function`, called as
   `function(files, root=root, home=home) -> str` with the files that matched, in the order of
   the patterns, each once; it returns what the model is told ('' for nothing). It runs each
-  time the prompt is read. One that can't be imported, or raises, says so in one line, and the
-  other sections still say theirs.
+  time the prompt is read, in the loop's worker thread. One that can't be imported, or raises,
+  says so in one line, and the other sections still say theirs.
 - `on_touch` (optional): another, called as `on_touch(files, touched, root=root, home=home)`
   after each input that opened files in the project (`touched`, absolute: `kernel.touched()`),
   returning a mapping of each of its files that bears on them to the text to tell with that

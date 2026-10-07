@@ -255,7 +255,8 @@ rather than through a shell, and an input that runs `cat`, `sed` or `ls` through
 Python does that, once for each kind of work a conversation. The namespace outlives a model
 swap; Ctrl-C interrupts the running input and keeps the namespace.
 
-After each input, the loop asks `memory` what to tell the model with its result: the functions
+After each input, the loop asks `memory` what to tell the model with its result (in a worker
+thread, as it reads the prompt, so neither freezes the app): the functions
 rows add there are given the input's code, its result and the project files it opened (the
 worker hears each `open` with an audit hook, so `kernel.touched()` is what Python in the input
 read or wrote, not what a shell command did). `kernel:shell_hints` adds the shell hint above;

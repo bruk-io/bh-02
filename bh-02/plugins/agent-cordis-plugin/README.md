@@ -17,7 +17,8 @@ approval modal) and a no is its answer (`DECLINED`), so approval is one place fo
 model provider. A call to any other name, or one with no `code` string, is answered with
 text saying so (`refusal`, pure) and runs nothing. A turn stopped part-way still answers every
 call: the one in the kernel when the stop came with `interrupted: ... it may have partly run`,
-the rest (the one at the approval question included) with `not run: ...`. The transcript and
+one that had its result (the stop came while its notes were made or the prompt read) with that
+result, the rest (the one at the approval question included) with `not run: ...`. The transcript and
 the kernel are rows of their own, so the history and the namespace outlive the loop: replace
 `model` (or the ui) and the loop reloads while the conversation carries on.
 
@@ -50,3 +51,27 @@ reads differently, whole, and the first line of each that is gone) goes with tha
 the person sees a `note`. A loop that reloads (a new model, a new ui) carries on from what the
 transcript says the model was told; `/clear` empties it, so the next conversation begins with
 the prompt as it reads then.
+
+The date is not in the prompt, which would then read differently every midnight: the model would
+be told its instructions changed, and the transcript would keep another whole prompt, each day.
+The loop tells it with the person's message instead (`reply`), when the transcript has told no
+date yet or the last one it told is another day's: the entry's content starts
+`(Today's date: 2026-10-07.)` and the entry carries the date as `"today"`, which is how the loop
+finds the last one told. So a resumed session (the transcript is a file) does not tell it again
+the same day, and `/clear` (an empty transcript) does. A message that also tells a change in the
+instructions has the date first, then the change, then the person's words. The clock is
+`LoopModel`'s `today` (the real date in the `agent:loop` row; a test gives its own). And a new
+session begins with the same prompt as one the day before in the same project (unless the
+branch, a context file or an extension changed it), so a local model server that keeps its
+prompt cache across conversations can reuse it. The providers send
+`content` alone, so `today` never reaches a model.
+
+Reading the prompt (`system.text()`, whose context-file sections may read many files and search
+the project, and `kernel.instructions()`) and asking `memory` (the on-touch functions read rule
+files) run in a worker thread (`asyncio.to_thread`), not on the event loop, which cordis and the
+TUI share, so a slow section function never freezes the app. The loop awaits each, so one runs
+at a time; the transcript is changed only once each is done, so a reply stopped meanwhile
+leaves it whole (stopped while the person's message was being dated and the prompt read, the
+message is kept and answered as stopped, as one stopped in its first model step is). What runs
+there must not need the event loop: a section function, `kernel.instructions()` and a `memory`
+function each read and return text.
