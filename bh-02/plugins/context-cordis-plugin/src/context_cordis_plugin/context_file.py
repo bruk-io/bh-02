@@ -4,22 +4,24 @@ that says what they mean to the model.
 A context file is TOML: `[[section]]`s, each `files` (patterns: from the project's root, `**/`
 for any depth; `~/...` and `/...` are paths of their own) and `function` (a full module path,
 `package.module:function`, called `function(files, root=, home=)` with the files that match and
-returning text). bh-02's own (`context.toml`, beside this module) is read first, then each of
-`ContextConfig.files`: the person's (`~/.config/bh-02/context.toml`), then the project's
-(`.bh-02/context.toml`). Each appends its sections, or starts the list afresh with
-`replace = true` at its top. A file is read again when it changes, so a section added reaches
-the model's next message; so is a file a section's patterns match, added, moved or removed
-(`_Search`: a search keeps the time each directory it looked in last changed, and looks again
-when one of them has).
+returning text). A section may also have `on_touch` (another, called `on_touch(files, touched,
+root=, home=)` with those files and the ones an input just opened, returning, for each of its
+files that bears on those, the text to tell with that input's result), or only that. bh-02's
+own (`context.toml`, beside this module) is read first, then each of `ContextConfig.files`: the
+person's (`~/.config/bh-02/context.toml`), then the project's (`.bh-02/context.toml`). Each
+appends its sections, or starts the list afresh with `replace = true` at its top. A file is read
+again when it changes, so a section added reaches the model's next message; so is a file a
+section's patterns match, added, moved or removed (`_Search`: a search keeps the time each
+directory it looked in last changed, and looks again when one of them has).
 
 A file inside the project is the model's to write, and bh-02 reads what it names in its own
 process, outside the jail. So it may name only bh-02's own functions
-(`context_cordis_plugin.sections`), only files in the project that are not hidden (no `~`, `/`,
-`..` or part starting with `.`), and may not `replace` the sections before it. And whatever file
-a section names, bh-02 reads nothing through it that the model could not read itself (`_kept`):
-a file reached from the project stays in it, none is read under a secret's name (`local.env`,
-`.env`, `*.env`), and a symlink in the project (where the model can make one) counts only when it
-points at another file the section found.
+(`context_cordis_plugin.sections`, as `function` and as `on_touch`), only files in the project
+that are not hidden (no `~`, `/`, `..` or part starting with `.`), and may not `replace` the
+sections before it. And whatever file a section names, bh-02 reads nothing through it that the
+model could not read itself (`_kept`): a file reached from the project stays in it, none is
+read under a secret's name (`local.env`, `.env`, `*.env`), and a symlink in the project (where
+the model can make one) counts only when it points at another file the section found.
 """
 
 import importlib
@@ -47,13 +49,15 @@ type Function = Callable[..., Any]
 
 @dataclass(frozen=True, slots=True)
 class Section:
-    """One `[[section]]`: its file patterns, its function, the context file it came from, and
-    whether that file is the person's (or bh-02's) rather than the project's."""
+    """One `[[section]]`: its file patterns, its function ('' for none), the context file it
+    came from, whether that file is the person's (or bh-02's) rather than the project's, and
+    its `on_touch` function ('' for none)."""
 
     files: tuple[str, ...]
     function: str
     source: str
     trusted: bool = True
+    on_touch: str = ""
 
 
 def parse(text: str, source: str, *, trusted: bool) -> tuple[tuple[Section, ...], bool]:
@@ -75,18 +79,23 @@ def parse(text: str, source: str, *, trusted: bool) -> tuple[tuple[Section, ...]
     for table in read.get("section", []):
         files = table.get("files", []) if isinstance(table, dict) else None
         files = [files] if isinstance(files, str) else files
-        function = table.get("function") if isinstance(table, dict) else None
+        function = table.get("function", "") if isinstance(table, dict) else None
+        on_touch = table.get("on_touch", "") if isinstance(table, dict) else None
+        named = [n for n in (function, on_touch) if n]
         if (
             not isinstance(files, list)
             or not all(isinstance(f, str) and f for f in files)
             or not isinstance(function, str)
-            or ":" not in function
-            or set(table) - {"files", "function"}
+            or not isinstance(on_touch, str)
+            or not named
+            or not all(":" in n for n in named)
+            or set(table) - {"files", "function", "on_touch"}
         ):
             raise ValueError(
                 f"a [[section]] in {source} is `files` (patterns from the project's root) and "
                 '`function` (a module path, "package.module:function"), as in '
-                '{ files = ["AGENTS.md"], function = "context_cordis_plugin.sections:place" }; '
+                '{ files = ["AGENTS.md"], function = "context_cordis_plugin.sections:place" }, '
+                "and may have `on_touch` (another, for what to tell when an input opens a file); "
                 f"got {table!r}"
             )
         outside = [
@@ -98,13 +107,13 @@ def parse(text: str, source: str, *, trusted: bool) -> tuple[tuple[Section, ...]
                 f"in the project that are not hidden (no ~, /, .. or part starting with .), not "
                 f"{', '.join(outside)}"
             )
-        if not trusted and not function.startswith(_OWN):
+        if not trusted and (other := next((n for n in named if not n.startswith(_OWN)), None)):
             raise ValueError(
                 f"{source} is the project's, which the model can write, so it may name only "
-                f"bh-02's own functions ({_OWN}place, rules, whole, named), not {function}: a "
+                f"bh-02's own functions ({_OWN}place, rules, whole, named, ...), not {other}: a "
                 "function of yours goes in your ~/.config/bh-02/context.toml"
             )
-        sections.append(Section(tuple(files), function, source, trusted))
+        sections.append(Section(tuple(files), function, source, trusted, on_touch))
     return tuple(sections), bool(read.get("replace", False))
 
 
@@ -125,6 +134,8 @@ class ContextFiles:
     def text(self, root: Path, home: Path) -> str:
         sections, parts = self._sections(root, home)
         for section in sections:
+            if not section.function:
+                continue
             try:
                 said = _function(section.function)(
                     list(self._found(section, root, home)), root=root, home=home
@@ -142,6 +153,28 @@ class ContextFiles:
             if len(text) <= cap
             else f"{text[:cap]}\n... [{len(text) - cap} more chars of project context]"
         )
+
+    def touched(self, touched: Sequence[Path], root: Path, home: Path) -> list[tuple[str, str]]:
+        """What the sections with an `on_touch` say about the files an input opened (`touched`,
+        absolute): each (file, text) its function returned, in the order of the sections. One
+        that fails says so in one line, under its own name. A context file that can't be read is
+        the prompt's to say, not this."""
+        said: list[tuple[str, str]] = []
+        for section in self._sections(root, home)[0]:
+            if not section.on_touch:
+                continue
+            try:
+                found = _function(section.on_touch)(
+                    list(self._found(section, root, home)), list(touched), root=root, home=home
+                )
+                if not isinstance(found, Mapping):
+                    raise TypeError(f"it returned a {type(found).__name__}, not a mapping of file to text")
+                said += [(str(path), str(text).strip()) for path, text in found.items() if str(text).strip()]
+            except Exception as error:  # one section failing must not take the others with it
+                said.append(
+                    (section.on_touch, f"(bh-02 could not make the section {section.on_touch}: {error})")
+                )
+        return said
 
     def _sections(self, root: Path, home: Path) -> tuple[list[Section], list[str]]:
         sections: list[Section] = []

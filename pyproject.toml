@@ -256,6 +256,9 @@ exclude = [
     "context_cordis_plugin.context_file:ContextFiles.*", "context_cordis_plugin.context_file:_parsed",
     "context_cordis_plugin.context_file:_function", "context_cordis_plugin.context_file:_search",
     "context_cordis_plugin.sections:place", "context_cordis_plugin.sections:rules",
+    "context_cordis_plugin.sections:place_touched", "context_cordis_plugin.sections:rules_touched",
+    # the on-touch memory function reads the context files and keeps what it told this conversation
+    "context_cordis_plugin.touch:OnTouch.__call__",
     "context_cordis_plugin.sections:whole", "context_cordis_plugin.sections:_text",
     # the kernel: a socket to a process a jail started, the process itself, and the worker program
     "kernel_cordis_plugin.client:Kernel.*",

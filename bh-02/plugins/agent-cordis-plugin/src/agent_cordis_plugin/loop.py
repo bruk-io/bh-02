@@ -1,7 +1,7 @@
 """The loop: a turn is one model step plus the inputs it asked for, until it asks for none.
 
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
-kernel, transcript, system, output). The model has one tool, the kernel's `python(code)`,
+kernel, transcript, system, output, memory). The model has one tool, the kernel's `python(code)`,
 offered through the provider's standard tool calling; every call runs as an input in the kernel.
 A kernel that is not `confined` runs with the person's own permissions, so the loop puts each
 of its inputs to the person first (`output.confirm`) and runs it only on a yes: one place for
@@ -11,10 +11,15 @@ Every request begins with the system prompt the conversation began with, kept in
 so a model server's cache of the conversation stays good. When the prompt reads differently (an
 extension loaded, the branch switched, CLAUDE.md edited), the new reading is kept after it and
 the model is told what changed (`prompt.changes`) on the next message it reads.
+
+After each input it runs, the loop asks `memory`, the functions rows have added there, what to
+tell the model with that input's result (`remembered`): each is given the input's code, its
+result and the project files it opened (`kernel.touched()`), and may add a note, never change
+the result. A path-scoped rule arrives that way when the model first works on a file it covers.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
 from agent_cordis_plugin.prompt import changes
@@ -27,10 +32,12 @@ __all__ = [
     "Asks",
     "Model",
     "LoopModel",
+    "Memory",
     "Python",
     "System",
     "Transcript",
     "refusal",
+    "remembered",
 ]
 
 type Json = Mapping[str, Any]
@@ -54,6 +61,18 @@ class Python(Protocol):
     def confined(self) -> bool: ...
     def instructions(self) -> str: ...
     async def run(self, code: str) -> str: ...
+    def touched(self) -> tuple[str, ...]: ...
+
+
+type Remember = Callable[[Json], str]
+
+
+@runtime_checkable
+class Memory(Protocol):
+    """What the loop needs of the `memory` value: the functions that may add a note to an
+    input's result, each called as `fn({"code", "result", "touched"}) -> str`."""
+
+    def __iter__(self) -> Iterator[Remember]: ...
 
 
 @runtime_checkable
@@ -90,6 +109,26 @@ STOPPED = "[the person stopped this reply here]"
 FAILED = "[this reply failed here; the person saw the error]"
 # What the person is shown when the model is told its instructions changed.
 _TOLD = "told the model its instructions changed since the conversation began"
+_REMEMBERED = "told the model with this result: "  # then a memory note's first line
+_SHOWN = 120  # how much of that line the person is shown
+
+
+def remembered(memory: Iterable[Remember], input: Json) -> list[str]:
+    """What `memory`'s functions say about one input (`code`, `result`, `touched`), sorted, so
+    the order rows added them in means nothing. A function that fails or returns something
+    other than text says so in one line, and the rest still say theirs."""
+    notes: list[str] = []
+    for fn in memory:
+        try:
+            said = fn(input)
+            if not isinstance(said, str):
+                raise TypeError(f"it returned a {type(said).__name__}, not text")
+        except Exception as error:  # one row's function failing must not cost the input its result
+            named = getattr(fn, "__qualname__", type(fn).__qualname__)
+            said = f"(bh-02 could not make a note with {getattr(fn, '__module__', '?')}:{named}: {error})"
+        if said.strip():
+            notes.append(said.strip())
+    return sorted(notes)
 
 
 def refusal(call: Json, spec: Json) -> str | None:
@@ -134,6 +173,7 @@ class LoopModel:
         max_nudges: int = 2,
         system: System | None = None,
         output: Asks | None = None,
+        memory: Memory | None = None,
     ) -> None:
         self._model = model
         self._kernel = kernel
@@ -141,6 +181,7 @@ class LoopModel:
         self._max_nudges = max_nudges
         self._system = system
         self._output = output  # none: nobody to ask, so an unconfined input is declined
+        self._memory = memory
 
     async def _approved(self, call: Json) -> bool:
         """Whether an input may run: a confined one always; an unconfined one on the person's yes."""
@@ -210,12 +251,16 @@ class LoopModel:
                         result = refusal(call, self._kernel.spec)
                         if result is None and not await self._approved(call):
                             result = DECLINED
+                        notes: list[str] = []
                         if result is None:
                             running = True
-                            result = await self._kernel.run(call["input"]["code"])
+                            code = call["input"]["code"]
+                            result = await self._kernel.run(code)
                             running = False
+                            ran = {"code": code, "result": result, "touched": self._kernel.touched()}
+                            notes = remembered(self._memory or (), ran)
                         note = self._told()
-                        told = f"{result}\n\n{note}" if note else result
+                        told = "\n\n".join([result, *notes, *([note] if note else [])])
                         self._transcript.append({"role": "tool", "content": told, "call_id": call["id"]})
                         answered += 1
                         yield {
@@ -224,6 +269,9 @@ class LoopModel:
                             "content": result,
                             "is_error": False,
                         }
+                        for said in notes:
+                            first = said.splitlines()[0]
+                            yield {"type": "note", "text": _REMEMBERED + first[:_SHOWN]}
                         if note:
                             yield {"type": "note", "text": _TOLD}
                 finally:

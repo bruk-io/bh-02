@@ -12,14 +12,31 @@ model is told ('' for nothing). One runs each time the prompt is read, so it rea
 - `rules`: rule files, as each one's frontmatter says (`rule`).
 - `whole`: each file, whole.
 - `named`: each file by name, for the model to read when it bears on its work.
+
+And two for a section's `on_touch`, each `on_touch(files, touched, *, root, home)` with the
+files an input just opened (absolute), returning, for each of its files that bears on them, the
+text to tell with that input's result (the row tells each once a conversation):
+
+- `place_touched`: the guidance further down that covers a file opened (one under its directory).
+- `rules_touched`: the rules whose `paths` (or `globs`) match a file opened.
 """
 
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 
-__all__ = ["Rule", "frontmatter", "named", "place", "rule", "rules", "whole"]
+__all__ = [
+    "Rule",
+    "frontmatter",
+    "named",
+    "place",
+    "place_touched",
+    "rule",
+    "rules",
+    "rules_touched",
+    "whole",
+]
 
 _LISTED = 30  # files named, the rest counted
 _FRONT = re.compile(r"\A---\n(.*?)\n---[ \t]*(?:\n|\Z)", re.S)
@@ -49,10 +66,35 @@ def place(files: Sequence[Path], *, root: Path, home: Path) -> str:
     if below:
         parts.append(
             f"Some directories have guidance of their own: {_named([_where(f, root, home) for f in below])}. "
-            "Before you work in one of them, read its file; where it disagrees with the guidance "
-            "above, it wins there."
+            "Before you work in one of them, read its file if it has not been given to you yet; "
+            "where it disagrees with the guidance above, it wins there."
         )
     return "\n\n".join(parts)
+
+
+def place_touched(
+    files: Sequence[Path], touched: Sequence[Path], *, root: Path, home: Path
+) -> dict[Path, str]:
+    """The guidance further down the project that covers a file an input opened (the file is
+    under its directory), whole, broadest first; of two with the same text (a CLAUDE.md linking
+    to the AGENTS.md beside it), one."""
+    below = [f for f in files if f.is_relative_to(root) and f.parent != root]
+    covering = sorted(
+        (f for f in below if any(t.is_relative_to(f.parent) for t in touched)),
+        key=lambda f: (len(f.parts), str(f)),
+    )
+    told: dict[Path, str] = {}
+    seen: set[str] = set()
+    for path in covering:
+        text = _text(path).strip()
+        if text and text not in seen:
+            seen.add(text)
+            where = _where(path.parent, root, home)
+            told[path] = (
+                f"From {_where(path, root, home)}, guidance for work under {where}/, where it wins "
+                f"over the guidance before it:\n\n{text}"
+            )
+    return told
 
 
 def rules(files: Sequence[Path], *, root: Path, home: Path) -> str:
@@ -65,12 +107,30 @@ def rules(files: Sequence[Path], *, root: Path, home: Path) -> str:
     pathed = [f"{r.path} (for {', '.join(r.paths)})" for r in each if r.applies == "paths"]
     if pathed:
         parts.append(
-            f"Rules for some files; read one before you work on files it is for: {_named(pathed, '; ')}."
+            "Rules for some files; read one before you work on files it is for, if it has not been "
+            f"given to you yet: {_named(pathed, '; ')}."
         )
     asked = [f"{r.path} ({r.description})" for r in each if r.applies == "asked"]
     if asked:
         parts.append(f"Rules to read when what they are for bears on your work: {_named(asked, '; ')}.")
     return "\n\n".join(parts)
+
+
+def rules_touched(
+    files: Sequence[Path], touched: Sequence[Path], *, root: Path, home: Path
+) -> dict[Path, str]:
+    """The rules for some files (`paths` or `globs`) that match a file an input opened in the
+    project, each whole, with the patterns it is for (and not the file that matched, so the
+    same rule reads the same whichever file brought it)."""
+    opened = [t.relative_to(root) for t in touched if t.is_relative_to(root)]
+    told: dict[Path, str] = {}
+    for path in files:
+        found = rule(_where(path, root, home), _text(path))
+        if found.applies != "paths" or not found.text:
+            continue
+        if any(_matches(t, p) for t in opened for p in found.paths):
+            told[path] = f"From {found.path}, a rule for {', '.join(found.paths)}:\n\n{found.text}"
+    return told
 
 
 def whole(files: Sequence[Path], *, root: Path, home: Path) -> str:
@@ -146,6 +206,15 @@ def rule(path: str, text: str) -> Rule:
     else:
         applies = "manual" if always == "false" else "always"
     return Rule(path, applies, tuple(paths), description, body.strip())
+
+
+def _matches(path: PurePath, pattern: str) -> bool:
+    """Whether a path from the project's root matches a rule's pattern: from the root, or, for
+    a pattern with no `/` (`*.tsx`), at any depth."""
+    pattern = pattern.strip().removeprefix("./").lstrip("/")
+    if not pattern:
+        return False
+    return path.full_match(pattern) or ("/" not in pattern and path.full_match(f"**/{pattern}"))
 
 
 def _bare(value: str) -> str:

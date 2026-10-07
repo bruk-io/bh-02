@@ -7,7 +7,9 @@ holds only what inputs put there: an input is plain Python, and the jail decides
 Wire: newline-delimited JSON. The host sends ``{"op": "hello"}`` once (a readiness probe
 connects and closes without a word, so the worker keeps accepting until one speaks), then
 ``{"op": "exec", "code"}`` per input, and the worker ends every input with
-``{"op": "done", "output", "error"}``. A worker nobody says hello to (its host was killed while
+``{"op": "done", "output", "error", "touched"}``: `touched` the files the input opened, read or
+written, each once by its absolute path (an audit hook, `_Kernel.heard`: what Python opens, not
+what a program it runs does). A worker nobody says hello to (its host was killed while
 starting it) exits once its parent is gone, or after `_HELLO_S` (a second argument overrides
 it), rather than wait in `accept` for ever; one whose host disconnects exits too, even mid-input.
 
@@ -30,6 +32,8 @@ import threading
 import time
 import traceback
 from collections.abc import Mapping, Sequence
+from sys import _getframe, addaudithook
+from types import FrameType
 from typing import Any
 
 __all__ = ["input_traceback", "main", "split_last_expression"]
@@ -37,6 +41,7 @@ __all__ = ["input_traceback", "main", "split_last_expression"]
 _MAX_OUTPUT = 20_000
 _HEAD = 6_000  # of an output cut to `_MAX_OUTPUT`, how much is its start; the rest is its end
 _INPUT = "<input"  # how every input's file name starts: the third input is `<input 3>`
+_TOUCHED = 1_000  # files one input's `touched` names at most: a walk of a big tree stays one line
 _HELLO_S = 60.0  # the host says hello within milliseconds of the worker listening
 _LOOK_S = 0.5  # how often a worker waiting for its hello checks that its parent is still there
 
@@ -93,6 +98,18 @@ class _Kernel:
         self._inputs = 0
         self._had: set[str] = set()  # every name the namespace has held since the worker started
         self._saved: str | None = None  # where a cut output is kept whole: made at the first cut
+        self._touched: dict[str, None] = {}  # the files the running input opened, in order
+
+    def heard(self, event: str, args: tuple[Any, ...]) -> None:
+        """An audit hook (`sys.addaudithook`): each file the running input opens, by `open`,
+        `pathlib` or `os.open`, read or written. Not a directory it lists, not a file the import
+        system opens (a module imported is not a file worked on), not one opened by number."""
+        if event != "open" or not self.running or len(self._touched) >= _TOUCHED or not args:
+            return
+        path = args[0]
+        if not isinstance(path, str | bytes | os.PathLike) or _importing():
+            return
+        self._touched.setdefault(os.path.abspath(os.fsdecode(path)), None)
 
     def serve(self) -> None:
         while (message := self._channel.inbox.get()) is not None:
@@ -108,6 +125,7 @@ class _Kernel:
         # dropped as stale), kept for later inputs: a function defined here and failing there
         # shows its own line, and which input it came from.
         linecache.cache[name] = (len(code), None, code.splitlines(keepends=True), name)
+        self._touched = {}
         self.running = True
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
@@ -136,7 +154,12 @@ class _Kernel:
             self.running = False
             self._had.update(self._namespace)
         output = self._capped(out.getvalue(), "")
-        return {"op": "done", "output": output, "error": error and self._capped(error, "-error")}
+        return {
+            "op": "done",
+            "output": output,
+            "error": error and self._capped(error, "-error"),
+            "touched": list(self._touched),
+        }
 
     def _capped(self, text: str, kind: str) -> str:
         """At most `_MAX_OUTPUT` characters of `text`: the host reads one line per message, so
@@ -155,6 +178,16 @@ class _Kernel:
             where = ""
         cut = len(text) - _MAX_OUTPUT
         return f"{text[:_HEAD]}\n... [{cut} characters cut here{where}] ...\n{text[-(_MAX_OUTPUT - _HEAD) :]}"
+
+
+def _importing() -> bool:
+    """Whether the import system is what is opening a file now: one of its frames is on the stack."""
+    frame: FrameType | None = _getframe(2)  # above `heard` and this
+    while frame is not None:
+        if frame.f_code.co_filename.startswith("<frozen importlib"):
+            return True
+        frame = frame.f_back
+    return False
 
 
 def main(argv: Sequence[str]) -> None:
@@ -180,6 +213,7 @@ def main(argv: Sequence[str]) -> None:
             break
         conn.close()  # a readiness probe: connected, said nothing, left
     kernel = _Kernel(_Channel(conn, file))
+    addaudithook(kernel.heard)
 
     def interrupt(signum: int, frame: object) -> None:
         if kernel.running:

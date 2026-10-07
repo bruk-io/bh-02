@@ -8,16 +8,18 @@ from agent_cordis_plugin.loop import (
     STOPPED,
     Asks,
     LoopModel,
+    Memory,
     Model,
     Python,
     System,
     Transcript,
     refusal,
+    remembered,
 )
 from agent_cordis_plugin.prompt import changes
 from agent_cordis_plugin.stops import classify
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
-from agent_cordis_plugin.wiring import LoopConfig, TranscriptConfig, loop, transcript
+from agent_cordis_plugin.wiring import LoopConfig, TranscriptConfig, loop, memory, transcript
 
 __all__ = [
     "DECLINED",
@@ -28,6 +30,7 @@ __all__ = [
     "FileTranscript",
     "LoopConfig",
     "LoopModel",
+    "Memory",
     "MemoryTranscript",
     "Python",
     "System",
@@ -36,6 +39,8 @@ __all__ = [
     "changes",
     "classify",
     "loop",
+    "memory",
     "refusal",
+    "remembered",
     "transcript",
 ]

@@ -1,12 +1,16 @@
 """`shelled` and `shell_note`: the shell commands an input runs for work Python does itself, and
-what the model is told about them."""
+what the model is told about them; `ShellHints`, which tells it through `memory`."""
 
 import re
 import textwrap
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import pytest
 
-from kernel_cordis_plugin import instructions_for, programs, shell_note, shelled
+from cordis.testing import drive
+from cordis_helpers import Hooks
+from kernel_cordis_plugin import ShellHints, instructions_for, programs, shell_hints, shell_note, shelled
 
 
 @pytest.mark.parametrize(
@@ -77,3 +81,22 @@ def test_the_example_the_model_is_shown_is_python() -> None:
     assert len(blocks) == 2 and "uses = [" in blocks[0] and "uses[0][0]" in blocks[1]
     for block in blocks:
         compile(textwrap.dedent(block), "<example>", "exec")
+
+
+def test_shell_hints_tell_each_kind_of_shell_work_once_a_conversation() -> None:
+    hints = ShellHints()
+    shown = (
+        "import subprocess\nprint(subprocess.run(['cat', 'a.txt'], capture_output=True, text=True).stdout)"
+    )
+    first = hints({"code": shown, "result": "one", "touched": ()})
+    assert first.startswith("(this input ran `cat` through a shell.") and "Path(p).read_text()" in first
+    assert hints({"code": shown.replace("cat", "head")}) == ""  # reading was said: once a kind
+    assert hints({"code": "subprocess.run(['ls'])"}).startswith("(this input ran `ls` through a shell.")
+    assert hints({"code": "subprocess.run(['git', '--version'])"}) == ""
+
+
+async def test_the_shell_hints_row_adds_its_function_to_memory() -> None:
+    memory: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
+    effects = await drive(shell_hints(memory=memory, transcript=object()))
+    assert [e.name for e in effects] == ["acquire"]
+    assert effects[0].args[0] == memory.add and isinstance(effects[0].args[1], ShellHints)

@@ -12,19 +12,19 @@ each input to the person and runs it only on a yes.
 
 A model trained on shell tools tends to use the REPL as one: each input a single `cat`, `sed`
 or `ls` through subprocess, its output printed whole. `programs` is what an input runs,
-`shelled` the part of it Python does itself, and
-`shell_note` is what the kernel adds to that input's result, once for each kind of work: how
-Python does it here, where the result stays in a variable for the next input.
+`shelled` the part of it Python does itself, and `shell_note` how Python does that work here,
+where the result stays in a variable for the next input. `ShellHints` is the `memory` function
+that tells the model so with that input's result, once for each kind of work in a conversation.
 """
 
 import ast
 import itertools
 import os
 import shlex
-from collections.abc import Iterator, Mapping, Sequence
-from typing import Any
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from typing import Any, Protocol, runtime_checkable
 
-__all__ = ["PYTHON", "instructions_for", "programs", "shell_note", "shelled"]
+__all__ = ["PYTHON", "Memory", "ShellHints", "instructions_for", "programs", "shell_note", "shelled"]
 
 PYTHON: Mapping[str, Any] = {
     "name": "python",
@@ -185,6 +185,29 @@ def shell_note(found: Sequence[tuple[str, str]]) -> str:
         f"result in a variable for the next input: {ways}. Keep subprocess for programs such as "
         "tests, git and builds.)"
     )
+
+
+@runtime_checkable
+class Memory(Protocol):
+    """What the shell-hints row needs of the `memory` value (CONTRACTS.md: memory): a function
+    added, and its remover back."""
+
+    def add(self, fn: Callable[[Mapping[str, Any]], str]) -> Callable[[], None]: ...
+
+
+class ShellHints:
+    """A `memory` function: given an input (`code`, ...), how Python does the shell work it ran
+    (`shell_note`), for each kind of work the first time this conversation sees it; '' after."""
+
+    def __init__(self) -> None:
+        self._told: set[str] = set()  # the kinds of work the model has been told Python does
+
+    def __call__(self, input: Mapping[str, Any]) -> str:
+        new = [
+            (command, kind) for command, kind in shelled(str(input.get("code", ""))) if kind not in self._told
+        ]
+        self._told.update(kind for _, kind in new)
+        return shell_note(new)
 
 
 def _command_lines(tree: ast.AST) -> Iterator[str]:

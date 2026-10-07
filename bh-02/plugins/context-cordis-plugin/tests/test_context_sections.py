@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from context_cordis_plugin import frontmatter, named, place, rule, rules, whole
+from context_cordis_plugin import frontmatter, named, place, place_touched, rule, rules, rules_touched, whole
 
 
 def _tree(base: Path, files: dict[str, str]) -> list[Path]:
@@ -72,3 +72,43 @@ def test_whole_and_named(tmp_path: Path) -> None:
         == "Files to read when they bear on your work: NOTES.md, EMPTY.md."
     )
     assert named([], root=tmp_path, home=tmp_path) == ""
+
+
+def test_place_touched_gives_the_guidance_covering_a_file_opened_broadest_first(tmp_path: Path) -> None:
+    home, root = tmp_path / "home", tmp_path / "project"
+    files = _tree(
+        root,
+        {
+            "AGENTS.md": "Root.",  # in the prompt already: never given on touch
+            "src/AGENTS.md": "Src.",
+            "src/db/AGENTS.md": "Db.",
+            "src/db/CLAUDE.md": "Db.",  # the same text beside it: once
+            "src/ui/AGENTS.md": "Ui.",
+        },
+    )
+    told = place_touched(files, [root / "src/db/models.py"], root=root, home=home)
+    assert list(told) == [root / "src/AGENTS.md", root / "src/db/AGENTS.md"]
+    assert told[root / "src/db/AGENTS.md"] == (
+        "From src/db/AGENTS.md, guidance for work under src/db/, where it wins over the guidance "
+        "before it:\n\nDb."
+    )
+    assert place_touched(files, [root / "README.md"], root=root, home=home) == {}
+
+
+def test_rules_touched_gives_each_rule_whose_paths_match_a_file_opened(tmp_path: Path) -> None:
+    files = _tree(
+        tmp_path,
+        {
+            "api.md": '---\npaths:\n  - "src/api/**/*.ts"\n---\nValidate inputs.',
+            "db.mdc": "---\nglobs: src/db/**, migrations/*\n---\nUse the session.",
+            "tsx.mdc": "---\nglobs: *.tsx\n---\nHooks only.",
+            "always.md": "Always.",  # in the prompt already
+            "asked.mdc": "---\ndescription: naming\n---\nx",
+        },
+    )
+    root = tmp_path
+    told = rules_touched(files, [root / "src/db/models.py", root / "web/App.tsx"], root=root, home=root)
+    assert set(told) == {root / "db.mdc", root / "tsx.mdc"}
+    assert told[root / "db.mdc"] == ("From db.mdc, a rule for src/db/**, migrations/*:\n\nUse the session.")
+    assert "api.md" not in str(rules_touched(files, [root / "src/api/x.js"], root=root, home=root))
+    assert set(rules_touched(files, [root / "src/api/v1/x.ts"], root=root, home=root)) == {root / "api.md"}

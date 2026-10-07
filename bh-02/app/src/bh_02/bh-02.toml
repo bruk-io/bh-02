@@ -30,6 +30,24 @@ use = "models:catalog"
 id = "transcript"
 use = "agent:transcript"
 
+# What the model is told with an input's result: a broker of functions rows add, each given the
+# input's code, its result and the project files it opened (`kernel.touched()`), the loop
+# calling each after every input. The shell hints (an input that ran `cat` or `sed` is told how
+# Python does that here) and the context files' on-touch sections (a subdirectory's AGENTS.md or
+# CLAUDE.md, a rule for some files, given when an input first opens a file they cover) add to
+# it, each depending on `transcript`, so a new conversation (/clear) is told afresh.
+[[plugin]]
+id = "memory"
+use = "agent:memory"
+
+[[plugin]]
+id = "shell-hints"
+use = "kernel:shell_hints"
+
+[[plugin]]
+id = "on-touch"
+use = "context:on_touch"
+
 # The app: binds `input`, `output` and `frame` (where rows push status). It depends on its
 # config alone, so no reload elsewhere restarts it.
 [[plugin]]

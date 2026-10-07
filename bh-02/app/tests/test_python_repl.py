@@ -323,3 +323,38 @@ async def test_the_harness_owned_loop_offers_only_python_and_runs_the_input(
     )
     assert "offered ['python']; the input said 42" in _shown()
     assert _asked() == ["print(6 * 7)"]
+
+
+async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_once(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The shipped `memory` rows, booted: the first input that opens a file under src/db gets its
+    CLAUDE.md and the rule for it with its result; a later one does not; one that reads through
+    a shell is told how Python does that."""
+    project, home = tmp_path / "project", tmp_path / "home"
+    (project / "src" / "db").mkdir(parents=True)
+    (project / ".claude" / "rules").mkdir(parents=True)
+    home.mkdir()
+    (project / "src" / "db" / "models.py").write_text("X = 1\n")
+    (project / "src" / "db" / "CLAUDE.md").write_text("Use the session.")
+    (project / ".claude" / "rules" / "db.md").write_text("---\npaths: src/db/**\n---\nMigrations by hand.")
+    inputs = (
+        "len(open('src/db/models.py').read())",
+        "len(open('src/db/models.py').read())",
+        "import subprocess; subprocess.run(['cat', 'src/db/models.py'], capture_output=True).returncode",
+    )
+    patch = _inputs(
+        composition,
+        *inputs,
+        extra=(
+            f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+            f'[[plugin]]\nid = "on-touch"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
+        ),
+    )
+    _answers(True, True, True)
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+    out = _shown()
+    assert "[0] 6\n\nFrom src/db/CLAUDE.md, guidance for work under src/db/" in out
+    assert "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand.\n[1] 6\n[2] 0\n\n" in out
+    assert out.count("Use the session.") == 1
+    assert "[2] 0\n\n(this input ran `cat` through a shell." in out

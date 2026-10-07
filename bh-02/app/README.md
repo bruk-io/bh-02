@@ -168,6 +168,9 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `model` | `models:model` (`default`: `sonnet`) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
 | `models` | `models:catalog` | |
 | `transcript` | `agent:transcript` | `path` (the session's `transcript.jsonl`) |
+| `memory` | `agent:memory` | |
+| `shell-hints` | `kernel:shell_hints` | |
+| `on-touch` | `context:on_touch` | |
 | `extensions` | `extensions:extensions` | |
 
 `run()` adds three rows of its own after every layer, pinned on so no layer can remove them:
@@ -195,7 +198,10 @@ context:project         binds System                       depends on nothing
 models:model            binds Model                        depends on nothing (its config; the models file, read as it starts; a credential, at the first step)
 models:catalog          binds Models                       depends on Loader
 agent:transcript        binds Transcript                   depends on nothing
-agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Output
+agent:memory            binds Memory                       depends on nothing
+agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Output, Memory
+kernel:shell_hints      adds the shell hints to Memory     depends on Memory, Transcript
+context:on_touch        adds the on-touch sections         depends on Memory, Transcript
 brig:jail               binds Jail                         depends on Layers
 kernel:unjailed         binds Jail                         depends on nothing
 kernel:kernel           binds Kernel (the one tool)        depends on Jail
@@ -246,8 +252,17 @@ Python REPL of its own that persists, and each call is one input to it: plain Py
 with nothing of bh-02's in the namespace, and nothing an input does calls back into bh-02. An input reads and edits files with `open` or `pathlib` and runs programs (`python`, `git`,
 a test runner) with `subprocess`, in the project directory. The model is told to work in Python
 rather than through a shell, and an input that runs `cat`, `sed` or `ls` through one is told how
-Python does that, once for each kind of work. The namespace outlives a model
+Python does that, once for each kind of work a conversation. The namespace outlives a model
 swap; Ctrl-C interrupts the running input and keeps the namespace.
+
+After each input, the loop asks `memory` what to tell the model with its result: the functions
+rows add there are given the input's code, its result and the project files it opened (the
+worker hears each `open` with an audit hook, so `kernel.touched()` is what Python in the input
+read or wrote, not what a shell command did). `kernel:shell_hints` adds the shell hint above;
+`context:on_touch` adds the context files' `on_touch` sections, so a subdirectory's AGENTS.md
+or CLAUDE.md, or a rule for some files, arrives whole with the result of the first input that
+opens a file it covers, as Claude Code's do when its Read, Write or Edit touches one. Both
+depend on `transcript`, so after `/clear` they tell the new conversation again.
 
 The kernel is a worker process started by the `jail` row. `brig:jail` confines it: writes
 only inside the project (and never to the layer files, the host's import paths, `.git/hooks`,

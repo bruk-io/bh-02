@@ -95,22 +95,31 @@ async def test_a_program_s_own_output_reaches_an_input_only_when_captured(tmp_pa
         assert "EOFError" in await k.run("input()")
 
 
-async def test_an_input_that_uses_the_shell_for_file_work_is_told_once_how_python_does_it(
-    tmp_path: Path,
-) -> None:
-    (tmp_path / "a.txt").write_text("one\ntwo\n")
+async def test_touched_is_the_project_s_files_the_last_input_opened(tmp_path: Path) -> None:
+    """What `memory` is given: files read or written, not a directory listed, a module imported
+    or a file a program read; and nothing outside the project."""
+    (tmp_path / "src" / "db").mkdir(parents=True)
+    (tmp_path / "src" / "db" / "models.py").write_text("X = 1\n")
+    (tmp_path / "notes.md").write_text("n")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("o")
+    root = tmp_path.resolve()
     async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
-        shown = (
-            "import subprocess\n"
-            "print(subprocess.run(['cat', 'a.txt'], capture_output=True, text=True).stdout)"
+        assert k.touched() == ()
+        await k.run(
+            "import os\nfrom pathlib import Path\n"
+            "Path('src/db/models.py').read_text()\nopen('notes.md').read()\n"
+            f"Path('new.txt').write_text('w')\nopen({str(outside)!r}).read()\nos.listdir('src')\n"
+            "open('notes.md').read()"
         )
-        first = await k.run(shown)
-        assert first.startswith("one\ntwo\n(this input ran `cat` through a shell.")
-        assert "read a file with Path(p).read_text()" in first
-        assert await k.run(shown.replace("cat", "head")) == "one\ntwo"  # reading was said: once a kind
-        quiet = await k.run("subprocess.run(['ls'], capture_output=True).returncode")
-        assert quiet.startswith("0\n(this input ran `ls` through a shell.")  # listing was not
-        assert await k.run("subprocess.run(['git', '--version'], capture_output=True).returncode") == "0"
+        assert k.touched() == (str(root / "src/db/models.py"), str(root / "notes.md"), str(root / "new.txt"))
+        await k.run(
+            "import sys, subprocess\nsys.path.insert(0, 'src/db')\nimport models\n"
+            "subprocess.run(['cat', 'notes.md'], capture_output=True)"
+        )
+        assert k.touched() == ()
+        await k.run("open('missing.md')")  # an input that failed still opened what it opened
+        assert k.touched() == (str(root / "missing.md"),)
 
 
 class Confined(Unjailed):

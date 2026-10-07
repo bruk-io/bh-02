@@ -1,10 +1,12 @@
 # context-cordis-plugin
 
-What the model is told about who and where it is.
+What the model is told about who and where it is, and what the guidance and rules for a file
+say when the model first works on it.
 
 | Row | Binds | Consumes |
 |---|---|---|
 | `context:project` | `system` (`text() -> str`, `add(section) -> remover`); config: `root` (default `.`), `files` (the context files after bh-02's own; default `["~/.config/bh-02/context.toml", ".bh-02/context.toml"]`), `max_chars` (what the context files' sections may say, all together; default 20,000), `home` | |
+| `context:on_touch` | adds `OnTouch` to `memory`; config: `context:project`'s (the same context files) | `memory` (`add`), `transcript` (its lifetime only) |
 
 `text()` is organised as Claude Code's is, and read fresh each time it is asked:
 
@@ -27,6 +29,7 @@ they mean to the model:
 [[section]]
 files    = ["AGENTS.md", "CLAUDE.md", "**/AGENTS.md", "**/CLAUDE.md"]
 function = "context_cordis_plugin.sections:place"
+on_touch = "context_cordis_plugin.sections:place_touched"
 ```
 
 - `files`: patterns from the project's root (`*`, `**/` for any depth; `**/AGENTS.md` matches the
@@ -42,6 +45,13 @@ function = "context_cordis_plugin.sections:place"
   the patterns, each once; it returns what the model is told ('' for nothing). It runs each
   time the prompt is read. One that can't be imported, or raises, says so in one line, and the
   other sections still say theirs.
+- `on_touch` (optional): another, called as `on_touch(files, touched, root=root, home=home)`
+  after each input that opened files in the project (`touched`, absolute: `kernel.touched()`),
+  returning a mapping of each of its files that bears on them to the text to tell with that
+  input's result. `context:on_touch` tells each once a conversation (again if what it says
+  changed), so a path-scoped rule or a subdirectory's AGENTS.md arrives the first time the model
+  works on a file it covers, as Claude Code's do when its Read, Write or Edit touches one. A
+  section may have only `on_touch`.
 
 The sections are read in order from bh-02's own file (`context.toml`, in the package), then each
 of `files`: yours, then the project's. Each appends its sections; `replace = true` at a file's
@@ -50,7 +60,7 @@ reaches the model's next message.
 
 **The project's file is held to what the model may do itself**, because the model can write it
 and bh-02 acts on it in its own process, outside the jail. So it may name only bh-02's own
-functions (`context_cordis_plugin.sections:*`), and only files in the project that are not
+functions (`context_cordis_plugin.sections:*`, as `function` and as `on_touch`), and only files in the project that are not
 hidden (no `~`, `/`, `..` or part starting with `.`), and it may not `replace` the sections
 before it. A function or a file outside the project of your own goes in your file. A file of
 yours inside the project (bh-02 run in your home) is the project's, on the same terms. And
@@ -68,10 +78,14 @@ bh-02's own functions (`sections.py`):
 | `rules` | Rule files, as each one's frontmatter says (`rule`): `alwaysApply: true`, or no frontmatter, whole; `paths` or `globs` named with them, for files they cover; a `description` named with it, for when it bears on the work; `alwaysApply: false` and nothing else not at all (yours to bring in). |
 | `whole` | Each file, whole. |
 | `named` | Each file by name, to read when it bears on the work. |
+| `place_touched` (an `on_touch`) | The guidance further down that covers a file an input opened (the file is under its directory), whole, broadest first, one of two with the same text. |
+| `rules_touched` (an `on_touch`) | The rules whose `paths` or `globs` match a file an input opened (from the project's root; a pattern with no `/`, `*.tsx`, at any depth), each whole. |
 
 bh-02's own file reads `~/AGENTS.md`, `~/CLAUDE.md`, the project's `AGENTS.md`, `CLAUDE.md` and
-their `.local.md`, and those further down, with `place`; and `.claude/rules/**/*.md` and
-`.cursor/rules/**/*.mdc` with `rules`.
+their `.local.md`, and those further down, with `place` (and `place_touched`); and
+`.claude/rules/**/*.md` and `.cursor/rules/**/*.mdc` with `rules` (and `rules_touched`). So the
+prompt names the guidance further down and the rules for some files, and each arrives whole
+with the result of the first input that opens a file it covers.
 
 ## The broker
 

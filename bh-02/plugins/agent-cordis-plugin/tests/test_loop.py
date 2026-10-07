@@ -1,7 +1,7 @@
 """The loop over a scripted model and a fake kernel, and the transcript outliving a model swap."""
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import Any
 
 import pytest
@@ -14,10 +14,12 @@ from agent_cordis_plugin import (
     MemoryTranscript,
     classify,
     loop,
+    memory,
     refusal,
     transcript,
 )
 from cordis import Effects, Inspection, Runtime, bind, component
+from cordis_helpers import Hooks
 
 type Json = Mapping[str, Any]
 
@@ -47,8 +49,9 @@ PYTHON: Json = {"name": "python", "description": "Run Python.", "parameters": {"
 
 
 class Shouting:
-    """A `kernel` value whose inputs upper-case their code, confined unless told otherwise; the
-    loop needs only `spec`, `confined`, `instructions()` and `run()`."""
+    """A `kernel` value whose inputs upper-case their code and touch `/p/<code>.py`, confined
+    unless told otherwise; the loop needs only `spec`, `confined`, `instructions()`, `run()` and
+    `touched()`."""
 
     def __init__(self, confined: bool = True) -> None:
         self.confined = confined
@@ -64,6 +67,9 @@ class Shouting:
 
     def instructions(self) -> str:
         return ""
+
+    def touched(self) -> tuple[str, ...]:
+        return (f"/p/{self.ran[-1].lower()}.py",) if self.ran else ()
 
 
 class Person:
@@ -194,6 +200,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
 
     rt = Runtime()
     rt.mount(transcript, id="transcript")
+    rt.mount(memory, id="memory")
     rt.mount(loop, id="loop")
     kernel_fiber = rt.mount(kernel_and_system, id="kernel")
     row = rt.mount(model_row(first), id="model")
@@ -518,3 +525,36 @@ def test_only_a_python_call_with_code_is_a_input() -> None:
     assert refusal({"id": "c", "name": "python", "input": {"code": "1"}}, PYTHON) is None
     assert refusal({"id": "c", "name": "python", "input": {"code": 1}}, PYTHON) is not None
     assert refusal({"id": "c", "name": "write_file", "input": {"code": "1"}}, PYTHON) is not None
+
+
+async def test_memory_s_notes_ride_on_the_input_s_result_and_the_person_sees_each_named() -> None:
+    """Each function is given the input's code, result and touched files; its note goes to the
+    model after the result, sorted with the others; one that fails says so and the rest still
+    say theirs; an input that never ran asks none of them."""
+    given: list[Json] = []
+
+    def rules(input: Json) -> str:
+        given.append(input)
+        return "Zebra rule: for /p/a.py.\nWhole rule text."
+
+    def quiet(input: Json) -> str:
+        return ""
+
+    def broken(input: Json) -> str:
+        raise RuntimeError("no rules file")
+
+    memory: Hooks[Callable[[Json], str]] = Hooks()
+    for fn in (rules, quiet, broken):
+        memory.add(fn)
+    history = MemoryTranscript()
+    scripted = Scripted([call("c1", "python", code="a"), call("c2", "nope", code="b")], [text("done")])
+    events = [e async for e in LoopModel(scripted, Shouting(), history, memory=memory).reply("go")]
+    assert given == [{"code": "a", "result": "A", "touched": ("/p/a.py",)}]  # c2 never ran
+    told = [m["content"] for m in history.messages if m["role"] == "tool"]
+    assert told[0].startswith("A\n\n(bh-02 could not make a note with ")
+    assert "broken: no rules file)\n\nZebra rule: for /p/a.py.\nWhole rule text." in told[0]
+    assert told[1].startswith("error: there is no tool named 'nope'") and "Zebra" not in told[1]
+    results = [e for e in events if e["type"] == "tool_result"]
+    assert results[0]["content"] == "A"  # the person sees the input's own output
+    notes = [e["text"] for e in events if e["type"] == "note"]
+    assert "told the model with this result: Zebra rule: for /p/a.py." in notes

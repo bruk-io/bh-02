@@ -8,14 +8,15 @@ worker that died, an answer too long or garbled to read, a worker that won't sta
 comes back as the input's text, never as an exception. Interrupting an input (cancelling `run`) sends SIGINT
 through the jail, which the worker turns into `KeyboardInterrupt` in the input, and waits for the
 input to say it ended: the namespace survives. A worker that dies is started again on the next
-input, and that input is told its earlier variables are gone. An input that runs `cat`, `sed`
-or `ls` through a shell is told, once for each kind of work, how Python does it here
-(`python.shell_note`).
+input, and that input is told its earlier variables are gone. After each input, `touched()` is
+the project's files it opened, read or written (the worker's audit hook): what a `memory`
+function is given to say what applies to them.
 """
 
 import asyncio
 import contextlib
 import json
+import os
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -25,7 +26,7 @@ from sys import executable
 from types import TracebackType
 from typing import Any, Protocol, runtime_checkable
 
-from kernel_cordis_plugin.python import PYTHON, instructions_for, shell_note, shelled
+from kernel_cordis_plugin.python import PYTHON, instructions_for
 
 __all__ = ["Jail", "Jailed", "Kernel", "KernelConfig", "is_confined", "worker_argv"]
 
@@ -67,10 +68,12 @@ class KernelConfig:
 
 @dataclass(frozen=True, slots=True)
 class _Output:
-    """What running one input produced: what it printed, and the error it ended with, if any."""
+    """What running one input produced: what it printed, the error it ended with, if any, and
+    the files it opened (absolute paths, each once)."""
 
     output: str
     error: str | None = None
+    touched: tuple[str, ...] = ()
 
     def text(self) -> str:
         """The input as the model reads it."""
@@ -100,6 +103,11 @@ def worker_argv(endpoint: str) -> list[str]:
     return [executable, "-I", str(_WORKER), endpoint]
 
 
+def _inside(paths: Sequence[str], root: str) -> tuple[str, ...]:
+    """Those of `paths` (absolute) that are under `root` (absolute), in order."""
+    return tuple(p for p in paths if p.startswith(root.rstrip(os.sep) + os.sep))
+
+
 def is_confined(report: Mapping[str, str]) -> bool:
     """Whether a jail's report says an input can write only where it was allowed and reach no network."""
     return all(report.get(axis) == "enforced" for axis in _CONFINING)
@@ -120,7 +128,7 @@ class Kernel:
         self._writer: asyncio.StreamWriter | None = None
         self._restarted = False  # a worker started again, not the row's first
         self._fresh = False  # a worker no input has run in yet
-        self._told: set[str] = set()  # the kinds of shell work the model was told Python does (shell_note)
+        self._touched: tuple[str, ...] = ()  # the project's files the last input opened
 
     @property
     def confined(self) -> bool:
@@ -148,13 +156,18 @@ class Kernel:
         await self._stop()
 
     async def run(self, code: str) -> str:
-        """Run one input and return it as the model reads it: what it printed and its error,
-        then, the first time an input runs a kind of shell command Python does itself (`cat`,
-        `sed`, `ls`), how Python does that here (`shell_note`)."""
-        text = (await self._execute(code)).text()
-        new = [(command, kind) for command, kind in shelled(code) if kind not in self._told]
-        self._told.update(kind for _, kind in new)
-        return f"{text}\n{note}" if (note := shell_note(new)) else text
+        """Run one input and return it as the model reads it: what it printed and its error."""
+        self._touched = ()
+        ran = await self._execute(code)
+        self._touched = _inside(ran.touched, str(Path(self._config.root).resolve()))
+        return ran.text()
+
+    def touched(self) -> tuple[str, ...]:
+        """The files under the root the last input opened, read or written: absolute paths, each
+        once, in the order first opened. Not a file a program it ran opened (`cat x` through
+        subprocess), nor a module it imported. Empty before any input, and after one that did
+        not run to the end."""
+        return self._touched
 
     async def _execute(self, code: str) -> _Output:
         async with self._lock:
@@ -189,7 +202,7 @@ class Kernel:
                     f"error: the REPL's answer to this input could not be read ({error}); a new "
                     "REPL starts with the next input, without the earlier variables",
                 )
-            return _Output(prefix + ran.output, ran.error) if prefix else ran
+            return _Output(prefix + ran.output, ran.error, ran.touched) if prefix else ran
 
     async def _opening(self) -> str:
         """What a new kernel's first input is told before its own output, when there is anything
@@ -224,7 +237,12 @@ class Kernel:
         while True:
             message = await self._receive()
             if message.get("op") == "done":
-                return _Output(str(message.get("output", "")), message.get("error"))
+                touched = message.get("touched")
+                return _Output(
+                    str(message.get("output", "")),
+                    message.get("error"),
+                    tuple(str(p) for p in touched) if isinstance(touched, list) else (),
+                )
 
     async def _interrupt(self) -> None:
         """Stop the running input and wait for it to end; a worker that won't is restarted."""

@@ -1,11 +1,13 @@
 # agent-cordis-plugin
 
-A harness-owned agent loop, and the transcript it reads.
+A harness-owned agent loop, the transcript it reads, and `memory`, what it tells the model with
+an input's result.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `confined`, `instructions`, `run`), `transcript` (`messages`, `append`), `system` (`text`), `output` (`confirm`) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `confined`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `output` (`confirm`), `memory` (iterated) |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
+| `agent:memory` | `memory`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 
 A turn is one model step plus the inputs it asked for, until it asks for none. The model's one
 tool is the kernel's `python(code)`, offered through the provider's standard tool calling;
@@ -18,6 +20,15 @@ call: the one in the kernel when the stop came with `interrupted: ... it may hav
 the rest (the one at the approval question included) with `not run: ...`. The transcript and
 the kernel are rows of their own, so the history and the namespace outlive the loop: replace
 `model` (or the ui) and the loop reloads while the conversation carries on.
+
+After each input that ran, the loop calls every function in `memory` with
+`{"code", "result", "touched"}` (`touched`: `kernel.touched()`, the project files the input
+opened) and puts what they return after the result (`remembered`, sorted, so the order rows
+added them in means nothing; one that fails says so in one line). The person sees the input's
+own output as the result, and a `note` for each memory note, by its first line. `memory` is a
+row of its own, depending on nothing, so neither the loop nor a row adding to it reloads the
+other; the rows that add to it (`kernel:shell_hints`, `context:on_touch`) depend on
+`transcript`, so `/clear` starts them afresh and they tell a new conversation again.
 
 Each turn is classified by `stops.classify` (pure; the table is in its docstring, after
 ../harness/ARCHITECTURE.MD): only `act` runs calls, only `answered` ends the reply, and a

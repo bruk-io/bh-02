@@ -57,7 +57,10 @@ _PROGRAM = re.compile(r"\b(?:subprocess\.(?:run|call|check_call|Popen)|os\.syste
 _CAPTURED = re.compile(r"capture_output\s*=\s*True|stdout\s*=|check_output\(")
 _EXCEPTION = re.compile(r"^(\w+(?:\.\w+)*(?:Error|Exception|Exit|Interrupt|Expired)):", re.M)
 _WRITES = re.compile(r"write_text\(|open\([^)]*['\"][wa]")
-_NOTE = re.compile(r"\n\(this input ran .+ through a shell\..*\)\Z", re.S)  # the kernel's shell_note
+# What `memory` adds after a result: the shell hint (once on the line after it, now after a blank
+# line; the notes are sorted, so any on-touch note follows it), and the context files' on-touch notes.
+_NOTE = re.compile(r"\n\n?\(this input ran .+ through a shell\..*\Z", re.S)
+_TOUCHED = re.compile(r"\n\nFrom \S+, (?:guidance for work under|a rule for) .*\Z", re.S)
 _CHANGED = "(bh-02: your instructions have changed since this conversation began."  # the loop's note
 # What makes an input more than a shell command and a print: logic of its own.
 _COMPOSING = (ast.comprehension, ast.Compare, ast.BoolOp, ast.IfExp, ast.Lambda)
@@ -136,7 +139,7 @@ def _one_input(session: str, code: str, result: str) -> Iterator[Finding]:
         yield Finding("shell_shaped", session, _short(code))
     if found := shelled(code):
         yield Finding("shell_for_files", session, f"{', '.join(c for c, _ in found)}: {_short(code, 100)}")
-    result = _NOTE.sub("", result.split(f"\n\n{_CHANGED}", 1)[0])
+    result = _TOUCHED.sub("", _NOTE.sub("", result.split(f"\n\n{_CHANGED}", 1)[0]))
     if result.startswith("error: there is no tool named"):
         yield Finding("no_such_tool", session, _short(result))
         return

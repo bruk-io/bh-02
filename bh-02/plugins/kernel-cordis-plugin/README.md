@@ -5,8 +5,9 @@ composition names, and the model's one tool, `python(code)`, which runs an input
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the project's file a new kernel runs first, default `.bh-02/kernel.py`) | `jail` |
+| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the project's file a new kernel runs first, default `.bh-02/kernel.py`) | `jail` |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
+| `kernel:shell_hints` | adds `ShellHints` to `memory` | `memory` (`add`), `transcript` (its lifetime only) |
 
 `python.py` is the tool, pure: its spec and `instructions_for(confined, startup)`, what the
 model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
@@ -20,7 +21,10 @@ every input); and where its code runs. A model trained on shell tools tends to u
 one, an input a single `cat`, `sed` or `ls`: `programs(code)` is what an input runs (read with
 `ast`, each command of a shell line), `shelled(code)` the part of it Python does itself (reading,
 editing, writing, listing and moving files; searching with `grep` or `rg` is not one, nor are
-tests, git and builds), and `shell_note` what such an input is told after its output.
+tests, git and builds), and `shell_note` what such an input is told after its output, by
+`ShellHints`, the `memory` function the `kernel:shell_hints` row adds: once for each kind of work
+a conversation (the row depends on `transcript`, so `/clear` starts it afresh), so it corrects a
+habit without nagging.
 `scripts/model-friction` reads transcripts with the same two. `confined` is what the loop reads to decide
 whether an input is put to the person first (`agent:loop`): the kernel itself never asks, so it
 depends on its jail alone and a new ui or model keeps the namespace.
@@ -39,15 +43,19 @@ resume. The namespace holds only what inputs put there: an input reads and write
 runs programs itself, with plain Python, and the jail decides what it may touch. Inputs run on
 the worker's main thread, so SIGINT lands as `KeyboardInterrupt` in the running input and the
 namespace survives; with no input running, SIGINT is ignored. An input's last expression is
-shown, and `print` is the observation channel.
+shown, and `print` is the observation channel. An audit hook (`sys.addaudithook`) hears each
+file the running input opens, with `open`, `pathlib` or `os.open`, read or written, and the
+`done` names them (`touched`, absolute, each once, at most 1,000): not a directory listed, not a
+file the import system opens (one of its frames is on the stack), and not what a program the
+input runs opens, which happens in another process. It is Claude Code's Read, Write and Edit
+for one tool that carries code, and has the same blind spot: a shell command's own reads.
 
 `client.py`'s `Kernel` is the host end: entering starts the worker through the jail (its
 socket in a short `/tmp` directory, since a socket path must fit in ~100 bytes), leaving stops
 it. Cancelling `run` interrupts the input and waits `grace` seconds for it to end; a worker that
 won't, or that died, is started again on the next input, which is told its variables are gone.
-The first input that runs a kind of shell work Python does itself is told how Python does it
-(`shell_note`), once for each kind while the row lives, so it corrects a habit without nagging.
-A new kernel's first input is also told what the startup file (`startup`, the model's own
+After each input, `touched()` is the files under `root` it opened (what the loop gives
+`memory`'s functions). A new kernel's first input is also told what the startup file (`startup`, the model's own
 helpers, kept with the project) did: confined, the kernel runs it first and says which names it
 defined, or its traceback; unconfined, it would run unasked with the person's permissions, so
 the model is told to run it as an input of its own, which the loop then puts to the person.

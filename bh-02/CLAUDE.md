@@ -55,8 +55,9 @@ programs with `subprocess`, and the jail decides what it may touch.
 Replacing a binding reloads every dependent (cordis's rule, and why history lives in
 `transcript`, a row of its own).
 
-**The broker pattern is the paper's (section 6.2).** `commands` (slash commands) and `frame`
-(the app's frame) are brokers: one row binds the key, contributors depend on it and `acquire` a
+**The broker pattern is the paper's (section 6.2).** `commands` (slash commands), `frame`
+(the app's frame), `system` (its sections) and `memory` (what the model is told with an input's
+result) are brokers: one row binds the key, contributors depend on it and `acquire` a
 registration whose return value is its remover, so adding or retiring a command reloads
 nothing. Keep registrations commutative: each takes its own entry, never an ordered chain.
 
@@ -92,8 +93,16 @@ model (a link out of the project, a `local.env`). The loop follows it with `kern
 CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
-plain Python, not IPython). The first input that runs `cat`, `sed`, `ls` or the like through a
-shell is told, once for each kind of work, how Python does it (`shell_note`). The loop reads
+plain Python, not IPython). After each input, the loop asks `memory` (`agent:memory`, a broker)
+what to tell the model with its result: each function rows add there gets the input's code, its
+result and `kernel.touched()` (the project files Python in the input opened, heard by an audit
+hook in the worker; a shell command's own reads are not heard) and may add a note, never change
+the result. `kernel:shell_hints` tells the first input that runs `cat`, `sed`, `ls` or the like
+through a shell, once for each kind of work, how Python does it (`shell_note`);
+`context:on_touch` gives the context files' `on_touch` sections, so a subdirectory's AGENTS.md
+or CLAUDE.md, or a rule for some files, arrives whole with the first input that opens a file it
+covers (Claude Code's on-demand loading). Both depend on `transcript`, so `/clear` starts them
+afresh; only layer rows add to `memory`, since its functions run in bh-02's process. The loop reads
 the prompt before each message the model reads but sends the one the conversation began with
 (the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
 switched, CLAUDE.md edited) is told as a note on that message (`prompt.changes`), because a
