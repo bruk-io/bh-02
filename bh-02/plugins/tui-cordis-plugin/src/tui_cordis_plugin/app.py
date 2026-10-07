@@ -8,7 +8,8 @@ Leaving: Ctrl-Q, or `/exit` or `/quit` in the composer. The terminal going away 
 closed: SIGHUP, or, with no controlling terminal, stdin at end of file) leaves the same way, so
 the composition unwinds rather than the process dying where it stands or spinning on a dead
 fd. Ctrl-C interrupts the running turn and never quits; with no turn running it says how to
-leave. Ctrl-P opens the command palette.
+leave, and while a command runs (a `!` one may take minutes) that Ctrl-C doesn't stop it.
+Ctrl-P opens the command palette.
 
 Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
 withdraws its own (shown or queued), and Ctrl-C with one up answers every open question no.
@@ -62,11 +63,18 @@ __all__ = ["BhApp", "running"]
 
 EXIT_COMMANDS = frozenset({"/exit", "/quit"})
 _HOW_TO_LEAVE = "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running turn; Ctrl-P lists commands."
+_COMMAND_RUNS = (
+    "A command is running, and Ctrl-C stops only a turn: a `!` command or /compact runs until it "
+    "ends or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
+)
 
 type _Question = tuple[Mapping[str, Any], asyncio.Future[bool]]
 
 # How long an interrupted turn has to withdraw its own questions before they are answered no.
 _WITHDRAW_GRACE = 0.5
+# How long a Ctrl-C held for the line being handled may go unheard before the app says a
+# command is running: a turn that is starting hears it within a tick.
+_UNHEARD_GRACE = 0.3
 # How long every row must stay up before a status field kept while they came up goes: a
 # restart's old fiber ends a moment before its new one starts (`/clear`'s kernel), and the
 # row showing the field (`status`) comes up after what it depends on.
@@ -317,12 +325,14 @@ class BhApp(App[None]):
 
     def action_interrupt(self) -> None:
         """Ctrl-C: stop the running turn and take its questions down as a no; with nothing
-        running, say how to leave.
+        running, say how to leave; while a command runs, say that Ctrl-C doesn't stop it.
 
         A turn that hears Ctrl-C is cancelled, which cancels the questions it is waiting on,
         and those come down as withdrawn: answering them no first would let the turn carry on
         with the answer before it hears the interrupt. Any question still open a moment later
-        (asked from outside a turn) is answered no; one with no turn to stop, at once.
+        (asked from outside a turn) is answered no; one with no turn to stop, at once. A Ctrl-C
+        the bridge holds for the line being handled is a turn's that is starting, which hears it
+        at once, or a command's, which never does: still held a moment later, it is the second.
         """
         questions = self._open_questions()
         stopped = self.bridge.interrupt()
@@ -332,6 +342,14 @@ class BhApp(App[None]):
             self._decline(questions)
         elif not stopped:
             self.query_one(Transcript).note(f"Nothing is running. {_HOW_TO_LEAVE}")
+        elif self.bridge.interrupt_held:
+            self.set_timer(_UNHEARD_GRACE, self._unheard)
+
+    def _unheard(self) -> None:
+        """A Ctrl-C held for the line being handled went unheard: a command is running (no turn
+        took it), which Ctrl-C does not stop; say so, and how to leave."""
+        if self.bridge.interrupt_held and not self.bridge.turn_running and not self.bridge.ended:
+            self.query_one(Transcript).note(_COMMAND_RUNS)
 
     def _open_questions(self) -> list[asyncio.Future[bool]]:
         """Every question not yet answered: the one up, then the queued ones."""

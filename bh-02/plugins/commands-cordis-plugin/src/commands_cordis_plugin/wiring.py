@@ -1,18 +1,22 @@
-"""The rows: the commands broker under `commands`, and the operator's commands registered into it."""
+"""The rows: the commands broker under `commands`; the operator's commands registered into it;
+and `!`, a shell command, the prefix claimed in it."""
 
 import asyncio
+import functools
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from commands_cordis_plugin.operations import Job, Loader, Models, Operator, OperatorConfig, perform
+from commands_cordis_plugin.operations import Loader, Models, Operator, OperatorConfig
 from commands_cordis_plugin.registry import Commands, CommandSpec, Run
+from commands_cordis_plugin.shell_command import ShellCommandConfig, run_line
 from cordis import Effects, Row, acquire, background, bind, component
 from cordis.composition import format_layer
 from cordis.loader import Loader as _Mounting
 from cordis.loader import read_layer
+from cordis_helpers import Job, perform
 
-__all__ = ["operator", "registry", "set_model", "shadowing"]
+__all__ = ["operator", "registry", "set_model", "shadowing", "shell_command"]
 
 
 @runtime_checkable
@@ -22,10 +26,33 @@ class _Registrar(Protocol):
     def register(self, spec: CommandSpec, run: Run) -> Callable[[], None]: ...
 
 
+@runtime_checkable
+class _Claimant(Protocol):
+    """What a row that takes the lines starting with a prefix needs of the `commands` value."""
+
+    def claim(self, prefix: str, spec: CommandSpec, run: Run) -> Callable[[], None]: ...
+
+
 @component(provides=("commands",))
 async def registry() -> Effects:
-    """Fills a `commands` row: `use = "commands:registry"`. Rows register commands into it."""
+    """Fills a `commands` row: `use = "commands:registry"`. Rows register commands into it, and
+    rows in a layer claim line prefixes."""
     yield bind("commands", Commands())
+
+
+@component
+async def shell_command(*, commands: _Claimant, config: ShellCommandConfig) -> Effects:
+    """Fills a `shell-command` row: `use = "commands:shell_command"`. A line starting with `!`
+    (`prefix`) runs as a shell command, as the person, in the project (`cwd`), its output
+    captured and stopped at its `timeout`; what it printed is shown, and the model reads it with
+    the person's next message. It claims the prefix in `commands`, which only a layer's row can:
+    an extension reaches `commands` through its `register` alone."""
+    spec: CommandSpec = {
+        "name": "shell",
+        "help": "run COMMAND in your shell, here, as you; the model reads its output with your next message",
+        "usage": "COMMAND",
+    }
+    yield acquire(commands.claim, config.prefix, spec, functools.partial(run_line, config=config))
 
 
 @component

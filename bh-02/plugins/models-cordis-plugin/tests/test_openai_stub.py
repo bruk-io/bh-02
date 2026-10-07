@@ -48,8 +48,11 @@ async def test_a_reply_streams_in_pieces_with_usage_its_stop_and_its_message() -
 async def test_a_python_call_round_trips_through_the_transcript() -> None:
     with StubServer() as stub:
         async with OpenAIModel(_named(stub.base_url)) as model:
-            asked = [{"role": "user", "content": "call print(6 * 7)"}]
+            # as the loop sends a conversation's first message: the date first, and as `today`
+            dated = "(Today's date: 2026-10-07.)\n\ncall print(6 * 7)"
+            asked = [{"role": "user", "content": dated, "today": "2026-10-07"}]
             first = await _step(model, asked)
+            assert stub.requests[0]["body"]["messages"] == [{"role": "user", "content": dated}]
             (call,) = [c for c in first if c["type"] == "tool_call"]
             assert call["name"] == "python" and call["input"] == {
                 "code": "print(6 * 7)"

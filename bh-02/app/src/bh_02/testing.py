@@ -65,6 +65,20 @@ async def slow_start(*, config: Mapping[str, Any] | None = None) -> Effects:
     yield bind("loop", _Echo())
 
 
+_CHANGED = "(End of what changed.)\n\n"  # how the loop's note on changed instructions ends
+
+
+def _words(message: Mapping[str, Any]) -> str:
+    """What the person typed, from a user entry: its content without what `agent:loop` puts
+    first, the date on an entry that carries `today` and a note that the model's instructions
+    changed (CONTRACTS.md: message)."""
+    content = str(message.get("content") or "")
+    content = content.partition("\n\n")[2] if message.get("today") else content
+    return (
+        content.partition(_CHANGED)[2] if content.startswith("(bh-02: ") and _CHANGED in content else content
+    )
+
+
 class _EchoModel:
     """One turn: `echo:` and the last user message upper-cased, a word at a time, then which
     user message of the conversation it was (`(message 2)`), so a screen shows whether the
@@ -81,7 +95,7 @@ class _EchoModel:
         if self._name:
             yield {"type": "text", "text": f"[{self._name}] "}
         yield {"type": "text", "text": "echo:"}
-        for word in str(said[-1]["content"] if said else "").upper().split():
+        for word in (_words(said[-1]) if said else "").upper().split():
             yield {"type": "text", "text": f" {word}"}
         yield {"type": "text", "text": f" (message {len(said)})"}
         yield {"type": "stop", "reason": "end_turn"}
@@ -140,7 +154,7 @@ class _Repl:
             yield {"type": "text", "text": f"the input said: {str(last['content']).strip()}"}
             yield {"type": "stop", "reason": "end_turn"}
             return
-        code = str(last.get("content", ""))
+        code = _words(last)
         yield {
             "type": "tool_call",
             "id": f"input{len(messages)}",

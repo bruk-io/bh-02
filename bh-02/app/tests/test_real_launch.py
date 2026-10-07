@@ -232,6 +232,56 @@ def test_a_message_gets_its_reply_ctrl_c_only_explains_and_ctrl_q_leaves(launch:
     assert "(uv run bh-02 --resume to continue it)" in app.text()
 
 
+def test_a_bang_line_runs_in_the_shell_and_the_model_reads_its_output_with_the_next_message(
+    launch: Launch,
+) -> None:
+    """`!COMMAND` (the shipped `shell-command` row): it runs as the person, in the project (the
+    launch's `work`), and its output is shown; it is no message, and the model (`fake` echoes
+    the last message, and says which of the conversation's it was) reads that output with the
+    next one, even across a `/model` switch, which reloads the chat row: `commands` holds it."""
+    app = launch("fake")
+    ready = app.wait_for(_READY, 60)
+    app.type("!echo shellsaid; pwd")
+    shown = app.wait_for("exit status 0; the model reads this with your next message", 20, after=ready)
+    assert "shellsaid" in app.text()[ready:shown] and "/work" in app.text()[ready:shown]
+    assert "SHELLSAID" not in app.text()  # nothing went to the model yet
+    app.type("/model fake-2")
+    switched = app.wait_for("↻ chat reloaded", 20, after=shown)
+    app.settle(1.0)
+    app.type("over to you")
+    app.wait_for("YOU", 20, after=switched)  # the model's echo, upper-cased
+    app.settle(0.5)
+    replied = app.text()[switched:]
+    assert "[fake-2] echo:" in replied and "SHELLSAID" in replied  # the output, in front of it
+    assert re.search(r"\(message\s+1\)", replied), replied[-3000:]  # the `!` line was no message
+    app.press(b"\x11")
+    assert app.exit_code() == 0
+
+
+def test_ctrl_c_says_a_bang_command_runs_on_and_ctrl_q_leaves_at_once_ending_it(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """A `!` command may take minutes (its timeout is 120 s): Ctrl-C doesn't stop it, and says
+    so; Ctrl-Q leaves at once, not when the command ends, and ends the command with it."""
+    app = launch("fake")
+    ready = app.wait_for(_READY, 60)
+    pid = tmp_path / "work" / "shell.pid"
+    app.type(f"!echo $$ > {pid}; sleep 60; echo ended-$((6 * 7))")
+    deadline = time.monotonic() + 20
+    while not (pid.exists() and pid.read_text().strip()) and time.monotonic() < deadline:
+        app.settle(0.1)
+    shell = int(pid.read_text())
+    app.press(b"\x03")
+    app.wait_for("A command is running, and Ctrl-C stops only a turn", 10, after=ready)
+    assert _alive(shell)  # Ctrl-C did not stop it
+    left = time.monotonic()
+    app.press(b"\x11")
+    assert app.exit_code(15) == 0
+    assert time.monotonic() - left < 10, "bh-02 waited for the command"
+    assert "ended-42" not in app.text()[ready:]
+    assert not _alive(shell)  # the command ended with bh-02
+
+
 def test_the_transcript_draws_every_kind_of_event_and_a_long_reply(launch: Launch) -> None:
     app = launch("showcase")
     ready = app.wait_for(_READY, 60)
@@ -589,6 +639,43 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
     assert "echo: AGAIN (message 1)" in screen and "HELLO THERE" not in screen, screen[-4000:]
     again.type("more")  # and sends the model its transcript since the clear: `again`, then this
     again.wait_for("echo: MORE (message 2)", 20, after=ready)
+    again.press(b"\x11")
+    assert again.exit_code() == 0
+
+
+def test_compact_carries_on_from_a_summary_and_a_resume_draws_from_it(launch: Launch, tmp_path: Path) -> None:
+    """`/compact` answers `cleared`, a note carrying the model's summary, then `restarting`: the
+    old turns leave the screen, the loop and its transcript restart, and the next message is the
+    new conversation's second (bh-02's note before the summary was its first). The old transcript
+    is kept beside the new one, and a resume draws from the note on. The fake's summary is its
+    echo of bh-02's request for one."""
+    app = launch("fake")
+    ready = app.wait_for(_READY, 60)
+    app.type("hello there")
+    replied = app.wait_for("echo: HELLO THERE (message 1)", after=ready)
+    app.type("/compact")
+    compacted = app.wait_for("the conversation was compacted", 20, after=replied)
+    app.wait_for("echo: (BH-02: THE PERSON ASKED TO COMPACT", 10, after=compacted)
+    app.wait_for("↻ chat reloaded", 20, after=compacted)
+    app.settle(1.0)
+    app.type("again")
+    app.wait_for("echo: AGAIN (message 2)", 20, after=compacted)
+    narrowed = len(app.text())
+    app.resize(_COLS - 20)  # drawn again: only what the transcript holds now
+    app.wait_for("echo: AGAIN (message 2)", 10, after=narrowed)
+    app.settle()
+    assert "HELLO THERE" not in app.text()[narrowed:]
+    app.press(b"\x11")
+    assert app.exit_code() == 0
+    (session,) = (tmp_path / "state" / "bh-02" / "sessions").iterdir()
+    assert "hello there" in (session / "transcript.jsonl.bak").read_text()
+    assert "hello there" not in (session / "transcript.jsonl").read_text()
+    again = launch("fake", "--resume")  # a resume draws from the compaction on
+    ready = again.wait_for(_READY, 60)
+    screen = again.text()
+    assert "echo: AGAIN (message 2)" in screen and "HELLO THERE" not in screen, screen[-4000:]
+    again.type("more")  # and sends the model the new conversation: the summary, `again`, this
+    again.wait_for("echo: MORE (message 3)", 20, after=ready)
     again.press(b"\x11")
     assert again.exit_code() == 0
 

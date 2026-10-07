@@ -53,9 +53,20 @@ _TERMINAL_MODULES = (
 )
 
 # Names in a terminal module that are not terminal I/O: the interpreter's path, the process's
-# arguments, where it imports from, and what it runs on. Imported by name (`from sys import
-# executable`), never the module.
-_NOT_TERMINAL = ("sys.argv", "sys.executable", "sys.modules", "sys.path", "sys.platform", "sys.prefix")
+# arguments, where it imports from (its environment's prefix and the base interpreter's), and
+# what it runs on; its audit hooks and its call stack (the kernel's worker hears what files an
+# input opens). Imported by name (`from sys import executable`), never the module.
+_NOT_TERMINAL = (
+    "sys.argv",
+    "sys.base_prefix",
+    "sys.executable",
+    "sys.modules",
+    "sys.path",
+    "sys.platform",
+    "sys.prefix",
+    "sys.addaudithook",
+    "sys._getframe",
+)
 
 # What every unit may import besides itself.
 _LIBRARIES = ("cordis", "cordis_helpers")
@@ -247,7 +258,7 @@ register_dsl_rule(
         build=_worker_stdlib_only,
         message=(
             "'{module}' imports '{imported_from}'; it runs inside a jail and imports only the "
-            "standard library. A cell is plain Python, and what it may touch is the jail's "
+            "standard library. An input is plain Python, and what it may touch is the jail's "
             "decision: use the standard library, or do the work in bh-02 outside the kernel"
         ),
     )

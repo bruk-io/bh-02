@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from typing import Any
 import pytest
 
 from cordis import Effects, Runtime, bind, component
+from cordis.testing import drive
 from kernel_cordis_plugin import (
     PYTHON,
     UNENFORCED,
@@ -21,8 +23,8 @@ from kernel_cordis_plugin import (
     KernelConfig,
     Unjailed,
     instructions_for,
-    is_confined,
     kernel,
+    release,
     worker_argv,
 )
 
@@ -67,6 +69,396 @@ async def test_the_project_s_startup_file_runs_first_when_inputs_are_confined(tm
         assert "exec(open('.bh-02/kernel.py').read())" in told and "broken" not in told
 
 
+def _person_s(text: str | bytes) -> Path:
+    """The person's own startup file, `$XDG_CONFIG_HOME/bh-02/kernel.py` (conftest gives each
+    test a config directory of its own, outside its `tmp_path`), holding `text`."""
+    path = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "kernel.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(text, bytes):
+        path.write_bytes(text)
+    else:
+        path.write_text(text)
+    return path
+
+
+def _project_s(root: Path, text: str) -> Path:
+    """The project's startup file, `.bh-02/kernel.py` under `root`, holding `text`."""
+    path = root / ".bh-02" / "kernel.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+async def test_the_person_s_startup_file_runs_before_the_project_s(tmp_path: Path) -> None:
+    """Both files: the person's first, so its helpers are there for the project's, which may
+    bind a name afresh; each is said with the names it defined, and leaves nothing else behind."""
+    person = _person_s("def show(x):\n    return f'<{x}>'\n\nWIDTH = 80\n")
+    _project_s(tmp_path, "def sh(cmd):\n    return show(cmd)\n\nWIDTH = 100\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run("sh('ls'), WIDTH")
+        assert first == (
+            f"({person} ran first and defined: WIDTH, show. "
+            ".bh-02/kernel.py ran next and defined: WIDTH, sh)\n('<ls>', 100)"
+        )
+        assert await k.run("[n for n in globals() if n.startswith('_bh')]") == "[]"
+        assert await k.run("show(1)") == "'<1>'"  # told once, then plain inputs
+
+
+async def test_a_startup_file_that_is_not_there_is_passed_over(tmp_path: Path) -> None:
+    person = _person_s("HELPER = 1\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # the project has none
+        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
+    person.unlink()
+    _project_s(tmp_path, "TOOLS = 2\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # the person has none
+        assert await k.run("TOOLS") == "(.bh-02/kernel.py ran first and defined: TOOLS)\n2"
+    (tmp_path / ".bh-02" / "kernel.py").unlink()
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # neither: nothing to tell
+        assert await k.run("1") == "1"
+
+
+async def test_a_failing_startup_file_says_why_and_the_next_one_still_runs(tmp_path: Path) -> None:
+    """A failure is the file's traceback, its own lines shown (the person's from the source the
+    host sent), and what ran before it stays, as at a REPL; the next file runs all the same."""
+    person = _person_s("def show(x):\n    return x\n\n\nraise RuntimeError('broken person helper')\n")
+    project = _project_s(tmp_path, "TOOLS = 2\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run("TOOLS")
+        assert first.startswith(f"({person} ran first and failed, so what it defines is missing:\n")
+        assert (
+            f'File "{person}", line 5, in <module>\n' in first
+            and "RuntimeError: broken person helper" in first
+        )
+        assert first.endswith(". .bh-02/kernel.py ran next and defined: TOOLS)\n2")
+        assert await k.run("show(3)") == "3"
+    person.write_text("HELPER = 1\n")
+    project.write_text("raise ValueError('broken project helper')\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run("HELPER")
+        assert first.startswith(
+            f"({person} ran first and defined: HELPER. .bh-02/kernel.py ran next and failed, so what "
+            "it defines is missing:\n"
+        )
+        assert "ValueError: broken project helper" in first and first.endswith(")\n1")
+    _person_s(b"HELPER = '\xff'\n")  # not UTF-8: the host can't read it, and says so
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        told = await k.run("1")
+        assert told.startswith(f"({person} could not be read ('utf-8' codec can't decode byte 0xff")
+        assert "so what it defines is missing. .bh-02/kernel.py ran next and failed" in told
+
+
+async def test_a_startup_file_that_ends_the_repl_is_named_and_passed_over_after(tmp_path: Path) -> None:
+    """A file that ends the worker (os._exit, a crash) would end every new one: the input it
+    cut short names it, and the workers after it pass it over, saying so, until `/restart kernel`
+    (a new kernel) runs it again. The project's still runs."""
+    person = _person_s("import os\nos._exit(3)\n")
+    _project_s(tmp_path, "TOOLS = 2\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        ended = await k.run("1")
+        assert ended == (
+            f"the REPL's process ended as {person} ran, before this input, so this input did not run; "
+            f"a new one starts with the next, without {person} (`/restart kernel` runs it again)"
+        )
+        passed = await k.run("TOOLS")
+        assert passed.startswith(
+            f"(the REPL was started again; what earlier inputs defined is gone. {person} was not run: it "
+            "ended the REPL's process when it last ran, so what it defines is missing (`/restart kernel` "
+            "runs it again). .bh-02/kernel.py ran next and defined: TOOLS)\n"
+        ), passed
+        assert passed.endswith("\n2") and await k.run("TOOLS + 1") == "3"
+
+
+async def test_a_startup_file_that_ends_the_repl_keeps_what_the_opening_had_to_tell(tmp_path: Path) -> None:
+    """The jail ended the last worker itself (a Linux jail's tripwire), and the person's startup
+    file ends the next as it runs: the input it cut short still says the REPL was started again,
+    and why, before it says which file ended it. Else the model never learns its variables went."""
+    person = _person_s("HELPER = 1\n")
+    jail = Tripping()
+    async with Kernel(jail, KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("kept = HELPER") == f"({person} ran first and defined: HELPER)"
+        _person_s("import os\nos._exit(3)\n")
+        await jail.trip("the host undid the jail's hold on /w/local.env; the next one holds it again")
+        ended = await k.run("kept")
+    assert ended == (
+        "(the REPL was started again, because the host undid the jail's hold on /w/local.env; the "
+        "next one holds it again; what earlier inputs defined is gone)\n"
+        f"the REPL's process ended as {person} ran, before this input, so this input did not run; "
+        f"a new one starts with the next, without {person} (`/restart kernel` runs it again)"
+    ), ended
+
+
+async def test_a_startup_file_stopped_part_way_keeps_what_the_opening_had_to_tell(tmp_path: Path) -> None:
+    """The same when Ctrl-C stops the file: the input after, in the same REPL, is told why the
+    REPL was started again as well as what was cut short."""
+    person = _person_s("HELPER = 1\n")
+    jail = Tripping()
+    async with Kernel(jail, KernelConfig(root=str(tmp_path))) as k:
+        await k.run("kept = HELPER")
+        _person_s("import time\ntime.sleep(60)\n")
+        await jail.trip("the host undid the jail's hold on /w/local.env")
+        hanging = asyncio.create_task(k.run("kept"))
+        await asyncio.sleep(0.5)
+        hanging.cancel()
+        await asyncio.gather(hanging, return_exceptions=True)
+        told = await asyncio.wait_for(k.run("'kept' in globals()"), 5)
+    assert told == (
+        "(the REPL was started again, because the host undid the jail's hold on /w/local.env; what "
+        f"earlier inputs defined is gone. {person} was stopped as it ran, so what it defines may be "
+        "missing, and no startup file after it ran)\nFalse"
+    ), told
+
+
+async def test_a_startup_file_stopped_part_way_is_not_run_again_in_that_repl(tmp_path: Path) -> None:
+    """Ctrl-C as a startup file runs (it hangs, say) stops it; the next input runs in the same
+    REPL without running the files again, and is told what was cut short. One that won't stop
+    costs its REPL, and the next passes it over rather than hang again."""
+    person = _person_s("import time\nA = 1\ntime.sleep(60)\nB = 2\n")
+    _project_s(tmp_path, "TOOLS = 2\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        hanging = asyncio.create_task(k.run("1"))
+        await asyncio.sleep(0.5)
+        hanging.cancel()
+        await asyncio.gather(hanging, return_exceptions=True)
+        told = await asyncio.wait_for(k.run("sorted(n for n in globals() if not n.startswith('_'))"), 5)
+    assert told == (
+        f"({person} was stopped as it ran, so what it defines may be missing, and no startup file after "
+        "it ran)\n['A', 'time']"
+    ), told
+    person.write_text(
+        "import time\nwhile True:\n    try:\n        time.sleep(60)\n"
+        "    except KeyboardInterrupt:\n        pass\n"
+    )
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path), grace=0.5)) as k:  # one that won't stop
+        hanging = asyncio.create_task(k.run("1"))
+        await asyncio.sleep(0.5)
+        hanging.cancel()
+        await asyncio.gather(hanging, return_exceptions=True)
+        told = await asyncio.wait_for(k.run("TOOLS"), 5)
+    assert told == (
+        f"(the REPL was started again; what earlier inputs defined is gone. {person} was not run: it would "
+        "not stop at Ctrl-C when it last ran, so what it defines is missing (`/restart kernel` runs it "
+        "again). .bh-02/kernel.py ran next and defined: TOOLS)\n2"
+    ), told
+
+
+async def test_a_startup_file_s_names_are_what_its_code_binds_on_a_line_of_their_own(tmp_path: Path) -> None:
+    """A name each file binds is said even when it is bound to the object it already held
+    (`WIDTH = 80` in both: one int), and what a file prints without a newline stays out of it."""
+    person = _person_s("print('hello', end='')\nWIDTH = 80\n")
+    _project_s(tmp_path, "WIDTH = 80\nTOOLS = 2\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("WIDTH") == (
+            f"({person} ran first and defined: WIDTH. "
+            ".bh-02/kernel.py ran next and defined: TOOLS, WIDTH)\n80"
+        )
+
+
+async def test_a_startup_file_saved_with_a_byte_order_mark_runs(tmp_path: Path) -> None:
+    """As `python file.py` runs it: a UTF-8 byte order mark (what some editors save) is no part of
+    the source, read on the host or in the jail."""
+    person = _person_s(b"\xef\xbb\xbfA = 1\n")
+    (tmp_path / ".bh-02").mkdir()
+    (tmp_path / ".bh-02" / "kernel.py").write_bytes(b"\xef\xbb\xbfB = 2\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("A + B") == (
+            f"({person} ran first and defined: A. .bh-02/kernel.py ran next and defined: B)\n3"
+        )
+
+
+def test_startup_is_a_file_name_or_a_list_of_them() -> None:
+    """A layer's typo (a number in the list) is the row's config error, saying what to write,
+    not an AttributeError from every request's instructions."""
+    with pytest.raises(TypeError) as raised:
+        KernelConfig(startup=[".bh-02/kernel.py", 1])  # type: ignore[list-item]
+    assert str(raised.value) == (
+        "`startup` must be a file name or a list of them, as in "
+        '`startup = ["$XDG_CONFIG_HOME/bh-02/kernel.py", ".bh-02/kernel.py"]`, not [\'.bh-02/kernel.py\', 1]'
+    )
+    with pytest.raises(TypeError):
+        KernelConfig(startup=3)  # type: ignore[arg-type]
+    assert KernelConfig(startup="~/helpers.py").startup == "~/helpers.py"
+
+
+async def test_unconfined_neither_startup_file_runs_unasked(tmp_path: Path) -> None:
+    """Unjailed, a startup file would run with the person's permissions without them being
+    asked: the model is told to run each as an input of its own, which the person is asked about."""
+    person = _person_s("print('the person s ran unasked')\n")
+    _project_s(tmp_path, "print('the project s ran unasked')\n")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        told = await k.run("1")
+    assert told == (
+        f"({person} and .bh-02/kernel.py were not run: inputs here are put to the person, so run them "
+        "as an input of your own if you want them: "
+        f"exec(open({str(person)!r}).read()); exec(open('.bh-02/kernel.py').read()))\n1"
+    )
+
+
+async def test_the_person_s_startup_file_runs_in_a_jail_that_cannot_read_it(tmp_path: Path) -> None:
+    """A Linux jail reads by allowlist and has no home directory, so the person's config
+    directory is not in it: the host reads the person's file and sends its source, so it runs
+    there all the same, its lines shown in a traceback. The project's is read in the jail."""
+    person = _person_s("def show(x):\n    return 1 / x\n")
+    _project_s(tmp_path, "TOOLS = 2\n")
+    async with Kernel(Hiding(os.environ["XDG_CONFIG_HOME"]), KernelConfig(root=str(tmp_path))) as k:
+        first = await k.run(f"open({str(person)!r})")
+        assert first.startswith(
+            f"({person} ran first and defined: show. .bh-02/kernel.py ran next and defined: TOOLS)\n"
+        )
+        assert "PermissionError: [Errno 13] the jail hides it" in first  # an input can't read it
+        failed = await k.run("show(0)")
+        assert f'File "{person}", line 2, in show\n    return 1 / x' in failed
+
+
+async def test_a_person_s_file_whose_way_leads_through_the_project_is_read_only_in_the_jail(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The person's config directory is a link into the project (a dotfiles repository, say),
+    where the model can write: it could make the file a link to one the jail hides, and the host
+    would hand it over. So a person's file whose way passes through the project is read as the
+    project's is: by the worker, in the jail, which decides. Each file runs once."""
+    dotfiles = tmp_path / "dotfiles"
+    (dotfiles / "bh-02").mkdir(parents=True)
+    config = tmp_path_factory.mktemp("home") / "config"
+    config.symlink_to(dotfiles)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    person = config / "bh-02" / "kernel.py"
+    (dotfiles / "bh-02" / "kernel.py").write_text("HELPER = 1\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
+    hidden = tmp_path_factory.mktemp("hidden")
+    (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
+    (dotfiles / "bh-02" / "kernel.py").unlink()
+    (dotfiles / "bh-02" / "kernel.py").symlink_to(hidden / "secret.py")  # what a model could do
+    async with Kernel(Hiding(str(hidden)), KernelConfig(root=str(tmp_path))) as k:
+        told = await k.run("'SECRET' in globals()")
+        assert told.startswith(f"({person} ran first and failed") and "PermissionError" in told
+        assert "stand-in" not in told and told.endswith(")\nFalse")
+    (dotfiles / "bh-02" / "kernel.py").unlink()
+    (dotfiles / "bh-02" / "kernel.py").symlink_to(_project_s(tmp_path, "TOOLS = 2\n"))
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # the project's own, once
+        assert await k.run("TOOLS") == f"({person} ran first and defined: TOOLS)\n2"
+
+
+async def test_run_from_the_home_directory_the_person_s_file_is_read_in_the_jail_and_still_theirs(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bh-02 run from the home directory: the person's config directory is in the project, where
+    the model can write. Their file runs, read by the worker as the project's is (so a link the
+    model planted there leads only where the jail lets it), and the model is still told it is
+    the person's, not its own to edit."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+    person = tmp_path / ".config" / "bh-02" / "kernel.py"
+    person.parent.mkdir(parents=True)
+    person.write_text("HELPER = 1\n")
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
+        told = k.instructions()
+        assert "go in .bh-02/kernel.py, the project's startup file" in told
+        assert f"own in {person}, which comes before it, and that file is theirs." in told
+    hidden = tmp_path_factory.mktemp("hidden")
+    (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
+    person.unlink()
+    person.symlink_to(hidden / "secret.py")  # what a model could do
+    async with Kernel(Hiding(str(hidden)), KernelConfig(root=str(tmp_path))) as k:
+        told = await k.run("'SECRET' in globals()")
+        assert told.startswith(f"({person} ran first and failed") and "PermissionError" in told
+        assert "stand-in" not in told and told.endswith(")\nFalse")
+
+
+async def test_a_person_s_file_whose_way_leads_through_any_root_an_input_writes_is_not_read_on_the_host(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not only the project: any root the jail lets an input write (`jail.writes()`, a `write`
+    the person added) is where the model could have made the file a link to one the jail hides.
+    The host reads nothing whose way passes through one, and when the jail then can't read it
+    either, the note says why bh-02 did not."""
+    project = tmp_path / "project"
+    project.mkdir()
+    dotfiles = tmp_path / "dotfiles"  # outside the project, but a root an input may write
+    (dotfiles / "bh-02").mkdir(parents=True)
+    config = tmp_path_factory.mktemp("home") / "config"
+    config.symlink_to(dotfiles)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    person = config / "bh-02" / "kernel.py"
+    hidden = tmp_path_factory.mktemp("hidden")
+    (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
+    (dotfiles / "bh-02" / "kernel.py").symlink_to(hidden / "secret.py")  # what a model could do
+    async with Kernel(Writing(str(hidden), [str(dotfiles)]), KernelConfig(root=str(project))) as k:
+        told = await k.run(
+            "import linecache\n'SECRET' in globals(), linecache.getlines(" + repr(str(person)) + ")"
+        )
+    assert told.startswith(
+        f"({person} ran first and failed (its way passes through {dotfiles}, where inputs can write, so "
+        "bh-02 left it to the jail), so what it defines is missing:\n"
+    ), told
+    assert "PermissionError" in told and "stand-in" not in told and told.endswith(")\n(False, [])")
+    (dotfiles / "bh-02" / "kernel.py").unlink()
+    (dotfiles / "bh-02" / "kernel.py").write_text("HELPER = 1\n")
+    async with Kernel(Writing(str(hidden), [str(dotfiles)]), KernelConfig(root=str(project))) as k:
+        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"  # read in the jail
+
+
+async def test_a_startup_file_is_named_from_home_or_the_config_directory_on_the_host(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`~/` and `$XDG_CONFIG_HOME/` (that variable's value, else `~/.config`, as for the context
+    file) are the host's to expand: the jail has no home in it."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+    (home / ".config" / "bh-02").mkdir(parents=True)
+    (home / ".config" / "bh-02" / "kernel.py").write_text("A = 1\n")
+    (home / "helpers.py").write_text("B = 2\n")
+    config = KernelConfig(
+        root=str(tmp_path), startup=("$XDG_CONFIG_HOME/bh-02/kernel.py", "~/helpers.py", ".bh-02/kernel.py")
+    )
+    async with Kernel(Hiding(str(home)), config) as k:
+        assert await k.run("A + B") == (
+            f"({home}/.config/bh-02/kernel.py ran first and defined: A. "
+            f"{home}/helpers.py ran next and defined: B)\n3"
+        )
+        told = k.instructions()
+        assert f"helpers of their own in {home}/.config/bh-02/kernel.py and {home}/helpers.py" in told
+    one = KernelConfig(root=str(tmp_path), startup="~/helpers.py")  # a single string is one file
+    async with Kernel(Confined(), one) as k:
+        assert await k.run("B") == f"({home}/helpers.py ran first and defined: B)\n2"
+
+
+def test_the_model_is_told_only_the_project_s_startup_file_is_its_to_edit() -> None:
+    mine, theirs = (".bh-02/kernel.py",), ("/home/me/.config/bh-02/kernel.py",)
+    for confined in (True, False):
+        told = instructions_for(confined, mine, theirs=theirs)
+        assert "go in .bh-02/kernel.py, the project's startup file, which you can write and grow" in told
+        assert (
+            "Only the project's startup file is yours to edit: the person may keep helpers of their "
+            "own in /home/me/.config/bh-02/kernel.py, which comes before it, and that file is theirs."
+        ) in told
+    assert "Only the project's" not in instructions_for(True)  # no file of the person's to name
+    alone = instructions_for(True, (), theirs=theirs)  # only the person's
+    assert "go in" not in alone and "That file is theirs, not yours to edit." in alone
+
+
+def test_under_an_allowlist_the_model_is_told_how_to_see_the_person_s_helpers() -> None:
+    """A Linux jail has no home directory in it: the person's helpers run (the host sent their
+    source), but the model's code finds no such file to open, so it is told what shows one."""
+    mine, theirs, reads = (".bh-02/kernel.py",), ("/home/me/.config/bh-02/kernel.py",), ("/usr", "/w/app")
+    told = instructions_for(True, mine, reads, theirs=theirs)
+    assert "finds no such file (bh-02 reads it for the REPL): inspect.getsource(helper) shows one" in told
+    assert "inspect.getsource" not in instructions_for(True, mine, reads)  # no file of the person's
+    assert "inspect.getsource" not in instructions_for(True, mine, (), theirs=theirs)  # it reads everything
+
+
+async def test_the_kernel_tells_the_model_where_the_person_s_startup_file_is(tmp_path: Path) -> None:
+    """By its place on this machine, `$XDG_CONFIG_HOME` expanded, though there is no file yet."""
+    async with Kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+        told = k.instructions()
+    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "kernel.py"
+    assert "go in .bh-02/kernel.py, the project's startup file" in told
+    said = "Only the project's startup file is yours to edit: the person may keep helpers of their own in"
+    assert f"{said} {person}, which comes before it" in told
+
+
 def test_the_model_is_told_its_tool_is_a_repl_of_its_own_that_persists_and_how_to_use_it() -> None:
     told = instructions_for(True)
     assert told.startswith("Your one tool is `python`: a Python REPL of your own")
@@ -95,30 +487,272 @@ async def test_a_program_s_own_output_reaches_an_input_only_when_captured(tmp_pa
         assert "EOFError" in await k.run("input()")
 
 
-async def test_an_input_that_uses_the_shell_for_file_work_is_told_once_how_python_does_it(
+async def test_touched_is_the_project_s_files_the_last_input_opened(tmp_path: Path) -> None:
+    """What `memory` is given: files read or written, not a directory listed, a module imported
+    or a file a program read; and nothing outside the project."""
+    (tmp_path / "src" / "db").mkdir(parents=True)
+    (tmp_path / "src" / "db" / "models.py").write_text("X = 1\n")
+    (tmp_path / "notes.md").write_text("n")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("o")
+    root = tmp_path.resolve()
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        assert k.touched() == ()
+        await k.run(
+            "import os\nfrom pathlib import Path\n"
+            "Path('src/db/models.py').read_text()\nopen('notes.md').read()\n"
+            f"Path('new.txt').write_text('w')\nopen({str(outside)!r}).read()\nos.listdir('src')\n"
+            "open('notes.md').read()"
+        )
+        assert k.touched() == (str(root / "src/db/models.py"), str(root / "notes.md"), str(root / "new.txt"))
+        await k.run(
+            "import sys, subprocess\nsys.path.insert(0, 'src/db')\nimport models\n"
+            "subprocess.run(['cat', 'notes.md'], capture_output=True)"
+        )
+        assert k.touched() == ()
+        await k.run("open('missing.md')")  # an input that failed still opened what it opened
+        assert k.touched() == (str(root / "missing.md"),)
+
+
+async def test_touched_is_not_misled_by_a_removal_that_opens_through_a_directory_s_descriptor(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "a.txt").write_text("one\ntwo\n")
+    """`shutil.rmtree` (and so a `TemporaryDirectory`'s cleanup) opens each directory by its name
+    relative to its parent's descriptor, which the audit event leaves out: resolved against the
+    working directory, removing a temporary `src/db` named the project's `src` and `db`. An
+    `os.open` is not heard; an `open()` in the same input still is."""
+    (tmp_path / "src" / "db").mkdir(parents=True)
+    (tmp_path / "notes.md").write_text("n")
     async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
-        shown = (
-            "import subprocess\n"
-            "print(subprocess.run(['cat', 'a.txt'], capture_output=True, text=True).stdout)"
+        await k.run(
+            "import os, shutil, tempfile\n"
+            "with tempfile.TemporaryDirectory() as t:\n"
+            "    os.makedirs(os.path.join(t, 'src', 'db'))\n"
+            "    shutil.rmtree(os.path.join(t, 'src'))\n"
+            "    os.makedirs(os.path.join(t, 'src', 'db'))\n"  # for the cleanup to remove
+            "open('notes.md').read()"
         )
-        first = await k.run(shown)
-        assert first.startswith("one\ntwo\n(this input ran `cat` through a shell.")
-        assert "read a file with Path(p).read_text()" in first
-        assert await k.run(shown.replace("cat", "head")) == "one\ntwo"  # reading was said: once a kind
-        quiet = await k.run("subprocess.run(['ls'], capture_output=True).returncode")
-        assert quiet.startswith("0\n(this input ran `ls` through a shell.")  # listing was not
-        assert await k.run("subprocess.run(['git', '--version'], capture_output=True).returncode") == "0"
+        assert k.touched() == (str(tmp_path.resolve() / "notes.md"),)
+
+
+async def test_only_the_project_s_files_count_towards_the_most_touched_names(tmp_path: Path) -> None:
+    """`touched` names at most 1,000 files, all of them the project's: an input that first opens
+    more than that elsewhere (a temporary directory, site-packages) still names the project file
+    it opens after them."""
+    (tmp_path / "notes.md").write_text("n")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        await k.run(
+            "import os, tempfile\n"
+            "with tempfile.TemporaryDirectory() as t:\n"
+            "    for i in range(1_001):\n"
+            "        open(os.path.join(t, f'{i}.txt'), 'w').close()\n"
+            "open('notes.md').read()"
+        )
+        assert k.touched() == (str(tmp_path.resolve() / "notes.md"),)
+        await k.run("for i in range(1_001):\n    open(f'{i}.txt', 'w').close()")
+        assert len(k.touched()) == 1_000
+
+
+async def test_an_open_with_no_python_frame_above_it_is_heard_and_goes_ahead(tmp_path: Path) -> None:
+    """`open` called straight from a thread `_thread` started has no Python frame above the
+    hook's own: it is not the import system's, so the file is heard, and the hook does not make
+    the open fail."""
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        made = await k.run(
+            "import _thread, os, time\n"
+            "_thread.start_new_thread(open, ('threaded.txt', 'w'))\n"
+            "deadline = time.monotonic() + 5\n"
+            "while not os.path.exists('threaded.txt') and time.monotonic() < deadline:\n"
+            "    time.sleep(0.01)\n"
+            "os.path.exists('threaded.txt')"
+        )
+        assert made == "True"
+        assert k.touched() == (str(tmp_path.resolve() / "threaded.txt"),)
+
+
+async def test_hearing_an_open_calls_the_hook_twice_however_deep_the_stack(tmp_path: Path) -> None:
+    """Every audited event calls the hook, the ones its own work raises included. Telling the
+    import system's frames by their code (`f_code`, which is audited) called it once per frame,
+    so an open 500 frames deep called it some 500 times; now it is the open and `_getframe`."""
+    for name in ("shallow.md", "deep.md"):
+        (tmp_path / name).write_text("x")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        counted = await k.run(
+            "import sys\n"
+            "events = []\n"
+            "counting = False\n"
+            "def count(event, args):\n"
+            "    if counting:\n"
+            "        events.append(event)\n"
+            "sys.addaudithook(count)\n"
+            "def at(depth, name):\n"
+            "    global counting\n"
+            "    if depth:\n"
+            "        return at(depth - 1, name)\n"
+            "    events.clear()\n"
+            "    counting = True\n"
+            "    open(name).close()\n"
+            "    counting = False\n"
+            "    return sorted(events)\n"
+            "at(0, 'shallow.md'), at(500, 'deep.md')"
+        )
+        assert counted == "(['open', 'sys._getframe'], ['open', 'sys._getframe'])"
+        root = tmp_path.resolve()
+        assert k.touched() == (str(root / "shallow.md"), str(root / "deep.md"))
+
+
+async def test_formatting_a_failed_input_s_traceback_is_not_heard(tmp_path: Path) -> None:
+    """A failed input's traceback reads the source file of each frame in it, after the input's
+    own code has stopped: those are not files the input worked on."""
+    (tmp_path / "helper.py").write_text("def fail():\n    raise ValueError('boom')\n")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        failed = await k.run("import os, sys\nsys.path.insert(0, os.getcwd())\nimport helper\nhelper.fail()")
+        assert "raise ValueError('boom')" in failed  # helper.py was read, to show its frame's line
+        assert k.touched() == ()
+
+
+_CONFINED: Mapping[str, str] = {**UNENFORCED, "fs_write": "enforced", "network": "enforced"}
+
+
+class Told:
+    """A program an unjailed process stands in for, with what its jail says this start is
+    (CONTRACTS.md: jail): its grades, its notice, the trees it reads and the roots it writes."""
+
+    def __init__(
+        self,
+        started: Any,
+        *,
+        report: Mapping[str, str] = UNENFORCED,
+        notice: str = "",
+        reads: Sequence[str] = (),
+        writes: Sequence[str] = (),
+    ) -> None:
+        self._started = started
+        self._report, self._notice, self._reads, self._writes = report, notice, tuple(reads), tuple(writes)
+
+    def interrupt(self) -> bool:
+        return bool(self._started.interrupt())
+
+    def ended(self) -> str:
+        return str(self._started.ended())
+
+    async def stop(self) -> None:
+        await self._started.stop()
+
+    def report(self) -> Mapping[str, str]:
+        return self._report
+
+    def notice(self) -> str:
+        return self._notice
+
+    def reads(self) -> tuple[str, ...]:
+        return self._reads
+
+    def writes(self) -> tuple[str, ...]:
+        return self._writes
 
 
 class Confined(Unjailed):
     """The unjailed process, reported as confined: what a jail looks like to the kernel, without
-    needing one on this platform."""
+    needing one on this platform. `writable`: the roots besides the project an input may write
+    (brig's `write`), which each start says."""
+
+    writable: tuple[str, ...] = ()
 
     def report(self) -> Mapping[str, str]:
-        return {**UNENFORCED, "fs_write": "enforced", "network": "enforced"}
+        return _CONFINED
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Any:
+        started = await super().start(argv, cwd=cwd, endpoint=endpoint)
+        return Told(started, report=_CONFINED, writes=self.writable)
+
+
+# The worker, run under an audit hook that refuses to open anything under a directory (the
+# first argument), wherever a link leads from: a jail with no such directory in it.
+_HIDING = """
+import os, runpy, sys
+hidden = os.path.join(os.path.realpath(sys.argv[1]), "")
+def hook(event, args):
+    if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
+        if os.path.realpath(os.fsdecode(args[0])).startswith(hidden):
+            raise PermissionError(13, "the jail hides it", os.fsdecode(args[0]))
+sys.addaudithook(hook)
+sys.argv = sys.argv[2:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+class Hiding(Confined):
+    """A confined jail with no `hidden` directory in it, as a Linux jail has no home directory
+    (and no secret) in it: the worker can open nothing under `hidden`."""
+
+    def __init__(self, hidden: str) -> None:
+        self._hidden = hidden
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Any:
+        executable, isolated, *worker = argv
+        return await super().start(
+            [executable, isolated, "-c", _HIDING, self._hidden, *worker], cwd=cwd, endpoint=endpoint
+        )
+
+
+class _Tripped:
+    """A worker a `Tripping` jail started: `ended()` is why the jail ended it, once it has."""
+
+    def __init__(self, process: Any) -> None:
+        self.process = process
+        self.why = ""
+
+    def interrupt(self) -> bool:
+        return bool(self.process.interrupt())
+
+    def ended(self) -> str:
+        return self.why
+
+    async def stop(self) -> None:
+        await self.process.stop()
+
+    def report(self) -> Mapping[str, str]:
+        return dict(self.process.report())
+
+    def notice(self) -> str:
+        return str(self.process.notice())
+
+    def reads(self) -> tuple[str, ...]:
+        return tuple(self.process.reads())
+
+    def writes(self) -> tuple[str, ...]:
+        return tuple(self.process.writes())
+
+
+class Tripping(Confined):
+    """A confined jail that can end its worker itself and say why, as a Linux `brig:jail` does
+    when the host undoes one of its holds (its tripwire): between inputs, so the kernel finds
+    the worker gone before the next one and tells that input why."""
+
+    def __init__(self) -> None:
+        self.started: list[_Tripped] = []
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Tripped:
+        started = _Tripped(await super().start(argv, cwd=cwd, endpoint=endpoint))
+        self.started.append(started)
+        return started
+
+    async def trip(self, why: str) -> None:
+        """End the running worker, as the tripwire does, and wait until the host's end of its
+        socket has heard it go."""
+        started = self.started[-1]
+        started.why = why
+        await started.process.stop()
+        await asyncio.sleep(0.2)  # the event loop reads the socket's end
+
+
+class Writing(Hiding):
+    """A `Hiding` jail that lets an input write `roots` besides the project (brig's `write`)."""
+
+    def __init__(self, hidden: str, roots: Sequence[str]) -> None:
+        super().__init__(hidden)
+        self.writable = tuple(roots)
 
 
 async def test_the_namespace_persists_and_the_last_expression_is_shown() -> None:
@@ -238,6 +872,61 @@ async def test_errors_come_back_as_text_and_a_dead_worker_is_started_again() -> 
         assert again.startswith("(the REPL was started again") and again.endswith("False")
 
 
+class Ending(Unjailed):
+    """A jail that ends its worker itself and says why (`started.ended()`), as a Linux
+    `brig:jail` does when the host undoes one of its holds."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.why = ""
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Any:
+        started = await super().start(argv, cwd=cwd, endpoint=endpoint)
+        jail = self
+
+        class Said:
+            def interrupt(self) -> bool:
+                return started.interrupt()
+
+            def ended(self) -> str:
+                return jail.why
+
+            async def stop(self) -> None:
+                jail.why = ""
+                await started.stop()
+
+            def report(self) -> Mapping[str, str]:
+                return dict(started.report())
+
+            def notice(self) -> str:
+                return str(started.notice())
+
+            def reads(self) -> tuple[str, ...]:
+                return tuple(started.reads())
+
+            def writes(self) -> tuple[str, ...]:
+                return tuple(started.writes())
+
+        return Said()
+
+
+async def test_a_worker_its_jail_ended_between_inputs_is_started_again_for_the_next() -> None:
+    """The jail can say it ended the worker before the end of its socket has reached the kernel
+    (nothing has run on bh-02's event loop since): the next input still runs, in a new worker,
+    told why, and is not sent to the one that ended."""
+    jail = Ending()
+    async with Kernel(jail, KernelConfig()) as k:
+        pid = int(await k.run("import os; x = 1; os.getpid()"))
+        jail.why = "something on the host replaced /p/.git/config"
+        os.killpg(pid, 9)
+        time.sleep(0.5)  # the worker is gone, and the event loop has not run since
+        again = await k.run("'x' in globals()")
+        assert again.startswith(
+            "(the REPL was started again, because something on the host replaced /p/.git/config"
+        ), again
+        assert again.endswith("False")
+
+
 async def test_the_row_starts_the_worker_and_leaving_stops_it() -> None:
     @component
     async def jail() -> Effects:
@@ -260,12 +949,6 @@ async def test_the_row_starts_the_worker_and_leaving_stops_it() -> None:
     else:
         raise AssertionError("the worker outlived its row")
     await rt.shutdown()
-
-
-def test_confined_means_writes_and_network_are_enforced() -> None:
-    assert is_confined({"fs_write": "enforced", "network": "enforced", "fs_read": "unenforced"})
-    assert not is_confined({"fs_write": "enforced", "network": "best_effort"})
-    assert not is_confined(UNENFORCED)
 
 
 async def test_a_worker_whose_host_goes_away_ends_even_mid_input() -> None:
@@ -328,3 +1011,118 @@ async def test_a_worker_whose_parent_is_gone_before_its_hello_exits() -> None:
         assert asyncio.get_running_loop().time() - started < 5  # its parent, not its deadline
     finally:
         shutil.rmtree(where, ignore_errors=True)
+
+
+async def test_touched_is_normalised_so_a_path_cannot_climb_out_of_the_project(tmp_path: Path) -> None:
+    """The worker is the model's process, so what it says it opened is matched, never trusted: an
+    input that writes into the worker's own record a path that climbs out of the project is not
+    believed."""
+    root = tmp_path.resolve()
+    forged = str(root / ".." / "elsewhere" / "id_test")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        await k.run(
+            "import gc\n"
+            "worker = next(o for o in gc.get_objects() if type(o).__name__ == '_Kernel')\n"
+            f"worker._touched[{forged!r}] = None\n"
+            f"worker._touched[{str(root / 'a' / '..' / 'b.md')!r}] = None"
+        )
+        assert k.touched() == (str(root / "b.md"),)
+
+
+class Holding(Unjailed):
+    """A jail that holds something on the host while it runs, and says what `release` freed."""
+
+    def __init__(self) -> None:
+        self.released = 0
+
+    async def release(self) -> str:
+        self.released += 1
+        return "Nothing holds /w/local.env until the kernel starts again."
+
+
+async def test_release_ends_the_worker_now_and_the_next_input_starts_another() -> None:
+    """`/release`: the worker ends at once (so its jail lets go of what it holds on the host),
+    the jail says what it freed, and the next input starts a new worker, told its variables went."""
+    jail = Holding()
+    async with Kernel(jail, KernelConfig()) as k:
+        await k.run("kept = 1")
+        said = await k.release()
+        assert said.startswith("The kernel is stopped")
+        assert said.endswith("Nothing holds /w/local.env until the kernel starts again.")
+        assert jail.released == 1
+        again = await k.run("'kept' in globals()")
+        assert again.startswith("(the REPL was started again") and again.endswith("False")
+
+
+async def test_release_while_an_input_runs_leaves_it_alone_and_says_so() -> None:
+    jail = Holding()
+    async with Kernel(jail, KernelConfig()) as k:
+        running = asyncio.ensure_future(k.run("import time; time.sleep(1); 'done'"))
+        await asyncio.sleep(0.3)
+        said = await k.release()
+        assert "An input is running" in said and jail.released == 0
+        assert await running == "'done'"
+
+
+class Counting(Confined):
+    """A jail whose every start is what it is anew, as a Linux jail's is (its reads name the
+    program's own directory): the n-th program it starts reads `/start/n`, may write `/root/n`,
+    and has a notice and an `fs_read` grade of its own."""
+
+    def __init__(self) -> None:
+        self.starts = 0
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Any:
+        self.starts += 1
+        n = self.starts
+        started = await Unjailed.start(self, argv, cwd=cwd, endpoint=endpoint)
+        report = {**_CONFINED, "fs_read": f"grade {n}"}
+        return Told(
+            started, report=report, notice=f"notice {n}", reads=(f"/start/{n}",), writes=(f"/root/{n}",)
+        )
+
+
+async def test_the_kernel_tells_its_own_worker_s_jail_whatever_else_the_jail_starts() -> None:
+    """One jail starts more than one program (the extensions' worker is another): what each
+    start is stays with it, and the kernel's `reads()`, `notice()` and `report()`, and so what
+    the model is told, are its own worker's. Another program starting changes none of them, nor
+    does the worker stopping for `/release`, until the next input starts a new one."""
+    jail = Counting()
+    async with Kernel(jail, KernelConfig()) as k:
+        told = k.instructions()
+        assert "/start/1" in told
+        assert (k.reads(), k.notice(), k.report()["fs_read"]) == (("/start/1",), "notice 1", "grade 1")
+        short = tempfile.mkdtemp(prefix="bh-t-", dir="/tmp")  # a socket path must fit in ~100 bytes
+        endpoint = f"{short}/x.sock"
+        other = await jail.start(worker_argv(endpoint), cwd=short, endpoint=endpoint)  # another program
+        try:
+            assert (k.reads(), k.notice(), k.report()["fs_read"]) == (("/start/1",), "notice 1", "grade 1")
+            assert k.instructions() == told
+        finally:
+            await other.stop()
+            shutil.rmtree(short, ignore_errors=True)
+        await k.release()
+        assert k.instructions() == told  # stopped, its worker is still what the model was told
+        await k.run("1")  # the next input starts a new worker, in a start of its own
+        assert (k.reads(), k.notice()) == (("/start/3",), "notice 3")
+
+
+async def test_an_unjailed_kernel_holds_nothing_to_release() -> None:
+    assert await Unjailed().release() == ""
+
+
+async def test_the_release_row_offers_slash_release_over_the_kernel() -> None:
+    registered: list[tuple[Mapping[str, Any], Any]] = []
+
+    class Commands:
+        def register(self, spec: Mapping[str, Any], run: Any) -> Any:
+            registered.append((spec, run))
+            return lambda: None
+
+    async with Kernel(Holding(), KernelConfig()) as k:
+        effects = await drive(release(kernel=k, commands=Commands()))
+        assert [e.name for e in effects] == ["acquire"]
+        effects[0].args[0](*effects[0].args[1:])
+        ((spec, run),) = registered
+        assert spec["name"] == "release" and "credential" in spec["help"]
+        assert (await run("")).startswith("The kernel is stopped")

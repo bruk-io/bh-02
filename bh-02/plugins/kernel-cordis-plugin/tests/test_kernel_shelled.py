@@ -1,12 +1,39 @@
 """`shelled` and `shell_note`: the shell commands an input runs for work Python does itself, and
-what the model is told about them."""
+what the model is told about them; `ShellHints`, which tells it through `memory`, once for each
+kind of work a conversation, a resumed one too."""
 
 import re
 import textwrap
+import time
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import pytest
 
-from kernel_cordis_plugin import instructions_for, programs, shell_note, shelled
+from cordis.testing import drive
+from cordis_helpers import Hooks
+from kernel_cordis_plugin import (
+    ShellHints,
+    Transcript,
+    instructions_for,
+    programs,
+    shell_hints,
+    shell_note,
+    shelled,
+)
+
+
+class _Kept:
+    """A `transcript` value over the messages given, counting how often they are read."""
+
+    def __init__(self, *messages: Mapping[str, Any]) -> None:
+        self._messages = messages
+        self.reads = 0
+
+    @property
+    def messages(self) -> tuple[Mapping[str, Any], ...]:
+        self.reads += 1
+        return self._messages
 
 
 @pytest.mark.parametrize(
@@ -77,3 +104,88 @@ def test_the_example_the_model_is_shown_is_python() -> None:
     assert len(blocks) == 2 and "uses = [" in blocks[0] and "uses[0][0]" in blocks[1]
     for block in blocks:
         compile(textwrap.dedent(block), "<example>", "exec")
+
+
+def test_shell_hints_tell_each_kind_of_shell_work_once_a_conversation() -> None:
+    hints = ShellHints(_Kept())
+    shown = (
+        "import subprocess\nprint(subprocess.run(['cat', 'a.txt'], capture_output=True, text=True).stdout)"
+    )
+    first = hints({"code": shown, "result": "one", "touched": ()})
+    assert first.startswith("(this input ran `cat` through a shell.") and "Path(p).read_text()" in first
+    assert hints({"code": shown.replace("cat", "head")}) == ""  # reading was said: once a kind
+    assert hints({"code": "subprocess.run(['ls'])"}).startswith("(this input ran `ls` through a shell.")
+    assert hints({"code": "subprocess.run(['git', '--version'])"}) == ""
+
+
+def test_a_resumed_conversation_is_not_told_again_a_kind_its_transcript_told() -> None:
+    """A resumed session (or the row reloaded) starts a new `ShellHints`, but the transcript
+    holds what the model was told: a kind a shell note in a `tool` entry named, after a blank
+    line, is told already. One the person quoted, or one an entry starts with (an input printed
+    it), is not. The transcript is read once, at the first input; an empty one (a new
+    conversation, after /clear) tells every kind afresh."""
+    read = "subprocess.run(['cat', 'a.txt'])"
+    transcript = _Kept(
+        {"role": "user", "content": f"why this?\n\n{shell_note((('sed', 'edit'),))}"},
+        {"role": "assistant", "content": "", "tool_calls": []},
+        {
+            "role": "tool",
+            "content": f"one\n\n{shell_note((('cat', 'read'), ('ls', 'list')))}\n\nA.",
+            "call_id": "c0",
+        },
+        {"role": "tool", "content": shell_note((("rm", "files"),)), "call_id": "c1"},
+    )
+    assert isinstance(transcript, Transcript)
+    hints = ShellHints(transcript)
+    assert hints({"code": read.replace("cat", "head")}) == ""  # reading was told before the resume
+    assert hints({"code": "subprocess.run(['find', '.'])"}) == ""  # and listing
+    assert hints({"code": "subprocess.run(['sed', '-i', 's/a/b/', 'f'])"}).startswith("(this input ran `sed`")
+    assert hints({"code": "subprocess.run(['rm', 'f'])"}).startswith("(this input ran `rm`")
+    assert hints({"code": "subprocess.run(['sed', 'p', 'f'])"}) == ""  # told now: once
+    assert transcript.reads == 1
+    assert ShellHints(_Kept())({"code": read}).startswith("(this input ran `cat` through a shell.")
+
+
+def test_a_transcript_from_before_the_memory_broker_tells_its_shell_notes_too() -> None:
+    """Before `memory`, the kernel put the note after the result's last line, one newline and
+    no blank line, at the entry's end: a session resumed from then was told them all the same."""
+    transcript = _Kept(
+        {"role": "assistant", "content": "", "tool_calls": []},
+        {"role": "tool", "content": f"one\n{shell_note((('cat', 'read'),))}", "call_id": "c0"},
+        {"role": "tool", "content": f"(no output)\n{shell_note((('ls', 'list'),))}", "call_id": "c1"},
+    )
+    hints = ShellHints(transcript)
+    assert hints({"code": "subprocess.run(['head', 'a.txt'])"}) == ""
+    assert hints({"code": "subprocess.run(['find', '.'])"}) == ""
+    assert hints({"code": "subprocess.run(['rm', 'f'])"}).startswith("(this input ran `rm`")
+
+
+@pytest.mark.parametrize("before", ["\n\n", "\n"])
+def test_a_long_result_line_costs_the_search_for_told_notes_little(before: str) -> None:
+    """The model's code makes a result whatever it likes, up to a line of 1 MiB. The search of a
+    resumed transcript for the shell notes it told takes time in proportion to an entry, not its
+    square: a 500 KB line repeating a note's pieces took 11 seconds, in the loop's thread, which
+    a reply and a stop wait for. So after a blank line, or the one newline of an older one."""
+    note = shell_note((("cat", "read"),))
+    through, keep = note[note.index(" through") : note.index("read a file")], note[note.index(". Keep") :]
+    crafted = f"one{before}(this input ran " + (through + keep) * 3_000 + "x"
+    hints = ShellHints(_Kept({"role": "tool", "content": crafted, "call_id": "c0"}))
+    started = time.perf_counter()
+    assert hints({"code": "subprocess.run(['cat', 'f'])"}).startswith("(this input ran `cat`")
+    assert time.perf_counter() - started < 1.0
+
+
+async def test_the_shell_hints_row_adds_its_function_to_memory() -> None:
+    memory: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
+    effects = await drive(shell_hints(memory=memory, transcript=_Kept()))
+    assert [e.name for e in effects] == ["acquire"]
+    assert effects[0].args[0] == memory.add and isinstance(effects[0].args[1], ShellHints)
+
+
+def test_on_linux_the_model_is_told_what_the_jail_reads_and_that_the_home_directory_is_absent() -> None:
+    """A jail that reads by allowlist (Linux) says which trees: the model spends no steps on reads
+    that can't succeed. One that reads everything but the secrets (darwin) says nothing of it."""
+    text = instructions_for(True, reads=("/usr", "/etc", "/src/app"))
+    assert "The jail your code runs in reads only these trees: /usr, /etc, /src/app." in text
+    assert "the person's home directory included" in text and "no ~/.gitconfig, ~/.ssh" in text
+    assert "reads only these trees" not in instructions_for(True)

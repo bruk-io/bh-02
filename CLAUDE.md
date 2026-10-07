@@ -11,7 +11,7 @@ has a CLAUDE.md of its own; read it before working there.
 
 - `libs/`: libraries with no app in them, each gated on its own.
   - `libs/cordis/`: the composition framework - parts that can be added, replaced and removed while the program runs. Its `README.md` is the authoritative design doc; `libs/cordis/CLAUDE.md` is the code layout and its gate.
-  - `libs/cordis-helpers/`: conveniences built on cordis with no domain in them: `Registry[T]` (the paper's broker, section 6.2, minus what the entries are) and `Hooks[F]` (a set of callables, order-free). cordis stays the paper's mechanisms; a pattern goes here once a second use shows up.
+  - `libs/cordis-helpers/`: conveniences built on cordis with no domain in them: `Registry[T]` (the paper's broker, section 6.2, minus what the entries are), `Hooks[F]` (a set of callables, order-free) and `perform` (a row's queue of its own work, for what a command must not run in its caller's task). cordis stays the paper's mechanisms; a pattern goes here once a second use shows up.
   - `libs/brig/`: a standalone sandbox library that knows nothing of cordis or any app (`libs/brig/CLAUDE.md`).
 - `bh-02/`: the coding harness. `plugins/` is its plugin family (one member per plugin, import name `<name>_cordis_plugin`), `CONTRACTS.md` their keys and shapes, `GLOSSARY.md` every term a bh-02 user meets (cordis's and bh-02's, one line each), `bh-02/CLAUDE.md` how the family and the running harness work. `bh-02/app/` is the app (package `bh_02`, the `bh-02` command: a Textual TUI over a CodeAct composition); its `README.md` is how it runs and the map of the compositions, rows and plugins.
 - `examples/warden/`: a second example app on cordis (a process supervisor), `app/` + `plugins/`, with its own README and CONTRACTS.md.
@@ -37,6 +37,7 @@ uv run ruff format .                                      # format
 uv run ruff check .                                       # lint; applies safe fixes by default (fix = true), --no-fix to only report
 uv run mypy                                               # strict; checked paths come from [tool.mypy] files
 scripts/arch-check                                        # every pypeeker gate (root, then libs/*); applies autofixes first, --no-fix to only report
+scripts/linux-jail-check                                  # the Linux jail (bubblewrap) tests, in a Docker container; not part of check
 uv run pytest -m "not real_launch"                        # skip the tests that launch the real app in a pty
 scripts/sync-tokens [--check] [--bh-01 PATH]              # bh-01's token CSS -> bh-02's Textual theme (reads ../bh-01)
 scripts/model-friction [--model NAME] [--examples N] [--json]  # where models trip in bh-02 sessions here: wrong tools, shell habits, errors, lost output, nudges

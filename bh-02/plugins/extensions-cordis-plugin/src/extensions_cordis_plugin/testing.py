@@ -1,8 +1,7 @@
-"""A `jail` for tests: the program as a plain subprocess, confining nothing, reported as asked.
+"""A `jail` for tests: the program as a plain subprocess, confining nothing, and saying so.
 
-`PlainJail(confined=True)` claims to enforce writes and network so that a test can drive the
-path a real jail takes (extensions load without asking); it enforces neither. Never bind it in a
-running bh-02.
+Whether an extension loads without asking is the `approval` value's to say, not the jail's, so a
+test drives either path with a fake approval over this. Never bind it in a running bh-02.
 """
 
 import asyncio
@@ -29,17 +28,28 @@ class _Started:
 
 
 class PlainJail:
-    """Implements `jail` for tests (module docstring). `started` is every program it started."""
+    """Implements `jail` for tests (module docstring). `started` is every program it started.
+    `release` stops every one of them, as a Linux `brig:jail`'s does, and the jail is released
+    until it next starts one."""
 
-    def __init__(self, *, confined: bool = True) -> None:
-        grade = "enforced" if confined else "unenforced"
-        self._report = {"fs_write": grade, "network": grade}
+    def __init__(self) -> None:
         self.started: list[_Started] = []
+        self._released = False
 
     def report(self) -> Mapping[str, str]:
-        return self._report
+        return {"fs_write": "unenforced", "network": "unenforced"}
+
+    def released(self) -> bool:
+        return self._released
+
+    async def release(self) -> str:
+        self._released = True
+        for started in self.started:
+            await started.stop()
+        return ""
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Started:
+        self._released = False
         with Path(endpoint).with_name("stderr.log").open("wb") as stderr:
             process = await asyncio.create_subprocess_exec(
                 *argv, cwd=cwd, stdin=asyncio.subprocess.DEVNULL, stderr=stderr, start_new_session=True

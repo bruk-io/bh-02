@@ -1,11 +1,12 @@
 """The decisions about the model's extensions, as pure functions of what was found.
 
-Which files to load and unload (`changes`), whether a jail confines what runs in it
-(`is_confined`), what an extension's state is (`Status`), and what the model, the status bar
-and the status file are told (`instructions`, `status_forms`, `status_file`).
+Which files to load and unload (`changes`), which of them bh-02 may read (`refusal`,
+`linked`), what an extension's state is (`Status`), and what the model, the status bar and the
+status file are told (`instructions`, `status_forms`, `status_file`).
 """
 
 import re
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,13 +16,13 @@ __all__ = [
     "changes",
     "extension_name",
     "instructions",
-    "is_confined",
+    "linked",
+    "refusal",
     "status_file",
     "status_forms",
 ]
 
 _NAME = re.compile(r"[a-z][a-z0-9_]*")
-_CONFINING = ("fs_write", "network")  # as the kernel's: what a jail must enforce to confine code
 
 _EXAMPLE = """    from cordis import Effects, acquire, component
 
@@ -80,20 +81,50 @@ def changes(
     return load, unload
 
 
-def is_confined(report: Mapping[str, str]) -> bool:
-    """Whether a jail's report says what runs in it can write only where it was allowed and
-    reach no network: the kernel's rule, so extensions load without asking exactly when inputs
-    run without asking."""
-    return all(report.get(axis) == "enforced" for axis in _CONFINING)
+def refusal(file: str, mode: int, names: int) -> str | None:
+    """Why bh-02 does not read the extension `file` (as the model names it, from the project),
+    given what it opened there without following a link: its `mode` (`stat.S_IFLNK` when it is a
+    link, which it did not open) and how many `names` it has. None when it may: a regular file of
+    its own. The model writes the directory from the jail and bh-02 reads it on the host, so a
+    link, or a second name (a hard link), could hand the model a file the jail hides."""
+    if stat.S_ISLNK(mode):
+        return (
+            f"{file} is a link, which bh-02 does not follow there (it could lead to a file the jail "
+            f"hides): write the extension itself at {file}, not a link to it"
+        )
+    if not stat.S_ISREG(mode):
+        return f"{file} is not a regular file: write the extension at {file} as a file of its own"
+    if names > 1:
+        return (
+            f"{file} has {names} names (a hard link), and bh-02 does not read one there (another "
+            f"name could be a file the jail hides): write the extension at {file} as a file of its own"
+        )
+    return None
+
+
+def linked(where: str, way: str) -> str:
+    """Why bh-02 loads nothing from the extensions directory `where`: `way`, the first directory
+    on the way to it from the project (`.bh-02`, say, or `where` itself), is a link. The model
+    is told so in its prompt, since nothing is written through the link, status.json included."""
+    return (
+        f"{way} is a link, so bh-02 loads no extension from {where} (a link could lead to files "
+        f"the jail hides): make {way} a directory in the project, not a link, and write the "
+        f"extensions in {where}"
+    )
 
 
 def instructions(
-    where: str, confined: bool, statuses: Mapping[str, Status], reference: str | None = None
+    where: str,
+    confined: bool,
+    statuses: Mapping[str, Status],
+    reference: str | None = None,
+    refused: str = "",
 ) -> str:
     """What the model is told about extending bh-02 (a section of its system prompt): how, the
     part of cordis an extension uses, what it reaches of bh-02, and which ones there are. `where`
     is the extensions directory, relative to the project; `reference` is cordis's own design
-    doc, when there is one to point at."""
+    doc, when there is one to point at; `refused`, why bh-02 loads nothing from the directory
+    (`linked`), when it can't."""
     consent = (
         "Extensions run in a jail of their own, as your `python` REPL (below) does: the project "
         "is their working "
@@ -157,6 +188,8 @@ def instructions(
             "",
             f"Extensions here: {', '.join(sorted(statuses))}. How each one is, is in {where}/status.json.",
         ]
+    if refused:
+        lines += ["", refused]
     return "\n".join(lines)
 
 

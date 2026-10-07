@@ -8,7 +8,8 @@ filesystem, `mech` may not go and get one, and `run` is the layer that may.
 
 1. `resolved_paths` -- every `Spec` path a mechanism's render might need
    resolved (`fs.write_allows`, `fs.write_denies`, `fs.read_denies`,
-   `fs.read_allows`, and every channel's `endpoint`), mapped to its
+   `fs.read_allows`, every channel's `endpoint`, and every directory between
+   a write root and a write deny, which `bwrap` pins), mapped to its
    `os.path.realpath` form, keyed EXACTLY as the `Spec` carries the path
    (never the resolved form as the key -- a mechanism's render looks up by
    the raw `Spec` value it already has in hand). `seatbelt` (task-058/
@@ -39,6 +40,11 @@ carve-out silently not holding. `os.path.exists` follows symlinks, matching
 `os.path.realpath` above: a dangling symlink is reported absent, which is
 what both mount primitives will make of it too.
 
+**`path_is_dir` (decision-164).** The same observation's other half:
+whether each path is a directory (`os.path.isdir`, following symlinks the
+same way). `bwrap` masks a `read_denies` carve-out inside a mounted root, and
+a mask must be the same kind of object as what it covers.
+
 The window between this observation and the launch is real and is a
 REFUSAL on both sides rather than a hole -- a path that appears in it makes
 bwrap's `--tmpfs` fail, one that vanishes makes its `--ro-bind` fail, and a
@@ -59,6 +65,7 @@ from collections.abc import Iterator
 
 from brig.core import Spec
 from brig.mech import CompileCtx
+from brig.mech.bwrap import pins
 
 
 def _spec_paths(spec: Spec) -> Iterator[str]:
@@ -72,6 +79,7 @@ def _spec_paths(spec: Spec) -> Iterator[str]:
     yield from spec.fs.read_allows
     for channel in spec.channels:
         yield channel.endpoint
+    yield from pins(spec.fs.write_allows, spec.fs.write_denies)
 
 
 def build_compile_ctx(spec: Spec, *, jail_dir: str, platform: str) -> CompileCtx:
@@ -92,11 +100,13 @@ def build_compile_ctx(spec: Spec, *, jail_dir: str, platform: str) -> CompileCtx
     spec_paths = tuple(_spec_paths(spec))
     resolved_paths = {path: os.path.realpath(path) for path in spec_paths}
     path_exists = {path: os.path.exists(path) for path in spec_paths}
+    path_is_dir = {path: os.path.isdir(path) for path in spec_paths}
     return CompileCtx(
         jail_dir=os.path.realpath(jail_dir),
         platform=platform,
         resolved_paths=resolved_paths,
         path_exists=path_exists,
+        path_is_dir=path_is_dir,
     )
 
 

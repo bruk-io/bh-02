@@ -7,11 +7,15 @@ from agent_cordis_plugin import (
     LoopConfig,
     LoopModel,
     MemoryTranscript,
+    OneAtATime,
     TranscriptConfig,
+    executor,
     loop,
+    memory,
     transcript,
 )
 from cordis.testing import drive
+from cordis_helpers import Hooks
 
 
 async def test_transcript_binds_an_empty_history() -> None:
@@ -28,12 +32,26 @@ async def test_loop_binds_a_model_over_what_it_was_given() -> None:
             kernel=kernel,
             transcript=history,
             system=object(),
-            output=object(),
+            approval=object(),
+            memory=Hooks(),
+            executor=OneAtATime(),
             config=LoopConfig(),
         )  # type: ignore[arg-type]
     )
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "loop")]
     assert isinstance(effects[0].args[1], LoopModel)
+
+
+async def test_memory_binds_an_empty_broker() -> None:
+    effects = await drive(memory())
+    assert [(e.name, e.args[0]) for e in effects] == [("bind", "memory")]
+    assert isinstance(effects[0].args[1], Hooks) and list(effects[0].args[1]) == []
+
+
+async def test_executor_binds_one_that_runs_a_call_at_a_time() -> None:
+    effects = await drive(executor())
+    assert [(e.name, e.args[0]) for e in effects] == [("bind", "executor")]
+    assert isinstance(effects[0].args[1], OneAtATime)
 
 
 async def test_a_transcript_with_a_path_is_kept_in_the_file_and_read_back(tmp_path: Path) -> None:

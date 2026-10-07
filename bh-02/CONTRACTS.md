@@ -15,44 +15,49 @@ packages' declarations of one shape type-check against each other without sharin
 | Key | Value | Bound by | Read by |
 |---|---|---|---|
 | `loop` | a conversation: `reply(message: str) -> AsyncIterator[event]` | `agent:loop`, `bh_02.testing:*` (fakes) | `chat:session` |
-| `input` | `read() -> str \| None` (`None` means no more input); `interrupted()` returns when the person asks to stop the running turn (a stop asked for after a line was read and before `interrupted()` is called is held for it; the next `read()` drops one still held) | `tui:app` | `chat:session` |
-| `output` | `show(events: AsyncIterator[event])`, `notice(message: str)`, `confirm(request) -> bool`. Not part of the key's shape: `lifecycle(event)` (a cordis `Event`: `kind`, `fiber`, `error`), which the ui row itself `observe`s to show rows reloading; no consumer of `output` calls it | `tui:app` | `chat:session`, `agent:loop` (`confirm`), `extensions:extensions` (`confirm`: an extension to load, unjailed) |
+| `input` | `read() -> str \| None` (`None` means no more input); `interrupted()` returns when the person asks to stop the running turn (a stop asked for after a line was read and before `interrupted()` is called is held for it; the next `read()` drops one still held); `closed()` returns once no more lines will come (the person left, or the ui crashed): a command running then is cancelled, since nobody is left to read its answer | `tui:app` | `chat:session` |
+| `output` | `show(events: AsyncIterator[event])`, `notice(message: str)`, `confirm(request) -> bool`. Not part of the key's shape: `lifecycle(event)` (a cordis `Event`: `kind`, `fiber`, `error`), which the ui row itself `observe`s to show rows reloading; no consumer of `output` calls it | `tui:app` | `chat:session`, `kernel:approval` (`confirm`: the model's code, unjailed), `tui:status` (`show`: the jail's notice, as a `note`), `agent:compact` (`show`: a `note` as the summary step begins; `notice`: a restart it queued that failed, after the new conversation was written) |
 | `frame` | the app's frame, which rows push into: `status(field: str, text: str, *shorter: str) -> remover` (`shorter`: shorter forms of `text`, each shorter than the last, which the status bar shows instead when its line is too narrow), `commands(specs) -> remover` (`specs: () -> Sequence[spec]`, a spec: name, help, usage, and `choices`?: `() -> Sequence[{args, help}]`, the arguments the palette offers as entries of their own, `/model haiku`; both read each time the palette opens, so commands registered later, and models added since, are offered) | `tui:app` | `tui:status` (`status`), `tui:palette` (`commands`), `extensions:extensions` (`status`: the extensions' fields, each under its extension's name, and its own `extensions` field) |
-| `system` | `text() -> str`: what the model is told about who and where it is (bh-02's own, then the project context: where it is working, what the context files' sections say, and what rows add), read fresh; `add(section) -> remover` (`section: () -> str`, read with the rest each time `text()` is, so a row with something to tell the model `acquire`s one and it leaves with the row) | `context:project` | `agent:loop` (`text`), `extensions:extensions` (`add`: how to extend bh-02, and the sections extensions add) |
-| `model` | one model step: `complete(messages, tools) -> AsyncIterator[chunk]` (`tools`: the tool specs offered through standard tool calling, from `agent:loop` always the kernel's one; closing it stops the step and releases what it holds). `messages` is always the whole conversation; a provider may keep its own copy across calls (the claude-code provider keeps one Claude Code session per conversation, checks each request against it and rebuilds it from `messages` when they differ), so it must not assume anything the messages do not say. `models:model` binds the model its config's `default` names, on that model's provider: `claude-code` (Claude through Claude Code), `openai` (any OpenAI-compatible `/chat/completions`), or a `module:attribute` factory given the model's table (bh-02's fakes); one it can't use binds too, and each step raises what is wrong | `models:model`, `bh_02.testing:echo_model`, `bh_02.testing:slow_model`, `bh_02.testing:repl_model` (fakes) | `agent:loop` |
-| `models` | the models there are, read fresh (the model row's config from the loader's entries, and the models file) each time: `listed() -> Sequence[{name, provider, id, current: bool, where?, problem?, shadows?}]` (in order: the built-ins, the models file's, the model row's `extra`; `where`: an openai model's `base_url`; `problem`: what is wrong with its table and what to do; `shadows`: a user's model named like a built-in; a models file that can't be read raises), `current() -> {name, provider}` (the model the model row names now; `provider` empty when the name is no usable model; never raises), `check(name) -> str \| None` (why the model row can't switch to `name`, or None), `path: str` (the models file). Depends on `loader` alone, so a switch never reloads it or what depends on it | `models:catalog` | `commands:operator` (`/model`), `tui:status` (`current`) |
-| `transcript` | `messages: Sequence[message]` (property), `append(message)`; besides the conversation, it keeps the system prompts the model was told as `{"role": "system"}` entries: the first is the one every request begins with, a later one a change told as a note on the message after it | `agent:transcript` | `agent:loop` |
-| `jail` | `start(argv, *, cwd, endpoint) -> started` (a program listening on the Unix socket `endpoint`; `started.interrupt() -> bool`, `await started.stop()`), `report() -> Mapping[axis, grade]` | `brig:jail`, `kernel:unjailed` | `kernel:kernel`, `extensions:extensions` (a second program, the extensions' worker) |
-| `kernel` | a persistent Python namespace, and the model's one tool: `spec` (the tool spec of `python(code)`), `instructions() -> str` (what the model is told about it, read per request), `run(code: str) -> str` (one input, as the model reads it; every failure the kernel knows of, a worker that died, an answer it can't read, a worker the jail won't start again, is the input's text, not an exception; a new kernel's first input starts with a parenthesised note when there is one: it was started again, or what the project's startup file `.bh-02/kernel.py` did), `confined: bool` (whether the loop may run an input without asking), `report()`. Depends on `jail` alone, so a new ui or model keeps the namespace | `kernel:kernel` | `agent:loop` (`spec`, `confined`, `instructions`, `run`), `tui:status` (`confined`, `report`) |
-| `layers` | `paths: tuple[str, ...]`: the layer files the loader is watching, which no jailed input may write; `secrets: tuple[str, ...]`: absolute paths no jailed input may read: where bh-02's credential file (`local.env`) may be, and the sessions' state directories, this run's and the default one (each session's `claude/`: Claude Code's config and its messaging peer token) | `bh_02.bootstrap:layer_files` (mounted by its `run()`) | `brig:jail` |
-| `commands` | the slash-command broker: `register(spec, run) -> remover` (`spec`: name, help, usage; `run: async (args: str) -> answer`), `specs()`, `run(line) -> answer` (an answer: text, which `chat:session` shows as one `note`, or a sequence of events it shows as they are: `/clear` answers `cleared`, a `note`, then `restarting`; `/model` lists the models, the current one marked; `/model NAME` a `note` then `restarting`, or text saying why NAME can't be switched to; `/model`'s spec has `choices`, one per usable model) | `commands:registry` | `chat:session` (`run`), `commands:operator` (`register`), `extensions:extensions` (`register`: the extensions' commands), `tui:palette` (`specs`) |
+| `system` | `text() -> str`: what the model is told about who and where it is (bh-02's own, then the project context: where it is working, what the context files' sections' `function`s say, and what rows add; not the date, which `agent:loop` tells with the person's message), read fresh, on `executor`, off the event loop (the loop calls it there, one call at a time, so it must not need the event loop); `add(section) -> remover` (`section: () -> str`, read with the rest each time `text()` is, in that thread, so a row with something to tell the model `acquire`s one and it leaves with the row); `touched(paths: Sequence[str]) -> Sequence[(file, text)]` (what the context files' `on_touch` sections say about `paths`, the absolute files an input opened, in the order of the sections; read fresh from the same context files as `text()`, so the `system` row's config is theirs too, and called on `executor` through a `memory` function, one call at a time with `text()`: the caches of what was read and searched, which the two share, take no lock) | `context:project` | `agent:loop` (`text`), `extensions:extensions` (`add`: how to extend bh-02, and the sections extensions add), `context:on_touch` (`touched`) |
+| `model` | one model step: `complete(messages, tools) -> AsyncIterator[chunk]` (`tools`: the tool specs offered through standard tool calling, from `agent:loop` always the kernel's one; closing it stops the step and releases what it holds). `messages` is always the whole conversation; a provider may keep its own copy across calls (the claude-code provider keeps one Claude Code session per conversation, checks each request against it and rebuilds it from `messages` when they differ), so it must not assume anything the messages do not say. `models:model` binds the model its config's `default` names, on that model's provider: `claude-code` (Claude through Claude Code), `openai` (any OpenAI-compatible `/chat/completions`), or a `module:attribute` factory given the model's table (bh-02's fakes); one it can't use binds too, and each step raises what is wrong | `models:model`, `bh_02.testing:echo_model`, `bh_02.testing:slow_model`, `bh_02.testing:repl_model` (fakes) | `agent:loop`, `agent:compact` (one step: `/compact`'s summary, asked as the loop's next request would be, with the kernel's spec offered; any call it makes is never run) |
+| `models` | the models there are, read fresh (the model row's config from the loader's entries, and the models file) each time: `listed() -> Sequence[{name, provider, id, current: bool, where?, problem?, shadows?}]` (in order: the built-ins, the models file's, the model row's `extra`; `where`: an openai model's `base_url`; `problem`: what is wrong with its table and what to do; `shadows`: a user's model named like a built-in; a models file that can't be read raises; one in the project is not read, and lists none), `current() -> {name, provider}` (the model the model row names now; `provider` empty when the name is no usable model; never raises), `check(name) -> str \| None` (why the model row can't switch to `name`, or None), `path: str` (the models file), `problem: str \| None` (why the models file is not read and where it must be instead: it is in the project, which the model's code can write; None when it is outside, there or not). Depends on `loader` and `layers` (where a key's `local.env` is looked for), neither of which a switch replaces, so a switch never reloads it or what depends on it | `models:catalog` | `commands:operator` (`/model`), `tui:status` (`current`) |
+| `transcript` | `messages: Sequence[message]` (property), `append(message)`; besides the conversation, it keeps the system prompts the model was told as `{"role": "system"}` entries (`system entry`, below): the first, whole, is the one every request begins with; a later one is a change told as a note on the message after it, kept as the edits from the reading before it rather than a whole copy (a transcript kept before the loop kept edits has each reading whole, and resumes as it is); and the dates it was told, each as `today` on the person's message that told it (`message`, below). `agent:transcript` keeps it in its config's `path` (a session's `transcript.jsonl`), which `/compact` replaces whole with a new conversation, its first two messages bh-02's note and the summary (the old file kept beside it, under the first of `.bak`, `.bak.2`, ... not taken), then restarts the row | `agent:transcript` | `agent:loop`; `kernel:shell_hints` and `context:on_touch` (`messages`, read once, at the first input that may need them: a note a `tool` entry holds whole, after a blank line and up to another note or the entry's end, was told before they began, though not one the entry starts with (a shell note in a transcript from before `memory` followed the result after one newline, at the entry's end, and counts too); where the result ends is not marked, so one an input printed that way counts too; and they share its lifetime, so a new conversation (`/clear`, `/compact`) starts them afresh); `agent:compact` depends on the row's file, not the key (the `path` of the row as the loader mounted it, `loader.rows`, when it is a running `agent:transcript` row), since it restarts the row |
+| `memory` | what the model is told with an input's result, a broker: `add(fn) -> remover`, iterable for the functions added. `fn(input) -> str`: `input` is `{"code", "result", "touched"}` (the input's code, its result as the model reads it, and `kernel.touched()`); it returns a note to go after the result ('' for none). A function adds a note and never changes the result, and the loop sorts the notes, so any set of them composes in any order; one that raises or returns something other than text is told as one line naming it, and the rest still say theirs. Called on `executor`, off bh-02's event loop, after every input that ran, one input's at a time and never beside a reading of the prompt (a stop waits for them), so it may read files but must not need the event loop; only rows in a layer add to it (it runs in bh-02's process; an extension's code runs in the jail). Its contributors keep what they have told as their own state, which a new conversation (`/clear`) starts afresh; what was told before they began (a resumed session's, or before a row reloaded) they read from `transcript`, so a note is told once a conversation, a resumed one too | `agent:memory` | `agent:loop` (iterates), `kernel:shell_hints` and `context:on_touch` (`add`) |
+| `executor` | where `agent:loop` runs what may block, off bh-02's event loop: `await run(fn)` (`fn()`, given nothing, in a daemon thread, once the call before it has ended; its result, or what it raised). A caller cancelled while it waits (a stopped reply) stops waiting and nothing else: the call runs to its end, its outcome dropped (what it raised is logged nowhere), and the next call waits for it, so one runs at a time however often a reply is stopped. A daemon's thread, not the default executor's, which `asyncio.run` and the interpreter join as they end, so a call left running never holds bh-02 open. Depends on nothing, so `/clear` and `/model`, which reload the loop, keep it and the call in flight; a new one (its row restarted, or replaced by a layer) knows nothing of a call the last one left running | `agent:executor` | `agent:loop` (`run`: each reading of the prompt, `system.text()` then `kernel.instructions()`, and each input's `memory` functions) |
+| `jail` | `start(argv, *, cwd, endpoint) -> started` (a program listening on the Unix socket `endpoint`; `started.interrupt() -> bool`, `await started.stop()`, `started.ended() -> str`: why the jail ended the program itself, for the person, or "": a Linux `brig:jail` ends itself when the host undoes one of its mounts; and what this start is, kept with it whatever else the jail starts (the `jail` row starts the kernel's worker and the extensions' worker, each from a command of its own): `started.report() -> Mapping[axis, grade]` (its grades), `started.notice() -> str` (what the person should know about the jail it runs in: `brig:jail` on Linux names the secrets it holds with a mount the host can undo; empty when there is nothing to say), `started.reads() -> tuple[str, ...]` (the trees it can read when that is all it can read: a Linux `brig:jail`'s allowlist, which names the program's own directory, and writable roots; empty when it reads everything but what it hides, as darwin's does, or is no jail), `started.writes() -> tuple[str, ...]` (the directories it may write, but a scratch directory of its own: `brig:jail`'s project root and what its `write` adds; empty when it confines no writes, as `kernel:unjailed`)), `report() -> Mapping[axis, grade]` (the grades, known before anything starts; no start changes them), `await release() -> str` (`/release`, called once the kernel has stopped its own program: what that freed on the host, for the person; a Linux `brig:jail` first stops every other program it started that still runs, the extensions' worker, whose jail holds the same paths (a start under way is waited for and stopped too), then names where bh-02 looks for its credential and nothing holds now, or what another session's jail still holds, and says the extensions' worker stopped; empty when there is nothing to say), `released() -> bool` (whether `release` stopped its programs and none has started since: the next start ends it, which is the next input's kernel worker; a program whose owner is not the kernel starts none while it holds, asking with nothing awaited between the question and the start, or its jail would hold again what the release freed before the person could use it; never for one whose `release` stops nothing, as `kernel:unjailed` and darwin's `brig:jail`) | `brig:jail`, `kernel:unjailed` | `kernel:kernel` (`start`, and its worker's `report`, `notice`, `reads` and `writes`, the last where the person's startup file is not read on the host; `report`, for `confined`; `release`), `extensions:extensions` (`start`: a second program, the extensions' worker; `released`: it starts none while the jail is released, then loads every extension again in a new one), `kernel:approval` (`report`) |
+| `kernel` | a persistent Python namespace, and the model's one tool: `spec` (the tool spec of `python(code)`), `instructions() -> str` (what the model is told about it, read per request, with `system.text()` on `executor`; under a jail that reads by allowlist, it names the trees `reads()` gives and says nothing else exists there), `run(code: str) -> str` (one input, as the model reads it; every failure the kernel knows of, a worker that died, an answer it can't read, a worker the jail won't start again, is the input's text, not an exception; a new kernel's first input starts with a parenthesised note when there is one: it was started again (and why, when its jail ended the last one), or what the startup files did, the person's own `$XDG_CONFIG_HOME/bh-02/kernel.py` (else `~/.config/bh-02/kernel.py`; read by the host, since a Linux jail has no home in it, unless it is in the project or another root its worker's `writes()` names, or its way passes through one: then read in the jail, and if that fails the note says why) and then the project's `.bh-02/kernel.py` (read in the jail), the only one `instructions()` says is the model's to edit; a startup file that ended the worker is passed over by the workers after it, until `/restart kernel`, and said to be, and one Ctrl-C stopped is not run again in that worker, the next input saying so; either way what the note had to tell before it, the restart and why among it, is still told: the input it cut short says it before which file ended the worker, and the next input after a stop says it with what was stopped), `confined: bool` (whether its jail confines its inputs, by `approval`'s rule: what `instructions()` tells the model, and whether the startup files run unasked), `report()`, `notice()` and `reads()` (its worker's jail's: what the worker it last started is, kept once that stops, never another program's of the same jail; before any, the jail's `report()`), `await release() -> str` (ends the worker and its jail now, then its jail's `release()`, which on Linux stops the extensions' worker too; the next input starts a new worker, told its variables are gone, and the extensions load again; an input running is left alone and the answer says so), `touched() -> tuple[str, ...]` (the files under the kernel's root the last input opened, read or written, absolute and each once, at most 1,000: what the input's own Python code opened with `open` or `pathlib`, heard by an audit hook in the worker, not an `os.open` (`shutil.rmtree`'s, `Path.touch`), a directory it listed, a module it imported, a source file its traceback was formatted from or a file a program it ran opened; empty before any input and after one that did not finish. The worker is the model's process, so these are what it says it opened: match them against files you chose, never open a file because it is named here). Depends on `jail` alone, so a new ui or model keeps the namespace | `kernel:kernel` | `agent:loop` (`spec`, `instructions`, `run`, `touched`), `tui:status` (`confined`, `report`, `notice`: shown as a note each time a kernel comes up), `kernel:release` (`release`: `/release`), `agent:compact` (`spec`, offered with the summary request as with every step; `/compact` never restarts the kernel, whose namespace the summary names) |
+| `approval` | whether the model's code may run: `confined: bool` (whether the jail confines what runs in it, so nothing is asked; read from the jail each time), `approve(request) -> bool` (async; `request` as in Shapes: yes at once when confined; otherwise the person's answer through `output.confirm(request)`, and no when there is nobody to ask). A capability, bound by one row: whether the model's code runs unasked is a rule with exactly one author, which is the point of it, so it is not a broker (guards rows add would compose, but then no one row could say what the rule is). Depends on `jail` and `output`, not `kernel`, so `/clear` leaves it up | `kernel:approval` | `agent:loop` (`approve`: each input), `extensions:extensions` (`confined`: what the model is told; `approve`: each extension to load) |
+| `layers` | `paths: tuple[str, ...]`: the layer files the loader is watching, which no jailed input may write; `credentials: tuple[str, ...]`: where the model rows look for bh-02's credential file (`local.env` above bh-02's install and its environment, nearest first; the first that is a regular file is read, unless the row names an `env_file`), the one definition of that search; `secrets: tuple[str, ...]`: absolute paths no jailed input may read: every one of `credentials`, the `local.env` beside and above the project, and the sessions' state directories, this run's and the default one (each session's `claude/`: Claude Code's config and its messaging peer token). A secret under a root an input may write it may not write or create either; `trusted: tuple[str, ...]`: bh-02's configuration directories of the person's, this run's (`$XDG_CONFIG_HOME/bh-02`, else `~/.config/bh-02`) and the default one (`~/.config/bh-02`), each as named and as it resolves (`bh_02.bootstrap.config_directories`), whose files the host reads and trusts (the models file, the person's context file and startup file): no jailed input may write in one that is under a root it may write (bh-02 run from the home directory), or a session could choose what a later one reads there | `bh_02.bootstrap:layer_files` (mounted by its `run()`) | `brig:jail` (`paths`, `secrets`, `trusted`, and `credentials`: one that does not exist yet stays denied, so no input can plant it, and `/release` names those it frees), `models:model` and `models:catalog` (`credentials`) |
+| `commands` | the command broker: `register(spec, run) -> remover` (`spec`: name, help, usage; `run: async (args: str) -> answer`), `claim(prefix, spec, run) -> remover` (every line that starts with `prefix`, one character that is no letter, digit, space or `/`, goes to `run` with the rest of the line; a prefix is one row's, so a second claim raises; `/help` lists it as the prefix and `spec`'s usage, the palette doesn't), `specs()` (the slash commands), `claims(line) -> bool` (whether a line is the harness's rather than the model's: `/name` then whitespace or the end, a known command or not, or a line starting with a claimed prefix), `run(line) -> answer` (what to show the person: text, which `chat:session` shows as one `note`, or a sequence of events it shows as they are; a command's own answer may also carry `for_model`, which the value holds instead of answering, and a `cleared` in it drops what is held and adds a note saying so, unless it is `compacted` (`/compact`'s), which keeps it: `/clear` answers `cleared`, a `note`, then `restarting`; `/model` lists the models, the current one marked, then where to add models or why the models file is not read; `/model NAME` a `note` then `restarting`, or text saying why NAME can't be switched to; `/model`'s spec has `choices`, one per usable model; `/compact` `cleared` (`compacted`), a `note` carrying the summary, the summary step's `usage` as one event, then `restarting`, or why nothing changed (text, or a `note` then the step's `usage`), having shown a `note` itself (`output.show`) as the step began; `!COMMAND` a `note`, what it printed and how it ended, then `for_model`, the same for the model, or text saying why it didn't run and what to set), `take_for_model() -> list[str]` (what commands left for the model since it was last asked, in the order they ran; taking it empties it: the chat row puts it in front of the person's next message. The value depends on nothing, so a restart of the chat row keeps it) | `commands:registry` | `chat:session` (`claims`, `run`, `take_for_model`), `commands:operator` (`register`), `commands:shell_command` (`claim`: `!`), `extensions:extensions` (`register`: the extensions' commands; never `claim`), `kernel:release` (`register`: `/release`), `agent:compact` (`register`: `/compact`), `tui:palette` (`specs`) |
 | `sessions` | the running session: `current: str` (its id, empty when the composition runs without a session), `resumed: bool` (whether it was continued with `--resume`) | `bh_02.bootstrap:session_list` (mounted by its `run()`) | `tui:status` (`current`, `resumed`: the status bar's session id) |
-| `loader` | cordis's loader handle: `status()`, `entries()`, `restart(*rows)` (together: a row depending on several reloads once; `/clear` restarts its rows so), `reload()` (read the layer files again now, rather than at the watcher's next look), `explain(row)` | the loader itself (cordis) | `commands:operator` (`restart`, `reload`: /model reloads at once; `config.layers`: the layer files after the session's, which `/model` checks for one that sets the model row's config), `tui:status` (`entries`: whether the layers still name the model row; `status`: whether that row is up when the model field is first pushed), `models:catalog` (`entries`: the model row's config) |
+| `loader` | cordis's loader handle: `status()`, `rows` (each row as it was mounted, with its `entry`), `entries()`, `restart(*rows)` (together: a row depending on several reloads once; `/clear` restarts its rows so), `reload()` (read the layer files again now, rather than at the watcher's next look), `explain(row)` | the loader itself (cordis) | `commands:operator` (`restart`, `reload`: /model reloads at once; `config.layers`: the layer files after the session's, which `/model` checks for one that sets the model row's config), `agent:compact` (`status`, `restart`: the loop and its transcript, together; `rows`: the transcript row's `use` and `path`, as it runs), `tui:status` (`entries`: whether the layers still name the model row; `status`: whether that row is up when the model field is first pushed), `models:catalog` (`entries`: the model row's config) |
 | `done` | an awaitable (the `asyncio.Task` `background(...)` returned) that resolves when the chat row's own run ends | `chat:session` | `bh_02.bootstrap:harness` |
 
 **The ui's `input` and `output` end with the ui.** Whatever ends the app (Ctrl-Q, `/exit` or `/quit`, a
 crash) settles everything waiting on it: a pending `input.read()` returns `None`, every
-`interrupted()` returns, a pending `output.confirm` is a no. After a crash, `read()` raises
+`interrupted()` and `closed()` returns (so a command running, a `!` one that would take
+minutes, is cancelled, and bh-02 leaves at once), a pending `output.confirm` is a no. After a crash, `read()` raises
 instead of returning `None`: the failure is shaped like a recoverable one (`kind =
 "ui_crashed"`, `message`), and it reaches the command line through the chat row's `done` (a
 teardown error would not).
 
 **The ui row's config.** `tui:app` takes `history` (a JSON-lines file the ui owns: it appends
 what the transcript draws, draws its last `replay` entries again when it starts, and trims it
-once it grows; a session's layer points it at the session's `events.jsonl`; a `cleared` event
-is recorded like any other and a replay starts after the last one, so a resume shows the
-conversation since the last `/clear`; a session made before `cleared` existed still lists the
-file in `commands:operator`'s `forget`, and the ui's next write after it is emptied puts a
-`carried` entry first, so the usage forgotten entries added up to is kept) and `replay` (how
-many entries to draw again, 400). The status bar's `usage` field is the ui's own, pushed by
-`tui:app`'s output: the session's running totals of usage events (a resumed session's history
-included, and not reset by `/clear`: `cleared` starts a new conversation, not a new session,
-and what the session spent stays spent), not a row's. Once a turn has ended with its usage
-still `partial` (stopped before the provider counted its output), the output and cost totals
-are lower bounds and end in `+`.
+once it grows; a session's layer points it at the session's `events.jsonl`; a `cleared` event is
+recorded like any other and a replay starts after the last one, so a resume shows the
+conversation since the last `/clear` or `/compact` (from the note carrying the summary); a
+session made before `cleared` existed still lists the file in `commands:operator`'s `forget`,
+and the ui's next write after it is emptied puts a `carried` entry first, so the usage forgotten
+entries added up to is kept) and `replay` (how many entries to draw again, 400). The status
+bar's `usage` field is the ui's own, pushed by `tui:app`'s output: the session's running totals
+of usage events (a resumed session's history included, and not reset by `/clear`: `cleared`
+starts a new conversation, not a new session, and what the session spent stays spent), not a
+row's. Once a turn has ended with its usage still `partial` (stopped before the provider counted
+its output), the output and cost totals are lower bounds and end in `+`.
 
 **Rows coming back up.** `/model` restarts the model row (`model`), `/clear` the loop,
-its transcript and the kernel, and the chat row reloads with them. The ui hears it through the lifecycle events it
+its transcript and the kernel, `/compact` the loop and its transcript, and the chat row reloads
+with them. The ui hears it through the lifecycle events it
 already `observe`s: `tui:status` shows `model: NAME (PROVIDER, starting…)` from the row's `unloading` (or
 `reload`) until it is `active`, and a line typed while no turn is running and rows are coming
 up is kept for the chat row's next `read()` and noted as waiting (`⧗ waiting for loop to
@@ -60,9 +65,10 @@ start; ...`), never dropped. The note names only rows that bind a key, which is 
 row depends on: a status-bar row reloading with them (`status` after a new kernel) is
 not waited on. A restarted row's old fiber ends `inactive` before its new one's
 `reload`; a line kept in that moment says it waits at the `reload`. The restart begins a
-moment after the command answers (the operator's queued job: `/clear` restarts the rows,
-`/model` reloads the layers it edited), while the chat row is still up and reading again; so
-both answers end with `restarting` (event), naming the rows they restart. From that event
+moment after the command answers (a job queued for the row's own work: the operator's `/clear`
+restarts the rows and `/model` reloads the layers it edited, the compact row's `/compact`
+restarts its rows), while the chat row is still up and reading again; so each answer ends with
+`restarting` (event), naming the rows it restarts. From that event
 until each of those rows is `active` again (through the `inactive` inside its restart), the
 ui hands no line to the chat row: a line typed right after the command waits for the new
 model and says so, rather than going to the old one or starting a turn the restart stops. A
@@ -71,6 +77,30 @@ then announces a restart. A row announced that has not begun two seconds later (
 restarted: a layer the loader could not read) is no longer waited on. `/model NAME` with the
 model already NAME changes nothing and announces nothing; `/restart ROW` announces nothing
 either, so a line typed right after `/restart loop` can still start a turn the restart stops.
+
+**A line the harness takes.** Which lines are the harness's, not the model's, is the
+`commands` value's to say (`claims`), and `chat:session` asks it: a slash command, or a line
+starting with a prefix a row claimed. Only a row in a layer claims one (the shipped layer's
+`shell-command`, `commands:shell_command`, claims `!`): a prefix takes every line the person
+starts with it, and `!` runs that line in the person's shell, so an extension can't (its
+`commands.claim` raises, and its host passes on nothing but a command, a field and a section). `!COMMAND` runs as the
+person: not in the jail and not put to `approval` (the person typed it), in the project,
+through their `$SHELL -c`, in bh-02's environment less `ANTHROPIC_*` and `CLAUDE*`. The app
+owns the terminal, so the command's stdin is empty, its output captured, and it has no
+controlling terminal; Ctrl-C doesn't stop a command (a Ctrl-C while one runs is held, then
+dropped by the next `read()`, and the ui says so), so it has a `timeout` (120 s), at which its
+process group is ended. The person leaving (`input.closed()`) ends it too: `chat:session`
+cancels the command, and its process group is ended before bh-02 exits. Its output is shown,
+with nothing a terminal acts on left in it (escapes, control characters), and reaches the
+model with the person's next message (its `for_model` event, which the `commands` value holds
+and `chat:session` takes, `take_for_model`, and puts in front of that message), never during a
+turn: the chat row reads one line at a time, so a `!` line typed during a turn runs after it.
+`commands` depends on nothing, so a restart of the chat row (`/model` reloads the loop, and
+the chat row with it) keeps what is held; `cleared` (`/clear`) drops it, and a note says so,
+but `/compact`'s (`compacted`) keeps it: the summary is written from what the model read, which
+never held it, and it still goes with the person's next message.
+It is held in memory, so a session left and resumed before the next message starts without
+it.
 
 **`frame` is a broker of the same shape as `commands`.** A row that shows something in the
 app's frame depends on what it reports on and on `frame`, and `acquire`s an entry: `yield
@@ -88,35 +118,57 @@ would never start.
 (`python(code)`), through its provider's standard tool calling. The loop runs each call as
 `kernel.run(code)` and answers a call to any other name, or one without a `code` string, with
 text saying so, never running it. A turn the person stops answers every call it made: the one
-running in the kernel with `interrupted: ... it may have partly run`, the rest (one waiting
-for approval included) with `not run: ...`. `kernel.instructions()` is what the model is told about the
+running in the kernel with `interrupted: ... it may have partly run`, one that already had its
+result (the stop came while its `memory` notes were made or the prompt read) with that result,
+the rest (one waiting for approval included) with `not run: ...`. `kernel.instructions()` is what the model is told about the
 tool and where its code runs; the loop puts it in the system prompt after `system.text()`, reads
-the two before each message the model reads, and sends the prompt the conversation began with:
-what reads differently later is told on that message (`agent_cordis_plugin.changes`), so the
-start of a conversation never changes under a model server's cache. A
+the two before each message the model reads (on `executor`, off the event loop), and sends
+the prompt the conversation began with: what reads differently from what it last told is told
+on that message (`agent_cordis_plugin.changes`) and kept in the transcript as the edits from
+that reading (`system entry`, below), so the start of a conversation never changes under a
+model server's cache, and the transcript holds the prompt once however often it changes. The
+date is not in the prompt, so it reads the same every day: the loop tells it first on the
+person's message when the transcript has told none yet or another day's. A
 input is plain Python: nothing of bh-02's is in its namespace and nothing it does reaches back
 into bh-02 but the files it writes (an extension, below, which loads jailed too); it reads and
 writes files and runs programs itself, and the jail decides what it may touch.
 
 **What the model's extensions reach.** `extensions:extensions` loads the cordis components the
 model writes (`.bh-02/plugins/NAME.py` in the project) into a second program the `jail` row
-starts, so they run as confined as inputs do; unconfined, each load is put to the person first,
-as an input is. An extension reaches bh-02 only through three keys, bound in that program, each
-of which only adds: `commands.register(spec, run)`, `frame.status(field, text, *shorter)`
-(pushed under `NAME:field`, so it can't replace another row's field) and `system.add(text)`
-(text, not a function: it crosses a socket). The extensions row registers each into the real
-key and keeps the remover, so a changed, deleted or failed extension takes back what it added,
-and nothing it does can replace a row. The plugin's README has the worker's wire.
+starts, so they run as confined as inputs do, and each load is put to `approval` as an input
+is (unconfined, the person decides). An extension reaches bh-02 only through three keys, bound
+in that program, each of which only adds: `commands.register(spec, run)` (never
+`commands.claim`, a line prefix: the worker's `commands` refuses it, and the host adds nothing
+an extension sends but these three kinds), `frame.status(field, text, *shorter)` (pushed under
+`NAME:field`, so it can't replace another row's field) and `system.add(text)` (text, not a
+function: it crosses a socket). The extensions
+row registers each into the real key and keeps the remover, so a changed, deleted or failed
+extension takes back what it added, and nothing it does can replace a row. The host reads what
+the model wrote there following no link: a link, a file with a second name, or a link on the way
+(`.bh-02`, the directory itself) is not read, since it could hand the model a file the jail
+hides, and status.json says why (for a link on the way, which nothing is written through, the
+row's `system` section does). The plugin's README has the worker's wire.
 
 **The jail and the kernel.** A `jail` starts one program and reports, per axis (`fs_read`,
 `fs_write`, `network`, `limits`, `env`, ...), a grade: `enforced`, `best_effort`,
-`cooperative` or `unenforced`, as brig grades them. The kernel is `confined` when its jail
-enforces `fs_write` and `network`. The worker's socket carries an input in and its output back,
-nothing else. Whether an input is asked about is where the confinement says, and the loop does the asking:
-confined, an input runs without asking (the jail denies writes outside the project, the layer
-files, the network and the credential files); unconfined (`kernel:unjailed`), `agent:loop`
-puts every input to the person with its code (`output.confirm`) and runs it only on a yes (a no
-is the call's answer, `denied: ...`), since it runs with the person's own permissions.
+`cooperative` or `unenforced`, as brig grades them. What runs in a jail is `confined` when the
+jail enforces `fs_write` and `network`. The worker's socket carries an input in and its output
+back, nothing else.
+
+**Approval: one rule, one row.** Whether the model's code runs unasked is where the confinement
+says, and the `approval` row (`kernel:approval`) is the one place that says it; the loop and the
+extensions row ask it, and neither keeps a copy of the rule. Confined, an input runs without
+asking (the jail denies writes outside the project, the layer files, the network and the
+credential files), and so does an extension's load; unconfined (`kernel:unjailed`), each is put
+to the person with its code (`output.confirm`) and runs only on a yes, since it would run with the
+person's own permissions. A no to an input is the call's answer (`denied: ...`); a no to an
+extension leaves it unloaded until its file changes. The kernel tells the model which of the two
+holds (`instructions()`) by the same rule over the same jail (`kernel.confined`), and the
+extensions row by `approval.confined`. Only a layer may replace the `approval` row: it runs in
+bh-02's own process, and an extension, which reaches bh-02 only through the three keys that
+add (above), has no way to bind or reach it. This is a question about code bh-02 is about to hand
+to the jail, not cordis's planned policy seam, which would see each effect a component yields
+before the runtime performs it.
 
 `done` is how "the chat is finished" reaches the bootstrap without `Runtime.idle()`, which is
 process-wide and would also wait on a provider's *own* background work (a heartbeat, a
@@ -147,12 +199,33 @@ raising any exception with two attributes: `kind: str` (a short tag: `authentica
 
 ```
 tool spec   {"name": str, "description": str, "parameters": <JSON Schema object>}
-request     {"name": "python", "input": {"code": str}, "title"?: str}   code put to the person by
-            `output.confirm`: an input, or (with its own `title`) an extension to load unjailed
+request     {"name": "python", "input": {"code": str}, "title"?: str}   code put to `approval.approve`,
+            and through it, unconfined, to the person by `output.confirm`: an input, or (with
+            `"name": "extension"` and its own `title`) an extension to load
 message     {"role": "user" | "assistant" | "tool", "content": str,
-             "tool_calls"?: [tool call, ...]   (assistant), "call_id"?: str (tool),
+             "tool_calls"?: [tool call, ...]   (assistant),
+             "call_id"?: str       (tool: the call it answers; its content is the input's result,
+                                    then each `memory` note told with it and any change in the
+                                    instructions, each after a blank line),
              "provider"?: Mapping  (assistant: the provider's own message, replayed as received),
-             "feedback"?: str      (user: the loop telling the model why its last turn didn't count)}
+             "feedback"?: str      (user: the loop telling the model why its last turn didn't count),
+             "today"?: str         (user: the date the loop told with this message, `2026-10-07`; its
+                                    content then starts `(Today's date: 2026-10-07.)` and a blank
+                                    line, before any change in the instructions and the person's
+                                    words. The loop's own: a provider sends `content` alone)}
+system entry
+            {"role": "system", "content": str}
+                        a prompt the model was told, whole: a transcript's first, the one every
+                        request begins with (and each later one, in a transcript kept before the
+                        loop kept edits)
+            {"role": "system", "edits": [{"at": int, "drop": int, "add": [str, ...]}, ...]}
+                        a later prompt, as what turns the one before it into this one, by
+                        paragraph (split at every blank line, exactly): from paragraph `at` of the
+                        one before, `drop` of them give way to `add` (`agent_cordis_plugin.edits`;
+                        `latest` applies a transcript's entries in turn, giving what the model was
+                        last told, and passes over one whose edits `edits` could not have made, a
+                        damaged file's). The loop's own: a request carries the first alone, as
+                        `{"role": "system", "content": str}`, so a provider never sees `edits`
 tool call   {"id": str, "name": str, "input": Mapping}
 chunk       {"type": "text", "text": str}
             {"type": "tool_call", "id": str, "name": str, "input": Mapping, "error"?: str}
@@ -175,18 +248,33 @@ event       a text, thinking, tool_call or usage chunk, or one of:
                                                           output count, which a later part carries (a
                                                           turn stopped before it has output not counted)
             {"type": "stop", "reason": str}
-            {"type": "note", "text": str}                 the shell speaking (a command's answer)
-            {"type": "cleared"}                           the conversation starts afresh (`/clear`): a ui
-                                                          drops what it shows of the conversation so far
+            {"type": "note", "text": str}                 the shell speaking (a command's answer); from the
+                                                          loop, what it told the model besides a result
+                                                          (its instructions changed; a `memory` note,
+                                                          by its first line)
+            {"type": "cleared", "compacted"?: true}       the conversation starts afresh (`/clear`, or
+                                                          `/compact`, its note carrying the summary): a
+                                                          ui drops what it shows of the conversation so far
                                                           (a line typed after `/clear` and not read yet
                                                           belongs to the new one, and stays) and keeps
                                                           the session's usage totals; a note
                                                           saying so follows, so a ui that ignores the
-                                                          type still says what happened
+                                                          type still says what happened. `compacted`:
+                                                          the new one carries on from a summary
+                                                          (`/compact`), so what `commands` holds for
+                                                          the model (`for_model`) is kept
+            {"type": "for_model", "text": str}           a command's answer: text for the model, not the
+                                                          person (`!COMMAND`'s output): the `commands`
+                                                          value holds it instead of answering it, and
+                                                          `chat:session` takes it (`take_for_model`)
+                                                          and puts it in front of the person's next
+                                                          message, a paragraph of its own (several, in
+                                                          the order they came); `cleared` drops what
+                                                          is held, unless `compacted`
             {"type": "restarting", "rows": [str, ...]}   a command's answer: these rows restart now
-                                                          (`/model`, `/clear`); a ui holds a line typed
-                                                          from here until they are `active` again,
-                                                          rather than hand it to the chat row still
+                                                          (`/model`, `/clear`, `/compact`); a ui holds a
+                                                          line typed from here until they are `active`
+                                                          again, rather than hand it to the chat row still
                                                           reading (see Rows coming back up). Shows nothing
 ```
 

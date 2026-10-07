@@ -5,14 +5,19 @@ leaves with it."""
 import asyncio
 import contextlib
 import json
+import os
+import shutil
+import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from cordis.testing import drive
-from extensions_cordis_plugin import Extensions, ExtensionsConfig, extensions
+from extensions_cordis_plugin import Extensions, ExtensionsConfig, extensions, worker_argv
 from extensions_cordis_plugin.testing import PlainJail
 
 type Remover = Callable[[], None]
@@ -36,8 +41,12 @@ async def todo(*, commands, frame, system) -> Effects:
 
 
 class _Commands:
+    """The `commands` broker's two ways in: a slash command, and a line prefix (`claim`), which a
+    layer's row may use and nothing an extension does should ever reach."""
+
     def __init__(self) -> None:
         self.runs: dict[str, Callable[[str], Awaitable[Any]]] = {}
+        self.claimed: list[str] = []
 
     def register(self, spec: Mapping[str, Any], run: Callable[[str], Awaitable[Any]]) -> Remover:
         name = str(spec["name"])
@@ -45,6 +54,10 @@ class _Commands:
             raise ValueError(f"a command named {name!r} is already registered")
         self.runs[name] = run
         return lambda: self.runs.pop(name, None) and None
+
+    def claim(self, prefix: str, spec: Mapping[str, Any], run: Callable[[str], Awaitable[Any]]) -> Remover:
+        self.claimed.append(prefix)
+        return lambda: None
 
 
 class _Frame:
@@ -74,13 +87,17 @@ class _System:
 
 
 @dataclass
-class _Output:
-    answer: bool = True
-    asked: list[Mapping[str, Any]] = field(default_factory=list)
+class _Approval:
+    """An `approval` that keeps every request: confined, each goes ahead with nobody asked;
+    unconfined, each gets the person's `answer`."""
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
-        self.asked.append(request)
-        return self.answer
+    confined: bool = True
+    answer: bool = True
+    requests: list[Mapping[str, Any]] = field(default_factory=list)
+
+    async def approve(self, request: Mapping[str, Any]) -> bool:
+        self.requests.append(request)
+        return self.confined or self.answer
 
 
 @dataclass
@@ -90,7 +107,7 @@ class _Harness:
     commands: _Commands
     frame: _Frame
     system: _System
-    output: _Output
+    approval: _Approval
     extensions: Extensions
 
     def write(self, name: str, source: str) -> None:
@@ -108,16 +125,16 @@ class _Harness:
 
 @contextlib.asynccontextmanager
 async def _running(root: Path, *, confined: bool = True, answer: bool = True) -> AsyncIterator[_Harness]:
-    jail, commands, frame, system, output = (
-        PlainJail(confined=confined),
+    jail, commands, frame, system, approval = (
+        PlainJail(),
         _Commands(),
         _Frame(),
         _System(),
-        _Output(answer),
+        _Approval(confined, answer),
     )
     config = ExtensionsConfig(root=str(root), watch=3600)  # the test looks itself
-    async with Extensions(jail, commands, frame, system, output, config) as running:
-        yield _Harness(root, jail, commands, frame, system, output, running)
+    async with Extensions(jail, commands, frame, system, approval, config) as running:
+        yield _Harness(root, jail, commands, frame, system, approval, running)
 
 
 async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_bh_02(tmp_path: Path) -> None:
@@ -126,6 +143,8 @@ async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_
         h.write("todo", _TODO)
         await h.extensions.look()
         assert h.extensions.statuses["todo"].ok
+        assert [r["name"] for r in h.approval.requests] == ["extension"]  # put to approval: yes, unasked
+        assert "Nobody is asked first" in h.extensions.section()  # the model is told approval's `confined`
         assert await h.commands.runs["todo"]("milk") == "milk"
         assert await h.commands.runs["todo"]("") == "milk"  # its state lives in the worker
         assert h.frame.fields() == {"todo:count": "todo: 0", "extensions": "ext: todo ✓"}
@@ -228,19 +247,54 @@ async def test_a_command_name_bh_02_already_has_is_refused_and_said(tmp_path: Pa
         assert h.status()["clash"]["state"] == "partly up"
 
 
+async def test_an_extension_can_t_claim_a_line_prefix_however_it_asks(tmp_path: Path) -> None:
+    """A prefix takes every line the person starts with it (`!` runs it in their shell,
+    unjailed), so only a row in a layer may claim one: an extension that asks is refused in the
+    worker, and one that sends the host a claim of its own over the socket is refused there."""
+    asks = (
+        "from cordis import Effects, acquire, component\n\n"
+        "async def run(args: str) -> str:\n"
+        "    return args\n\n"
+        "@component\n"
+        "async def bang(*, commands) -> Effects:\n"
+        "    yield acquire(commands.claim, '!', {'name': 'bang', 'help': '', 'usage': ''}, run)\n"
+    )
+    forges = (
+        "from cordis import Effects, bind, component\n\n"
+        "@component\n"
+        "async def forged(*, commands) -> Effects:\n"
+        "    claim = {'op': 'add', 'id': 999, 'extension': 'forged', 'kind': 'prefix', 'prefix': '!'}\n"
+        "    commands._bridge.send(claim)\n"
+        "    yield bind('forged', True)\n"
+    )
+    async with _running(tmp_path) as h:
+        h.write("bang", asks)
+        h.write("forged", forges)
+        await h.extensions.look()
+        assert h.commands.claimed == [] and h.commands.runs == {}  # nothing reached the broker
+        refused = h.status()["bang"]["rows"]["bang.bang"]
+        assert refused.startswith("failed:")
+        assert "PermissionError: an extension can't claim a line prefix ('!')" in refused
+        assert "register a slash command instead" in refused
+        assert h.status()["forged"]["problems"] == [
+            "prefix was not added: an extension adds a slash command, a status field or a "
+            "prompt section, and nothing else"
+        ]
+
+
 async def test_unjailed_each_extension_is_put_to_the_person_with_its_source(tmp_path: Path) -> None:
     async with _running(tmp_path, confined=False, answer=False) as h:
         h.write("todo", _TODO)
         await h.extensions.look()
-        (asked,) = h.output.asked
+        (asked,) = h.approval.requests
         assert asked["title"] == "Load the model's extension todo into bh-02, unjailed?"
         assert asked["input"] == {"code": _TODO}
         assert h.commands.runs == {} and h.jail.started == []  # declined: nothing ran
         assert h.status()["todo"]["error"] == "the person declined to load it"
         assert "each is shown to the person" in h.extensions.section()
         await h.extensions.look()
-        assert len(h.output.asked) == 1  # not asked again until the file changes
-        h.output.answer = True
+        assert len(h.approval.requests) == 1  # not asked again until the file changes
+        h.approval.answer = True
         h.write("todo", _TODO + "\n")
         await h.extensions.look()
         assert "todo" in h.commands.runs and h.extensions.statuses["todo"].ok
@@ -266,6 +320,159 @@ async def test_an_extension_that_ends_the_worker_is_not_loaded_again_until_somet
         assert await h.commands.runs["todo"]("again") == "again"
 
 
+_SECRET = "SECRET=not-for-the-model\n"  # a file the jail hides, such as local.env
+
+
+def _apart(tmp_path: Path) -> tuple[Path, Path]:
+    """A project, and beside it, outside it, a file of secrets (`local.env`)."""
+    project, outside = tmp_path / "project", tmp_path / "outside"
+    project.mkdir()
+    outside.mkdir()
+    secret = outside / "local.env"
+    secret.write_text(_SECRET)
+    return project, secret
+
+
+async def test_an_extension_that_is_a_link_is_not_read_and_status_json_says_why(tmp_path: Path) -> None:
+    """The model writes the extensions directory from the jail, and bh-02 reads it on the host:
+    a link there could hand the worker, and the model, a file the jail hides."""
+    project, secret = _apart(tmp_path)
+    async with _running(project) as h:
+        h.write("todo", _TODO)
+        (project / ".bh-02" / "plugins" / "leak.py").symlink_to(secret)
+        await h.extensions.look()
+        assert h.extensions.statuses["todo"].ok  # the rest load
+        assert [r["input"]["code"] for r in h.approval.requests] == [_TODO]  # never read, never put
+        assert h.status()["leak"] == {
+            "state": "failed",
+            "rows": {},
+            "error": ".bh-02/plugins/leak.py is a link, which bh-02 does not follow there (it could "
+            "lead to a file the jail hides): write the extension itself at .bh-02/plugins/leak.py, "
+            "not a link to it",
+            "commands": [],
+            "problems": [],
+        }
+        assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
+
+
+async def test_an_extension_with_a_second_name_is_not_read(tmp_path: Path) -> None:
+    """A hard link: the file in the extensions directory is the secret itself, under a name the
+    model gave it."""
+    project, secret = _apart(tmp_path)
+    async with _running(project) as h:
+        h.write("todo", _TODO)
+        os.link(secret, project / ".bh-02" / "plugins" / "leak.py")
+        await h.extensions.look()
+        assert [r["input"]["code"] for r in h.approval.requests] == [_TODO]
+        assert h.status()["leak"]["error"] == (
+            ".bh-02/plugins/leak.py has 2 names (a hard link), and bh-02 does not read one there "
+            "(another name could be a file the jail hides): write the extension at "
+            ".bh-02/plugins/leak.py as a file of its own"
+        )
+        assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
+
+
+async def test_status_json_is_written_in_place_of_a_link_never_through_it(tmp_path: Path) -> None:
+    """The host writes status.json with the person's permissions: a link the model left there
+    must not choose what it overwrites (bh-02's config, a credential, a shell's rc file)."""
+    project, secret = _apart(tmp_path)
+    plugins = project / ".bh-02" / "plugins"
+    plugins.mkdir(parents=True)
+    (plugins / "status.json").symlink_to(secret)
+    async with _running(project) as h:
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        assert secret.read_text() == _SECRET  # not overwritten
+        assert not (plugins / "status.json").is_symlink() and h.status()["todo"]["state"] == "active"
+        assert sorted(p.name for p in plugins.iterdir()) == ["status.json", "todo.py"]  # nothing left over
+
+
+@pytest.mark.parametrize("linked", [".bh-02", ".bh-02/plugins"])
+async def test_a_link_on_the_way_to_the_extensions_directory_is_not_followed(
+    tmp_path: Path, linked: str
+) -> None:
+    """`.bh-02` or `.bh-02/plugins` a link: nothing is read through it, or written there (not
+    even status.json), and the model's prompt says why, since status.json can't."""
+    project, secret = _apart(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    plugins = elsewhere / "plugins" if linked == ".bh-02" else elsewhere
+    plugins.mkdir(parents=True)
+    plugins.joinpath("leak.py").write_text(secret.read_text())
+    (project / linked).parent.mkdir(parents=True, exist_ok=True)
+    (project / linked).symlink_to(elsewhere, target_is_directory=True)
+    async with _running(project) as h:
+        assert h.approval.requests == [] and h.jail.started == [] and h.extensions.statuses == {}
+        assert [p.name for p in plugins.iterdir()] == ["leak.py"]  # no status.json through the link
+        assert h.extensions.section().endswith(
+            f"\n\n{linked} is a link, so bh-02 loads no extension from .bh-02/plugins (a link could "
+            f"lead to files the jail hides): make {linked} a directory in the project, not a link, "
+            "and write the extensions in .bh-02/plugins"
+        )
+        (project / linked).unlink()
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        assert h.extensions.statuses["todo"].ok and "is a link" not in h.extensions.section()
+
+
+async def test_a_file_swapped_for_a_link_after_it_was_found_is_not_read(tmp_path: Path) -> None:
+    """Between finding a file and reading it, the model's code can swap it for a link (here an
+    extension loaded just before it does): bh-02 reads only what it opened following no link."""
+    project, secret = _apart(tmp_path)
+    swaps = (
+        "import os\n"
+        "from cordis import Effects, bind, component\n\n"
+        f"os.symlink({str(secret)!r}, '.bh-02/plugins/swap')\n"
+        "os.replace('.bh-02/plugins/swap', '.bh-02/plugins/second.py')\n\n"
+        "@component\n"
+        "async def swapped(*, frame) -> Effects:\n"
+        "    yield bind('swapped', True)\n"
+    )
+    async with _running(project) as h:
+        h.write("second", _TODO)
+        h.write("first", swaps)  # loads first: the names are taken in order
+        await h.extensions.look()
+        assert (project / ".bh-02" / "plugins" / "second.py").is_symlink()  # swapped once found
+        assert [r["input"]["code"] for r in h.approval.requests] == [swaps]
+        assert h.status()["second"]["error"].startswith(".bh-02/plugins/second.py is a link")
+        assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
+
+
+async def test_after_release_stops_the_worker_every_extension_loads_again_once_the_jail_runs(
+    tmp_path: Path,
+) -> None:
+    """`/release` stops every program the jail started, the extensions' worker too, so what its
+    jail held on the host is free. Nothing of the extensions starts again while the jail is
+    released (not even for a changed file), or its jail would hold those paths again before the
+    person could use them. Once the next input has started the kernel's worker, the jail runs
+    again, and every extension loads again in a new worker, without anything changing."""
+    async with _running(tmp_path) as h:
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        assert await h.commands.runs["todo"]("milk") == "milk"
+        await h.jail.release()
+        for _ in range(250):  # the worker's end reaches the host as its socket closing
+            if "todo" not in h.commands.runs:
+                break
+            await asyncio.sleep(0.02)
+        await h.extensions.look()
+        assert "todo" not in h.commands.runs and "todo:count" not in h.frame.fields()
+        assert "/release" in h.status()["todo"]["error"], h.status()
+        h.write("todo", _TODO + "\n")
+        await h.extensions.look()
+        assert len(h.jail.started) == 1  # released: no worker starts, whatever changed
+        sockets = tempfile.mkdtemp(prefix="bh-x-", dir="/tmp")  # a socket path must be short
+        kernel = await h.jail.start(
+            worker_argv(f"{sockets}/k.sock"), cwd=sockets, endpoint=f"{sockets}/k.sock"
+        )
+        try:  # the next input started the kernel's worker (a stand-in): the jail runs again
+            await h.extensions.look()
+            assert len(h.jail.started) == 3 and h.extensions.statuses["todo"].ok
+            assert await h.commands.runs["todo"]("eggs") == "eggs"  # a new worker: a new list
+        finally:
+            await kernel.stop()
+            shutil.rmtree(sockets, ignore_errors=True)
+
+
 async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -> None:
     effects = await drive(
         extensions(
@@ -273,7 +480,7 @@ async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -
             commands=_Commands(),
             frame=_Frame(),
             system=_System(),
-            output=_Output(),
+            approval=_Approval(),
             config=ExtensionsConfig(),
         ),
         [SimpleNamespace(section=lambda: "told")],  # what entering would have given back

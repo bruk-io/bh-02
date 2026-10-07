@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from commands_cordis_plugin import (
     Commands,
     Operator,
@@ -13,7 +15,6 @@ from commands_cordis_plugin import (
     model_list,
     operator,
     parse,
-    perform,
     registry,
     rows_table,
     set_model,
@@ -49,6 +50,118 @@ async def test_the_broker_runs_what_is_registered_and_help_lists_it() -> None:
     assert "Ctrl-D" not in help  # the key that leaves is each ui's own to say
     remove()  # a row that leaves takes its commands with it
     assert await commands.run("/echo hi") == "unknown command /echo; /help lists them"
+
+
+def test_the_broker_says_which_lines_are_the_harness_s() -> None:
+    """`claims` is how the chat row tells a command from a message: a slash command, known or
+    not (so a typo never reaches the model), or a line starting with a claimed prefix."""
+    commands = Commands()
+    for line in ("/help", "  /model haiku ", "/new-thing x", "/Model", "/nope"):
+        assert commands.claims(line), line
+    for line in ("/tmp/x.py", "/", "hi /help", "/2fast", "", "   ", "!ls", "hello"):
+        assert not commands.claims(line), line
+
+    async def shell(args: str) -> str:
+        return f"ran {args}"
+
+    remove = commands.claim("!", {"name": "shell", "help": "run it", "usage": "COMMAND"}, shell)
+    assert commands.claims("!ls") and commands.claims("  ! git status") and commands.claims("!")
+    assert not commands.claims("hi !ls") and not commands.claims("/tmp/x.py")
+    remove()
+    assert not commands.claims("!ls")
+
+
+async def test_a_claimed_prefix_takes_its_lines_one_character_each_and_never_twice() -> None:
+    commands = Commands()
+    asked: list[str] = []
+
+    async def shell(args: str) -> str:
+        asked.append(args)
+        return f"ran {args}"
+
+    async def broken(args: str) -> str:
+        raise RuntimeError("no shell")
+
+    spec = {"name": "shell", "help": "run COMMAND as you", "usage": "COMMAND"}
+    remove = commands.claim("!", spec, shell)  # type: ignore[arg-type]
+    assert await commands.run("  ! git status ") == "ran git status"  # the rest of the line
+    assert asked == ["git status"]
+    assert commands.specs() == []  # a prefix is typed, not chosen from the palette
+    assert "!COMMAND  run COMMAND as you" in await commands.run("/help")
+    # a second claim on the same character is refused, as a second command of one name is
+    with pytest.raises(ValueError, match="a prefix named '!' is already registered"):
+        commands.claim("!", spec, shell)  # type: ignore[arg-type]
+    for bad, said in [
+        ("!!", "a prefix is one character, such as '!'; got '!!'"),
+        ("", "a prefix is one character, such as '!'; got ''"),
+        ("/", "'/' starts the slash commands; claim another character, such as '!'"),
+        ("a", "a line can start with 'a' by chance"),
+        ("7", "a line can start with '7' by chance"),
+        (" ", "a line can start with ' ' by chance"),
+    ]:
+        with pytest.raises(ValueError) as refused:
+            commands.claim(bad, spec, shell)  # type: ignore[arg-type]
+        assert said in str(refused.value)
+    remove()
+    assert await commands.run("!ls") == "'!ls' is not a command; /help lists them"  # unclaimed now
+    commands.claim("!", spec, broken)  # type: ignore[arg-type]
+    assert await commands.run("!ls") == "! (shell) failed: no shell"
+
+
+async def test_what_a_command_leaves_for_the_model_is_held_here_until_taken_or_cleared() -> None:
+    """`for_model` is held by the broker, which never reloads, not by the chat row, which a
+    `/model` switch reloads: it is answered to nobody, and taken once, in the order it came;
+    a new conversation (`cleared`) drops it, and says so."""
+    commands = Commands()
+
+    async def shell(args: str) -> list[dict[str, str]]:
+        return [{"type": "note", "text": f"{args} said"}, {"type": "for_model", "text": f"$ {args}"}]
+
+    async def clear(args: str) -> list[dict[str, str]]:
+        return [{"type": "cleared"}, {"type": "note", "text": "cleared"}]
+
+    commands.claim("!", {"name": "shell", "help": "", "usage": "COMMAND"}, shell)
+    commands.register({"name": "clear", "help": "", "usage": ""}, clear)
+    assert commands.take_for_model() == []
+    assert await commands.run("!ls") == [{"type": "note", "text": "ls said"}]  # shown, not held
+    assert await commands.run("/help") != ""  # other commands keep it
+    await commands.run("!pwd")
+    assert commands.take_for_model() == ["$ ls", "$ pwd"]
+    assert commands.take_for_model() == []  # taken once
+    await commands.run("!ls")
+    await commands.run("!pwd")
+    assert await commands.run("/clear") == [
+        {"type": "cleared"},
+        {"type": "note", "text": "cleared"},
+        {
+            "type": "note",
+            "text": "2 commands' output, which was waiting for your next message, is dropped "
+            "with the old conversation",
+        },
+    ]
+    assert commands.take_for_model() == []
+    assert await commands.run("/clear") == [{"type": "cleared"}, {"type": "note", "text": "cleared"}]
+
+
+async def test_a_conversation_carried_on_from_a_summary_keeps_what_is_held_for_the_model() -> None:
+    """`/compact`'s `cleared` is `compacted`: the summary was written from what the model read,
+    which never held `!`'s output, so it is kept for the person's next message, unannounced."""
+    commands = Commands()
+
+    async def shell(args: str) -> list[dict[str, str]]:
+        return [{"type": "for_model", "text": f"$ {args}"}]
+
+    async def compact(args: str) -> list[dict[str, Any]]:
+        return [{"type": "cleared", "compacted": True}, {"type": "note", "text": "compacted"}]
+
+    commands.claim("!", {"name": "shell", "help": "", "usage": "COMMAND"}, shell)
+    commands.register({"name": "compact", "help": "", "usage": ""}, compact)
+    await commands.run("!pytest")
+    assert await commands.run("/compact") == [
+        {"type": "cleared", "compacted": True},
+        {"type": "note", "text": "compacted"},
+    ]
+    assert commands.take_for_model() == ["$ pytest"]
 
 
 @dataclass
@@ -94,6 +207,7 @@ class Models:
     def __init__(self) -> None:
         self.now = "haiku"
         self.broken = False
+        self.problem: str | None = None  # why the models file is not read (it is in the project)
 
     def listed(self) -> list[dict[str, Any]]:
         if self.broken:
@@ -253,22 +367,15 @@ def test_the_model_list_marks_a_shadowed_built_in() -> None:
     ]
 
 
-async def test_a_failed_job_is_reported_and_the_next_one_still_runs() -> None:
-    jobs: asyncio.Queue[Any] = asyncio.Queue()
-    ran, failures = [], []
-
-    async def fails() -> None:
-        raise RuntimeError("boom")
-
-    async def works() -> None:
-        ran.append("ok")
-
-    await jobs.put(fails)
-    await jobs.put(works)
-    worker = asyncio.create_task(perform(jobs, failures.append))
-    await asyncio.sleep(0.01)
-    worker.cancel()
-    assert failures == ["RuntimeError: boom"] and ran == ["ok"]
+async def test_the_model_list_says_why_the_models_file_is_not_read_instead_of_where_to_add() -> None:
+    """A models file in the project is not read: /model says so where it would say to add models
+    there, and still lists the models there are."""
+    models = Models()
+    models.problem = "the models file /p/.config/bh-02/models.toml is not read: it is in the project (/p)"
+    op = Operator(Loader(), models, OperatorConfig(), asyncio.Queue(), lambda *a: None)
+    said = (await dict((s["name"], f) for s, f in op.specs)["model"]("")).splitlines()
+    assert said[0] == "  sonnet  claude-code  sonnet"
+    assert said[-1] == f"/model NAME switches; {models.problem}" and "add models in" not in said[-1]
 
 
 def test_rows_line_up() -> None:

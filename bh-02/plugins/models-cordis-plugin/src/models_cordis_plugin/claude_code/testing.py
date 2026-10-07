@@ -2,12 +2,20 @@
 
 It behaves the way the real CLI was measured to (README.md), in the SDK's own message types:
 a query streams each scripted step as raw Messages API events (`StreamEvent`), then the
-finished `AssistantMessage`; a step that asks for tools asks the permission callback, then
-calls the declared tools through the in-process MCP server over the MCP protocol itself (an
-`mcp.Client` on the options' `Server`), with the tool_use id in the request's `_meta`, and
-records the results (`UserMessage`) before the next step; an answered step ends the query with
-a `ResultMessage`; `interrupt()` ends the running query with one at once. A tool the
-permission callback denies is answered by the fake itself, as Claude Code does.
+finished `AssistantMessage` (the streamed message's id, no stop reason); a step that asks for
+tools asks the permission callback, then calls the declared tools through the in-process MCP
+server over the MCP protocol itself (an `mcp.Client` on the options' `Server`), with the
+tool_use id in the request's `_meta`, and records the results (`UserMessage`) before the next
+step; an answered step ends the query with a `ResultMessage` (its `result`: what the step
+said); `interrupt()` ends the running query with one at once. A tool the permission callback
+denies is answered by the fake itself, as Claude Code does. A step can
+also fall back to a non-streamed request part-way, as Claude Code does when a stream fails
+before a block completes (CLI 2.1.282): its events stop, and the whole message comes as one
+`AssistantMessage` of a new id, stop reason and usage set, with no stream events. Or it can
+retry its stream, as Claude Code does when one stalls, or its connection drops (even part-way
+through text or a tool call's arguments): it closes the open block and the message itself (a
+`content_block_stop`, a `message_stop`, no `message_delta`), then streams the whole step again
+(CLI 2.1.282).
 """
 
 import asyncio
@@ -26,6 +34,7 @@ from claude_agent_sdk import (
     StreamEvent,
     SystemMessage,
     TextBlock,
+    ThinkingBlock,
     ToolPermissionContext,
     ToolResultBlock,
     ToolUseBlock,
@@ -55,6 +64,13 @@ class FakeStep:
     error: AssistantMessageError | None = None
     # after this many events the stream starts over (a retried stream: a second `message_start`)
     restart_after: int | None = None
+    # after this many events the stream is given up on, and the step comes whole, not streamed
+    # (Claude Code's fallback to a non-streaming request)
+    fallback_after: int | None = None
+    # after this many events the stream is closed where it is (a `content_block_stop` for a block
+    # left open, a `message_stop`, no `message_delta`) and streamed again from the start
+    # (Claude Code retrying a stalled or dropped stream)
+    retry_after: int | None = None
 
 
 def events_for(step: FakeStep, *, message_id: str = "msg_fake") -> list[dict[str, Any]]:
@@ -136,11 +152,22 @@ def events_for(step: FakeStep, *, message_id: str = "msg_fake") -> list[dict[str
     return events
 
 
+def _retried(events: list[dict[str, Any]], after: int) -> list[dict[str, Any]]:
+    """The first `after` events, closed the way Claude Code closes a stream it will retry."""
+    sent = events[:after]
+    open_blocks = [e["index"] for e in sent if e["type"] == "content_block_start"]
+    closed = {e["index"] for e in sent if e["type"] == "content_block_stop"}
+    left = [{"type": "content_block_stop", "index": i} for i in open_blocks if i not in closed]
+    return [*sent, *left, {"type": "message_stop"}]
+
+
 def _blocks(step: FakeStep) -> list[Any]:
     out: list[Any] = []
     for block in step.blocks:
         if block.get("type") == "text":
             out.append(TextBlock(text=str(block["text"])))
+        elif block.get("type") == "thinking":
+            out.append(ThinkingBlock(thinking=str(block["thinking"]), signature=str(block["signature"])))
         elif block.get("type") == "tool_use":
             out.append(
                 ToolUseBlock(
@@ -203,7 +230,7 @@ class FakeClaudeCode:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
 
-    def _result(self, subtype: str, *, is_error: bool = False) -> None:
+    def _result(self, subtype: str, *, is_error: bool = False, result: str | None = None) -> None:
         self._queue.put_nowait(
             ResultMessage(
                 subtype=subtype,
@@ -212,6 +239,7 @@ class FakeClaudeCode:
                 is_error=is_error,
                 num_turns=1,
                 session_id=self.session_id,
+                result=result,
             )
         )
 
@@ -238,14 +266,30 @@ class FakeClaudeCode:
             events = events_for(step)
             if step.restart_after is not None:
                 events = events[: step.restart_after] + events
+            if step.fallback_after is not None:
+                events = events[: step.fallback_after]
+            if step.retry_after is not None:
+                events = _retried(events, step.retry_after) + events_for(step, message_id="msg_fake_retry")
             for n, event in enumerate(events):
                 if n == step.stall_after:
                     await asyncio.Event().wait()  # a slow model: until interrupted
                 self._queue.put_nowait(StreamEvent(uuid="u", session_id=self.session_id, event=event))
                 await asyncio.sleep(0)
-            self._queue.put_nowait(AssistantMessage(content=_blocks(step), model=step.model))
+            if step.fallback_after is None:
+                finished = AssistantMessage(content=_blocks(step), model=step.model, message_id="msg_fake")
+            else:  # the non-streamed request's message: whole, and a new id
+                usage = {"input_tokens": step.input_tokens, "output_tokens": step.output_tokens}
+                finished = AssistantMessage(
+                    content=_blocks(step),
+                    model=step.model,
+                    usage=usage,
+                    message_id="msg_fake_unstreamed",
+                    stop_reason=step.stop,
+                )
+            self._queue.put_nowait(finished)
             if step.stop != "tool_use":
-                self._result("success")
+                answer = "".join(str(b["text"]) for b in step.blocks if b.get("type") == "text")
+                self._result("success", result=answer)
                 return
             if self.hold_calls is not None:
                 await self.hold_calls.wait()

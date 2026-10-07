@@ -1,8 +1,8 @@
 """A `jail` that confines nothing: the worker as a plain subprocess, and a report that says so.
 
 For a platform brig can't jail, or a person who chooses not to. Every axis is reported
-`unenforced`, so the kernel is not `confined`: an input can do anything the person running
-bh-02 can, and agent:loop puts each input to the person before it runs.
+`unenforced`, so nothing is `confined`: an input can do anything the person running bh-02 can,
+and `approval` puts each input (and each extension to load) to the person before it runs.
 """
 
 import asyncio
@@ -47,6 +47,26 @@ class _Process:
             return True
         return False
 
+    def ended(self) -> str:
+        """Nothing ends the worker of its own accord here."""
+        return ""
+
+    def report(self) -> Mapping[str, str]:
+        return UNENFORCED
+
+    def notice(self) -> str:
+        """Nothing: the status bar says it is unjailed, and every input asks."""
+        return ""
+
+    def reads(self) -> tuple[str, ...]:
+        """No allowlist: an input reads what the person can."""
+        return ()
+
+    def writes(self) -> tuple[str, ...]:
+        """None named: it confines no writes, so an input writes what the person can (and is put
+        to them first; nothing runs unasked here, a startup file included)."""
+        return ()
+
     async def stopped(self) -> None:
         """Return once the process has ended, however it ended."""
         await self._process.wait()
@@ -69,6 +89,14 @@ class Unjailed:
 
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
+
+    async def release(self) -> str:
+        """Nothing: no jail holds anything on the host, so nothing is stopped."""
+        return ""
+
+    def released(self) -> bool:
+        """Never: `release` stops nothing, so nothing waits for the next input."""
+        return False
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Process:
         log = Path(endpoint).with_name("stderr.log")

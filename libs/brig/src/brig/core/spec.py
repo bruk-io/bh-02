@@ -8,7 +8,8 @@ are canonicalized one step further, to an antichain -- an entry another entry
 already covers is dropped, because an allow entry is a subtree (SPEC.md
 section 5, decision-160). Construction raises
 `ValueError` on a negative/non-integer limit, a duplicate channel name, an
-empty path/name/endpoint, the inactive read-model field being populated, or
+empty path/name/endpoint, `read_allows` populated under DENY_LIST (its
+inactive model; `read_denies` is active under both, decision-164), or
 `EnvPolicy(mode=PASS, allow_names=(...))` -- PASS's `allow_names` is inert,
 and populating it is refused rather than silently ignored (SPEC.md section 5,
 decision-064).
@@ -152,11 +153,12 @@ class FsPolicy:
                 "FsPolicy.read_allows must be empty when read_model is DENY_LIST, "
                 f"got {self.read_allows!r}"
             )
-        if self.read_model is ReadModel.ALLOW_LIST and self.read_denies:
-            raise ValueError(
-                "FsPolicy.read_denies must be empty when read_model is ALLOW_LIST, "
-                f"got {self.read_denies!r}"
-            )
+        # `read_denies` is active under BOTH models (decision-164): under
+        # DENY_LIST it is the whole read policy, under ALLOW_LIST it is the
+        # carve-outs subtracted from the allowed tree -- deny-over-allow, the
+        # read twin of `write_denies`. So there is no inactive-field refusal
+        # for it; `read_allows` under DENY_LIST keeps one, because a denylist
+        # has nothing for an allow entry to mean.
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,11 +304,7 @@ class Spec:
             write_allows=_allows_meet(self.fs.write_allows, other.fs.write_allows),
             write_denies=tuple(set(self.fs.write_denies) | set(other.fs.write_denies)),
             read_model=self.fs.read_model,
-            read_denies=(
-                tuple(set(self.fs.read_denies) | set(other.fs.read_denies))
-                if self.fs.read_model is ReadModel.DENY_LIST
-                else ()
-            ),
+            read_denies=tuple(set(self.fs.read_denies) | set(other.fs.read_denies)),
             read_allows=(
                 _allows_meet(self.fs.read_allows, other.fs.read_allows)
                 if self.fs.read_model is ReadModel.ALLOW_LIST
@@ -529,8 +527,10 @@ def _denies_grow(child: Spec, parent: Spec) -> bool:
         return False
     if not set(child.fs.write_denies) >= set(parent.fs.write_denies):
         return False
+    if not set(child.fs.read_denies) >= set(parent.fs.read_denies):
+        return False
     if child.fs.read_model is ReadModel.DENY_LIST:
-        return set(child.fs.read_denies) >= set(parent.fs.read_denies)
+        return True
     return _allows_reach_within(child.fs.read_allows, parent.fs.read_allows)
 
 

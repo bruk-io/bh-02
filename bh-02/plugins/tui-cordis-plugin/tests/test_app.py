@@ -79,6 +79,29 @@ async def test_ctrl_c_stops_the_running_turn_and_otherwise_says_how_to_leave() -
         await asyncio.wait_for(turn, 1)
 
 
+async def test_ctrl_c_while_a_command_runs_says_it_does_not_stop_one_and_a_starting_turn_hears_it() -> None:
+    """A Ctrl-C held for the line being handled: a turn starting hears it at once and nothing is
+    said; a command (a `!` one may take minutes) never does, so the app says Ctrl-C doesn't stop
+    it, and how to leave."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE) as pilot:
+        await pilot.press(*"!sleep 600", "enter")
+        assert await asyncio.wait_for(app.bridge.line(), 1) == "!sleep 600"
+        await pilot.press("ctrl+c")
+        await pilot.pause(0.5)
+        said = [text for _, text in _blocks(app) if text.startswith("A command is running")]
+        assert said == [
+            "A command is running, and Ctrl-C stops only a turn: a `!` command or /compact runs until "
+            "it ends or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
+        ]
+        await pilot.press(*"hello", "enter")
+        assert await asyncio.wait_for(app.bridge.line(), 1) == "hello"  # a turn starts
+        await pilot.press("ctrl+c")
+        await asyncio.wait_for(app.bridge.interrupted(), 1)  # and hears the held Ctrl-C
+        await pilot.pause(0.5)
+        assert len([text for _, text in _blocks(app) if text.startswith("A command is running")]) == 1
+
+
 async def test_a_reply_streams_into_one_block_and_other_events_get_their_own() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:

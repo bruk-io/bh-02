@@ -1,10 +1,11 @@
 [project]
 name = "agent-cordis-plugin"
 version = "0.1.0"
-description = "A loop that consumes a model and the kernel's one tool, python, and provides the loop; the transcript row."
+description = "A loop that consumes a model and the kernel's one tool, python, and provides the loop; the transcript row; the memory broker."
 requires-python = ">=3.15"
 dependencies = [
     "cordis",
+    "cordis-helpers",
 ]
 
 [project.entry-points."cordis.plugins"]
@@ -12,6 +13,7 @@ agent = "agent_cordis_plugin"
 
 [tool.uv.sources]
 cordis = { workspace = true }
+cordis-helpers = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

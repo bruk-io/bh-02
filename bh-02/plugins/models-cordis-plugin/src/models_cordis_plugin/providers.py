@@ -1,17 +1,20 @@
 """The `model` value for a row's config: the named model, on its provider.
 
-`resolved` is which model the config names (the built-ins, the models file, the row's own
-`extra`), or why none can be used. `opened` is its provider's value, entered for as long as the
-row is up: Claude Code (`claude-code`), an OpenAI-compatible endpoint (`openai`), or a factory
-a model names as `module:attribute`. A model that can't be used still binds, as `Unusable`,
-whose every step raises what is wrong, so a typo in the models file is a message in the
-conversation (and `/model` another model fixes it), not a composition that won't start.
+`resolved` is which model the config names (the built-ins, the models file unless it is in the
+project, `refused`, and the row's own `extra`), or why none can be used. `opened` is its
+provider's value, entered for as long as the row is up: Claude Code (`claude-code`), an
+OpenAI-compatible endpoint (`openai`), or a factory a model names as `module:attribute`. A
+model that can't be used still binds, as `Unusable`, whose every step raises what is wrong,
+so a typo in the models file is a message in the conversation (and `/model` another model
+fixes it), not a composition that won't start.
 """
 
 import contextlib
 import importlib
+import os
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
+from pathlib import Path
 from typing import Any, cast
 
 from models_cordis_plugin.claude_code import ClaudeCodeConfig, ClaudeCodeModel
@@ -24,13 +27,14 @@ from models_cordis_plugin.named import (
     chosen,
     combined,
     environ,
+    in_project,
     models_file,
     parsed,
     read_models,
 )
 from models_cordis_plugin.openai import OpenAIModel
 
-__all__ = ["Unusable", "known", "opened", "resolved"]
+__all__ = ["Unusable", "known", "opened", "refused", "resolved"]
 
 type Json = Mapping[str, Any]
 
@@ -46,26 +50,51 @@ class Unusable:
         yield {}  # an async generator, as every provider's `complete` is
 
 
-def known(config: ModelConfig) -> tuple[list[Named], str]:
-    """Every model the config can name, and the models file they were read from."""
+def refused(config: ModelConfig) -> str | None:
+    """Why the config's models file is not read (`in_project`), or None when it is outside the
+    project: the working directory, where the jail lets the model's code write (the kernel's
+    root), and the row's `cwd` when a layer names another."""
+    if not isinstance(config.cwd, str | None):  # cordis does not type-check a row's config
+        raise ModelsError(
+            "model_config",
+            f"the model row's cwd is {config.cwd!r}, not a directory; give it the project's path, "
+            "or remove it (the working directory is the project then)",
+        )
     path = models_file(config.models, environ())
-    return combined(parsed(read_models(path), str(path)), str(path), config.extra), str(path)
+    roots = dict.fromkeys(root for root in (config.cwd, os.getcwd()) if root)
+    return next((why for root in roots if (why := in_project(path, Path(root))) is not None), None)
+
+
+def known(config: ModelConfig) -> tuple[list[Named], str, str | None]:
+    """Every model the config can name, the models file they were read from, and why that file
+    was not read (`refused`): then only the built-ins and the row's `extra` are named."""
+    path = models_file(config.models, environ())
+    why = refused(config)
+    text = None if why is not None else read_models(path)
+    return combined(parsed(text, str(path)), str(path), config.extra), str(path), why
 
 
 def resolved(config: ModelConfig) -> Named:
     """The model `config.default` names, or a `ModelsError` saying what to do."""
-    models, source = known(config)
-    return chosen(config.default, models, source)
+    models, source, why = known(config)
+    return chosen(config.default, models, source, why)
 
 
-def _provided(named: Named, config: ModelConfig) -> Any:
-    """The provider's value for `named`: not entered yet."""
+def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any:
+    """The provider's value for `named`: not entered yet. `searched`: where `local.env` is
+    looked for when the config names no `env_file` (the `layers` value's `credentials`)."""
     if named.provider == CLAUDE_CODE:
         return ClaudeCodeModel(
-            ClaudeCodeConfig(model=named.id, state=config.state, env_file=config.env_file, cwd=config.cwd)
+            ClaudeCodeConfig(
+                model=named.id,
+                state=config.state,
+                env_file=config.env_file,
+                cwd=config.cwd,
+                searched=tuple(searched),
+            )
         )
     if named.provider == OPENAI:
-        return OpenAIModel(named, config.env_file)
+        return OpenAIModel(named, config.env_file, searched=searched)
     module, _, attribute = named.provider.partition(":")
     try:
         factory = cast(
@@ -89,11 +118,12 @@ def _provided(named: Named, config: ModelConfig) -> Any:
 
 
 @contextlib.asynccontextmanager
-async def opened(config: ModelConfig) -> AsyncIterator[Any]:
+async def opened(config: ModelConfig, searched: Sequence[str] = ()) -> AsyncIterator[Any]:
     """The `model` value, for as long as the row is up: the named model's provider, entered
-    when it is a context manager (Claude Code's process, an HTTP client), else `Unusable`."""
+    when it is a context manager (Claude Code's process, an HTTP client), else `Unusable`.
+    `searched`: where the provider looks for `local.env` (the `layers` value's `credentials`)."""
     try:
-        value = _provided(resolved(config), config)
+        value = _provided(resolved(config), config, searched)
     except ModelsError as error:
         value = Unusable(error)
     if isinstance(value, AbstractAsyncContextManager):

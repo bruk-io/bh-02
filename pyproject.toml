@@ -211,11 +211,18 @@ exclude = [
     "bh_02.cli:update_layer_command",                         # rewrites a layer file, keeping FILE.bak
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
     "agent_cordis_plugin.transcript:FileTranscript.*",
+    "agent_cordis_plugin.transcript:rewrite",                 # /compact: the new conversation written whole (temp, then replace), the old kept as .bak, .bak.2, ...
+    "agent_cordis_plugin.compact:compact_conversation",       # /compact: reads the transcript's file, shows that it asks, then rewrites it
     "commands_cordis_plugin.operations:Operator.clear.job",   # empties a session's history files
     "commands_cordis_plugin.wiring:set_model",                # /model: rewrites the session's layer
+    # `!COMMAND`: the person's shell command, a subprocess run as them; what it prints read as it
+    # comes, its process group ended at its timeout; `run_line` is the prefix's run (run_command)
+    "commands_cordis_plugin.shell_command:run_command", "commands_cordis_plugin.shell_command:_end",
+    "commands_cordis_plugin.shell_command:_Output.read", "commands_cordis_plugin.shell_command:run_line",
     # the loops between input, output and the model
     "chat_cordis_plugin.chat:converse",
     "agent_cordis_plugin.loop:LoopModel.reply",
+    "agent_cordis_plugin.loop:_today",                        # the clock: the date the loop tells with a message
     "agent_cordis_plugin.transcript:MemoryTranscript.append",
     # Claude Code: one process per conversation and what it holds, saved in the session's
     # state dir; the one read of local.env; a rebuilt session file; the CLI's stderr to a log;
@@ -236,27 +243,37 @@ exclude = [
     "models_cordis_plugin.claude_code.detach:main",
     # the models file and the environment that says where it is, read when a model is chosen
     "models_cordis_plugin.named:read_models", "models_cordis_plugin.named:environ",
+    # whether the models file is in the project, which the model can write (then it is not read):
+    # the project's root resolved, and the file's links followed, each time before it is read
+    "models_cordis_plugin.named:in_project", "models_cordis_plugin.providers:refused",
     # the model row reads the models file when it starts (`known`), and the `models` value reads
     # it again each time it is asked, so a /model or the status bar never sees a stale one
     "models_cordis_plugin.providers:known", "models_cordis_plugin.providers:resolved",
     "models_cordis_plugin.providers:opened",
-    # the `models` value: each answer reads the models file afresh (through `known`); the rest
-    # of the catalog (`_config`, `_entry`, `_listed`) stays gated
+    # the `models` value: each answer reads the models file afresh (through `known`), or asks
+    # whether it is in the project (`problem`); the rest of the catalog (`_config`, `_entry`,
+    # `_listed`) stays gated
     "models_cordis_plugin.catalog:Catalog.path", "models_cordis_plugin.catalog:Catalog.listed",
     "models_cordis_plugin.catalog:Catalog.current", "models_cordis_plugin.catalog:Catalog.check",
+    "models_cordis_plugin.catalog:Catalog.problem",
     # an OpenAI-compatible model: one streamed HTTP call per step, and its key read from local.env
     "models_cordis_plugin.openai.client:authorization",
     "models_cordis_plugin.openai.client:missing_key",  # /model looks for the key's line, reads no value out
     "models_cordis_plugin.openai.client:OpenAIModel.complete",
     # the stand-in OpenAI-compatible server tests run the provider against: its socket
     "models_cordis_plugin.openai.testing:_Handler.*",
-    # I/O at the edges: the project's files
-    "context_cordis_plugin.project:ProjectContext.text",
+    # I/O at the edges: the project's files, for the prompt and for the on-touch row
+    "context_cordis_plugin.project:ProjectContext.text", "context_cordis_plugin.project:ProjectContext.touched",
     # the context files, the files their sections name, and the functions that read those
     "context_cordis_plugin.context_file:ContextFiles.*", "context_cordis_plugin.context_file:_parsed",
     "context_cordis_plugin.context_file:_function", "context_cordis_plugin.context_file:_search",
     "context_cordis_plugin.sections:place", "context_cordis_plugin.sections:rules",
-    "context_cordis_plugin.sections:whole", "context_cordis_plugin.sections:_text",
+    "context_cordis_plugin.sections:place_touched", "context_cordis_plugin.sections:rules_touched",
+    "context_cordis_plugin.sections:whole",
+    # a section's file read from the project's root through no link (`read`, which the functions
+    # above read with; `_opened` the walk), and the root resolved, to tell what is in the project
+    "context_cordis_plugin.context_file:read", "context_cordis_plugin.context_file:_opened",
+    "context_cordis_plugin.context_file:_roots",
     # the kernel: a socket to a process a jail started, the process itself, and the worker program
     "kernel_cordis_plugin.client:Kernel.*",
     "kernel_cordis_plugin.unjailed:_Process.*", "kernel_cordis_plugin.unjailed:Unjailed.start",
@@ -269,6 +286,11 @@ exclude = [
     "extensions_cordis_plugin.host:Extensions.*",
     "extensions_cordis_plugin.worker:*",
     "extensions_cordis_plugin.testing:*",
+    "brig_cordis_plugin.jail:remove_placeholders",  # rmdir what a gone jail made (its stop, or the next start's sweep)
+    "brig_cordis_plugin.jail:_lives",               # whether a recorded jail's process group still runs
+    "brig_cordis_plugin.jail:_place",               # mkdir a placeholder and mark it, before bubblewrap starts
+    "brig_cordis_plugin.jail:_clear_up",            # take the jail lock alone, then remove_placeholders
+    "brig_cordis_plugin.tripwire:Tripwire.*",       # inotify on the held paths' directories; kills the jail at a lift
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
     "chat_cordis_plugin.wiring:session", "models_cordis_plugin.wiring:model",
 ]

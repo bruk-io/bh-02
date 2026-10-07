@@ -6,7 +6,7 @@ restart; what keeps that safe is where the code runs, not who reads it first.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame` and `system`; its own `system` section tells the model how | `jail`, `commands`, `frame`, `system`, `output` (`confirm`, unjailed) |
+| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame` and `system`; its own `system` section tells the model how | `jail` (`start`, `released`), `commands`, `frame`, `system`, `approval` (`confined`, `approve`) |
 
 Config (`ExtensionsConfig`): `root` (the project, `.`), `path` (the extensions directory under
 it, `.bh-02/plugins`), `watch` (how often it is looked at, 0.5 s).
@@ -38,7 +38,11 @@ async def todo(*, commands, system) -> Effects:
 
 What an extension reaches of bh-02, each only to add to it, each returning its remover:
 - `commands.register(spec, run)`: a slash command for the person (`spec`: `name`, `help`,
-  `usage`; `run`: async, argument text in, text out). A name bh-02 already has is refused.
+  `usage`; `run`: async, argument text in, text out). A name bh-02 already has is refused. Not
+  `commands.claim`, a line prefix (`!`): a prefix takes every line the person starts with it
+  (`!` runs it in their shell, unjailed), so only a row in a layer may claim one. The worker's
+  `commands.claim` raises `PermissionError` saying so, and the host adds nothing an extension
+  sends but a command, a status field and a prompt section (anything else is a `problem`).
 - `frame.status(field, text, *shorter)`: a status-bar field, pushed as `NAME:field`, so it
   can't cover another row's.
 - `system.add(text)`: text in the model's own prompt, told with the next message the model reads
@@ -72,12 +76,13 @@ bh-02 refused). The status bar's `extensions` field shows the same to the person
 
 Not in bh-02's process. `host.py` starts `worker.py` through the `jail` row, the same jail the
 kernel's inputs run in: with `brig:jail` an extension can write only inside the project, can't
-reach the network, and can't read `local.env` or the sessions' state. So an extension loads
-without asking, exactly as an input runs without asking; the model's plugins are as contained as
-its inputs. With `--no-jail` (`kernel:unjailed`) an extension would run with the person's own
-permissions, so each load is put to the person through `output.confirm`, the source shown
+reach the network, and can't read `local.env` or the sessions' state. Each load is put to
+`approval` (`kernel:approval`), the row that decides for inputs too, so an extension loads
+without asking exactly when an input runs without asking; the model's plugins are as contained
+as its inputs. With `--no-jail` (`kernel:unjailed`) an extension would run with the person's own
+permissions, so `approval` puts each load to the person (`output.confirm`), the source shown
 whole (`Load the model's extension todo into bh-02, unjailed (12 lines)?`), and a no leaves it
-unloaded until the file changes.
+unloaded until the file changes. What the model is told about it follows `approval.confined`.
 
 Nothing of an extension crosses into bh-02 but data over the worker's socket: a command's spec
 and, when the person runs it, its argument text out and its answer back; a field's text; a
@@ -88,6 +93,32 @@ added.
 A project that ships a `.bh-02/plugins/` (a repository cloned from someone else) loads its
 extensions when bh-02 starts there, jailed, as the model's would be. Unjailed, each is asked
 about first.
+
+## What the host reads, and writes, there
+
+The model writes the extensions directory from the jail, and `host.py` reads it on the host,
+with the person's permissions, so it follows no link there (the kernel's rule for its startup
+files: never read a file the model could write, or reach through a link it could make, and hand
+its text to the model). A link to `local.env`, or a hard link to it, would otherwise send the
+secret to the worker as an extension's source, where an extension already loaded could keep
+it, and a SyntaxError on its first line would put that line in status.json and the prompt.
+- The directory is opened from the project's root a name at a time (`.bh-02`, then `plugins`)
+  with `O_NOFOLLOW`, and listed and read through that descriptor (`_opened`). The root itself
+  is the person's, and may be reached through a link of theirs.
+- An extension is opened beneath it with `O_NOFOLLOW` (and `O_NONBLOCK`, so a FIFO swapped in
+  never blocks), and read only when `fstat` on that descriptor says it is a regular file with
+  one name (`watch.refusal`). So a file swapped for a link after it was found, or as it is
+  opened, is not read either.
+- A file refused is not loaded (what an earlier version of it added goes), and status.json says
+  why and what to write instead: `.bh-02/plugins/leak.py is a link, which bh-02 does not follow
+  there (it could lead to a file the jail hides): write the extension itself at
+  .bh-02/plugins/leak.py, not a link to it`; a hard link says how many names it has.
+- A link on the way (`.bh-02`, or the directory itself) loads nothing: nothing in it is listed,
+  read or written, status.json included, so the row's `system` section says it instead
+  (`watch.linked`: make it a directory in the project, not a link).
+- status.json is written through the same descriptor, as a new file renamed over the old, so a
+  link the model left at `status.json` is replaced, not written through, and an input never
+  reads half of one.
 
 ## The worker
 
@@ -111,12 +142,24 @@ end it: `os._exit` at import) takes every extension down; nothing loads again, a
 started, until the directory changes, so an extension that ends the worker as it loads isn't
 loaded again every `watch`.
 
+`/release` stops the worker too: on Linux the jail stops every program it started, since the
+worker's jail holds the same placeholders as the kernel's (where bh-02 looks for its
+credential, the person's to fill now). That is not an ending: while the jail is `released()`
+no worker starts, whatever changes in the directory (each extension's status says why), and
+once the next input has started the kernel, every extension there is loads again in a new
+worker, with nothing changed (`test_after_release_stops_the_worker_every_extension_loads_again_once_the_jail_runs`).
+What a command of theirs kept in memory starts afresh, as after any new worker.
+
 ## Tests
 
-- `test_extensions_watch.py` is pure: names, changes, confinement, what the model and the
-  status bar are told.
+- `test_extensions_watch.py` is pure: names, changes, which files may be read, what the model
+  and the status bar are told.
 - `test_extensions_host.py` runs `Extensions` against a real worker under
-  `extensions_cordis_plugin.testing.PlainJail` (a plain subprocess reported as confined or not;
-  it confines nothing) and fakes for the keys: an extension loaded and its command run, changed
-  and deleted, the ways one fails to load, a command name bh-02 has, the unjailed question,
-  a worker an extension ends.
+  `extensions_cordis_plugin.testing.PlainJail` (a plain subprocess; it confines nothing and says
+  so) and fakes for the keys, `approval` among them (confined or not): an extension loaded and
+  its command run, changed and deleted, the ways one fails to load, a command name bh-02 has,
+  the unjailed question, a worker an extension ends, one `/release` stops (`PlainJail`'s
+  `release` stops every program it started, as a Linux `brig:jail`'s does), and the links it does
+  not follow: a link to a file outside, a hard link, `.bh-02` or `.bh-02/plugins` a link, a file
+  swapped for a link between being found and read (by an extension loaded just before it), and a
+  link at `status.json`.

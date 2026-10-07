@@ -420,6 +420,7 @@ _REAL_POPEN_INIT: Final = subprocess.Popen.__init__
 #: argv space-joined, which is exactly `" ".join(_PS_ARGV)`.
 _PS_ARGV: Final = ["/bin/ps", "-Ao", "pid=,ppid=,pgid=,stat=,command="]
 _PS_SELF_COMMAND: Final = " ".join(_PS_ARGV)
+_PS_ENV: Final = {"LC_ALL": "C"}
 
 
 def _ps_rows() -> list[tuple[int, int, int, str, str]]:
@@ -428,7 +429,11 @@ def _ps_rows() -> list[tuple[int, int, int, str, str]]:
     harness-child leak arm; `stat` is carried for the failure message's
     sake (see this module's docstring: a zombie is still a leak here, not
     excluded by state)."""
-    proc = subprocess.run(_PS_ARGV, capture_output=True, text=True, check=True)
+    # An environment of its own, not the process's: the poller runs this from its thread while a
+    # test on the main thread sets variables (monkeypatch.setenv), and a child exec'd with the
+    # live environment meanwhile fails with EFAULT ('Bad address') -- 58 of 298 spawns in a
+    # stress run, 0 of 296 with this -- which then fails the whole session's teardown.
+    proc = subprocess.run(_PS_ARGV, capture_output=True, text=True, check=True, env=_PS_ENV)
     rows: list[tuple[int, int, int, str, str]] = []
     for line in proc.stdout.splitlines():
         stripped = line.strip()

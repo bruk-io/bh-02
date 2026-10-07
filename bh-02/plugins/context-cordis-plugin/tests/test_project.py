@@ -1,5 +1,6 @@
 """The prompt as a function, and the files it is read from, in a temporary project."""
 
+import datetime
 from pathlib import Path
 
 from context_cordis_plugin import ContextConfig, ProjectContext, branch_of, describe, project
@@ -7,16 +8,24 @@ from cordis.testing import drive
 
 
 def test_the_prompt_says_where_the_model_is_working() -> None:
-    text = describe("/src/app", "main", "2026-09-22")
-    assert "Working directory: /src/app\nGit branch: main\nToday: 2026-09-22" in text
-    assert "Git branch" not in describe("/src/app", None, "2026-09-22")
+    text = describe("/src/app", "main")
+    assert text.endswith("Working directory: /src/app\nGit branch: main")
+    assert "Git branch" not in describe("/src/app", None)
     assert "instructions" not in text  # the project's own are the `guidance` row's section
+
+
+def test_the_prompt_reads_the_same_every_day(tmp_path: Path) -> None:
+    """The date would make the prompt differ from the one a conversation began with every
+    midnight, and the loop tell the model its instructions changed: the loop tells the date with
+    the person's message instead."""
+    text = ProjectContext(ContextConfig(root=str(tmp_path), home=str(tmp_path))).text()
+    assert "Today" not in text and datetime.date.today().isoformat() not in text
 
 
 def test_the_prompt_says_the_model_is_in_bh_02_and_not_in_claude_code() -> None:
     # A CLAUDE.md is often addressed to Claude Code, and the claude-code provider's prompt opens
     # with Claude Code's own line: the prompt says first where the model really is.
-    text = describe("/src/app", None, "2026-09-22")
+    text = describe("/src/app", None)
     first = text.split("\n\n")[0]
     assert first.startswith("You are the model in bh-02, a coding harness")
     assert "You are not Claude Code and not running inside it" in first

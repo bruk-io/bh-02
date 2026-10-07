@@ -9,6 +9,7 @@ import pytest
 
 import brig.core
 import brig.mech
+import brig.mech.contract
 
 
 def _identity(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -211,7 +212,7 @@ def test_step_events_is_documented_as_present() -> None:
     asserts the positive: the docstring names `EventSource`, names both of
     its methods, and says `run` is what stamps `ts`/`jail_id`.
     """
-    docstring = brig.mech.__doc__
+    docstring = brig.mech.contract.__doc__
     assert docstring is not None
     assert "EventSource" in docstring
     assert "known_at_compile" in docstring

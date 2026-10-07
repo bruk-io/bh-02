@@ -30,6 +30,36 @@ use = "models:catalog"
 id = "transcript"
 use = "agent:transcript"
 
+# Where the loop reads the prompt (a section function may read many files and search the
+# project) and asks `memory`: off the event loop the app shares, one call at a time. Nothing
+# stops a reading part-way, so one a stopped reply left running is waited for before the next
+# begins. A row of its own that depends on nothing, so /clear and /model, which reload the loop,
+# keep it: Ctrl-C after Ctrl-C leaves one reading running, however often the loop reloads.
+[[plugin]]
+id = "executor"
+use = "agent:executor"
+
+# What the model is told with an input's result: a broker of functions rows add, each given the
+# input's code, its result and the project files it opened (`kernel.touched()`), the loop
+# calling each after every input. The shell hints (an input that ran `cat` or `sed` is told how
+# Python does that here) and the context files' on-touch sections (a subdirectory's AGENTS.md or
+# CLAUDE.md, a rule for some files, given when an input first opens a file they cover) add to
+# it, each depending on `transcript`, so a new conversation (/clear) is told afresh and a resumed
+# one is not told again what its transcript holds. The on-touch row asks `system` what the
+# context files say, so it has no config: set `root`, `home` or `files` on the `system` row and
+# they hold for both.
+[[plugin]]
+id = "memory"
+use = "agent:memory"
+
+[[plugin]]
+id = "shell-hints"
+use = "kernel:shell_hints"
+
+[[plugin]]
+id = "on-touch"
+use = "context:on_touch"
+
 # The app: binds `input`, `output` and `frame` (where rows push status). It depends on its
 # config alone, so no reload elsewhere restarts it.
 [[plugin]]
@@ -41,7 +71,10 @@ id = "chat"
 use = "chat:session"
 
 # The kernel: a persistent Python namespace, and the model's one tool, `python(code)`. Jailed,
-# its inputs run without asking; unjailed (`kernel:unjailed` below), each input asks first.
+# its inputs run without asking; unjailed (`kernel:unjailed` below), each is put to the person
+# first (the `approval` row). A new kernel runs its startup files first (config `startup`, by
+# default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`,
+# the only one the model may edit); unjailed, the model is told to run them as inputs instead.
 [[plugin]]
 id = "kernel"
 use = "kernel:kernel"
@@ -50,6 +83,24 @@ use = "kernel:kernel"
 [[plugin]]
 id = "jail"
 use = "brig:jail"
+
+# Whether the model's code may run: each input (the loop asks) and each extension to load (the
+# extensions row asks). At once when the jail confines it (writes and network enforced); else
+# the person is asked, through the ui's approval modal, and only a yes runs it. It depends on the
+# jail and the ui, not the kernel, so `/clear` leaves it up. It runs in bh-02's own process:
+# only a layer replaces it; an extension has no way to.
+[[plugin]]
+id = "approval"
+use = "kernel:approval"
+
+# `/release`: stops the kernel until the next input, and with it its jail, which on Linux frees
+# what the jail holds on the host (where bh-02 looks for its credential: how to add one
+# mid-session); the jail stops the extensions' worker too, and the extensions load again once
+# the next input has started the kernel. A row of its own over `kernel` and `commands`, so the
+# kernel depends on its jail alone.
+[[plugin]]
+id = "release"
+use = "kernel:release"
 
 # The status bar: the session's id, the model and its provider, and the kernel's jail grades
 # (usage is the app's own). A small row over `kernel`, `loader`, `models`, `sessions` and
@@ -62,8 +113,9 @@ use = "tui:status"
 id = "system"
 use = "context:project"
 
-# Slash commands: a broker rows register commands into, and the operator's own (/rows,
-# /explain, /restart, /clear, /model), which act through the loader's handle.
+# Slash commands: a broker rows register commands into (and a layer's rows claim line prefixes
+# in), and the operator's own (/rows, /explain, /restart, /clear, /model), which act through the
+# loader's handle. The chat row asks it which lines are commands (`claims`).
 [[plugin]]
 id = "commands"
 use = "commands:registry"
@@ -71,6 +123,27 @@ use = "commands:registry"
 [[plugin]]
 id = "operator"
 use = "commands:operator"
+
+# `/compact [WHAT TO KEEP]`: the model summarises the conversation, and a new one begins from
+# the summary, written over the transcript row's file (its `path`; the old kept as `.bak`, then
+# `.bak.2`, ...): the loop and the transcript restart, so the prompt is read afresh, and the
+# kernel keeps its namespace, which the summary names. A row of its own over `model`, `kernel`
+# (its tool spec), the loader, `commands` and `output`, not the operator, which never depends on
+# the model. Ctrl-C doesn't stop a command (quitting does), so the model has `timeout` seconds
+# (300) to answer, and a note says so as it begins.
+[[plugin]]
+id = "compact"
+use = "agent:compact"
+
+# `!COMMAND`: a line starting with `!` runs as a shell command, as you (not in the jail), in the
+# project, through your $SHELL. The app owns the terminal, so its output is captured, and Ctrl-C
+# can't stop a command, so it is stopped at its `timeout` (120 s; config: `prefix`, `cwd`,
+# `timeout`, `shell`), or when you quit. What it printed is shown, and the model reads it with
+# your next message, never mid-turn (`commands` holds it meanwhile, so `/model` keeps it). The
+# prefix is claimed in `commands`, which only a row in a layer can do: an extension can't.
+[[plugin]]
+id = "shell-command"
+use = "commands:shell_command"
 
 # The command palette (Ctrl-P) offers the commands broker's commands.
 [[plugin]]

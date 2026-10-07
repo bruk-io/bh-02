@@ -46,6 +46,21 @@ async def test_leaving_the_app_ends_the_input_and_settles_every_turn() -> None:
     await asyncio.wait_for(bridge.interrupted(), 1)  # returns at once: nothing left to stop
 
 
+async def test_the_input_is_closed_once_the_app_has_ended_and_not_before() -> None:
+    """`closed()` is how a command running (a `!` one may take minutes) hears that nobody is
+    left to read its answer; Ctrl-C is not it."""
+    bridge = Bridge()
+    bridge.submit("!sleep 600")
+    assert await bridge.line() == "!sleep 600"
+    closed = asyncio.ensure_future(TuiInput(bridge).closed())
+    assert bridge.interrupt()  # Ctrl-C while the command runs
+    await asyncio.sleep(0.01)
+    assert not closed.done()
+    bridge.end()  # Ctrl-Q
+    await asyncio.wait_for(closed, 1)
+    await asyncio.wait_for(TuiInput(bridge).closed(), 1)  # and at once from then on
+
+
 async def test_a_crash_reaches_whoever_reads_next() -> None:
     bridge = Bridge()
     reading = asyncio.ensure_future(bridge.line())

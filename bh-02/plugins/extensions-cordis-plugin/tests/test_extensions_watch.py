@@ -1,9 +1,10 @@
-"""The decisions, as pure functions: names, changes, confinement, and what is said."""
+"""The decisions, as pure functions: names, changes, and what is said."""
 
 import json
+import stat
 
-from extensions_cordis_plugin import Status, changes, extension_name, instructions, is_confined
-from extensions_cordis_plugin.watch import status_file, status_forms
+from extensions_cordis_plugin import Status, changes, extension_name, instructions
+from extensions_cordis_plugin.watch import linked, refusal, status_file, status_forms
 
 
 def test_an_extension_is_a_lowercase_python_module() -> None:
@@ -20,10 +21,38 @@ def test_what_to_load_is_what_is_new_or_changed_and_what_to_unload_is_what_is_go
     assert changes(after, after) == ((), ())
 
 
-def test_extensions_load_without_asking_exactly_when_inputs_run_without_asking() -> None:
-    assert is_confined({"fs_write": "enforced", "network": "enforced", "fs_read": "best_effort"})
-    assert not is_confined({"fs_write": "enforced", "network": "unenforced"})
-    assert not is_confined({})
+def test_bh_02_reads_an_extension_only_from_a_regular_file_with_one_name() -> None:
+    """The model writes the directory from the jail and bh-02 reads it on the host: what it
+    opened there (following no link) must be the model's own file, or a link could hand the
+    model a file the jail hides. Each refusal says what to write instead."""
+    file = ".bh-02/plugins/todo.py"
+    assert refusal(file, stat.S_IFREG | 0o644, 1) is None
+    assert refusal(file, stat.S_IFLNK | 0o777, 1) == (
+        ".bh-02/plugins/todo.py is a link, which bh-02 does not follow there (it could lead to a "
+        "file the jail hides): write the extension itself at .bh-02/plugins/todo.py, not a link to it"
+    )
+    assert refusal(file, stat.S_IFREG | 0o644, 3) == (
+        ".bh-02/plugins/todo.py has 3 names (a hard link), and bh-02 does not read one there (another "
+        "name could be a file the jail hides): write the extension at .bh-02/plugins/todo.py as a "
+        "file of its own"
+    )
+    for other in (stat.S_IFIFO, stat.S_IFDIR, stat.S_IFSOCK):
+        assert refusal(file, other | 0o644, 1) == (
+            ".bh-02/plugins/todo.py is not a regular file: write the extension at "
+            ".bh-02/plugins/todo.py as a file of its own"
+        )
+
+
+def test_a_link_on_the_way_to_the_extensions_is_told_in_the_model_s_prompt() -> None:
+    """Nothing is written through such a link, status.json included, so the prompt says it."""
+    why = linked(".bh-02/plugins", ".bh-02")
+    assert why == (
+        ".bh-02 is a link, so bh-02 loads no extension from .bh-02/plugins (a link could lead to "
+        "files the jail hides): make .bh-02 a directory in the project, not a link, and write the "
+        "extensions in .bh-02/plugins"
+    )
+    told = instructions(".bh-02/plugins", True, {}, None, why)
+    assert told == instructions(".bh-02/plugins", True, {}) + "\n\n" + why
 
 
 def test_the_model_is_told_how_to_extend_bh_02_and_how_each_extension_is() -> None:

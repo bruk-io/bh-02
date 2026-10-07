@@ -46,6 +46,18 @@ def test_hooks_are_a_set_with_per_hook_removal_and_a_snapshot_on_iteration() -> 
     assert list(hooks) == ["b"] and len(hooks) == 1
 
 
+def test_the_same_hook_added_twice_is_two_registrations() -> None:
+    """Definition 44: each registration is its own entry, even of one function."""
+    hooks: Hooks[str] = Hooks()
+    remove_one, remove_two = hooks.add("same"), hooks.add("same")
+    remove_one()
+    assert list(hooks) == ["same"]
+    remove_one()  # idempotent: the other registration stays
+    assert list(hooks) == ["same"]
+    remove_two()
+    assert list(hooks) == []
+
+
 async def test_contributors_come_and_go_without_reloading_the_broker_or_each_other() -> None:
     @component
     async def broker() -> Effects:

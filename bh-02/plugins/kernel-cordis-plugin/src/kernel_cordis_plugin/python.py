@@ -12,19 +12,30 @@ each input to the person and runs it only on a yes.
 
 A model trained on shell tools tends to use the REPL as one: each input a single `cat`, `sed`
 or `ls` through subprocess, its output printed whole. `programs` is what an input runs,
-`shelled` the part of it Python does itself, and
-`shell_note` is what the kernel adds to that input's result, once for each kind of work: how
-Python does it here, where the result stays in a variable for the next input.
+`shelled` the part of it Python does itself, and `shell_note` how Python does that work here,
+where the result stays in a variable for the next input. `ShellHints` is the `memory` function
+that tells the model so with that input's result, once for each kind of work in a conversation,
+a resumed one too: it reads what the conversation's transcript says the model was told.
 """
 
 import ast
 import itertools
 import os
+import re
 import shlex
-from collections.abc import Iterator, Mapping, Sequence
-from typing import Any
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Protocol, runtime_checkable
 
-__all__ = ["PYTHON", "instructions_for", "programs", "shell_note", "shelled"]
+__all__ = [
+    "PYTHON",
+    "Memory",
+    "ShellHints",
+    "Transcript",
+    "instructions_for",
+    "programs",
+    "shell_note",
+    "shelled",
+]
 
 PYTHON: Mapping[str, Any] = {
     "name": "python",
@@ -48,10 +59,10 @@ _REPL = (
     "Each call sends it `code`, as if you typed it at the prompt, and you get back what it "
     "printed. It is one process, whose working directory is the project, and it persists for "
     "this run of bh-02: the variables, imports and functions an input defines are there for "
-    "every later one, in this turn and later ones, and across a /model switch. It starts empty "
-    "when bh-02 starts (a resumed session too: the conversation comes back, the variables do "
-    "not), after /clear, and if the process dies (the next input says so): then define again "
-    "what you need rather than assume it."
+    "every later one, in this turn and later ones, and across a /model switch or a /compact. It "
+    "starts empty when bh-02 starts (a resumed session too: the conversation comes back, the "
+    "variables do not), after /clear, and if the process dies (the next input says so): then "
+    "define again what you need rather than assume it."
 )
 _EXAMPLE = """    import re, subprocess
     from pathlib import Path
@@ -101,15 +112,19 @@ _USE = (
 )
 
 
-def instructions_for(confined: bool, startup: str = ".bh-02/kernel.py") -> str:
+def instructions_for(
+    confined: bool,
+    startup: Sequence[str] = (".bh-02/kernel.py",),
+    reads: Sequence[str] = (),
+    *,
+    theirs: Sequence[str] = (),
+) -> str:
     """What the model is told about acting in code: the one tool, its REPL and how long that
-    lasts, the project's startup file (`startup`), how to use it, and where its code runs."""
-    keep = f"Helpers worth having in every session go in {startup}, which you can write and grow: " + (
-        "a new REPL runs it before your first input and says what it defined."
-        if confined
-        else "when it is there, a new REPL says so, and you run it as an input of your own (here "
-        "every input is put to the person, so it does not run unasked)."
-    )
+    lasts, the startup files (`startup`, the project's, which are the model's to write; `theirs`,
+    the person's own, which run before them and are not), how to use it, and where its code
+    runs. `reads`, the trees the jail lets code read when it reads by allowlist (a Linux jail), is
+    said plainly, so the model spends no steps on reads that can't succeed, and so is how to see
+    a helper of the person's, whose file is usually not among them."""
     where = (
         "Your code runs in a jail: it can write only inside the project directory, cannot reach "
         "the network, and cannot read credentials. Inside the project it also cannot write what "
@@ -119,7 +134,50 @@ def instructions_for(confined: bool, startup: str = ".bh-02/kernel.py") -> str:
         else "Your code runs unjailed, with the person's own permissions: each input is shown to "
         "the person and runs only if they approve it, so keep inputs small and say what they do."
     )
-    return "\n".join([f"{_REPL} {keep}", "", *_USE, "", where])
+    if reads:
+        where += (
+            f" The jail your code runs in reads only these trees: {', '.join(reads)}. Nothing else "
+            "exists in it, the person's home directory included (at most the path to an "
+            "interpreter installed under it): no ~/.gitconfig, ~/.ssh, dotfiles or caches, so don't "
+            "look for files outside these. git commits carry the person's name and email when git "
+            "on their machine knows them."
+        )
+        if confined and theirs:
+            where += (
+                " The person's startup file runs in the REPL even where your code finds no such "
+                "file (bh-02 reads it for the REPL): inspect.getsource(helper) shows one of its "
+                "helpers."
+            )
+    keep = _keep(confined, (startup,) if isinstance(startup, str) else startup, theirs)
+    return "\n".join([f"{_REPL} {keep}".rstrip(), "", *_USE, "", where])
+
+
+def _keep(confined: bool, startup: Sequence[str], theirs: Sequence[str]) -> str:
+    """What the model is told of the startup files: the project's (`startup`) are its own to
+    write and grow; the person's (`theirs`), which come first, are theirs and not its to edit."""
+    runs = (
+        "a new REPL runs it before your first input and says what it defined."
+        if confined
+        else "when it is there, a new REPL says so, and you run it as an input of your own (here "
+        "every input is put to the person, so it does not run unasked)."
+    )
+    said = []
+    if startup:
+        said.append(
+            f"Helpers worth having in every session go in {' and '.join(startup)}, the project's "
+            f"startup file, which you can write and grow: {runs}"
+        )
+    if theirs and startup:
+        said.append(
+            "Only the project's startup file is yours to edit: the person may keep helpers of "
+            f"their own in {' and '.join(theirs)}, which comes before it, and that file is theirs."
+        )
+    elif theirs:
+        said.append(
+            f"The person may keep helpers of their own in {' and '.join(theirs)}: {runs} That file "
+            "is theirs, not yours to edit."
+        )
+    return " ".join(said)
 
 
 # The shell commands an input may run for work Python does itself, by kind of work, and how
@@ -148,6 +206,23 @@ _RUNNERS = {
 }
 _SHELLS = {"sh", "bash", "zsh"}
 _SEPARATORS = {"|", "||", "&&", ";", "&", "(", ")"}
+# What an input that did such work is told (`shell_note`): the commands it ran, and the way
+# Python does each kind of work they did, joined by "; ".
+_HINT = (
+    "(this input ran {commands} through a shell. Python does that itself here, and keeps the "
+    "result in a variable for the next input: {ways}. Keep subprocess for programs such as "
+    "tests, git and builds.)"
+)
+# That note in a transcript's `tool` entry, a line of its own: the loop puts each note after a
+# blank line, and another note or the entry's end follows it; before the `memory` broker, the
+# kernel put it after the result's last line, one newline and no blank line, at the entry's end,
+# so one newline before it counts too (as `scripts/model-friction` reads it). `_ways` takes its
+# ways out of the line with `partition`: a pattern with a group for each would take time with the
+# square of a line's length, and the model's code makes a result's lines what it likes. Here each
+# line is tried from the newline or two before it, and given up at its own end.
+_HINT_HEAD, _HINT_REST = _HINT.split("{commands}")  # what comes before the commands
+_HINT_MIDDLE, _HINT_TAIL = _HINT_REST.split("{ways}")  # between them and the ways; after the ways
+_HINTED = re.compile(r"\n\n?(" + re.escape(_HINT_HEAD) + r"[^\n]*)(?=\n\n|\Z)")
 
 
 def programs(code: str) -> tuple[tuple[str, bool], ...]:
@@ -180,11 +255,73 @@ def shell_note(found: Sequence[tuple[str, str]]) -> str:
     names = [f"`{command}`" for command, _ in found]
     commands = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
     ways = "; ".join(dict.fromkeys(_INSTEAD[kind] for _, kind in found))
-    return (
-        f"(this input ran {commands} through a shell. Python does that itself here, and keeps the "
-        f"result in a variable for the next input: {ways}. Keep subprocess for programs such as "
-        "tests, git and builds.)"
-    )
+    return _HINT.format(commands=commands, ways=ways)
+
+
+def _hinted(messages: Iterable[Mapping[str, Any]]) -> set[str]:
+    """The kinds of work a conversation's transcript (`messages`) says the model was told Python
+    does: each shell note (`shell_note`) told with an input's result names its kinds by their
+    ways. A note is told when a `tool` entry holds it whole, a line after a blank line (or, as
+    a transcript from before the `memory` broker has it, after a line of the result) with a
+    blank line or the entry's end after it: not at the entry's start, and not in what the person
+    says. Where the result ends is not marked, so a note an input printed that way counts too."""
+    kinds = {way: kind for kind, way in _INSTEAD.items()}
+    told = (str(m.get("content") or "") for m in messages if m.get("role") == "tool")
+    return {
+        kinds[way]
+        for content in told
+        for line in _HINTED.findall(content)
+        for way in _ways(line).split("; ")
+        if way in kinds
+    }
+
+
+def _ways(line: str) -> str:
+    """The ways a shell note's line (`_HINTED`'s) names, '' for a line that is not one."""
+    _, found, rest = line.partition(_HINT_MIDDLE)
+    return rest.removesuffix(_HINT_TAIL) if found and rest.endswith(_HINT_TAIL) else ""
+
+
+@runtime_checkable
+class Memory(Protocol):
+    """What the shell-hints row needs of the `memory` value (CONTRACTS.md: memory): a function
+    added, and its remover back."""
+
+    def add(self, fn: Callable[[Mapping[str, Any]], str]) -> Callable[[], None]: ...
+
+
+@runtime_checkable
+class Transcript(Protocol):
+    """What the shell-hints row needs of the `transcript` value (CONTRACTS.md: transcript): the
+    conversation so far, whose `tool` entries carry each input's result and the notes told with
+    it."""
+
+    @property
+    def messages(self) -> Sequence[Mapping[str, Any]]: ...
+
+
+class ShellHints:
+    """A `memory` function: given an input (`code`, ...), how Python does the shell work it ran
+    (`shell_note`), for each kind of work the first time this conversation sees it; '' after.
+
+    What the conversation was told before this began (a resumed session's, or this one's before
+    the row reloaded) is in its `transcript`, read once, at the first input: a kind a shell note
+    there named is told already."""
+
+    def __init__(self, transcript: Transcript) -> None:
+        self._transcript = transcript
+        # the kinds of work the model has been told Python does; None until the first input reads
+        # them from the transcript. Called on the loop's `executor`, one call at a time, so it
+        # takes no lock.
+        self._told: set[str] | None = None
+
+    def __call__(self, input: Mapping[str, Any]) -> str:
+        if self._told is None:
+            self._told = _hinted(self._transcript.messages)
+        told = self._told
+        new = [(command, kind) for command, kind in shelled(str(input.get("code", ""))) if kind not in told]
+        told.update(kind for _, kind in new)
+        return shell_note(new)
 
 
 def _command_lines(tree: ast.AST) -> Iterator[str]:

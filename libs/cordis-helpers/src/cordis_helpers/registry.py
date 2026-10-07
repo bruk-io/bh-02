@@ -62,19 +62,25 @@ class Hooks[F]:
     """A set of callables whose order must not matter: guards, listeners, policies."""
 
     def __init__(self) -> None:
-        self._hooks: list[F] = []
+        self._hooks: list[tuple[object, F]] = []
 
     def add(self, fn: F) -> Callable[[], None]:
-        """Add a hook; returns the remover, which takes only this hook."""
-        self._hooks.append(fn)
+        """Add a hook; returns the remover, which takes only this registration and is
+        idempotent. Two rows adding the same function hold two registrations, so either can
+        leave without taking the other's."""
+        mine = object()
+        self._hooks.append((mine, fn))
 
         def remove() -> None:
-            self._hooks[:] = [h for h in self._hooks if h is not fn]
+            self._hooks[:] = [entry for entry in self._hooks if entry[0] is not mine]
 
         return remove
 
     def __iter__(self) -> Iterator[F]:
-        return iter(list(self._hooks))  # a snapshot: a hook may add or remove hooks
+        # a snapshot, the list copied in one step: a hook may add or remove hooks, and one
+        # iterating in a worker thread must not see the list shift under it while the event loop
+        # adds or removes one (it would skip a hook, or see one twice)
+        return iter([fn for _, fn in list(self._hooks)])
 
     def __len__(self) -> int:
         return len(self._hooks)

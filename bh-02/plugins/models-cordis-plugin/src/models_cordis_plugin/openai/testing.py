@@ -3,7 +3,9 @@
 It serves `POST /v1/chat/completions` on 127.0.0.1 from a thread, streaming each reply as
 server-sent events the way the API does (a role delta, content in pieces, a tool call's id and
 name first and its arguments in pieces, `finish_reason`, a usage-only event, `[DONE]`), and
-keeps every request it was sent. What it answers depends on the conversation's last message:
+keeps every request it was sent. What it answers depends on the conversation's last message,
+read without the date `agent:loop` may tell first (`(Today's date: 2026-10-07.)` and a blank
+line, CONTRACTS.md: message):
 
 - a tool result: `the input said: <result>` (a python call's round trip);
 - `call <code>`: one call of the offered tool with `<code>` as its `code`;
@@ -23,6 +25,7 @@ connection before the reply was all written.
 """
 
 import json
+import re
 import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
@@ -32,6 +35,21 @@ from typing import Any
 __all__ = ["StubServer"]
 
 type Json = Mapping[str, Any]
+
+_DATED = re.compile(r"\(Today's date: [0-9-]+\.\)\n\n")
+
+
+_CHANGED = "(End of what changed.)\n\n"  # how the loop's note on changed instructions ends
+
+
+def _said(message: Json) -> str:
+    """A message's text, without what the loop may put first: the date, and a note that the
+    model's instructions changed."""
+    content = str(message.get("content") or "")
+    content = content[dated.end() :] if (dated := _DATED.match(content)) else content
+    return (
+        content.partition(_CHANGED)[2] if content.startswith("(bh-02: ") and _CHANGED in content else content
+    )
 
 
 def _chunk(model: str, delta: Json | None = None, finish: str | None = None, **extra: Any) -> dict[str, Any]:
@@ -50,7 +68,7 @@ def _events(body: Json) -> Iterator[dict[str, Any] | str]:
     model = str(body.get("model", "stub"))
     messages: Sequence[Json] = body.get("messages", [])
     last = messages[-1] if messages else {"role": "user", "content": ""}
-    said = str(last.get("content") or "")
+    said = _said(last)
     yield _chunk(model, {"role": "assistant", "content": ""})
     if last.get("role") == "tool":
         for part in ("the input ", f"said: {said.strip()}"):
@@ -132,7 +150,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.server.strict and "stream_options" in body:
             self._json(422, "body.stream_options: Extra inputs are not permitted")
             return
-        said = str((body.get("messages") or [{}])[-1].get("content") or "")
+        said = _said((body.get("messages") or [{}])[-1])
         if said.startswith("status "):
             self._json(int(said.split()[1]), f"stub says {said}")
             return

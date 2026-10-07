@@ -2,13 +2,24 @@
 
 import os
 import sys
+import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
-from context_cordis_plugin import ContextConfig, ContextFiles, ProjectContext, parse
+from context_cordis_plugin import (
+    ContextConfig,
+    ContextFiles,
+    ProjectContext,
+    parse,
+    place,
+    place_touched,
+    read,
+)
 
 _NAMED = "context_cordis_plugin.sections:named"
+_WHOLE = "context_cordis_plugin.sections:whole"
 
 
 def _write(path: Path, text: str) -> Path:
@@ -46,11 +57,48 @@ def test_the_project_s_file_may_name_only_bh_02_s_own_functions() -> None:
     """The model can write the project's file, and its functions run in bh-02, outside the jail."""
     with pytest.raises(ValueError, match="may name only bh-02's own functions") as raised:
         parse('[[section]]\nfunction = "os:system"\n', ".bh-02/context.toml", trusted=False)
-    assert "~/.config/bh-02/context.toml" in str(raised.value)  # says where one of yours goes
+    # says where one of yours goes, as the models file's docs do
+    assert "$XDG_CONFIG_HOME/bh-02/context.toml (else ~/.config/bh-02/context.toml)" in str(raised.value)
     assert (
         parse('[[section]]\nfunction = "os:system"\n', "mine.toml", trusted=True)[0][0].function
         == "os:system"
     )
+
+
+def test_the_project_s_file_may_name_only_files_in_it_and_only_add() -> None:
+    """Whatever the project's file names, bh-02 reads outside the jail, so it names no file the
+    jail keeps from the model: none outside the project, none hidden; and it cannot drop yours."""
+    for pattern in ("../local.env", "~/.ssh/id_rsa", "/etc/passwd", ".git/config", "docs/.private/*.md"):
+        toml = f'[[section]]\nfiles = ["{pattern}"]\nfunction = "{_NAMED}"\n'
+        with pytest.raises(ValueError, match="may name only files in the project that are not hidden"):
+            parse(toml, ".bh-02/context.toml", trusted=False)
+        assert parse(toml, "mine.toml", trusted=True)[0][0].files == (pattern,)
+    with pytest.raises(ValueError, match="may only add sections, not `replace` yours"):
+        parse("replace = true", ".bh-02/context.toml", trusted=False)
+
+
+def test_nothing_is_read_through_a_section_that_the_model_could_not_read(tmp_path: Path) -> None:
+    """A link the model makes in the project, or a secret's name, reads nothing; a link from one
+    guidance file to another, or one of the person's own outside the project, still reads."""
+    context, root, home = _context(tmp_path)
+    _write(tmp_path / "local.env", "FAKE-BESIDE")
+    _write(home / ".ssh/id_test", "FAKE-KEY")
+    _write(root / "local.env", "FAKE-INSIDE")
+    (root / "CLAUDE.local.md").symlink_to("../local.env")
+    (root / "AGENTS.local.md").symlink_to(home / ".ssh/id_test")
+    _write(root / "src/AGENTS.md", "x")
+    (root / "src/CLAUDE.md").symlink_to(home / ".ssh/id_test")  # where the search finds it
+    _write(root / "AGENTS.md", "The project's.")
+    (root / "CLAUDE.md").symlink_to("AGENTS.md")
+    _write(home / "dotfiles/AGENTS.md", "Mine, kept in my dotfiles.")
+    (home / "AGENTS.md").symlink_to(home / "dotfiles/AGENTS.md")
+    _write(
+        home / ".config/bh-02/context.toml", f'[[section]]\nfiles = ["local.env"]\nfunction = "{_WHOLE}"\n'
+    )
+    text = context.text()
+    assert "FAKE" not in text
+    assert "src/CLAUDE.md" not in text and "src/AGENTS.md" in text
+    assert "From AGENTS.md:\n\nThe project's." in text and "Mine, kept in my dotfiles." in text
 
 
 def test_bh_02_s_own_file_reads_the_guidance_and_the_rules(tmp_path: Path) -> None:
@@ -91,6 +139,76 @@ def test_your_file_adds_a_section_of_your_own_and_an_edit_reaches_the_next_readi
     sys.modules.pop("mine", None)
 
 
+def _yours_and_the_other(root: Path, xdg: Path, dot_config: Path) -> None:
+    """A context file of yours in each place it could be, each saying which it is."""
+    _write(root / "XDG.md", "The one in XDG_CONFIG_HOME.")
+    _write(root / "DOT.md", "The one in ~/.config.")
+    _write(xdg / "bh-02/context.toml", f'[[section]]\nfiles = ["XDG.md"]\nfunction = "{_WHOLE}"\n')
+    _write(dot_config / "bh-02/context.toml", f'[[section]]\nfiles = ["DOT.md"]\nfunction = "{_WHOLE}"\n')
+
+
+def test_your_file_is_in_xdg_config_home_when_it_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """As the models file is: `$XDG_CONFIG_HOME/bh-02/context.toml`, and then not ~/.config's."""
+    context, root, home = _context(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    _yours_and_the_other(root, tmp_path / "xdg", home / ".config")
+    text = context.text()
+    assert "From XDG.md:\n\nThe one in XDG_CONFIG_HOME." in text and "DOT.md" not in text
+
+
+@pytest.mark.parametrize("xdg", [None, ""], ids=["unset", "empty"])
+def test_your_file_is_in_your_home_s_config_when_xdg_config_home_is_unset_or_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, xdg: str | None
+) -> None:
+    context, root, home = _context(tmp_path)
+    if xdg is not None:
+        monkeypatch.setenv("XDG_CONFIG_HOME", xdg)
+    _yours_and_the_other(root, tmp_path / "xdg", home / ".config")
+    text = context.text()
+    assert "From DOT.md:\n\nThe one in ~/.config." in text and "XDG.md" not in text
+
+
+def test_your_file_in_an_xdg_config_home_inside_the_project_is_the_project_s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The model can write anywhere in the project, so a config directory there puts your file on
+    the project's terms, as a home there does: wherever its name came from, where it is decides."""
+    context, root, _ = _context(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(root / "config"))
+    _write(root / "AGENTS.md", "Still here.")
+    _write(root / "config/bh-02/context.toml", '[[section]]\nfiles = ["x"]\nfunction = "os:system"\n')
+    text = context.text()
+    assert "(bh-02 could not read the context file" in text and "may name only bh-02's own functions" in text
+    assert "From AGENTS.md:\n\nStill here." in text  # the rest still say theirs
+
+
+def test_a_pipe_swapped_in_as_the_project_s_context_file_is_refused_without_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pipe with no writer, swapped in after the project's file was seen as a file, would hold
+    the reading, and with it every later reading of the prompt (they run one at a time): it is
+    refused at once, and the rest still say theirs."""
+    context, root, _ = _context(tmp_path)
+    _write(root / "AGENTS.md", "Still here.")
+    (root / ".bh-02").mkdir()
+    os.mkfifo(root / ".bh-02/context.toml")
+    is_file = Path.is_file
+    monkeypatch.setattr(  # seen as a file a moment before it was read
+        Path,
+        "is_file",
+        lambda self: (self.name, self.parent.name) == ("context.toml", ".bh-02") or is_file(self),
+    )
+    said: list[str] = []
+    reading = threading.Thread(target=lambda: said.append(context.text()), daemon=True)
+    reading.start()
+    reading.join(5)
+    assert said, "the reading waited on the pipe"
+    assert "(bh-02 could not read the context file" in said[0] and "is not a regular file" in said[0]
+    assert "From AGENTS.md:\n\nStill here." in said[0]
+
+
 def test_a_project_file_naming_another_function_is_refused_and_says_so(tmp_path: Path) -> None:
     context, root, _ = _context(tmp_path)
     _write(root / ".bh-02/context.toml", '[[section]]\nfiles = ["x"]\nfunction = "shutil:rmtree"\n')
@@ -111,40 +229,185 @@ def test_a_section_that_fails_says_so_and_the_rest_still_say_theirs(tmp_path: Pa
 
 
 def test_a_file_a_wildcard_matches_is_found_at_the_next_reading_added_or_removed(tmp_path: Path) -> None:
-    files, root = ContextFiles((".bh-02/context.toml",), 20_000), tmp_path
+    files, root, home = ContextFiles(("~/mine.toml",), 20_000), tmp_path / "p", tmp_path
     _write(
-        root / ".bh-02/context.toml",
+        home / "mine.toml",
         'replace = true\n[[section]]\nfiles = ["docs/**/*.md", ".claude/rules/*.md"]\n'
         f'function = "{_NAMED}"\n',
     )
     _write(root / "docs/a.md", "a")
-    assert files.text(root, tmp_path).endswith("docs/a.md.")
+    assert files.text(root, home).endswith("docs/a.md.")
     _write(root / "docs/b.md", "b")
     _write(root / "docs/deep/c.md", "c")  # in a directory that was not there to look in
-    assert files.text(root, tmp_path).endswith("docs/a.md, docs/b.md, docs/deep/c.md.")
+    assert files.text(root, home).endswith("docs/a.md, docs/b.md, docs/deep/c.md.")
     (root / "docs/a.md").unlink()
-    assert files.text(root, tmp_path).endswith("docs/b.md, docs/deep/c.md.")
+    assert files.text(root, home).endswith("docs/b.md, docs/deep/c.md.")
     _write(root / ".claude/rules/new.md", "r")  # under directories that were not there at all
-    assert ".claude/rules/new.md" in files.text(root, tmp_path)
+    assert ".claude/rules/new.md" in files.text(root, home)
 
 
 def test_a_search_looks_again_only_when_a_directory_it_looked_in_changed(tmp_path: Path) -> None:
     """Each reading costs a `stat` of each directory looked in, not a walk: shown by a file whose
     directory's time is put back, which the search does not see."""
-    files, root = ContextFiles((".bh-02/context.toml",), 20_000), tmp_path
+    files, root, home = ContextFiles(("~/mine.toml",), 20_000), tmp_path / "p", tmp_path
     _write(
-        root / ".bh-02/context.toml",
+        home / "mine.toml",
         f'replace = true\n[[section]]\nfiles = ["docs/*.md"]\nfunction = "{_NAMED}"\n',
     )
     _write(root / "docs/a.md", "a")
-    files.text(root, tmp_path)
+    files.text(root, home)
     was = (root / "docs").stat()
     _write(root / "docs/hidden.md", "h")
     os.utime(root / "docs", ns=(was.st_atime_ns, was.st_mtime_ns))
-    assert "hidden.md" not in files.text(root, tmp_path)
+    assert "hidden.md" not in files.text(root, home)
 
 
 def test_the_context_files_say_at_most_max_chars(tmp_path: Path) -> None:
     context, root, _ = _context(tmp_path, max_chars=40)
     _write(root / "AGENTS.md", "x" * 500)
     assert "more chars of project context]" in context.text()
+
+
+def test_your_file_inside_the_project_is_the_project_s(tmp_path: Path) -> None:
+    """Run in your home, the model can write your file too, so it is held to the project's terms."""
+    files, home = ContextFiles(("~/.config/bh-02/context.toml",), 20_000), tmp_path
+    _write(home / ".config/bh-02/context.toml", '[[section]]\nfunction = "os:system"\n')
+    assert "may name only bh-02's own functions" in files.text(home, home)
+
+
+def test_a_link_in_the_project_to_a_file_outside_it_is_still_the_project_s(tmp_path: Path) -> None:
+    """The model may write outside the project too (the jail's scratch directory): a context file
+    it links into the project, or the `.bh-02` directory it links out, is held to the project's
+    terms all the same, so it can name no file outside the project and no function of its own."""
+    context, root, home = _context(tmp_path)
+    _write(home / ".ssh/id_test", "FAKE-KEY")
+    scratch = _write(
+        tmp_path / "scratch/evil.toml",
+        f'[[section]]\nfiles = ["~/.ssh/id_test"]\nfunction = "{_WHOLE}"\n',
+    )
+    (root / ".bh-02").mkdir()
+    (root / ".bh-02/context.toml").symlink_to(scratch)
+    text = context.text()
+    assert "FAKE" not in text and "may name only files in the project" in text
+    (root / ".bh-02/context.toml").unlink()
+    (root / ".bh-02").rmdir()
+    (scratch.parent / "context.toml").write_text(scratch.read_text())
+    (root / ".bh-02").symlink_to(scratch.parent)
+    text = ContextFiles((".bh-02/context.toml",), 20_000).text(root.resolve(), home)
+    assert "FAKE" not in text and "may name only files in the project" in text
+
+
+def test_a_hard_link_in_the_project_is_not_read(tmp_path: Path) -> None:
+    """A second name in the project may be one the model gave a file the jail hides from it."""
+    context, root, _ = _context(tmp_path)
+    secret = _write(tmp_path / "hidden-from-the-jail.txt", "FAKE-HIDDEN")
+    os.link(secret, root / "CLAUDE.local.md")
+    _write(root / "AGENTS.md", "Read me.")
+    text = context.text()
+    assert "FAKE" not in text and "Read me." in text
+
+
+def _swap(files: Sequence[Path], home: Path) -> None:
+    """The model's move: each file made a link to a secret of the person's."""
+    for file in files:
+        file.unlink()
+        file.symlink_to(home / ".ssh/id_test")
+
+
+def _swapped(files: Sequence[Path], *, root: Path, home: Path) -> str:
+    """bh-02's `place`, once the model has swapped each file it was given for a link to a secret:
+    after bh-02 checked what the section found, and before it read them."""
+    _swap(files, home)
+    return place(files, root=root, home=home)
+
+
+def _swapped_touched(
+    files: Sequence[Path], touched: Sequence[Path], *, root: Path, home: Path
+) -> dict[Path, str]:
+    """bh-02's `place_touched`, after the same swap."""
+    _swap(files, home)
+    return place_touched(files, touched, root=root, home=home)
+
+
+def test_a_file_swapped_for_a_link_after_it_was_checked_is_not_read(tmp_path: Path) -> None:
+    """The model can make a link at any moment (an input left running in a loop), so a file in the
+    project is read through no link bh-02 did not allow: one made after the section's files were
+    checked, before they are read, is not followed, for the prompt or for an input's result."""
+    context, root, home = _context(tmp_path)
+    _write(home / ".ssh/id_test", "FAKE-KEY")
+    _write(root / "AGENTS.md", "The project's.")
+    _write(root / "src/AGENTS.md", "Below.")
+    _write(
+        home / ".config/bh-02/context.toml",
+        f'replace = true\n[[section]]\nfiles = ["AGENTS.md"]\nfunction = "{__name__}:_swapped"\n'
+        f'[[section]]\nfiles = ["src/AGENTS.md"]\non_touch = "{__name__}:_swapped_touched"\n',
+    )
+    text = context.text()
+    assert "FAKE" not in text and "(bh-02 could not make the section" in text
+    said = context.touched([str(root / "src/x.py")])
+    assert said and "FAKE" not in str(said)
+
+
+def test_your_file_linked_into_the_project_is_the_project_s(tmp_path: Path) -> None:
+    """The dotfiles case: your context file is a link into ~/dotfiles and bh-02 runs there, so the
+    model can repoint the file in the project at one it wrote outside it. Neither the name nor
+    where it ends is in the project, but a link on the way is: it is the project's."""
+    home = tmp_path / "home"
+    root = home / "dotfiles"
+    _write(home / "secret.txt", "FAKE-SECRET")
+    _write(root / "bh02/context.toml", "")
+    (home / ".config/bh-02").mkdir(parents=True)
+    (home / ".config/bh-02/context.toml").symlink_to(root / "bh02/context.toml")
+    evil = _write(
+        tmp_path / "scratch/evil.toml", f'[[section]]\nfiles = ["~/secret.txt"]\nfunction = "{_WHOLE}"\n'
+    )
+    (root / "bh02/context.toml").unlink()
+    (root / "bh02/context.toml").symlink_to(evil)
+    text = ProjectContext(ContextConfig(root=str(root), home=str(home))).text()
+    assert "FAKE" not in text and "may name only files in the project" in text
+
+
+def test_your_guidance_linked_into_the_project_is_not_read_through_the_link(tmp_path: Path) -> None:
+    """`~/AGENTS.md` a link into ~/dotfiles, and bh-02 run there: the file it leads to is the
+    project's, which the model can repoint, so yours is not read through it. The project's own
+    AGENTS.md is that file, read from the project, on the project's terms."""
+    home = tmp_path / "home"
+    root = home / "dotfiles"
+    _write(home / ".ssh/id_test", "FAKE-KEY")
+    _write(root / "AGENTS.md", "Mine, kept in my dotfiles.")
+    (home / "AGENTS.md").symlink_to(root / "AGENTS.md")
+    context = ProjectContext(ContextConfig(root=str(root), home=str(home)))
+    assert "Mine, kept in my dotfiles." in context.text()
+    (root / "AGENTS.md").unlink()
+    (root / "AGENTS.md").symlink_to(home / ".ssh/id_test")
+    assert "FAKE" not in context.text()
+
+
+def test_read_walks_from_the_project_s_root_through_no_link_but_one_to_another_of_the_files(
+    tmp_path: Path,
+) -> None:
+    """`read`, which bh-02's own functions read with (and yours may): in the project, a regular
+    file with one name reached through no link, or a link to another of the files given, read as
+    that; outside it, the file as named. Anything else says why it was not read, and a pipe does
+    so at once, never waiting for a writer."""
+    root, home = tmp_path / "project", tmp_path / "home"
+    agents = _write(root / "AGENTS.md", "Read me.")
+    (root / "CLAUDE.md").symlink_to("AGENTS.md")
+    (home / "dotfiles").mkdir(parents=True)
+    (home / "AGENTS.md").symlink_to(_write(home / "dotfiles/AGENTS.md", "Mine."))
+    assert read(root / "CLAUDE.md", [root / "CLAUDE.md", agents], root) == "Read me."
+    assert read(home / "AGENTS.md", [home / "AGENTS.md"], root) == "Mine."  # yours, as named
+    with pytest.raises(OSError, match="not another of the section's files"):
+        read(root / "CLAUDE.md", [root / "CLAUDE.md"], root)
+    with pytest.raises(ValueError, match="not one of the files given"):
+        read(root / "CLAUDE.md", [agents], root)
+    _write(root / "real/x.md", "x")
+    (root / "docs").symlink_to("real")
+    with pytest.raises(OSError, match="reached through .*docs, which is a link"):
+        read(root / "docs/x.md", [root / "docs/x.md"], root)
+    os.link(agents, root / "SECOND.md")
+    with pytest.raises(OSError, match="not a regular file with one name"):
+        read(agents, [agents], root)
+    os.mkfifo(root / "PIPE.md")
+    with pytest.raises(OSError, match="not a regular file with one name"):
+        read(root / "PIPE.md", [root / "PIPE.md"], root)

@@ -1,7 +1,7 @@
 [project]
 name = "commands-cordis-plugin"
 version = "0.1.0"
-description = "Slash commands: a broker rows register commands into, and commands over the running composition."
+description = "Slash commands and line prefixes: a broker rows register into, commands over the running composition, and ! shell commands."
 requires-python = ">=3.15"
 dependencies = [
     "cordis",

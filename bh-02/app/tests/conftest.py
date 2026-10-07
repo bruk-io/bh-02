@@ -8,8 +8,8 @@ from typing import Protocol
 
 import pytest
 
-# The kernel with no jail, for tests that are not about the jail: brig runs on darwin only, and
-# a test of a model or a chat row should not depend on the platform.
+# The kernel with no jail, for tests that are not about the jail: brig runs on darwin and on
+# Linux with bubblewrap, and a test of a model or a chat row should not depend on the platform.
 UNJAILED = '[[plugin]]\nid = "jail"\nuse = "kernel:unjailed"\n'
 
 # bh-02 has no one-shot chat row, but many of its tests want one: the reply to one prompt (the
@@ -21,6 +21,7 @@ ONE_REPLY = (
 # An importable module of components, named by layer files as `fragile:<component>`.
 PLUGIN = '''
 import asyncio
+import threading
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -53,6 +54,9 @@ class Silent:
         return None
 
     async def interrupted(self) -> None:
+        await asyncio.Event().wait()
+
+    async def closed(self) -> None:
         await asyncio.Event().wait()
 
 
@@ -97,6 +101,9 @@ class OneMessage:
     async def interrupted(self) -> None:
         await asyncio.Event().wait()
 
+    async def closed(self) -> None:
+        await asyncio.Event().wait()
+
 
 class Upper:
     async def reply(self, message: str) -> AsyncIterator[dict[str, Any]]:
@@ -129,6 +136,9 @@ class Paced:
         return None
 
     async def interrupted(self) -> None:
+        await asyncio.Event().wait()
+
+    async def closed(self) -> None:
         await asyncio.Event().wait()
 
 
@@ -172,6 +182,9 @@ class Scripted:
         return SCRIPT.pop(0) if SCRIPT else None
 
     async def interrupted(self) -> None:
+        await asyncio.Event().wait()
+
+    async def closed(self) -> None:
         await asyncio.Event().wait()
 
 
@@ -228,6 +241,41 @@ async def counting_model() -> Effects:
     yield bind("model", Counting())
 
 
+class Held:
+    """A `system` whose every reading waits until `release` is set (10 s at most), as a slow
+    section function would, counting the readings begun, how many run now and the most that
+    ran at once."""
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self.begun = self.running = self.most = 0
+        self._lock = threading.Lock()
+
+    def text(self) -> str:
+        with self._lock:
+            self.begun += 1
+            self.running += 1
+            self.most = max(self.most, self.running)
+        self.release.wait(10)
+        with self._lock:
+            self.running -= 1
+        return "held"
+
+    def add(self, section: Any) -> Any:
+        return lambda: None
+
+    def touched(self, paths: Any) -> list[Any]:
+        return []
+
+
+HELD = Held()
+
+
+@component(provides=("system",))
+async def held_system() -> Effects:
+    yield bind("system", HELD)
+
+
 @component(provides=("input", "output", "frame"))
 async def one_message_recorded_ui() -> Effects:
     yield bind("input", OneMessage())
@@ -238,6 +286,24 @@ async def one_message_recorded_ui() -> Effects:
 @component(provides=("loop",))
 async def echo_model() -> Effects:
     yield bind("loop", Echo())
+
+
+@component
+async def layers_seen(*, layers: Any, config: Mapping[str, Any]) -> Effects:
+    """Writes the `layers` value's `credentials`, `secrets` and `trusted` to `config["out"]` as
+    JSON: what the model rows search and what the jail keeps an input from, as the composition
+    was booted."""
+    import json
+    from pathlib import Path
+
+    seen = {
+        "credentials": list(layers.credentials),
+        "secrets": list(layers.secrets),
+        "trusted": list(layers.trusted),
+    }
+    Path(config["out"]).write_text(json.dumps(seen))
+    return
+    yield
 
 
 @component(provides=("loop",))
@@ -293,6 +359,10 @@ async def heartbeat() -> Effects:
     yield background(forever())
 
 
+# What the model was last told as the system prompt (the project context and the tool's).
+SYSTEM: list[str] = []
+
+
 @dataclass(frozen=True)
 class Inputs:
     code: tuple[str, ...] = ()
@@ -306,6 +376,7 @@ class InputScript:
         self._inputs = inputs
 
     async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
+        SYSTEM[:] = [m["content"] for m in messages if m["role"] == "system"]
         results = [m["content"] for m in messages if m["role"] == "tool"]
         if len(results) < len(self._inputs):
             n = len(results)
@@ -338,13 +409,126 @@ class OneInput:
 @component(provides=("model",))
 async def one_input_model() -> Effects:
     yield bind("model", OneInput())
+
+
+# What the compacting model was sent: each request's messages and the names of the tools offered.
+SENT: list[tuple[list[dict[str, Any]], list[str]]] = []
+# How many usage events the compacting model sends with its summary (a provider may send several).
+USAGES: list[int] = [0]
+
+
+def usages(n: int) -> None:
+    USAGES[:] = [n]
+
+
+class Compacting:
+    """A model for /compact: a message `py:CODE` is one python input of CODE, then what it
+    printed (`ran: ...`); bh-02 asking for a summary is answered `SUMMARY: x holds 42`; anything
+    else is answered with the roles of the messages it was sent."""
+
+    async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
+        SENT.append(([dict(m) for m in messages], [t["name"] for t in tools]))
+        last = messages[-1]
+        words = str(last["content"]).rpartition("\\n\\n")[2]  # after the date the loop tells first
+        if last["role"] == "tool":
+            yield {"type": "text", "text": f"ran: {str(last['content']).strip()}"}
+        elif str(last["content"]).startswith("(bh-02: the person asked to compact"):
+            for _ in range(USAGES[0]):
+                yield {"type": "usage", "input_tokens": 10, "output_tokens": 1}
+            yield {"type": "text", "text": "SUMMARY: x holds 42"}
+        elif words.startswith("py:"):
+            code = {"code": words[3:]}
+            yield {"type": "tool_call", "id": f"c{len(messages)}", "name": "python", "input": code}
+            yield {"type": "stop", "reason": "tool_use"}
+            return
+        else:
+            yield {"type": "text", "text": "roles: " + ",".join(m["role"] for m in messages)}
+        yield {"type": "stop", "reason": "end_turn"}
+
+
+@component(provides=("model",))
+async def compacting_model() -> Effects:
+    yield bind("model", Compacting())
+
+
+# Set once the slow summarising model is asked for a summary: the person leaves then.
+QUIT = asyncio.Event()
+# Set when the slow summarising model's summary step is closed.
+CLOSED: list[bool] = []
+
+
+class SlowSummary(Compacting):
+    """As `Compacting`, but a summary takes a minute, and the person leaves (QUIT) as soon as it
+    is asked for."""
+
+    async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
+        if str(messages[-1]["content"]).startswith("(bh-02: the person asked to compact"):
+            QUIT.set()
+            try:
+                await asyncio.sleep(60)
+            finally:
+                CLOSED.append(True)
+        async for chunk in super().complete(messages, tools):
+            yield chunk
+
+
+@component(provides=("model",))
+async def slow_summary_model() -> Effects:
+    yield bind("model", SlowSummary())
+
+
+class Quitting(Scripted):
+    """Reads SCRIPT until the person leaves (QUIT); from then on, as the app's input once it has
+    ended (Ctrl-Q, /exit), `read()` is None and `interrupted()` and `closed()` return at once."""
+
+    async def read(self) -> str | None:
+        return None if QUIT.is_set() else await super().read()
+
+    async def interrupted(self) -> None:
+        await QUIT.wait()
+
+    async def closed(self) -> None:
+        await QUIT.wait()
+
+
+@component(provides=("input", "output", "frame"))
+async def quitting_ui() -> Effects:
+    yield bind("input", Quitting())
+    yield bind("frame", Pushed())
+    yield bind("output", Record())
+
+
+# The type of every event a drawing output was shown, in order.
+DRAWN: list[str] = []
+
+
+class Drawing(Record):
+    """A recording output that gives the loop a turn after each event, as the app's output does
+    while it draws (so a restart queued meanwhile can land mid-answer)."""
+
+    async def show(self, chunks: AsyncIterator[Mapping[str, Any]]) -> None:
+        async def drawn() -> AsyncIterator[Mapping[str, Any]]:
+            async for chunk in chunks:
+                DRAWN.append(str(chunk.get("type")))
+                yield chunk
+                await asyncio.sleep(0)
+
+        await super().show(drawn())
+
+
+@component(provides=("input", "output", "frame"))
+async def drawing_ui() -> Effects:
+    yield bind("input", Scripted())
+    yield bind("frame", Pushed())
+    yield bind("output", Drawing())
 '''
 
 
 @pytest.fixture(autouse=True)
 def _own_models_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test reads a models file of its own (none, unless it writes one), never the
-    person's `~/.config/bh-02/models.toml`."""
+    person's `~/.config/bh-02/models.toml`, and runs no startup file of the person's
+    (`~/.config/bh-02/kernel.py`) in a kernel."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 

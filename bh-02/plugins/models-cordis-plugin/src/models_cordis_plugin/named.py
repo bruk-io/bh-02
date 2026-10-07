@@ -16,8 +16,16 @@ shadowing it). The file is one table per model:
     temperature = 0.2                          # optional
 
 A provider can also be `module:attribute`, a factory the model's table is passed to (bh-02's
-fakes are one); its table is its own. Everything here is pure but `models_file`, which reads
-the environment, and `read_models`, which reads the file.
+fakes are one); its table is its own.
+
+The models file is trusted whole: a factory it names runs in bh-02's own process, and a `key`
+it names is sent to its `base_url`. So it is not read when it is in the project, which the
+model's code can write (`in_project`: bh-02 run from the home directory, `$XDG_CONFIG_HOME` in
+the project, a link into it). And wherever a table comes from, an `openai` model's `key` may
+not name the Claude Code token (`withheld`), which is the Claude Code CLI's alone.
+
+Everything here is pure but `models_file`, which reads the environment, `read_models`, which
+reads the file, and `in_project`, which follows the file's links.
 """
 
 import os
@@ -29,6 +37,8 @@ from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlsplit
 
+from models_cordis_plugin.claude_code.credential import TOKEN_VARIABLE
+
 __all__ = [
     "BUILT_IN",
     "CLAUDE_CODE",
@@ -39,11 +49,13 @@ __all__ = [
     "combined",
     "chosen",
     "environ",
+    "in_project",
     "key_name",
     "models_file",
     "parsed",
     "problem",
     "read_models",
+    "withheld",
 ]
 
 CLAUDE_CODE: Final = "claude-code"
@@ -88,7 +100,9 @@ class ModelConfig:
     table per name, as in the file. For the claude-code provider: `state`, the directory its
     Claude Code state lives in (the session's `claude/`, which the session layer sets);
     `env_file`, where `local.env` is (found above the install when unset; the openai provider
-    reads a model's `key` there too); `cwd`, the project Claude Code is told it works in."""
+    reads a model's `key` there too); `cwd`, the project Claude Code is told it works in (the
+    working directory when unset), which, like the working directory, a models file must be
+    outside of (`in_project`)."""
 
     default: str = "sonnet"
     models: str | None = None
@@ -130,6 +144,60 @@ def read_models(path: Path) -> str | None:
         raise ModelsError(
             "models_file", f"can't read the models file {path} ({error.strerror}); fix it or remove it"
         ) from None
+
+
+def in_project(path: Path, root: Path) -> str | None:
+    """Why the models file `path` is not read, said so the person can fix it: it is in the project
+    `root`, which the model's code can write. It is the project's when, as named or anywhere reading
+    it goes (each directory and link on the way, links followed, to where it ends: `_walked`), it is
+    under the root as named or as resolved; a link the model could repoint, or a directory it could
+    swap for one, would choose what is read. None when it is outside. Whether the file is there
+    does not matter: the model could write one."""
+    named = Path(os.path.normpath(path.absolute()))
+    roots = (Path(os.path.normpath(root.absolute())), root.resolve())
+    inside = [p for p in (named, *_walked(path.absolute())) if any(p.is_relative_to(r) for r in roots)]
+    if not inside:
+        return None
+    return _refused(path, root, "" if inside[0] == named else f" as its links lead ({inside[-1]})")
+
+
+def _refused(path: Path, root: Path, how: str) -> str:
+    return (
+        f"the models file {path} is not read: it is in the project ({root}){how}, which the model's "
+        "code can write, and a models file the model wrote could run code in bh-02's own process (a "
+        "`module:attribute` provider) or send a local.env key to a server of its choosing. Keep your "
+        "models file outside the project, and not a link into it: run bh-02 in the project's own "
+        "directory rather than one that holds your config (such as your home), or set "
+        "XDG_CONFIG_HOME (or the model row's `models`) to a directory outside it. Until then only "
+        "the built-in models and the model row's `extra` are offered"
+    )
+
+
+_MOST_LINKS: Final = 40  # links one walk follows at most (Linux's own limit), so a loop of links ends
+
+
+def _walked(path: Path) -> list[Path]:
+    """Every place reading the absolute `path` goes through, from the top: each directory and link
+    on the way (a link where it sits, then what it points to, followed), then where it ends."""
+    at, pending, links, out = Path(path.anchor), list(path.parts[1:]), 0, list[Path]()
+    while pending:
+        part = pending.pop(0)
+        if part == "..":  # after the links before it are followed, as the kernel does
+            at = at.parent
+            continue
+        step = at / part
+        out.append(step)
+        try:
+            target = Path(os.readlink(step)) if links < _MOST_LINKS and step.is_symlink() else None
+        except OSError:  # gone since, or can't be read: reading the file will say what is wrong
+            target = None
+        if target is None:
+            at = step
+            continue
+        links += 1
+        at = Path(target.anchor) if target.is_absolute() else at
+        pending[:0] = target.parts[1:] if target.is_absolute() else target.parts
+    return [*out, at]
 
 
 def environ() -> Mapping[str, str]:
@@ -236,6 +304,8 @@ def _openai_problem(named: Named, where: str) -> str | None:
             '`key = "OPENAI_API_KEY"`), not hold the key itself; put the key in local.env as '
             "`OPENAI_API_KEY=<the key>` and name that line here"
         )
+    if (why := withheld(named)) is not None:
+        return why
     tokens = named.table.get("max_tokens")
     if tokens is not None and (not isinstance(tokens, int) or isinstance(tokens, bool) or tokens <= 0):
         return f"{where}: max_tokens must be a whole number above 0"
@@ -257,15 +327,29 @@ def _url_problem(url: str) -> str | None:
     return None
 
 
+def withheld(named: Named) -> str | None:
+    """Why `named`'s key is never sent: it names the Claude Code token, which bh-02 hands to the
+    Claude Code CLI alone, never to an endpoint; None when it names another line, or none."""
+    if named.table.get("key") != TOKEN_VARIABLE:
+        return None
+    return (
+        f"model {named.name!r} ({named.source}): key may not name {TOKEN_VARIABLE}, the Claude Code "
+        "token: bh-02 gives it to the Claude Code CLI alone and never sends it to an endpoint "
+        "(whoever holds it can use your subscription). Name the local.env line of this endpoint's "
+        "own key (add one as `ITS_API_KEY=<the key>`), or use sonnet, opus or haiku for Claude"
+    )
+
+
 def key_name(key: object) -> str | None:
     """`key` when it is the name of a local.env line (`OPENAI_API_KEY`: capitals, digits, `_`);
     None for anything else, which may be the key itself and so is never quoted."""
     return key if isinstance(key, str) and _KEY_NAME.fullmatch(key) else None
 
 
-def chosen(name: object, models: Sequence[Named], source: str) -> Named:
+def chosen(name: object, models: Sequence[Named], source: str, refused: str | None = None) -> Named:
     """The model `name` means, or a `ModelsError` saying what to do: no such name (the models
-    there are, and where to add one), or a table with a problem."""
+    there are, and where to add one, or why the models file is not read: `refused`, which
+    `in_project` says), or a table with a problem."""
     if not isinstance(name, str) or not name:
         raise ModelsError(
             "model_config",
@@ -275,10 +359,12 @@ def chosen(name: object, models: Sequence[Named], source: str) -> Named:
     found = next((named for named in models if named.name == name), None)
     if found is None:
         names = ", ".join(named.name for named in models)
+        add = refused or (
+            f"to add {name!r}, give it a table in the models file {source}:\n{_EXAMPLE.replace('NAME', name)}"
+        )
         raise ModelsError(
             "unknown_model",
-            f"no model named {name!r}; the models are {names}. /model NAME switches to one; to add "
-            f"{name!r}, give it a table in the models file {source}:\n{_EXAMPLE.replace('NAME', name)}",
+            f"no model named {name!r}; the models are {names}. /model NAME switches to one; {add}",
         )
     if (why := problem(found)) is not None:
         raise ModelsError("model_config", why)
