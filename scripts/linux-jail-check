@@ -65,7 +65,7 @@ WORKDIR /work
 
 # The default run: brig's bwrap tests (the mechanism, then the preset end to end) and its tether
 # (a jail ends with the process that launched it), then bh-02's
-# Linux jail tests (the policy compiled for Linux, and real cells in the real jail).
+# Linux jail tests (the policy compiled for Linux, and real inputs in the real jail).
 DEFAULT = (
     "uv run --locked pytest -q -p no:cacheprovider"
     " libs/brig/tests/unit/test_bwrap_compile.py"

@@ -258,7 +258,7 @@ register_dsl_rule(
         build=_worker_stdlib_only,
         message=(
             "'{module}' imports '{imported_from}'; it runs inside a jail and imports only the "
-            "standard library. A cell is plain Python, and what it may touch is the jail's "
+            "standard library. An input is plain Python, and what it may touch is the jail's "
             "decision: use the standard library, or do the work in bh-02 outside the kernel"
         ),
     )
