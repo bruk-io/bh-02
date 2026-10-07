@@ -6,7 +6,7 @@ say when the model first works on it.
 | Row | Binds | Consumes |
 |---|---|---|
 | `context:project` | `system` (`text() -> str`, `add(section) -> remover`, `touched(paths) -> [(file, text)]`); config: `root` (default `.`), `files` (the context files after bh-02's own; default `["$XDG_CONFIG_HOME/bh-02/context.toml", ".bh-02/context.toml"]`), `max_chars` (what the context files' sections may say in the prompt, all together; default 20,000), `home` | |
-| `context:on_touch` | adds `OnTouch` to `memory`; no config: the context files are `system`'s | `system` (`touched`), `memory` (`add`), `transcript` (its lifetime only) |
+| `context:on_touch` | adds `OnTouch` to `memory`; no config: the context files are `system`'s | `system` (`touched`), `memory` (`add`), `transcript` (`messages`) |
 
 `text()` is organised as Claude Code's is, and read fresh each time it is asked:
 
@@ -32,7 +32,10 @@ itself, so what a layer sets on the `system` row (`files`, `root`, `home`) reach
 each file is read and searched once. It depends on `system`, `memory` and `transcript`;
 `context:project` depends on nothing, so the on-touch row reloads with it only when the `system`
 row changes, and with `transcript` at each new conversation (`/clear`), which `system` and its
-caches outlive.
+caches outlive. What the conversation was told before the row began (a resumed session's, or
+before it reloaded) it reads from the transcript once, at the first input that opens a file: a
+text a `tool` entry holds whole after its result is told already, so a resume does not tell it
+again; one cut short there, or changed since, is told.
 
 `agent:loop` calls `text()` in a worker thread, off the event loop the TUI runs on, one call at
 a time, so a section function that reads many files or searches a large project freezes nothing;

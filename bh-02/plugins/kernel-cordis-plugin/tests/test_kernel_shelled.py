@@ -1,5 +1,6 @@
 """`shelled` and `shell_note`: the shell commands an input runs for work Python does itself, and
-what the model is told about them; `ShellHints`, which tells it through `memory`."""
+what the model is told about them; `ShellHints`, which tells it through `memory`, once for each
+kind of work a conversation, a resumed one too."""
 
 import re
 import textwrap
@@ -10,7 +11,28 @@ import pytest
 
 from cordis.testing import drive
 from cordis_helpers import Hooks
-from kernel_cordis_plugin import ShellHints, instructions_for, programs, shell_hints, shell_note, shelled
+from kernel_cordis_plugin import (
+    ShellHints,
+    Transcript,
+    instructions_for,
+    programs,
+    shell_hints,
+    shell_note,
+    shelled,
+)
+
+
+class _Kept:
+    """A `transcript` value over the messages given, counting how often they are read."""
+
+    def __init__(self, *messages: Mapping[str, Any]) -> None:
+        self._messages = messages
+        self.reads = 0
+
+    @property
+    def messages(self) -> tuple[Mapping[str, Any], ...]:
+        self.reads += 1
+        return self._messages
 
 
 @pytest.mark.parametrize(
@@ -84,7 +106,7 @@ def test_the_example_the_model_is_shown_is_python() -> None:
 
 
 def test_shell_hints_tell_each_kind_of_shell_work_once_a_conversation() -> None:
-    hints = ShellHints()
+    hints = ShellHints(_Kept())
     shown = (
         "import subprocess\nprint(subprocess.run(['cat', 'a.txt'], capture_output=True, text=True).stdout)"
     )
@@ -95,9 +117,37 @@ def test_shell_hints_tell_each_kind_of_shell_work_once_a_conversation() -> None:
     assert hints({"code": "subprocess.run(['git', '--version'])"}) == ""
 
 
+def test_a_resumed_conversation_is_not_told_again_a_kind_its_transcript_told() -> None:
+    """A resumed session (or the row reloaded) starts a new `ShellHints`, but the transcript
+    holds what the model was told: a kind a shell note there named after a result is told
+    already. A note the person quoted, or a result that is one (an input printed it), told the
+    model nothing. The transcript is read once, at the first input; an empty one (a new
+    conversation, after /clear) tells every kind afresh."""
+    read = "subprocess.run(['cat', 'a.txt'])"
+    transcript = _Kept(
+        {"role": "user", "content": f"why this?\n\n{shell_note((('sed', 'edit'),))}"},
+        {"role": "assistant", "content": "", "tool_calls": []},
+        {
+            "role": "tool",
+            "content": f"one\n\n{shell_note((('cat', 'read'), ('ls', 'list')))}\n\nA.",
+            "call_id": "c0",
+        },
+        {"role": "tool", "content": shell_note((("rm", "files"),)), "call_id": "c1"},
+    )
+    assert isinstance(transcript, Transcript)
+    hints = ShellHints(transcript)
+    assert hints({"code": read.replace("cat", "head")}) == ""  # reading was told before the resume
+    assert hints({"code": "subprocess.run(['find', '.'])"}) == ""  # and listing
+    assert hints({"code": "subprocess.run(['sed', '-i', 's/a/b/', 'f'])"}).startswith("(this input ran `sed`")
+    assert hints({"code": "subprocess.run(['rm', 'f'])"}).startswith("(this input ran `rm`")
+    assert hints({"code": "subprocess.run(['sed', 'p', 'f'])"}) == ""  # told now: once
+    assert transcript.reads == 1
+    assert ShellHints(_Kept())({"code": read}).startswith("(this input ran `cat` through a shell.")
+
+
 async def test_the_shell_hints_row_adds_its_function_to_memory() -> None:
     memory: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
-    effects = await drive(shell_hints(memory=memory, transcript=object()))
+    effects = await drive(shell_hints(memory=memory, transcript=_Kept()))
     assert [e.name for e in effects] == ["acquire"]
     assert effects[0].args[0] == memory.add and isinstance(effects[0].args[1], ShellHints)
 

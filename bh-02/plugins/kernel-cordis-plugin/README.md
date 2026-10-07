@@ -10,7 +10,7 @@ composition names, and the model's one tool, `python(code)`, which runs an input
 | `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when confined, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
 | `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
-| `kernel:shell_hints` | adds `ShellHints` to `memory` | `memory` (`add`), `transcript` (its lifetime only) |
+| `kernel:shell_hints` | adds `ShellHints` to `memory` | `memory` (`add`), `transcript` (`messages`) |
 
 `python.py` is the tool, pure: its spec and `instructions_for(confined, startup, reads)`, what the
 model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
@@ -28,8 +28,9 @@ one, an input a single `cat`, `sed` or `ls`: `programs(code)` is what an input r
 editing, writing, listing and moving files; searching with `grep` or `rg` is not one, nor are
 tests, git and builds), and `shell_note` what such an input is told after its output, by
 `ShellHints`, the `memory` function the `kernel:shell_hints` row adds: once for each kind of work
-a conversation (the row depends on `transcript`, so `/clear` starts it afresh), so it corrects a
-habit without nagging.
+a conversation (the row depends on `transcript`, so `/clear` starts it afresh; at its first
+input it reads the transcript's `tool` entries for the shell notes told after a result, so a
+resumed session is not told a kind again), so it corrects a habit without nagging.
 `scripts/model-friction` reads transcripts with the same two. `confined` is what the model is
 told (`instructions_for`) and whether the startup file runs unasked: the kernel itself never
 asks, so it depends on its jail alone and a new ui or model keeps the namespace.

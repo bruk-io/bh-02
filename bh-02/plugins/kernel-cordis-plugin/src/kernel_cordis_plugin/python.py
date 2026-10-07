@@ -14,17 +14,28 @@ A model trained on shell tools tends to use the REPL as one: each input a single
 or `ls` through subprocess, its output printed whole. `programs` is what an input runs,
 `shelled` the part of it Python does itself, and `shell_note` how Python does that work here,
 where the result stays in a variable for the next input. `ShellHints` is the `memory` function
-that tells the model so with that input's result, once for each kind of work in a conversation.
+that tells the model so with that input's result, once for each kind of work in a conversation,
+a resumed one too: it reads what the conversation's transcript says the model was told.
 """
 
 import ast
 import itertools
 import os
+import re
 import shlex
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
-__all__ = ["PYTHON", "Memory", "ShellHints", "instructions_for", "programs", "shell_note", "shelled"]
+__all__ = [
+    "PYTHON",
+    "Memory",
+    "ShellHints",
+    "Transcript",
+    "instructions_for",
+    "programs",
+    "shell_note",
+    "shelled",
+]
 
 PYTHON: Mapping[str, Any] = {
     "name": "python",
@@ -158,6 +169,20 @@ _RUNNERS = {
 }
 _SHELLS = {"sh", "bash", "zsh"}
 _SEPARATORS = {"|", "||", "&&", ";", "&", "(", ")"}
+# What an input that did such work is told (`shell_note`): the commands it ran, and the way
+# Python does each kind of work they did, joined by "; ".
+_HINT = (
+    "(this input ran {commands} through a shell. Python does that itself here, and keeps the "
+    "result in a variable for the next input: {ways}. Keep subprocess for programs such as "
+    "tests, git and builds.)"
+)
+# That note, told after a result in a transcript's `tool` entry: the loop puts each note after a
+# blank line, and another note or the entry's end follows it. Its ways are caught.
+_HINTED = re.compile(
+    r"\n\n"
+    + re.escape(_HINT).replace(re.escape("{commands}"), r"[^\n]*?").replace(re.escape("{ways}"), r"([^\n]*?)")
+    + r"(?=\n\n|\Z)"
+)
 
 
 def programs(code: str) -> tuple[tuple[str, bool], ...]:
@@ -190,11 +215,23 @@ def shell_note(found: Sequence[tuple[str, str]]) -> str:
     names = [f"`{command}`" for command, _ in found]
     commands = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
     ways = "; ".join(dict.fromkeys(_INSTEAD[kind] for _, kind in found))
-    return (
-        f"(this input ran {commands} through a shell. Python does that itself here, and keeps the "
-        f"result in a variable for the next input: {ways}. Keep subprocess for programs such as "
-        "tests, git and builds.)"
-    )
+    return _HINT.format(commands=commands, ways=ways)
+
+
+def _hinted(messages: Iterable[Mapping[str, Any]]) -> set[str]:
+    """The kinds of work a conversation's transcript (`messages`) says the model was told Python
+    does: each shell note (`shell_note`) told after an input's result names its kinds by their
+    ways. A note is told when its exact text follows the result in a `tool` entry, not when a
+    result or the person quotes it."""
+    kinds = {way: kind for kind, way in _INSTEAD.items()}
+    told = (str(m.get("content") or "") for m in messages if m.get("role") == "tool")
+    return {
+        kinds[way]
+        for content in told
+        for ways in _HINTED.findall(content)
+        for way in ways.split("; ")
+        if way in kinds
+    }
 
 
 @runtime_checkable
@@ -205,18 +242,37 @@ class Memory(Protocol):
     def add(self, fn: Callable[[Mapping[str, Any]], str]) -> Callable[[], None]: ...
 
 
+@runtime_checkable
+class Transcript(Protocol):
+    """What the shell-hints row needs of the `transcript` value (CONTRACTS.md: transcript): the
+    conversation so far, whose `tool` entries carry each input's result and the notes told with
+    it."""
+
+    @property
+    def messages(self) -> Sequence[Mapping[str, Any]]: ...
+
+
 class ShellHints:
     """A `memory` function: given an input (`code`, ...), how Python does the shell work it ran
-    (`shell_note`), for each kind of work the first time this conversation sees it; '' after."""
+    (`shell_note`), for each kind of work the first time this conversation sees it; '' after.
 
-    def __init__(self) -> None:
-        self._told: set[str] = set()  # the kinds of work the model has been told Python does
+    What the conversation was told before this began (a resumed session's, or this one's before
+    the row reloaded) is in its `transcript`, read once, at the first input: a kind a shell note
+    there named is told already."""
+
+    def __init__(self, transcript: Transcript) -> None:
+        self._transcript = transcript
+        # the kinds of work the model has been told Python does; None until the first input reads
+        # them from the transcript. Called in the loop's worker thread, one input's at a time, so
+        # it takes no lock.
+        self._told: set[str] | None = None
 
     def __call__(self, input: Mapping[str, Any]) -> str:
-        new = [
-            (command, kind) for command, kind in shelled(str(input.get("code", ""))) if kind not in self._told
-        ]
-        self._told.update(kind for _, kind in new)
+        if self._told is None:
+            self._told = _hinted(self._transcript.messages)
+        told = self._told
+        new = [(command, kind) for command, kind in shelled(str(input.get("code", ""))) if kind not in told]
+        told.update(kind for _, kind in new)
         return shell_note(new)
 
 
