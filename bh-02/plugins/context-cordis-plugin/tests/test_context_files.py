@@ -238,3 +238,35 @@ def test_your_file_inside_the_project_is_the_project_s(tmp_path: Path) -> None:
     files, home = ContextFiles(("~/.config/bh-02/context.toml",), 20_000), tmp_path
     _write(home / ".config/bh-02/context.toml", '[[section]]\nfunction = "os:system"\n')
     assert "may name only bh-02's own functions" in files.text(home, home)
+
+
+def test_a_link_in_the_project_to_a_file_outside_it_is_still_the_project_s(tmp_path: Path) -> None:
+    """The model may write outside the project too (the jail's scratch directory): a context file
+    it links into the project, or the `.bh-02` directory it links out, is held to the project's
+    terms all the same, so it can name no file outside the project and no function of its own."""
+    context, root, home = _context(tmp_path)
+    _write(home / ".ssh/id_test", "FAKE-KEY")
+    scratch = _write(
+        tmp_path / "scratch/evil.toml",
+        f'[[section]]\nfiles = ["~/.ssh/id_test"]\nfunction = "{_WHOLE}"\n',
+    )
+    (root / ".bh-02").mkdir()
+    (root / ".bh-02/context.toml").symlink_to(scratch)
+    text = context.text()
+    assert "FAKE" not in text and "may name only files in the project" in text
+    (root / ".bh-02/context.toml").unlink()
+    (root / ".bh-02").rmdir()
+    (scratch.parent / "context.toml").write_text(scratch.read_text())
+    (root / ".bh-02").symlink_to(scratch.parent)
+    text = ContextFiles((".bh-02/context.toml",), 20_000).text(root.resolve(), home)
+    assert "FAKE" not in text and "may name only files in the project" in text
+
+
+def test_a_hard_link_in_the_project_is_not_read(tmp_path: Path) -> None:
+    """A second name in the project may be one the model gave a file the jail hides from it."""
+    context, root, _ = _context(tmp_path)
+    secret = _write(tmp_path / "hidden-from-the-jail.txt", "FAKE-HIDDEN")
+    os.link(secret, root / "CLAUDE.local.md")
+    _write(root / "AGENTS.md", "Read me.")
+    text = context.text()
+    assert "FAKE" not in text and "Read me." in text

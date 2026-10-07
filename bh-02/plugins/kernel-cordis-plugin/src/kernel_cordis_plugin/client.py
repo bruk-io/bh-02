@@ -106,8 +106,11 @@ def worker_argv(endpoint: str) -> list[str]:
 
 
 def _inside(paths: Sequence[str], root: str) -> tuple[str, ...]:
-    """Those of `paths` (absolute) that are under `root` (absolute), in order."""
-    return tuple(p for p in paths if p.startswith(root.rstrip(os.sep) + os.sep))
+    """Those of `paths` that are under `root` (absolute), normalised (`a/../b` is `b`), in order.
+    The worker is the model's process, so these are what it says it opened, not proof: a reader
+    may match them against files it chose, never open one because it is named here."""
+    under = root.rstrip(os.sep) + os.sep
+    return tuple(p for p in map(os.path.normpath, paths) if p.startswith(under))
 
 
 class Kernel:

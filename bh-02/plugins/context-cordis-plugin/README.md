@@ -70,14 +70,17 @@ it changes, so a section added reaches the model's next message.
 
 **The project's file is held to what the model may do itself**, because the model can write it
 and bh-02 acts on it in its own process, outside the jail. So it may name only bh-02's own
-functions (`context_cordis_plugin.sections:*`, as `function` and as `on_touch`), and only files in the project that are not
-hidden (no `~`, `/`, `..` or part starting with `.`), and it may not `replace` the sections
-before it. A function or a file outside the project of your own goes in your file. A file of
-yours inside the project (bh-02 run in your home, or a `$XDG_CONFIG_HOME` in the project) is
-the project's, on the same terms. And
-whichever file a section came from, nothing is read through it that the jail keeps from the
-model: a file reached from the project must be in it, a link in the project counts only when it
-leads to another file the section found (a CLAUDE.md linking to the AGENTS.md beside it), and a
+functions (`context_cordis_plugin.sections:*`, as `function` and as `on_touch`), and only files
+in the project that are not hidden (no `~`, `/`, `..` or part starting with `.`), and it may not
+`replace` the sections before it. A function or a file outside the project of your own goes in
+your file. A context file is the project's when the model could have written it: the path as
+named or as it resolves is in the project, so a file of yours inside it (bh-02 run in your
+home, a `$XDG_CONFIG_HOME` in the project) is the project's, and so is `.bh-02/context.toml` (or
+`.bh-02`) made a link to a file outside it, such as one the model wrote in the jail's scratch
+directory. And whichever file a section came from, nothing is read through it that the jail
+keeps from the model: a file reached from the project must be in it, a link in the project
+counts only when it leads to another file the section found (a CLAUDE.md linking to the
+AGENTS.md beside it), a file in the project with a second name (a hard link) is not read, and a
 file named like a secret (`local.env`, `.env`, `*.env`) is never read. A link of your own,
 outside the project (`~/AGENTS.md` into your dotfiles), is yours to follow.
 

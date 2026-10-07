@@ -22,8 +22,11 @@ its own process, outside the jail. So it may name only bh-02's own functions
 that are not hidden (no `~`, `/`, `..` or part starting with `.`), and may not `replace` the
 sections before it. And whatever file a section names, bh-02 reads nothing through it that the
 model could not read itself (`_kept`): a file reached from the project stays in it, none is
-read under a secret's name (`local.env`, `.env`, `*.env`), and a symlink in the project (where
-the model can make one) counts only when it points at another file the section found.
+read under a secret's name (`local.env`, `.env`, `*.env`), a symlink in the project (where the
+model can make one) counts only when it points at another file the section found, and a hard
+link in the project is not read. Whether a context file is the project's is whether the model
+could have written it, as named or as it resolves (`_writable`): a link in the project to a file
+outside it is still the project's.
 """
 
 import importlib
@@ -194,7 +197,9 @@ class ContextFiles:
                 self._read[path] = (
                     stamp,
                     _parsed(
-                        path, trusted=path == _SHIPPED or not path.resolve().is_relative_to(root.resolve())
+                        path,
+                        trusted=path == _SHIPPED
+                        or not _writable((path, path.resolve()), (root, root.resolve())),
                     )
                     if stamp
                     else ((), False),
@@ -223,7 +228,9 @@ class ContextFiles:
                 matches = searched.found
             for path in matches:
                 found.setdefault(path, not pattern.startswith(("~", "/")))
-        resolved = {path: (path.parent.resolve() / path.name, path.resolve()) for path in found}
+        resolved = {
+            path: (path.parent.resolve() / path.name, path.resolve(), path.stat().st_nlink) for path in found
+        }
         return _kept(tuple(found.items()), resolved, root.resolve(), trusted=section.trusted)
 
 
@@ -231,35 +238,44 @@ def _located(name: str, root: Path, home: Path, environ: Mapping[str, str]) -> P
     """Where the context file `name` is: one starting `$XDG_CONFIG_HOME/` in the person's config
     directory (that variable's value, else `home`'s `.config`, as the models file is), one
     starting `~` in `home`, and any other from the project's root (an absolute one is itself).
-    Whom it is trusted as is not this: that is where it turns out to be, in the project or not."""
+    Whom it is trusted as is not this: that is whether the model could write it (`_writable`)."""
     if name.startswith(_CONFIG_HOME):
         return Path(environ.get("XDG_CONFIG_HOME") or home / ".config") / name.removeprefix(_CONFIG_HOME)
     return Path(str(home) + name[1:]) if name.startswith("~") else root / name
 
 
+def _writable(path: tuple[Path, Path], root: tuple[Path, Path]) -> bool:
+    """Whether the model could have written a context file: its path as named or as it resolves
+    (`path`) is in the project, as named or as it resolves (`root`). Both, because a link in the
+    project (`.bh-02/context.toml`, or `.bh-02` itself) may lead to a file the model wrote outside
+    it, in the jail's own scratch directory, and a file of the person's may be a link into it."""
+    return any(p.is_relative_to(r) for p in path for r in root)
+
+
 def _kept(
     found: Sequence[tuple[Path, bool]],
-    resolved: Mapping[Path, tuple[Path, Path]],
+    resolved: Mapping[Path, tuple[Path, Path, int]],
     root: Path,
     *,
     trusted: bool,
 ) -> tuple[Path, ...]:
     """What of a section's files it may read, in order: never more than the model itself could.
     `found`: each file, and whether it was reached from the project (a relative pattern);
-    `resolved`: each file's place (its directories' links followed) and what it finally is (its
-    own link followed too). One reached from the project must be in it; a link in the project,
-    which the model could have made, must lead to another file the section found (a CLAUDE.md
-    linking to the AGENTS.md beside it stays), while one of the person's own, outside it, is
-    theirs to follow; none named like a secret is read; and, for the project's own file, none
-    hidden."""
-    places = {place for place, _ in resolved.values()}
+    `resolved`: each file's place (its directories' links followed), what it finally is (its own
+    link followed too) and how many names it has. One reached from the project must be in it; a
+    link in the project, which the model could have made, must lead to another file the section
+    found (a CLAUDE.md linking to the AGENTS.md beside it stays), while one of the person's own,
+    outside it, is theirs to follow; a file in the project with a second name (a hard link) is
+    not read, since that name may be one the model gave a file the jail hides; none named like a
+    secret is read; and, for the project's own file, none hidden."""
+    places = {place for place, _, _ in resolved.values()}
     kept: list[Path] = []
     for path, from_project in found:
-        place, real = resolved[path]
+        place, real, names = resolved[path]
         inside = place.is_relative_to(root)
         if from_project and not inside:
             continue
-        if inside and real != place and real not in places:
+        if inside and (names > 1 or (real != place and real not in places)):
             continue
         if _SECRET.search(place.name) or _SECRET.search(real.name):
             continue

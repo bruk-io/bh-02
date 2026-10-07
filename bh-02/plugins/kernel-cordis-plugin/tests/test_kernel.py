@@ -330,3 +330,19 @@ async def test_a_worker_whose_parent_is_gone_before_its_hello_exits() -> None:
         assert asyncio.get_running_loop().time() - started < 5  # its parent, not its deadline
     finally:
         shutil.rmtree(where, ignore_errors=True)
+
+
+async def test_touched_is_normalised_so_a_path_cannot_climb_out_of_the_project(tmp_path: Path) -> None:
+    """The worker is the model's process, so what it says it opened is matched, never trusted: an
+    input that writes into the worker's own record a path that climbs out of the project is not
+    believed."""
+    root = tmp_path.resolve()
+    forged = str(root / ".." / "elsewhere" / "id_test")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        await k.run(
+            "import gc\n"
+            "worker = next(o for o in gc.get_objects() if type(o).__name__ == '_Kernel')\n"
+            f"worker._touched[{forged!r}] = None\n"
+            f"worker._touched[{str(root / 'a' / '..' / 'b.md')!r}] = None"
+        )
+        assert k.touched() == (str(root / "b.md"),)
