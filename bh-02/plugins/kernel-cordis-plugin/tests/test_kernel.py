@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -733,6 +734,49 @@ async def test_errors_come_back_as_text_and_a_dead_worker_is_started_again() -> 
         assert "ended" in died
         again = await k.run("'x' in globals()")
         assert again.startswith("(the REPL was started again") and again.endswith("False")
+
+
+class Ending(Unjailed):
+    """A jail that ends its worker itself and says why (`started.ended()`), as a Linux
+    `brig:jail` does when the host undoes one of its holds."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.why = ""
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Any:
+        started = await super().start(argv, cwd=cwd, endpoint=endpoint)
+        jail = self
+
+        class Said:
+            def interrupt(self) -> bool:
+                return started.interrupt()
+
+            def ended(self) -> str:
+                return jail.why
+
+            async def stop(self) -> None:
+                jail.why = ""
+                await started.stop()
+
+        return Said()
+
+
+async def test_a_worker_its_jail_ended_between_inputs_is_started_again_for_the_next() -> None:
+    """The jail can say it ended the worker before the end of its socket has reached the kernel
+    (nothing has run on bh-02's event loop since): the next input still runs, in a new worker,
+    told why, and is not sent to the one that ended."""
+    jail = Ending()
+    async with Kernel(jail, KernelConfig()) as k:
+        pid = int(await k.run("import os; x = 1; os.getpid()"))
+        jail.why = "something on the host replaced /p/.git/config"
+        os.killpg(pid, 9)
+        time.sleep(0.5)  # the worker is gone, and the event loop has not run since
+        again = await k.run("'x' in globals()")
+        assert again.startswith(
+            "(the REPL was started again, because something on the host replaced /p/.git/config"
+        ), again
+        assert again.endswith("False")
 
 
 async def test_the_row_starts_the_worker_and_leaving_stops_it() -> None:

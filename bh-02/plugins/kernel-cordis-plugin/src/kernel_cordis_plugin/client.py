@@ -351,8 +351,10 @@ class Kernel:
 
     async def _execute(self, code: str) -> _Output:
         async with self._lock:
-            if self._reader is not None and self._reader.at_eof():
-                # the worker ended between inputs (its jail ended it): start it again for this one
+            if self._reader is not None and (self._reader.at_eof() or self._ended()):
+                # the worker ended between inputs (its jail ended it): start it again for this one.
+                # The jail may say so before the socket's end has reached this event loop, and an
+                # input sent then would go to the worker that ended
                 self._why = self._ended()
                 await self._stop()
             if self._writer is None:
