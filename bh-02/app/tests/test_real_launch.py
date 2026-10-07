@@ -232,6 +232,29 @@ def test_a_message_gets_its_reply_ctrl_c_only_explains_and_ctrl_q_leaves(launch:
     assert "(uv run bh-02 --resume to continue it)" in app.text()
 
 
+def test_a_bang_line_runs_in_the_shell_and_the_model_reads_its_output_with_the_next_message(
+    launch: Launch,
+) -> None:
+    """`!COMMAND` (the shipped `shell-command` row): it runs as the person, in the project (the
+    launch's `work`), and its output is shown; it is no message, and the model (`fake` echoes
+    the last message, and says which of the conversation's it was) reads that output with the
+    next one."""
+    app = launch("fake")
+    ready = app.wait_for(_READY, 60)
+    app.type("!echo shellsaid; pwd")
+    shown = app.wait_for("exit status 0; the model reads this with your next message", 20, after=ready)
+    assert "shellsaid" in app.text()[ready:shown] and "/work" in app.text()[ready:shown]
+    assert "SHELLSAID" not in app.text()  # nothing went to the model yet
+    app.type("over to you")
+    app.wait_for("YOU", 20, after=shown)  # the model's echo, upper-cased
+    app.settle(0.5)
+    replied = app.text()[shown:]
+    assert "SHELLSAID" in replied  # the output, in front of the message
+    assert re.search(r"\(message\s+1\)", replied), replied[-3000:]  # the `!` line was no message
+    app.press(b"\x11")
+    assert app.exit_code() == 0
+
+
 def test_the_transcript_draws_every_kind_of_event_and_a_long_reply(launch: Launch) -> None:
     app = launch("showcase")
     ready = app.wait_for(_READY, 60)

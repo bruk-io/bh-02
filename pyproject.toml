@@ -215,6 +215,10 @@ exclude = [
     "agent_cordis_plugin.compact:compact_conversation",       # /compact: reads the transcript's file, then rewrites it
     "commands_cordis_plugin.operations:Operator.clear.job",   # empties a session's history files
     "commands_cordis_plugin.wiring:set_model",                # /model: rewrites the session's layer
+    # `!COMMAND`: the person's shell command, a subprocess run as them; what it prints read as it
+    # comes, its process group ended at its timeout; `run_line` is the prefix's run (run_command)
+    "commands_cordis_plugin.shell_command:run_command", "commands_cordis_plugin.shell_command:_end",
+    "commands_cordis_plugin.shell_command:_Output.read", "commands_cordis_plugin.shell_command:run_line",
     # the loops between input, output and the model
     "chat_cordis_plugin.chat:converse",
     "agent_cordis_plugin.loop:LoopModel.reply",

@@ -36,8 +36,12 @@ async def todo(*, commands, frame, system) -> Effects:
 
 
 class _Commands:
+    """The `commands` broker's two ways in: a slash command, and a line prefix (`claim`), which a
+    layer's row may use and nothing an extension does should ever reach."""
+
     def __init__(self) -> None:
         self.runs: dict[str, Callable[[str], Awaitable[Any]]] = {}
+        self.claimed: list[str] = []
 
     def register(self, spec: Mapping[str, Any], run: Callable[[str], Awaitable[Any]]) -> Remover:
         name = str(spec["name"])
@@ -45,6 +49,10 @@ class _Commands:
             raise ValueError(f"a command named {name!r} is already registered")
         self.runs[name] = run
         return lambda: self.runs.pop(name, None) and None
+
+    def claim(self, prefix: str, spec: Mapping[str, Any], run: Callable[[str], Awaitable[Any]]) -> Remover:
+        self.claimed.append(prefix)
+        return lambda: None
 
 
 class _Frame:
@@ -232,6 +240,41 @@ async def test_a_command_name_bh_02_already_has_is_refused_and_said(tmp_path: Pa
         problems = h.status()["clash"]["problems"]
         assert problems == ["/model was not added: a command named 'model' is already registered"]
         assert h.status()["clash"]["state"] == "partly up"
+
+
+async def test_an_extension_can_t_claim_a_line_prefix_however_it_asks(tmp_path: Path) -> None:
+    """A prefix takes every line the person starts with it (`!` runs it in their shell,
+    unjailed), so only a row in a layer may claim one: an extension that asks is refused in the
+    worker, and one that sends the host a claim of its own over the socket is refused there."""
+    asks = (
+        "from cordis import Effects, acquire, component\n\n"
+        "async def run(args: str) -> str:\n"
+        "    return args\n\n"
+        "@component\n"
+        "async def bang(*, commands) -> Effects:\n"
+        "    yield acquire(commands.claim, '!', {'name': 'bang', 'help': '', 'usage': ''}, run)\n"
+    )
+    forges = (
+        "from cordis import Effects, bind, component\n\n"
+        "@component\n"
+        "async def forged(*, commands) -> Effects:\n"
+        "    claim = {'op': 'add', 'id': 999, 'extension': 'forged', 'kind': 'prefix', 'prefix': '!'}\n"
+        "    commands._bridge.send(claim)\n"
+        "    yield bind('forged', True)\n"
+    )
+    async with _running(tmp_path) as h:
+        h.write("bang", asks)
+        h.write("forged", forges)
+        await h.extensions.look()
+        assert h.commands.claimed == [] and h.commands.runs == {}  # nothing reached the broker
+        refused = h.status()["bang"]["rows"]["bang.bang"]
+        assert refused.startswith("failed:")
+        assert "PermissionError: an extension can't claim a line prefix ('!')" in refused
+        assert "register a slash command instead" in refused
+        assert h.status()["forged"]["problems"] == [
+            "prefix was not added: an extension adds a slash command, a status field or a "
+            "prompt section, and nothing else"
+        ]
 
 
 async def test_unjailed_each_extension_is_put_to_the_person_with_its_source(tmp_path: Path) -> None:

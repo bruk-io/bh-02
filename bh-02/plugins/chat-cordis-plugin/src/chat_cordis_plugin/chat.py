@@ -2,7 +2,8 @@
 
 `converse` is a plain function of the values this plugin declares its own contracts for
 (CONTRACTS.md: loop, input, output, and commands if it has them). Nothing here touches a
-terminal or cordis.
+terminal or cordis. Which lines are commands is the `commands` value's to say (`claims`): a
+slash command, or a line starting with a prefix a row claimed (`!`, a shell command).
 """
 
 import asyncio
@@ -17,7 +18,6 @@ __all__ = [
     "Output",
     "Recoverable",
     "converse",
-    "is_command",
 ]
 
 type Event = Mapping[str, Any]
@@ -47,9 +47,11 @@ class Output(Protocol):
 
 @runtime_checkable
 class Commands(Protocol):
-    """What the session needs of the `commands` value: run a slash command, get what to show
-    (text, or events: CONTRACTS.md, commands)."""
+    """What the session needs of the `commands` value: whether a line is the harness's rather
+    than the model's, and to run one, getting what to show (text, or events: CONTRACTS.md,
+    commands)."""
 
+    def claims(self, line: str) -> bool: ...
     async def run(self, line: str) -> str | Sequence[Event]: ...
 
 
@@ -58,16 +60,25 @@ def _answered(answer: str | Sequence[Event]) -> list[Event]:
     return [{"type": "note", "text": answer}] if isinstance(answer, str) else list(answer)
 
 
-def is_command(line: str) -> bool:
-    """Whether a line is for the harness rather than the model: `/name`, then whitespace or the end.
-    A pasted `/tmp/app.py is broken` is not."""
-    head = line.strip().split(maxsplit=1)[0] if line.strip() else ""
-    return (
-        len(head) > 1
-        and head[0] == "/"
-        and head[1].isalpha()
-        and all(c.isalpha() or c == "-" for c in head[1:])
-    )
+def _hold(held: Sequence[str], events: Iterable[Event]) -> tuple[list[str], list[Event]]:
+    """What is held for the model after a command's answer, and what of it to show: a
+    `for_model` event's text is held (and not shown) until the person's next message; a
+    `cleared` drops what was held, since a new conversation starts without it."""
+    kept, shown = list(held), []
+    for event in events:
+        if event.get("type") == "for_model":
+            kept.append(str(event.get("text", "")))
+            continue
+        if event.get("type") == "cleared":
+            kept = []
+        shown.append(event)
+    return kept, shown
+
+
+def _told(held: Sequence[str], message: str) -> str:
+    """The message the loop is given: what commands held for the model, in the order they ran,
+    then the person's own, each a paragraph of its own."""
+    return "\n\n".join([*held, message])
 
 
 @runtime_checkable
@@ -81,21 +92,27 @@ class Recoverable(Protocol):
 async def converse(loop: Loop, input: Input, output: Output, commands: Commands | None = None) -> None:
     """Read a message, show the streamed reply, repeat until there is no more input.
 
-    A `/command` line goes to `commands` and never to the model; what it returns is shown
-    (`_answered`: text as a note, events as they are).
+    A line `commands` claims (a `/command`, or one starting with a claimed prefix, `!`) goes to
+    it and never to the model; what it returns is shown (`_answered`: text as a note, events as
+    they are), but for what it gives the model (`for_model`: `!`'s output), which is held and
+    put in front of the person's next message (`_told`), so the model reads it with that and
+    never during a turn. The loop's contract is unchanged: it is given one message.
 
     A recoverable failure is shown and the chat carries on; anything else leaves, and the
     bootstrap re-raises it. Returning is how the program ends: nothing is left running, so
     the runtime is idle.
     """
+    held: list[str] = []
     while (message := await input.read()) is not None:
         if not message.strip():
             continue
-        if commands is not None and is_command(message):
-            await output.show(_each(_answered(await commands.run(message))))
+        if commands is not None and commands.claims(message):
+            held, shown = _hold(held, _answered(await commands.run(message)))
+            await output.show(_each(shown))
             continue
+        told, held = _told(held, message), []
         try:
-            await _interruptible(_show(loop.reply(message), output), input, output)
+            await _interruptible(_show(loop.reply(told), output), input, output)
         except Exception as error:
             if not isinstance(error, Recoverable):
                 raise

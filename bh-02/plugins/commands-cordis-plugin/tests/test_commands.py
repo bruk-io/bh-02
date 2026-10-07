@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from commands_cordis_plugin import (
     Commands,
     Operator,
@@ -48,6 +50,62 @@ async def test_the_broker_runs_what_is_registered_and_help_lists_it() -> None:
     assert "Ctrl-D" not in help  # the key that leaves is each ui's own to say
     remove()  # a row that leaves takes its commands with it
     assert await commands.run("/echo hi") == "unknown command /echo; /help lists them"
+
+
+def test_the_broker_says_which_lines_are_the_harness_s() -> None:
+    """`claims` is how the chat row tells a command from a message: a slash command, known or
+    not (so a typo never reaches the model), or a line starting with a claimed prefix."""
+    commands = Commands()
+    for line in ("/help", "  /model haiku ", "/new-thing x", "/Model", "/nope"):
+        assert commands.claims(line), line
+    for line in ("/tmp/x.py", "/", "hi /help", "/2fast", "", "   ", "!ls", "hello"):
+        assert not commands.claims(line), line
+
+    async def shell(args: str) -> str:
+        return f"ran {args}"
+
+    remove = commands.claim("!", {"name": "shell", "help": "run it", "usage": "COMMAND"}, shell)
+    assert commands.claims("!ls") and commands.claims("  ! git status") and commands.claims("!")
+    assert not commands.claims("hi !ls") and not commands.claims("/tmp/x.py")
+    remove()
+    assert not commands.claims("!ls")
+
+
+async def test_a_claimed_prefix_takes_its_lines_one_character_each_and_never_twice() -> None:
+    commands = Commands()
+    asked: list[str] = []
+
+    async def shell(args: str) -> str:
+        asked.append(args)
+        return f"ran {args}"
+
+    async def broken(args: str) -> str:
+        raise RuntimeError("no shell")
+
+    spec = {"name": "shell", "help": "run COMMAND as you", "usage": "COMMAND"}
+    remove = commands.claim("!", spec, shell)  # type: ignore[arg-type]
+    assert await commands.run("  ! git status ") == "ran git status"  # the rest of the line
+    assert asked == ["git status"]
+    assert commands.specs() == []  # a prefix is typed, not chosen from the palette
+    assert "!COMMAND  run COMMAND as you" in await commands.run("/help")
+    # a second claim on the same character is refused, as a second command of one name is
+    with pytest.raises(ValueError, match="a prefix named '!' is already registered"):
+        commands.claim("!", spec, shell)  # type: ignore[arg-type]
+    for bad, said in [
+        ("!!", "a prefix is one character, such as '!'; got '!!'"),
+        ("", "a prefix is one character, such as '!'; got ''"),
+        ("/", "'/' starts the slash commands; claim another character, such as '!'"),
+        ("a", "a line can start with 'a' by chance"),
+        ("7", "a line can start with '7' by chance"),
+        (" ", "a line can start with ' ' by chance"),
+    ]:
+        with pytest.raises(ValueError) as refused:
+            commands.claim(bad, spec, shell)  # type: ignore[arg-type]
+        assert said in str(refused.value)
+    remove()
+    assert await commands.run("!ls") == "'!ls' is not a command; /help lists them"  # unclaimed now
+    commands.claim("!", spec, broken)  # type: ignore[arg-type]
+    assert await commands.run("!ls") == "! (shell) failed: no shell"
 
 
 @dataclass

@@ -38,7 +38,11 @@ async def todo(*, commands, system) -> Effects:
 
 What an extension reaches of bh-02, each only to add to it, each returning its remover:
 - `commands.register(spec, run)`: a slash command for the person (`spec`: `name`, `help`,
-  `usage`; `run`: async, argument text in, text out). A name bh-02 already has is refused.
+  `usage`; `run`: async, argument text in, text out). A name bh-02 already has is refused. Not
+  `commands.claim`, a line prefix (`!`): a prefix takes every line the person starts with it
+  (`!` runs it in their shell, unjailed), so only a row in a layer may claim one. The worker's
+  `commands.claim` raises `PermissionError` saying so, and the host adds nothing an extension
+  sends but a command, a status field and a prompt section (anything else is a `problem`).
 - `frame.status(field, text, *shorter)`: a status-bar field, pushed as `NAME:field`, so it
   can't cover another row's.
 - `system.add(text)`: text in the model's own prompt, told with the next message the model reads

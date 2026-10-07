@@ -101,8 +101,12 @@ is kept as the session's `transcript.jsonl.bak`; the model has 300 seconds, the 
 `timeout`, since a command can't be interrupted), `/model [NAME]` lists the models or switches
 to one, `/release` stops the kernel until the next input (on Linux, the way to add your
 credential mid-session: the jail frees where bh-02 looks for it). A command never reaches the
-model; a line like `/tmp/app.py is broken` is not a command. Ctrl-C stops a reply, Ctrl-Q (or
-`/exit`) quits.
+model; a line like `/tmp/app.py is broken` is not a command. `!COMMAND` runs COMMAND in your
+shell, as you (not in the jail), in the project: what it printed is shown, and the model reads
+it with your next message, never mid-turn. Its output is captured, since the app owns the
+terminal (a program that wants the terminal, a password prompt, fails), and Ctrl-C can't stop
+it: it is stopped at its timeout (120 s; the `shell-command` row's `timeout`). Ctrl-C stops a
+reply, Ctrl-Q (or `/exit`) quits.
 
 The app owns the terminal while it runs, so nothing else writes there: `--trace FILE` appends
 lifecycle lines to a file, a layer file that could not be reloaded is reported after the app
@@ -175,6 +179,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `commands` | `commands:registry` | |
 | `operator` | `commands:operator` | `layer`, `model_row` (`model`), `forget` (the transcript) |
 | `compact` | `agent:compact` (`timeout`: 300) | |
+| `shell-command` | `commands:shell_command` | |
 | `status` | `tui:status` | |
 | `palette` | `tui:palette` | |
 | `model` | `models:model` (`default`: `sonnet`) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
@@ -212,6 +217,7 @@ What the rows depend on, which is what decides what reloads when:
 ```
 commands:registry       binds Commands                     depends on nothing
 commands:operator       registers /rows ... /model         depends on Commands, Loader, Models
+commands:shell_command  claims ! (a shell command)         depends on Commands
 context:project         binds System                       depends on nothing
 models:model            binds Model                        depends on Layers (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
 models:catalog          binds Models                       depends on Loader, Layers
@@ -257,12 +263,12 @@ other plugin; the gate proves it.
 | `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `palette`) | `frame` and what each row reports on |
 | `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's one tool, `python`, only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are | `layers` (`credentials`: where both look for `local.env`), `loader` (catalog) |
 | `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes, its result followed by what `memory`'s functions add), `transcript` (`agent:transcript`), `memory` (`agent:memory`: the broker of what the model is told with an input's result); `agent:compact` registers `/compact`, which begins a new conversation from the model's summary, restarting the loop and the transcript | the loop: `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (its functions, after each input); compact: `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `entries`, `restart`), `commands` (`register`) |
-| `chat-cordis-plugin` | runs `session` (a turn interruptible) and binds `done` | `loop`, `input`, `output`, `commands` |
+| `chat-cordis-plugin` | runs `session` (a turn interruptible; a line `commands` claims goes to it, and what a command gives the model goes with the next message) and binds `done` | `loop`, `input`, `output`, `commands` (`claims`, `run`) |
 | `context-cordis-plugin` | `system` (`context:project`): who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of, then the project context: the working directory and branch, what the context files' sections say (guidance and rule files, each read by a function), read fresh; a broker other rows add sections to; and what the context files' `on_touch` sections say about the files an input opened (`touched`). `context:on_touch` adds to `memory` that guidance and those rules, each told once a conversation with the result of the first input that opens a file they cover | on-touch: `system` (`touched`), `memory` (`add`), `transcript` (`messages`: what a resumed conversation was told) |
 | `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system`; each load on `approval`'s yes | `jail`, `commands`, `frame`, `system`, `approval` |
 | `kernel-cordis-plugin` | `kernel` (`kernel:kernel`): a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, an input run, the files it opened); `approval` (`kernel:approval`): whether the model's code runs, at once when the jail confines it, else on the person's yes; `jail` (`kernel:unjailed`); `kernel:shell_hints` adds to `memory` how Python does what an input ran through a shell (`cat`, `sed`, `ls`), once for each kind of work a conversation; `kernel:release` registers `/release`, which stops the kernel and its jail until the next input | kernel: `jail` (`start`, `report`, `notice`, `reads`, `release`); approval: `jail` (`report`), `output` (`confirm`); shell hints: `memory` (`add`), `transcript` (`messages`: what a resumed conversation was told); release: `kernel` (`release`), `commands` (`register`) |
 | `brig-cordis-plugin` | `jail`: brig's `scratch_darwin()` on darwin, `strict_linux()` on Linux; the only importer of brig | `layers` |
-| `commands-cordis-plugin` | `commands` (the broker); the operator's commands over the loader | `commands`, `loader`, `models` (operator) |
+| `commands-cordis-plugin` | `commands` (the broker: slash commands, and the line prefixes a layer's rows claim; it says which lines are commands); the operator's commands over the loader; `!COMMAND` (`commands:shell_command`): the person's shell command, its output shown and held for their next message | `commands`, `loader`, `models` (operator); `commands` (`claim`: shell command) |
 
 Every model runs in the same composition: `agent:loop` offers the kernel's one tool on every
 request, runs every call as an input, and classifies every turn (harness's rule: never read a

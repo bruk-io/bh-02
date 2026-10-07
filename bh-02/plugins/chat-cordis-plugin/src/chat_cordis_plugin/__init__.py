@@ -9,7 +9,6 @@ from chat_cordis_plugin.chat import (
     Output,
     Recoverable,
     converse,
-    is_command,
 )
 from chat_cordis_plugin.wiring import session
 
@@ -20,6 +19,5 @@ __all__ = [
     "Output",
     "Recoverable",
     "converse",
-    "is_command",
     "session",
 ]

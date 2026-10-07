@@ -81,7 +81,9 @@ class Jail(Protocol):
 
 @runtime_checkable
 class Commands(Protocol):
-    """What the extensions need of the `commands` value: a registration and its remover."""
+    """What the extensions need of the `commands` value: a registration and its remover. Never
+    `claim`: a line prefix takes every line the person starts with it, so only a row in a layer
+    may claim one, and nothing an extension sends is passed on as one."""
 
     def register(
         self, spec: Mapping[str, Any], run: Callable[[str], Awaitable[Any]]
@@ -361,6 +363,11 @@ class Extensions:
                     text = str(message["text"])
                     label = "a prompt section"
                     remove = self._system.add(lambda: text)
+                case _:  # a line prefix among them: only a layer's row may claim one
+                    raise ValueError(
+                        "an extension adds a slash command, a status field or a prompt section, "
+                        "and nothing else"
+                    )
         except Exception as error:  # bh-02 refused it: a command name another row has, say
             self._problems.setdefault(extension, []).append(f"{label} was not added: {error}")
         self._entries[entry] = _Entry(extension, label, remove)

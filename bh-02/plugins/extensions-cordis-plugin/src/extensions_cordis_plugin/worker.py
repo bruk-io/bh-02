@@ -128,6 +128,15 @@ class _Commands:
         }
         return self._bridge.add(self._extension, "command", fields, run)
 
+    def claim(self, prefix: str, spec: Mapping[str, Any], run: Run) -> Callable[[], None]:
+        """Refused: a prefix takes every line the person starts with it (`!` runs it in their
+        shell, unjailed), so only a row in a layer may claim one, never an extension."""
+        raise PermissionError(
+            f"an extension can't claim a line prefix ({prefix!r}): a prefix takes every line the "
+            "person starts with it, so only a row in a layer may claim one; register a slash "
+            "command instead (commands.register)"
+        )
+
 
 class _Frame:
     """`frame` as an extension sees it: it can only show a field in the status bar."""
