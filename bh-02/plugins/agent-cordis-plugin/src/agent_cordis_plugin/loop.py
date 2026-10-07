@@ -9,11 +9,11 @@ knows whether a stopped call ever reached the kernel.
 
 Every request begins with the system prompt the conversation began with, kept in its transcript,
 so a model server's cache of the conversation stays good. When the prompt reads differently (an
-extension loaded, the branch switched, CLAUDE.md edited), the new reading is kept after it and
-the model is told what changed (`prompt.changes`) on the next message it reads. The date is not
-in the prompt: the loop tells it with the person's message, the first of a conversation and the
-first of each new day (`(Today's date: ...)`), so the prompt reads the same from one day to the
-next.
+extension loaded, the branch switched, CLAUDE.md edited), the new reading is kept after it, as
+the edits from the one before (`prompt.edits`), not another whole copy, and the model is told
+what changed (`prompt.changes`) on the next message it reads. The date is not in the prompt:
+the loop tells it with the person's message, the first of a conversation and the first of each
+new day (`(Today's date: ...)`), so the prompt reads the same from one day to the next.
 
 After each input it runs, the loop asks `memory`, the functions rows have added there, what to
 tell the model with that input's result (`remembered`): each is given the input's code, its
@@ -31,7 +31,7 @@ import datetime
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
-from agent_cordis_plugin.prompt import changes
+from agent_cordis_plugin.prompt import changes, edits, latest
 from agent_cordis_plugin.stops import ACT, ANSWERED, FEEDBACK, REFUSED, classify
 
 __all__ = [
@@ -199,11 +199,13 @@ class LoopModel:
 
     The system prompt (`system.text()`, then the kernel's instructions) is read before each
     message the model reads, in a worker thread, but sent as the conversation began with it: a
-    `system` entry in the transcript, the first one. A later reading that differs is kept as
-    another `system` entry and told on that message (`prompt.changes`), so the conversation's
-    start never changes under a model server's cache. The date is told on the person's message
-    instead, when the transcript has told none yet or another day's (`today`, the clock; a test
-    gives its own): first on that message, then any change to the instructions, then the message.
+    `system` entry in the transcript, the first one, kept whole. A later reading that differs
+    from the last told is kept as another `system` entry, the edits from that one
+    (`prompt.edits`), and told on that message (`prompt.changes`), so the conversation's start
+    never changes under a model server's cache and the transcript holds the prompt once, not
+    once per change. The date is told on the person's message instead, when the transcript has
+    told none yet or another day's (`today`, the clock; a test gives its own): first on that
+    message, then any change to the instructions, then the message.
     """
 
     def __init__(
@@ -225,6 +227,9 @@ class LoopModel:
         self._system = system
         self._memory = memory
         self._today = today
+        # what the model was last told (`prompt.latest`), and of how many `system` entries: the
+        # transcript keeps a change as edits, so this saves applying them all for every message
+        self._last: tuple[int, str | None] = (0, None)
 
     def _prompt(self) -> str:
         """The system prompt as it reads now. Run in a worker thread (`_told`)."""
@@ -233,9 +238,9 @@ class LoopModel:
 
     async def _told(self) -> str:
         """Bring what the transcript says the model was told up to date, before a message it is
-        about to read: the first prompt is kept as the conversation's start, a later one that
-        reads differently after it, and what changed is returned to go with that message ('' when
-        nothing did).
+        about to read: the first prompt is kept whole as the conversation's start, a later one
+        that reads differently from the last told as the edits from it (`prompt.edits`), and
+        what changed is returned to go with that message ('' when nothing did).
 
         The prompt is read in a worker thread, off the event loop the TUI shares, and the
         transcript is touched only once it has been, so a reply stopped meanwhile changes nothing.
@@ -244,15 +249,22 @@ class LoopModel:
         running, which finishes in its thread unused while the next may begin."""
         now = await asyncio.to_thread(self._prompt)
         kept = [m for m in self._transcript.messages if m.get("role") == "system"]
-        last = str(kept[-1].get("content") or "") if kept else None
+        if len(kept) != self._last[0]:
+            # a transcript this loop has not read yet (a resume, a reloaded loop) or one another
+            # loop kept a reading in since: what its entries come to, once
+            self._last = (len(kept), latest(kept))
+        last = self._last[1]
         if now == (last or ""):
             return ""
-        self._transcript.append({"role": "system", "content": now})
+        kept_now = {"content": now} if last is None else {"edits": edits(last, now)}
+        self._transcript.append({"role": "system", **kept_now})
+        self._last = (len(kept) + 1, now)
         return changes(last, now) if last is not None else ""
 
     def _request(self) -> list[Json]:
         """The messages for one request: the prompt the conversation began with, then the
-        conversation. The prompts kept after the first were told as notes, so they stay out."""
+        conversation. The readings kept after the first were told as notes, so they stay out: a
+        model is sent one `system` message, whole, and never sees the loop's edits."""
         messages = self._transcript.messages
         first = next((m for m in messages if m.get("role") == "system"), None)
         head: list[Json] = [{"role": "system", "content": first["content"]}] if first else []

@@ -1,6 +1,7 @@
 """The loop over a scripted model and a fake kernel, and the transcript outliving a model swap."""
 
 import asyncio
+import json
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -16,7 +17,9 @@ from agent_cordis_plugin import (
     FileTranscript,
     LoopModel,
     MemoryTranscript,
+    changes,
     classify,
+    latest,
     loop,
     memory,
     refusal,
@@ -369,7 +372,7 @@ async def test_a_conversation_keeps_the_prompt_it_began_with_and_is_told_what_ch
     """A model server reuses its work on a conversation only up to the first token that differs,
     so the prompt is sent as the conversation began with it; a change rides on the next message."""
     where, history = _Where(), MemoryTranscript()
-    scripted = Scripted([text("one")], [text("two")], [text("three")], [text("four")])
+    scripted = Scripted(*([text(said)] for said in ("one", "two", "three", "four", "five", "six")))
     model = LoopModel(scripted, _Guided(), history, Confined(), system=where)
     await _collect(model, "first")
     where.text_now = "in /b"
@@ -397,10 +400,130 @@ async def test_a_conversation_keeps_the_prompt_it_began_with_and_is_told_what_ch
         "user",
         "assistant",
     ]
+    # the change is kept as what turns the last reading into this one, not a whole prompt
+    assert history.messages[3] == {"role": "system", "edits": [{"at": 0, "drop": 1, "add": ["in /b"]}]}
     # a reloaded loop (a new model, a new ui) carries on from what the transcript says it told
     again = LoopModel(scripted, _Guided(), history, Confined(), system=where)
     await _collect(again, "fourth")
     assert scripted.requests[3][0][0] == began and scripted.requests[3][0][-1]["content"] == "fourth"
+    # and a loop goes by what the transcript says it told, not what it told itself: a change
+    # another loop over the same transcript told is not told again
+    where.text_now = "in /c"
+    await _collect(again, "fifth")
+    await _collect(model, "sixth")
+    assert '"in /b"' in scripted.requests[4][0][-1]["content"]
+    assert scripted.requests[5][0][-1]["content"] == "sixth"
+
+
+_SHOUT = "Shout when asked."  # `_Guided`'s instructions, which none of the changes below touch
+_DAY = "2026-10-07"
+
+
+def _today() -> str:
+    return _DAY
+
+
+async def test_several_changes_keep_the_prompt_once_and_each_is_told_against_the_last_told(
+    tmp_path: Path,
+) -> None:
+    """Each change is kept as the edits from the reading before it, not as another whole prompt,
+    and told against what the model was last told, not what the conversation began with. A
+    resumed session (the transcript read back from its file, a new loop over it) carries on from
+    the last reading: it tells nothing that was told already, and the next change against that."""
+    path = tmp_path / "transcript.jsonl"
+    where = _Where()
+    scripted = Scripted(*([text(f"reply {n}")] for n in range(6)))
+    model = LoopModel(scripted, _Guided(), FileTranscript(str(path)), Confined(), system=where, today=_today)
+    readings = ["in /a", "in /b", "in /b\n\nExtensions here: sh.", "in /c\n\nExtensions here: sh."]
+    for n, reading in enumerate(readings):
+        where.text_now = reading
+        await _collect(model, f"message {n}")
+    # bh-02 ended and resumed: the same file, read back by a new transcript, and a new loop
+    resumed = LoopModel(
+        scripted, _Guided(), FileTranscript(str(path)), Confined(), system=where, today=_today
+    )
+    await _collect(resumed, "message 4")  # it reads as it was last told
+    where.text_now = "in /c"
+    await _collect(resumed, "message 5")
+
+    asked = [request for request, _ in scripted.requests]
+    began = {"role": "system", "content": f"in /a\n\n{_SHOUT}"}
+    for request in asked:  # the start, whole, and no other `system` message: the edits stay home
+        assert request[0] == began and [m for m in request if m["role"] == "system"] == [began]
+    said = [request[-1]["content"] for request in asked]
+    told = [f"{reading}\n\n{_SHOUT}" for reading in [*readings, "in /c"]]
+    assert said[0] == f"(Today's date: {_DAY}.)\n\nmessage 0"
+    for n in (1, 2, 3):
+        assert said[n] == f"{changes(told[n - 1], told[n])}\n\nmessage {n}"
+    assert "in /b" not in said[2]  # told already: only the extension is new since
+    assert '"in /b"' in said[3] and '"in /a"' not in said[3]  # gone since it was last told
+    assert said[4] == "message 4"  # resumed: nothing told twice
+    assert said[5] == (
+        "(bh-02: your instructions have changed since this conversation began. "
+        'No longer in them: "Extensions here: sh.".)\n\nmessage 5'
+    )
+    entries = [json.loads(line) for line in path.read_text().splitlines()]
+    kept = [entry for entry in entries if entry["role"] == "system"]
+    assert kept[0] == began and all(set(entry) == {"role", "edits"} for entry in kept[1:])
+    assert len(kept) == 5  # the start and four changes: the resume kept none of its own
+    assert path.read_text().count(_SHOUT) == 1  # the prompt is in the file once
+    assert latest(kept) == told[-1]
+
+
+async def test_a_transcript_that_kept_each_prompt_whole_still_loads_and_resumes(tmp_path: Path) -> None:
+    """Before the loop kept edits, it kept every reading that differed whole, and before the date
+    left the prompt each reading had a `Today:` line. Such a session resumes as it was: each
+    request begins with its first prompt, old date and all; its last whole reading is what the
+    model was last told, so the first message after the resume tells the date and the part the
+    line is gone from; and each change from then on is kept as the edits from the one before."""
+    path = tmp_path / "transcript.jsonl"
+    began = {"role": "system", "content": f"in /a\nToday: 2026-10-01\n\n{_SHOUT}"}
+    then = {"role": "system", "content": f"in /b\nToday: 2026-10-01\n\n{_SHOUT}"}
+    old = [
+        began,
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "one"},
+        then,
+        {"role": "user", "content": f"{changes(began['content'], then['content'])}\n\nsecond"},
+        {"role": "assistant", "content": "two"},
+    ]
+    path.write_text("".join(json.dumps(message) + "\n" for message in old))
+    where = _Where()
+    scripted = Scripted([text("three")], [text("four")], [text("five")])
+
+    async def resume(message: str) -> None:
+        loop = LoopModel(
+            scripted, _Guided(), FileTranscript(str(path)), Confined(), system=where, today=_today
+        )
+        await _collect(loop, message)
+
+    where.text_now = "in /b"
+    await resume("third")
+    where.text_now = "in /c"
+    await resume("fourth")
+    await resume("fifth")
+
+    asked = [request for request, _ in scripted.requests]
+    for request in asked:
+        assert request[0] == began and [m for m in request if m["role"] == "system"] == [began]
+    conversation = [m for m in old if m["role"] != "system"]
+    assert list(asked[0][1:-1]) == conversation  # the old conversation, carried as it was
+    in_b, in_c = f"in /b\n\n{_SHOUT}", f"in /c\n\n{_SHOUT}"
+    third = asked[0][-1]["content"]  # told against `then`, the last whole reading
+    assert third == f"(Today's date: {_DAY}.)\n\n{changes(then['content'], in_b)}\n\nthird"
+    assert "\n\nin /b\n\n" in third and "in /a" not in third
+    fourth = asked[1][-1]["content"]  # told against what the edits came to
+    assert fourth == f"{changes(in_b, in_c)}\n\nfourth"
+    assert '"in /b"' in fourth and "Today" not in fourth
+    assert asked[2][-1]["content"] == "fifth"
+    kept = [m for m in FileTranscript(str(path)).messages if m["role"] == "system"]
+    assert kept == [
+        began,
+        then,
+        {"role": "system", "edits": [{"at": 0, "drop": 1, "add": ["in /b"]}]},
+        {"role": "system", "edits": [{"at": 0, "drop": 1, "add": ["in /c"]}]},
+    ]
+    assert latest(kept) == in_c
 
 
 async def test_a_change_made_by_an_input_is_told_with_that_input_s_result() -> None:

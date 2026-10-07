@@ -46,15 +46,26 @@ the last request, so a prompt sent fresh each time would make the whole conversa
 whenever the prompt changed: minutes of prompt processing with a local model before the first
 new token, a restart of Claude Code and the loss of its cache with Claude. The loop still reads
 the prompt before each message the model reads (the person's message, an input's result, a
-nudge); when it reads differently from the last one kept, the new reading is kept as another
-`system` entry and what changed (`prompt.changes`, pure: each part, a paragraph, that is new or
-reads differently, whole, and the first line of each that is gone) goes with that message, while
-the person sees a `note`. A loop that reloads (a new model, a new ui) carries on from what the
-transcript says the model was told; `/clear` empties it, so the next conversation begins with
-the prompt as it reads then.
+nudge); when it reads differently from what the model was last told, what changed
+(`prompt.changes`, pure: each part, a paragraph, that is new or reads differently, whole, and
+the first line of each that is gone) goes with that message, while the person sees a `note`.
+
+The new reading is kept as another `system` entry, but not whole: as the edits that turn the
+last reading into it (`prompt.edits`, pure: for each run of paragraphs that reads differently,
+where it starts, how many are gone and what stands there now, `{"at", "drop", "add"}`), so a
+session where extensions load, the branch switches or CLAUDE.md is edited keeps the prompt in its
+transcript once, not once per change. What the model was last told is the first entry with
+each later one's edits applied in turn (`prompt.latest`, pure), which the loop works out when it
+meets a transcript it has not read and then keeps up itself. A transcript from before the loop
+kept edits has every reading whole; `latest` takes those as they are, so it resumes unchanged
+and its next change is kept as edits from its last whole reading. Only the first entry reaches a
+model, as `{"role": "system", "content"}`; the edits are the loop's own. A loop that reloads (a
+new model, a new ui), or one over a resumed session, carries on from what the transcript says
+the model was told; `/clear` empties it, so the next conversation begins with the prompt as it
+reads then.
 
 The date is not in the prompt, which would then read differently every midnight: the model would
-be told its instructions changed, and the transcript would keep another whole prompt, each day.
+be told its instructions changed, and the transcript would keep another change, each day.
 The loop tells it with the person's message instead (`reply`), when the transcript has told no
 date yet or the last one it told is another day's: the entry's content starts
 `(Today's date: 2026-10-07.)` and the entry carries the date as `"today"`, which is how the loop

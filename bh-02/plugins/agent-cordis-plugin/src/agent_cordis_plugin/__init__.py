@@ -16,7 +16,7 @@ from agent_cordis_plugin.loop import (
     refusal,
     remembered,
 )
-from agent_cordis_plugin.prompt import changes
+from agent_cordis_plugin.prompt import changes, edits, latest
 from agent_cordis_plugin.stops import classify
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
 from agent_cordis_plugin.wiring import LoopConfig, TranscriptConfig, loop, memory, transcript
@@ -38,6 +38,8 @@ __all__ = [
     "TranscriptConfig",
     "changes",
     "classify",
+    "edits",
+    "latest",
     "loop",
     "memory",
     "refusal",
