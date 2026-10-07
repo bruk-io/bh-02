@@ -117,7 +117,8 @@ async def test_a_program_left_holding_the_output_ends_with_the_command_one_that_
 
 
 async def test_a_command_cancelled_while_it_runs_ends_with_its_process_group(tmp_path: Path) -> None:
-    """bh-02 leaving (or the chat row restarting) cancels a command mid-run: nothing is left."""
+    """The person leaving bh-02 (the chat row cancels a command once its input closes), or the
+    chat row restarting, cancels a command mid-run: nothing is left."""
     running = asyncio.ensure_future(run_command("sleep 30 & echo $! > child; wait", _config(tmp_path)))
     child = await _written(tmp_path / "child")
     running.cancel()
@@ -135,6 +136,32 @@ async def test_a_long_output_keeps_its_start_and_its_end(tmp_path: Path) -> None
 async def test_colour_a_program_writes_anyway_is_taken_out(tmp_path: Path) -> None:
     ran = await run_command(r"printf '\033[31mred\033[0m plain\n'", _config(tmp_path))
     assert ran.output == "red plain\n"
+
+
+async def test_nothing_a_terminal_acts_on_is_left_in_what_it_printed(tmp_path: Path) -> None:
+    """What is shown goes to the person's terminal, so no escape or control character reaches
+    it: `tput sgr0`'s `ESC ( B`, line drawing (`ESC ( 0`), `ESC 7`/`ESC 8`, a reset (`ESC c`),
+    `ESC # 8`, `ESC =`, a title, a bell, an 8-bit CSI. A line a program wrote over (`\\r`, a
+    progress bar) reads as it ended up."""
+    printed = (
+        r"printf 'AAA\033(0qqq\033(BZZZ\n\0337saved\0338 \033c\033#8\033=keypad\n';"
+        r"printf '\033]0;title\007bell\007 \302\23331m\n';"
+        r"printf '10%%\r20%%\r30%%\r\ndone\033['"
+    )
+    ran = await run_command(printed, _config(tmp_path))
+    assert ran.output == "AAAqqqZZZ\nsaved keypad\nbell 31m\n30%\ndone"
+    tput = await run_command(r"printf 'red'; printf '\033(B\033[m\n'", _config(tmp_path))
+    assert tput.output == "red\n"
+
+
+async def test_a_long_output_is_cut_on_whole_characters(tmp_path: Path) -> None:
+    """The start kept ends, and the end kept begins, where a character does: no `é` is split."""
+    ran = await run_command(
+        "printf '%5999s' '' | tr ' ' a; yes é | head -n 10000 | tr -d '\\n'; printf '!'", _config(tmp_path)
+    )
+    assert "\ufffd" not in ran.output
+    assert ran.output.startswith("a" * 5999 + "\n... [6002 bytes cut here] ...\né")
+    assert ran.output.endswith("éé!")
 
 
 def test_the_host_s_own_variables_stay_out_of_the_command_s_environment() -> None:
@@ -170,10 +197,16 @@ async def test_how_a_command_ended_is_said(tmp_path: Path) -> None:
 async def test_an_empty_command_or_one_that_cannot_start_is_said_and_holds_nothing(tmp_path: Path) -> None:
     said = await run_line("", config=ShellCommandConfig())
     assert said == "type a shell command after !, such as !git status"
-    said = await run_line("ls", config=ShellCommandConfig(shell=str(tmp_path / "no-such-shell")))
+    shell = str(tmp_path / "no-such-shell")
+    said = await run_line("ls", config=ShellCommandConfig(shell=shell))
     assert isinstance(said, str) and said.startswith("couldn't run 'ls': ")
+    assert said.endswith(  # and what to do about it
+        f"The shell-command row runs it with its `shell` ({shell}) in its `cwd` (.): give that "
+        "row a shell and a directory that exist, in a layer"
+    )
     said = await run_line("ls", config=ShellCommandConfig(cwd=str(tmp_path / "gone")))
     assert isinstance(said, str) and said.startswith("couldn't run 'ls': ")
+    assert "its `shell` (empty: your $SHELL, else /bin/sh) in its `cwd` (" in said
 
 
 async def test_the_person_s_own_shell_runs_it_by_default(
@@ -193,17 +226,17 @@ async def test_the_row_claims_its_prefix_in_the_broker_once_and_takes_it_when_it
     await rt.settle()
     commands = rt.root.get("commands")
     assert commands.claims("!echo hi") and not commands.claims("echo hi")
-    note, told = await commands.run("!echo hi")
-    assert note == {"type": "note", "text": f"hi\nexit status 0; {_NEXT}"}
-    assert told["type"] == "for_model" and "$ echo hi\nhi\n" in told["text"]
+    assert await commands.run("!echo hi") == [{"type": "note", "text": f"hi\nexit status 0; {_NEXT}"}]
+    [told] = commands.take_for_model()  # held in the broker for the next message, not answered
+    assert told.startswith(_TOLD) and "$ echo hi\nhi\n" in told
     assert "!COMMAND  run COMMAND in your shell, here, as you" in await commands.run("/help")
     second = rt.mount(shell_command, id="another", config={"shell": "/bin/sh"})
     await rt.settle()
     assert second.state is State.FAILED  # one prefix, one row
     assert "a prefix named '!' is already registered" in str(second.error)
-    other = rt.mount(shell_command, id="other", config={"prefix": "$", "cwd": str(tmp_path)})
+    other = rt.mount(shell_command, id="other", config={"prefix": "%", "cwd": str(tmp_path)})
     await rt.settle()
-    assert other.state is State.ACTIVE and commands.claims("$ ls")
+    assert other.state is State.ACTIVE and commands.claims("% ls")
     await row.retire()
     await rt.settle()
     assert not commands.claims("!echo hi")  # the row took its prefix with it

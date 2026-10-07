@@ -13,11 +13,14 @@ terminal's Ctrl-C never reaches it and a program that opens /dev/tty fails rathe
 over the app. A command is not a turn, and Ctrl-C does not stop it (CONTRACTS.md: input), so it
 has a `timeout`, at which its process group is ended; so is a program it left running in the
 background that still holds its output, once it has exited, since nobody would read what that
-prints. What it printed is kept to its start and its end, however much there was.
+prints, and so is the command when it is cancelled (the person left bh-02). What it printed is
+kept to its start and its end, however much there was, and shown as plain text: nothing in it
+reaches the terminal that a terminal acts on (an escape, a control character).
 
 Its answer (CONTRACTS.md: commands) is a `note` for the person, what it printed and how it
-ended, and a `for_model` event, the same framed for the model, which `chat:session` holds and
-puts in front of the person's next message: the model reads it with that, never during a turn.
+ended, and a `for_model` event, the same framed for the model, which the `commands` value
+holds and `chat:session` puts in front of the person's next message: the model reads it with
+that, never during a turn.
 """
 
 import asyncio
@@ -38,8 +41,17 @@ _LEFT_OPEN_S = 0.5  # after the shell exits, how long a program it left running 
 _STOP_GRACE_S = 2.0  # between SIGTERM and SIGKILL
 _GONE = (ProcessLookupError, PermissionError)  # a group already ended (darwin: only zombies left)
 _HOST_ONLY = ("ANTHROPIC_", "CLAUDE")
-# CSI (private markers too), OSC, and two-byte escapes: colour a program wrote though no terminal
-_ESCAPES = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
+# What a program writes for a terminal though it has none (colour, `tput sgr0`'s `ESC ( B`)
+_ESCAPES = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI (private markers too): colour, the cursor
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: a title, a link
+    r"|\x1b[PX^_][^\x1b]*\x1b\\"  # DCS, SOS, PM, APC: a string for the terminal
+    r"|\x1b[ -/]*[0-~]"  # the rest: a character set (`ESC ( 0`), `ESC 7`, `ESC c` (a reset)
+)
+# an escape the text ends in the middle of (where the start kept of a long output was cut)
+_UNFINISHED = re.compile(r"\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b]*|[PX^_][^\x1b]*|[ -/]*)?\Z")
+# what is left that a terminal acts on: a stray ESC, C0 controls but tab and newline, DEL, C1
+_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,8 +70,8 @@ class ShellCommandConfig:
 @dataclass(frozen=True, slots=True)
 class Ran:
     """A command that ran: what was typed; what it printed (stdout and stderr together, its start
-    and end when it was long, escapes removed); and how it ended: its exit status (negative: the
-    signal that ended it), or None when it was stopped at its timeout."""
+    and end when it was long, as plain text: `_plain`); and how it ended: its exit status
+    (negative: the signal that ended it), or None when it was stopped at its timeout."""
 
     command: str
     output: str
@@ -72,12 +84,38 @@ def environment(environ: Mapping[str, str]) -> dict[str, str]:
     return {name: value for name, value in environ.items() if not name.startswith(_HOST_ONLY)}
 
 
+def _plain(text: str) -> str:
+    """`text` as a terminal would leave it to read, with nothing left in it that a terminal acts
+    on: escapes taken out (one it ends in the middle of too); a line a program wrote over
+    (`\\r`, a progress bar) as it ended up; any other control character but tab and newline
+    gone."""
+    lines = _ESCAPES.sub("", _UNFINISHED.sub("", text)).replace("\r\n", "\n").split("\n")
+    return _CONTROLS.sub("", "\n".join(line.rstrip("\r").rpartition("\r")[2] for line in lines))
+
+
+def _whole(head: bytes, tail: bytes) -> tuple[bytes, bytes]:
+    """The start and end kept of what was printed, cut where a character begins: a UTF-8
+    character the cut split is left out of both."""
+    for back in range(1, min(4, len(head)) + 1):
+        if head[-back] < 0x80:  # ASCII: the start ends on a whole character
+            break
+        if head[-back] >= 0xC0:  # where the last character began: whole, or left out
+            needs = 2 if head[-back] < 0xE0 else 3 if head[-back] < 0xF0 else 4
+            head = head if back >= needs else head[:-back]
+            break
+    skip = next((n for n in range(min(3, len(tail))) if not 0x80 <= tail[n] < 0xC0), min(3, len(tail)))
+    return head, tail[skip:]
+
+
 def _printed(head: bytes, tail: bytes, total: int) -> str:
-    """What a command printed, as text: all of it, or, when it printed more than was kept, its
-    start and its end with how much was cut between them; escapes removed."""
+    """What a command printed, as text (`_plain`): all of it, or, when it printed more than was
+    kept, its start and its end, each cut on a whole character, with how much was cut between."""
+    if total <= len(head) + len(tail):
+        return _plain((head + tail).decode(errors="replace"))
+    head, tail = _whole(head, tail)
     cut = total - len(head) - len(tail)
-    parts = [head + tail] if cut <= 0 else [head, f"\n... [{cut} bytes cut here] ...\n".encode(), tail]
-    return _ESCAPES.sub("", "".join(part.decode(errors="replace") for part in parts))
+    start, end = (_plain(part.decode(errors="replace")) for part in (head, tail))
+    return f"{start}\n... [{cut} bytes cut here] ...\n{end}"
 
 
 class _Output:
@@ -125,9 +163,9 @@ async def run_command(command: str, config: ShellCommandConfig) -> Ran:
     except TimeoutError:
         stopped = process.returncode is None
     finally:
-        # stopped at its timeout (its output closed or not), cancelled (bh-02 is leaving), or a
-        # program it left running still holds its output: it ends with the command, since
-        # nobody would read what it prints
+        # stopped at its timeout (its output closed or not), cancelled (the person left bh-02:
+        # the chat row cancels a command once its input closes), or a program it left running
+        # still holds its output: it ends with the command, since nobody would read what it prints
         if process.returncode is None or not reading.done():
             await _end(process)
             await asyncio.wait({reading}, timeout=_STOP_GRACE_S)
@@ -188,5 +226,10 @@ async def run_line(command: str, *, config: ShellCommandConfig) -> str | list[di
     try:
         ran = await run_command(command, config)
     except OSError as error:
-        return f"couldn't run {command!r}: {error}"
+        shell = config.shell or "empty: your $SHELL, else /bin/sh"
+        return (
+            f"couldn't run {command!r}: {error}. The shell-command row runs it with its `shell` "
+            f"({shell}) in its `cwd` ({config.cwd}): give that row a shell and a directory that "
+            "exist, in a layer"
+        )
     return answer(ran, config.timeout)

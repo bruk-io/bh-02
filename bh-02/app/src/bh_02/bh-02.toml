@@ -114,9 +114,9 @@ use = "commands:operator"
 # `!COMMAND`: a line starting with `!` runs as a shell command, as you (not in the jail), in the
 # project, through your $SHELL. The app owns the terminal, so its output is captured, and Ctrl-C
 # can't stop a command, so it is stopped at its `timeout` (120 s; config: `prefix`, `cwd`,
-# `timeout`, `shell`). What it printed is shown, and the model reads it with your next message,
-# never mid-turn. The prefix is claimed in `commands`, which only a row in a layer can do: an
-# extension can't.
+# `timeout`, `shell`), or when you quit. What it printed is shown, and the model reads it with
+# your next message, never mid-turn (`commands` holds it meanwhile, so `/model` keeps it). The
+# prefix is claimed in `commands`, which only a row in a layer can do: an extension can't.
 [[plugin]]
 id = "shell-command"
 use = "commands:shell_command"

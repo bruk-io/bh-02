@@ -81,10 +81,13 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 **What the model sees and how a turn looks.** `loop.reply` yields events (text, thinking,
 tool_call, tool_result, usage, stop, note). `approval.approve` decides whether the model's code
 runs (unjailed, by asking through `output.confirm`);
-`input.interrupted()` is Ctrl-C, which `chat:session` races against the reply. Which lines
-are the harness's, not the model's, `chat:session` asks `commands` (`claims`); what a command
-gives the model (`for_model`: a `!COMMAND`'s output) it holds and puts in front of the person's
-next message, so `loop.reply` is still given one message and nothing reaches a turn. `system`
+`input.interrupted()` is Ctrl-C, which `chat:session` races against the reply, and
+`input.closed()` the person leaving, which it races against a command. Which lines are the
+harness's, not the model's, `chat:session` asks `commands` (`claims`); what a command gives the
+model (`for_model`: a `!COMMAND`'s output) `commands` holds (a row that never reloads, so a
+`/model` switch, which reloads the chat row, keeps it) and the chat row takes and puts in front
+of the person's next message (`take_for_model`), so `loop.reply` is still given one message and
+nothing reaches a turn. `system`
 (`context:project`) is organised as Claude Code's is: who the model is (the model in bh-02, not
 Claude Code) and what bh-02 is made of, then the project context: the working directory and
 branch, what the context files say, and the sections rows add (`system.add`: the extensions
@@ -139,7 +142,8 @@ It depends on its config alone, so it never reloads with anything else. The app 
 terminal: a child process that inherits fd 2 paints over it, so every child's stderr goes to
 a file (the kernel's and brig's do) or is captured (`commands:shell_command` runs a `!COMMAND`
 line in the person's shell in a session of its own, with no stdin, and stops it at its timeout,
-since Ctrl-C stops only a turn), `--trace` takes a file, and anything
+since Ctrl-C stops only a turn, or when the person leaves; what it printed is shown as plain
+text, nothing a terminal acts on left in it), `--trace` takes a file, and anything
 the shell must say waits until the app has exited. A row that shows something in the frame
 depends on `frame` and `acquire`s an entry (`tui:status` is the pattern). The approval
 modal is `push_screen` with a callback, because `confirm()` is called from cordis's coroutines,

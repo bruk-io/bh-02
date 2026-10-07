@@ -23,10 +23,13 @@ the shapes are in `../../CONTRACTS.md`.
 The input, output and frame never touch a widget: cordis's coroutines run outside the app's task, so they post a
 message and the app draws it. Whatever ends the app (Ctrl-Q, `/exit`, `/quit`, a crash) ends
 the bridge: a pending `read()` returns None (a crash: raises `AppCrashed`, which reaches the
-command line through the chat row's `done`), turns waiting on Ctrl-C return, questions are a no.
-Ctrl-C is a priority binding that interrupts the running turn and never quits; one pressed
-after a line is sent and before its turn listens (or during a slash command) is held for the
-turn, and the next read drops it. `confirm()` comes from plain coroutines (not Textual
+command line through the chat row's `done`), turns waiting on Ctrl-C return, `closed()` returns
+(the chat row cancels a command still running, so a `!` command doesn't keep bh-02 alive),
+questions are a no. Ctrl-C is a priority binding that interrupts the running turn and never
+quits; one pressed after a line is sent and before its turn listens (or during a command: a
+slash command, a `!` one) is held for the turn, and the next read drops it. Held and still
+unheard a moment later, it was pressed during a command, which it doesn't stop, and the app
+says so, and that leaving does. `confirm()` comes from plain coroutines (not Textual
 workers), so the modal is `push_screen` with a callback resolving a future. Questions are
 shown one at a time, the rest queued; an interrupted turn cancels its future and its modal
 comes down wherever it is (anything shown over it is popped first); Ctrl-C with a question up

@@ -109,6 +109,41 @@ async def test_a_claimed_prefix_takes_its_lines_one_character_each_and_never_twi
     assert await commands.run("!ls") == "! (shell) failed: no shell"
 
 
+async def test_what_a_command_leaves_for_the_model_is_held_here_until_taken_or_cleared() -> None:
+    """`for_model` is held by the broker, which never reloads, not by the chat row, which a
+    `/model` switch reloads: it is answered to nobody, and taken once, in the order it came;
+    a new conversation (`cleared`) drops it, and says so."""
+    commands = Commands()
+
+    async def shell(args: str) -> list[dict[str, str]]:
+        return [{"type": "note", "text": f"{args} said"}, {"type": "for_model", "text": f"$ {args}"}]
+
+    async def clear(args: str) -> list[dict[str, str]]:
+        return [{"type": "cleared"}, {"type": "note", "text": "cleared"}]
+
+    commands.claim("!", {"name": "shell", "help": "", "usage": "COMMAND"}, shell)
+    commands.register({"name": "clear", "help": "", "usage": ""}, clear)
+    assert commands.take_for_model() == []
+    assert await commands.run("!ls") == [{"type": "note", "text": "ls said"}]  # shown, not held
+    assert await commands.run("/help") != ""  # other commands keep it
+    await commands.run("!pwd")
+    assert commands.take_for_model() == ["$ ls", "$ pwd"]
+    assert commands.take_for_model() == []  # taken once
+    await commands.run("!ls")
+    await commands.run("!pwd")
+    assert await commands.run("/clear") == [
+        {"type": "cleared"},
+        {"type": "note", "text": "cleared"},
+        {
+            "type": "note",
+            "text": "2 commands' output, which was waiting for your next message, is dropped "
+            "with the old conversation",
+        },
+    ]
+    assert commands.take_for_model() == []
+    assert await commands.run("/clear") == [{"type": "cleared"}, {"type": "note", "text": "cleared"}]
+
+
 @dataclass
 class Entry:
     id: str

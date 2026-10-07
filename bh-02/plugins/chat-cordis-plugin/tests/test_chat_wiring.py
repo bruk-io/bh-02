@@ -69,12 +69,45 @@ async def test_replacing_the_ui_restarts_the_loop_and_keeps_the_conversation() -
     await rt.shutdown()
 
 
+async def test_what_a_command_left_for_the_model_survives_the_chat_row_s_restart() -> None:
+    """`/model` reloads the loop, and the chat row with it: `!`'s output, held by `commands`
+    (a row that does not reload), still goes with the person's next message."""
+    commands, typed, screen = Noted(), Typed("!git diff"), Screen()
+    first, second = Echo(), Echo()
+
+    @component
+    async def held_commands() -> Effects:
+        yield bind("commands", commands)
+
+    rt = Runtime()
+    loop = rt.mount(model_row(first), id="loop")
+    rt.mount(ui_row(typed, screen), id="ui")
+    rt.mount(held_commands, id="commands")
+    chat = rt.mount(session, id="chat")
+    await rt.settle()
+    await asyncio.sleep(0.01)
+    assert commands.ran == ["!git diff"]
+    await loop.retire()  # a model switch: the chat row goes down with the loop
+    await rt.settle()
+    assert chat.state is State.INACTIVE
+    rt.mount(model_row(second), id="loop")
+    typed.type("review this")
+    typed.type(None)
+    await asyncio.wait_for(rt.idle(), 2)
+    assert first.seen == []
+    assert second.seen == ["(the person ran git diff)\n\nreview this"]
+    await rt.shutdown()
+
+
 async def test_an_unexpected_failure_in_the_loop_reaches_the_bootstrap() -> None:
     class Broken:
         async def read(self) -> str | None:
             raise RuntimeError("the terminal fell over")
 
         async def interrupted(self) -> None:
+            await asyncio.Event().wait()
+
+        async def closed(self) -> None:
             await asyncio.Event().wait()
 
     rt = Runtime()

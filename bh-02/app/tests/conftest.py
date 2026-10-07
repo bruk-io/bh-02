@@ -55,6 +55,9 @@ class Silent:
     async def interrupted(self) -> None:
         await asyncio.Event().wait()
 
+    async def closed(self) -> None:
+        await asyncio.Event().wait()
+
 
 FIELDS: dict[str, str] = {}
 
@@ -97,6 +100,9 @@ class OneMessage:
     async def interrupted(self) -> None:
         await asyncio.Event().wait()
 
+    async def closed(self) -> None:
+        await asyncio.Event().wait()
+
 
 class Upper:
     async def reply(self, message: str) -> AsyncIterator[dict[str, Any]]:
@@ -129,6 +135,9 @@ class Paced:
         return None
 
     async def interrupted(self) -> None:
+        await asyncio.Event().wait()
+
+    async def closed(self) -> None:
         await asyncio.Event().wait()
 
 
@@ -172,6 +181,9 @@ class Scripted:
         return SCRIPT.pop(0) if SCRIPT else None
 
     async def interrupted(self) -> None:
+        await asyncio.Event().wait()
+
+    async def closed(self) -> None:
         await asyncio.Event().wait()
 
 
