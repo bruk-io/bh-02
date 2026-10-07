@@ -593,6 +593,43 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
     assert again.exit_code() == 0
 
 
+def test_compact_carries_on_from_a_summary_and_a_resume_draws_from_it(launch: Launch, tmp_path: Path) -> None:
+    """`/compact` answers `cleared`, a note carrying the model's summary, then `restarting`: the
+    old turns leave the screen, the loop and its transcript restart, and the next message is the
+    new conversation's second (bh-02's note before the summary was its first). The old transcript
+    is kept beside the new one, and a resume draws from the note on. The fake's summary is its
+    echo of bh-02's request for one."""
+    app = launch("fake")
+    ready = app.wait_for(_READY, 60)
+    app.type("hello there")
+    replied = app.wait_for("echo: HELLO THERE (message 1)", after=ready)
+    app.type("/compact")
+    compacted = app.wait_for("the conversation was compacted", 20, after=replied)
+    app.wait_for("echo: (BH-02: THE PERSON ASKED TO COMPACT", 10, after=compacted)
+    app.wait_for("↻ chat reloaded", 20, after=compacted)
+    app.settle(1.0)
+    app.type("again")
+    app.wait_for("echo: AGAIN (message 2)", 20, after=compacted)
+    narrowed = len(app.text())
+    app.resize(_COLS - 20)  # drawn again: only what the transcript holds now
+    app.wait_for("echo: AGAIN (message 2)", 10, after=narrowed)
+    app.settle()
+    assert "HELLO THERE" not in app.text()[narrowed:]
+    app.press(b"\x11")
+    assert app.exit_code() == 0
+    (session,) = (tmp_path / "state" / "bh-02" / "sessions").iterdir()
+    assert "hello there" in (session / "transcript.jsonl.bak").read_text()
+    assert "hello there" not in (session / "transcript.jsonl").read_text()
+    again = launch("fake", "--resume")  # a resume draws from the compaction on
+    ready = again.wait_for(_READY, 60)
+    screen = again.text()
+    assert "echo: AGAIN (message 2)" in screen and "HELLO THERE" not in screen, screen[-4000:]
+    again.type("more")  # and sends the model the new conversation: the summary, `again`, this
+    again.wait_for("echo: MORE (message 3)", 20, after=ready)
+    again.press(b"\x11")
+    assert again.exit_code() == 0
+
+
 def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_visibly(
     launch: Launch,
 ) -> None:

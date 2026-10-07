@@ -13,7 +13,6 @@ from commands_cordis_plugin import (
     model_list,
     operator,
     parse,
-    perform,
     registry,
     rows_table,
     set_model,
@@ -263,24 +262,6 @@ async def test_the_model_list_says_why_the_models_file_is_not_read_instead_of_wh
     said = (await dict((s["name"], f) for s, f in op.specs)["model"]("")).splitlines()
     assert said[0] == "  sonnet  claude-code  sonnet"
     assert said[-1] == f"/model NAME switches; {models.problem}" and "add models in" not in said[-1]
-
-
-async def test_a_failed_job_is_reported_and_the_next_one_still_runs() -> None:
-    jobs: asyncio.Queue[Any] = asyncio.Queue()
-    ran, failures = [], []
-
-    async def fails() -> None:
-        raise RuntimeError("boom")
-
-    async def works() -> None:
-        ran.append("ok")
-
-    await jobs.put(fails)
-    await jobs.put(works)
-    worker = asyncio.create_task(perform(jobs, failures.append))
-    await asyncio.sleep(0.01)
-    worker.cancel()
-    assert failures == ["RuntimeError: boom"] and ran == ["ok"]
 
 
 def test_rows_line_up() -> None:

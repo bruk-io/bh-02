@@ -356,6 +356,38 @@ class OneInput:
 @component(provides=("model",))
 async def one_input_model() -> Effects:
     yield bind("model", OneInput())
+
+
+# What the compacting model was sent: each request's messages and the names of the tools offered.
+SENT: list[tuple[list[dict[str, Any]], list[str]]] = []
+
+
+class Compacting:
+    """A model for /compact: a message `py:CODE` is one python input of CODE, then what it
+    printed (`ran: ...`); bh-02 asking for a summary is answered `SUMMARY: x holds 42`; anything
+    else is answered with the roles of the messages it was sent."""
+
+    async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
+        SENT.append(([dict(m) for m in messages], [t["name"] for t in tools]))
+        last = messages[-1]
+        words = str(last["content"]).rpartition("\\n\\n")[2]  # after the date the loop tells first
+        if last["role"] == "tool":
+            yield {"type": "text", "text": f"ran: {str(last['content']).strip()}"}
+        elif str(last["content"]).startswith("(bh-02: the person asked to compact"):
+            yield {"type": "text", "text": "SUMMARY: x holds 42"}
+        elif words.startswith("py:"):
+            code = {"code": words[3:]}
+            yield {"type": "tool_call", "id": f"c{len(messages)}", "name": "python", "input": code}
+            yield {"type": "stop", "reason": "tool_use"}
+            return
+        else:
+            yield {"type": "text", "text": "roles: " + ",".join(m["role"] for m in messages)}
+        yield {"type": "stop", "reason": "end_turn"}
+
+
+@component(provides=("model",))
+async def compacting_model() -> Effects:
+    yield bind("model", Compacting())
 '''
 
 

@@ -63,15 +63,15 @@ nothing. Keep registrations commutative: each takes its own entry, never an orde
 
 ## The running harness
 
-The shell's base layer is the whole harness (CodeAct always); each later file (the session's
-own `session.toml`, `--patch`) is a patch over it. The loader watches every layer
-file: editing one, by hand or by `/model`, reshapes the running composition (a jailed input
-can't write one: the jail denies them, and on Linux a save by rename ends the jail so the next
-input's holds the new file). The layer files are the only way the composition's
-*shape* changes durably; the loader's `restart(row)` (`/restart`, `/clear`) gives a row a fresh
-fiber, and can't outlive the session. The shell pins three rows of its own after every layer
-(`disabled = false`, so no layer can remove them): `layers`, `sessions` (the running session,
-whose id the status bar shows) and `harness`.
+The shell's base layer is the whole harness (CodeAct always); each later file (the session's own
+`session.toml`, `--patch`) is a patch over it. The loader watches every layer file: editing one,
+by hand or by `/model`, reshapes the running composition (a jailed input can't write one: the
+jail denies them, and on Linux a save by rename ends the jail so the next input's holds the new
+file). The layer files are the only way the composition's *shape* changes durably; the loader's
+`restart(row)` (`/restart`, `/clear`, `/compact`) gives a row a fresh fiber, and can't outlive
+the session. The shell pins three rows of its own after every layer (`disabled = false`, so no
+layer can remove them): `layers`, `sessions` (the running session, whose id the status bar
+shows) and `harness`.
 A session is a directory under `$XDG_STATE_HOME/bh-02/sessions/` whose `session.toml` carries
 every per-run choice, so a resume is booting with it again. An
 override's `config` replaces the row's, it doesn't merge. The bootstrap follows the chat row's
@@ -108,8 +108,8 @@ through a shell, once for each kind of work, how Python does it (`shell_note`);
 or CLAUDE.md, or a rule for some files, arrives whole with the first input that opens a file it
 covers (Claude Code's on-demand loading); it has no config of its own and asks the `system`
 value (`system.touched(paths)`), so the context files, and the caches of what was read and
-searched, are `context:project`'s alone. Both depend on `transcript`, so `/clear` starts them
-afresh, and read its `messages` once, at their first input, so a resumed session is not told a
+searched, are `context:project`'s alone. Both depend on `transcript`, so `/clear` and `/compact`
+start them afresh, and read its `messages` once, at their first input, so a resumed session is not told a
 note its transcript holds after a result; only layer rows add to `memory`, since its functions
 run in bh-02's process. The loop reads the prompt before each message the model reads but sends
 the one the conversation began with (the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
@@ -122,7 +122,7 @@ know what it last told (`prompt.latest`); a transcript that kept whole copies re
 The date is not in the prompt, or every midnight would be such a change: the loop tells it
 first on the person's message, the first of a conversation and of each day
 (`(Today's date: ...)`, the entry's `today` field saying which it told, so a resume does not
-tell it again and `/clear` does). So the prompt reads the same from day to day,
+tell it again and `/clear` and `/compact` do). So the prompt reads the same from day to day,
 and a local model server that keeps its prompt cache can reuse a new session's start. The
 prompt is read, and `memory` asked, in a thread of the loop's own, never on the event loop the
 TUI shares: a section function may read many files and search the project, and must not need the
@@ -132,6 +132,15 @@ and the thread is a daemon's, not the default executor's, which `asyncio.run` an
 interpreter join as they end, so one left running never holds bh-02 open. The claude-code provider
 adds a note that Claude Code's own opening line and its `mcp__bh__` tool names don't mean the
 model is in Claude Code.
+`/compact` (`agent:compact`, a row of its own over `model`, the kernel's `spec`, the loader and
+`commands`) begins a new conversation from the model's summary of this one: one step, the
+loop's own request with bh-02 asking for the summary after it (a call it makes never runs), in
+`timeout` seconds (a command can't be interrupted); the new conversation (bh-02's note, then the
+summary as the model's answer) is written over the transcript row's file in one step, the old
+kept as `.bak`, and the loop and the transcript restart, so the prompt is read afresh and the
+date told again, while the kernel keeps the namespace the summary names. It depends on neither
+`loop` nor `transcript` (their restart would reload it mid-job), reading the row's file through
+the loader's entries; its answer is `cleared`, the note carrying the summary, then `restarting`.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays
 a provider's message as it came.

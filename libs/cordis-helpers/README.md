@@ -10,6 +10,12 @@ nothing else; this package is patterns built on them, with no domain in them.
   (Definition 44): every subset can be withdrawn in any order.
 - **`Hooks[F]`**: a set of callables with the same discipline, for guards, listeners and
   policies where order must not matter.
+- **`perform(jobs, failed)`** (and `Job`): work a row owns, put on a queue by code that runs
+  in another row's task (a slash command, which runs in the task of the row that read the line)
+  and run one job at a time by the row's own `background(perform(jobs, failed))`. A job that
+  restarts what the caller depends on would cancel itself half-way in the caller's task; in the
+  row's own, it runs to the end, and leaves with the row. A job that fails is reported to
+  `failed` and the next still runs.
 
 Depends on `cordis` only. A plugin that uses it depends on `cordis-helpers`, which is a
 library, not another plugin.
