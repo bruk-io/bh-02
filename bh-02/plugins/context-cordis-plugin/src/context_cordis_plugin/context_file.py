@@ -137,10 +137,11 @@ class ContextFiles:
         self._max_chars = max_chars
         # The caches take no lock. One `ContextFiles` (the `system` value's) serves the prompt
         # (`text`) and the on-touch row (`touched`), and it is used by one thread at a time:
-        # `agent:loop` reads the prompt and asks `memory` each in a worker thread and awaits each
-        # before the next. The one overlap is a call a stopped reply left running beside the next
-        # one; each change here is a single dict operation, so the worst it costs is a file read
-        # or a search done twice.
+        # `agent:loop` reads the prompt and asks `memory` each in a thread of its own, one at a
+        # time: a call a stopped reply left running finishes before the next begins. The one
+        # overlap is such a call beside the first of a loop that reloaded meanwhile (`/model`,
+        # `/clear`); each change here is a single dict operation, so the worst it costs is a file
+        # read or a search done twice.
         self._read: dict[Path, tuple[int, tuple[tuple[Section, ...], bool] | str]] = {}
         self._searched: dict[tuple[Path, str], _Search] = {}
 
