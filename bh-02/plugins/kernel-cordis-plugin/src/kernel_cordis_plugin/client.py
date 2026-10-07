@@ -164,10 +164,12 @@ class Kernel:
         return ran.text()
 
     def touched(self) -> tuple[str, ...]:
-        """The files under the root the last input opened, read or written: absolute paths, each
-        once, in the order first opened. Not a file a program it ran opened (`cat x` through
-        subprocess), nor a module it imported. Empty before any input, and after one that did
-        not run to the end."""
+        """The files under the root the last input opened with `open` or `pathlib`, read or
+        written: absolute paths, each once, in the order first opened, at most 1,000. Not a file
+        a program it ran opened (`cat x` through subprocess), a module it imported, an `os.open`
+        (`shutil.rmtree` opens by names relative to a directory), nor a source file its
+        traceback was formatted from. Empty before any input, and after one that did not run to
+        the end."""
         return self._touched
 
     async def _execute(self, code: str) -> _Output:

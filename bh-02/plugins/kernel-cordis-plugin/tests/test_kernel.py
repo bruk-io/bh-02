@@ -121,6 +121,103 @@ async def test_touched_is_the_project_s_files_the_last_input_opened(tmp_path: Pa
         assert k.touched() == (str(root / "missing.md"),)
 
 
+async def test_touched_is_not_misled_by_a_removal_that_opens_through_a_directory_s_descriptor(
+    tmp_path: Path,
+) -> None:
+    """`shutil.rmtree` (and so a `TemporaryDirectory`'s cleanup) opens each directory by its name
+    relative to its parent's descriptor, which the audit event leaves out: resolved against the
+    working directory, removing a temporary `src/db` named the project's `src` and `db`. An
+    `os.open` is not heard; an `open()` in the same input still is."""
+    (tmp_path / "src" / "db").mkdir(parents=True)
+    (tmp_path / "notes.md").write_text("n")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        await k.run(
+            "import os, shutil, tempfile\n"
+            "with tempfile.TemporaryDirectory() as t:\n"
+            "    os.makedirs(os.path.join(t, 'src', 'db'))\n"
+            "    shutil.rmtree(os.path.join(t, 'src'))\n"
+            "    os.makedirs(os.path.join(t, 'src', 'db'))\n"  # for the cleanup to remove
+            "open('notes.md').read()"
+        )
+        assert k.touched() == (str(tmp_path.resolve() / "notes.md"),)
+
+
+async def test_only_the_project_s_files_count_towards_the_most_touched_names(tmp_path: Path) -> None:
+    """`touched` names at most 1,000 files, all of them the project's: an input that first opens
+    more than that elsewhere (a temporary directory, site-packages) still names the project file
+    it opens after them."""
+    (tmp_path / "notes.md").write_text("n")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        await k.run(
+            "import os, tempfile\n"
+            "with tempfile.TemporaryDirectory() as t:\n"
+            "    for i in range(1_001):\n"
+            "        open(os.path.join(t, f'{i}.txt'), 'w').close()\n"
+            "open('notes.md').read()"
+        )
+        assert k.touched() == (str(tmp_path.resolve() / "notes.md"),)
+        await k.run("for i in range(1_001):\n    open(f'{i}.txt', 'w').close()")
+        assert len(k.touched()) == 1_000
+
+
+async def test_an_open_with_no_python_frame_above_it_is_heard_and_goes_ahead(tmp_path: Path) -> None:
+    """`open` called straight from a thread `_thread` started has no Python frame above the
+    hook's own: it is not the import system's, so the file is heard, and the hook does not make
+    the open fail."""
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        made = await k.run(
+            "import _thread, os, time\n"
+            "_thread.start_new_thread(open, ('threaded.txt', 'w'))\n"
+            "deadline = time.monotonic() + 5\n"
+            "while not os.path.exists('threaded.txt') and time.monotonic() < deadline:\n"
+            "    time.sleep(0.01)\n"
+            "os.path.exists('threaded.txt')"
+        )
+        assert made == "True"
+        assert k.touched() == (str(tmp_path.resolve() / "threaded.txt"),)
+
+
+async def test_hearing_an_open_calls_the_hook_twice_however_deep_the_stack(tmp_path: Path) -> None:
+    """Every audited event calls the hook, the ones its own work raises included. Telling the
+    import system's frames by their code (`f_code`, which is audited) called it once per frame,
+    so an open 500 frames deep called it some 500 times; now it is the open and `_getframe`."""
+    for name in ("shallow.md", "deep.md"):
+        (tmp_path / name).write_text("x")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        counted = await k.run(
+            "import sys\n"
+            "events = []\n"
+            "counting = False\n"
+            "def count(event, args):\n"
+            "    if counting:\n"
+            "        events.append(event)\n"
+            "sys.addaudithook(count)\n"
+            "def at(depth, name):\n"
+            "    global counting\n"
+            "    if depth:\n"
+            "        return at(depth - 1, name)\n"
+            "    events.clear()\n"
+            "    counting = True\n"
+            "    open(name).close()\n"
+            "    counting = False\n"
+            "    return sorted(events)\n"
+            "at(0, 'shallow.md'), at(500, 'deep.md')"
+        )
+        assert counted == "(['open', 'sys._getframe'], ['open', 'sys._getframe'])"
+        root = tmp_path.resolve()
+        assert k.touched() == (str(root / "shallow.md"), str(root / "deep.md"))
+
+
+async def test_formatting_a_failed_input_s_traceback_is_not_heard(tmp_path: Path) -> None:
+    """A failed input's traceback reads the source file of each frame in it, after the input's
+    own code has stopped: those are not files the input worked on."""
+    (tmp_path / "helper.py").write_text("def fail():\n    raise ValueError('boom')\n")
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+        failed = await k.run("import os, sys\nsys.path.insert(0, os.getcwd())\nimport helper\nhelper.fail()")
+        assert "raise ValueError('boom')" in failed  # helper.py was read, to show its frame's line
+        assert k.touched() == ()
+
+
 class Confined(Unjailed):
     """The unjailed process, reported as confined: what a jail looks like to the kernel, without
     needing one on this platform."""

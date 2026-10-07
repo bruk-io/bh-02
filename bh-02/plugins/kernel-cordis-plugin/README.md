@@ -57,11 +57,22 @@ runs programs itself, with plain Python, and the jail decides what it may touch.
 the worker's main thread, so SIGINT lands as `KeyboardInterrupt` in the running input and the
 namespace survives; with no input running, SIGINT is ignored. An input's last expression is
 shown, and `print` is the observation channel. An audit hook (`sys.addaudithook`) hears each
-file the running input opens, with `open`, `pathlib` or `os.open`, read or written, and the
-`done` names them (`touched`, absolute, each once, at most 1,000): not a directory listed, not a
-file the import system opens (one of its frames is on the stack), and not what a program the
-input runs opens, which happens in another process. It is Claude Code's Read, Write and Edit
-for one tool that carries code, and has the same blind spot: a shell command's own reads.
+file the input's own code opens with `open` or `pathlib` (an `open` event whose mode is a
+string), read or written, under the directory the worker started in (the project root, where
+the jail starts it), and the `done` names them (`touched`, absolute, each once, at most 1,000,
+and only the project's count towards those). Not heard: an `os.open` (its event has no
+`dir_fd`, so the names `shutil.rmtree`, `os.fwalk` and a `TemporaryDirectory`'s cleanup open
+relative to a directory would read as the project's; `Path.touch` is one too), a directory
+listed, a file the import system opens (one of its frames is on the stack), a file opened while
+the input's own code is not running (its traceback's formatting reads each frame's source), and
+what a program the input runs opens, which happens in another process. It is Claude Code's
+Read, Write and Edit for one tool that carries code, and has the same blind spot: a shell
+command's own reads. Every audited operation calls the hook (`id()` is one, so `copy.deepcopy`
+calls it once per object), so it compares the event with `open` before anything else, and is a
+plain function: a bound method cost three times as much per call (CPython looks up a hook's
+`__cantrace__` each time, which on a bound method raises and clears an AttributeError). An open
+calls it at most twice, at any depth: the import system's frames are told by their globals
+(`f_globals`, `f_back`), which raise no audit event, where a frame's `f_code` raises one.
 
 `client.py`'s `Kernel` is the host end: entering starts the worker through the jail (its
 socket in a short `/tmp` directory, since a socket path must fit in ~100 bytes), leaving stops
