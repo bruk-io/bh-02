@@ -13,7 +13,10 @@ It is also a broker (paper 6.2): a row with something to tell the model `acquire
 
 `agent:loop` calls `text()` in a worker thread, off the event loop, one call at a time; so a
 section function (a context file's, or one a row adds) runs there too and must not need the
-event loop.
+event loop. `touched()` is what the context files' `on_touch` sections say about the files an
+input opened, from the same context files: the on-touch row (`touch.OnTouch`, a `memory`
+function the loop calls in a worker thread too) asks it, so a layer's `files`, `root` and `home`
+reach both and each file is read and searched once.
 """
 
 from collections.abc import Callable, Sequence
@@ -82,6 +85,11 @@ class ProjectContext:
     def __init__(self, config: ContextConfig) -> None:
         self._config = config
         self._sections: Hooks[Callable[[], str]] = Hooks()
+        # One `ContextFiles` for the prompt (`text`) and the on-touch row (`touched`), so both
+        # read the same context files and share what was read and searched. Its caches take no
+        # lock: it is used by one thread at a time, since the loop reads the prompt and asks
+        # `memory` (where the on-touch row calls `touched`) each in a worker thread and awaits
+        # each before the next (`ContextFiles` says what a stopped reply may leave running).
         self._files = ContextFiles(config.files, config.max_chars)
 
     def add(self, section: Callable[[], str]) -> Callable[[], None]:
@@ -90,11 +98,23 @@ class ProjectContext:
         return self._sections.add(section)
 
     def text(self) -> str:
-        root = Path(self._config.root).resolve()
+        root, home = self._places()
         head = root / ".git" / "HEAD"
         branch = branch_of(head.read_text(encoding="utf-8")) if head.is_file() else None
-        home = Path(self._config.home or Path.home()).resolve()
         # the sections rows have added now: a snapshot, as the event loop may add or remove one
         # while this runs in the loop's worker thread
         sections = [self._files.text(root, home), *(section() for section in self._sections)]
         return describe(str(root), branch, sections)
+
+    def touched(self, paths: Sequence[str]) -> list[tuple[str, str]]:
+        """What the context files' `on_touch` sections say about `paths` (absolute: the files an
+        input opened): each (file, text) a section's function returned, in the order of the
+        sections; one that fails says so under its own name. Read fresh, as `text()` is, from the
+        same context files; called in the loop's worker thread (through the on-touch row's
+        `memory` function), so it must not need the event loop."""
+        root, home = self._places()
+        return self._files.touched([Path(p) for p in paths], root, home)
+
+    def _places(self) -> tuple[Path, Path]:
+        """The project's root and the person's home, resolved."""
+        return Path(self._config.root).resolve(), Path(self._config.home or Path.home()).resolve()

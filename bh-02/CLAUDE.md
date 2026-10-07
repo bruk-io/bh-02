@@ -103,7 +103,9 @@ the result. `kernel:shell_hints` tells the first input that runs `cat`, `sed`, `
 through a shell, once for each kind of work, how Python does it (`shell_note`);
 `context:on_touch` gives the context files' `on_touch` sections, so a subdirectory's AGENTS.md
 or CLAUDE.md, or a rule for some files, arrives whole with the first input that opens a file it
-covers (Claude Code's on-demand loading). Both depend on `transcript`, so `/clear` starts them
+covers (Claude Code's on-demand loading); it has no config of its own and asks the `system`
+value (`system.touched(paths)`), so the context files, and the caches of what was read and
+searched, are `context:project`'s alone. Both depend on `transcript`, so `/clear` starts them
 afresh; only layer rows add to `memory`, since its functions run in bh-02's process. The loop reads
 the prompt before each message the model reads but sends the one the conversation began with
 (the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch

@@ -349,7 +349,8 @@ async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_
 ) -> None:
     """The shipped `memory` rows, booted: the first input that opens a file under src/db gets its
     CLAUDE.md and the rule for it with its result; a later one does not; one that reads through
-    a shell is told how Python does that."""
+    a shell is told how Python does that. The on-touch row reads the `system` row's context
+    files, so the project and the home are set there, as a layer would."""
     project, home = tmp_path / "project", tmp_path / "home"
     (project / "src" / "db").mkdir(parents=True)
     (project / ".claude" / "rules").mkdir(parents=True)
@@ -367,7 +368,7 @@ async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_
         *inputs,
         extra=(
             f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
-            f'[[plugin]]\nid = "on-touch"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
+            f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
         ),
     )
     _answers(True, True, True)

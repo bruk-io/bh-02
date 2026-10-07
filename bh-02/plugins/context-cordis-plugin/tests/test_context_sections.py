@@ -112,3 +112,45 @@ def test_rules_touched_gives_each_rule_whose_paths_match_a_file_opened(tmp_path:
     assert told[root / "db.mdc"] == ("From db.mdc, a rule for src/db/**, migrations/*:\n\nUse the session.")
     assert "api.md" not in str(rules_touched(files, [root / "src/api/x.js"], root=root, home=root))
     assert set(rules_touched(files, [root / "src/api/v1/x.ts"], root=root, home=root)) == {root / "api.md"}
+
+
+def test_a_rule_s_braces_are_its_alternatives(tmp_path: Path) -> None:
+    """`src/**/*.{ts,tsx}`, as Claude Code's docs write `paths`: in a list of either form, or in a
+    `globs` string, whose commas inside braces don't split a pattern."""
+    files = _tree(
+        tmp_path,
+        {
+            "ts.md": '---\npaths:\n  - "src/**/*.{ts,tsx}"\n---\nTypes.',
+            "inline.md": '---\npaths: ["{web,app}/**/*.{css,scss}", "*.md"]\n---\nStyles.',
+            "cursor.mdc": "---\nglobs: src/**/*.{ts,tsx}, lib/{a,b}/*.py\n---\nBoth.",
+            "nested.mdc": "---\nglobs: docs/{api,{guide,howto}/*}.txt\n---\nDocs.",
+            "many.mdc": "---\nglobs: " + "/".join(["{a,b}"] * 30) + "\n---\nNever.",
+        },
+    )
+    root = tmp_path
+
+    def told(*opened: str) -> set[str]:
+        return {p.name for p in rules_touched(files, [root / o for o in opened], root=root, home=root)}
+
+    assert told("src/ui/App.tsx") == told("src/x.ts") == {"ts.md", "cursor.mdc"}
+    assert told("src/x.js") == set() and told("web/x.ts") == set()
+    assert told("app/theme/main.scss") == told("web/a.css") == {"inline.md"}
+    assert told("lib/b/x.py") == {"cursor.mdc"} and told("lib/c/x.py") == set()
+    assert told("docs/api.txt") == told("docs/howto/x.txt") == {"nested.mdc"}
+    assert told("docs/guide.txt") == set()
+    assert told("README.md") == {"inline.md"}  # its `*.md`, at any depth
+    # thirty groups are 2**30 ways, tried a bounded number of them: it ends, matching nothing here
+    assert told("a/b/c.py") == set()
+    # read as written: each rule's patterns whole, and named as they are
+    assert rule("c.mdc", "---\nglobs: src/**/*.{ts,tsx}, lib/*\n---\n").paths == (
+        "src/**/*.{ts,tsx}",
+        "lib/*",
+    )
+    assert frontmatter('---\npaths: ["a/{b,c}", d]\n---\n')[0] == {"paths": ["a/{b,c}", "d"]}
+    text = rules(files[:3], root=root, home=root)
+    assert "cursor.mdc (for src/**/*.{ts,tsx}, lib/{a,b}/*.py)" in text
+    assert "inline.md (for {web,app}/**/*.{css,scss}, *.md)" in text
+    said = rules_touched(files, [root / "src/x.ts"], root=root, home=root)
+    assert (
+        said[root / "cursor.mdc"] == "From cursor.mdc, a rule for src/**/*.{ts,tsx}, lib/{a,b}/*.py:\n\nBoth."
+    )

@@ -5,8 +5,8 @@ say when the model first works on it.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `context:project` | `system` (`text() -> str`, `add(section) -> remover`); config: `root` (default `.`), `files` (the context files after bh-02's own; default `["$XDG_CONFIG_HOME/bh-02/context.toml", ".bh-02/context.toml"]`), `max_chars` (what the context files' sections may say, all together; default 20,000), `home` | |
-| `context:on_touch` | adds `OnTouch` to `memory`; config: `context:project`'s (the same context files) | `memory` (`add`), `transcript` (its lifetime only) |
+| `context:project` | `system` (`text() -> str`, `add(section) -> remover`, `touched(paths) -> [(file, text)]`); config: `root` (default `.`), `files` (the context files after bh-02's own; default `["$XDG_CONFIG_HOME/bh-02/context.toml", ".bh-02/context.toml"]`), `max_chars` (what the context files' sections may say in the prompt, all together; default 20,000), `home` | |
+| `context:on_touch` | adds `OnTouch` to `memory`; no config: the context files are `system`'s | `system` (`touched`), `memory` (`add`), `transcript` (its lifetime only) |
 
 `text()` is organised as Claude Code's is, and read fresh each time it is asked:
 
@@ -21,11 +21,22 @@ say when the model first works on it.
 The date is not in the prompt, which would then change every midnight: the loop tells it with
 the person's message. `describe` is the prompt as a pure function of what was found.
 
+`touched(paths)` is what the context files' `on_touch` sections say about some files an input
+opened (absolute), each `(file, text)`, read fresh from the same context files as `text()`, with
+the same `root` and `home`. `context:on_touch` asks it rather than reading the context files
+itself, so what a layer sets on the `system` row (`files`, `root`, `home`) reaches both, and
+each file is read and searched once. It depends on `system`, `memory` and `transcript`;
+`context:project` depends on nothing, so the on-touch row reloads with it only when the `system`
+row changes, and with `transcript` at each new conversation (`/clear`), which `system` and its
+caches outlive.
+
 `agent:loop` calls `text()` in a worker thread, off the event loop the TUI runs on, one call at
 a time, so a section function that reads many files or searches a large project freezes nothing;
 it runs in that thread too, and must not need the event loop. So do the `on_touch` functions
-(`context:on_touch` is a `memory` function, which the loop calls the same way). The caches of
-what was read and searched take no lock, since no two calls run at once.
+(`context:on_touch` is a `memory` function, which the loop calls the same way, and it calls
+`touched()` there). The loop awaits each before the next, so the one set of caches of what was
+read and searched, which `text()` and `touched()` share, is used by one thread at a time and
+takes no lock.
 
 ## Context files
 
@@ -56,9 +67,9 @@ on_touch = "context_cordis_plugin.sections:place_touched"
   after each input that opened files in the project (`touched`, absolute: `kernel.touched()`),
   returning a mapping of each of its files that bears on them to the text to tell with that
   input's result. `context:on_touch` tells each once a conversation (again if what it says
-  changed), so a path-scoped rule or a subdirectory's AGENTS.md arrives the first time the model
-  works on a file it covers, as Claude Code's do when its Read, Write or Edit touches one. A
-  section may have only `on_touch`.
+  changed), at most 20,000 characters with one result, so a path-scoped rule or a
+  subdirectory's AGENTS.md arrives the first time the model works on a file it covers, as
+  Claude Code's do when its Read, Write or Edit touches one. A section may have only `on_touch`.
 
 The sections are read in order from bh-02's own file (`context.toml`, in the package), then each
 of `files`: yours, `$XDG_CONFIG_HOME/bh-02/context.toml` (else `~/.config/bh-02/context.toml`),
@@ -89,11 +100,11 @@ bh-02's own functions (`sections.py`):
 | Function | What it says |
 |---|---|
 | `place` | Guidance files, each of which applies to everything under the directory it sits in: at the project's root or outside the project (yours, in your home) whole, broadest first, each once (a CLAUDE.md linking to the AGENTS.md beside it is read once); further down, named for the model to read before it works there. |
-| `rules` | Rule files, as each one's frontmatter says (`rule`): `alwaysApply: true`, or no frontmatter, whole; `paths` or `globs` named with them, for files they cover; a `description` named with it, for when it bears on the work; `alwaysApply: false` and nothing else not at all (yours to bring in). |
+| `rules` | Rule files, as each one's frontmatter says (`rule`): `alwaysApply: true`, or no frontmatter, whole; `paths` or `globs` (a list, or one comma-separated string, split only at the commas outside braces) named with them as written, for files they cover; a `description` named with it, for when it bears on the work; `alwaysApply: false` and nothing else not at all (yours to bring in). |
 | `whole` | Each file, whole. |
 | `named` | Each file by name, to read when it bears on the work. |
 | `place_touched` (an `on_touch`) | The guidance further down that covers a file an input opened (the file is under its directory), whole, broadest first, one of two with the same text. |
-| `rules_touched` (an `on_touch`) | The rules whose `paths` or `globs` match a file an input opened (from the project's root; a pattern with no `/`, `*.tsx`, at any depth), each whole. |
+| `rules_touched` (an `on_touch`) | The rules whose `paths` or `globs` match a file an input opened (from the project's root; a pattern with no `/`, `*.tsx`, at any depth; each `{a,b}` group one of its alternatives, as Claude Code's `paths` write it: `src/**/*.{ts,tsx}`), each whole. |
 
 bh-02's own file reads `~/AGENTS.md`, `~/CLAUDE.md`, the project's `AGENTS.md`, `CLAUDE.md` and
 their `.local.md`, and those further down, with `place` (and `place_touched`); and

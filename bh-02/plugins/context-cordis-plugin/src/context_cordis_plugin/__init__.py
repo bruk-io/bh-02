@@ -15,7 +15,7 @@ from context_cordis_plugin.sections import (
     rules_touched,
     whole,
 )
-from context_cordis_plugin.touch import Memory, OnTouch
+from context_cordis_plugin.touch import Memory, OnTouch, System
 from context_cordis_plugin.wiring import on_touch, project
 
 __all__ = [
@@ -26,6 +26,7 @@ __all__ = [
     "ProjectContext",
     "Rule",
     "Section",
+    "System",
     "branch_of",
     "describe",
     "frontmatter",

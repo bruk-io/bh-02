@@ -18,12 +18,14 @@ files an input just opened (absolute), returning, for each of its files that bea
 text to tell with that input's result (the row tells each once a conversation):
 
 - `place_touched`: the guidance further down that covers a file opened (one under its directory).
-- `rules_touched`: the rules whose `paths` (or `globs`) match a file opened.
+- `rules_touched`: the rules whose `paths` (or `globs`) match a file opened; a pattern's
+  `{a,b}` groups are its alternatives, as in Claude Code's `paths` (`src/**/*.{ts,tsx}`).
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path, PurePath
 
 __all__ = [
@@ -40,6 +42,8 @@ __all__ = [
 
 _LISTED = 30  # files named, the rest counted
 _FRONT = re.compile(r"\A---\n(.*?)\n---[ \t]*(?:\n|\Z)", re.S)
+_BRACE = re.compile(r"\{([^{}]*)\}")  # a `{a,b}` group with none inside it: expanded first
+_ALTERNATIVES = 1_000  # a pattern's alternatives tried at most, so no rule file's braces take long
 _GUIDANCE = (
     "Guidance written for whichever agent works here, the person's own and the project's, "
     "broadest first: where it names Claude Code or another agent it means you, and where it "
@@ -161,8 +165,8 @@ class Rule:
 
 def frontmatter(text: str) -> tuple[dict[str, str | list[str]], str]:
     """A file's frontmatter (between `---` lines at its start), each key to its value or list
-    (`[a, b]`, or `- a` lines under it), and the text after it. A small, forgiving reading of
-    YAML: what rule files use, nothing more."""
+    (`[a, b]`, split at the commas outside braces, or `- a` lines under it), and the text after
+    it. A small, forgiving reading of YAML: what rule files use, nothing more."""
     found = _FRONT.match(text)
     if found is None:
         return {}, text
@@ -179,7 +183,7 @@ def frontmatter(text: str) -> tuple[dict[str, str | list[str]], str]:
             continue
         key, value = name.strip(), value.strip()
         if value.startswith("[") and value.endswith("]"):
-            said[key] = [_bare(v) for v in value[1:-1].split(",") if v.strip()]
+            said[key] = [_bare(v) for v in _split(value[1:-1])]
         else:
             said[key] = _bare(value)
     return said, text[found.end() :]
@@ -187,13 +191,14 @@ def frontmatter(text: str) -> tuple[dict[str, str | list[str]], str]:
 
 def rule(path: str, text: str) -> Rule:
     """A rule file, read by its frontmatter: `alwaysApply: true`, or no frontmatter at all,
-    always; `paths` or `globs` (a list, or one string of comma-separated patterns) for matching
-    files; a `description`, when what it describes bears on the work; `alwaysApply: false` and
-    nothing else, only when the person brings it in."""
+    always; `paths` or `globs` (a list, or one string of comma-separated patterns, split only
+    at the commas outside braces: `_split`) for matching files; a `description`, when what it
+    describes bears on the work; `alwaysApply: false` and nothing else, only when the person
+    brings it in."""
     said, body = frontmatter(text)
     paths = said.get("paths") or said.get("globs") or []
     if isinstance(paths, str):
-        paths = [p.strip() for p in paths.split(",") if p.strip()]
+        paths = _split(paths)
     described = said.get("description")
     description = described if isinstance(described, str) else ""
     always = str(said.get("alwaysApply", "")).lower()
@@ -208,13 +213,48 @@ def rule(path: str, text: str) -> Rule:
     return Rule(path, applies, tuple(paths), description, body.strip())
 
 
+def _split(patterns: str) -> list[str]:
+    """Comma-separated patterns, split at the commas outside braces, each stripped:
+    `src/**/*.{ts,tsx}, lib/*` is two patterns, the first with its `{ts,tsx}` whole."""
+    parts: list[str] = []
+    depth, start = 0, 0
+    for at, char in enumerate(patterns):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth = max(depth - 1, 0)
+        elif char == "," and not depth:
+            parts.append(patterns[start:at])
+            start = at + 1
+    return [part.strip() for part in [*parts, patterns[start:]] if part.strip()]
+
+
 def _matches(path: PurePath, pattern: str) -> bool:
-    """Whether a path from the project's root matches a rule's pattern: from the root, or, for
-    a pattern with no `/` (`*.tsx`), at any depth."""
-    pattern = pattern.strip().removeprefix("./").lstrip("/")
-    if not pattern:
-        return False
-    return path.full_match(pattern) or ("/" not in pattern and path.full_match(f"**/{pattern}"))
+    """Whether a path from the project's root matches a rule's pattern: any of its alternatives
+    (`_alternatives`), each from the root, or, with no `/` (`*.tsx`), at any depth."""
+    for each in islice(_alternatives(pattern.strip()), _ALTERNATIVES):
+        alternative = each.removeprefix("./").lstrip("/")
+        if alternative and (
+            path.full_match(alternative) or ("/" not in alternative and path.full_match(f"**/{alternative}"))
+        ):
+            return True
+    return False
+
+
+def _alternatives(pattern: str) -> Iterator[str]:
+    """`pattern` with each `{a,b}` group one of its alternatives, as in Claude Code's `paths` and
+    a shell (`PurePath.full_match` has no braces): `src/*.{ts,tsx}` is `src/*.ts`, then
+    `src/*.tsx`; several groups give each combination, in order, and a group inside another is
+    expanded first. Lazily, so the first that matches ends the search."""
+    todo = [pattern]
+    while todo:
+        here = todo.pop()
+        group = _BRACE.search(here)
+        if group is None:
+            yield here
+            continue
+        head, tail = here[: group.start()], here[group.end() :]
+        todo += [head + alternative + tail for alternative in reversed(group.group(1).split(","))]
 
 
 def _bare(value: str) -> str:

@@ -1,13 +1,14 @@
 """The on-touch row: what the context files' `on_touch` sections say about the files an input
-opened, told with its result, each once a conversation."""
+opened, told with its result, each once a conversation. The context files are the `system`
+value's (`ProjectContext.touched`)."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from context_cordis_plugin import ContextConfig, OnTouch, on_touch, parse
+from context_cordis_plugin import ContextConfig, OnTouch, ProjectContext, System, on_touch, parse
 from cordis.testing import drive
 from cordis_helpers import Hooks
 
@@ -20,11 +21,12 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def _project(tmp_path: Path) -> tuple[OnTouch, Path, Path]:
+def _project(tmp_path: Path, **config: Any) -> tuple[OnTouch, Path, Path]:
     home, root = tmp_path / "home", tmp_path / "project"
     home.mkdir()
     root.mkdir()
-    return OnTouch(ContextConfig(root=str(root), home=str(home))), root.resolve(), home
+    system = ProjectContext(ContextConfig(root=str(root), home=str(home), **config))
+    return OnTouch(system), root.resolve(), home
 
 
 def test_a_file_opened_brings_the_guidance_and_rules_for_it_once(tmp_path: Path) -> None:
@@ -75,8 +77,8 @@ def test_an_on_touch_of_yours_that_fails_says_so_once(tmp_path: Path) -> None:
 def test_the_on_touch_row_reads_your_file_where_the_prompt_does(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """It has `context:project`'s config, so the same files: yours in `$XDG_CONFIG_HOME` when that
-    is set, and then not ~/.config's."""
+    """It asks the `system` value, so the same files: yours in `$XDG_CONFIG_HOME` when that is
+    set, and then not ~/.config's."""
     told, root, home = _project(tmp_path)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     for where, name in ((tmp_path / "xdg", "from_xdg"), (home / ".config", "from_dot_config")):
@@ -88,8 +90,51 @@ def test_the_on_touch_row_reads_your_file_where_the_prompt_does(
     assert f"{_OWN}from_xdg" in said and "from_dot_config" not in said
 
 
-async def test_the_row_adds_its_function_to_memory() -> None:
+def test_the_context_files_the_system_row_names_reach_it(tmp_path: Path) -> None:
+    """A layer that sets `files` (or `root`, `home`) on the `system` row sets them for this too:
+    a context file only that layer names gives its `on_touch` here, as its `function` gives the
+    prompt its part."""
+    home, root = tmp_path / "home", tmp_path / "project"
+    _write(
+        home / "team.toml",
+        f'[[section]]\nfiles = ["docs/GUIDE.md"]\nfunction = "{_OWN}named"\n'
+        f'on_touch = "{_OWN}place_touched"\n',
+    )
+    _write(root / "docs/GUIDE.md", "Docs guidance.")
+    opened = {"touched": (str(root.resolve() / "docs/x.md"),)}
+    assert OnTouch(ProjectContext(ContextConfig(root=str(root), home=str(home))))(opened) == ""
+    system = ProjectContext(ContextConfig(root=str(root), home=str(home), files=("~/team.toml",)))
+    assert OnTouch(system)(opened).endswith(
+        "work under docs/, where it wins over the guidance before it:\n\nDocs guidance."
+    )
+    assert system.text().endswith("Files to read when they bear on your work: docs/GUIDE.md.")
+
+
+class _Said:
+    """A `system` value that says what it is given to say, and keeps what it was asked."""
+
+    def __init__(self, *said: tuple[str, str]) -> None:
+        self.said = said
+        self.asked: list[Sequence[str]] = []
+
+    def touched(self, paths: Sequence[str]) -> Sequence[tuple[str, str]]:
+        self.asked.append(paths)
+        return self.said
+
+
+def test_it_asks_the_system_value_and_tells_each_once() -> None:
+    system = _Said(("/p/a.md", "A."), ("/p/b.md", "B."), ("/p/a.md", "A."))
+    assert isinstance(system, System)
+    told = OnTouch(system)
+    assert told({"touched": (Path("/p/src/x.py"),)}) == "A.\n\nB."  # each once, in order
+    assert system.asked == [["/p/src/x.py"]]  # as text, as it crosses to another plugin
+    assert told({"touched": ("/p/src/y.py",)}) == ""
+    assert told({"code": "1"}) == "" and len(system.asked) == 2  # nothing opened: nothing asked
+
+
+async def test_the_row_adds_its_function_to_memory(tmp_path: Path) -> None:
     memory: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
-    effects = await drive(on_touch(memory=memory, transcript=object(), config=ContextConfig()))
+    system = ProjectContext(ContextConfig(root=str(tmp_path), home=str(tmp_path)))
+    effects = await drive(on_touch(system=system, memory=memory, transcript=object()))
     assert [e.name for e in effects] == ["acquire"]
     assert effects[0].args[0] == memory.add and isinstance(effects[0].args[1], OnTouch)

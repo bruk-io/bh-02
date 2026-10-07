@@ -202,7 +202,7 @@ agent:transcript        binds Transcript                   depends on nothing
 agent:memory            binds Memory                       depends on nothing
 agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Approval, Memory
 kernel:shell_hints      adds the shell hints to Memory     depends on Memory, Transcript
-context:on_touch        adds the on-touch sections         depends on Memory, Transcript
+context:on_touch        adds the on-touch sections         depends on System, Memory, Transcript
 brig:jail               binds Jail                         depends on Layers
 kernel:unjailed         binds Jail                         depends on nothing
 kernel:kernel           binds Kernel (the one tool)        depends on Jail
@@ -237,11 +237,11 @@ other plugin; the gate proves it.
 |---|---|---|
 | `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `palette`) | `frame` and what each row reports on |
 | `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's one tool, `python`, only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are | `loader` (catalog) |
-| `agent-cordis-plugin` | `loop` (`loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes), `transcript` | `model`, `kernel`, `transcript`, `system`, `approval` (`approve`), `memory` |
+| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes, its result followed by what `memory`'s functions add), `transcript` (`agent:transcript`), `memory` (`agent:memory`: the broker of what the model is told with an input's result) | the loop: `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (its functions, after each input) |
 | `chat-cordis-plugin` | runs `session` (a turn interruptible) and binds `done` | `loop`, `input`, `output`, `commands` |
-| `context-cordis-plugin` | `system`: who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of, then the project context: the working directory and branch, what the context files' sections say (guidance and rule files, each read by a function), read fresh; a broker other rows add sections to | |
+| `context-cordis-plugin` | `system` (`context:project`): who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of, then the project context: the working directory and branch, what the context files' sections say (guidance and rule files, each read by a function), read fresh; a broker other rows add sections to; and what the context files' `on_touch` sections say about the files an input opened (`touched`). `context:on_touch` adds to `memory` that guidance and those rules, each told once a conversation with the result of the first input that opens a file they cover | on-touch: `system` (`touched`), `memory` (`add`), `transcript` (its lifetime only) |
 | `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system`; each load on `approval`'s yes | `jail`, `commands`, `frame`, `system`, `approval` |
-| `kernel-cordis-plugin` | `kernel`: a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, an input run); `approval`: whether the model's code runs, at once when the jail confines it, else on the person's yes; `jail`: `unjailed` | `jail`, `output` (approval) |
+| `kernel-cordis-plugin` | `kernel` (`kernel:kernel`): a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, an input run, the files it opened); `approval` (`kernel:approval`): whether the model's code runs, at once when the jail confines it, else on the person's yes; `jail` (`kernel:unjailed`); `kernel:shell_hints` adds to `memory` how Python does what an input ran through a shell (`cat`, `sed`, `ls`), once for each kind of work a conversation | kernel: `jail` (`start`, `report`); approval: `jail` (`report`), `output` (`confirm`); shell hints: `memory` (`add`), `transcript` (its lifetime only) |
 | `brig-cordis-plugin` | `jail`: brig's `scratch_darwin()`; the only importer of brig | `layers` |
 | `commands-cordis-plugin` | `commands` (the broker); the operator's commands over the loader | `commands`, `loader`, `models` (operator) |
 
@@ -267,7 +267,9 @@ worker hears each `open` with an audit hook, so `kernel.touched()` is what Pytho
 read or wrote, not what a shell command did). `kernel:shell_hints` adds the shell hint above;
 `context:on_touch` adds the context files' `on_touch` sections, so a subdirectory's AGENTS.md
 or CLAUDE.md, or a rule for some files, arrives whole with the result of the first input that
-opens a file it covers, as Claude Code's do when its Read, Write or Edit touches one. Both
+opens a file it covers, as Claude Code's do when its Read, Write or Edit touches one. It asks
+the `system` value (`touched`), so the context files are the ones the `system` row's config
+names (`root`, `home`, `files`), read and searched once for the prompt and for this. Both
 depend on `transcript`, so after `/clear` they tell the new conversation again.
 
 The kernel is a worker process started by the `jail` row. `brig:jail` confines it: writes
