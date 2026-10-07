@@ -1,13 +1,14 @@
 # agent-cordis-plugin
 
-A harness-owned agent loop, the transcript it reads, and `memory`, what it tells the model with
-an input's result.
+A harness-owned agent loop, the transcript it reads, `memory`, what it tells the model with
+an input's result, and `/compact`, which begins a new conversation from the model's summary.
 
 | Row | Binds | Consumes |
 |---|---|---|
 | `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (iterated) |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
 | `agent:memory` | `memory`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
+| `agent:compact` | registers `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300), `loop` and `transcript` (the rows it restarts) | `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `entries`, `restart`), `commands` (`register`) |
 
 A turn is one model step plus the inputs it asked for, until it asks for none. The model's one
 tool is the kernel's `python(code)`, offered through the provider's standard tool calling;
@@ -76,3 +77,34 @@ leaves it whole (stopped while the person's message was being dated and the prom
 message is kept and answered as stopped, as one stopped in its first model step is). What runs
 there must not need the event loop: a section function, `kernel.instructions()` and a `memory`
 function each read and return text.
+
+`/compact` (`agent:compact`, `compact.py`) is for a conversation grown long: a local model
+processes more prompt before each first token, and any model nears its context window. It asks
+the model for a summary in one step: the request is the loop's own (`loop.request_for`: the
+prompt the conversation began with, then the conversation) with the kernel's spec offered as
+with every step, so a model server reuses its work on the conversation, then bh-02's message
+asking for the summary in plain text, for the model itself to carry on from, naming what its
+Python namespace holds (`asked`; `/compact WHAT TO KEEP` adds what the person wants kept). A
+call the step makes is never run, and a step that calls, is cut off, says nothing or refuses
+gives no summary (`stops.classify`): the answer says why and nothing changes. A command runs in
+the chat row's task and can't be interrupted, so the step has `timeout` seconds; past them it
+is closed (its provider stops) and nothing changes. The summary then begins the new
+conversation (`seeded`: bh-02's note that the conversation carries on from an earlier one, as
+the person's message, then the summary as the model's answer, so the roles alternate), written
+over the transcript row's file in one step (`transcript.rewrite`: written whole beside it, then
+renamed over it, the old file kept as `.bak`), and the loop and the transcript restart, together.
+The new conversation holds no `system` entry and no date, so the loop reads the prompt afresh
+for its first message (folding in whatever changed since the old one began, with no note of a
+change) and tells the date. The kernel is not restarted: the summary names what its namespace
+holds. The answer is the step's `usage` (counted in the session's totals), `cleared`, a note
+carrying the summary, then `restarting` the two rows, so the ui drops the old conversation and
+a resume's replay starts at the summary.
+
+The compact row depends on `model`, `kernel` (only its `spec`), the loader and `commands`, and
+on neither `loop` nor `transcript`: a restart of them reloads what depends on them, which would
+cancel the row's own work half-way. It reads the conversation from the transcript row's file
+(its `path`, from `loader.entries()`), so it needs a session's transcript (one kept in memory
+can't begin again from a summary, and /compact says so). The restart is queued for the row's own
+`background` (cordis-helpers' `perform`), never run in the chat row's task, which it reloads: the
+operator's `/clear` does the same. It is a row of its own rather than one of the operator's
+commands, so the operator keeps not depending on the model (a `/model` switch never reloads it).

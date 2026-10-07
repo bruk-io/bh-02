@@ -110,6 +110,16 @@ use = "commands:registry"
 id = "operator"
 use = "commands:operator"
 
+# `/compact [WHAT TO KEEP]`: the model summarises the conversation, and a new one begins from
+# the summary, written over the transcript row's file (its `path`; the old kept as `.bak`): the
+# loop and the transcript restart, so the prompt is read afresh, and the kernel keeps its
+# namespace, which the summary names. A row of its own over `model`, `kernel` (its tool spec),
+# the loader and `commands`, not the operator, which never depends on the model. A command
+# can't be interrupted, so the model has `timeout` seconds (300) to answer.
+[[plugin]]
+id = "compact"
+use = "agent:compact"
+
 # The command palette (Ctrl-P) offers the commands broker's commands.
 [[plugin]]
 id = "palette"

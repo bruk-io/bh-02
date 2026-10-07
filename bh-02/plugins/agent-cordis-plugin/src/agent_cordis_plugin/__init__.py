@@ -1,7 +1,17 @@
 """A harness-owned agent loop: a `model` plus the kernel's one tool, `python`, provided as a `loop`.
 
-Also the transcript row, so the history outlives the loop."""
+Also the transcript row, so the history outlives the loop, and `/compact`, which begins a new
+conversation from the model's summary of it."""
 
+from agent_cordis_plugin.compact import (
+    CompactConfig,
+    Unsummarised,
+    asked,
+    compact_conversation,
+    kept_in,
+    seeded,
+    summarise,
+)
 from agent_cordis_plugin.loop import (
     DECLINED,
     FAILED,
@@ -18,14 +28,15 @@ from agent_cordis_plugin.loop import (
 )
 from agent_cordis_plugin.prompt import changes
 from agent_cordis_plugin.stops import classify
-from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
-from agent_cordis_plugin.wiring import LoopConfig, TranscriptConfig, loop, memory, transcript
+from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript, rewrite
+from agent_cordis_plugin.wiring import LoopConfig, TranscriptConfig, compact, loop, memory, transcript
 
 __all__ = [
     "DECLINED",
     "FAILED",
     "STOPPED",
     "Approval",
+    "CompactConfig",
     "Model",
     "FileTranscript",
     "LoopConfig",
@@ -36,11 +47,19 @@ __all__ = [
     "System",
     "Transcript",
     "TranscriptConfig",
+    "Unsummarised",
+    "asked",
     "changes",
     "classify",
+    "compact",
+    "compact_conversation",
+    "kept_in",
     "loop",
     "memory",
     "refusal",
     "remembered",
+    "rewrite",
+    "seeded",
+    "summarise",
     "transcript",
 ]

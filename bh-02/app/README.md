@@ -94,11 +94,15 @@ models plugin's README has every setting.
 In a session: `/help` lists the commands (Ctrl-P opens them as a palette). `/rows` shows the
 running composition, `/explain ROW` what cordis knows about a row, `/restart ROW` starts one
 afresh, `/clear` starts a new conversation and an empty kernel (and clears the screen, leaving
-one note; the usage totals are the session's and stay), `/model [NAME]` lists the models or
-switches to one, `/release` stops the kernel until the next input (on Linux, the way to add
-your credential mid-session: the jail frees where bh-02 looks for it). A command never reaches
-the model; a line like `/tmp/app.py is broken` is not a command. Ctrl-C stops a reply, Ctrl-Q
-(or `/exit`) quits.
+one note; the usage totals are the session's and stay), `/compact [WHAT TO KEEP]` asks the model
+to summarise the conversation and carries on in a new one from the summary, keeping the kernel
+and its variables (the screen keeps only the note carrying the summary, and the old transcript
+is kept as the session's `transcript.jsonl.bak`; the model has 300 seconds, the `compact` row's
+`timeout`, since a command can't be interrupted), `/model [NAME]` lists the models or switches
+to one, `/release` stops the kernel until the next input (on Linux, the way to add your
+credential mid-session: the jail frees where bh-02 looks for it). A command never reaches the
+model; a line like `/tmp/app.py is broken` is not a command. Ctrl-C stops a reply, Ctrl-Q (or
+`/exit`) quits.
 
 The app owns the terminal while it runs, so nothing else writes there: `--trace FILE` appends
 lifecycle lines to a file, a layer file that could not be reloaded is reported after the app
@@ -170,6 +174,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `system` | `context:project` | |
 | `commands` | `commands:registry` | |
 | `operator` | `commands:operator` | `layer`, `model_row` (`model`), `forget` (the transcript) |
+| `compact` | `agent:compact` (`timeout`: 300) | |
 | `status` | `tui:status` | |
 | `palette` | `tui:palette` | |
 | `model` | `models:model` (`default`: `sonnet`) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
@@ -213,6 +218,7 @@ models:catalog          binds Models                       depends on Loader, La
 agent:transcript        binds Transcript                   depends on nothing
 agent:memory            binds Memory                       depends on nothing
 agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Approval, Memory
+agent:compact           registers /compact                 depends on Model, Kernel, Loader, Commands (the transcript row's file, not Transcript)
 kernel:shell_hints      adds the shell hints to Memory     depends on Memory, Transcript
 context:on_touch        adds the on-touch sections         depends on System, Memory, Transcript
 brig:jail               binds Jail                         depends on Layers
@@ -250,7 +256,7 @@ other plugin; the gate proves it.
 |---|---|---|
 | `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `palette`) | `frame` and what each row reports on |
 | `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's one tool, `python`, only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are | `layers` (`credentials`: where both look for `local.env`), `loader` (catalog) |
-| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes, its result followed by what `memory`'s functions add), `transcript` (`agent:transcript`), `memory` (`agent:memory`: the broker of what the model is told with an input's result) | the loop: `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (its functions, after each input) |
+| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes, its result followed by what `memory`'s functions add), `transcript` (`agent:transcript`), `memory` (`agent:memory`: the broker of what the model is told with an input's result); `agent:compact` registers `/compact`, which begins a new conversation from the model's summary, restarting the loop and the transcript | the loop: `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (its functions, after each input); compact: `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `entries`, `restart`), `commands` (`register`) |
 | `chat-cordis-plugin` | runs `session` (a turn interruptible) and binds `done` | `loop`, `input`, `output`, `commands` |
 | `context-cordis-plugin` | `system` (`context:project`): who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of, then the project context: the working directory and branch, what the context files' sections say (guidance and rule files, each read by a function), read fresh; a broker other rows add sections to; and what the context files' `on_touch` sections say about the files an input opened (`touched`). `context:on_touch` adds to `memory` that guidance and those rules, each told once a conversation with the result of the first input that opens a file they cover | on-touch: `system` (`touched`), `memory` (`add`), `transcript` (its lifetime only) |
 | `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system`; each load on `approval`'s yes | `jail`, `commands`, `frame`, `system`, `approval` |
@@ -283,7 +289,7 @@ or CLAUDE.md, or a rule for some files, arrives whole with the result of the fir
 opens a file it covers, as Claude Code's do when its Read, Write or Edit touches one. It asks
 the `system` value (`touched`), so the context files are the ones the `system` row's config
 names (`root`, `home`, `files`), read and searched once for the prompt and for this. Both
-depend on `transcript`, so after `/clear` they tell the new conversation again.
+depend on `transcript`, so after `/clear` or `/compact` they tell the new conversation again.
 
 The kernel is a worker process started by the `jail` row. `brig:jail` confines it: writes
 only inside the project (and never to the layer files, the host's import paths, `.git/hooks`,

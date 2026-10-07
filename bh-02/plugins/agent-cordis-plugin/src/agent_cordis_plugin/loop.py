@@ -47,6 +47,7 @@ __all__ = [
     "Transcript",
     "refusal",
     "remembered",
+    "request_for",
 ]
 
 type Json = Mapping[str, Any]
@@ -169,6 +170,15 @@ def remembered(memory: Iterable[Remember], input: Json) -> list[str]:
     return sorted(notes)
 
 
+def request_for(messages: Sequence[Json]) -> list[Json]:
+    """The messages for one request over a transcript's `messages`: the prompt the conversation
+    began with (its first `system` entry), then the conversation. The prompts kept after the
+    first were told as notes, so they stay out."""
+    first = next((m for m in messages if m.get("role") == "system"), None)
+    head: list[Json] = [{"role": "system", "content": first["content"]}] if first else []
+    return [*head, *(m for m in messages if m.get("role") != "system")]
+
+
 def refusal(call: Json, spec: Json) -> str | None:
     """Why a call can't run as an input (a name other than the one tool's, or no `code` string),
     as text the model reads instead of a result; None when it can run."""
@@ -250,14 +260,6 @@ class LoopModel:
         self._transcript.append({"role": "system", "content": now})
         return changes(last, now) if last is not None else ""
 
-    def _request(self) -> list[Json]:
-        """The messages for one request: the prompt the conversation began with, then the
-        conversation. The prompts kept after the first were told as notes, so they stay out."""
-        messages = self._transcript.messages
-        first = next((m for m in messages if m.get("role") == "system"), None)
-        head: list[Json] = [{"role": "system", "content": first["content"]}] if first else []
-        return [*head, *(m for m in messages if m.get("role") != "system")]
-
     async def reply(self, message: str) -> AsyncIterator[Json]:
         """Run turns until one is answered, yielding what happens (CONTRACTS.md: event)."""
         today = self._today()
@@ -276,7 +278,7 @@ class LoopModel:
         nudges = 0
         while True:
             turn = _Turn()
-            chunks = self._model.complete(self._request(), [self._kernel.spec])
+            chunks = self._model.complete(request_for(self._transcript.messages), [self._kernel.spec])
             try:
                 async for chunk in chunks:
                     if (shown := turn.take(chunk)) is not None:

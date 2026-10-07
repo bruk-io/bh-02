@@ -14,10 +14,12 @@ an unknown one says so and never reaches the model.
 The operator acts through cordis's loader handle (`status`, `entries`, `restart`,
 `reload`, `explain`), never the runtime. A restart replaces rows the chat session depends on, which
 restarts the session itself, so restarts are queued to the operator row's own background work
-rather than run in the session's task. `/clear` empties the `forget` files first (Claude
-Code's session id, the loop's transcript), since a restarted model row would otherwise read
-the old conversation back, and answers with events rather than text: `cleared` (CONTRACTS.md:
-event), so the ui drops the old conversation from its screen, then a note saying so.
+(cordis-helpers' `perform`) rather than run in the session's task. `/clear` empties the
+`forget` files first (Claude Code's session id, the loop's transcript), since a restarted model
+row would otherwise read the old conversation back, and answers with events rather than text:
+`cleared` (CONTRACTS.md: event), so the ui drops the old conversation from its screen, then a
+note saying so. (`/compact`, which asks the model for a summary, is the agent plugin's
+`agent:compact` row, so the operator never depends on the model.)
 
 `/model` lists the models (the `models` value: the built-ins, the models file's, the model
 row's own), the one the model row names marked `●`, each with its provider and id, and says

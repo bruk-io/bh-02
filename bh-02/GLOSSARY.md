@@ -68,10 +68,11 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **status** (row): `tui:status`: the status bar's session id, model and jail grades. The `usage` field is the ui's own.
 - **status bar**: the line along the bottom: session, model, jail, usage; narrower forms when the terminal is narrow.
 - **palette** (row): `tui:palette`: the commands, offered in the command palette (Ctrl-P).
-- **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers (`/release`).
+- **commands** (row and key): the slash-command broker: `/help`, `/rows`, `/explain`, `/restart`, `/clear`, `/model`, and any a row registers (`/release`, `/compact`).
 - **operator** (row): `commands:operator`: the commands that act on the running program through the loader.
 - **system** (row and key): `context:project`: what the model is told about where it is working (that it is the model in bh-02, not Claude Code; the directory, its branch), and the sections other rows add to it.
 - **context file**: TOML listing the project context's `[[section]]`s, each `files` (patterns) and `function` (a module path given the files that match), and optionally `on_touch` (one given them with the files an input opened): bh-02's own, then yours (`$XDG_CONFIG_HOME/bh-02/context.toml`, else `~/.config/bh-02/context.toml`), then the project's `.bh-02/context.toml` (bh-02's own functions and the project's non-hidden files only); read again when it changes.
+- **compact** (row): `agent:compact`: `/compact [WHAT TO KEEP]` asks the model to summarise the conversation and begins a new one from the summary (the old transcript kept as `transcript.jsonl.bak`); the loop and the transcript restart, the kernel keeps its namespace. The model has `timeout` seconds (300), since a command can't be interrupted.
 - **memory** (row and key): `agent:memory`, what the model is told with an input's result: a broker of functions rows add, each given the input's code, result and touched files, each adding a note or nothing.
 - **touched**: the project files an input opened, read or written (`kernel.touched()`), heard by an audit hook in the worker; not what a shell command it ran opened.
 - **on-touch** (row): `context:on_touch`: the guidance or rule for a file, given whole the first time an input opens it in a conversation; it reads the context files through the `system` row (`touched`), so it has no config of its own.

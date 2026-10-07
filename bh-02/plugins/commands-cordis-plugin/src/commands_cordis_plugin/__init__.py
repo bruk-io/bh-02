@@ -6,7 +6,6 @@ from commands_cordis_plugin.operations import (
     Operator,
     OperatorConfig,
     model_list,
-    perform,
     rows_table,
 )
 from commands_cordis_plugin.registry import Choice, Commands, CommandSpec, Run, parse
@@ -24,7 +23,6 @@ __all__ = [
     "model_list",
     "operator",
     "parse",
-    "perform",
     "registry",
     "rows_table",
     "set_model",

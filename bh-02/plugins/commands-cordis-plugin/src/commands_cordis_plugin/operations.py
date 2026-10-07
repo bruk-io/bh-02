@@ -2,9 +2,9 @@
 
 They act through the loader's handle (cordis's operator API) and never through the runtime.
 A restart replaces a row the chat session depends on, which restarts the session itself: so
-restarts are queued for work the operator row owns (`jobs`), never run in the session's own
-task, which they would cancel half-way. `/clear` answers with a `cleared` event
-(CONTRACTS.md: event), so a ui drops the old conversation from its screen. `/model` edits
+restarts are queued for work the operator row owns (`jobs`, run by cordis-helpers' `perform`),
+never run in the session's own task, which they would cancel half-way. `/clear` answers with a
+`cleared` event (CONTRACTS.md: event), so a ui drops the old conversation from its screen. `/model` edits
 the session's own layer file and queues a reload of the layers (the loader's watcher would
 notice the edit too, half a second later): the layer files stay the only way the program's
 shape changes, and a resumed session keeps the choice. Both end their answer with a
@@ -13,16 +13,15 @@ them instead of handing it to the old model.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from commands_cordis_plugin.registry import Answer, CommandSpec, Run
+from cordis_helpers import Job
 
-__all__ = ["Loader", "Models", "Operator", "OperatorConfig", "model_list", "perform", "rows_table"]
-
-type Job = Callable[[], Awaitable[None]]
+__all__ = ["Loader", "Models", "Operator", "OperatorConfig", "model_list", "rows_table"]
 
 
 @runtime_checkable
@@ -206,14 +205,3 @@ class Operator:
         await self.jobs.put(self.loader.reload)
         note = f"switching to {args} (the session's layer is reloaded; the conversation carries on)"
         return [{"type": "note", "text": note}, *_restarting([row], self.loader.status())]
-
-
-async def perform(jobs: asyncio.Queue[Job], failed: Callable[[str], None]) -> None:
-    """The operator's own work: run queued jobs one at a time, for as long as the row is up. A
-    job that fails is reported and the next one still runs."""
-    while True:
-        job = await jobs.get()
-        try:
-            await job()
-        except Exception as error:
-            failed(f"{type(error).__name__}: {error}")

@@ -5,12 +5,13 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from commands_cordis_plugin.operations import Job, Loader, Models, Operator, OperatorConfig, perform
+from commands_cordis_plugin.operations import Loader, Models, Operator, OperatorConfig
 from commands_cordis_plugin.registry import Commands, CommandSpec, Run
 from cordis import Effects, Row, acquire, background, bind, component
 from cordis.composition import format_layer
 from cordis.loader import Loader as _Mounting
 from cordis.loader import read_layer
+from cordis_helpers import Job, perform
 
 __all__ = ["operator", "registry", "set_model", "shadowing"]
 
