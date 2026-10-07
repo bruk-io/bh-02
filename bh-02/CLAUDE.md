@@ -120,9 +120,12 @@ be such a change: the loop tells it first on the person's message, the first of 
 and of each day (`(Today's date: ...)`, the entry's `today` field saying which it told, so a
 resume does not tell it again and `/clear` does). So the prompt reads the same from day to day,
 and a local model server that keeps its prompt cache can reuse a new session's start. The
-prompt is read, and `memory` asked, in a worker thread (`asyncio.to_thread`), never on the event
-loop the TUI shares: a section function may read many files and search the project, and must
-not need the event loop; the loop awaits each, so one runs at a time. The claude-code provider
+prompt is read, and `memory` asked, in a thread of the loop's own, never on the event loop the
+TUI shares: a section function may read many files and search the project, and must not need the
+event loop. One runs at a time: nothing stops one part-way, so a reading a stopped reply left
+running is waited for before the next begins (Ctrl-C after Ctrl-C leaves at most one in flight),
+and the thread is a daemon's, not the default executor's, which `asyncio.run` and the
+interpreter join as they end, so one left running never holds bh-02 open. The claude-code provider
 adds a note that Claude Code's own opening line and its `mcp__bh__` tool names don't mean the
 model is in Claude Code.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.

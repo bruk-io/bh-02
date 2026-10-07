@@ -772,3 +772,97 @@ async def test_a_reply_stopped_after_an_input_s_notes_were_made_still_tells_them
     await asyncio.gather(task, return_exceptions=True)
     tools = [m["content"] for m in history.messages if m["role"] == "tool"]
     assert tools == ["A\n\na rule, told once"]
+
+
+class _Held:
+    """A `system` whose every reading waits until `release` is set (5 s at most), keeping count
+    of the readings begun, how many run now and the most that ran at once, and the threads they
+    ran in. The first `failing` readings raise once released."""
+
+    def __init__(self, *, failing: int = 0) -> None:
+        self.release = threading.Event()
+        self.failing = failing
+        self.begun = 0
+        self.running = 0
+        self.most = 0
+        self.threads: list[threading.Thread] = []
+        self._lock = threading.Lock()
+
+    def text(self) -> str:
+        with self._lock:
+            self.begun += 1
+            failing = self.begun <= self.failing
+            self.running += 1
+            self.most = max(self.most, self.running)
+            self.threads.append(threading.current_thread())
+        self.release.wait(5)
+        with self._lock:
+            self.running -= 1
+        if failing:
+            raise OSError("the project went away")
+        return "in /a"
+
+
+async def test_replies_stopped_over_and_over_while_the_prompt_is_read_leave_one_reading_running() -> None:
+    """Ctrl-C again and again while a slow section function reads the project: a reading can't
+    be stopped part-way, so each new reply waits for the one a stopped reply left running
+    instead of starting its own beside it. Each stop used to leave one more thread reading."""
+    held, history = _Held(), MemoryTranscript()
+    loop = LoopModel(Scripted([text("at last")]), Shouting(), history, Confined(), system=held)
+    try:
+        for n in range(4):
+            task = asyncio.create_task(_collect(loop, f"go {n}"))
+            while not held.begun:
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)  # time enough for this reply's own reading to begin, were it to
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert (held.begun, held.running, held.most) == (1, 1, 1)
+    finally:
+        held.release.set()
+    assert await _collect(loop, "go on") == "at last"
+    assert (held.begun, held.most) == (2, 1)  # read afresh, once the one left behind was done
+    replies = [m["content"] for m in history.messages if m["role"] == "assistant"]
+    assert replies == [STOPPED] * 4 + ["at last"]  # every stopped message answered as stopped
+
+
+async def test_a_stopped_reply_s_reading_that_fails_costs_the_next_reply_nothing() -> None:
+    held = _Held(failing=1)  # the one left behind fails; the next reads
+    loop = LoopModel(Scripted([text("fine")]), Shouting(), MemoryTranscript(), Confined(), system=held)
+    task = asyncio.create_task(_collect(loop, "go"))
+    while not held.begun:
+        await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    held.release.set()
+    assert await _collect(loop, "again") == "fine"
+    assert held.begun == 2
+
+
+def test_a_reading_a_stopped_reply_left_running_does_not_hold_bh_02_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """bh-02 runs in `asyncio.run`, which joins the default executor's threads as it ends, and
+    the interpreter joins them again at exit: a reading a stopped reply left there kept bh-02
+    from leaving until it finished. The loop reads in a daemon thread of its own, which neither
+    waits for, and whose answer to an event loop that has closed meanwhile goes nowhere."""
+    escaped: list[BaseException | None] = []
+    monkeypatch.setattr(threading, "excepthook", lambda args: escaped.append(args.exc_value))
+    held = _Held()
+
+    async def stop_one_reply() -> None:
+        loop = LoopModel(Scripted(), Shouting(), MemoryTranscript(), Confined(), system=held)
+        task = asyncio.create_task(_collect(loop, "go"))
+        while not held.begun:
+            await asyncio.sleep(0.01)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    try:
+        asyncio.run(stop_one_reply())
+        assert held.running == 1  # asyncio.run ended without waiting for it
+        assert [thread.daemon for thread in held.threads] == [True]  # nor will the interpreter
+    finally:
+        held.release.set()
+    held.threads[0].join(5)
+    assert not held.threads[0].is_alive() and escaped == []
