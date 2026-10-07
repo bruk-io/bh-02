@@ -123,6 +123,25 @@ def test_the_context_files_the_system_row_names_reach_it(tmp_path: Path) -> None
     assert system.text().endswith("Files to read when they bear on your work: docs/GUIDE.md.")
 
 
+def test_a_text_the_cap_cut_is_told_whole_with_a_later_input_that_opens_its_files(tmp_path: Path) -> None:
+    """Two 12,000-character guidance files, and one input that opens a file under each: the note
+    holds the first whole and is cut in the second, so the second is not told yet, and a later
+    input that opens a file under it is told it whole. One longer than the cap by itself is told
+    once, cut: no note could hold more of it."""
+    told, root, _ = _project(tmp_path)
+    a, b = "A" * 12_000, "B" * 12_000
+    _write(root / "a/CLAUDE.md", a)
+    _write(root / "b/CLAUDE.md", b)
+    first = told({"touched": (str(root / "a/x.py"), str(root / "b/x.py"))})
+    assert a in first and b not in first and first.endswith(" more chars of guidance]")
+    later = told({"touched": (str(root / "b/y.py"),)})
+    assert later.startswith("From b/CLAUDE.md") and later.endswith(b)
+    assert told({"touched": (str(root / "b/z.py"),)}) == ""  # told whole now: once
+    _write(root / "c/CLAUDE.md", "C" * 30_000)
+    assert told({"touched": (str(root / "c/x.py"),)}).endswith(" more chars of guidance]")
+    assert told({"touched": (str(root / "c/y.py"),)}) == ""
+
+
 class _Said:
     """A `system` value that says what it is given to say, and keeps what it was asked."""
 

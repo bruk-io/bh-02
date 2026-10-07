@@ -14,8 +14,8 @@ say when the model first works on it.
    written for Claude Code, and the claude-code provider's prompt opens with Claude Code's own
    line), and what bh-02 is made of (cordis rows the person reshapes while it runs);
 2. **the project context**: the working directory and the git branch (from `.git/HEAD`, no
-   subprocess); then what the context files' sections say; then the sections other rows add
-   (`add`).
+   subprocess, read as a section's file is: through no link); then what the context files'
+   sections say; then the sections other rows add (`add`).
 
 `agent:loop` sends a conversation the prompt it began with and tells a later change as a note.
 The date is not in the prompt, which would then change every midnight: the loop tells it with
@@ -76,14 +76,18 @@ on_touch = "context_cordis_plugin.sections:place_touched"
   `function(files, root=root, home=home) -> str` with the files that matched, in the order of
   the patterns, each once; it returns what the model is told ('' for nothing). It runs each
   time the prompt is read, in the loop's worker thread. One that can't be imported, or raises,
-  says so in one line, and the other sections still say theirs.
+  says so in one line, and the other sections still say theirs. bh-02's own read each file with
+  `read(path, files, root)` (below), and a function of yours may: a file it reads itself may
+  have been made a link since it was found.
 - `on_touch` (optional): another, called as `on_touch(files, touched, root=root, home=home)`
   after each input that opened files in the project (`touched`, absolute: `kernel.touched()`),
   returning a mapping of each of its files that bears on them to the text to tell with that
   input's result. `context:on_touch` tells each once a conversation (again if what it says
   changed), at most 20,000 characters with one result, so a path-scoped rule or a
   subdirectory's AGENTS.md arrives the first time the model works on a file it covers, as
-  Claude Code's do when its Read, Write or Edit touches one. A section may have only `on_touch`.
+  Claude Code's do when its Read, Write or Edit touches one. A text that note cut short, or
+  left out, is not told yet: the next input that opens a file it covers tells it whole (one
+  longer than 20,000 characters by itself is told once, cut). A section may have only `on_touch`.
 
 The sections are read in order from bh-02's own file (`context.toml`, in the package), then each
 of `files`: yours, `$XDG_CONFIG_HOME/bh-02/context.toml` (else `~/.config/bh-02/context.toml`),
@@ -98,16 +102,29 @@ and bh-02 acts on it in its own process, outside the jail. So it may name only b
 functions (`context_cordis_plugin.sections:*`, as `function` and as `on_touch`), and only files
 in the project that are not hidden (no `~`, `/`, `..` or part starting with `.`), and it may not
 `replace` the sections before it. A function or a file outside the project of your own goes in
-your file. A context file is the project's when the model could have written it: the path as
-named or as it resolves is in the project, so a file of yours inside it (bh-02 run in your
-home, a `$XDG_CONFIG_HOME` in the project) is the project's, and so is `.bh-02/context.toml` (or
-`.bh-02`) made a link to a file outside it, such as one the model wrote in the jail's scratch
-directory. And whichever file a section came from, nothing is read through it that the jail
-keeps from the model: a file reached from the project must be in it, a link in the project
-counts only when it leads to another file the section found (a CLAUDE.md linking to the
-AGENTS.md beside it), a file in the project with a second name (a hard link) is not read, and a
-file named like a secret (`local.env`, `.env`, `*.env`) is never read. A link of your own,
-outside the project (`~/AGENTS.md` into your dotfiles), is yours to follow.
+your file. A context file is the project's when the model could have written it or chosen what
+it is: as named, as it resolves, or through any directory or link on its way, it is in the
+project. So a file of yours inside it (bh-02 run in your home, a `$XDG_CONFIG_HOME` in the
+project) is the project's; so is `.bh-02/context.toml` (or `.bh-02`) made a link to a file
+outside it, such as one the model wrote in the jail's scratch directory; and so is your file
+when it is a link into the project (`~/.config/bh-02/context.toml` kept in `~/dotfiles`, and
+bh-02 run there), since the model could repoint the file the link leads to.
+
+And whichever file a section came from, nothing is read through it that the jail keeps from
+the model: a file reached from the project must be in it, a link in the project counts only
+when it leads to another file the section found (a CLAUDE.md linking to the AGENTS.md beside
+it), a file in the project reached through a linked directory, or with a second name (a hard
+link), is not read, and a file named like a secret (`local.env`, `.env`, `*.env`) is never read.
+A link of your own, outside the project (`~/AGENTS.md` into your dotfiles), is yours to follow,
+unless it leads through the project (bh-02 run in those dotfiles): the model could repoint its
+end, so it is not read (the project's own `AGENTS.md`, that same file, is, on the project's
+terms). That is decided when the files are found, and the model can make a link at any moment
+after, so the read is safe by itself too: `read(path, files, root)`, which bh-02's own functions
+read every file with, walks to a file in the project from its root through no link (`O_NOFOLLOW`
+on every part) and reads it from what that opened, only when it is a regular file with one name
+(a pipe is refused, not waited on); a link there is read as its target, the same way, only when
+that is another of `files`; a file outside the project is read as it is named. A file it does
+not read raises an error saying why, so the section says it could not be made.
 
 bh-02's own functions (`sections.py`):
 

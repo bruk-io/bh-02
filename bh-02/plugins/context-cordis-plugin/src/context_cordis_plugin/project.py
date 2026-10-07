@@ -23,7 +23,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from context_cordis_plugin.context_file import ContextFiles
+from context_cordis_plugin.context_file import ContextFiles, read
 from cordis_helpers import Hooks
 
 __all__ = ["ContextConfig", "ProjectContext", "branch_of", "describe"]
@@ -100,7 +100,10 @@ class ProjectContext:
     def text(self) -> str:
         root, home = self._places()
         head = root / ".git" / "HEAD"
-        branch = branch_of(head.read_text(encoding="utf-8")) if head.is_file() else None
+        try:  # a file in the project, so read as a section's are: through no link the model made
+            branch = branch_of(read(head, (head,), root))
+        except OSError:  # no repository here (or a worktree's, whose .git is a file), or a link
+            branch = None
         # the sections rows have added now: a snapshot, as the event loop may add or remove one
         # while this runs in the loop's worker thread
         sections = [self._files.text(root, home), *(section() for section in self._sections)]

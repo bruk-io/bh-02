@@ -2,11 +2,20 @@
 
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
-from context_cordis_plugin import ContextConfig, ContextFiles, ProjectContext, parse
+from context_cordis_plugin import (
+    ContextConfig,
+    ContextFiles,
+    ProjectContext,
+    parse,
+    place,
+    place_touched,
+    read,
+)
 
 _NAMED = "context_cordis_plugin.sections:named"
 _WHOLE = "context_cordis_plugin.sections:whole"
@@ -270,3 +279,109 @@ def test_a_hard_link_in_the_project_is_not_read(tmp_path: Path) -> None:
     _write(root / "AGENTS.md", "Read me.")
     text = context.text()
     assert "FAKE" not in text and "Read me." in text
+
+
+def _swap(files: Sequence[Path], home: Path) -> None:
+    """The model's move: each file made a link to a secret of the person's."""
+    for file in files:
+        file.unlink()
+        file.symlink_to(home / ".ssh/id_test")
+
+
+def _swapped(files: Sequence[Path], *, root: Path, home: Path) -> str:
+    """bh-02's `place`, once the model has swapped each file it was given for a link to a secret:
+    after bh-02 checked what the section found, and before it read them."""
+    _swap(files, home)
+    return place(files, root=root, home=home)
+
+
+def _swapped_touched(
+    files: Sequence[Path], touched: Sequence[Path], *, root: Path, home: Path
+) -> dict[Path, str]:
+    """bh-02's `place_touched`, after the same swap."""
+    _swap(files, home)
+    return place_touched(files, touched, root=root, home=home)
+
+
+def test_a_file_swapped_for_a_link_after_it_was_checked_is_not_read(tmp_path: Path) -> None:
+    """The model can make a link at any moment (an input left running in a loop), so a file in the
+    project is read through no link bh-02 did not allow: one made after the section's files were
+    checked, before they are read, is not followed, for the prompt or for an input's result."""
+    context, root, home = _context(tmp_path)
+    _write(home / ".ssh/id_test", "FAKE-KEY")
+    _write(root / "AGENTS.md", "The project's.")
+    _write(root / "src/AGENTS.md", "Below.")
+    _write(
+        home / ".config/bh-02/context.toml",
+        f'replace = true\n[[section]]\nfiles = ["AGENTS.md"]\nfunction = "{__name__}:_swapped"\n'
+        f'[[section]]\nfiles = ["src/AGENTS.md"]\non_touch = "{__name__}:_swapped_touched"\n',
+    )
+    text = context.text()
+    assert "FAKE" not in text and "(bh-02 could not make the section" in text
+    said = context.touched([str(root / "src/x.py")])
+    assert said and "FAKE" not in str(said)
+
+
+def test_your_file_linked_into_the_project_is_the_project_s(tmp_path: Path) -> None:
+    """The dotfiles case: your context file is a link into ~/dotfiles and bh-02 runs there, so the
+    model can repoint the file in the project at one it wrote outside it. Neither the name nor
+    where it ends is in the project, but a link on the way is: it is the project's."""
+    home = tmp_path / "home"
+    root = home / "dotfiles"
+    _write(home / "secret.txt", "FAKE-SECRET")
+    _write(root / "bh02/context.toml", "")
+    (home / ".config/bh-02").mkdir(parents=True)
+    (home / ".config/bh-02/context.toml").symlink_to(root / "bh02/context.toml")
+    evil = _write(
+        tmp_path / "scratch/evil.toml", f'[[section]]\nfiles = ["~/secret.txt"]\nfunction = "{_WHOLE}"\n'
+    )
+    (root / "bh02/context.toml").unlink()
+    (root / "bh02/context.toml").symlink_to(evil)
+    text = ProjectContext(ContextConfig(root=str(root), home=str(home))).text()
+    assert "FAKE" not in text and "may name only files in the project" in text
+
+
+def test_your_guidance_linked_into_the_project_is_not_read_through_the_link(tmp_path: Path) -> None:
+    """`~/AGENTS.md` a link into ~/dotfiles, and bh-02 run there: the file it leads to is the
+    project's, which the model can repoint, so yours is not read through it. The project's own
+    AGENTS.md is that file, read from the project, on the project's terms."""
+    home = tmp_path / "home"
+    root = home / "dotfiles"
+    _write(home / ".ssh/id_test", "FAKE-KEY")
+    _write(root / "AGENTS.md", "Mine, kept in my dotfiles.")
+    (home / "AGENTS.md").symlink_to(root / "AGENTS.md")
+    context = ProjectContext(ContextConfig(root=str(root), home=str(home)))
+    assert "Mine, kept in my dotfiles." in context.text()
+    (root / "AGENTS.md").unlink()
+    (root / "AGENTS.md").symlink_to(home / ".ssh/id_test")
+    assert "FAKE" not in context.text()
+
+
+def test_read_walks_from_the_project_s_root_through_no_link_but_one_to_another_of_the_files(
+    tmp_path: Path,
+) -> None:
+    """`read`, which bh-02's own functions read with (and yours may): in the project, a regular
+    file with one name reached through no link, or a link to another of the files given, read as
+    that; outside it, the file as named. Anything else says why it was not read, and a pipe does
+    so at once, never waiting for a writer."""
+    root, home = tmp_path / "project", tmp_path / "home"
+    agents = _write(root / "AGENTS.md", "Read me.")
+    (root / "CLAUDE.md").symlink_to("AGENTS.md")
+    (home / "dotfiles").mkdir(parents=True)
+    (home / "AGENTS.md").symlink_to(_write(home / "dotfiles/AGENTS.md", "Mine."))
+    assert read(root / "CLAUDE.md", [root / "CLAUDE.md", agents], root) == "Read me."
+    assert read(home / "AGENTS.md", [home / "AGENTS.md"], root) == "Mine."  # yours, as named
+    with pytest.raises(OSError, match="not another of the section's files"):
+        read(root / "CLAUDE.md", [root / "CLAUDE.md"], root)
+    with pytest.raises(ValueError, match="not one of the files given"):
+        read(root / "CLAUDE.md", [agents], root)
+    _write(root / "real/x.md", "x")
+    (root / "docs").symlink_to("real")
+    with pytest.raises(OSError, match="reached through .*docs, which is a link"):
+        read(root / "docs/x.md", [root / "docs/x.md"], root)
+    os.link(agents, root / "SECOND.md")
+    with pytest.raises(OSError, match="not a regular file with one name"):
+        read(agents, [agents], root)
+    os.mkfifo(root / "PIPE.md")
+    with pytest.raises(OSError, match="not a regular file with one name"):
+        read(root / "PIPE.md", [root / "PIPE.md"], root)

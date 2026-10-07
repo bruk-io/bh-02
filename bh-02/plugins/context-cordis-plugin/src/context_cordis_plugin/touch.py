@@ -11,6 +11,7 @@ before it began (a resumed session's) is in the `transcript`'s `tool` entries, w
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from itertools import accumulate
 from typing import Any, Protocol, runtime_checkable
 
 __all__ = ["Memory", "OnTouch", "System", "Transcript"]
@@ -72,21 +73,36 @@ def _told_in(results: Sequence[str], text: str) -> bool:
     return False
 
 
+def _cut(texts: Sequence[str]) -> tuple[str, int]:
+    """The note telling `texts`, each after a blank line: at most `_MAX_CHARS` of it, the rest
+    counted after it. And how many of them it tells: each it holds whole, so one the cap cuts, or
+    leaves out, is told by a later note; and the first even when cut, since it alone is longer
+    than any note holds."""
+    text = "\n\n".join(texts)
+    more = len(text) - _MAX_CHARS
+    if more <= 0:
+        return text, len(texts)
+    whole = sum(1 for end in accumulate(len(t) + 2 for t in texts) if end - 2 <= _MAX_CHARS)
+    return f"{text[:_MAX_CHARS]}\n... [{more} more chars of guidance]", max(whole, 1)
+
+
 class OnTouch:
     """A `memory` function over what `system`'s context files' `on_touch` sections say: given an
     input (`touched`, ...), what they say about the files it opened that this conversation has
     not been told (a file whose text changed since is told again); '' for nothing. At most
-    `_MAX_CHARS` of it.
+    `_MAX_CHARS` of it (`_cut`): a text told only in part, cut by that or left out, is not told
+    yet, so the next input that opens a file it covers tells it whole; one longer than that by
+    itself is told once, cut.
 
     What the conversation was told before this began (a resumed session's, or this one's before
     the row reloaded) is in its `transcript`: read at the first input that opens a file, and
-    each text checked against it once, the first time `system` says it."""
+    each text checked against it until it is told."""
 
     def __init__(self, system: System, transcript: Transcript) -> None:
         self._system = system
         self._transcript = transcript
-        # (file, what was said), told this conversation or checked against what was told before
-        # this began. Called on the loop's `executor`, one call at a time, so it takes no lock.
+        # (file, what was said), told this conversation (whole, or as much as a note holds) or
+        # before this began. Called on the loop's `executor`, one call at a time, so it takes no lock.
         self._told: set[tuple[str, str]] = set()
         # what the inputs before this began were answered with: None until the first input that
         # opens a file reads them
@@ -101,8 +117,8 @@ class OnTouch:
         before = self._before
         said = self._system.touched([str(t) for t in touched])
         unseen = [item for item in dict.fromkeys(said) if item not in self._told]
-        self._told.update(unseen)
-        new = [text for _, text in unseen if not _told_in(before, text)]
-        text = "\n\n".join(new)
-        more = len(text) - _MAX_CHARS
-        return text if more <= 0 else f"{text[:_MAX_CHARS]}\n... [{more} more chars of guidance]"
+        self._told.update(item for item in unseen if _told_in(before, item[1]))
+        new = [item for item in unseen if item not in self._told]
+        note, told = _cut([text for _, text in new])
+        self._told.update(new[:told])
+        return note

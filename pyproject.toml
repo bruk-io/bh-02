@@ -269,7 +269,11 @@ exclude = [
     "context_cordis_plugin.context_file:_function", "context_cordis_plugin.context_file:_search",
     "context_cordis_plugin.sections:place", "context_cordis_plugin.sections:rules",
     "context_cordis_plugin.sections:place_touched", "context_cordis_plugin.sections:rules_touched",
-    "context_cordis_plugin.sections:whole", "context_cordis_plugin.sections:_text",
+    "context_cordis_plugin.sections:whole",
+    # a section's file read from the project's root through no link (`read`, which the functions
+    # above read with; `_opened` the walk), and the root resolved, to tell what is in the project
+    "context_cordis_plugin.context_file:read", "context_cordis_plugin.context_file:_opened",
+    "context_cordis_plugin.context_file:_roots",
     # the kernel: a socket to a process a jail started, the process itself, and the worker program
     "kernel_cordis_plugin.client:Kernel.*",
     "kernel_cordis_plugin.unjailed:_Process.*", "kernel_cordis_plugin.unjailed:Unjailed.start",

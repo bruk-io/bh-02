@@ -1,6 +1,9 @@
 """bh-02's own section functions, over files in a temporary home and project."""
 
+from collections.abc import Callable
 from pathlib import Path
+
+import pytest
 
 from context_cordis_plugin import frontmatter, named, place, place_touched, rule, rules, rules_touched, whole
 
@@ -154,3 +157,32 @@ def test_a_rule_s_braces_are_its_alternatives(tmp_path: Path) -> None:
     assert (
         said[root / "cursor.mdc"] == "From cursor.mdc, a rule for src/**/*.{ts,tsx}, lib/{a,b}/*.py:\n\nBoth."
     )
+
+
+def test_bh_02_s_own_functions_follow_no_link_in_the_project_but_one_to_another_of_their_files(
+    tmp_path: Path,
+) -> None:
+    """However a link to a secret came to be among a section's files (made after they were
+    checked), none of bh-02's own functions reads through it; a link to another of the files
+    they were given (a CLAUDE.md linking to the AGENTS.md beside it) is read as that file."""
+    home, root = tmp_path / "home", tmp_path / "project"
+    secret = _tree(home, {".ssh/id_test": "FAKE-KEY"})[0]
+    agents = _tree(root, {"src/AGENTS.md": "Below."})[0]
+    (root / "src/CLAUDE.md").symlink_to("AGENTS.md")
+    assert whole([root / "src/CLAUDE.md", agents], root=root, home=home) == (
+        "From src/CLAUDE.md:\n\nBelow.\n\nFrom src/AGENTS.md:\n\nBelow."
+    )
+    for name in ("AGENTS.md", "src/db/AGENTS.md", "rule.md"):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).symlink_to(secret)
+    opened = [root / "src/db/x.py"]
+    calls: list[Callable[[], object]] = [
+        lambda: place([root / "AGENTS.md"], root=root, home=home),
+        lambda: place_touched([root / "src/db/AGENTS.md"], opened, root=root, home=home),
+        lambda: rules([root / "rule.md"], root=root, home=home),
+        lambda: rules_touched([root / "rule.md"], opened, root=root, home=home),
+        lambda: whole([root / "rule.md"], root=root, home=home),
+    ]
+    for call in calls:
+        with pytest.raises(OSError, match="so bh-02 did not read it"):
+            call()

@@ -98,8 +98,15 @@ files, AGENTS.md and CLAUDE.md, yours and the project's, and rule files, each re
 in `context_cordis_plugin.sections`), then yours (`$XDG_CONFIG_HOME/bh-02/context.toml`, else
 `~/.config/bh-02/context.toml`), then the project's
 `.bh-02/context.toml`, which the model can write and so may name only bh-02's own functions and
-non-hidden files in the project; nothing is read through any section that the jail keeps from the
-model (a link out of the project, a `local.env`). The loop follows it with `kernel.instructions()`: that `python` is the
+non-hidden files in the project. Any context file the model could have written or chosen is held
+to the same terms: one that, as named, as it resolves, or through any directory or link on its
+way, is in the project (yours too, when it is a link into the dotfiles bh-02 runs in). Nothing is read through
+any section that the jail keeps from the model (a link out of the project, a `local.env`, a hard
+link, a file of yours whose link leads through the project), and not only when the files are
+found: the model can make a link at any moment, so bh-02's own section functions read a file
+in the project from its root through no link (`O_NOFOLLOW` on every part, then a regular file
+with one name, read from what that opened), a link there only to another of the section's
+files (`context_cordis_plugin.read`). The loop follows it with `kernel.instructions()`: that `python` is the
 CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
@@ -113,7 +120,8 @@ the result. `kernel:shell_hints` tells the first input that runs `cat`, `sed`, `
 through a shell, once for each kind of work, how Python does it (`shell_note`);
 `context:on_touch` gives the context files' `on_touch` sections, so a subdirectory's AGENTS.md
 or CLAUDE.md, or a rule for some files, arrives whole with the first input that opens a file it
-covers (Claude Code's on-demand loading); it has no config of its own and asks the `system`
+covers (Claude Code's on-demand loading; one that input's 20,000-character note cut short, or
+left out, arrives with the next that opens a file it covers); it has no config of its own and asks the `system`
 value (`system.touched(paths)`), so the context files, and the caches of what was read and
 searched, are `context:project`'s alone. Both depend on `transcript`, so `/clear` and `/compact`
 start them afresh, and read its `messages` once, at the first input that may need them

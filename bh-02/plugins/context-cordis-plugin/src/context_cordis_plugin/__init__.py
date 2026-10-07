@@ -2,7 +2,7 @@
 with the project context the context files describe; and what those files say about the files
 an input opens, through `memory`."""
 
-from context_cordis_plugin.context_file import ContextFiles, Section, parse
+from context_cordis_plugin.context_file import ContextFiles, Section, parse, read
 from context_cordis_plugin.project import ContextConfig, ProjectContext, branch_of, describe
 from context_cordis_plugin.sections import (
     Rule,
@@ -37,6 +37,7 @@ __all__ = [
     "place",
     "place_touched",
     "project",
+    "read",
     "rule",
     "rules",
     "rules_touched",

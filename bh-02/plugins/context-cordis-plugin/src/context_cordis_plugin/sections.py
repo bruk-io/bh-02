@@ -3,7 +3,9 @@ files mean to the model.
 
 Each is `function(files, *, root, home) -> str`: the files the section's patterns matched (in
 the order of its patterns, each once), the project's root, the person's home, and the text the
-model is told ('' for nothing). One runs each time the prompt is read, so it reads its files then.
+model is told ('' for nothing). One runs each time the prompt is read, so it reads its files then,
+each through `context_file.read`: a file in the project from its root through no link but one to
+another of its files, so a link the model made after they were found is not followed.
 
 - `place`: guidance files (AGENTS.md, CLAUDE.md, ...), each of which applies to everything under
   the directory it sits in: those at the project's root or outside the project (the person's
@@ -27,6 +29,8 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path, PurePath
+
+from context_cordis_plugin.context_file import read
 
 __all__ = [
     "Rule",
@@ -57,15 +61,15 @@ def place(files: Sequence[Path], *, root: Path, home: Path) -> str:
     beside it is read once); named when they apply to part of it (further down)."""
     below = [f for f in files if f.is_relative_to(root) and f.parent != root]
     covering = sorted((f for f in files if f not in below), key=lambda f: f.is_relative_to(root))
-    read: dict[str, str] = {}
+    given: dict[str, str] = {}
     for path in covering:
-        text = _text(path)
-        if text.strip() and text not in read.values():
-            read[_where(path, root, home)] = text
+        text = read(path, files, root)
+        if text.strip() and text not in given.values():
+            given[_where(path, root, home)] = text
     parts: list[str] = []
-    if read:
+    if given:
         parts.append(_GUIDANCE)
-        for where, text in read.items():
+        for where, text in given.items():
             parts += [f"From {where}:", text.strip()]
     if below:
         parts.append(
@@ -90,7 +94,7 @@ def place_touched(
     told: dict[Path, str] = {}
     seen: set[str] = set()
     for path in covering:
-        text = _text(path).strip()
+        text = read(path, files, root).strip()
         if text and text not in seen:
             seen.add(text)
             where = _where(path.parent, root, home)
@@ -106,7 +110,7 @@ def rules(files: Sequence[Path], *, root: Path, home: Path) -> str:
     for some files named with them, one for some kinds of work with its description, for the
     model to read when they bear on its work; a manual one not at all (it is the person's to
     bring in)."""
-    each = [rule(_where(p, root, home), _text(p)) for p in files]
+    each = [rule(_where(p, root, home), read(p, files, root)) for p in files]
     parts = [part for r in each if r.applies == "always" and r.text for part in (f"From {r.path}:", r.text)]
     pathed = [f"{r.path} (for {', '.join(r.paths)})" for r in each if r.applies == "paths"]
     if pathed:
@@ -129,7 +133,7 @@ def rules_touched(
     opened = [t.relative_to(root) for t in touched if t.is_relative_to(root)]
     told: dict[Path, str] = {}
     for path in files:
-        found = rule(_where(path, root, home), _text(path))
+        found = rule(_where(path, root, home), read(path, files, root))
         if found.applies != "paths" or not found.text:
             continue
         if any(_matches(t, p) for t in opened for p in found.paths):
@@ -139,7 +143,7 @@ def rules_touched(
 
 def whole(files: Sequence[Path], *, root: Path, home: Path) -> str:
     """Each file, whole, as it is."""
-    texts = [(_where(p, root, home), _text(p)) for p in files]
+    texts = [(_where(p, root, home), read(p, files, root)) for p in files]
     return "\n\n".join(f"From {where}:\n\n{text.strip()}" for where, text in texts if text.strip())
 
 
@@ -264,10 +268,6 @@ def _bare(value: str) -> str:
 def _named(items: Sequence[str], sep: str = ", ") -> str:
     more = f"{sep}and {len(items) - _LISTED} more" if len(items) > _LISTED else ""
     return sep.join(items[:_LISTED]) + more
-
-
-def _text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _where(path: Path, root: Path, home: Path) -> str:
