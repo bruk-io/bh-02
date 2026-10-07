@@ -159,7 +159,14 @@ showing the code) and runs only on a yes. `agent:loop` asks it about every input
 `confined` (what the model is told) reads the same function, `kernel_cordis_plugin.is_confined`.
 It depends on `jail` and `output`, not `kernel`, so `/clear` leaves it up; only a layer replaces
 it (it runs in bh-02's process; an extension can't reach it). The kernel depends on its jail
-alone, so a new ui or model keeps the namespace. Only `brig_cordis_plugin` imports brig
+alone, so a new ui or model keeps the namespace. A new kernel runs its startup files first when
+confined (`startup`): the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
+`~/.config/bh-02/kernel.py`), which the host reads and sends in, since a Linux jail has no home
+in it, then the project's `.bh-02/kernel.py`, which only the worker reads, in the jail (never
+read a file the model can write, or reach through a link it could make, on the host and hand
+its text to the model: the link could lead to a secret). A person's file in the project, or
+whose way passes through it, is read as the project's is. `instructions()` tells the model only
+the project's is its to edit. Only `brig_cordis_plugin` imports brig
 (`brig-one-adapter`). darwin is jailed by seatbelt (reads by denylist), Linux by bubblewrap
 (reads by allowlist: the system, the interpreter, the project; the policy, `spec_for`, is the
 same). The Linux jail's tests skip on darwin; `scripts/linux-jail-check` runs them in a

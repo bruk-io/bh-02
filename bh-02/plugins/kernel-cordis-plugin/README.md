@@ -6,16 +6,17 @@ composition names, and the model's one tool, `python(code)`, which runs an input
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its jail's), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the project's file a new kernel runs first, default `.bh-02/kernel.py`) | `jail` |
+| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its jail's), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `jail` |
 | `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when confined, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
 | `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
 | `kernel:shell_hints` | adds `ShellHints` to `memory` | `memory` (`add`), `transcript` (`messages`) |
 
-`python.py` is the tool, pure: its spec and `instructions_for(confined, startup, reads)`, what the
+`python.py` is the tool, pure: its spec and `instructions_for(confined, startup, reads, theirs=)`, what the
 model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
 long as this run of bh-02 (a /model switch keeps it; a start, a resume, /clear or a dead worker
-empties it), and that helpers worth keeping go in the startup file; how to use it (work in
+empties it), and that helpers worth keeping go in the project's startup file (`startup`), the
+only one that is its to edit, the person's own (`theirs`), which comes first, being theirs; how to use it (work in
 Python, not through a shell, shown by an input that searches and keeps what it found and a later
 one that edits with it; build up state and re-read what changed, print what matters, run
 programs with `subprocess.run(..., capture_output=True, text=True, timeout=...)` and treat what
@@ -32,7 +33,7 @@ a conversation (the row depends on `transcript`, so `/clear` starts it afresh; a
 input it reads the transcript's `tool` entries for the shell notes told after a result, so a
 resumed session is not told a kind again), so it corrects a habit without nagging.
 `scripts/model-friction` reads transcripts with the same two. `confined` is what the model is
-told (`instructions_for`) and whether the startup file runs unasked: the kernel itself never
+told (`instructions_for`) and whether the startup files run unasked: the kernel itself never
 asks, so it depends on its jail alone and a new ui or model keeps the namespace.
 
 `approval.py` is the rule, written once: `is_confined(report)` (the jail enforces `fs_write` and
@@ -85,10 +86,37 @@ won't, or that died, is started again on the next input, which is told its varia
 and why when its jail ended it (`started.ended()`: a Linux `brig:jail` ends itself when the host
 undoes one of its mounts). A worker that died between inputs is noticed before the next input
 is sent, so that input runs in the new one. After each input, `touched()` is the files under `root` it opened (what the loop gives
-`memory`'s functions). A new kernel's first input is also told what the startup file (`startup`, the model's own
-helpers, kept with the project) did: confined, the kernel runs it first and says which names it
-defined, or its traceback; unconfined, it would run unasked with the person's permissions, so
-the model is told to run it as an input of its own, which the loop then puts to the person.
+`memory`'s functions).
+
+A new kernel's first input is also told what the startup files did (`startup`, helpers kept
+across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/kernel.py` (else
+`~/.config/bh-02/kernel.py`), for the helpers they want in every project, then the project's,
+`.bh-02/kernel.py`, the model's own. A name starting `$XDG_CONFIG_HOME/` is in the person's
+config directory (that variable's value, else `~/.config`, as for the context file), one
+starting `~/` in their home, any other from `root`; a single string is one file. Confined, the
+kernel runs each that is there as an input of its own and says which names it defined (or bound
+afresh, as the project's may a helper of the person's), or its traceback; one failing doesn't
+stop the next, and one that isn't there is passed over. Unconfined, they would run unasked with
+the person's permissions, so the model is told to run them as an input of its own, which the
+loop then puts to the person. Where each is read is the point:
+- The project's is read by the worker, in the jail, which decides what it may open: the model
+  can write it, and a link there to a file the jail hides would otherwise hand that file over.
+- The person's is outside the project, and a Linux jail reads by allowlist, with no home
+  directory in it, so the worker can't see it: the host expands its name, reads it and sends
+  its source in the input (registered with `linecache`, so a traceback shows its lines). It
+  runs in the model's REPL, so whatever it holds the model can read.
+- But only when reading it goes nowhere in the project (`_walked`, as the models plugin walks
+  the models file: each directory and link on the way, as named and as resolved). A person's
+  file in the project (bh-02 run from the home directory) or whose way passes through it (a
+  config directory linked into a dotfiles repository being worked on) is read as the project's
+  is: the model could have written it, or chosen where it leads, so the worker reads it, at its
+  resolved place when that is in the project.
+
+Each file runs once, at its first place in the list. Whose a file is goes by how it is named, not
+by where it is read: one named from the root is the project's, one named from the person's config
+directory, their home or `/` is theirs. `instructions_for` tells the model that only the
+project's startup file is its to edit, and names the person's, which comes before it, as theirs.
+
 Every failure it knows of comes back as the input's text, never as an exception out of `run`: a
 worker that died, an answer it can't read (the worker is replaced), a worker the jail won't
 start again (the next input tries again).

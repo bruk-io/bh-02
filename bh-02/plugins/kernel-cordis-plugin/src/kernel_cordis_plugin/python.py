@@ -112,17 +112,18 @@ _USE = (
 )
 
 
-def instructions_for(confined: bool, startup: str = ".bh-02/kernel.py", reads: Sequence[str] = ()) -> str:
+def instructions_for(
+    confined: bool,
+    startup: Sequence[str] = (".bh-02/kernel.py",),
+    reads: Sequence[str] = (),
+    *,
+    theirs: Sequence[str] = (),
+) -> str:
     """What the model is told about acting in code: the one tool, its REPL and how long that
-    lasts, the project's startup file (`startup`), how to use it, and where its code runs.
-    `reads`, the trees the jail lets code read when it reads by allowlist (a Linux jail), is said
-    plainly, so the model spends no steps on reads that can't succeed."""
-    keep = f"Helpers worth having in every session go in {startup}, which you can write and grow: " + (
-        "a new REPL runs it before your first input and says what it defined."
-        if confined
-        else "when it is there, a new REPL says so, and you run it as an input of your own (here "
-        "every input is put to the person, so it does not run unasked)."
-    )
+    lasts, the startup files (`startup`, the project's, which are the model's to write; `theirs`,
+    the person's own, which run before them and are not), how to use it, and where its code
+    runs. `reads`, the trees the jail lets code read when it reads by allowlist (a Linux jail), is
+    said plainly, so the model spends no steps on reads that can't succeed."""
     where = (
         "Your code runs in a jail: it can write only inside the project directory, cannot reach "
         "the network, and cannot read credentials. Inside the project it also cannot write what "
@@ -140,7 +141,36 @@ def instructions_for(confined: bool, startup: str = ".bh-02/kernel.py", reads: S
             "look for files outside these. git commits carry the person's name and email when git "
             "on their machine knows them."
         )
-    return "\n".join([f"{_REPL} {keep}", "", *_USE, "", where])
+    keep = _keep(confined, (startup,) if isinstance(startup, str) else startup, theirs)
+    return "\n".join([f"{_REPL} {keep}".rstrip(), "", *_USE, "", where])
+
+
+def _keep(confined: bool, startup: Sequence[str], theirs: Sequence[str]) -> str:
+    """What the model is told of the startup files: the project's (`startup`) are its own to
+    write and grow; the person's (`theirs`), which come first, are theirs and not its to edit."""
+    runs = (
+        "a new REPL runs it before your first input and says what it defined."
+        if confined
+        else "when it is there, a new REPL says so, and you run it as an input of your own (here "
+        "every input is put to the person, so it does not run unasked)."
+    )
+    said = []
+    if startup:
+        said.append(
+            f"Helpers worth having in every session go in {' and '.join(startup)}, the project's "
+            f"startup file, which you can write and grow: {runs}"
+        )
+    if theirs and startup:
+        said.append(
+            "Only the project's startup file is yours to edit: the person may keep helpers of "
+            f"their own in {' and '.join(theirs)}, which comes before it, and that file is theirs."
+        )
+    elif theirs:
+        said.append(
+            f"The person may keep helpers of their own in {' and '.join(theirs)}: {runs} That file "
+            "is theirs, not yours to edit."
+        )
+    return " ".join(said)
 
 
 # The shell commands an input may run for work Python does itself, by kind of work, and how

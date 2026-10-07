@@ -5,7 +5,7 @@ An input is one request and one answer: the worker runs the code and says it is 
 the person is asked first is the `approval` row's to answer and the loop's to ask, so the kernel
 depends on its jail alone and a new ui keeps the namespace. Its own `confined` (the same rule,
 `approval.is_confined`, over the same jail) decides only what the model is told and whether the
-startup file runs unasked. Every failure the kernel knows of (a
+startup files run unasked. Every failure the kernel knows of (a
 worker that died, an answer too long or garbled to read, a worker that won't start again)
 comes back as the input's text, never as an exception. Interrupting an input (cancelling `run`) sends SIGINT
 through the jail, which the worker turns into `KeyboardInterrupt` in the input, and waits for the
@@ -13,6 +13,16 @@ input to say it ended: the namespace survives. A worker that dies is started aga
 input, and that input is told its earlier variables are gone, and why, when the jail ended it.
 After each input, `touched()` is the project's files it opened, read or written (the worker's
 audit hook): what a `memory` function is given to say what applies to them.
+
+A new kernel runs its startup files before its first input (`KernelConfig.startup`), when its
+inputs are confined: the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
+`~/.config/bh-02/kernel.py`), then the project's (`.bh-02/kernel.py`). The project's is read by
+the worker, in the jail, which decides: the model can write it, and a link there could lead to a
+file the jail hides. The person's is outside the project, where a Linux jail (which reads by
+allowlist, the home directory absent) can't see it, so the host reads it and sends its source;
+but only when reading it goes nowhere in the project (`_walked`: no directory or link on the way
+is there). One in the project, or whose way passes through it, the worker reads, as it does the
+project's; it is still the person's, not the model's to edit, which is what the model is told.
 """
 
 import asyncio
@@ -38,6 +48,8 @@ _WORKER = Path(__file__).with_name("worker.py")
 # each, and JSON escapes a character to at most 12 bytes (a surrogate pair, `\ud83d\ude00`),
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
 _LINE_LIMIT = 1 << 20
+_CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a startup file in the person's config directory
+_MOST_LINKS = 40  # links one walk follows at most (Linux's own limit), so a loop of links ends
 
 
 @runtime_checkable
@@ -65,13 +77,41 @@ class Jail(Protocol):
 @dataclass(frozen=True, slots=True)
 class KernelConfig:
     """`root` is the working directory inputs run in; `grace` how long an interrupted input gets
-    to say it ended before the worker is stopped and started again; `startup` the project's own
-    file (relative to `root`) a new kernel runs before its first input, when its inputs are
-    confined: the model's helpers, kept across sessions."""
+    to say it ended before the worker is stopped and started again; `startup` the files a new
+    kernel runs, in order, before its first input, when its inputs are confined: helpers kept
+    across sessions. The person's own first (`$XDG_CONFIG_HOME/` is their config directory: that
+    variable's value, else `~/.config`, as for the context file; `~/` is their home), then the
+    project's (a relative name is from `root`), the one the model may write. A single string is
+    one file."""
 
     root: str = "."
     grace: float = 5.0
-    startup: str = ".bh-02/kernel.py"
+    startup: Sequence[str] = ("$XDG_CONFIG_HOME/bh-02/kernel.py", ".bh-02/kernel.py")
+
+
+@dataclass(frozen=True, slots=True)
+class _Startup:
+    """A startup file as configured: `name`, how the model is told of it (the project's as
+    configured, from the root; the person's by its absolute path), `path`, where it is, and
+    whether it is the project's (named from the root), the model's to edit, rather than the
+    person's (named from their config directory, their home or `/`). Whose it is is not where
+    it is read: a person's file in the project is read in the jail all the same (`_ready`)."""
+
+    name: str
+    path: Path
+    project: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _Ready:
+    """A startup file that is there: `name` as the model is told of it, `path` what the code
+    that runs it opens, and `source`, its text when the host read it (None: the worker reads
+    `path`, in the jail), or `problem`, why the host could not."""
+
+    name: str
+    path: str
+    source: str | None = None
+    problem: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,19 +131,86 @@ class _Output:
         return "\n".join(parts) or "(no output)"
 
 
-def _startup_input(path: str) -> str:
-    """The input that runs the startup file at `path` in the namespace and prints, last, the
-    public names it defined."""
-    return "\n".join(
+def _startup_input(path: str, source: str | None = None) -> str:
+    """The input that runs a startup file in the namespace and prints, last, the public names it
+    defined or bound afresh ("nothing" for none). `source` is its text when the host read it
+    (the person's own, which a jail that reads by allowlist can't see), registered with
+    `linecache` under `path` so a traceback shows its lines; without it the worker reads `path`
+    itself, in the jail. The input's own names are gone after it, however it ends."""
+    read = (
         [
-            "import pathlib as _bh_path",
-            "_bh_before = set(globals())",
-            f"_bh_source = _bh_path.Path({path!r}).read_text(encoding='utf-8')",
-            f"exec(compile(_bh_source, {path!r}, 'exec'), globals())",
-            "print(', '.join(sorted(n for n in set(globals()) - _bh_before if not n.startswith('_'))))",
-            "del _bh_path, _bh_before, _bh_source",
+            f"    _bh_source = {source!r}",
+            "    import linecache as _bh_lines",
+            f"    _bh_lines.cache[{path!r}] = (len(_bh_source), None, _bh_source.splitlines(True), {path!r})",
+        ]
+        if source is not None
+        else [
+            "    import pathlib as _bh_path",
+            f"    _bh_source = _bh_path.Path({path!r}).read_text(encoding='utf-8')",
         ]
     )
+    return "\n".join(
+        [
+            "_bh_before = dict(globals())",
+            "try:",
+            *read,
+            f"    exec(compile(_bh_source, {path!r}, 'exec'), globals())",
+            "    print(', '.join(sorted(n for n, v in globals().items() if not n.startswith('_')"
+            " and (n not in _bh_before or _bh_before[n] is not v))) or 'nothing')",
+            "finally:",
+            "    for _bh_name in ('_bh_before', '_bh_source', '_bh_path', '_bh_lines', '_bh_name'):",
+            "        globals().pop(_bh_name, None)",
+        ]
+    )
+
+
+def _located(name: str, root: Path, home: Path, environ: Mapping[str, str]) -> Path:
+    """Where the startup file `name` is: one starting `$XDG_CONFIG_HOME/` in the person's config
+    directory (that variable's value, else `home`'s `.config`, as the context file is), one
+    starting `~/` in `home`, and any other from the project's `root` (an absolute one is itself)."""
+    if name.startswith(_CONFIG_HOME):
+        config = Path(environ.get("XDG_CONFIG_HOME") or home / ".config")
+        return root / config / name.removeprefix(_CONFIG_HOME)
+    return home / name[2:] if name == "~" or name.startswith("~/") else root / name
+
+
+def _placed(names: Sequence[str], root: Path, home: Path, environ: Mapping[str, str]) -> tuple[_Startup, ...]:
+    """The startup files `names` (`KernelConfig.startup`; a string is one) name, in order, each
+    where it is (from the absolute `root`) and whether it is the project's: named from the root,
+    not from the person's config directory, their home or `/`."""
+    listed = (names,) if isinstance(names, str) else tuple(names)
+    placed = []
+    for name in listed:
+        path = Path(os.path.normpath(_located(name, root, home, environ)))
+        project = not (name.startswith(("/", "~/", _CONFIG_HOME)) or name == "~")
+        placed.append(_Startup(name if project else str(path), path, project))
+    return tuple(placed)
+
+
+def _walked(path: Path) -> list[Path]:
+    """Every place reading the absolute `path` goes through, from the top: each directory and
+    link on the way (a link where it sits, then what it points to, followed), then where it
+    ends. The models plugin's `in_project` walks the models file so: a link the model could
+    repoint, or a directory it could swap for one, would choose what the host reads."""
+    at, pending, links, out = Path(path.anchor), list(path.parts[1:]), 0, list[Path]()
+    while pending:
+        part = pending.pop(0)
+        if part == "..":  # after the links before it are followed, as the kernel does
+            at = at.parent
+            continue
+        step = at / part
+        out.append(step)
+        try:
+            target = Path(os.readlink(step)) if links < _MOST_LINKS and step.is_symlink() else None
+        except OSError:  # gone since, or can't be read: reading the file will say what is wrong
+            target = None
+        if target is None:
+            at = step
+            continue
+        links += 1
+        at = Path(target.anchor) if target.is_absolute() else at
+        pending[:0] = target.parts[1:] if target.is_absolute() else target.parts
+    return [*out, at]
 
 
 def worker_argv(endpoint: str) -> list[str]:
@@ -160,8 +267,15 @@ class Kernel:
         return PYTHON
 
     def instructions(self) -> str:
-        """What the model is told about the tool and where its code runs, read per request."""
-        return instructions_for(self.confined, self._config.startup, self.reads())
+        """What the model is told about the tool and where its code runs, read per request: the
+        project's startup files are the model's to edit, the person's are theirs."""
+        placed = _placed(self._config.startup, Path(self._config.root).resolve(), Path.home(), os.environ)
+        return instructions_for(
+            self.confined,
+            tuple(s.name for s in placed if s.project),
+            self.reads(),
+            theirs=tuple(s.name for s in placed if not s.project),
+        )
 
     async def __aenter__(self) -> Kernel:
         await self._start()
@@ -245,28 +359,83 @@ class Kernel:
 
     async def _opening(self) -> str:
         """What a new kernel's first input is told before its own output, when there is anything
-        to tell: that the worker was started again, and what the startup file did. Jailed, the
-        file runs here; unjailed, it would run unasked with the person's permissions, so the
-        model is told to run it as an input of its own."""
+        to tell: that the worker was started again, and what the startup files did. Jailed, each
+        runs here, in order, whether or not the one before failed; unjailed, they would run
+        unasked with the person's permissions, so the model is told to run them as an input of
+        its own."""
         why, self._why = (f", because {self._why}" if self._why else ""), ""
         notes = (
             [f"the REPL was started again{why}; what earlier inputs defined is gone"]
             if self._restarted
             else []
         )
-        startup = self._config.startup
-        if (Path(self._config.root) / startup).is_file():
-            if not self.confined:
+        confined = self.confined
+        try:
+            ready = await asyncio.to_thread(self._ready, confined)
+        except Exception as error:  # the input still runs, and says why its helpers are missing
+            ready = []
+            notes.append(f"the startup files could not be looked at ({error}), so none ran")
+        if ready and not confined:
+            one = len(ready) == 1
+            runs = "; ".join(f"exec(open({r.path!r}).read())" for r in ready)
+            notes.append(
+                f"{' and '.join(r.name for r in ready)} {'was' if one else 'were'} not run: inputs here "
+                f"are put to the person, so run {'it' if one else 'them'} as an input of your own if you "
+                f"want {'it' if one else 'them'}: {runs}"
+            )
+        for index, startup in enumerate(ready if confined else ()):
+            if startup.problem:
                 notes.append(
-                    f"{startup} was not run: inputs here are put to the person, so run it as an input "
-                    f"of your own if you want it: exec(open({startup!r}).read())"
+                    f"{startup.name} could not be read ({startup.problem}), so what it defines is missing"
                 )
-            elif (ran := await self._exchange(_startup_input(startup))).error:
-                notes.append(f"{startup} ran first and failed, so what it defines is missing:\n{ran.error}")
+                continue
+            ran = await self._exchange(_startup_input(startup.path, startup.source))
+            when = "first" if index == 0 else "next"
+            if ran.error:
+                notes.append(
+                    f"{startup.name} ran {when} and failed, so what it defines is missing:\n{ran.error}"
+                )
             else:
                 lines = ran.output.strip().splitlines()
-                notes.append(f"{startup} ran first and defined: {lines[-1] if lines else 'nothing'}")
+                notes.append(f"{startup.name} ran {when} and defined: {lines[-1] if lines else 'nothing'}")
         return f"({'. '.join(notes)})\n" if notes else ""
+
+    def _ready(self, read: bool) -> list[_Ready]:
+        """The startup files that are there, in order, each once (at its first place), and how
+        each is run (in a worker thread: it looks at the filesystem). The project's is the
+        worker's to read, in the jail. The person's, when reading it goes nowhere in the project,
+        the host reads (when `read`: inputs are confined, so it is about to run); one in the
+        project, or whose way passes through it, is read by the worker as the project's is."""
+        given = Path(os.path.normpath(Path(self._config.root).absolute()))
+        root = given.resolve()
+        ready: list[_Ready] = []
+        seen: set[Path] = set()
+        for startup in _placed(self._config.startup, root, Path.home(), os.environ):
+            real = startup.path.resolve()
+            if not startup.path.is_file() or real in seen:
+                continue
+            seen.add(real)
+            if startup.project:  # the worker reads it by its name, from the root it starts in
+                ready.append(_Ready(startup.name, startup.name))
+            elif any(
+                p.is_relative_to(r) for p in (startup.path, *_walked(startup.path)) for r in (given, root)
+            ):
+                # in the project, or reached through it (bh-02 run from the home directory, a
+                # config directory linked into the project): the model could have written it, or
+                # chosen where it leads, so the worker reads it, where the jail can see it if anywhere
+                ready.append(_Ready(startup.name, str(real if real.is_relative_to(root) else startup.path)))
+            elif not read:
+                ready.append(_Ready(startup.name, str(startup.path)))
+            else:
+                try:
+                    source = startup.path.read_text(encoding="utf-8")
+                except FileNotFoundError:  # gone since it was looked at
+                    continue
+                except (OSError, UnicodeDecodeError) as error:
+                    ready.append(_Ready(startup.name, str(startup.path), problem=str(error)))
+                    continue
+                ready.append(_Ready(startup.name, str(startup.path), source))
+        return ready
 
     def _ended(self) -> str:
         """Why the jail ended the worker itself, or ""."""

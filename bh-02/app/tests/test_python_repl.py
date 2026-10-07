@@ -461,6 +461,30 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
     assert token_file(None, [str(credential)]) == credential
 
 
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Linux jail reads by allowlist: the person's config directory is not in it. The host
+    reads the person's startup file and sends its source, so its helpers are there all the same;
+    the project's is read inside the jail, which can see the project."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "kernel.py"  # conftest: outside the project
+    person.parent.mkdir(parents=True)
+    person.write_text("def show(x):\n    return f'<{x}>'\n")
+    project = tmp_path / "project"
+    (project / ".bh-02").mkdir(parents=True)
+    (project / ".bh-02" / "kernel.py").write_text("TOOLS = 2\n")
+    async with Kernel(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+        out = await kernel.run(f"import os\nprint(os.path.exists({str(person)!r}))\nshow(TOOLS)")
+    assert out.startswith(
+        f"({person} ran first and defined: show. .bh-02/kernel.py ran next and defined: TOOLS)\n"
+    ), out
+    assert out.endswith("\nFalse\n'<2>'"), out  # the jail can't see the person's file; its helper runs
+
+
 def _append_to(path: Path, mode: str = "a", text: str = "# planted by an input\n") -> str:
     """An input that tries to write `path`, and says whether it could."""
     return (

@@ -51,6 +51,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **kernel** (row and key), **the REPL**: a Python process, started inside the jail, that keeps what each input defines for the rest of the run; the model is told of it as a Python REPL of its own that persists.
 - **worker**: the kernel's process, the one that runs inputs; the `jail` row starts it, and a new jail starts a new worker.
 - **input** (to the REPL): one piece of code the model sent the kernel, one `python` call, and its output (not the `input` key, below).
+- **startup file**: Python a new kernel runs before the first input, when it is confined: yours (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else `~/.config/bh-02/kernel.py`), for helpers in every project, then the project's `.bh-02/kernel.py`, the only one the model is told it may edit; unconfined, the model is told to run them as inputs, which you are asked about.
 - **jail** (row and key): what the kernel runs in: `brig:jail` confines it (no writes outside the project, no network, no credentials); `kernel:unjailed` (`--no-jail`) does not.
 - **confined**: the jail enforces writes and network, so an input (or an extension's load) runs without asking; unconfined, each is put to you first.
 - **grades**: how well each part of the jail holds (`enforced`, `best_effort`, `cooperative`, `unenforced`), shown in the status bar as ✓ and ✗.
