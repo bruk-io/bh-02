@@ -355,8 +355,8 @@ async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_h
 
     started = await jailed()
     try:
-        assert one.report()["fs_read"] == "best_effort"
-        assert f"{secret}, {absent}" in one.notice()
+        assert started.report()["fs_read"] == "best_effort"
+        assert f"{secret}, {absent}" in started.notice()
         await asyncio.sleep(0.5)
         assert not seen.exists() and absent.is_dir() and started.ended() == ""  # held
         group = _recorded_group(tmp_path)
@@ -551,6 +551,49 @@ open(sys.argv[2], "w").write("MINE=1\\n")
 open(sys.argv[3], "w").write("done")
 time.sleep(60)
 """
+
+
+# Listens, and waits.
+_LISTEN = """
+import socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+time.sleep(60)
+"""
+
+
+@pytest.mark.usefixtures("_plain_launch")
+async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp_path: Path) -> None:
+    """The `jail` row starts two programs, the kernel's worker and the extensions' worker, each
+    from a command of its own. What a start is (the trees its program reads, which name the
+    program's own directory; the roots it writes; its notice and grades) is that start's: the
+    second start replaces none of the first's, so the kernel never tells the model the
+    extensions' worker's trees. The jail's own grades are what was known before either."""
+    project = tmp_path / "project"
+    project.mkdir()
+    credential = project / "local.env"  # where bh-02 looks for its credential, absent: held
+    for name in ("kernel", "extensions"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "worker.py").write_text(_LISTEN)
+    one = BrigJail(BrigConfig(), Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    before = dict(one.report())
+    started = []
+    try:
+        for name in ("kernel", "extensions"):
+            endpoint = _endpoint()
+            argv = [sys.executable, "-I", str(tmp_path / name / "worker.py"), endpoint]
+            started.append(await one.start(argv, cwd=str(project), endpoint=endpoint))
+        kernel, extensions = started
+        assert str(tmp_path / "kernel") in kernel.reads(), kernel.reads()
+        assert str(tmp_path / "extensions") not in kernel.reads()  # the second start's, not the first's
+        assert str(tmp_path / "extensions") in extensions.reads()
+        assert kernel.writes() == extensions.writes() == (str(project.resolve()),)
+        assert str(credential) in kernel.notice() and kernel.report()["fs_read"] == "best_effort"
+        assert one.report() == before
+    finally:
+        for each in started:
+            await each.stop()
 
 
 @pytest.mark.usefixtures("_plain_launch")

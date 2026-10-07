@@ -611,12 +611,60 @@ async def test_formatting_a_failed_input_s_traceback_is_not_heard(tmp_path: Path
         assert k.touched() == ()
 
 
-class Confined(Unjailed):
-    """The unjailed process, reported as confined: what a jail looks like to the kernel, without
-    needing one on this platform."""
+_CONFINED: Mapping[str, str] = {**UNENFORCED, "fs_write": "enforced", "network": "enforced"}
+
+
+class Told:
+    """A program an unjailed process stands in for, with what its jail says this start is
+    (CONTRACTS.md: jail): its grades, its notice, the trees it reads and the roots it writes."""
+
+    def __init__(
+        self,
+        started: Any,
+        *,
+        report: Mapping[str, str] = UNENFORCED,
+        notice: str = "",
+        reads: Sequence[str] = (),
+        writes: Sequence[str] = (),
+    ) -> None:
+        self._started = started
+        self._report, self._notice, self._reads, self._writes = report, notice, tuple(reads), tuple(writes)
+
+    def interrupt(self) -> bool:
+        return bool(self._started.interrupt())
+
+    def ended(self) -> str:
+        return str(self._started.ended())
+
+    async def stop(self) -> None:
+        await self._started.stop()
 
     def report(self) -> Mapping[str, str]:
-        return {**UNENFORCED, "fs_write": "enforced", "network": "enforced"}
+        return self._report
+
+    def notice(self) -> str:
+        return self._notice
+
+    def reads(self) -> tuple[str, ...]:
+        return self._reads
+
+    def writes(self) -> tuple[str, ...]:
+        return self._writes
+
+
+class Confined(Unjailed):
+    """The unjailed process, reported as confined: what a jail looks like to the kernel, without
+    needing one on this platform. `writable`: the roots besides the project an input may write
+    (brig's `write`), which each start says."""
+
+    writable: tuple[str, ...] = ()
+
+    def report(self) -> Mapping[str, str]:
+        return _CONFINED
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Any:
+        started = await super().start(argv, cwd=cwd, endpoint=endpoint)
+        return Told(started, report=_CONFINED, writes=self.writable)
 
 
 # The worker, run under an audit hook that refuses to open anything under a directory (the
@@ -692,10 +740,7 @@ class Writing(Hiding):
 
     def __init__(self, hidden: str, roots: Sequence[str]) -> None:
         super().__init__(hidden)
-        self._roots = tuple(roots)
-
-    def writes(self) -> tuple[str, ...]:
-        return self._roots
+        self.writable = tuple(roots)
 
 
 async def test_the_namespace_persists_and_the_last_expression_is_shown() -> None:
@@ -993,6 +1038,49 @@ async def test_release_while_an_input_runs_leaves_it_alone_and_says_so() -> None
         said = await k.release()
         assert "An input is running" in said and jail.released == 0
         assert await running == "'done'"
+
+
+class Counting(Confined):
+    """A jail whose every start is what it is anew, as a Linux jail's is (its reads name the
+    program's own directory): the n-th program it starts reads `/start/n`, may write `/root/n`,
+    and has a notice and an `fs_read` grade of its own."""
+
+    def __init__(self) -> None:
+        self.starts = 0
+
+    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Any:
+        self.starts += 1
+        n = self.starts
+        started = await Unjailed.start(self, argv, cwd=cwd, endpoint=endpoint)
+        report = {**_CONFINED, "fs_read": f"grade {n}"}
+        return Told(
+            started, report=report, notice=f"notice {n}", reads=(f"/start/{n}",), writes=(f"/root/{n}",)
+        )
+
+
+async def test_the_kernel_tells_its_own_worker_s_jail_whatever_else_the_jail_starts() -> None:
+    """One jail starts more than one program (the extensions' worker is another): what each
+    start is stays with it, and the kernel's `reads()`, `notice()` and `report()`, and so what
+    the model is told, are its own worker's. Another program starting changes none of them, nor
+    does the worker stopping for `/release`, until the next input starts a new one."""
+    jail = Counting()
+    async with Kernel(jail, KernelConfig()) as k:
+        told = k.instructions()
+        assert "/start/1" in told
+        assert (k.reads(), k.notice(), k.report()["fs_read"]) == (("/start/1",), "notice 1", "grade 1")
+        short = tempfile.mkdtemp(prefix="bh-t-", dir="/tmp")  # a socket path must fit in ~100 bytes
+        endpoint = f"{short}/x.sock"
+        other = await jail.start(worker_argv(endpoint), cwd=short, endpoint=endpoint)  # another program
+        try:
+            assert (k.reads(), k.notice(), k.report()["fs_read"]) == (("/start/1",), "notice 1", "grade 1")
+            assert k.instructions() == told
+        finally:
+            await other.stop()
+            shutil.rmtree(short, ignore_errors=True)
+        await k.release()
+        assert k.instructions() == told  # stopped, its worker is still what the model was told
+        await k.run("1")  # the next input starts a new worker, in a start of its own
+        assert (k.reads(), k.notice()) == (("/start/3",), "notice 3")
 
 
 async def test_an_unjailed_kernel_holds_nothing_to_release() -> None:

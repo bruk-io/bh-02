@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +20,7 @@ from bh_02.bootstrap import config_directories, credential_files, layers, run, u
 from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group
 from cordis import Row
 from cordis.loader import boot
-from kernel_cordis_plugin import Kernel, KernelConfig
+from kernel_cordis_plugin import Kernel, KernelConfig, worker_argv
 from models_cordis_plugin.local_env import token_file
 
 # darwin's jail (seatbelt) reads by denylist: everything but the secrets. Linux's (bubblewrap)
@@ -461,6 +462,52 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
         assert str(credential) in kernel.notice()
     assert credential.read_text() == "CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n"
     assert token_file(None, [str(credential)]) == credential
+
+
+# A program that listens and waits, standing in for the extensions' worker: the `jail` row's
+# second program, run from a directory of its own.
+_LISTENS = """
+import socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+time.sleep(60)
+"""
+
+
+async def test_on_linux_the_kernel_tells_the_model_its_own_worker_s_trees_when_another_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `jail` row starts the kernel's worker and the extensions' worker, and a Linux jail
+    reads the directory of the program it runs. What the kernel tells the model is its own
+    worker's jail: another program starting on the same jail, from another directory, leaves
+    `kernel.instructions()` as it was, so the loop tells the model no change and names no tree
+    its inputs can't read."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project, elsewhere = tmp_path / "project", tmp_path / "elsewhere"
+    project.mkdir()
+    elsewhere.mkdir()
+    (elsewhere / "worker.py").write_text(_LISTENS)
+    jail = BrigJail(BrigConfig(), _Layers())
+    sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
+    endpoint = str(sockets / "x.sock")
+    try:
+        async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+            told = kernel.instructions()
+            own = str(Path(worker_argv(endpoint)[2]).parent)  # the kernel's worker's directory
+            assert own in kernel.reads() and own in told, kernel.reads()
+            argv = [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint]
+            other = await jail.start(argv, cwd=str(project), endpoint=endpoint)
+            try:
+                assert str(elsewhere) not in kernel.reads(), kernel.reads()
+                assert kernel.instructions() == told
+                assert str(elsewhere) in other.reads()  # the other program's own
+            finally:
+                await other.stop()
+    finally:
+        shutil.rmtree(sockets, ignore_errors=True)
 
 
 @pytest.mark.usefixtures("_needs_a_jail")

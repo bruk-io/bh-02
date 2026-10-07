@@ -51,6 +51,22 @@ class _Process:
         """Nothing ends the worker of its own accord here."""
         return ""
 
+    def report(self) -> Mapping[str, str]:
+        return UNENFORCED
+
+    def notice(self) -> str:
+        """Nothing: the status bar says it is unjailed, and every input asks."""
+        return ""
+
+    def reads(self) -> tuple[str, ...]:
+        """No allowlist: an input reads what the person can."""
+        return ()
+
+    def writes(self) -> tuple[str, ...]:
+        """None named: it confines no writes, so an input writes what the person can (and is put
+        to them first; nothing runs unasked here, a startup file included)."""
+        return ()
+
     async def stopped(self) -> None:
         """Return once the process has ended, however it ended."""
         await self._process.wait()
@@ -73,19 +89,6 @@ class Unjailed:
 
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
-
-    def notice(self) -> str:
-        """Nothing: the status bar says it is unjailed, and every input asks."""
-        return ""
-
-    def reads(self) -> tuple[str, ...]:
-        """No allowlist: an input reads what the person can."""
-        return ()
-
-    def writes(self) -> tuple[str, ...]:
-        """None named: it confines no writes, so an input writes what the person can (and is put
-        to them first; nothing runs unasked here, a startup file included)."""
-        return ()
 
     async def release(self) -> str:
         """Nothing: no jail holds anything on the host."""

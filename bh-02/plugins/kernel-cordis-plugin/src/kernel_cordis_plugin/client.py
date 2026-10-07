@@ -21,10 +21,10 @@ the worker, in the jail, which decides: the model can write it, and a link there
 file the jail hides. The person's is outside the project, where a Linux jail (which reads by
 allowlist, the home directory absent) can't see it, so the host reads it and sends its source;
 but only when reading it goes nowhere an input may write (`_walked`: no directory or link on the
-way is in the project, or in another root the jail lets an input write, `jail.writes()`). One
-that is there, or whose way passes through there, the worker reads, as it does the project's,
-and if that fails the note says why the host did not; it is still the person's, not the model's
-to edit, which is what the model is told. (The jail also keeps an input from writing in the
+way is in the project, or in another root the worker's jail lets an input write, its
+`writes()`). One that is there, or whose way passes through there, the worker reads, as it does
+the project's, and if that fails the note says why the host did not; it is still the person's,
+not the model's to edit, which is what the model is told. (The jail also keeps an input from writing in the
 person's config directory, so a session run from the home directory can't choose what a later
 one reads there: brig's `trusted`.) A startup file that ends the worker is passed over by the
 workers after it, until `/restart kernel`, and the input it cut short says which it was, after
@@ -62,11 +62,16 @@ _MOST_LINKS = 40  # links one walk follows at most (Linux's own limit), so a loo
 class Jailed(Protocol):
     """A program a jail started: it can be interrupted and stopped, and says why, when the jail
     ended it itself (`ended`: a Linux `brig:jail` whose hold on a path the host undid; "" when
-    it did not)."""
+    it did not), and what its start is (`report`, `notice`, `reads`, `writes`: this program's
+    jail's, whatever else the jail starts)."""
 
     def interrupt(self) -> bool: ...
     def ended(self) -> str: ...
     async def stop(self) -> None: ...
+    def report(self) -> Mapping[str, str]: ...
+    def notice(self) -> str: ...
+    def reads(self) -> tuple[str, ...]: ...
+    def writes(self) -> tuple[str, ...]: ...
 
 
 @runtime_checkable
@@ -75,9 +80,6 @@ class Jail(Protocol):
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
-    def notice(self) -> str: ...
-    def reads(self) -> tuple[str, ...]: ...
-    def writes(self) -> tuple[str, ...]: ...
     async def release(self) -> str: ...
 
 
@@ -279,6 +281,10 @@ class Kernel:
         self._lock = asyncio.Lock()
         self._dir: str | None = None
         self._process: Jailed | None = None
+        # the last worker this kernel started, kept once it has stopped: what its jail is (`reads`,
+        # `notice`, `report`, `writes`) is this kernel's, never another program's of the same jail,
+        # and stays what the model was told until a new worker starts
+        self._worker: Jailed | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._restarted = False  # a worker started again, not the row's first
@@ -294,16 +300,17 @@ class Kernel:
         return is_confined(self._jail.report())
 
     def report(self) -> Mapping[str, str]:
-        return self._jail.report()
+        """The grades of the jail the worker runs in (before any worker, the jail's own)."""
+        return self._worker.report() if self._worker is not None else self._jail.report()
 
     def notice(self) -> str:
         """What the person should know about the jail the worker runs in ("" when nothing)."""
-        return self._jail.notice()
+        return self._worker.notice() if self._worker is not None else ""
 
     def reads(self) -> tuple[str, ...]:
-        """The trees an input can read, when a jail reads by allowlist; empty when it reads
-        everything but what it hides (or is no jail at all)."""
-        return self._jail.reads()
+        """The trees an input can read, when the worker's jail reads by allowlist; empty when it
+        reads everything but what it hides (or is no jail at all)."""
+        return self._worker.reads() if self._worker is not None else ()
 
     @property
     def spec(self) -> Mapping[str, Any]:
@@ -485,11 +492,12 @@ class Kernel:
         each is run (in a worker thread: it looks at the filesystem). The project's is the
         worker's to read, in the jail. The person's, when reading it goes nowhere an input may
         write, the host reads (when `read`: inputs are confined, so it is about to run); one in
-        the project or another root the jail lets an input write (`jail.writes()`), or whose way
-        passes through one, is read by the worker as the project's is."""
+        the project or another root the worker's jail lets an input write (its `writes()`), or
+        whose way passes through one, is read by the worker as the project's is."""
         given = Path(os.path.normpath(Path(self._config.root).absolute()))
         root = given.resolve()
-        writable = (given, root, *(Path(w) for w in self._jail.writes()))
+        writes = self._worker.writes() if self._worker is not None else ()
+        writable = (given, root, *(Path(w) for w in writes))
         ready: list[_Ready] = []
         seen: set[Path] = set()
         for startup in _placed(self._config.startup, root, Path.home(), os.environ):
@@ -576,7 +584,9 @@ class Kernel:
         self._dir = tempfile.mkdtemp(prefix="bh-k-", dir="/tmp")
         endpoint = str(Path(self._dir) / "k.sock")
         root = str(Path(self._config.root).resolve())
-        self._process = await self._jail.start(worker_argv(endpoint), cwd=root, endpoint=endpoint)
+        self._process = self._worker = await self._jail.start(
+            worker_argv(endpoint), cwd=root, endpoint=endpoint
+        )
         self._reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)
         self._send({"op": "hello"})
         self._fresh, self._pending = True, ""  # a new worker runs its startup files afresh

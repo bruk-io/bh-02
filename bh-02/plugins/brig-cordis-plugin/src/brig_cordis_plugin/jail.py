@@ -486,9 +486,26 @@ def remove_placeholders(made: Sequence[tuple[str, str | None]]) -> None:
                 os.rmdir(path)
 
 
+@dataclass(frozen=True, slots=True)
+class _Facts:
+    """What one start of the jail is, kept with that start for whoever started it (CONTRACTS.md:
+    jail): its grades (`graded`), what the person should know about it (`notice_for`), the trees
+    its program reads when that is all it reads (`told_reads`: a Linux jail's; empty on darwin)
+    and the roots it may write but its scratch. A jail starts more than one program (the
+    kernel's worker, the extensions' worker), each from its own command: what one start is never
+    replaces what another is."""
+
+    report: Mapping[str, str]
+    notice: str = ""
+    reads: tuple[str, ...] = ()
+    writes: tuple[str, ...] = ()
+
+
 class _Jailed:
     """A program brig started: interrupt is SIGINT to its group, stop is brig's teardown, then
-    the directories the jail made on the host (`made`, deepest first) once it is gone.
+    the directories the jail made on the host (`made`, deepest first) once it is gone. `facts`
+    is what this start is (`report`, `notice`, `reads`, `writes`), read whether or not it still
+    runs.
 
     `tether` is the write end of the launch's tether (brig SPEC.md section 8): held by this
     process alone, so when bh-02 ends, however it ends (`SIGKILL` included), the kernel closes
@@ -510,6 +527,7 @@ class _Jailed:
     def __init__(
         self,
         handle: Handle,
+        facts: _Facts,
         jail_dir: str,
         made: Sequence[tuple[str, str]],
         lock: int | None,
@@ -518,6 +536,7 @@ class _Jailed:
         wire: Tripwire | None = None,
     ) -> None:
         self._handle = handle
+        self._facts = facts
         self._wire = wire
         self._tether = tether
         self._jail_dir = jail_dir
@@ -532,6 +551,27 @@ class _Jailed:
     def ended(self) -> str:
         """Why the jail ended its program itself (the host undid a mount, `tripped_for`), or ""."""
         return self._wire.tripped if self._wire is not None else ""
+
+    def report(self) -> Mapping[str, str]:
+        """This start's grades: brig's, with `fs_read` best-effort while it holds a secret with a
+        mount the host can undo (`graded`)."""
+        return self._facts.report
+
+    def notice(self) -> str:
+        """What the person should know about this start's jail (`notice_for`): on Linux, the
+        secrets it holds with a mount the host can undo; empty on darwin."""
+        return self._facts.notice
+
+    def reads(self) -> tuple[str, ...]:
+        """The trees this start's program can read, when that is all it can read (`told_reads`):
+        a Linux jail's allowlist (the system, the interpreter, the program's own directory) and
+        the roots it may write. Empty on darwin, whose jail reads everything but the secrets."""
+        return self._facts.reads
+
+    def writes(self) -> tuple[str, ...]:
+        """The directories this start's program may write, but the jail's own scratch: the
+        project and what `write` adds."""
+        return self._facts.writes
 
     def _write(self) -> None:
         """The record as it stands: the placeholders, and which bubblewrap process holds them."""
@@ -632,28 +672,25 @@ class BrigJail:
         self._platform = platform
         # The grades are known before anything starts: compile once against a throwaway directory.
         # A platform brig has no preset for grades nothing; `start` says what to use instead.
+        # What each start is (its own grades among it) is kept with that start (`_Facts`).
         self._report: Mapping[str, str] = {}
-        self._notice = ""
-        self._reads: tuple[str, ...] = ()
-        self._writes: tuple[str, ...] = ()
+        # where bh-02 looks for its credential that a jail of this one's has held: what `release`
+        # says about, whichever program's jail held it
         self._holding: tuple[str, ...] = ()
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
                 self._report = self.compile(probe, str(Path(probe, "k.sock")), ".", ())[1]
 
     def report(self) -> Mapping[str, str]:
+        """The grades, known before anything starts (what `approval` reads); no start changes
+        them. A started program's own are its `report()`."""
         return self._report
-
-    def notice(self) -> str:
-        """What the person should know about the jail the kernel runs in (`notice_for`): the
-        paths a Linux jail holds with a mount, which the host can undo. Empty on darwin."""
-        return self._notice
 
     async def release(self) -> str:
         """What the person should know once the kernel has ended its worker for `/release`, with
         no jail of this one's running: on Linux, which places bh-02 looks for its credential are
-        free now (`released_for`), after sweeping what jails that are gone left. Empty when the
-        last jail held none of them, and on darwin, where seatbelt holds a path without
+        free now (`released_for`), after sweeping what jails that are gone left. Empty when no
+        jail of this one's held any of them, and on darwin, where seatbelt holds a path without
         anything on the host."""
         if self._platform != "linux" or not self._holding:
             return ""
@@ -662,19 +699,6 @@ class BrigJail:
             [p for p in self._holding if not os.path.lexists(p)],
             [p for p in self._holding if Path(p).is_dir()],
         )
-
-    def reads(self) -> tuple[str, ...]:
-        """The trees an input can read, once the kernel has started, when that is all it can read
-        (`told_reads`): a Linux jail's allowlist (the system, the interpreter, the worker's
-        directory) and the roots it may write. Empty on darwin, whose jail reads everything but
-        the secrets."""
-        return self._reads
-
-    def writes(self) -> tuple[str, ...]:
-        """The directories an input may write, once the kernel has started, but the jail's own
-        scratch: the project and what `write` adds. The host reads nothing there that it hands to
-        the model (the kernel's person's startup file)."""
-        return self._writes
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
         stack_for(self._platform)  # refuses on a platform brig has no preset for
@@ -697,16 +721,12 @@ class BrigJail:
         watched, tether = os.pipe()
         try:
             author = git_author(*self._git_identity(cwd)) if self._platform == "linux" else ()
-            jail, self._report = self.compile(jail_dir, endpoint, cwd, argv, author)
+            jail, report = self.compile(jail_dir, endpoint, cwd, argv, author)
             absent = self._absent_secrets(jail.spec)
-            self._writes = tuple(w for w in jail.spec.fs.write_allows if not Path(w).is_relative_to(jail_dir))
-            self._notice = notice_for(
-                self._platform, held(jail.spec, absent) if self._platform == "linux" else ()
-            )
+            facts = self._facts(jail.spec, report, absent, jail_dir, endpoint)
             if self._platform == "linux":
-                trees = (*jail.spec.fs.read_allows, *jail.spec.fs.write_allows)
-                self._reads = told_reads(trees, (jail_dir, str(Path(endpoint).parent)))
-                self._holding = holding(self._layers.credentials, jail.spec.fs.write_denies)
+                held_now = holding(self._layers.credentials, jail.spec.fs.write_denies)
+                self._holding = tuple(dict.fromkeys((*self._holding, *held_now)))
             made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
             if made:
                 # Recorded before anything is made, each by the mark it will carry, then made and
@@ -757,7 +777,7 @@ class BrigJail:
             os.close(watched)
         if wire is not None:
             wire.arm(handle.pgid)
-        started = _Jailed(handle, jail_dir, placed, lock, record, tether, wire)
+        started = _Jailed(handle, facts, jail_dir, placed, lock, record, tether, wire)
         try:
             await asyncio.to_thread(handle.wait_ready, "kernel", _READY_TIMEOUT_S)
         except BaseException as error:
@@ -804,6 +824,23 @@ class BrigJail:
         report = {axis.value: grade.grade.value for axis, grade in jail.report.axes.items()}
         holds = held(spec, self._absent_secrets(spec)) if self._platform == "linux" else ()
         return jail, graded(report, holds)
+
+    def _facts(
+        self, spec: Spec, report: Mapping[str, str], absent: Collection[str], jail_dir: str, endpoint: str
+    ) -> _Facts:
+        """What a start compiled to `spec` (in `jail_dir`, listening on `endpoint`; `absent`, the
+        read denies that are not there) is, for whoever started it: its grades, its notice, the
+        trees it reads (Linux) and the roots it may write but its scratch."""
+        writes = tuple(w for w in spec.fs.write_allows if not Path(w).is_relative_to(jail_dir))
+        if self._platform != "linux":
+            return _Facts(report, writes=writes)
+        trees = (*spec.fs.read_allows, *spec.fs.write_allows)
+        return _Facts(
+            report,
+            notice_for(self._platform, held(spec, absent)),
+            told_reads(trees, (jail_dir, str(Path(endpoint).parent))),
+            writes,
+        )
 
     def _linked_dirs(self, path: str) -> list[str]:
         """Every symlinked directory on the way to `path`, following its links. bubblewrap mounts

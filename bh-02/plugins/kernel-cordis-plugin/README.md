@@ -6,7 +6,7 @@ composition names, and the model's one tool, `python(code)`, which runs an input
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its jail's), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `jail` (`writes()`: where the person's startup file is not read on the host) |
+| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its worker's jail's: the worker it last started, never another program of the same jail), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `jail` (`start`, and of the worker it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()`, for `confined`; `release()`) |
 | `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when confined, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
 | `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
@@ -127,8 +127,8 @@ model, and nothing needs keeping from it. Where each is read is the point:
   input). The model is told how to see one (`inspect.getsource(helper)`).
 - But only when reading it goes nowhere an input may write (`_walked`, as the models plugin
   walks the models file: each directory and link on the way, as named and as resolved): the
-  project, or another root the jail lets an input write (`jail.writes()`: a `write` the person
-  added to `brig:jail`). A person's file there (bh-02 run from the home directory) or whose way
+  project, or another root the worker's jail lets an input write (its `writes()`: a `write`
+  the person added to `brig:jail`). A person's file there (bh-02 run from the home directory) or whose way
   passes through one (a config directory linked into a dotfiles repository being worked on) is
   read as the project's is: the model could have written it, or chosen where it leads, so the
   worker reads it, at its resolved place when that is in such a root. If that fails (the jail

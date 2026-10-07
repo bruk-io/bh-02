@@ -28,7 +28,7 @@ gate's `brig-one-adapter`).
   itself, an absent one a placeholder, the directories above it pinned, a host change ending the
   jail). Not when the project is that directory or inside it: the deny would leave the project
   read-only, so bh-02 run in its own config lets the model write there, as in any project.
-  `writes()` names the roots an input may write, once the jail has started (the kernel reads
+  a started program's `writes()` names the roots its inputs may write (the kernel reads
   nothing on the host whose way passes through one);
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
   what `layers` names as `secrets` (bh-02's `local.env`, the sessions' state);
@@ -183,7 +183,8 @@ because bubblewrap nests it in a user namespace bh-02 has no capabilities in; me
 do on its own, and `best_effort` would mark the jail unconfined, so every input would ask. A host
 change ends the jail rather than lowering the grade; the window above is what remains. `fs_read`
 stays best-effort while a secret is held under a writable root (`held`), and the jail names
-those paths when the kernel comes up (`notice()`, which `tui:status` shows as a note). brig's
+those paths when the kernel comes up (the kernel's worker's `notice()`, which `tui:status`
+shows as a note). brig's
 SPEC.md (section 6, bwrap) says what its own grade covers. darwin's seatbelt matches paths, not
 directory entries, and has no such gap: a host `git config` there changes nothing for the jail
 (`test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing`).
@@ -222,8 +223,8 @@ Known gaps on Linux, beyond darwin's:
   config (aliases, credential helpers, includes) reaches the jail, and an input can read the two
   values from its environment, as it could from any commit. Chosen over a generated
   `HOME/.gitconfig` in the jail's scratch: no file, and a repository's own identity still wins
-  (the host resolved it). The model is told what the jail reads (`reads()`, which the kernel's
-  instructions name) and that the home directory is not there.
+  (the host resolved it). The model is told what the jail reads (the kernel's worker's
+  `reads()`, which the kernel's instructions name) and that the home directory is not there.
 
 Known gap on darwin, beyond Linux's: seatbelt has no process namespace, so the jail's processes
 are known by their process group alone. A program an input starts in a session of its own

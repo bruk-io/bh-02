@@ -199,10 +199,10 @@ confined (`startup`): the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
 in it, then the project's `.bh-02/kernel.py`, which only the worker reads, in the jail (never
 read a file the model can write, or reach through a link it could make, on the host and hand
 its text to the model: the link could lead to a secret). So a person's file in the project or
-another root the jail lets an input write (`jail.writes()`), or whose way passes through one, is
-read as the project's is, and if that fails the note says why the host did not; and the jail
-denies every input writing bh-02's config directory (`layers.trusted`, below), so a session run
-from the home directory can't choose what a later one reads there. A startup file that ends the
+another root the jail lets an input write (the worker's `writes()`), or whose way passes
+through one, is read as the project's is, and if that fails the note says why the host did not;
+and the jail denies every input writing bh-02's config directory (`layers.trusted`, below), so a
+session run from the home directory can't choose what a later one reads there. A startup file that ends the
 worker is passed over by the workers after it, until `/restart kernel`; the input it cut short
 says which, after what the opening had to tell by then (that the REPL was started again, and
 why: told nowhere else). `instructions()` tells
