@@ -26,6 +26,30 @@ async def test_a_failed_job_is_reported_and_the_next_one_still_runs() -> None:
     assert failures == ["RuntimeError: boom"] and ran == ["ok"]
 
 
+async def test_a_failure_told_asynchronously_is_told_before_the_next_job() -> None:
+    """`failed` may return an awaitable (a row telling the person through `output.notice`): it
+    is awaited before the next job runs."""
+    jobs: asyncio.Queue[Job] = asyncio.Queue()
+    said: list[str] = []
+
+    async def fails() -> None:
+        raise LookupError("no row 'transcript'")
+
+    async def works() -> None:
+        said.append("next job")
+
+    async def tell(failure: str) -> None:
+        await asyncio.sleep(0)
+        said.append(f"told: {failure}")
+
+    await jobs.put(fails)
+    await jobs.put(works)
+    worker = asyncio.create_task(perform(jobs, tell))
+    await asyncio.sleep(0.01)
+    worker.cancel()
+    assert said == ["told: LookupError: no row 'transcript'", "next job"]
+
+
 async def test_jobs_run_one_at_a_time_in_order_as_the_row_s_own_work_until_it_leaves() -> None:
     """Put from outside the row (a command another row's task runs), performed by the row's
     `background`, which leaves with it: a job put after that never runs."""

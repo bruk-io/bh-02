@@ -143,6 +143,27 @@ async def test_what_a_command_leaves_for_the_model_is_held_here_until_taken_or_c
     assert await commands.run("/clear") == [{"type": "cleared"}, {"type": "note", "text": "cleared"}]
 
 
+async def test_a_conversation_carried_on_from_a_summary_keeps_what_is_held_for_the_model() -> None:
+    """`/compact`'s `cleared` is `compacted`: the summary was written from what the model read,
+    which never held `!`'s output, so it is kept for the person's next message, unannounced."""
+    commands = Commands()
+
+    async def shell(args: str) -> list[dict[str, str]]:
+        return [{"type": "for_model", "text": f"$ {args}"}]
+
+    async def compact(args: str) -> list[dict[str, Any]]:
+        return [{"type": "cleared", "compacted": True}, {"type": "note", "text": "compacted"}]
+
+    commands.claim("!", {"name": "shell", "help": "", "usage": "COMMAND"}, shell)
+    commands.register({"name": "compact", "help": "", "usage": ""}, compact)
+    await commands.run("!pytest")
+    assert await commands.run("/compact") == [
+        {"type": "cleared", "compacted": True},
+        {"type": "note", "text": "compacted"},
+    ]
+    assert commands.take_for_model() == ["$ pytest"]
+
+
 @dataclass
 class Entry:
     id: str

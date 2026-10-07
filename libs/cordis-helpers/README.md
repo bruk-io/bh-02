@@ -15,7 +15,8 @@ nothing else; this package is patterns built on them, with no domain in them.
   and run one job at a time by the row's own `background(perform(jobs, failed))`. A job that
   restarts what the caller depends on would cancel itself half-way in the caller's task; in the
   row's own, it runs to the end, and leaves with the row. A job that fails is reported to
-  `failed` and the next still runs.
+  `failed` (one line; awaited when it returns an awaitable, as a row telling the person does)
+  and the next still runs.
 
 Depends on `cordis` only. A plugin that uses it depends on `cordis-helpers`, which is a
 library, not another plugin.

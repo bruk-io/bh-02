@@ -7,12 +7,13 @@ summary of it."""
 
 from agent_cordis_plugin.compact import (
     CompactConfig,
-    Unsummarised,
+    Unchanged,
     asked,
     compact_conversation,
     kept_in,
     seeded,
     summarise,
+    unrestarted,
 )
 from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.loop import (
@@ -61,7 +62,7 @@ __all__ = [
     "System",
     "Transcript",
     "TranscriptConfig",
-    "Unsummarised",
+    "Unchanged",
     "asked",
     "changes",
     "classify",
@@ -79,4 +80,5 @@ __all__ = [
     "seeded",
     "summarise",
     "transcript",
+    "unrestarted",
 ]

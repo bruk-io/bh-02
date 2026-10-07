@@ -12,7 +12,8 @@ What a command leaves for the model (a `for_model` event in its answer: `!`'s ou
 here, not shown, until the chat row takes it for the person's next message
 (`take_for_model`). This row depends on nothing, so a restart of the chat row (`/model`
 reloads the loop, and the chat row with it) keeps it; a new conversation (`cleared`, `/clear`'s
-answer) drops it, and says so.
+answer) drops it, and says so, but one carried on from a summary (`/compact`'s, `compacted`)
+keeps it.
 """
 
 import re
@@ -93,7 +94,10 @@ def _prefix_problem(prefix: object) -> str | None:
 def _held_after(held: Sequence[str], answer: Answer) -> tuple[list[str], Answer]:
     """What is held for the model after a command's `answer`, and what of it to answer: a
     `for_model` event's text is held (and not answered); a `cleared` drops what was held,
-    since a new conversation starts without it, and a note after the answer says so."""
+    since a new conversation starts without it, and a note after the answer says so. A
+    `cleared` that carries the conversation on from a summary (`compacted`, `/compact`'s)
+    keeps it: the model never read it, so the summary can't hold it, and it still goes with
+    the person's next message."""
     if isinstance(answer, str):
         return list(held), answer
     kept, dropped = list(held), 0
@@ -102,7 +106,7 @@ def _held_after(held: Sequence[str], answer: Answer) -> tuple[list[str], Answer]
         if event.get("type") == "for_model":
             kept.append(str(event.get("text", "")))
             continue
-        if event.get("type") == "cleared":
+        if event.get("type") == "cleared" and not event.get("compacted"):
             dropped, kept = dropped + len(kept), []
         shown.append(event)
     if dropped:

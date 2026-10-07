@@ -10,7 +10,7 @@ which begins a new conversation from the model's summary.
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
 | `agent:memory` | `memory`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
-| `agent:compact` | registers `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300), `loop` and `transcript` (the rows it restarts) | `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `entries`, `restart`), `commands` (`register`) |
+| `agent:compact` | registers `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300), `loop` and `transcript` (the rows it restarts) | `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
 
 A turn is one model step plus the inputs it asked for, until it asks for none. The model's one
 tool is the kernel's `python(code)`, offered through the provider's standard tool calling;
@@ -119,25 +119,40 @@ with every step, so a model server reuses its work on the conversation, then bh-
 asking for the summary in plain text, for the model itself to carry on from, naming what its
 Python namespace holds (`asked`; `/compact WHAT TO KEEP` adds what the person wants kept). A
 call the step makes is never run, and a step that calls, is cut off, says nothing or refuses
-gives no summary (`stops.classify`): the answer says why and nothing changes. A command runs in
-the chat row's task and can't be interrupted, so the step has `timeout` seconds; past them it
-is closed (its provider stops) and nothing changes. The summary then begins the new
-conversation (`seeded`: bh-02's note that the conversation carries on from an earlier one, as
-the person's message, then the summary as the model's answer, so the roles alternate), written
-over the transcript row's file in one step (`transcript.rewrite`: written whole beside it, then
-renamed over it, the old file kept as `.bak`), and the loop and the transcript restart, together.
-The new conversation holds no `system` entry and no date, so the loop reads the prompt afresh
-for its first message (folding in whatever changed since the old one began, with no note of a
-change) and tells the date. The kernel is not restarted: the summary names what its namespace
-holds. The answer is the step's `usage` (counted in the session's totals), `cleared`, a note
-carrying the summary, then `restarting` the two rows, so the ui drops the old conversation and
-a resume's replay starts at the summary.
+gives no summary (`stops.classify`): the answer says why (and what the step cost, as one
+`usage` event, which still counts) and nothing changes. A conversation that is only the last
+summary, nothing said since, is not compacted again. A command runs in the chat row's task and
+Ctrl-C stops only a turn, so the step has `timeout` seconds, and a note says so as it begins
+(the row shows it itself, `output.show`, since the chat row shows a command's answer only once
+it has one); past them it is closed (its provider stops) and nothing changes. The person
+leaving cancels the command (`chat:session` races it against `input.closed()`): the step is
+closed and nothing has been written. The summary then begins the new conversation (`seeded`:
+bh-02's note that the conversation carries on from an earlier one, as the person's message,
+then the summary as the model's answer, so the roles alternate; the note stays at the
+conversation's start, a resume's too, so it says the namespace was kept at the compaction and
+empties as the kernel's instructions say), written over the transcript row's file in one step
+(`transcript.rewrite`: written whole beside it, then renamed over it, the old file kept under
+the first of `.bak`, `.bak.2`, ... not taken, so no compaction's backup replaces another's),
+and the loop and the transcript restart, together. The new conversation holds no `system`
+entry and no date, so the loop reads the prompt afresh for its first message (folding in
+whatever changed since the old one began, with no note of a change) and tells the date. The
+kernel is not restarted: the summary names what its namespace holds. The answer is `cleared`
+(`compacted`: what `commands` holds for the model's next message, `!`'s output, is kept, since
+the summary was written from what the model read, which never held it), a note carrying the
+summary, the step's usage as one event (counted in the session's totals), then `restarting`
+the two rows, so the ui drops the old conversation and a resume's replay starts at the summary.
+The restart is queued before the chat row shows the answer, and stops the chat row: the note
+comes second whatever the provider sent, as `/clear`'s does, so it is shown before then.
 
-The compact row depends on `model`, `kernel` (only its `spec`), the loader and `commands`, and
-on neither `loop` nor `transcript`: a restart of them reloads what depends on them, which would
-cancel the row's own work half-way. It reads the conversation from the transcript row's file
-(its `path`, from `loader.entries()`), so it needs a session's transcript (one kept in memory
-can't begin again from a summary, and /compact says so). The restart is queued for the row's own
-`background` (cordis-helpers' `perform`), never run in the chat row's task, which it reloads: the
-operator's `/clear` does the same. It is a row of its own rather than one of the operator's
-commands, so the operator keeps not depending on the model (a `/model` switch never reloads it).
+The compact row depends on `model`, `kernel` (only its `spec`), the loader, `commands` and
+`output`, and on neither `loop` nor `transcript`: a restart of them reloads what depends on them,
+which would cancel the row's own work half-way. It finds the conversation's file from the
+transcript row as the loader mounted it (`loader.rows`: a running `agent:transcript` row's
+`path`, whatever the layer files say now), so it needs a session's transcript (one kept in
+memory, or a row another component fills, can't begin again from a summary, and /compact says
+so). The restart is queued for the row's own `background` (cordis-helpers' `perform`), never
+run in the chat row's task, which it reloads: the operator's `/clear` does the same. A restart
+that fails is told to the person (`output.notice`), since the new conversation is written by
+then; a row restarted while the model wrote the summary writes nothing, since its queue went
+with it. It is a row of its own rather than one of the operator's commands, so the operator
+keeps not depending on the model (a `/model` switch never reloads it).

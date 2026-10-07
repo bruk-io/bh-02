@@ -59,10 +59,10 @@ _REPL = (
     "Each call sends it `code`, as if you typed it at the prompt, and you get back what it "
     "printed. It is one process, whose working directory is the project, and it persists for "
     "this run of bh-02: the variables, imports and functions an input defines are there for "
-    "every later one, in this turn and later ones, and across a /model switch. It starts empty "
-    "when bh-02 starts (a resumed session too: the conversation comes back, the variables do "
-    "not), after /clear, and if the process dies (the next input says so): then define again "
-    "what you need rather than assume it."
+    "every later one, in this turn and later ones, and across a /model switch or a /compact. It "
+    "starts empty when bh-02 starts (a resumed session too: the conversation comes back, the "
+    "variables do not), after /clear, and if the process dies (the next input says so): then "
+    "define again what you need rather than assume it."
 )
 _EXAMPLE = """    import re, subprocess
     from pathlib import Path

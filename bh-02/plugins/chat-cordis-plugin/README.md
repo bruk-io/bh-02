@@ -22,4 +22,4 @@ paragraph of its own in front of it, so `loop.reply` is still given one message 
 reads the output with it, never during a turn. Lines are read one at a time, so a `!` line
 typed during a turn runs after it. `commands` depends on nothing, so a restart of this row (a
 `/model` switch reloads the loop, and this row with it) keeps what is held; a `cleared` event
-(`/clear`) drops it.
+(`/clear`) drops it, and a `compacted` one (`/compact`, whose summary never held it) keeps it.

@@ -3,6 +3,7 @@ model is a fake, which runs scripted inputs and answers bh-02's summary request.
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -54,3 +55,76 @@ async def test_compact_begins_a_new_conversation_from_the_summary_and_the_kernel
     kept = [json.loads(line) for line in history.read_text().splitlines()]
     assert kept[:2] == last[1:3] and kept[2]["role"] == "system"  # the prompt, kept when first read
     assert "py:x = 6 * 7" in Path(f"{history}.bak").read_text()
+
+
+async def test_leaving_while_the_model_writes_the_summary_ends_bh_02_at_once_and_changes_nothing(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The ui ending (Ctrl-Q, /exit, the terminal gone) while the model writes the summary
+    stops /compact: the summary step is closed, so its provider stops, nothing is written (no
+    new conversation, no `.bak`), and bh-02 ends rather than wait out the step."""
+    history = tmp_path / "transcript.jsonl"
+    patch = composition(
+        '[[plugin]]\nid = "model"\nuse = "fragile:slow_summary_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:quitting_ui"\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+    )
+    import fragile  # the module the fixture wrote, imported by the composition
+
+    fragile.script("hello", "/compact")
+    started = time.monotonic()
+    await asyncio.wait_for(run([*layers(), patch]), 30)
+    assert time.monotonic() - started < 10  # not the minute the summary would take
+    assert fragile.QUIT.is_set() and fragile.CLOSED == [True]  # asked, then closed
+    before = history.read_text()
+    assert "hello" in before and "SUMMARY" not in before
+    assert sorted(p.name for p in tmp_path.glob("transcript.jsonl*")) == ["transcript.jsonl"]
+    assert not [n for n in fragile.NOTES if n.startswith("the conversation was compacted")]
+
+
+async def test_however_many_usage_parts_the_summary_sends_its_whole_answer_is_shown(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The restart is queued before the chat row shows the answer, and the restart stops the
+    chat row: an output that gives the loop a turn after every event (as the app's does) is
+    still shown `cleared` and the note carrying the summary, however many usage parts the
+    provider sends, since they come as one event after the note."""
+    history = tmp_path / "transcript.jsonl"
+    patch = composition(
+        '[[plugin]]\nid = "model"\nuse = "fragile:compacting_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:drawing_ui"\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+    )
+    import fragile  # the module the fixture wrote, imported by the composition
+
+    fragile.script("hello", "/compact", "and now?")
+    fragile.usages(16)
+    await asyncio.wait_for(run([*layers(), patch]), 30)
+    start = fragile.DRAWN.index("cleared")
+    assert fragile.DRAWN[start : start + 3] == ["cleared", "note", "usage"]
+    (note,) = [n for n in fragile.NOTES if n.startswith("the conversation was compacted")]
+    assert note.endswith("SUMMARY: x holds 42")
+    last, _ = fragile.SENT[-1]  # the request for "and now?", in the new conversation
+    assert last[2]["content"] == "SUMMARY: x holds 42"
+
+
+async def test_a_shell_command_s_output_waiting_for_the_model_is_kept_across_compact(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """`!`'s output waits for the person's next message; the summary was written from what the
+    model read, which never held it, so /compact keeps it, and the next message carries it."""
+    history = tmp_path / "transcript.jsonl"
+    patch = composition(
+        '[[plugin]]\nid = "model"\nuse = "fragile:compacting_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+    )
+    import fragile  # the module the fixture wrote, imported by the composition
+
+    fragile.script("hello", "!echo kept-for-the-model", "/compact", "and now?")
+    await asyncio.wait_for(run([*layers(), patch]), 30)
+    (asked,) = [m for m, _ in fragile.SENT if str(m[-1]["content"]).startswith("(bh-02: the")]
+    assert not any("kept-for-the-model" in str(m["content"]) for m in asked)  # not in the summary
+    last, _ = fragile.SENT[-1]  # the request for "and now?"
+    assert "kept-for-the-model" in str(last[-1]["content"]) and str(last[-1]["content"]).endswith("and now?")
+    assert not [n for n in fragile.NOTES if "is dropped with the old conversation" in n]

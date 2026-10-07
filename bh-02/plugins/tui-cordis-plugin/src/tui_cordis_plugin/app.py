@@ -64,8 +64,8 @@ __all__ = ["BhApp", "running"]
 EXIT_COMMANDS = frozenset({"/exit", "/quit"})
 _HOW_TO_LEAVE = "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running turn; Ctrl-P lists commands."
 _COMMAND_RUNS = (
-    "A command is running, and Ctrl-C stops only a turn: a `!` command runs until it ends or its "
-    "timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
+    "A command is running, and Ctrl-C stops only a turn: a `!` command or /compact runs until it "
+    "ends or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
 )
 
 type _Question = tuple[Mapping[str, Any], asyncio.Future[bool]]

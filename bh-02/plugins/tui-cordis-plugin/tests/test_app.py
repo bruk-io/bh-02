@@ -91,8 +91,8 @@ async def test_ctrl_c_while_a_command_runs_says_it_does_not_stop_one_and_a_start
         await pilot.pause(0.5)
         said = [text for _, text in _blocks(app) if text.startswith("A command is running")]
         assert said == [
-            "A command is running, and Ctrl-C stops only a turn: a `!` command runs until it ends "
-            "or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
+            "A command is running, and Ctrl-C stops only a turn: a `!` command or /compact runs until "
+            "it ends or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
         ]
         await pilot.press(*"hello", "enter")
         assert await asyncio.wait_for(app.bridge.line(), 1) == "hello"  # a turn starts

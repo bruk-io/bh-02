@@ -6,8 +6,8 @@ The transcript is its own row so the history outlives the loop: replace the `mod
 and the loop reloads against the new provider while the conversation carries on. `memory` is
 its own row too, depending on nothing, so neither the loop nor a row adding to it reloads the
 other. So is `executor`, so a reloaded loop keeps the call a stopped reply left running and waits
-for it. `/compact` is a row of its own over the model, the kernel's tool spec, the loader and
-`commands`, and depends on neither the loop nor the transcript, which it restarts.
+for it. `/compact` is a row of its own over the model, the kernel's tool spec, the loader,
+`commands` and `output`, and depends on neither the loop nor the transcript, which it restarts.
 """
 
 import asyncio
@@ -16,7 +16,15 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
-from agent_cordis_plugin.compact import SPEC, CompactConfig, Offered, Rows, compact_conversation
+from agent_cordis_plugin.compact import (
+    SPEC,
+    CompactConfig,
+    Offered,
+    Rows,
+    Shown,
+    compact_conversation,
+    unrestarted,
+)
 from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.loop import (
     Approval,
@@ -111,19 +119,29 @@ class _Registrar(Protocol):
 
 @component
 async def compact(
-    *, model: Model, kernel: Offered, loader: Rows, commands: _Registrar, config: CompactConfig
+    *, model: Model, kernel: Offered, loader: Rows, commands: _Registrar, output: Shown, config: CompactConfig
 ) -> Effects:
     """Fills a `compact` row: `use = "agent:compact"`. `/compact [WHAT TO KEEP]` asks the model
-    for a summary of the conversation (in `config.timeout` seconds: a command can't be
-    interrupted), writes the new conversation it begins over the transcript row's file (the old
-    kept as `.bak`), and restarts the loop and the transcript; the kernel keeps its namespace.
+    for a summary of the conversation (in `config.timeout` seconds: Ctrl-C stops only a turn;
+    a note says so as it begins), writes the new conversation it begins over the transcript
+    row's file (the old kept beside it), and restarts the loop and the transcript; the kernel
+    keeps its namespace.
 
     It depends on neither the loop nor the transcript: the restart would reload this row too,
-    cancelling its own work half-way. It reads the conversation from the transcript row's file
-    (its `path`, through the loader's entries), and its restart is its own background work,
-    never run in the chat row's task, which the restart reloads."""
+    cancelling its own work half-way. It finds the conversation's file from the transcript row
+    as the loader mounted it (`loader.rows`), and its restart is its own background work,
+    never run in the chat row's task, which the restart reloads. A restart that fails is told
+    to the person (`output.notice`): the new conversation is written by then."""
     jobs: asyncio.Queue[Job] = asyncio.Queue()
-    failures: list[str] = []
-    yield background(perform(jobs, failures.append))
-    run = partial(compact_conversation, model=model, kernel=kernel, loader=loader, config=config, jobs=jobs)
+    worker = yield background(perform(jobs, lambda why: output.notice(unrestarted(config, why))))
+    run = partial(
+        compact_conversation,
+        model=model,
+        kernel=kernel,
+        loader=loader,
+        output=output,
+        config=config,
+        jobs=jobs,
+        worker=worker,
+    )
     yield acquire(commands.register, SPEC, run)

@@ -124,11 +124,12 @@ id = "operator"
 use = "commands:operator"
 
 # `/compact [WHAT TO KEEP]`: the model summarises the conversation, and a new one begins from
-# the summary, written over the transcript row's file (its `path`; the old kept as `.bak`): the
-# loop and the transcript restart, so the prompt is read afresh, and the kernel keeps its
-# namespace, which the summary names. A row of its own over `model`, `kernel` (its tool spec),
-# the loader and `commands`, not the operator, which never depends on the model. A command
-# can't be interrupted, so the model has `timeout` seconds (300) to answer.
+# the summary, written over the transcript row's file (its `path`; the old kept as `.bak`, then
+# `.bak.2`, ...): the loop and the transcript restart, so the prompt is read afresh, and the
+# kernel keeps its namespace, which the summary names. A row of its own over `model`, `kernel`
+# (its tool spec), the loader, `commands` and `output`, not the operator, which never depends on
+# the model. Ctrl-C doesn't stop a command (quitting does), so the model has `timeout` seconds
+# (300) to answer, and a note says so as it begins.
 [[plugin]]
 id = "compact"
 use = "agent:compact"

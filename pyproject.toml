@@ -211,8 +211,8 @@ exclude = [
     "bh_02.cli:update_layer_command",                         # rewrites a layer file, keeping FILE.bak
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
     "agent_cordis_plugin.transcript:FileTranscript.*",
-    "agent_cordis_plugin.transcript:rewrite",                 # /compact: the new conversation written whole (temp, then replace), the old kept as .bak
-    "agent_cordis_plugin.compact:compact_conversation",       # /compact: reads the transcript's file, then rewrites it
+    "agent_cordis_plugin.transcript:rewrite",                 # /compact: the new conversation written whole (temp, then replace), the old kept as .bak, .bak.2, ...
+    "agent_cordis_plugin.compact:compact_conversation",       # /compact: reads the transcript's file, shows that it asks, then rewrites it
     "commands_cordis_plugin.operations:Operator.clear.job",   # empties a session's history files
     "commands_cordis_plugin.wiring:set_model",                # /model: rewrites the session's layer
     # `!COMMAND`: the person's shell command, a subprocess run as them; what it prints read as it

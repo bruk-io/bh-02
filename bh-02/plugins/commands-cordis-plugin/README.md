@@ -49,7 +49,9 @@ value holds rather than answering; `chat:session` takes it (`take_for_model()`) 
 front of the person's next message, so the model reads the output with it, never during a turn
 (a line typed during a turn runs once the turn has ended). The registry depends on nothing, so
 a restart of the chat row (`/model` switching reloads it) keeps what is held; a new
-conversation (`/clear`'s `cleared`) drops it, with a note saying so.
+conversation (`/clear`'s `cleared`) drops it, with a note saying so, and one carried on from a
+summary (`/compact`'s `cleared`, `compacted`) keeps it: the summary was written from what the
+model read, which never held it.
 
 The operator acts through cordis's loader handle (`status`, `entries`, `restart`,
 `reload`, `explain`), never the runtime. A restart replaces rows the chat session depends on, which
