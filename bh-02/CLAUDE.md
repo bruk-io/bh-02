@@ -115,10 +115,13 @@ the prompt before each message the model reads but sends the one the conversatio
 switched, CLAUDE.md edited) is told as a note on that message (`prompt.changes`), because a
 model server reuses its work on a conversation only up to the first token that differs, and a
 changed start costs a local model minutes of prompt processing (it looks frozen) and Claude
-a restart of Claude Code and its cache. The date is not in the prompt, or every midnight would
-be such a change: the loop tells it first on the person's message, the first of a conversation
-and of each day (`(Today's date: ...)`, the entry's `today` field saying which it told, so a
-resume does not tell it again and `/clear` does). So the prompt reads the same from day to day,
+a restart of Claude Code and its cache. The transcript keeps a change as the edits from the
+reading before it (`prompt.edits`), not a whole copy, and the loop applies them in turn to
+know what it last told (`prompt.latest`); a transcript that kept whole copies reads the same.
+The date is not in the prompt, or every midnight would be such a change: the loop tells it
+first on the person's message, the first of a conversation and of each day
+(`(Today's date: ...)`, the entry's `today` field saying which it told, so a resume does not
+tell it again and `/clear` does). So the prompt reads the same from day to day,
 and a local model server that keeps its prompt cache can reuse a new session's start. The
 prompt is read, and `memory` asked, in a thread of the loop's own, never on the event loop the
 TUI shares: a section function may read many files and search the project, and must not need the

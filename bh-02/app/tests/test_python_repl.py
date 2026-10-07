@@ -874,3 +874,44 @@ async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_
     assert "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand.\n[1] 6\n[2] 0\n\n" in out
     assert out.count("Use the session.") == 1
     assert "[2] 0\n\n(this input ran `cat` through a shell." in out
+
+
+async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The shipped loop, transcript and project context, booted twice over one transcript file:
+    a session, then its resume. Each input that switches the git branch changes the prompt; the
+    change is told with that input's result and kept as the edits from the reading before, so
+    the file holds the prompt once. The resumed run's requests begin where the session's did,
+    and it tells only the switch made since."""
+    import fragile
+
+    project, home = tmp_path / "project", tmp_path / "home"
+    (project / ".git").mkdir(parents=True)
+    home.mkdir()
+    (project / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    history = tmp_path / "transcript.jsonl"
+    branches = ("one", "two", "three")
+    switches = [f"open('.git/HEAD', 'w').write('ref: refs/heads/{branch}\\n')" for branch in branches]
+    rows = (
+        f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+        f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+    )
+    # the scripted model runs each input the transcript has no result for: the session runs two,
+    # and its resume, scripted with all three, only the third
+    for script, run_now in ((switches[:2], switches[:2]), (switches, switches[2:])):
+        _answers(True, True, True)
+        patch = _inputs(composition, *script, extra=rows)
+        await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+        assert _asked() == run_now
+    entries = [json.loads(line) for line in history.read_text().splitlines()]
+    kept = [entry for entry in entries if entry["role"] == "system"]
+    assert "Git branch: main" in kept[0]["content"]
+    assert len(kept) == 4 and all(set(entry) == {"role", "edits"} for entry in kept[1:])
+    results = [entry["content"] for entry in entries if entry["role"] == "tool"]
+    for result, branch in zip(results, branches, strict=True):
+        assert f"Git branch: {branch}\n" in result, result  # told with the input that switched it
+    opening = json.dumps(kept[0]["content"].split("\n\n")[0])[1:-1]  # who the model is, as the file has it
+    assert history.read_text().count(opening) == 1
+    assert [kept[0]["content"]] == fragile.SYSTEM  # the resumed run's last request began as the first did
