@@ -4,8 +4,11 @@
 (`write`) and a scratch directory of the jail's own. What it may not, even inside those: the
 composition's layer files (an input rewriting one would reshape the program running it, outside
 the jail), every path the host imports code from (`sys.path` entries and the interpreter's
-prefix), brig's own self-modification list (`.git/hooks`, `.git/config`, shell rc files,
-CLAUDE.md, ...), any secret below under a writable root (it may not replace what it can't
+prefix), the directory of every package bh-02 runs code from (`code`: bh-02's own, cordis's,
+brig's and each plugin's, as installed; under a writable root when bh-02 works on its own
+checkout, an editable install), whose shipped context file the host trusts whole and reads
+before every message, brig's own self-modification list (`.git/hooks`, `.git/config`, shell rc
+files, CLAUDE.md, ...), any secret below under a writable root (it may not replace what it can't
 read), and bh-02's configuration directories under one (`trusted`: the person's
 `$XDG_CONFIG_HOME/bh-02` and `~/.config/bh-02`, when bh-02 runs from the home directory), whose
 models file, context file and startup file a later session reads on the host and trusts. What
@@ -131,8 +134,9 @@ _STACKS: Mapping[str, Callable[[], Stack]] = {"darwin": scratch_darwin, "linux":
 class Layers(Protocol):
     """What the jail needs of the `layers` value (CONTRACTS.md: layers): the composition's files,
     which an input may not write; where bh-02 looks for its credential, where an input may
-    create nothing; the secrets, which it may not read; and bh-02's configuration directories
-    (`trusted`), whose files the host reads and trusts, which it may not write."""
+    create nothing; the secrets, which it may not read; bh-02's configuration directories
+    (`trusted`), whose files the host reads and trusts, which it may not write; and the
+    directories bh-02 runs its own code from (`code`), which it may not write either."""
 
     @property
     def paths(self) -> tuple[str, ...]: ...
@@ -142,6 +146,8 @@ class Layers(Protocol):
     def secrets(self) -> tuple[str, ...]: ...
     @property
     def trusted(self) -> tuple[str, ...]: ...
+    @property
+    def code(self) -> tuple[str, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,12 +178,14 @@ def spec_for(
     host: Sequence[str],
     secrets: Sequence[str] = (),
     trusted: Sequence[str] = (),
+    code: Sequence[str] = (),
 ) -> Spec:
     """The jail's Spec. `host` is every path the host process loads code from; any under a
     writable root is denied, as are the layer files and brig's self-modification list.
     `secrets` (absolute) may not be read, wherever they are. `trusted` (absolute directories:
-    bh-02's configuration, whose files the host reads and trusts) may not be written where
-    they are under a writable root."""
+    bh-02's configuration, whose files the host reads and trusts) and `code` (absolute: the
+    directory of every package bh-02 runs code from) may not be written where they are under a
+    writable root."""
     roots = [str(Path(root, w).resolve()) for w in config.write]
     writable = [*roots, scratch]
     # A host import path *inside* a writable root is denied. One that *is* a root (the project
@@ -196,6 +204,13 @@ def spec_for(
     # startup file with a link to one the jail hides, say. Only strictly under one: a root that is
     # the directory or inside it (bh-02 run in its own config) would be left read-only.
     configured = [t for t in trusted if any(t.startswith(r + "/") for r in roots)]
+    # bh-02's own code under a writable root (bh-02 working on its own checkout, an editable
+    # install; or run from a home the checkout is in): an input there could write a module bh-02
+    # imports later, or the shipped context file, which the host trusts whole and reads before
+    # every message, to name one it wrote. By package, whatever `host` holds: a package an import
+    # hook finds is on no `sys.path`, and a `src` that is the project itself is not denied there.
+    # Only strictly under a root, as `trusted`: one the project is would leave it read-only.
+    running = [c for c in code if any(c.startswith(r + "/") for r in roots)]
     denies = [
         *layers,
         *under,
@@ -203,6 +218,7 @@ def spec_for(
         *(str(Path(root, d).resolve()) for d in config.deny),
         *kept,
         *configured,
+        *running,
     ]
     return Spec(
         fs=FsPolicy(
@@ -869,6 +885,7 @@ class BrigJail:
             host=host,
             secrets=self._layers.secrets,
             trusted=self._layers.trusted,
+            code=self._layers.code,
         )
         if self._platform == "linux":
             readable = readable_roots(argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE)

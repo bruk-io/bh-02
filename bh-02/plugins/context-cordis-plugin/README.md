@@ -102,8 +102,21 @@ of `files`: yours, `$XDG_CONFIG_HOME/bh-02/context.toml` (else `~/.config/bh-02/
 then the project's, `.bh-02/context.toml`. A name in `files` starting `$XDG_CONFIG_HOME/` is in
 that directory, or in `home`'s `.config` when the variable is unset or empty (as the models
 file is); one starting `~` is in `home`; any other is from the project's root. Each appends its
-sections; `replace = true` at a file's top starts the list afresh. A file is read again whenever
-it changes, so a section added reaches the model's next message.
+sections; `replace = true` at a file's top starts the list afresh. Each of `files` is read again
+whenever it changes, so a section added reaches the model's next message.
+
+**bh-02's own file is read once**, as the `system` row starts. It is trusted whole (a function
+it names is imported and run in bh-02's process), so it is bh-02's code, as its modules are,
+and like them it is read before any of the model's code runs (the row starts before the kernel
+and the extensions' worker) and not again. That matters when bh-02 works on its own checkout
+(an editable install): the file is then in the project. The jail denies an input writing it
+(`layers.code`, the brig plugin's README), and where it can't (bh-02 run in the package's own
+directory, or with `--no-jail`), what an input wrote there waits for bh-02, or the row
+(`/restart system`), to start again, as an edit to any of bh-02's modules does: never the next
+message (`test_bh_02_s_own_context_file_is_read_once_as_the_row_starts`). Holding the file to
+the project's terms instead would have cost every session in the checkout your own guidance
+(`~/AGENTS.md`, `~/CLAUDE.md`) and the rule files, which those terms refuse. If you edit it
+while working on bh-02, start bh-02 again to see the change.
 
 **The project's file is held to what the model may do itself**, because the model can write it
 and bh-02 acts on it in its own process, outside the jail. So it may name only bh-02's own

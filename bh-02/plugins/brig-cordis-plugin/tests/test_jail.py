@@ -63,6 +63,7 @@ class Layers:
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
+    code: tuple[str, ...] = ()
 
 
 def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
@@ -139,6 +140,51 @@ def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> 
     assert _denied(extra, "/home/me/.config/bh-02/kernel.py")
     inside = home_rooted("/home/me/.config/bh-02")  # bh-02 run in its own config directory
     assert not _denied(inside, "/home/me/.config/bh-02/notes.md")
+
+
+_CHECKOUT = "/home/me/src/bh-02"  # bh-02's own workspace, installed editable
+_CODE = (  # the directory of every package bh-02 runs code from (`layers.code`)
+    f"{_CHECKOUT}/bh-02/plugins/context-cordis-plugin/src/context_cordis_plugin",
+    f"{_CHECKOUT}/bh-02/plugins/kernel-cordis-plugin/src/kernel_cordis_plugin",
+    f"{_CHECKOUT}/libs/cordis/src/cordis",
+    "/opt/py/lib/python3.15/site-packages/brig",  # one installed into the interpreter
+)
+
+
+def test_bh_02_s_own_code_under_a_writable_root_is_denied_as_its_layer_files_are() -> None:
+    """bh-02 working on its own checkout (an editable install), or run from the home directory
+    with the checkout under it: the directory of every package bh-02 runs code from
+    (`layers.code`) is under a root an input may write. The shipped context file is in one, and
+    the host trusts it whole and reads it before every message, so an input could name a module
+    it wrote beside it and bh-02 would import that in its own process. Each is denied as a layer
+    file is, whatever the host's `sys.path` holds (`host` names nothing here). Not one the project
+    is (bh-02 run in a package's own directory), or the project would be read-only; one outside
+    every writable root needs no deny."""
+    shipped = f"{_CODE[0]}/context.toml"
+
+    def rooted(root: str) -> Any:
+        return spec_for(
+            root=root,
+            endpoint="/tmp/k/k.sock",
+            scratch="/tmp/j/tmp",
+            home="/home/me",
+            config=BrigConfig(),
+            layers=(),
+            host=(),
+            code=_CODE,
+        )
+
+    for root in (_CHECKOUT, "/home/me"):  # checkout-rooted, home-rooted
+        spec = rooted(root)
+        assert _denied(spec, shipped), root
+        assert _denied(spec, f"{_CODE[0]}/planted.py"), root  # a module the context file could name
+        assert all(_denied(spec, code) for code in _CODE[:3]), root  # every plugin's, and cordis's
+        assert _CODE[3] not in spec.fs.write_denies  # outside every writable root
+        assert not _denied(spec, f"{_CHECKOUT}/README.md")  # the rest of the checkout is the project's
+    elsewhere = rooted("/home/me/work/app")  # the usual case: none is under the project
+    assert not set(_CODE) & set(elsewhere.fs.write_denies)
+    inside = rooted(_CODE[0])  # bh-02 run in a package's own directory
+    assert not _denied(inside, f"{_CODE[0]}/notes.md")
 
 
 def test_allow_takes_names_off_brig_s_self_modification_list_and_only_those() -> None:
@@ -716,7 +762,7 @@ from pathlib import Path
 from brig_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
-    paths, credentials, secrets, trusted = (), (), (), ()
+    paths, credentials, secrets, trusted, code = (), (), (), (), ()
 
 async def main():
     sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
@@ -743,7 +789,7 @@ from brig_cordis_plugin import BrigConfig, BrigJail
 from kernel_cordis_plugin import Kernel, KernelConfig
 
 class Layers:
-    paths, credentials, secrets, trusted = (), (), (), ()
+    paths, credentials, secrets, trusted, code = (), (), (), (), ()
 
 LOOP = (
     "import os, sys, time\\n"
@@ -909,7 +955,7 @@ from brig.run import SubprocessLauncher
 from brig_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
-    paths, credentials, secrets, trusted = (), (), (), ()
+    paths, credentials, secrets, trusted, code = (), (), (), (), ()
 
 def crash(self, *args, **kwargs):
     os._exit(9)

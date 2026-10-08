@@ -28,8 +28,21 @@ gate's `brig-one-adapter`).
   itself, an absent one a placeholder, the directories above it pinned, a host change ending the
   jail). Not when the project is that directory or inside it: the deny would leave the project
   read-only, so bh-02 run in its own config lets the model write there, as in any project.
-  a started program's `writes()` names the roots its inputs may write (the kernel reads
-  nothing on the host whose way passes through one);
+  Nor bh-02's own code (`layers.code`: the directory of every package bh-02 runs, its own,
+  cordis's, cordis_helpers's, brig's and each installed plugin's, as installed, as named and as
+  resolved) where one is under a writable root: bh-02 working on its own checkout (`uv run` in
+  it, `uv tool install --editable`), or run from a home the checkout is in. The shipped context
+  file (`context_cordis_plugin/context.toml`) is there, and the host trusts it whole and reads
+  it before every message, so an input that rewrote it could name a module it wrote beside it,
+  which bh-02 would import in its own process
+  (`test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_its_checkout`). By
+  package, whatever `sys.path` holds: a package an import hook finds is on no `sys.path`, and a
+  `src` directory that is the project itself is not denied as a host import path (the test runs
+  there too). Held on Linux as any write deny there is. Not one the project is (bh-02 run in a
+  package's own directory), which would leave the project read-only: there the context plugin
+  reading its shipped file once, as it starts, is what keeps a change from taking effect before
+  the next start. A started program's `writes()` names the roots its inputs may write (the
+  kernel reads nothing on the host whose way passes through one);
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
   what `layers` names as `secrets` (bh-02's `local.env`, the sessions' state);
 - **network**: none; the program's own LISTEN socket is the one way in or out. The `jail` row

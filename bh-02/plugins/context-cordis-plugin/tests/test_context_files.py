@@ -268,6 +268,34 @@ def test_the_context_files_say_at_most_max_chars(tmp_path: Path) -> None:
     assert "more chars of project context]" in context.text()
 
 
+def test_bh_02_s_own_context_file_is_read_once_as_the_row_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bh-02's own context file is trusted whole: a section of it may name any function, which
+    bh-02 imports and runs in its own process. It is bh-02's code, as its modules are, and like
+    them it is read once, as the `system` row starts, before any of the model's code runs. When
+    bh-02 works on its own checkout the file is in the project, and an input that rewrote it (the
+    jail denies that: `layers.code`) could name a module it wrote; what it wrote waits for bh-02,
+    or the row, to start again, as an edit to any of bh-02's modules does."""
+    root, home = tmp_path / "project", tmp_path / "home"
+    home.mkdir()
+    _write(root / "NOTES.md", "The notes.")
+    own = _write(  # bh-02's own, in the project: bh-02 working on its own checkout
+        root / "src/own_pkg/context.toml",
+        f'[[section]]\nfiles = ["NOTES.md"]\nfunction = "{_WHOLE}"\n',
+    )
+    files = ContextFiles((), 20_000, own=own)
+    assert "The notes." in files.text(root, home)
+    _write(root / "planted_by_an_input.py", "def run(files, root, home):\n    return 'PLANTED'\n")
+    monkeypatch.syspath_prepend(str(root))  # importable, as a module beside bh-02's own would be
+    own.write_text('[[section]]\nfiles = ["NOTES.md"]\nfunction = "planted_by_an_input:run"\n')
+    os.utime(own, ns=(1, 1))  # a time of its own: seen as changed however coarse the clock
+    assert "PLANTED" not in files.text(root, home) and "planted_by_an_input" not in sys.modules
+    assert "The notes." in files.text(root, home)
+    assert "PLANTED" in ContextFiles((), 20_000, own=own).text(root, home)  # the next start reads it
+    sys.modules.pop("planted_by_an_input", None)
+
+
 def test_your_file_inside_the_project_is_the_project_s(tmp_path: Path) -> None:
     """Run in your home, the model can write your file too, so it is held to the project's terms."""
     files, home = ContextFiles(("~/.config/bh-02/context.toml",), 20_000), tmp_path

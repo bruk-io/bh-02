@@ -95,8 +95,10 @@ row's is how to extend bh-02 and the part of cordis that takes). A context file 
 of `[[section]]`s, each `files` (patterns) and `function` (a full module path given the files
 that match, returning text): bh-02's own (`context_cordis_plugin/context.toml`: the guidance
 files, AGENTS.md and CLAUDE.md, yours and the project's, and rule files, each read by a function
-in `context_cordis_plugin.sections`), then yours (`$XDG_CONFIG_HOME/bh-02/context.toml`, else
-`~/.config/bh-02/context.toml`), then the project's
+in `context_cordis_plugin.sections`; trusted whole, so it is bh-02's code as its modules are,
+and like them read once, as the `system` row starts, before any of the model's code runs: bh-02
+working on its own checkout has it in the project), then yours
+(`$XDG_CONFIG_HOME/bh-02/context.toml`, else `~/.config/bh-02/context.toml`), then the project's
 `.bh-02/context.toml`, which the model can write and so may name only bh-02's own functions and
 non-hidden files in the project. Any context file the model could have written or chosen is held
 to the same terms: one that, as named, as it resolves, or through any directory or link on its
@@ -327,9 +329,22 @@ The kernel never gets it:
   startup file that is a link to a key the jail hides. On Linux the directory is held like any
   write deny there (a mount the host can undo, the directories above it pinned). Not when bh-02
   runs in that directory or below it: denying it would leave the project read-only.
+- `brig:jail` denies writing bh-02's own code where it is under a root an input may write
+  (bh-02 working on its own checkout, an editable install, or run from a home the checkout is
+  in): `layers.code`, the directory of every package bh-02 runs (`bh_02`, cordis,
+  cordis_helpers, brig and each installed plugin's), each as named and as it resolves, found by
+  name from installed metadata (`bh_02.bootstrap.code_directories`; `importlib.util.find_spec`
+  imports nothing). The shipped context file is in one, and bh-02 trusts it whole: an input
+  could otherwise name a module it wrote beside it and have bh-02 import that in its own
+  process at the next message. By package, whatever the host's `sys.path` holds (a package an
+  import hook finds is on none, and a `src` that is the project is not denied as a host import
+  path), held on Linux like any write deny there. Not one the project is (bh-02 run in a
+  package's own directory), which would leave the project read-only; then the context plugin's
+  own rule holds: it reads its shipped file once, before any of the model's code runs, so what
+  an input wrote waits for the next start, as an edit to any module does.
 - An approved `--no-jail` input runs with the person's permissions and could open `local.env`
-  itself, or rewrite bh-02's config directory; only its environment is scrubbed, and every
-  input is put to the person, its code shown, before it runs.
+  itself, or rewrite bh-02's config directory or its own code; only its environment is
+  scrubbed, and every input is put to the person, its code shown, before it runs.
 
 Without a token the row still binds, and each step answers with an `authentication_failed` error
 naming the variable, `local.env` and `claude setup-token`.
