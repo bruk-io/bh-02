@@ -39,9 +39,8 @@ declared to it (`declared.py`). Each call to `complete` streams exactly one mode
   start another model request on that answer.
 
 One Claude Code process holds the conversation, started on the first step with the request's
-system message as its system prompt (after a note saying that Claude Code's own opening line, and
-its `mcp__bh__` names for the tools, don't mean the model is in Claude Code) and the offered
-tools; a changed system prompt or tool set
+system message as its system prompt (after a note naming which of Claude Code's `mcp__bh__`
+names is which of bh-02's tools) and the offered tools; a changed system prompt or tool set
 restarts it (resuming its own session) before the next user line, never while calls are parked.
 What its session holds is checked against every request (`reconcile.py`); when the two differ,
 the transcript is written as a new Claude Code session and that is resumed (`records.py`). The
@@ -121,13 +120,9 @@ _ALIASES: Final[Mapping[str, str]] = {
     "opus": "claude-opus-5-5",
     "haiku": "claude-haiku-4-5-20251001",
 }
-# Claude Code opens every system prompt with a line of its own ("You are a Claude agent, built on
-# Anthropic's Claude Agent SDK." for a custom one, measured, CLI 2.1.280), and names the declared
-# tools `mcp__bh__<name>`: both read as being in Claude Code, so the prompt says what they mean here.
-_CARRIER: Final = (
-    "bh-02 reaches you through the Claude Agent SDK (Claude Code), which wrote the line before this "
-    "one: here Claude Code only carries your steps to bh-02 and back, and you are not working in it."
-)
+# Claude Code names the declared tools `mcp__bh__<name>`, while bh-02's prompt names them as bh-02
+# does (`python`): the system prompt opens by saying which is which.
+_NAMED: Final = "bh-02's tools reach you under these names: {named}."
 _MAKE_ONE: Final = f"Make a token with `claude setup-token`, put `{TOKEN_VARIABLE}=<the token>` in"
 _ERRORS: Final[Mapping[str, str]] = {
     "authentication_failed": (
@@ -247,11 +242,10 @@ class _Astray(ClaudeCodeError):
 
 
 def _carried(system: str, specs: Sequence[Json]) -> str:
-    """The system prompt Claude Code is started with: what its own opening line and its names
-    for the declared tools mean here, then the request's system prompt."""
+    """The system prompt Claude Code is started with: which of its names for the declared tools
+    is which of bh-02's, then the request's system prompt."""
     named = ", ".join(f"`{spec['name']}` as `mcp__{SERVER}__{spec['name']}`" for spec in specs)
-    note = f"{_CARRIER} bh-02's tools reach you under Claude Code's names: {named}." if named else _CARRIER
-    return f"{note}\n\n{system}" if system else note
+    return "\n\n".join(part for part in (_NAMED.format(named=named) if named else "", system) if part)
 
 
 def _text_of(message: AssistantMessage) -> str:

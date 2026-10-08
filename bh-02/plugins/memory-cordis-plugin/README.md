@@ -40,8 +40,8 @@ paths, as Claude Code's `claudeMdExcludes`) leaves out a file whose path, or whe
 lead, matches.
 
 Each is told as `Contents of <file> (<what it is>):` and the text, after a paragraph saying that
-where these files name Claude Code they mean the model in bh-02, and that the later file wins
-where two disagree. `""` when nothing loads.
+they are written for the model whatever agent they name, and that the later file wins where two
+disagree. `""` when nothing loads.
 
 ## What loads on demand
 

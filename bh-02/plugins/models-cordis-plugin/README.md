@@ -155,11 +155,8 @@ bh-02's loop does all of the following:
 Claude Code does none of that. It runs with no built-in tool (`tools=[]`), no settings file
 or CLAUDE.md (`setting_sources=[]`), and no connector (`strict_mcp_config`,
 `ENABLE_CLAUDEAI_MCP_SERVERS=0`). Its system prompt is the request's system message, after a
-note of the provider's own: Claude Code opens a custom system prompt with a line of its own
-(`You are a Claude agent, built on Anthropic's Claude Agent SDK.`, measured, CLI 2.1.280) and
-names the declared tool `mcp__bh__python`, and both read to the model as being in Claude Code,
-so the note says Claude Code only carries the steps and which name is bh-02's `python`. It does
-not compact (`DISABLE_AUTO_COMPACT`).
+note of the provider's own: Claude Code names the declared tool `mcp__bh__python`, so the note
+says that is bh-02's `python`. It does not compact (`DISABLE_AUTO_COMPACT`).
 
 **The tool is only declared.** The loop's one tool, `python`, reaches Claude Code as an
 in-process MCP server (`declared.py`, the MCP library's low-level `Server`), so the model calls

@@ -23,13 +23,11 @@ def test_the_prompt_reads_the_same_every_day(tmp_path: Path) -> None:
     assert "Today" not in text and datetime.date.today().isoformat() not in text
 
 
-def test_the_prompt_says_the_model_is_in_bh_02_and_not_in_claude_code() -> None:
-    # A CLAUDE.md is often addressed to Claude Code, and the claude-code provider's prompt opens
-    # with Claude Code's own line: the prompt says first where the model really is.
+def test_the_prompt_says_the_model_is_in_bh_02_and_names_no_other_harness() -> None:
     text = describe("/src/app", None)
     first = text.split("\n\n")[0]
     assert first.startswith("You are the model in bh-02, a coding harness")
-    assert "You are not Claude Code and not running inside it" in first
+    assert "Claude Code" not in text
     assert "bh-02 is a cordis composition" in text  # what it is made of, and that it changes live
 
 

@@ -8,7 +8,7 @@ input's result.
 
 The `system` row (`agent:system`) builds the prompt, in the order Claude Code builds its own:
 
-1. who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of;
+1. who the model is (the model in bh-02) and what bh-02 is made of;
 2. where it is working: the directory and its git branch;
 3. the sections other rows add: memory's instruction files ([Memory](../using/memory.md)), auto
    memory, and how to extend bh-02 with extensions of its own.

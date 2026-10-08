@@ -47,12 +47,11 @@ _CLAUDE = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")  # a directory's
 _AGENTS = ("AGENTS.md", ".claude/AGENTS.md")
 _HOPS = 4  # imports followed from a file, at most: Claude Code's limit
 _PREFACE = (
-    "Memory: what the person and the project keep for whichever agent works here, as Claude Code "
-    "reads it (CLAUDE.md and AGENTS.md files, the files they import, and rules), broadest first. "
-    "Where it names Claude Code or another agent it means you, and where it names that agent's "
-    "tools, do the same in Python. Where two disagree, the later one wins. A subdirectory's "
-    "CLAUDE.md, and a rule for some files, are told with the result of the first input that "
-    "opens a file they cover."
+    "Memory: what the person and the project keep for whichever agent works here (CLAUDE.md and "
+    "AGENTS.md files, the files they import, and rules), broadest first, written for you whatever "
+    "agent it names. Where two disagree, the later one wins. A subdirectory's CLAUDE.md, and a "
+    "rule for some files, are told with the result of the first input that opens a file they "
+    "cover."
 )
 
 

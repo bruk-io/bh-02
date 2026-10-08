@@ -26,12 +26,8 @@ __all__ = ["SystemConfig", "SystemPrompt", "branch_of", "describe"]
 
 _INTRO = (
     "You are the model in bh-02, a coding harness: a terminal app in which a person works with "
-    "you on a project on their machine. You are not Claude Code and not running inside it, "
-    "whatever else in this prompt or the project's files suggests: Claude Code's tools, slash "
-    "commands and settings do not exist here, and your only tool is `python`, a Python REPL "
-    "of your own, described below. "
-    "Read before you change anything, change as little as the task needs, and say plainly what "
-    "you did and what you could not do."
+    "you on a project on their machine. Read before you change anything, change as little as the "
+    "task needs, and say plainly what you did and what you could not do."
 )
 _HARNESS = (
     "bh-02 is a cordis composition: every part of it is a row, named in a layer file, that can be "

@@ -60,7 +60,8 @@ def test_launch_reads_broadest_first(tmp_path: Path) -> None:
     ]
     assert "Contents of CLAUDE.md (project instructions, checked into the codebase):\n\nProject." in text
     assert f"({'instructions for everything under ' + work}/)" in text
-    assert text.startswith("Memory: what the person and the project keep") and "it means you" in text
+    assert text.startswith("Memory: what the person and the project keep") and "written for you" in text
+    assert "Claude Code" not in text.split("\n\n")[0]  # the preface names no other harness
 
 
 def test_nothing_to_tell_is_no_section(tmp_path: Path) -> None:

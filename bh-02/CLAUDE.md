@@ -88,8 +88,8 @@ model (`for_model`: a `!COMMAND`'s output) `commands` holds (a row that never re
 `/model` switch, which reloads the chat row, keeps it) and the chat row takes and puts in front
 of the person's next message (`take_for_model`), so `loop.reply` is still given one message and
 nothing reaches a turn. `system`
-(`agent:system`) is organised as Claude Code's is: who the model is (the model in bh-02, not
-Claude Code) and what bh-02 is made of, the working directory and branch, then the sections rows
+(`agent:system`) is organised as Claude Code's is: who the model is (the model in bh-02) and
+what bh-02 is made of, the working directory and branch, then the sections rows
 add (`system.add`): memory's, then the extensions row's (how to extend bh-02 and the part of
 cordis that takes). Memory (`memory:memory`) is Claude Code's, as its docs describe it: the
 managed policy's CLAUDE.md, yours (`~/.claude/CLAUDE.md` and `~/.claude/rules/`), each
@@ -142,8 +142,8 @@ nothing, so `/clear` and `/model`, which reload the loop but not `system` (whose
 lock), keep the call in flight: Ctrl-C after Ctrl-C leaves at most one, however often the loop
 reloads between. Each call's thread is a daemon's, not the default executor's, which
 `asyncio.run` and the interpreter join as they end, so one left running never holds bh-02 open. The claude-code provider
-adds a note that Claude Code's own opening line and its `mcp__bh__` tool names don't mean the
-model is in Claude Code.
+opens the prompt with a note naming which of Claude Code's `mcp__bh__` tool names is which of
+bh-02's tools.
 `/compact` (`agent:compact`, a row of its own over `model`, the kernel's `spec`, the loader,
 `commands` and `output`) begins a new conversation from the model's summary of this one: one
 step, the loop's own request with bh-02 asking for the summary after it (a call it makes never
