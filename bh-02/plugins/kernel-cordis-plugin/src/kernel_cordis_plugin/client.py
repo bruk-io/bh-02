@@ -319,13 +319,18 @@ class Kernel:
 
     def instructions(self) -> str:
         """What the model is told about the tool and where its code runs, read per request: the
-        project's startup files are the model's to edit, the person's are theirs."""
-        placed = _placed(self._config.startup, Path(self._config.root).resolve(), Path.home(), os.environ)
+        project's startup files are the model's to edit, the person's are theirs; and where its
+        worker's jail lets it write besides the project (its `writes()`: the auto memory
+        directory, a `write` the person added)."""
+        root = Path(self._config.root).resolve()
+        placed = _placed(self._config.startup, root, Path.home(), os.environ)
+        writes = self._worker.writes() if self._worker is not None else ()
         return instructions_for(
             self.confined,
             tuple(s.name for s in placed if s.project),
             self.reads(),
             theirs=tuple(s.name for s in placed if not s.project),
+            elsewhere=tuple(w for w in writes if not Path(w).is_relative_to(root)),
         )
 
     async def __aenter__(self) -> Kernel:

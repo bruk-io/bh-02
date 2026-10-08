@@ -12,7 +12,7 @@ composition names, and the model's one tool, `python(code)`, which runs an input
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
 | `kernel:shell_hints` | adds `ShellHints` to `notes` | `notes` (`add`), `transcript` (`messages`) |
 
-`python.py` is the tool, pure: its spec and `instructions_for(confined, startup, reads, theirs=)`, what the
+`python.py` is the tool, pure: its spec and `instructions_for(confined, startup, reads, theirs=, elsewhere=)`, what the
 model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
 long as this run of bh-02 (a /model switch keeps it; a start, a resume, /clear or a dead worker
 empties it), and that helpers worth keeping go in the project's startup file (`startup`), the

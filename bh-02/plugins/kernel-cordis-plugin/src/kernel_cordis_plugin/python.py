@@ -118,15 +118,19 @@ def instructions_for(
     reads: Sequence[str] = (),
     *,
     theirs: Sequence[str] = (),
+    elsewhere: Sequence[str] = (),
 ) -> str:
     """What the model is told about acting in code: the one tool, its REPL and how long that
     lasts, the startup files (`startup`, the project's, which are the model's to write; `theirs`,
     the person's own, which run before them and are not), how to use it, and where its code
     runs. `reads`, the trees the jail lets code read when it reads by allowlist (a Linux jail), is
     said plainly, so the model spends no steps on reads that can't succeed, and so is how to see
-    a helper of the person's, whose file is usually not among them."""
+    a helper of the person's, whose file is usually not among them. `elsewhere`, the directories
+    outside the project the jail lets code write (a row's, such as the project's auto memory),
+    is named with the project, so the model knows its code can write there too."""
+    writes = " and ".join(["the project directory", *elsewhere])
     where = (
-        "Your code runs in a jail: it can write only inside the project directory, cannot reach "
+        f"Your code runs in a jail: it can write only inside {writes}, cannot reach "
         "the network, and cannot read credentials. Inside the project it also cannot write what "
         "could run code later (.git/hooks, .git/config, .claude, shell rc files) or bh-02's own "
         "files, so `git init` fails there; ask the person instead. Inputs run without asking."

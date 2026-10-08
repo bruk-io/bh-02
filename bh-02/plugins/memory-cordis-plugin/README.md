@@ -78,8 +78,10 @@ does not load one its own tools read. It depends on `transcript`, so a new conve
 - **`/memory` lists, it doesn't open.** bh-02's app owns the terminal, so `/memory` names each
   file, marked by how it loads (✓ at launch, … on demand, · not there, ✗ excluded or not read),
   and you open one in your own editor.
-- **Auto memory has no tool of its own.** The model writes its notes with plain Python, as it
-  writes any file; what it is told is how.
+- **Auto memory adds no tool.** The model writes its notes with whatever tools the
+  composition gives it, as it writes any file, and this plugin names none: bh-02 is not CodeAct
+  only. A tool that can write the directory says so itself (the python tool names the
+  directories its jail lets it write).
 
 ## Auto memory
 

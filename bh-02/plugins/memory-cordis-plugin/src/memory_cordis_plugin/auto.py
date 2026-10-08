@@ -4,8 +4,10 @@ in a directory of the project's own outside the repository (`$XDG_STATE_HOME/bh-
 `MEMORY.md` index, one line per memory, and a topic file for each; the index's first 200 lines
 or 25KB are told at the start of every conversation, the topic files read when they are needed.
 
-The model writes them with plain Python, as it writes any file: there is no memory tool. What
-it is told (`auto_section`) is how: what is worth keeping, of which kind, and where. The index
+The model writes them with whatever tools the composition gives it, as it writes any file:
+this plugin adds none, and says nothing of any (a tool that can write there says so itself, as
+the python tool names the directories its jail lets it write). What it is told (`auto_section`)
+is what is worth keeping, of which kind, and where. The index
 is read once a conversation (`AutoMemory`, a section of the system prompt whose row lives as long
 as the conversation does), as Claude Code reads it at the start of one: a write to it during the
 conversation is the model's own, and telling it back as a change in its instructions would only
@@ -43,9 +45,9 @@ def auto_section(directory: str, index: str | None, cut: bool) -> str:
     index (None: there is none yet), with a word when it was `cut`."""
     how = (
         f"Auto memory: {directory} is a directory of your own, kept across conversations for "
-        "this project (on this machine; never in the repository). Save there, with plain Python, "
-        "what would help a later conversation and that the code, its history and the memory "
-        "files above don't already say: the person's role, expertise and preferences (type "
+        "this project (on this machine; never in the repository). Save there what would help a "
+        "later conversation and that the code, its history and the memory files above don't "
+        "already say: the person's role, expertise and preferences (type "
         "`user`), corrections they gave you and approaches they confirmed (`feedback`), ongoing "
         "work, deadlines and decisions (`project`), and where to find things outside the project "
         "(`reference`). One topic file per memory, opening with frontmatter (`name`, "

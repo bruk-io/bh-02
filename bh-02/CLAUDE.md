@@ -97,7 +97,7 @@ directory's `CLAUDE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md` from the file
 down to the project's, the project's `.claude/rules/` without `paths`, AGENTS.md where there is
 no CLAUDE.md (`instruction_files`), each file's comments out and its `@path` imports after it;
 `/memory` lists them. Auto memory (`memory:auto`) is the notes the model keeps for itself, with
-plain Python, in the project's directory outside the repository (`layers.memory`:
+whatever tools it has, in the project's directory outside the repository (`layers.memory`:
 `$XDG_STATE_HOME/bh-02/projects/<project>/memory`, which the jail lets an input write); its
 MEMORY.md index is read once a conversation, so the model's own writes are not told back. Nothing is read that the jail keeps from the model: a file in the project
 is read from its root through no link (`O_NOFOLLOW` on every part, then a regular file with one
