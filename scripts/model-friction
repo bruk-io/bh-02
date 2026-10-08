@@ -13,23 +13,23 @@ come up most are where the prompt, the kernel or the loop should change next.
     scripts/model-friction --json          # the findings, for another tool
 
 The signals match the texts bh-02 itself writes (the loop's refusals and nudges, the kernel's
-notes), so a change to one of those texts is a change here too. What an input runs is read the
-way the kernel reads it (`kernel_cordis_plugin.programs` and `shelled`), so run this from the
-repository; the rest is the standard library.
+notes), so a change to one of those texts is a change here too. It is the standard library
+alone.
 """
 
 import argparse
 import ast
+import itertools
 import json
 import os
 import re
+import shlex
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from kernel_cordis_plugin import programs, shelled
 
 type Message = Mapping[str, Any]
 
@@ -57,14 +57,130 @@ _PROGRAM = re.compile(r"\b(?:subprocess\.(?:run|call|check_call|Popen)|os\.syste
 _CAPTURED = re.compile(r"capture_output\s*=\s*True|stdout\s*=|check_output\(")
 _EXCEPTION = re.compile(r"^(\w+(?:\.\w+)*(?:Error|Exception|Exit|Interrupt|Expired)):", re.M)
 _WRITES = re.compile(r"write_text\(|open\([^)]*['\"][wa]")
-# What `notes` adds after a result: the shell hint (once on the line after it, now after a blank
-# line; the notes are sorted, so any on-touch note follows it), and memory's on-touch notes (a
-# transcript from before the memory plugin says `guidance for work under`).
+# What `notes` added after a result: the shell hint, in a transcript from before bh-02 dropped it
+# (once on the line after the result, later after a blank line; the notes are sorted, so any
+# on-touch note follows it), and memory's on-touch notes (a transcript from before the memory
+# plugin says `guidance for work under`).
 _NOTE = re.compile(r"\n\n?\(this input ran .+ through a shell\..*\Z", re.S)
 _TOUCHED = re.compile(r"\n\nFrom \S+, (?:guidance for work under|instructions for work under|a rule for) .*\Z", re.S)
 _CHANGED = "(bh-02: your instructions have changed since this conversation began."  # the loop's note
 # What makes an input more than a shell command and a print: logic of its own.
 _COMPOSING = (ast.comprehension, ast.Compare, ast.BoolOp, ast.IfExp, ast.Lambda)
+
+
+# What an input runs (`_programs`), and which of those are shell commands for work Python does
+# itself (`_shelled`), by kind of work. Searching (grep, rg) is not one: a program that knows
+# what git ignores is fair to run.
+_KINDS = {
+    "read": ("cat", "head", "tail", "wc"),
+    "edit": ("sed", "awk"),
+    "write": ("tee",),
+    "list": ("ls", "find", "tree"),
+    "files": ("mkdir", "touch", "cp", "mv", "rm"),
+}
+_KIND_OF = {command: kind for kind, commands in _KINDS.items() for command in commands}
+_RUNNERS = {
+    "subprocess": {"run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput"},
+    "os": {"system", "popen"},
+}
+_SHELLS = {"sh", "bash", "zsh"}
+_SEPARATORS = {"|", "||", "&&", ";", "&", "(", ")"}
+
+
+def _programs(code: str) -> tuple[tuple[str, bool], ...]:
+    """Each program `code` runs through subprocess or os (each command of a shell line), by
+    name, with whether its output is sent to a file, in the order they appear: () for none, and
+    for code that does not parse."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError, ValueError:
+        return ()
+    return tuple(found for line in _command_lines(tree) for found in _split(line))
+
+
+def _shelled(code: str) -> tuple[tuple[str, str], ...]:
+    """The shell commands `code` runs for work Python does itself, as (command, kind of work),
+    each command once, in the order they appear."""
+    found: dict[str, str] = {}
+    for name, redirected in _programs(code):
+        kind = "write" if redirected else _KIND_OF.get(name)
+        if kind is not None:
+            found.setdefault(name, kind)
+    return tuple(found.items())
+
+
+def _command_lines(tree: ast.AST) -> Iterator[str]:
+    """Each command an input runs through subprocess or os, as shell text: a string as written
+    (an f-string up to its first field), a list's leading words quoted, `sh -c`'s script."""
+    modules = {"subprocess": "subprocess", "os": "os"}  # a name in the input -> the module
+    functions: dict[str, tuple[str, str]] = {}  # an imported function's name -> (module, function)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules |= {a.asname or a.name: a.name for a in node.names if a.name in _RUNNERS}
+        elif isinstance(node, ast.ImportFrom) and node.module in _RUNNERS:
+            functions |= {a.asname or a.name: (node.module, a.name) for a in node.names}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            module, name = modules.get(func.value.id, ""), func.attr
+        elif isinstance(func, ast.Name) and func.id in functions:
+            module, name = functions[func.id]
+        else:
+            continue
+        if name not in _RUNNERS.get(module, ()):
+            continue
+        given = node.args[0] if node.args else None
+        given = given or next((k.value for k in node.keywords if k.arg in ("args", "cmd", "command")), None)
+        if isinstance(given, ast.List | ast.Tuple):
+            words: list[str] = []
+            for element in given.elts:
+                if not (isinstance(element, ast.Constant) and isinstance(element.value, str)):
+                    break
+                words.append(element.value)
+            if len(words) > 2 and os.path.basename(words[0]) in _SHELLS and words[1] in ("-c", "-lc"):
+                yield words[2]
+            elif words:
+                yield shlex.join(words)
+        elif isinstance(given, ast.Constant) and isinstance(given.value, str):
+            yield given.value
+        elif isinstance(given, ast.JoinedStr):
+            parts = []
+            for part in given.values:
+                if not (isinstance(part, ast.Constant) and isinstance(part.value, str)):
+                    break
+                parts.append(part.value)
+            yield "".join(parts)
+
+
+def _split(text: str) -> Iterator[tuple[str, bool]]:
+    """Each command in shell text, by name, and whether its output is sent to a file (`>` or
+    `>>`, not to /dev/null). A here-document's lines are its text, not commands."""
+    ending: str | None = None  # the line that ends the here-document being read
+    for line in text.splitlines():
+        if ending is not None:
+            ending = None if line.strip() == ending else ending
+            continue
+        try:
+            lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = True
+            words = list(lexer)
+        except ValueError:  # an unclosed quote: the words as they split
+            words = line.split()
+        ending = next(
+            (after.lstrip("-") for before, after in itertools.pairwise(words) if before == "<<"), None
+        )
+        segment: list[str] = []
+        for word in [*words, ";"]:
+            if word not in _SEPARATORS:
+                segment.append(word)
+                continue
+            names = [w for w in segment if not (w.partition("=")[0].isidentifier() and "=" in w)]
+            if names:
+                targets = [after for before, after in itertools.pairwise(segment) if before in (">", ">>")]
+                yield os.path.basename(names[0]), any(t != "/dev/null" for t in targets)
+            segment = []
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +245,7 @@ def _shell_shaped(code: str) -> bool:
         body = [s for s in ast.parse(code).body if not isinstance(s, ast.Import | ast.ImportFrom)]
     except SyntaxError, ValueError:
         return False
-    return bool(body and programs(code)) and all(
+    return bool(body and _programs(code)) and all(
         isinstance(s, ast.Expr | ast.Assign) and not any(isinstance(n, _COMPOSING) for n in ast.walk(s))
         for s in body
     )
@@ -138,7 +254,7 @@ def _shell_shaped(code: str) -> bool:
 def _one_input(session: str, code: str, result: str) -> Iterator[Finding]:
     if _shell_shaped(code):
         yield Finding("shell_shaped", session, _short(code))
-    if found := shelled(code):
+    if found := _shelled(code):
         yield Finding("shell_for_files", session, f"{', '.join(c for c, _ in found)}: {_short(code, 100)}")
     result = _TOUCHED.sub("", _NOTE.sub("", result.split(f"\n\n{_CHANGED}", 1)[0]))
     if result.startswith("error: there is no tool named"):

@@ -1023,9 +1023,9 @@ async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
     """The shipped `notes` and memory rows, booted: the first input that opens a file under src/db
-    gets its CLAUDE.md and the rule for it with its result; a later one does not; one that reads
-    through a shell is told how Python does that. The on-touch row asks the `memory` row, so the
-    project and the home are set there, as a layer would."""
+    gets its CLAUDE.md and the rule for it with its result; a later one does not, nor does one
+    that reads it through a shell (a shell command's reads are not heard). The on-touch row asks
+    the `memory` row, so the project and the home are set there, as a layer would."""
     project, home = tmp_path / "project", tmp_path / "home"
     (project / "src" / "db").mkdir(parents=True)
     (project / ".claude" / "rules").mkdir(parents=True)
@@ -1051,9 +1051,10 @@ async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
     assert "[0] 6\n\nFrom src/db/CLAUDE.md, instructions for work under src/db/" in out
-    assert "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand.\n[1] 6\n[2] 0\n\n" in out
+    assert out.endswith(
+        "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand.\n[1] 6\n[2] 0\n"
+    ), out
     assert out.count("Use the session.") == 1
-    assert "[2] 0\n\n(this input ran `cat` through a shell." in out
 
 
 async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes(
@@ -1101,9 +1102,10 @@ async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes
 async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_them_afresh(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
-    """The shipped `notes` and memory rows over a session's transcript file. The first run's inputs are told
-    the guidance and the rule for src/db and a shell hint; a resumed run (the same file, read back:
-    `--resume`) whose inputs open that file and read through a shell again is told none of them;
+    """The shipped `notes` and memory rows over a session's transcript file. The first run's input that
+    opens src/db/models.py is told the guidance and the rule for src/db, and its input that reads
+    the file through a shell is told nothing (a shell command's reads are not heard); a resumed
+    run (the same file, read back: `--resume`) whose inputs do both again is told none of them;
     after /clear (the file emptied and the rows started afresh, as the session layer has it) the
     same inputs are told them again."""
     project, home = tmp_path / "project", tmp_path / "home"
@@ -1127,7 +1129,7 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     await run([*layers(), first], [Row("chat", config={"prompt": "go"})])
     told = _shown()
     assert "[0] 6\n\nFrom src/db/CLAUDE.md, instructions for work under src/db/" in told
-    assert "Migrations by hand.\n[1] 0\n\n(this input ran `cat` through a shell." in told
+    assert told.endswith("Migrations by hand.\n[1] 0\n"), told
 
     import fragile
 

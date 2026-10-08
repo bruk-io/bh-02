@@ -190,7 +190,6 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `transcript` | `agent:transcript` | `path` (the session's `transcript.jsonl`) |
 | `notes` | `agent:notes` | |
 | `executor` | `agent:executor` | |
-| `shell-hints` | `kernel:shell_hints` | |
 | `memory` | `memory:memory` | |
 | `on-touch` | `memory:on_touch` | |
 | `memory-auto` | `memory:auto` | |
@@ -238,7 +237,6 @@ agent:notes             binds Notes                        depends on nothing
 agent:executor          binds Executor                     depends on nothing
 agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Approval, Notes, Executor
 agent:compact           registers /compact                 depends on Model, Kernel, Loader, Commands, Output (the transcript row's file, not Transcript)
-kernel:shell_hints      adds the shell hints to Notes      depends on Notes, Transcript
 memory:memory           binds Memory, registers /memory    depends on System, Commands, Layers
 memory:on_touch         adds memory loaded on demand       depends on Memory, Notes, Transcript
 memory:auto             adds auto memory to System         depends on System, Layers, Transcript
@@ -282,7 +280,7 @@ other plugin; the gate proves it.
 | `chat-cordis-plugin` | runs `session` (a turn interruptible; a line `commands` claims goes to it, cancelled if the input closes, and what a command left the model, which `commands` holds, goes with the next message) and binds `done` | `loop`, `input`, `output`, `commands` (`claims`, `run`, `take_for_model`) |
 | `memory-cordis-plugin` | `memory` (`memory:memory`): Claude Code's memory, as its docs describe it: the managed policy's CLAUDE.md, yours (`~/.claude/CLAUDE.md`, `~/.claude/rules/`), each directory's CLAUDE.md files from the filesystem's root down to the project's, AGENTS.md where there is none, `@path` imports (four hops) and `.claude/rules/` without `paths`, a section of `system`, read fresh; `/memory` lists them. `memory:auto` adds auto memory: how the model keeps notes of its own in the project's directory outside the repository, and their MEMORY.md index, read once a conversation. `memory:on_touch` adds to `notes` what loads on demand (a subdirectory's CLAUDE.md files and rules, every rule whose `paths` match), each told whole once a conversation, with the result of the first input that opens a file it covers (or of the next, when that one's note was full) | memory: `system` (`add`), `commands` (`register`), `layers` (`memory`); auto: `system` (`add`), `layers` (`memory`), `transcript` (its lifetime); on-touch: `memory` (`touched`), `notes` (`add`), `transcript` (`messages`: what a resumed conversation was told) |
 | `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system`; each load on `approval`'s yes; after `/release` stopped its worker, none starts until the next input has started the kernel, and then every extension loads again | `jail` (`start`, `released`), `commands`, `frame`, `system`, `approval` |
-| `kernel-cordis-plugin` | `kernel` (`kernel:kernel`): a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, an input run, the files it opened); `approval` (`kernel:approval`): whether the model's code runs, at once when the jail confines it, else on the person's yes; `jail` (`kernel:unjailed`); `kernel:shell_hints` adds to `notes` how Python does what an input ran through a shell (`cat`, `sed`, `ls`), once for each kind of work a conversation; `kernel:release` registers `/release`, which stops the kernel and its jail until the next input | kernel: `jail` (`start`, and its worker's `report`, `notice`, `reads`, `writes`; `report`; `release`); approval: `jail` (`report`), `output` (`confirm`); shell hints: `notes` (`add`), `transcript` (`messages`: what a resumed conversation was told); release: `kernel` (`release`), `commands` (`register`) |
+| `kernel-cordis-plugin` | `kernel` (`kernel:kernel`): a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, an input run, the files it opened); `approval` (`kernel:approval`): whether the model's code runs, at once when the jail confines it, else on the person's yes; `jail` (`kernel:unjailed`); `kernel:release` registers `/release`, which stops the kernel and its jail until the next input | kernel: `jail` (`start`, and its worker's `report`, `notice`, `reads`, `writes`; `report`; `release`); approval: `jail` (`report`), `output` (`confirm`); release: `kernel` (`release`), `commands` (`register`) |
 | `brig-cordis-plugin` | `jail`: brig's `scratch_darwin()` on darwin, `strict_linux()` on Linux; the only importer of brig | `layers` |
 | `commands-cordis-plugin` | `commands` (the broker: slash commands, and the line prefixes a layer's rows claim; it says which lines are commands); the operator's commands over the loader; `!COMMAND` (`commands:shell_command`): the person's shell command, its output shown and held (in `commands`) for their next message | `commands`, `loader`, `models` (operator); `commands` (`claim`: shell command) |
 
@@ -297,8 +295,7 @@ calling (../harness/ARCHITECTURE.MD: "one tool, and it carries code"). To the mo
 Python REPL of its own that persists, and each call is one input to it: plain Python (not IPython),
 with nothing of bh-02's in the namespace, and nothing an input does calls back into bh-02. An input reads and edits files with `open` or `pathlib` and runs programs (`python`, `git`,
 a test runner) with `subprocess`, in the project directory. The model is told to work in Python
-rather than through a shell, and an input that runs `cat`, `sed` or `ls` through one is told how
-Python does that, once for each kind of work a conversation. The namespace outlives a model
+rather than through a shell. The namespace outlives a model
 swap; Ctrl-C interrupts the running input and keeps the namespace.
 
 Helpers you want in every project's REPL (a `show`, a `search`) go in your own startup file,
@@ -320,13 +317,12 @@ After each input, the loop asks `notes` what to tell the model with its result (
 off the event loop, as it reads the prompt, so neither freezes the app): the functions
 rows add there are given the input's code, its result and the project files it opened (the
 worker hears each `open` with an audit hook, so `kernel.touched()` is what Python in the input
-read or wrote, not what a shell command did). `kernel:shell_hints` adds the shell hint above;
-`memory:on_touch` adds memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
+read or wrote, not what a shell command did). `memory:on_touch` adds memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
 `paths` match, arrives whole with the result of the first input that opens a file it covers, as
 Claude Code's do when its Read, Write or Edit touches one. It asks the `memory` value
 (`touched`), so the memory row's config (`root`, `home`, `instruction_files`, `excludes`) holds
-for the prompt and for this. Both
-depend on `transcript`, so after `/clear` or `/compact` they tell the new conversation again, and read what it
+for the prompt and for this. It
+depends on `transcript`, so after `/clear` or `/compact` it tells the new conversation again, and reads what it
 holds, so a resumed session (`--resume`) is not told again a note told with an earlier result.
 
 The kernel is a worker process started by the `jail` row. `brig:jail` confines it: writes

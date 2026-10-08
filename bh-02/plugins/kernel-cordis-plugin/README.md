@@ -10,7 +10,6 @@ composition names, and the model's one tool, `python(code)`, which runs an input
 | `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when confined, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
 | `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
-| `kernel:shell_hints` | adds `ShellHints` to `notes` | `notes` (`add`), `transcript` (`messages`) |
 
 `python.py` is the tool, pure: its spec and `instructions_for(confined, startup, reads, theirs=, elsewhere=)`, what the
 model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
@@ -23,21 +22,7 @@ programs with `subprocess.run(..., capture_output=True, text=True, timeout=...)`
 they print as data, since one not captured never reaches the input, no stdin, the person sees
 every input); and where its code runs, and under a jail that reads by allowlist (Linux) the
 trees it reads (`reads`, the kernel's `reads()`) and that nothing else, the home directory
-included, is there. A model trained on shell tools tends to use the REPL as
-one, an input a single `cat`, `sed` or `ls`: `programs(code)` is what an input runs (read with
-`ast`, each command of a shell line), `shelled(code)` the part of it Python does itself (reading,
-editing, writing, listing and moving files; searching with `grep` or `rg` is not one, nor are
-tests, git and builds), and `shell_note` what such an input is told after its output, by
-`ShellHints`, the `notes` function the `kernel:shell_hints` row adds: once for each kind of work
-a conversation (the row depends on `transcript`, so `/clear` starts it afresh; at its first
-input it reads the transcript's `tool` entries for the shell notes they hold, each a line after
-a blank line with a blank line or the entry's end after it, but not one an entry starts with, so
-a resumed session is not told a kind again; a transcript from before the `notes` broker has the note after
-the result's last line, one newline and no blank line, at the entry's end, and that counts too,
-as `scripts/model-friction` reads it; the search takes time in proportion to an entry, however
-the model's code shapes its lines; where a result ends is not marked, so a note an input printed
-that way counts too), so it corrects a habit without nagging.
-`scripts/model-friction` reads transcripts with the same two. `confined` is what the model is
+included, is there. `confined` is what the model is
 told (`instructions_for`) and whether the startup files run unasked: the kernel itself never
 asks, so it depends on its jail alone and a new ui or model keeps the namespace.
 

@@ -33,8 +33,8 @@ opened) and puts what they return after the result (`noted`, sorted, so the orde
 added them in means nothing; one that fails says so in one line). The person sees the input's
 own output as the result, and a `note` for each of those notes, by its first line. `notes` is a
 row of its own, depending on nothing, so neither the loop nor a row adding to it reloads the
-other; the rows that add to it (`kernel:shell_hints`, `memory:on_touch`) depend on
-`transcript`, so `/clear` starts them afresh and they tell a new conversation again; they read
+other; a row that adds to it (`memory:on_touch`) depends on
+`transcript`, so `/clear` starts it afresh and it tells a new conversation again; it reads
 its `messages` too, so a resumed one is not told again a note a `tool` entry holds (CONTRACTS.md:
 transcript).
 

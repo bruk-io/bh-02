@@ -80,6 +80,11 @@ _REMOVED_USES = ("tools:", "fs:", "codeact:", "tui:approver", "bh_02.bootstrap:l
 # only a change to the shipped row (no `use`) or a row using `tui:sessions` is dropped.
 _NO_SIDEBAR = "bh-02 has no sidebar now (`bh-02 sessions` lists this directory's sessions)"
 _SIDEBAR, _SIDEBAR_USE = "sidebar", "tui:sessions"
+# The shell hints: the shipped `shell-hints` row, filled by `kernel:shell_hints`, which told an
+# input that ran `cat` or `sed` through a shell how Python does it. As with the sidebar, a row of
+# that id naming a plugin of the person's own still runs.
+_NO_SHELL_HINTS = "bh-02 no longer tells the model how Python does what an input ran through a shell"
+_SHELL_HINTS, _SHELL_HINTS_USE = "shell-hints", "kernel:shell_hints"
 
 
 def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
@@ -101,7 +106,9 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       layer keeps its own `disabled`). A status row with nothing left to say is not written.
     - A row bh-02 no longer has is dropped: the tool rows before the one tool, a session's
       `session` row, the sidebar (a change to the shipped `sidebar` row, or any row using
-      `tui:sessions`), and a fixed field (`tui:status` with a `field` or `text`, whatever its id).
+      `tui:sessions`), the shell hints (a change to the shipped `shell-hints` row, or any row
+      using `kernel:shell_hints`), and a fixed field (`tui:status` with a `field` or `text`,
+      whatever its id).
     - The project context's rows are the system prompt's and memory's (`context:project` is
       `agent:system`, `context:on_touch` is `memory:on_touch`), and a `system` row's config of
       more than `root` is split (`_split_system`): its `root` and `home` go to a `memory` row
@@ -275,6 +282,10 @@ def _removed(row: Row) -> str | None:
         return f"{row.use} is gone: {_NO_SIDEBAR}"
     if row.id == _SIDEBAR and row.use is None:
         return _NO_SIDEBAR
+    if row.use == _SHELL_HINTS_USE:
+        return f"{row.use} is gone: {_NO_SHELL_HINTS}"
+    if row.id == _SHELL_HINTS and row.use is None:
+        return _NO_SHELL_HINTS
     if row.use == _STATUS_USE and {"field", "text"} & set(row.config or {}):
         return "tui:status is now the status bar's one row (session, model, jail), not a fixed field"
     return None

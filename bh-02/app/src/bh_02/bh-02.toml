@@ -41,18 +41,13 @@ use = "agent:executor"
 
 # What the model is told with an input's result: a broker of functions rows add, each given the
 # input's code, its result and the project files it opened (`kernel.touched()`), the loop
-# calling each after every input. The shell hints (an input that ran `cat` or `sed` is told how
-# Python does that here) and memory's on-demand files (a subdirectory's CLAUDE.md, a rule for
-# some files, given when an input first opens a file they cover) add to it, each depending on
+# calling each after every input. Memory's on-demand files (a subdirectory's CLAUDE.md, a rule
+# for some files, given when an input first opens a file they cover) add to it, depending on
 # `transcript`, so a new conversation (/clear) is told afresh and a resumed one is not told
 # again what its transcript holds.
 [[plugin]]
 id = "notes"
 use = "agent:notes"
-
-[[plugin]]
-id = "shell-hints"
-use = "kernel:shell_hints"
 
 # Memory, as Claude Code has it: the managed policy's CLAUDE.md, yours (~/.claude/CLAUDE.md and
 # ~/.claude/rules/), the CLAUDE.md files from the filesystem's root down to the project's (and

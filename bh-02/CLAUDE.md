@@ -114,15 +114,13 @@ the system, the interpreter, the project; no home directory). After each input, 
 add there gets the input's code, its
 result and `kernel.touched()` (the project files Python in the input opened, heard by an audit
 hook in the worker; a shell command's own reads are not heard) and may add a note, never change
-the result. `kernel:shell_hints` tells the first input that runs `cat`, `sed`, `ls` or the like
-through a shell, once for each kind of work, how Python does it (`shell_note`);
-`memory:on_touch` gives memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
+the result. `memory:on_touch` gives memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
 `paths` match, arrives whole with the first input that opens a file it covers (Claude Code's
 on-demand loading; one that input's 20,000-character note cut short, or left out, arrives with
 the next that opens a file it covers; one the model opened itself is not told after); it has no
-config of its own and asks the `memory` value (`memory.touched(paths)`). Both depend on `transcript`, so `/clear` and `/compact`
-start them afresh, and read its `messages` once, at the first input that may need them
-(on-touch: the first that opens a file), so a resumed session is not told again a note its
+config of its own and asks the `memory` value (`memory.touched(paths)`). It depends on `transcript`, so `/clear` and `/compact`
+start it afresh, and reads its `messages` once, at the first input that opens a file, so a
+resumed session is not told again a note its
 transcript's `tool` entries hold; only layer rows add to `notes`, since its functions
 run in bh-02's process. The loop reads the prompt before each message the model reads but sends
 the one the conversation began with (the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
