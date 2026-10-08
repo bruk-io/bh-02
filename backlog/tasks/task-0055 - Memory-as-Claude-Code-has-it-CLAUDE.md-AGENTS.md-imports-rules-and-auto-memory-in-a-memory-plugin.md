@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-10-08 13:06'
-updated_date: '2026-10-08 13:19'
+updated_date: '2026-10-08 13:45'
 labels:
   - memory
   - context
@@ -30,7 +30,7 @@ Claude Code's memory (https://code.claude.com/docs/en/memory) as one cordis plug
 - [x] #5 No link the model could have made is followed and a file in the project imports nothing outside it
 - [x] #6 /memory lists every memory file and how it loads
 - [x] #7 update-layer rewrites layers naming context:project, context:on_touch or agent:memory
-- [ ] #8 Auto memory: MEMORY.md and topic files the model writes in $XDG_STATE_HOME/bh-02/projects/<project>/memory/, which the runner lets an input write; the index's first 200 lines or 25KB told each session
+- [x] #8 Auto memory: MEMORY.md and topic files the model writes in $XDG_STATE_HOME/bh-02/projects/<project>/memory/, which the runner lets an input write; the index's first 200 lines or 25KB told each session
 <!-- AC:END -->
 
 ## Implementation Notes
