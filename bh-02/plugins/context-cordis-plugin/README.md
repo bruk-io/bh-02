@@ -33,12 +33,20 @@ each file is read and searched once. It depends on `system`, `memory` and `trans
 `context:project` depends on nothing, so the on-touch row reloads with it only when the `system`
 row changes, and with `transcript` at each new conversation (`/clear`), which `system` and its
 caches outlive. What the conversation was told before the row began (a resumed session's, or
-before it reloaded) it reads from the transcript once, at the first input that opens a file: a
-text a `tool` entry holds whole after a blank line, where a note ends (the entry's end, the mark
-of a note cut short, or another note: bh-02's begin with `(`, the context files' with `From `),
-is told already, so a resume does not tell it again. One an entry starts with, one cut short
-there, one changed since and one cut back since (the paragraphs now gone follow it there) are
-told. Where a result ends is not marked, so a text an input printed that way counts too.
+before it reloaded) it reads from the transcript once, at the first input that opens a file:
+the notes the loop told with each result, which it keeps on the `tool` entry (`notes`). A text
+one of them holds whole is told already, so a resume does not tell it again: the note itself,
+or one of the texts the row's note joins with a blank line, ending where the note ends, where it
+was cut short, or where the next text begins (bh-02's own on-touch functions begin one `From
+FILE, guidance for work under` or `From FILE, a rule for`, and a section that failed `(bh-02
+could not make the section`). One cut short, one changed since and one cut back since (the
+paragraphs now gone follow it, however they begin) are told, and so is one that another
+function's text follows in the note: told twice rather than never. A note the result printed is not one
+told. An entry from before the loop kept `notes` is searched instead: a text it holds whole
+after a blank line, where a note ends (the entry's end, the mark of a note cut short, or
+another note: bh-02's begin with `(`, the context files' with `From `), but not one the entry
+starts with; where a result ends is not marked there, so a text an input printed that way counts
+too.
 
 `agent:loop` calls `text()` on its `executor` (`agent:executor`), in a thread off the event loop
 the TUI runs on, one call at a time, so a section function that reads many files or searches a

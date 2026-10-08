@@ -19,6 +19,9 @@ After each input it runs, the loop asks `memory`, the functions rows have added 
 tell the model with that input's result (`remembered`): each is given the input's code, its
 result and the project files it opened (`kernel.touched()`), and may add a note, never change
 the result. A path-scoped rule arrives that way when the model first works on a file it covers.
+The model reads the notes after the result; the `tool` entry also keeps them as a list
+(`notes`), so a row reading a resumed transcript for what it told finds each note whole, not
+somewhere in a text the result and the other notes share.
 
 Reading the prompt (every section function, which may read many files and search the project)
 and asking `memory` (which may read rule files) both run on `executor` (`executor.OneAtATime`),
@@ -162,6 +165,14 @@ def _asked(message: str, today: str | None, note: str) -> dict[str, Any]:
     rides on the entry as `today` too, which is how a later message finds the last one told."""
     told = [*([_DATED.format(today)] if today else []), *([note] if note else []), message]
     return {"role": "user", "content": "\n\n".join(told)} | ({"today": today} if today else {})
+
+
+def _answer(call: Json, content: str, notes: Sequence[str]) -> dict[str, Any]:
+    """The transcript entry answering `call`: `content`, what the model reads (the input's result,
+    then its notes and any change in the instructions, each after a blank line), and the `memory`
+    notes alone (`notes`, `[]` for none), so what was told is read back without searching the text.
+    The loop's own, as `today` is: a provider sends `content`."""
+    return {"role": "tool", "content": content, "call_id": call["id"], "notes": list(notes)}
 
 
 def remembered(memory: Iterable[Remember], input: Json) -> list[str]:
@@ -357,7 +368,7 @@ class LoopModel:
                                 raise
                         note = await self._told()
                         told = "\n\n".join([result, *notes, *([note] if note else [])])
-                        self._transcript.append({"role": "tool", "content": told, "call_id": call["id"]})
+                        self._transcript.append(_answer(call, told, notes))
                         answered, answer, result = answered + 1, result, None
                         yield {
                             "type": "tool_result",
@@ -377,12 +388,12 @@ class LoopModel:
                     # its answer (while its notes were made or the prompt read) gets that answer,
                     # with its notes.
                     for n, call in enumerate(turn.calls[answered:]):
-                        said = _NOT_RUN
+                        said, kept = _NOT_RUN, []
                         if n == 0 and result is not None:
-                            said = "\n\n".join([result, *notes])
+                            said, kept = "\n\n".join([result, *notes]), notes
                         elif n == 0 and running:
                             said = _INTERRUPTED
-                        self._transcript.append({"role": "tool", "content": said, "call_id": call["id"]})
+                        self._transcript.append(_answer(call, said, kept))
                 continue
             yield {"type": "stop", "reason": stop}
             if stop in (ANSWERED, REFUSED) or nudges >= self._max_nudges:

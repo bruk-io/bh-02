@@ -147,7 +147,7 @@ async def test_a_tool_turn_runs_the_call_as_an_input_and_asks_again() -> None:
         == "let me QUIET it is"
     )
     assert [m["role"] for m in history.messages] == ["user", "assistant", "tool", "assistant"]
-    assert history.messages[2] == {"role": "tool", "content": "QUIET", "call_id": "c1"}
+    assert history.messages[2] == {"role": "tool", "content": "QUIET", "call_id": "c1", "notes": []}
     assert scripted.requests[1][0][-1]["content"] == "QUIET"  # the result went back to the model
 
 
@@ -339,6 +339,7 @@ async def test_an_interrupted_call_still_gets_an_answer_in_the_transcript() -> N
     assert [m["call_id"] for m in tools] == ["c1", "c2"]  # both calls answered
     assert tools[0]["content"].startswith("interrupted")  # c1 was in the kernel: it may have partly run
     assert tools[1]["content"].startswith("not run")  # c2 never started
+    assert [m["notes"] for m in tools] == [[], []]
 
 
 async def test_a_turn_stopped_at_the_approval_question_says_the_input_never_ran() -> None:
@@ -738,6 +739,38 @@ async def test_memory_s_notes_ride_on_the_input_s_result_and_the_person_sees_eac
     assert "told the model with this result: Zebra rule: for /p/a.py." in notes
 
 
+async def test_the_notes_told_with_a_result_are_kept_on_its_entry_beside_what_the_model_reads() -> None:
+    """The model reads the result, then the notes, sorted, each after a blank line, then any change
+    in its instructions; the entry also keeps the notes alone, as a list (`notes`), so a row reading
+    a resumed transcript finds what it told without searching the text. Every `tool` entry the loop
+    writes has one, `[]` for an input told nothing or never run: an entry without it was written
+    before the loop kept them."""
+    where = _Where()
+
+    class Extending(Shouting):
+        async def run(self, code: str) -> str:
+            where.text_now = "in /b"  # the input changed the instructions
+            return await super().run(code)
+
+    memory: Hooks[Callable[[Json], str]] = Hooks()
+    for said in ("Zebra: another row's note.", "From a.md, a rule for *.py:\n\nOne.\n\n(Two.)", ""):
+        memory.add(lambda input, said=said: said)
+    history = MemoryTranscript()
+    scripted = Scripted(
+        [call("c1", "python", code="a"), call("c2", "nope", code="b"), call("c3", "python", code="c")],
+        [text("done")],
+    )
+    loop = LoopModel(scripted, Extending(), history, Person(True, False), system=where, memory=memory)
+    await _collect(loop, "go")
+    tools = [m for m in history.messages if m["role"] == "tool"]
+    notes = ["From a.md, a rule for *.py:\n\nOne.\n\n(Two.)", "Zebra: another row's note."]
+    told = "\n\n".join(["A", *notes, changes("in /a", "in /b")])
+    assert tools[0] == {"role": "tool", "content": told, "call_id": "c1", "notes": notes}
+    assert scripted.requests[1][0][-3] == tools[0]  # the model is sent the entry, which it reads as content
+    assert [m["notes"] for m in tools[1:]] == [[], []]  # a call that can't run, and one declined
+    assert [m["content"] for m in tools[1:]] == [refusal(call("c2", "nope", code="b"), PYTHON), DECLINED]
+
+
 class _Ticker:
     """A task that counts while the event loop is free to run it, every 10 ms."""
 
@@ -815,7 +848,8 @@ async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_t
     tools = [m for m in history.messages if m["role"] == "tool"]
     assert [m["call_id"] for m in tools] == ["c1", "c2"]
     assert tools[0]["content"] == "A\n\na rule"  # it ran to the end: its result and its note
-    assert tools[1]["content"].startswith("not run")
+    assert tools[0]["notes"] == ["a rule"]
+    assert tools[1]["content"].startswith("not run") and tools[1]["notes"] == []
     assert kernel.ran == ["a"]
 
 

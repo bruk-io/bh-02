@@ -320,8 +320,9 @@ or CLAUDE.md, or a rule for some files, arrives whole with the result of the fir
 opens a file it covers, as Claude Code's do when its Read, Write or Edit touches one. It asks
 the `system` value (`touched`), so the context files are the ones the `system` row's config
 names (`root`, `home`, `files`), read and searched once for the prompt and for this. Both
-depend on `transcript`, so after `/clear` or `/compact` they tell the new conversation again, and read what it
-holds, so a resumed session (`--resume`) is not told again a note told with an earlier result.
+depend on `transcript`, so after `/clear` or `/compact` they tell the new conversation again, and read the
+notes it keeps with each result (`notes` on the result's entry), so a resumed session (`--resume`)
+is not told again a note told with an earlier result.
 
 The kernel is a worker process started by the `jail` row. `brig:jail` confines it: writes
 only inside the project (and never to the layer files, the host's import paths, `.git/hooks`,

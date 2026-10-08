@@ -118,12 +118,13 @@ def test_shell_hints_tell_each_kind_of_shell_work_once_a_conversation() -> None:
     assert hints({"code": "subprocess.run(['git', '--version'])"}) == ""
 
 
-def test_a_resumed_conversation_is_not_told_again_a_kind_its_transcript_told() -> None:
+def test_a_resumed_conversation_from_before_the_loop_kept_notes_is_searched_for_what_it_told() -> None:
     """A resumed session (or the row reloaded) starts a new `ShellHints`, but the transcript
-    holds what the model was told: a kind a shell note in a `tool` entry named, after a blank
-    line, is told already. One the person quoted, or one an entry starts with (an input printed
-    it), is not. The transcript is read once, at the first input; an empty one (a new
-    conversation, after /clear) tells every kind afresh."""
+    holds what the model was told. An entry from before the loop kept `notes` holds it only in
+    its text: a kind a shell note there named, after a blank line, is told already. One the
+    person quoted, or one an entry starts with (an input printed it), is not. The transcript is
+    read once, at the first input; an empty one (a new conversation, after /clear) tells every
+    kind afresh."""
     read = "subprocess.run(['cat', 'a.txt'])"
     transcript = _Kept(
         {"role": "user", "content": f"why this?\n\n{shell_note((('sed', 'edit'),))}"},
@@ -144,6 +145,25 @@ def test_a_resumed_conversation_is_not_told_again_a_kind_its_transcript_told() -
     assert hints({"code": "subprocess.run(['sed', 'p', 'f'])"}) == ""  # told now: once
     assert transcript.reads == 1
     assert ShellHints(_Kept())({"code": read}).startswith("(this input ran `cat` through a shell.")
+
+
+def test_a_resumed_conversation_reads_the_shell_notes_the_loop_kept_on_each_entry() -> None:
+    """The loop keeps the notes it told with a result on its entry (`notes`), so a kind is told
+    already when a shell note there names it, wherever the notes sorted and whatever the result
+    printed: a note the result printed (after a blank line, as one told would be) is not one told.
+    An entry without `notes` (written before the loop kept them) is searched as before."""
+    other = "Zebra: another row's note, sorted after the shell note."
+    told = shell_note((("cat", "read"),))
+    printed = shell_note((("ls", "list"),))
+    transcript = _Kept(
+        {"role": "tool", "content": f"one\n\n{told}\n\n{other}", "call_id": "c0", "notes": [told, other]},
+        {"role": "tool", "content": f"two\n\n{printed}", "call_id": "c1", "notes": []},
+        {"role": "tool", "content": f"three\n\n{shell_note((('rm', 'files'),))}", "call_id": "c2"},
+    )
+    hints = ShellHints(transcript)
+    assert hints({"code": "subprocess.run(['head', 'a.txt'])"}) == ""  # in the entry's notes
+    assert hints({"code": "subprocess.run(['cp', 'a', 'b'])"}) == ""  # an entry from before them
+    assert hints({"code": "subprocess.run(['find', '.'])"}).startswith("(this input ran `find`")
 
 
 def test_a_transcript_from_before_the_memory_broker_tells_its_shell_notes_too() -> None:
