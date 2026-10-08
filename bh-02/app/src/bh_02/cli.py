@@ -29,6 +29,8 @@ from bh_02.bootstrap import (
     config_directories,
     credential_files,
     layers,
+    memory_directory,
+    project_of,
     read_layers,
     run,
     unreadable,
@@ -276,12 +278,15 @@ def _launch(
     # token (this run's, and the default one when `XDG_STATE_HOME` moves this run's elsewhere):
     # no jailed input may read any of them. Another state root, of a run with another
     # `XDG_STATE_HOME`, is not known here. And bh-02's configuration (this run's and the default
-    # one), whose files the host reads and trusts: no jailed input may write there.
+    # one), whose files the host reads and trusts: no jailed input may write there. And the
+    # project's auto memory directory, made here so the jail can let an input write it.
     credentials = credential_search()
     states = [listing.root, str(sessions.default_state_root())] if listing.root else []
     beside = [Path.cwd() / CREDENTIAL_FILE]
     secrets = unreadable(credentials, beside, (str(Path(state).resolve()) for state in states))
     trusted = config_directories(os.environ, Path.home())
+    memory = memory_directory(project_of(Path.cwd().resolve()), os.environ, Path.home())
+    Path(memory).mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         asyncio.run(
             run(
@@ -292,6 +297,7 @@ def _launch(
                 credentials=credentials,
                 secrets=secrets,
                 trusted=trusted,
+                memory=memory,
             )
         )
     except CompositionError as error:

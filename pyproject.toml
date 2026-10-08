@@ -210,6 +210,8 @@ exclude = [
     "bh_02.cli:_session", "bh_02.cli:main", "bh_02.cli:sessions_command",
     "bh_02.cli:update_layer_command",                         # rewrites a layer file, keeping FILE.bak
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
+    "bh_02.cli:_launch",                                      # makes the project's auto memory directory
+    "bh_02.bootstrap:project_of",                             # reads .git: a worktree's main repository
     "agent_cordis_plugin.transcript:FileTranscript.*",
     "agent_cordis_plugin.transcript:rewrite",                 # /compact: the new conversation written whole (temp, then replace), the old kept as .bak, .bak.2, ...
     "agent_cordis_plugin.compact:compact_conversation",       # /compact: reads the transcript's file, shows that it asks, then rewrites it
@@ -271,6 +273,8 @@ exclude = [
     "memory_cordis_plugin.reading:read", "memory_cordis_plugin.reading:_opened",
     "memory_cordis_plugin.reading:_named", "memory_cordis_plugin.reading:roots",
     "memory_cordis_plugin.wiring:memory.run",
+    # auto memory's index, read once a conversation from its directory through no link
+    "memory_cordis_plugin.auto:AutoMemory.*",
     # the kernel: a socket to a process a jail started, the process itself, and the worker program
     "kernel_cordis_plugin.client:Kernel.*",
     "kernel_cordis_plugin.unjailed:_Process.*", "kernel_cordis_plugin.unjailed:Unjailed.start",

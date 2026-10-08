@@ -131,8 +131,9 @@ _STACKS: Mapping[str, Callable[[], Stack]] = {"darwin": scratch_darwin, "linux":
 class Layers(Protocol):
     """What the jail needs of the `layers` value (CONTRACTS.md: layers): the composition's files,
     which an input may not write; where bh-02 looks for its credential, where an input may
-    create nothing; the secrets, which it may not read; and bh-02's configuration directories
-    (`trusted`), whose files the host reads and trusts, which it may not write."""
+    create nothing; the secrets, which it may not read; bh-02's configuration directories
+    (`trusted`), whose files the host reads and trusts, which it may not write; and the project's
+    auto memory directory (`memory`), which it may write ('' for none)."""
 
     @property
     def paths(self) -> tuple[str, ...]: ...
@@ -142,6 +143,8 @@ class Layers(Protocol):
     def secrets(self) -> tuple[str, ...]: ...
     @property
     def trusted(self) -> tuple[str, ...]: ...
+    @property
+    def memory(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,14 +175,17 @@ def spec_for(
     host: Sequence[str],
     secrets: Sequence[str] = (),
     trusted: Sequence[str] = (),
+    memory: str = "",
 ) -> Spec:
     """The jail's Spec. `host` is every path the host process loads code from; any under a
     writable root is denied, as are the layer files and brig's self-modification list.
     `secrets` (absolute) may not be read, wherever they are. `trusted` (absolute directories:
     bh-02's configuration, whose files the host reads and trusts) may not be written where
-    they are under a writable root."""
+    they are under a writable root. `memory` (absolute: the project's auto memory directory, ''
+    for none) may be written, as a root of its own outside the project: no self-modification
+    list applies there, since nothing reads it but the memory row, through no link."""
     roots = [str(Path(root, w).resolve()) for w in config.write]
-    writable = [*roots, scratch]
+    writable = [*roots, scratch, *([str(Path(memory).resolve())] if memory else [])]
     # A host import path *inside* a writable root is denied. One that *is* a root (the project
     # itself on sys.path, as under `python -m bh_02`) is not: denying it would make the project
     # read-only. What that leaves: a module an input writes at the project root could shadow one
@@ -869,6 +875,7 @@ class BrigJail:
             host=host,
             secrets=self._layers.secrets,
             trusted=self._layers.trusted,
+            memory=self._layers.memory,
         )
         if self._platform == "linux":
             readable = readable_roots(argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE)

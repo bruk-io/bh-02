@@ -9,7 +9,9 @@ gate's `brig-one-adapter`).
 
 `spec_for` is the policy, as a pure function:
 
-- **writes**: the project root and a scratch directory of the jail's own (`TMPDIR`), except
+- **writes**: the project root, a scratch directory of the jail's own (`TMPDIR`), and the
+  project's auto memory directory (`layers.memory`, outside the project: the model keeps its
+  notes there across sessions, and only the memory rows read it, through no link), except
   the composition's layer files (`layers`), every path the host imports code from that sits
   under a writable root (`sys.path` entries, the interpreter's prefix), brig's
   self-modification list (`.git/hooks`, `.git/config`, `.claude`, shell rc files, editor

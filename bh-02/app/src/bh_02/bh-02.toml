@@ -68,6 +68,15 @@ use = "memory:memory"
 id = "on-touch"
 use = "memory:on_touch"
 
+# Auto memory: the notes the model keeps for itself across conversations, in the project's own
+# directory outside the repository ($XDG_STATE_HOME/bh-02/projects/<project>/memory, which the
+# jail lets an input write), and the MEMORY.md index, read at the start of each conversation. A
+# row of its own over `transcript`, so a new conversation reads the index afresh; set
+# `disabled = true` on it to turn auto memory off.
+[[plugin]]
+id = "memory-auto"
+use = "memory:auto"
+
 # The app: binds `input`, `output` and `frame` (where rows push status). It depends on its
 # config alone, so no reload elsewhere restarts it.
 [[plugin]]

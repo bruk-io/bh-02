@@ -97,7 +97,8 @@ class Source:
 
 @dataclass(frozen=True, slots=True)
 class Entry:
-    """One memory file as `/memory` lists it and the prompt tells it: `state` is `loaded` (its
+    """One memory file as `/memory` lists it and the prompt tells it (the auto memory index, kind
+    `auto`, is the memory-auto row's to tell): `state` is `loaded` (its
     `text` told), `on demand` (told when an input opens a file it covers), `missing`, `excluded`,
     `skipped` (an AGENTS.md `instruction_files` leaves out) or `not read` (`why`)."""
 
@@ -112,8 +113,9 @@ class Memory:
     keeps nothing, so `/memory` on the event loop and the prompt in the loop's worker thread may
     ask at once."""
 
-    def __init__(self, config: MemoryConfig) -> None:
+    def __init__(self, config: MemoryConfig, auto: str = "") -> None:
         self._config = config
+        self._auto = auto  # the project's auto memory directory ('' for none), for `/memory`
 
     @property
     def instruction_files(self) -> str:
@@ -141,6 +143,9 @@ class Memory:
             entries += self._entry(source, files, root, home, seen)
         for path in skipped:
             entries.append(Entry(Source(path, "agents", path.parent), "skipped"))
+        if self._auto:
+            index = Path(self._auto) / "MEMORY.md"
+            entries.append(Entry(Source(index, "auto"), "loaded" if os.path.lexists(index) else "missing"))
         return entries
 
     def touched(self, paths: Sequence[str]) -> list[tuple[str, str]]:
@@ -372,6 +377,8 @@ def described(entries: Sequence[Entry], root: Path, home: Path) -> str:
     parts: list[str] = []
     for entry in entries:
         named = where(entry.source.path, root, home)
+        if entry.source.kind == "auto":
+            continue  # the memory-auto row's section, read once a conversation
         if entry.state == "loaded" and entry.text:
             parts.append(f"Contents of {named} ({label(entry.source, root, home)}):\n\n{entry.text}")
         elif entry.state == "not read" and entry.source.kind == "imported":
@@ -409,6 +416,10 @@ def label(source: Source, root: Path, home: Path) -> str:
             )
         case "rule":
             return "a project rule"
+        case "auto":
+            return (
+                "the model's auto memory index, told at the start of each conversation (the memory-auto row)"
+            )
         case _:
             return f"imported by {where(source.by or source.path, root, home)}"
 

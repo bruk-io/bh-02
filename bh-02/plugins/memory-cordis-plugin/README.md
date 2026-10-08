@@ -3,13 +3,14 @@
 Claude Code's memory in bh-02, as [Claude Code's docs](https://code.claude.com/docs/en/memory)
 describe it: the CLAUDE.md and AGENTS.md files, the files they import and the rules, found where
 Claude Code finds them and told as a section of the system prompt; the ones for a subdirectory
-or some files told with the result of the first input that opens a file they cover; and
-`/memory`, which lists them. The system prompt itself is agent's (`agent:system`); this adds a
+or some files told with the result of the first input that opens a file they cover; auto
+memory, the notes the model keeps for itself; and `/memory`, which lists them. The system prompt itself is agent's (`agent:system`); this adds a
 section to it.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `memory:memory` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`) |
+| `memory:memory` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `layers` (`memory`: for `/memory`) |
+| `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index | `system` (`add`), `layers` (`memory`), `transcript` (its lifetime) |
 | `memory:on_touch` | adds `OnTouch` to `notes`; no config: the memory files are `memory`'s | `memory` (`touched`), `notes` (`add`), `transcript` (`messages`) |
 
 ## What loads at launch
@@ -77,7 +78,29 @@ does not load one its own tools read. It depends on `transcript`, so a new conve
 - **`/memory` lists, it doesn't open.** bh-02's app owns the terminal, so `/memory` names each
   file, marked by how it loads (✓ at launch, … on demand, · not there, ✗ excluded or not read),
   and you open one in your own editor.
-- **Auto memory** (the notes Claude Code writes itself) is not here yet.
+- **Auto memory has no tool of its own.** The model writes its notes with plain Python, as it
+  writes any file; what it is told is how.
+
+## Auto memory
+
+`memory:auto` is Claude Code's auto memory: notes the model keeps for itself across
+conversations. Each project has a directory of its own outside the repository,
+`$XDG_STATE_HOME/bh-02/projects/<project>/memory` (else under `~/.local/state`), where
+`<project>` is the git repository's root (a worktree's main repository, so its worktrees share
+one), named as Claude Code names it (every character but a letter or a digit a `-`). The
+command line works it out (`bh_02.bootstrap.memory_directory`), makes it, and hands it to the
+`layers` value, whose `memory` the jail lets an input write. On Linux it is the one directory
+outside the project the jail lets an input read, so another project's memory is not there.
+
+The model is told how to keep it (`auto_section`): what is worth a memory and what is not, its
+four kinds (`user`, `feedback`, `project`, `reference`), one topic file per memory with
+frontmatter, and one line for each in `MEMORY.md`, the index. The index's first 200 lines or
+25KB (`indexed`) follow, read from the directory through no link (the model writes it). It is
+read once a conversation, at its first reading of the prompt, and kept for the rest of it
+(`AutoMemory`; the row depends on `transcript`, so `/clear` and `/compact` read it afresh), as
+Claude Code reads it at the start of one: a write to it later in the conversation is the
+model's own, and telling it back as a change in its instructions would only repeat it.
+`disabled = true` on the `memory-auto` row turns auto memory off.
 
 ## Reading safely
 
