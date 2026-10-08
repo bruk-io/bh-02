@@ -29,8 +29,10 @@ One policy, two platforms; only the stack and the read model differ:
   everything but the secrets.
 - Linux: brig's `strict_linux()` (bubblewrap). Reads by allowlist, so `allowlisted` turns the
   policy into one: what is readable is the system tree (`/usr`, `/etc`, ...), the interpreter
-  (`sys.base_prefix`, `sys.prefix`), the directories the command names, and what the policy
-  lets an input write. Everything else does not exist in the jail, the home directory included.
+  (`sys.base_prefix`, `sys.prefix`), the directories the command names, bh-02's own code
+  (`code`, read-only: the extensions' worker imports cordis, with an editable install from the
+  workspace), and what the policy lets an input write. Everything else does not exist in the
+  jail, the home directory included.
   The secrets stay `read_denies`, now brig's carve-outs: one inside that tree (a `local.env` at
   the project root) is masked if it exists, and one that does not exist yet is not, which
   brig's `fs_read` grade says (`best_effort`, naming it); an absent one where bh-02 looks for
@@ -136,7 +138,8 @@ class Layers(Protocol):
     which an input may not write; where bh-02 looks for its credential, where an input may
     create nothing; the secrets, which it may not read; bh-02's configuration directories
     (`trusted`), whose files the host reads and trusts, which it may not write; and the
-    directories bh-02 runs its own code from (`code`), which it may not write either."""
+    directories bh-02 runs its own code from (`code`), which every jail reads and no input
+    writes."""
 
     @property
     def paths(self) -> tuple[str, ...]: ...
@@ -259,15 +262,22 @@ def allowlisted(spec: Spec, readable: Sequence[str], hold: Collection[str] = ())
 
 
 def readable_roots(
-    *, argv: Sequence[str], interpreter: Sequence[str], system: Sequence[str]
+    *,
+    argv: Sequence[str],
+    interpreter: Sequence[str],
+    system: Sequence[str],
+    code: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """What a Linux jail reads besides what it may write: the system tree, the interpreter's
     trees (the standard library under `sys.base_prefix`, the environment under `sys.prefix`),
-    and the directory of every absolute path the command names (the worker program's own). Not
-    the host's whole `sys.path`: under pytest or `python -m` it holds the workspace root, and
-    with it the workspace's `local.env`, for nothing a stdlib-only worker needs."""
+    the directory of every absolute path the command names (the worker program's own), and
+    bh-02's own code (`code`: the directory of each package it runs, which the extensions'
+    worker imports cordis from; with an editable install, the workspace's `src/cordis`, which
+    the interpreter's trees don't hold). Not the host's whole `sys.path`: under pytest or
+    `python -m` it holds the workspace root, and with it the workspace's `local.env`, for
+    nothing a worker needs."""
     named = [str(Path(arg).parent) for arg in argv if arg.startswith("/")]
-    return tuple(dict.fromkeys([*system, *interpreter, *named]))
+    return tuple(dict.fromkeys([*system, *interpreter, *named, *code]))
 
 
 def uncovered(denies: Sequence[str]) -> tuple[str, ...]:
@@ -362,12 +372,14 @@ def released_for(free: Sequence[str], still: Sequence[str], others: bool = False
 
 
 def told_reads(trees: Sequence[str], own: Sequence[str]) -> tuple[str, ...]:
-    """The trees a jail reads, as the model is told them: each once, the jail's own directories
-    (its scratch and the kernel's socket, named anew at every start) as `$TMPDIR` alone, so the
-    prompt is the same from one kernel to the next (the claude-code provider starts Claude Code
-    again when it changes)."""
+    """The trees a jail reads, as the model is told them: each once, none that another of them
+    holds (bh-02's own code, or the interpreter's environment, inside the project), the jail's
+    own directories (its scratch and the kernel's socket, named anew at every start) as `$TMPDIR`
+    alone, so the prompt is the same from one kernel to the next (the claude-code provider starts
+    Claude Code again when it changes)."""
     kept = [t for t in trees if not any(t == o or t.startswith(o + "/") for o in own)]
-    return (*dict.fromkeys(kept), "$TMPDIR")
+    outer = [t for t in kept if not any(t.startswith(o + "/") for o in kept)]
+    return (*dict.fromkeys(outer), "$TMPDIR")
 
 
 def git_author(name: str, email: str) -> tuple[tuple[str, str], ...]:
@@ -588,8 +600,9 @@ class _Jailed:
 
     def reads(self) -> tuple[str, ...]:
         """The trees this start's program can read, when that is all it can read (`told_reads`):
-        a Linux jail's allowlist (the system, the interpreter, the program's own directory) and
-        the roots it may write. Empty on darwin, whose jail reads everything but the secrets."""
+        a Linux jail's allowlist (the system, the interpreter, the program's own directory,
+        bh-02's own code) and the roots it may write. Empty on darwin, whose jail reads
+        everything but the secrets."""
         return self._facts.reads
 
     def writes(self) -> tuple[str, ...]:
@@ -888,7 +901,9 @@ class BrigJail:
             code=self._layers.code,
         )
         if self._platform == "linux":
-            readable = readable_roots(argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE)
+            readable = readable_roots(
+                argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE, code=self._layers.code
+            )
             links = [link for arg in argv if arg.startswith("/") for link in self._linked_dirs(arg)]
             hold = [c for c in self._layers.credentials if not Path(c).exists()]
             spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()], hold)

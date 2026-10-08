@@ -115,8 +115,9 @@ def test_the_bh_02_command_boots_handing_the_jail_the_directories_bh_02_runs_cod
     """The launch hands the jail the directory of every package bh-02 runs code from
     (`layers.code`): its own, cordis's, cordis_helpers's, brig's and each installed plugin's, as
     installed, found by name. With this editable install those are the workspace's `src/<package>`
-    directories: the shipped context file is in one, which no input may write when bh-02 works on
-    its own checkout. Never the workspace itself, whose `local.env` no input may read."""
+    directories: the shipped context file is in one (which no input may write when bh-02 works on
+    its own checkout), and the extensions' worker imports cordis from another (which a Linux jail
+    must let it read). Never the workspace itself, whose `local.env` no input may read."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     work = tmp_path / "work"
     work.mkdir()

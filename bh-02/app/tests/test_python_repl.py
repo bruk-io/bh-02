@@ -11,9 +11,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -31,6 +32,7 @@ from bh_02.bootstrap import (
 from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group, self_modify_denied
 from cordis import Row
 from cordis.loader import boot
+from extensions_cordis_plugin import Extensions, ExtensionsConfig
 from kernel_cordis_plugin import Kernel, KernelConfig, worker_argv
 from models_cordis_plugin.local_env import token_file
 
@@ -529,9 +531,9 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
     extensions' worker, whose jail also holds the absent `local.env` where bh-02 looks for its
     credential (and takes the shared jail lock). `/release` stops it too, so the path is free
     and nothing claims another session holds it; the jail stays released, so the extensions'
-    worker does not start again before the next input. (A stand-in program here: under a Linux
-    jail an editable install's extensions' worker can't import cordis, which lives outside
-    what the jail reads.)"""
+    worker does not start again before the next input. (A stand-in program here: what the
+    release stops is the jail's, whatever runs in it; the real extensions' worker under a Linux
+    jail is `test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install`'s.)"""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the hold is bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -572,6 +574,67 @@ def _code() -> tuple[str, ...]:
     (`layers.code`): with this editable install, the workspace's `src/<package>` directories."""
     plugins = (ep.module for ep in importlib.metadata.entry_points(group="cordis.plugins"))
     return code_directories(code_packages(plugins))
+
+
+_HELLO = """
+from cordis import Effects, acquire, component
+
+@component
+async def hello(*, commands) -> Effects:
+    async def run(args: str) -> str:
+        return f"hello {args}"
+
+    yield acquire(commands.register, {"name": "hello", "help": "Say hello", "usage": "/hello NAME"}, run)
+"""
+
+
+class _Added:
+    """What the extensions add to bh-02, for a test: `commands` (`register`), `frame` (`status`)
+    and `system` (`add`) at once; and an `approval` that confines, as a jail's does."""
+
+    confined = True
+
+    def __init__(self) -> None:
+        self.runs: dict[str, Callable[[str], Awaitable[Any]]] = {}
+
+    def register(self, spec: Mapping[str, Any], run: Callable[[str], Awaitable[Any]]) -> Callable[[], None]:
+        self.runs[str(spec["name"])] = run
+        return lambda: None
+
+    def status(self, field: str, text: str, *shorter: str) -> Callable[[], None]:
+        return lambda: None
+
+    def add(self, section: Callable[[], str]) -> Callable[[], None]:
+        return lambda: None
+
+    async def approve(self, request: Mapping[str, Any]) -> bool:
+        return True
+
+
+async def test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Linux jail reads by allowlist, and with an editable install (`uv run` in the checkout,
+    `uv tool install --editable`) the environment's `.pth` files name the workspace's `src`
+    directories, outside the project and the interpreter: the extensions' worker could not import
+    cordis, never listened, and no extension loaded. The jail reads the directories bh-02 runs
+    its own code from (`layers.code`, read-only), so the real worker, in a project elsewhere,
+    loads the model's extension and what it adds reaches bh-02."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    plugins = project / ".bh-02" / "plugins"
+    plugins.mkdir(parents=True)
+    (plugins / "hello.py").write_text(_HELLO)
+    added = _Added()
+    jail = BrigJail(BrigConfig(), _Layers(code=_code()))
+    config = ExtensionsConfig(root=str(project), watch=3600)  # entering looks once
+    async with Extensions(jail, added, added, added, added, config) as extensions:
+        status = json.loads((plugins / "status.json").read_text())
+        assert extensions.statuses["hello"].ok, status
+        assert status["hello"]["state"] == "active", status
+        assert await added.runs["hello"]("there") == "hello there"
 
 
 @pytest.mark.usefixtures("_needs_a_jail")

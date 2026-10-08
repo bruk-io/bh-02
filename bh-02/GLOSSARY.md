@@ -83,7 +83,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **shell hints** (row): `kernel:shell_hints`: an input that ran `cat`, `sed` or `ls` through a shell is told how Python does that, once per kind of work in a conversation (a resumed one's transcript says what it was told).
 - **extension**: a plugin the model writes itself, `.bh-02/plugins/NAME.py` in the project: cordis components bh-02 loads while it runs, jailed, which can add a command, a status field or prompt text and nothing else. **extensions** (row): `extensions:extensions`, which loads them.
 - **session**: one run and everything it keeps, under `$XDG_STATE_HOME/bh-02/sessions/<id>/`, so `--resume` continues it.
-- **sessions** (key), **layers** (key), **harness** (row): rows the shell adds itself, **pinned** after every layer so no layer can remove them: the running session, whose id the status bar shows; the layer files, the paths no input may read or write, and where bh-02's own code is; the wait for the chat's `done`.
+- **sessions** (key), **layers** (key), **harness** (row): rows the shell adds itself, **pinned** after every layer so no layer can remove them: the running session, whose id the status bar shows; the layer files, the paths no input may read or write, and where bh-02's own code is (which every jail reads); the wait for the chat's `done`.
 - **done** (key): what the chat binds; the shell waits on it, and follows it across a restart of the chat row.
 - **usage**: tokens and cost, per turn and summed for the session, in the status bar.
 - **credential**: `CLAUDE_CODE_OAUTH_TOKEN` in `local.env` at the repository root, read by the model row alone; an OpenAI-compatible model's `key` names another line of the same file.

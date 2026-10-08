@@ -205,9 +205,10 @@ named and as resolved, where your models file, context file and startup file are
 reads and trusts, so a jailed input can't write there when it is in the project (bh-02 run from
 your home directory); and `code`: where bh-02 runs its own code from, the directory of every
 package a layer may name (`bh_02`, cordis, cordis_helpers, brig, each installed plugin's) as
-installed, as named and as resolved (`code_directories`), which a jailed input can't write when
-it is in the project (bh-02 working on its own checkout, an editable install: the shipped
-context file, which bh-02 trusts whole, is there); with
+installed, as named and as resolved (`code_directories`), which every jail reads (with an
+editable install, `uv run` here or `uv tool install --editable`, the extensions' worker imports
+cordis from the workspace) and a jailed input can't write when it is in the project (bh-02
+working on its own checkout: the shipped context file, which bh-02 trusts whole, is there); with
 `--no-jail` an input runs with your permissions, so one you approve could open or write them:
 only its environment is scrubbed), `sessions` (the running session,
 whose id the status bar shows) and `harness` (which follows the chat row's `done`, across a
