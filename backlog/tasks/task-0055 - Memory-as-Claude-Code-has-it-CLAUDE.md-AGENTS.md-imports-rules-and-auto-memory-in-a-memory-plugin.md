@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-10-08 13:06'
-updated_date: '2026-10-08 13:06'
+updated_date: '2026-10-08 13:19'
 labels:
   - memory
   - context
@@ -32,3 +32,9 @@ Claude Code's memory (https://code.claude.com/docs/en/memory) as one cordis plug
 - [x] #7 update-layer rewrites layers naming context:project, context:on_touch or agent:memory
 - [ ] #8 Auto memory: MEMORY.md and topic files the model writes in $XDG_STATE_HOME/bh-02/projects/<project>/memory/, which the runner lets an input write; the index's first 200 lines or 25KB told each session
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+memory-cordis-plugin replaces context-cordis-plugin (git history kept: reading.py was context_file.py, rules.py was sections.py, touch.py). agent:system binds the system prompt; agent:notes the after-input broker (was agent:memory). Claude Code's memory: managed policy, ~/.claude/CLAUDE.md and rules, the hierarchy from / to the project (CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md), project rules without paths, AGENTS.md by instruction_files; @imports (4 hops, code skipped, a project file imports nothing outside the project), block HTML comments out, excludes, 4 MiB. On demand: a subdirectory's CLAUDE.md/CLAUDE.local.md/AGENTS.md and .claude/rules, every rule whose paths match; a memory file the model opened itself is not told after. /memory lists. Auto memory: bh_02.bootstrap.memory_directory (XDG_STATE_HOME/bh-02/projects/<project>/memory, project = git root or a worktree's main repo, named as Claude Code names it), made by the command line, layers.memory; brig:jail writes it (verified under real bubblewrap, and refused without it); memory:auto tells how to keep it and MEMORY.md (200 lines/25KB) once a conversation. update-layer rewrites context:project, context:on_touch, agent:memory. Differences from Claude Code: imports out of the project from a project file are not followed (no dialog); /memory lists rather than opens; no modified timestamp on writes.
+<!-- SECTION:NOTES:END -->
