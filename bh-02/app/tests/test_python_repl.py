@@ -414,6 +414,7 @@ class _Layers:
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
+    memory: str = ""
 
 
 async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input(
