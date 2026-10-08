@@ -11,3 +11,4 @@ __pycache__/
 local.env
 *.env
 .claude/worktrees/
+site/

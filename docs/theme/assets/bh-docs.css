@@ -1,0 +1,603 @@
+/*
+ * The documentation site's own styles, on bh-01's tokens (vendor/bh-01: the library's
+ * @bruk-io/bh-01/tokens and /theme exports, unchanged). Only semantic tokens are read: no
+ * colour or size is written here, and no primitive. The frame is bh-01's components, styled by
+ * themselves; this file places them and styles the page body, plain HTML from Markdown, the way
+ * bh-01 styles the same things (Table for tables, Link for links, CommandPalette's key chip for
+ * keys).
+ *
+ * The one mandarin signal in a view is the current page in the sidebar's tree (Tree's own
+ * selected style). The active section's mark in the activity bar is set to plain text colour
+ * through ActivityItem's own override knob, so nothing else at rest is orange. Status is a word
+ * and a colour (admonitions); pine (color-link) is for links and never for a status.
+ */
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+html,
+body {
+  margin: 0;
+  background: var(--bh-color-bg);
+  color: var(--bh-color-text);
+  font-family: var(--bh-font-sans);
+}
+
+body {
+  overflow: hidden;
+}
+
+/* Until bh-01's elements are defined the frame has nothing to draw; show it once they are
+   (a <noscript> rule in the page shows it without them). */
+bh-app-shell:not(:defined) {
+  visibility: hidden;
+}
+
+/* AppShell sizes itself to the viewport; on a phone the dynamic viewport is the one the reader
+   sees (the browser's own bars come and go). */
+bh-app-shell {
+  height: 100dvh;
+  width: 100%;
+  --bh-activity-item-active-border: var(--bh-color-text);
+}
+
+.skip-link {
+  position: fixed;
+  top: var(--bh-spacing-2);
+  left: var(--bh-spacing-2);
+  z-index: var(--bh-z-tooltip);
+  padding: var(--bh-spacing-2) var(--bh-spacing-3);
+  background: var(--bh-color-surface-overlay);
+  color: var(--bh-color-link);
+  border: var(--bh-border-1) solid var(--bh-color-border);
+  border-radius: var(--bh-radius-md);
+  box-shadow: var(--bh-shadow-lg);
+  transform: translateY(-200%);
+  transition: transform var(--bh-duration-fast) var(--bh-ease-default);
+}
+
+.skip-link:focus {
+  transform: none;
+  outline: var(--bh-border-2) solid var(--bh-color-ring);
+  outline-offset: var(--bh-spacing-0-5);
+}
+
+/* ---- The sidebar -------------------------------------------------------------------------- */
+
+bh-sidebar-panel {
+  height: 100%;
+}
+
+bh-sidebar-panel bh-panel-header {
+  flex: 1;
+  min-width: 0;
+}
+
+bh-tree {
+  padding: var(--bh-spacing-2) 0;
+}
+
+bh-tree[hidden] {
+  display: none;
+}
+
+/* Narrow: the open sidebar takes the width beside the activity bar and the page waits behind it
+   (the measured activity width is set by bh-docs.js, so no size is written here). */
+:root[data-narrow] bh-app-shell[sidebar-open]::part(grid) {
+  --bh-shell-sidebar-width: calc(100% - var(--docs-activity-width));
+}
+
+:root[data-narrow] bh-app-shell[sidebar-open] bh-sidebar-panel {
+  --bh-sidebar-panel-width: 100%;
+}
+
+:root[data-narrow] bh-app-shell[sidebar-open] > main {
+  display: none;
+}
+
+/* ---- The status bar ----------------------------------------------------------------------- */
+
+bh-status-bar .build {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bh-spacing-1-5);
+  min-width: 0;
+  white-space: nowrap;
+  font-family: var(--bh-font-mono);
+}
+
+bh-status-bar .build-ref {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bh-spacing-1-5);
+  height: var(--bh-spacing-6);
+  padding: 0 var(--bh-spacing-1-5);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: color var(--bh-duration-fast) var(--bh-ease-default),
+              background var(--bh-duration-fast) var(--bh-ease-default);
+}
+
+.status-action:hover {
+  color: var(--bh-color-text);
+  background: var(--bh-color-surface-raised);
+}
+
+.status-action:focus-visible {
+  outline: var(--bh-border-2) solid var(--bh-color-ring);
+  outline-offset: calc(-1 * var(--bh-border-2));
+}
+
+.theme-toggle [data-theme-name] {
+  color: var(--bh-color-text-muted);
+}
+
+:root[data-theme="light"] .theme-toggle [data-theme-name="light"],
+:root[data-theme="dark"] .theme-toggle [data-theme-name="dark"] {
+  color: var(--bh-color-text);
+  font-weight: var(--bh-font-semibold);
+}
+
+/* A key, as CommandPalette draws a keybinding. */
+kbd {
+  font-family: var(--bh-font-mono);
+  font-size: var(--bh-text-xs);
+  line-height: var(--bh-leading-none);
+  color: var(--bh-color-text-muted);
+  background: var(--bh-color-surface-recessed);
+  padding: var(--bh-spacing-0-5) var(--bh-spacing-1-5);
+  border-radius: var(--bh-radius-sm);
+}
+
+/* ---- The page ------------------------------------------------------------------------------ */
+
+.page-content {
+  display: block;
+  box-sizing: border-box;
+  max-width: calc(var(--bh-spacing-32) * 7);
+  padding: var(--bh-spacing-8) clamp(var(--bh-spacing-4), 5%, var(--bh-spacing-12)) var(--bh-spacing-16);
+  font-size: var(--bh-body-size);
+  font-weight: var(--bh-body-weight);
+  line-height: var(--bh-body-leading);
+  overflow-wrap: break-word;
+}
+
+.page-content:focus {
+  outline: none;
+}
+
+.page-content > :first-child {
+  margin-top: 0;
+}
+
+.page-content h1,
+.page-content h2,
+.page-content h3,
+.page-content h4,
+.page-content h5,
+.page-content h6 {
+  color: var(--bh-color-text-bright);
+  font-weight: var(--bh-heading-weight);
+  line-height: var(--bh-heading-leading);
+  margin: var(--bh-spacing-10) 0 var(--bh-spacing-3);
+  overflow-wrap: break-word;
+}
+
+.page-content h1 {
+  font-size: var(--bh-heading-size);
+  margin-bottom: var(--bh-spacing-6);
+}
+
+.page-content h2 {
+  font-size: var(--bh-text-xl);
+  font-weight: var(--bh-font-semibold);
+  padding-top: var(--bh-spacing-6);
+  border-top: var(--bh-border-1) solid var(--bh-color-border-muted);
+}
+
+.page-content h3 {
+  font-size: var(--bh-text-lg);
+  font-weight: var(--bh-font-semibold);
+  margin-top: var(--bh-spacing-8);
+}
+
+.page-content h4,
+.page-content h5,
+.page-content h6 {
+  font-size: var(--bh-text-base);
+  font-weight: var(--bh-font-semibold);
+  margin-top: var(--bh-spacing-6);
+}
+
+.page-content p,
+.page-content ul,
+.page-content ol,
+.page-content dl,
+.page-content blockquote,
+.page-content table,
+.page-content .admonition,
+.page-content .highlight,
+.page-content > pre {
+  margin: 0 0 var(--bh-spacing-4);
+}
+
+.page-content ul,
+.page-content ol {
+  padding-left: var(--bh-spacing-6);
+}
+
+.page-content li > ul,
+.page-content li > ol,
+.page-content li > p {
+  margin-bottom: var(--bh-spacing-2);
+}
+
+.page-content li + li {
+  margin-top: var(--bh-spacing-1);
+}
+
+.page-content strong {
+  font-weight: var(--bh-font-semibold);
+  color: var(--bh-color-text-bright);
+}
+
+.page-content hr {
+  border: 0;
+  border-top: var(--bh-border-1) solid var(--bh-color-border);
+  margin: var(--bh-spacing-8) 0;
+}
+
+.page-content blockquote {
+  padding: 0 0 0 var(--bh-spacing-4);
+  border-left: var(--bh-border-1) solid var(--bh-color-border-bright);
+  color: var(--bh-color-text-muted);
+}
+
+/* Links: bh-01's Link, default variant. */
+.page-content a {
+  color: var(--bh-color-link);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: color var(--bh-duration-fast) var(--bh-ease-default),
+              text-decoration-color var(--bh-duration-fast) var(--bh-ease-default);
+}
+
+.page-content a:hover {
+  color: var(--bh-color-link-hover);
+  text-decoration-color: currentColor;
+}
+
+.page-content a:focus-visible,
+.skip-link:focus-visible {
+  outline: var(--bh-border-2) solid var(--bh-color-ring);
+  outline-offset: var(--bh-spacing-0-5);
+  border-radius: var(--bh-radius-sm);
+}
+
+/* The heading anchors the toc extension adds: quiet until the heading is pointed at. */
+.page-content a.headerlink {
+  margin-left: var(--bh-spacing-2);
+  color: var(--bh-color-text-muted);
+  font-family: var(--bh-font-mono);
+  font-weight: var(--bh-font-normal);
+  text-decoration: none;
+  opacity: 0;
+}
+
+.page-content :is(h1, h2, h3, h4, h5, h6):hover a.headerlink,
+.page-content a.headerlink:focus-visible {
+  opacity: 1;
+}
+
+/* ---- Code: mono, in a recessed well ------------------------------------------------------- */
+
+/* Inline code: a quiet chip that shows on either theme's ground; a long name may break anywhere,
+   so a narrow column never has to scroll. */
+.page-content code {
+  font-family: var(--bh-font-mono);
+  font-size: var(--bh-text-sm);
+  background: var(--bh-color-secondary);
+  color: var(--bh-color-secondary-text);
+  border-radius: var(--bh-radius-sm);
+  padding: var(--bh-spacing-0-5) var(--bh-spacing-1);
+  overflow-wrap: anywhere;
+}
+
+.page-content a code {
+  color: inherit;
+}
+
+.page-content :is(h1, h2, h3, h4, h5, h6) code {
+  font-size: inherit;
+}
+
+.page-content .highlight,
+.page-content > pre {
+  position: relative;
+}
+
+.page-content pre {
+  margin: 0;
+  padding: var(--bh-spacing-3) var(--bh-spacing-4);
+  overflow-x: auto;
+  background: var(--bh-color-surface-recessed);
+  border: var(--bh-border-1) solid var(--bh-color-border);
+  border-radius: var(--bh-radius-lg);
+  box-shadow: var(--bh-shadow-inset);
+  font-family: var(--bh-font-mono);
+  font-size: var(--bh-text-sm);
+  line-height: var(--bh-leading-relaxed);
+  overflow-wrap: normal;
+}
+
+.page-content pre code {
+  display: block;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  font-size: inherit;
+  white-space: pre;
+}
+
+/* No syntax colours but one: comments step back. */
+.page-content .highlight :is(.c, .c1, .ch, .cm, .cp, .cpf, .cs, .gp) {
+  color: var(--bh-color-text-muted);
+}
+
+.copy-code {
+  position: absolute;
+  top: var(--bh-spacing-1-5);
+  right: var(--bh-spacing-1-5);
+  padding: var(--bh-spacing-0-5) var(--bh-spacing-2);
+  font-family: var(--bh-font-sans);
+  font-size: var(--bh-text-xs);
+  line-height: var(--bh-leading-normal);
+  color: var(--bh-color-text-muted);
+  background: var(--bh-color-surface);
+  border: var(--bh-border-1) solid var(--bh-color-border);
+  border-radius: var(--bh-radius-md);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--bh-duration-fast) var(--bh-ease-default),
+              color var(--bh-duration-fast) var(--bh-ease-default);
+}
+
+.page-content :is(.highlight, pre):hover > .copy-code,
+.copy-code:focus-visible,
+.copy-code[data-copied] {
+  opacity: 1;
+}
+
+.copy-code:hover {
+  color: var(--bh-color-text);
+}
+
+.copy-code:focus-visible {
+  outline: var(--bh-border-2) solid var(--bh-color-ring);
+  outline-offset: var(--bh-spacing-0-5);
+}
+
+@media (hover: none) {
+  .copy-code {
+    opacity: 1;
+  }
+}
+
+/* ---- Tables: bh-01's Table, default variant and density ----------------------------------- */
+
+.page-content table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--bh-color-surface-raised);
+  border: var(--bh-border-1) solid var(--bh-color-border);
+  border-radius: var(--bh-radius-lg);
+  overflow: hidden;
+  font-family: var(--bh-font-sans);
+  font-size: var(--bh-text-sm);
+  line-height: var(--bh-leading-normal);
+}
+
+.page-content thead {
+  background: var(--bh-color-surface);
+}
+
+.page-content th,
+.page-content td {
+  padding: var(--bh-spacing-3) var(--bh-spacing-4);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: var(--bh-border-1) solid var(--bh-color-border);
+}
+
+.page-content th {
+  font-weight: var(--bh-font-semibold);
+  color: var(--bh-color-text-muted);
+  white-space: nowrap;
+}
+
+.page-content td {
+  color: var(--bh-color-text);
+}
+
+.page-content tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.page-content tbody tr:hover {
+  background: var(--bh-color-secondary);
+}
+
+.page-content td code {
+  font-size: inherit;
+}
+
+/* Narrow: Table's compact density; headers wrap between words and cells anywhere, so a table
+   fits the column without scrolling sideways. */
+:root[data-narrow] .page-content th,
+:root[data-narrow] .page-content td {
+  padding: var(--bh-spacing-1-5) var(--bh-spacing-3);
+  font-size: var(--bh-text-xs);
+}
+
+:root[data-narrow] .page-content th {
+  white-space: normal;
+}
+
+:root[data-narrow] .page-content td {
+  overflow-wrap: anywhere;
+}
+
+/* ---- Admonitions: a word and a colour ----------------------------------------------------- */
+
+.page-content .admonition {
+  padding: var(--bh-spacing-3) var(--bh-spacing-4);
+  background: var(--bh-color-surface);
+  border: var(--bh-border-1) solid var(--bh-color-border);
+  border-radius: var(--bh-radius-lg);
+}
+
+.page-content .admonition > :last-child {
+  margin-bottom: 0;
+}
+
+.page-content .admonition-title {
+  margin: 0 0 var(--bh-spacing-1);
+  font-weight: var(--bh-font-semibold);
+  color: var(--bh-color-text);
+}
+
+.page-content .admonition-title::after {
+  content: ":";
+}
+
+.page-content .admonition:is(.warning, .caution, .attention) {
+  border-color: var(--bh-color-warning);
+}
+
+.page-content .admonition:is(.warning, .caution, .attention) > .admonition-title {
+  color: var(--bh-color-warning);
+}
+
+.page-content .admonition:is(.danger, .error, .failure, .bug) {
+  border-color: var(--bh-color-danger);
+}
+
+.page-content .admonition:is(.danger, .error, .failure, .bug) > .admonition-title {
+  color: var(--bh-color-danger);
+}
+
+.page-content .admonition:is(.success, .check, .done) {
+  border-color: var(--bh-color-success);
+}
+
+.page-content .admonition:is(.success, .check, .done) > .admonition-title {
+  color: var(--bh-color-success);
+}
+
+/* ---- API reference (mkdocstrings) --------------------------------------------------------- */
+
+.page-content .doc-object {
+  margin-bottom: var(--bh-spacing-6);
+}
+
+.page-content .doc-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--bh-spacing-2);
+}
+
+.page-content .doc-object-name {
+  font-family: var(--bh-font-mono);
+}
+
+.page-content .doc-heading code,
+.page-content .doc-label code {
+  background: none;
+  color: inherit;
+  padding: 0;
+}
+
+/* What kind of object, as a quiet chip (mkdocstrings leaves the word to the stylesheet). */
+.page-content .doc-heading .doc-symbol {
+  font-family: var(--bh-font-mono);
+  font-size: var(--bh-text-xs);
+  font-weight: var(--bh-font-medium);
+  line-height: var(--bh-leading-none);
+  color: var(--bh-color-text-muted);
+  background: var(--bh-color-secondary);
+  border-radius: var(--bh-radius-full);
+  padding: var(--bh-spacing-1) var(--bh-spacing-2);
+}
+
+.page-content .doc-symbol-class::after { content: "class"; }
+.page-content .doc-symbol-function::after { content: "function"; }
+.page-content .doc-symbol-method::after { content: "method"; }
+.page-content .doc-symbol-attribute::after { content: "attribute"; }
+.page-content .doc-symbol-type_alias::after { content: "type"; }
+.page-content .doc-symbol-module::after { content: "module"; }
+
+.page-content .doc-labels {
+  display: inline-flex;
+  gap: var(--bh-spacing-1);
+}
+
+.page-content .doc-label {
+  font-size: var(--bh-text-xs);
+  color: var(--bh-color-text-muted);
+}
+
+.page-content .doc-label::before { content: "("; }
+.page-content .doc-label::after { content: ")"; }
+
+.page-content .doc-class-bases {
+  color: var(--bh-color-text-muted);
+}
+
+/* A class's own members sit under it. */
+.page-content .doc-children .doc-children {
+  padding-left: var(--bh-spacing-4);
+  border-left: var(--bh-border-1) solid var(--bh-color-border-muted);
+}
+
+.page-content .doc-children .doc-children .doc-heading {
+  border-top: 0;
+  padding-top: 0;
+}
+
+/* ---- Previous and next -------------------------------------------------------------------- */
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--bh-spacing-2);
+  margin-top: var(--bh-spacing-12);
+  padding-top: var(--bh-spacing-4);
+  border-top: var(--bh-border-1) solid var(--bh-color-border);
+}
+
+.pager-next {
+  margin-left: auto;
+}
+
+/* bh-01's motion rule, for this page's own transitions: a reader who asks for reduced motion
+   gets instant changes. (The library's components don't do this yet.) */
+@media (prefers-reduced-motion: reduce) {
+  .skip-link,
+  .status-action,
+  .page-content a,
+  .copy-code {
+    transition: none;
+  }
+}

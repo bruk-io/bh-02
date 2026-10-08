@@ -23,6 +23,12 @@ dev = [
     "pypeeker @ git+https://github.com/brukhabtu/pypeeker@cf4f168",
     # brig's property tests
     "hypothesis>=6.112",
+    # the documentation site (mkdocs.yml, docs/): MkDocs, the plugin that includes the READMEs,
+    # the API reference from cordis's docstrings, and the Markdown extensions mkdocs.yml names
+    "mkdocs>=1.6.1",
+    "mkdocs-include-markdown-plugin>=7.3.0",
+    "mkdocstrings[python]>=1.0.6",
+    "pymdown-extensions>=12.1",
 ]
 
 [tool.pytest.ini_options]
@@ -62,7 +68,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RET"]
 [tool.mypy]
 strict = true
 python_version = "3.15"
-files = ["bh-02/app/src", "bh-02/plugins/*/src", "libs/*/src", "examples/*/app/src", "examples/*/plugins/*/src"]
+# docs/hooks: the documentation site's MkDocs hook
+files = ["bh-02/app/src", "bh-02/plugins/*/src", "libs/*/src", "examples/*/app/src", "examples/*/plugins/*/src", "docs/hooks"]
 
 # venusian is untyped upstream; cordis.authoring is the only module that touches it.
 [[tool.mypy.overrides]]
@@ -82,6 +89,7 @@ ignore_missing_imports = true
 src = [
     "bh-02/app/src", "bh-02/app/tests", "bh-02/plugins/*/src", "bh-02/plugins/*/tests",
     "examples/*/app/src", "examples/*/app/tests", "examples/*/plugins/*/src", "examples/*/plugins/*/tests",
+    "docs/hooks",  # the documentation site's MkDocs hook
 ]
 
 [tool.pypeeker]
@@ -108,6 +116,7 @@ src = [
     "bh-02/plugins/models-cordis-plugin/tests",
     "bh-02/plugins/tui-cordis-plugin/src",
     "bh-02/plugins/tui-cordis-plugin/tests",
+    "docs/hooks",
     "examples/warden/app/src",
     "examples/warden/app/tests",
     "examples/warden/plugins/warden-cordis-plugin/src",
@@ -308,4 +317,6 @@ allow = [
     "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:repl_provider",
     # registered by decorator or by [project.scripts], never called by name
     "bh_02.cli:sessions_command", "bh_02.cli:update_layer_command", "models_cordis_plugin.claude_code.detach:main",
+    # the documentation site's MkDocs hook: MkDocs calls these by name (mkdocs.yml `hooks`)
+    "bh_docs:on_config", "bh_docs:on_page_markdown",
 ]
