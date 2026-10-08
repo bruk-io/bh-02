@@ -29,13 +29,17 @@ the kernel are rows of their own, so the history and the namespace outlive the l
 After each input that ran, the loop calls every function in `memory` with
 `{"code", "result", "touched"}` (`touched`: `kernel.touched()`, the project files the input
 opened) and puts what they return after the result (`remembered`, sorted, so the order rows
-added them in means nothing; one that fails says so in one line). The person sees the input's
-own output as the result, and a `note` for each memory note, by its first line. `memory` is a
+added them in means nothing; one that fails says so in one line). The `tool` entry keeps them as
+a list too (`notes`, `[]` for none and for an input that never ran), beside the text the model
+reads (the result, then each note, then any change in the instructions, each after a blank
+line), so what was told is read back whole, never searched for in a text the result and the
+other notes share. The person sees the input's own output as the result, and a `note` for each
+memory note, by its first line. `memory` is a
 row of its own, depending on nothing, so neither the loop nor a row adding to it reloads the
 other; the rows that add to it (`kernel:shell_hints`, `context:on_touch`) depend on
 `transcript`, so `/clear` starts them afresh and they tell a new conversation again; they read
-its `messages` too, so a resumed one is not told again a note a `tool` entry holds (CONTRACTS.md:
-transcript).
+its `messages` too, so a resumed one is not told again a note a `tool` entry's `notes` hold (an
+entry from before the loop kept them is searched; CONTRACTS.md: transcript).
 
 Each turn is classified by `stops.classify` (pure; the table is in its docstring, after
 ../harness/ARCHITECTURE.MD): only `act` runs calls, only `answered` ends the reply, and a

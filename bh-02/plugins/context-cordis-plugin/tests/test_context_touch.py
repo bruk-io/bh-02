@@ -164,13 +164,13 @@ def test_it_asks_the_system_value_and_tells_each_once() -> None:
     assert told({"code": "1"}) == "" and len(system.asked) == 2  # nothing opened: nothing asked
 
 
-def test_a_resumed_conversation_is_not_told_again_what_its_transcript_was_told() -> None:
+def test_a_resumed_conversation_from_before_the_loop_kept_notes_is_searched_for_what_it_told() -> None:
     """A resumed session (or the row reloaded) starts a new `OnTouch`, but the transcript holds
-    what the model was told: a text a `tool` entry holds whole, after a blank line, is told
-    already. One the person quoted, one an entry starts with (an input printed it), one cut short
-    and one that changed since were not, so each is told. The transcript is read once, at the
-    first input that opens a file; an empty one (a new conversation, after /clear) tells each
-    afresh."""
+    what the model was told. An entry from before the loop kept `notes` holds it only in its
+    text: a text it holds whole, after a blank line, is told already. One the person quoted, one
+    an entry starts with (an input printed it), one cut short and one that changed since were
+    not, so each is told. The transcript is read once, at the first input that opens a file; an
+    empty one (a new conversation, after /clear) tells each afresh."""
     rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand.\n\nNever by script."
     guide = "From src/db/CLAUDE.md, guidance for work under src/db/:\n\nUse the session."
     long, quoted, printed = "From long.md:\n\n" + "L" * 30, "From q.md:\n\nQ.", "From p.md:\n\nP."
@@ -194,9 +194,9 @@ def test_a_resumed_conversation_is_not_told_again_what_its_transcript_was_told()
 def test_a_text_cut_back_since_a_resumed_conversation_was_told_it_is_told_again() -> None:
     """A rule cut back to its first paragraphs since the conversation was told it is still whole
     in the old note, but with the paragraph now gone after it: told again, or the model would keep
-    believing that paragraph. A text counts as told only where its note ends: at the entry's end,
-    at the mark of a note cut short, or where another note begins (bh-02's begin with `(`, the
-    context files' with `From `)."""
+    believing that paragraph. In an entry from before the loop kept `notes`, a text counts as told
+    only where its note ends: at the entry's end, at the mark of a note cut short, or where another
+    note begins (bh-02's begin with `(`, the context files' with `From `)."""
     rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
     guide = "From src/db/CLAUDE.md, guidance for work under src/db/:\n\nUse the session."
     near, changed = "From near.md:\n\nN.", "(bh-02: your instructions have changed ...)"
@@ -207,6 +207,60 @@ def test_a_text_cut_back_since_a_resumed_conversation_was_told_it_is_told_again(
     )
     said = [("/p/rule.md", rule), ("/p/CLAUDE.md", guide), ("/p/near.md", near)]
     assert OnTouch(_Said(*said), transcript)({"touched": ("/p/src/db/x.py",)}) == rule
+
+
+_RULE = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
+_GUIDE = "From src/db/CLAUDE.md, guidance for work under src/db/, where it wins over the guidance before it:"
+
+
+def test_a_resumed_conversation_reads_what_was_told_from_the_notes_kept_on_each_entry() -> None:
+    """The loop keeps the notes it told with a result on its entry (`notes`), so another row's
+    note sorting after this row's is not taken for more of a text, and a note the result printed
+    is not one told."""
+    guide, other = f"{_GUIDE}\n\nUse the session.", "Zebra: another row's note."
+    printed = "From p.md:\n\nP."
+    transcript = _Kept(
+        {
+            "role": "tool",
+            "content": f"6\n\n{guide}\n\n{_RULE}\n\n{other}",
+            "call_id": "c0",
+            "notes": [f"{guide}\n\n{_RULE}", other],
+        },
+        {"role": "tool", "content": f"7\n\n{printed}", "call_id": "c1", "notes": []},
+    )
+    said = [("/p/CLAUDE.md", guide), ("/p/rule.md", _RULE), ("/p/p.md", printed)]
+    assert OnTouch(_Said(*said), transcript)({"touched": ("/p/src/db/x.py",)}) == printed
+
+
+def test_a_guidance_file_cut_back_after_a_paragraph_in_brackets_is_told_again_after_a_resume() -> None:
+    """A file cut back since its text was told is still whole at the start of the old text, the
+    paragraphs now gone after it, however they begin: told again. In one note, a text ends where
+    the note ends, where it was cut short, or where the next text begins, after a blank line: as
+    bh-02's own on-touch functions write them (`From FILE, guidance for work under` or `From
+    FILE, a rule for`), or a section that failed (`(bh-02 could not make the section`)."""
+    trimmed = f"{_GUIDE}\n\nUse the session."
+    near = "From .claude/rules/near.md, a rule for near/**:\n\nN."
+    cut = "From cut/CLAUDE.md, guidance for work under cut/, where it wins over the guidance before it:\n\nC."
+    failed = "(bh-02 could not make the section x:y: boom)"
+    notes = (
+        f"{trimmed}\n\n(Never by script.)",
+        f"{_RULE}\n\nFrom the repository's root, run them with `make migrate`.",
+        f"{near}\n\n{failed}\n\n{cut}\n... [40 more chars of guidance]",
+    )
+    transcript = _Kept(
+        *(
+            {"role": "tool", "content": f"{n}\n\n{note}", "call_id": f"c{n}", "notes": [note]}
+            for n, note in enumerate(notes)
+        )
+    )
+    said = [
+        ("/p/CLAUDE.md", trimmed),
+        ("/p/rule.md", _RULE),
+        ("/p/near.md", near),
+        ("/p/x", failed),
+        ("/p/cut.md", cut),
+    ]
+    assert OnTouch(_Said(*said), transcript)({"touched": ("/p/src/db/x.py",)}) == f"{trimmed}\n\n{_RULE}"
 
 
 async def test_the_row_adds_its_function_to_memory(tmp_path: Path) -> None:

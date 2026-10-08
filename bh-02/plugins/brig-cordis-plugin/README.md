@@ -28,8 +28,21 @@ gate's `brig-one-adapter`).
   itself, an absent one a placeholder, the directories above it pinned, a host change ending the
   jail). Not when the project is that directory or inside it: the deny would leave the project
   read-only, so bh-02 run in its own config lets the model write there, as in any project.
-  a started program's `writes()` names the roots its inputs may write (the kernel reads
-  nothing on the host whose way passes through one);
+  Nor bh-02's own code (`layers.code`: the directory of every package bh-02 runs, its own,
+  cordis's, cordis_helpers's, brig's and each installed plugin's, as installed, as named and as
+  resolved) where one is under a writable root: bh-02 working on its own checkout (`uv run` in
+  it, `uv tool install --editable`), or run from a home the checkout is in. The shipped context
+  file (`context_cordis_plugin/context.toml`) is there, and the host trusts it whole and reads
+  it before every message, so an input that rewrote it could name a module it wrote beside it,
+  which bh-02 would import in its own process
+  (`test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_its_checkout`). By
+  package, whatever `sys.path` holds: a package an import hook finds is on no `sys.path`, and a
+  `src` directory that is the project itself is not denied as a host import path (the test runs
+  there too). Held on Linux as any write deny there is. Not one the project is (bh-02 run in a
+  package's own directory), which would leave the project read-only: there the context plugin
+  reading its shipped file once, as it starts, is what keeps a change from taking effect before
+  the next start. A started program's `writes()` names the roots its inputs may write (the
+  kernel reads nothing on the host whose way passes through one);
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
   what `layers` names as `secrets` (bh-02's `local.env`, the sessions' state);
 - **network**: none; the program's own LISTEN socket is the one way in or out. The `jail` row
@@ -45,9 +58,16 @@ One policy, two stacks (`stack_for`):
   what is readable: `SYSTEM_READABLE` (`/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/etc`, those
   that exist), the interpreter (`sys.base_prefix`, `sys.prefix`, and every symlinked directory
   on the way to the executable: a uv venv's `python` goes through `cpython-3.15-...`), the
-  directory of each absolute path the command names (the worker's), and the writable roots.
+  directory of each absolute path the command names (the worker's), bh-02's own code
+  (`layers.code`, read-only: with an editable install the environment's `.pth` files name the
+  workspace's `src` directories, outside the interpreter's trees, and the extensions' worker
+  imports cordis from there; without them it never listened and no extension loaded:
+  `test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install`; the package
+  directories, never the workspace, whose `local.env` stays out), and the writable roots.
   Nothing else exists in the jail, the home directory included, so an input that reads a file
-  outside the project gets `No such file or directory`. The policy's read denies are brig's
+  outside the project gets `No such file or directory`. What a started program can read is its
+  `reads()`, each tree once and none inside another (`told_reads`), which the kernel names to
+  the model. The policy's read denies are brig's
   carve-outs inside that tree. A secret under the project (its `local.env`, and when bh-02 runs
   inside its own workspace every place the model row looks for one: `layers.secrets` names
   them) is held in place by a mount on its path: one that exists is masked (reads fail with
@@ -226,8 +246,8 @@ Known gaps on Linux, beyond darwin's:
 - In a git worktree or submodule `.git` is a file, and nothing can be mounted under it, so the
   jail denies writing the `.git` file itself (`mountable`); on darwin only `.git/hooks` and
   `.git/config` are denied, which cannot exist under a file anyway.
-- There is no home directory in the jail (at most the path to an interpreter installed under
-  it), so `~/.gitconfig` isn't read. The person's `user.name` and `user.email`, as git resolves
+- There is no home directory in the jail (at most the paths to an interpreter and to bh-02's own
+  code installed under it), so `~/.gitconfig` isn't read. The person's `user.name` and `user.email`, as git resolves
   them on the host for the project, are set in the worker's environment as `GIT_AUTHOR_*` and
   `GIT_COMMITTER_*` (`git_author`), so a jailed `git commit` is theirs; nothing else of their git
   config (aliases, credential helpers, includes) reaches the jail, and an input can read the two

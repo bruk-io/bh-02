@@ -32,6 +32,7 @@ from bh_02.outdated import translated
 from cordis import Row
 from cordis.composition import format_layer
 from cordis.loader import read_layer
+from cordis_helpers import config_home
 
 __all__ = [
     "Broken",
@@ -233,9 +234,9 @@ def state_root() -> Path:
 
 def models_file() -> Path:
     """`$XDG_CONFIG_HOME/bh-02/models.toml`, else `~/.config/bh-02/models.toml`: the models file
-    the model row reads when its config names no other (the models plugin resolves it the same way)."""
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "bh-02" / "models.toml"
+    the model row reads when its config names no other (the models plugin resolves it the same way,
+    through the same `cordis_helpers.config_home`)."""
+    return config_home(os.environ, Path.home()) / "bh-02" / "models.toml"
 
 
 def default_state_root() -> Path:

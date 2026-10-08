@@ -44,6 +44,17 @@ shape, in `CONTRACTS.md`:
   (`cordis-in-wiring-only`); `wiring.py` is the components, which `bind` a value or `acquire` a
   registration.
 - A plugin's tests use fakes from a package's own `testing` module (`chat_cordis_plugin.testing`, `bh_02.testing`), never another package's tests.
+- **What several packages must compute alike, and that names no domain, is one function in
+  `cordis_helpers`**, not a copy in each: `config_home` (where the person's configuration
+  lives: `$XDG_CONFIG_HOME`, else `~/.config`), under which the models file, the person's
+  context and startup files and `layers.trusted` are found, and `walked` (every place reading a
+  path goes through: each directory and link on the way, links followed), which holds the
+  models file, the context files and the person's startup file to whether the model's code
+  could have written or chosen them. Not a key: `layers` could carry the configuration home, but
+  `system` depends on nothing and the kernel on its jail alone, so a `layers` dependency would
+  reload `system`, and a `kernel:unjailed` kernel, at a `/restart layers` (a layer edit,
+  `/model`'s too, never rebinds `layers`: its row's entry doesn't change); and the context row's
+  own `home` decides its `~/.config`.
 
 **The model has one tool, and it carries code.** The kernel is the tool: `kernel:kernel` binds
 `kernel`, a persistent Python namespace whose `spec` is `python(code)`, and `agent:loop` offers
@@ -95,8 +106,10 @@ row's is how to extend bh-02 and the part of cordis that takes). A context file 
 of `[[section]]`s, each `files` (patterns) and `function` (a full module path given the files
 that match, returning text): bh-02's own (`context_cordis_plugin/context.toml`: the guidance
 files, AGENTS.md and CLAUDE.md, yours and the project's, and rule files, each read by a function
-in `context_cordis_plugin.sections`), then yours (`$XDG_CONFIG_HOME/bh-02/context.toml`, else
-`~/.config/bh-02/context.toml`), then the project's
+in `context_cordis_plugin.sections`; trusted whole, so it is bh-02's code as its modules are,
+and like them read once, as the `system` row starts, before any of the model's code runs: bh-02
+working on its own checkout has it in the project), then yours
+(`$XDG_CONFIG_HOME/bh-02/context.toml`, else `~/.config/bh-02/context.toml`), then the project's
 `.bh-02/context.toml`, which the model can write and so may name only bh-02's own functions and
 non-hidden files in the project. Any context file the model could have written or chosen is held
 to the same terms: one that, as named, as it resolves, or through any directory or link on its
@@ -111,7 +124,7 @@ CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for thi
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
 plain Python, not IPython), and under a Linux jail what its code can read (`kernel.reads()`:
-the system, the interpreter, the project; no home directory). After each input, the loop asks
+the system, the interpreter, bh-02's own code, the project; no home directory). After each input, the loop asks
 `memory` (`agent:memory`, a broker) what to tell the model with its result: each function rows
 add there gets the input's code, its
 result and `kernel.touched()` (the project files Python in the input opened, heard by an audit
@@ -126,9 +139,11 @@ value (`system.touched(paths)`), so the context files, and the caches of what wa
 searched, are `context:project`'s alone. Both depend on `transcript`, so `/clear` and `/compact`
 start them afresh, and read its `messages` once, at the first input that may need them
 (on-touch: the first that opens a file), so a resumed session is not told again a note its
-transcript's `tool` entries hold; only layer rows add to `memory`, since its functions
-run in bh-02's process. The loop reads the prompt before each message the model reads but sends
-the one the conversation began with (the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
+transcript's `tool` entries hold: the loop keeps the notes it told on each as a list (`notes`)
+beside the text the model reads, and an entry from before it did is searched instead; only
+layer rows add to `memory`, since its functions run in bh-02's process. The loop reads the
+prompt before each message the model reads but sends the one the conversation began with (the
+transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
 switched, CLAUDE.md edited) is told as a note on that message (`prompt.changes`), because a
 model server reuses its work on a conversation only up to the first token that differs, and a
 changed start costs a local model minutes of prompt processing (it looks frozen) and Claude
@@ -208,9 +223,12 @@ says which, after what the opening had to tell by then (that the REPL was starte
 why: told nowhere else). `instructions()` tells
 the model only the project's is its to edit. Only `brig_cordis_plugin` imports brig
 (`brig-one-adapter`). darwin is jailed by seatbelt (reads by denylist), Linux by bubblewrap
-(reads by allowlist: the system, the interpreter, the project; the policy, `spec_for`, is the
-same). The Linux jail's tests skip on darwin; `scripts/linux-jail-check` runs them in a
-container with bubblewrap.
+(reads by allowlist: the system, the interpreter, bh-02's own code, the project; the policy,
+`spec_for`, is the same). bh-02's own code is `layers.code`, the directory of every package it
+runs (`bh_02.bootstrap.code_directories`): with an editable install those are the workspace's
+`src/<package>` directories, outside the interpreter's trees, and the extensions' worker
+imports cordis from one, so a Linux jail reads them, read-only. The Linux jail's tests skip on
+darwin; `scripts/linux-jail-check` runs them in a container with bubblewrap.
 
 **The model's own plugins.** `extensions:extensions` loads the cordis components the model
 writes to `.bh-02/plugins/NAME.py` while bh-02 runs (looked at every half second; changed,
@@ -318,16 +336,31 @@ The kernel never gets it:
 - `brig:jail` also denies writing bh-02's config directory where it is under a root an input may
   write (bh-02 run from the home directory): `layers.trusted`, this run's
   `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`, each as named and as it resolves
-  (`bh_02.bootstrap.config_directories`). The host reads what is there and trusts it (the models
-  file names a key's `local.env` line and a provider that runs in bh-02's process, the person's
-  context file names functions bh-02 runs, the person's startup file goes to the model's REPL
-  as text), so one session's input could otherwise plant something every later session reads: a
-  startup file that is a link to a key the jail hides. On Linux the directory is held like any
-  write deny there (a mount the host can undo, the directories above it pinned). Not when bh-02
-  runs in that directory or below it: denying it would leave the project read-only.
+  (`bh_02.bootstrap.config_directories`, under `cordis_helpers.config_home`, where the model,
+  context and kernel rows look for those files too). The host reads what is there and trusts it
+  (the models file names a key's `local.env` line and a provider that runs in bh-02's process,
+  the person's context file names functions bh-02 runs, the person's startup file goes to the
+  model's REPL as text), so one session's input could otherwise plant something every later
+  session reads: a startup file that is a link to a key the jail hides. On Linux the directory
+  is held like any write deny there (a mount the host can undo, the directories above it
+  pinned). Not when bh-02 runs in that directory or below it: denying it would leave the project
+  read-only.
+- `brig:jail` denies writing bh-02's own code where it is under a root an input may write
+  (bh-02 working on its own checkout, an editable install, or run from a home the checkout is
+  in): `layers.code`, the directory of every package bh-02 runs (`bh_02`, cordis,
+  cordis_helpers, brig and each installed plugin's), each as named and as it resolves, found by
+  name from installed metadata (`bh_02.bootstrap.code_directories`; `importlib.util.find_spec`
+  imports nothing). The shipped context file is in one, and bh-02 trusts it whole: an input
+  could otherwise name a module it wrote beside it and have bh-02 import that in its own
+  process at the next message. By package, whatever the host's `sys.path` holds (a package an
+  import hook finds is on none, and a `src` that is the project is not denied as a host import
+  path), held on Linux like any write deny there. Not one the project is (bh-02 run in a
+  package's own directory), which would leave the project read-only; then the context plugin's
+  own rule holds: it reads its shipped file once, before any of the model's code runs, so what
+  an input wrote waits for the next start, as an edit to any module does.
 - An approved `--no-jail` input runs with the person's permissions and could open `local.env`
-  itself, or rewrite bh-02's config directory; only its environment is scrubbed, and every
-  input is put to the person, its code shown, before it runs.
+  itself, or rewrite bh-02's config directory or its own code; only its environment is
+  scrubbed, and every input is put to the person, its code shown, before it runs.
 
 Without a token the row still binds, and each step answers with an `authentication_failed` error
 naming the variable, `local.env` and `claude setup-token`.

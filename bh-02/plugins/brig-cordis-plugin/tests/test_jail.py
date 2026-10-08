@@ -63,6 +63,7 @@ class Layers:
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
+    code: tuple[str, ...] = ()
 
 
 def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
@@ -139,6 +140,92 @@ def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> 
     assert _denied(extra, "/home/me/.config/bh-02/kernel.py")
     inside = home_rooted("/home/me/.config/bh-02")  # bh-02 run in its own config directory
     assert not _denied(inside, "/home/me/.config/bh-02/notes.md")
+
+
+_CHECKOUT = "/home/me/src/bh-02"  # bh-02's own workspace, installed editable
+_CODE = (  # the directory of every package bh-02 runs code from (`layers.code`)
+    f"{_CHECKOUT}/bh-02/plugins/context-cordis-plugin/src/context_cordis_plugin",
+    f"{_CHECKOUT}/bh-02/plugins/kernel-cordis-plugin/src/kernel_cordis_plugin",
+    f"{_CHECKOUT}/libs/cordis/src/cordis",
+    "/opt/py/lib/python3.15/site-packages/brig",  # one installed into the interpreter
+)
+
+
+def test_bh_02_s_own_code_under_a_writable_root_is_denied_as_its_layer_files_are() -> None:
+    """bh-02 working on its own checkout (an editable install), or run from the home directory
+    with the checkout under it: the directory of every package bh-02 runs code from
+    (`layers.code`) is under a root an input may write. The shipped context file is in one, and
+    the host trusts it whole and reads it before every message, so an input could name a module
+    it wrote beside it and bh-02 would import that in its own process. Each is denied as a layer
+    file is, whatever the host's `sys.path` holds (`host` names nothing here). Not one the project
+    is (bh-02 run in a package's own directory), or the project would be read-only; one outside
+    every writable root needs no deny."""
+    shipped = f"{_CODE[0]}/context.toml"
+
+    def rooted(root: str) -> Any:
+        return spec_for(
+            root=root,
+            endpoint="/tmp/k/k.sock",
+            scratch="/tmp/j/tmp",
+            home="/home/me",
+            config=BrigConfig(),
+            layers=(),
+            host=(),
+            code=_CODE,
+        )
+
+    for root in (_CHECKOUT, "/home/me"):  # checkout-rooted, home-rooted
+        spec = rooted(root)
+        assert _denied(spec, shipped), root
+        assert _denied(spec, f"{_CODE[0]}/planted.py"), root  # a module the context file could name
+        assert all(_denied(spec, code) for code in _CODE[:3]), root  # every plugin's, and cordis's
+        assert _CODE[3] not in spec.fs.write_denies  # outside every writable root
+        assert not _denied(spec, f"{_CHECKOUT}/README.md")  # the rest of the checkout is the project's
+    elsewhere = rooted("/home/me/work/app")  # the usual case: none is under the project
+    assert not set(_CODE) & set(elsewhere.fs.write_denies)
+    inside = rooted(_CODE[0])  # bh-02 run in a package's own directory
+    assert not _denied(inside, f"{_CODE[0]}/notes.md")
+
+
+def test_a_linux_jail_reads_bh_02_s_own_code_and_writes_none_of_it(tmp_path: Path) -> None:
+    """A Linux jail reads by allowlist. The extensions' worker imports cordis, and with an
+    editable install that is the workspace's `src/cordis`, outside the project and the
+    interpreter: so the allowlist names bh-02's own code (`layers.code`), read-only (outside
+    every writable root nothing writes it; under one, it is denied above), and never the
+    workspace itself, whose `local.env` an input must not read."""
+    readable = readable_roots(
+        argv=["/w/.venv/bin/python", "-I", f"{_CODE[1]}/worker.py", "/tmp/k/k.sock"],
+        interpreter=("/opt/py", "/w/.venv"),
+        system=SYSTEM_READABLE,
+        code=_CODE,
+    )
+    assert set(_CODE) <= set(readable) and len(readable) == len(set(readable))
+    assert _CHECKOUT not in readable and f"{_CHECKOUT}/libs/cordis/src" not in readable
+    policy = spec_for(
+        root="/w/app",
+        endpoint="/tmp/k/k.sock",
+        scratch="/tmp/j/tmp",
+        home="/home/me",
+        config=BrigConfig(),
+        layers=(),
+        host=(),
+        code=_CODE,
+    )
+    linux = allowlisted(policy, readable)
+    read = linux.fs.read_allows  # brig keeps a tree once: one under another (`/opt/py`) is that one
+    assert all(any(c == r or c.startswith(r + "/") for r in read) for c in _CODE), read
+    assert not any(c == w or c.startswith(w + "/") for c in _CODE for w in linux.fs.write_allows)
+    # and the row's jail compiles them in: bound read-only, as they are on the host
+    package = tmp_path / "src" / "cordis"
+    package.mkdir(parents=True)
+    project = tmp_path / "project"
+    project.mkdir()
+    jail = BrigJail(BrigConfig(), Layers(code=(str(package),)), platform="linux")
+    compiled, _ = jail.compile(str(tmp_path / "j"), str(tmp_path / "k" / "k.sock"), str(project), ())
+    assert str(package) in compiled.spec.fs.read_allows
+    argv = compiled.wrap(("w",))
+    at = argv.index(str(package))
+    assert argv[at - 1] == "--ro-bind" and argv[at + 1] == str(package)
 
 
 def test_allow_takes_names_off_brig_s_self_modification_list_and_only_those() -> None:
@@ -475,7 +562,17 @@ def test_a_placeholder_is_known_by_the_jail_s_mark_else_by_its_identity() -> Non
 
 
 def test_the_model_is_told_the_trees_a_jail_reads_the_same_at_every_start() -> None:
-    trees = ("/usr", "/tmp/bh-k-a1", "/w/app", "/tmp/bh-j-b2/tmp", "/usr")
+    """Each tree once, and none that another holds: bh-02's own code, or the interpreter's
+    environment, inside the project (bh-02 working on its own checkout) is the project's."""
+    trees = (
+        "/usr",
+        "/tmp/bh-k-a1",
+        "/w/app/src/cordis",
+        "/w/app/.venv",
+        "/w/app",
+        "/tmp/bh-j-b2/tmp",
+        "/usr",
+    )
     assert told_reads(trees, ("/tmp/bh-j-b2", "/tmp/bh-k-a1")) == ("/usr", "/w/app", "$TMPDIR")
 
 
@@ -716,7 +813,7 @@ from pathlib import Path
 from brig_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
-    paths, credentials, secrets, trusted = (), (), (), ()
+    paths, credentials, secrets, trusted, code = (), (), (), (), ()
 
 async def main():
     sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
@@ -743,7 +840,7 @@ from brig_cordis_plugin import BrigConfig, BrigJail
 from kernel_cordis_plugin import Kernel, KernelConfig
 
 class Layers:
-    paths, credentials, secrets, trusted = (), (), (), ()
+    paths, credentials, secrets, trusted, code = (), (), (), (), ()
 
 LOOP = (
     "import os, sys, time\\n"
@@ -909,7 +1006,7 @@ from brig.run import SubprocessLauncher
 from brig_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
-    paths, credentials, secrets, trusted = (), (), (), ()
+    paths, credentials, secrets, trusted, code = (), (), (), (), ()
 
 def crash(self, *args, **kwargs):
     os._exit(9)

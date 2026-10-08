@@ -33,12 +33,20 @@ each file is read and searched once. It depends on `system`, `memory` and `trans
 `context:project` depends on nothing, so the on-touch row reloads with it only when the `system`
 row changes, and with `transcript` at each new conversation (`/clear`), which `system` and its
 caches outlive. What the conversation was told before the row began (a resumed session's, or
-before it reloaded) it reads from the transcript once, at the first input that opens a file: a
-text a `tool` entry holds whole after a blank line, where a note ends (the entry's end, the mark
-of a note cut short, or another note: bh-02's begin with `(`, the context files' with `From `),
-is told already, so a resume does not tell it again. One an entry starts with, one cut short
-there, one changed since and one cut back since (the paragraphs now gone follow it there) are
-told. Where a result ends is not marked, so a text an input printed that way counts too.
+before it reloaded) it reads from the transcript once, at the first input that opens a file:
+the notes the loop told with each result, which it keeps on the `tool` entry (`notes`). A text
+one of them holds whole is told already, so a resume does not tell it again: the note itself,
+or one of the texts the row's note joins with a blank line, ending where the note ends, where it
+was cut short, or where the next text begins (bh-02's own on-touch functions begin one `From
+FILE, guidance for work under` or `From FILE, a rule for`, and a section that failed `(bh-02
+could not make the section`). One cut short, one changed since and one cut back since (the
+paragraphs now gone follow it, however they begin) are told, and so is one that another
+function's text follows in the note: told twice rather than never. A note the result printed is not one
+told. An entry from before the loop kept `notes` is searched instead: a text it holds whole
+after a blank line, where a note ends (the entry's end, the mark of a note cut short, or
+another note: bh-02's begin with `(`, the context files' with `From `), but not one the entry
+starts with; where a result ends is not marked there, so a text an input printed that way counts
+too.
 
 `agent:loop` calls `text()` on its `executor` (`agent:executor`), in a thread off the event loop
 the TUI runs on, one call at a time, so a section function that reads many files or searches a
@@ -92,10 +100,24 @@ on_touch = "context_cordis_plugin.sections:place_touched"
 The sections are read in order from bh-02's own file (`context.toml`, in the package), then each
 of `files`: yours, `$XDG_CONFIG_HOME/bh-02/context.toml` (else `~/.config/bh-02/context.toml`),
 then the project's, `.bh-02/context.toml`. A name in `files` starting `$XDG_CONFIG_HOME/` is in
-that directory, or in `home`'s `.config` when the variable is unset or empty (as the models
-file is); one starting `~` is in `home`; any other is from the project's root. Each appends its
-sections; `replace = true` at a file's top starts the list afresh. A file is read again whenever
+that directory, or in `home`'s `.config` when the variable is unset or empty
+(`cordis_helpers.config_home`, as for the models file and the kernel's startup files); one
+starting `~` is in `home`; any other is from the project's root. Each appends its sections;
+`replace = true` at a file's top starts the list afresh. Each of `files` is read again whenever
 it changes, so a section added reaches the model's next message.
+
+**bh-02's own file is read once**, as the `system` row starts. It is trusted whole (a function
+it names is imported and run in bh-02's process), so it is bh-02's code, as its modules are,
+and like them it is read before any of the model's code runs (the row starts before the kernel
+and the extensions' worker) and not again. That matters when bh-02 works on its own checkout
+(an editable install): the file is then in the project. The jail denies an input writing it
+(`layers.code`, the brig plugin's README), and where it can't (bh-02 run in the package's own
+directory, or with `--no-jail`), what an input wrote there waits for bh-02, or the row
+(`/restart system`), to start again, as an edit to any of bh-02's modules does: never the next
+message (`test_bh_02_s_own_context_file_is_read_once_as_the_row_starts`). Holding the file to
+the project's terms instead would have cost every session in the checkout your own guidance
+(`~/AGENTS.md`, `~/CLAUDE.md`) and the rule files, which those terms refuse. If you edit it
+while working on bh-02, start bh-02 again to see the change.
 
 **The project's file is held to what the model may do itself**, because the model can write it
 and bh-02 acts on it in its own process, outside the jail. So it may name only bh-02's own
@@ -103,12 +125,13 @@ functions (`context_cordis_plugin.sections:*`, as `function` and as `on_touch`),
 in the project that are not hidden (no `~`, `/`, `..` or part starting with `.`), and it may not
 `replace` the sections before it. A function or a file outside the project of your own goes in
 your file. A context file is the project's when the model could have written it or chosen what
-it is: as named, as it resolves, or through any directory or link on its way, it is in the
-project. So a file of yours inside it (bh-02 run in your home, a `$XDG_CONFIG_HOME` in the
-project) is the project's; so is `.bh-02/context.toml` (or `.bh-02`) made a link to a file
-outside it, such as one the model wrote in the jail's scratch directory; and so is your file
-when it is a link into the project (`~/.config/bh-02/context.toml` kept in `~/dotfiles`, and
-bh-02 run there), since the model could repoint the file the link leads to.
+it is: as named, as it resolves, or through any directory or link on its way
+(`cordis_helpers.walked`, the walk the models file and the kernel's startup files are held to),
+it is in the project. So a file of yours inside it (bh-02 run in your home, a
+`$XDG_CONFIG_HOME` in the project) is the project's; so is `.bh-02/context.toml` (or `.bh-02`)
+made a link to a file outside it, such as one the model wrote in the jail's scratch directory;
+and so is your file when it is a link into the project (`~/.config/bh-02/context.toml` kept in
+`~/dotfiles`, and bh-02 run there), since the model could repoint the file the link leads to.
 
 And whichever file a section came from, nothing is read through it that the jail keeps from
 the model: a file reached from the project must be in it, a link in the project counts only

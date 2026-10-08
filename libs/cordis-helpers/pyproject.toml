@@ -37,6 +37,8 @@ exclude = [
     # the registry mutates itself by design: each registration is an entry with its own remover
     "cordis_helpers.registry:Registry.register", "cordis_helpers.registry:Registry.register.remove",
     "cordis_helpers.registry:Hooks.add", "cordis_helpers.registry:Hooks.add.remove",
+    # the walk reads the links on a path (each place's `readlink`) as they are when it is asked
+    "cordis_helpers.paths:walked",
 ]
 
 [tool.pypeeker.over-exposed-module-symbol]

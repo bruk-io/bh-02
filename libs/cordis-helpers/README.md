@@ -17,6 +17,14 @@ nothing else; this package is patterns built on them, with no domain in them.
   row's own, it runs to the end, and leaves with the row. A job that fails is reported to
   `failed` (one line; awaited when it returns an awaitable, as a row telling the person does)
   and the next still runs.
+- **`config_home(environ, home)`** and **`walked(path)`** (and `MOST_LINKS`): paths as every
+  package that trusts a file by where it is must see them alike. `config_home` is where the
+  person's configuration lives (`$XDG_CONFIG_HOME`, else `home`'s `.config`); `walked` is every
+  place reading an absolute path goes through, from the top (each directory and link on the
+  way, a link where it sits and then where it leads, a `..` from where the links before it led,
+  at most `MOST_LINKS` links), then where it ends: whoever may write any of them chooses what is
+  read. Not built on cordis at all; here because the packages of a family may import nothing of
+  each other's, and two copies of a check like this one drift.
 
 Depends on `cordis` only. A plugin that uses it depends on `cordis-helpers`, which is a
 library, not another plugin.

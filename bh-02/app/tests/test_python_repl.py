@@ -4,22 +4,35 @@ runs programs itself, the jail decides what it may touch, and unjailed every inp
 
 import asyncio
 import contextlib
+import importlib.metadata
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from bh_02.bootstrap import config_directories, credential_files, layers, run, unreadable
-from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group
+import context_cordis_plugin
+import cordis
+from bh_02.bootstrap import (
+    code_directories,
+    code_packages,
+    config_directories,
+    credential_files,
+    layers,
+    run,
+    unreadable,
+)
+from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group, self_modify_denied
 from cordis import Row
 from cordis.loader import boot
+from extensions_cordis_plugin import Extensions, ExtensionsConfig
 from kernel_cordis_plugin import Kernel, KernelConfig, worker_argv
 from models_cordis_plugin.local_env import token_file
 
@@ -414,6 +427,7 @@ class _Layers:
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
+    code: tuple[str, ...] = ()
 
 
 async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input(
@@ -517,9 +531,9 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
     extensions' worker, whose jail also holds the absent `local.env` where bh-02 looks for its
     credential (and takes the shared jail lock). `/release` stops it too, so the path is free
     and nothing claims another session holds it; the jail stays released, so the extensions'
-    worker does not start again before the next input. (A stand-in program here: under a Linux
-    jail an editable install's extensions' worker can't import cordis, which lives outside
-    what the jail reads.)"""
+    worker does not start again before the next input. (A stand-in program here: what the
+    release stops is the jail's, whatever runs in it; the real extensions' worker under a Linux
+    jail is `test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install`'s.)"""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the hold is bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -553,6 +567,117 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
                 await extensions.stop()
     finally:
         shutil.rmtree(sockets, ignore_errors=True)
+
+
+def _code() -> tuple[str, ...]:
+    """The directories bh-02 runs its own code from, as the `bh-02` command finds them
+    (`layers.code`): with this editable install, the workspace's `src/<package>` directories."""
+    plugins = (ep.module for ep in importlib.metadata.entry_points(group="cordis.plugins"))
+    return code_directories(code_packages(plugins))
+
+
+_HELLO = """
+from cordis import Effects, acquire, component
+
+@component
+async def hello(*, commands) -> Effects:
+    async def run(args: str) -> str:
+        return f"hello {args}"
+
+    yield acquire(commands.register, {"name": "hello", "help": "Say hello", "usage": "/hello NAME"}, run)
+"""
+
+
+class _Added:
+    """What the extensions add to bh-02, for a test: `commands` (`register`), `frame` (`status`)
+    and `system` (`add`) at once; and an `approval` that confines, as a jail's does."""
+
+    confined = True
+
+    def __init__(self) -> None:
+        self.runs: dict[str, Callable[[str], Awaitable[Any]]] = {}
+
+    def register(self, spec: Mapping[str, Any], run: Callable[[str], Awaitable[Any]]) -> Callable[[], None]:
+        self.runs[str(spec["name"])] = run
+        return lambda: None
+
+    def status(self, field: str, text: str, *shorter: str) -> Callable[[], None]:
+        return lambda: None
+
+    def add(self, section: Callable[[], str]) -> Callable[[], None]:
+        return lambda: None
+
+    async def approve(self, request: Mapping[str, Any]) -> bool:
+        return True
+
+
+async def test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Linux jail reads by allowlist, and with an editable install (`uv run` in the checkout,
+    `uv tool install --editable`) the environment's `.pth` files name the workspace's `src`
+    directories, outside the project and the interpreter: the extensions' worker could not import
+    cordis, never listened, and no extension loaded. The jail reads the directories bh-02 runs
+    its own code from (`layers.code`, read-only), so the real worker, in a project elsewhere,
+    loads the model's extension and what it adds reaches bh-02."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    plugins = project / ".bh-02" / "plugins"
+    plugins.mkdir(parents=True)
+    (plugins / "hello.py").write_text(_HELLO)
+    added = _Added()
+    jail = BrigJail(BrigConfig(), _Layers(code=_code()))
+    config = ExtensionsConfig(root=str(project), watch=3600)  # entering looks once
+    async with Extensions(jail, added, added, added, added, config) as extensions:
+        status = json.loads((plugins / "status.json").read_text())
+        assert extensions.statuses["hello"].ok, status
+        assert status["hello"]["state"] == "active", status
+        assert await added.runs["hello"]("there") == "hello there"
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_its_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bh-02 working on its own checkout (an editable install): the project is the workspace, and
+    the directories bh-02 runs its own code from are in it. The shipped context file is in one,
+    and bh-02 trusts it whole and reads it before every message, so an input that rewrote it
+    could name a module it wrote beside it, and bh-02 would import that in its own process. The
+    jail denies writing every one of them (`layers.code`), as it does a layer file: the context
+    file stays as it was, and no module of the input's lands beside it or beside cordis. So it
+    does when the project is a `src` directory of the checkout: the host's `sys.path` names that
+    directory, which, being the project, is not denied as a host import path."""
+    shipped = Path(context_cordis_plugin.__file__).with_name("context.toml")
+    checkout = next((p for p in shipped.parents if (p / "uv.lock").is_file()), None)
+    if checkout is None:
+        pytest.skip("bh-02 is not installed editable from its workspace here")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    planted = [
+        shipped.with_name("planted_by_an_input.py"),
+        Path(cordis.__file__).with_name("planted_by_an_input.py"),
+    ]
+    before = shipped.read_bytes()
+    # brig's self-modification list let through, so the jail makes no placeholder in the checkout
+    # (`.envrc/`, ...): what this is about is bh-02's own code alone
+    config = BrigConfig(allow=self_modify_denied(()))
+    inputs = [
+        _append_to(shipped, text=""),  # opened to append, nothing written: the real file stays as it was
+        *(_append_to(path, mode="x", text="import os\n") for path in planted),
+    ]
+    said: dict[Path, list[str]] = {}
+    try:
+        for root in (checkout, shipped.parent.parent):  # the workspace, then the plugin's `src`
+            jail = BrigJail(config, _Layers(code=_code()))
+            async with Kernel(jail, KernelConfig(root=str(root))) as kernel:
+                said[root] = [await kernel.run(code) for code in inputs]
+    finally:
+        for path in planted:
+            path.unlink(missing_ok=True)
+    for root, answers in said.items():
+        assert [a.splitlines()[-1].split()[0] for a in answers] == ["DENIED"] * len(inputs), (root, answers)
+    assert shipped.read_bytes() == before
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -1141,3 +1266,52 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     assert again.startswith(told) and again.endswith("\n[2] 6\n[3] 0\n"), again  # resumed: none again
     assert afresh.startswith(told) and afresh.endswith("\n[2] 6\n[3] 0\n"), afresh  # /clear: told afresh
     assert "the conversation was cleared; starting afresh: loop, transcript, kernel" in fragile.NOTES
+
+
+async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_on_their_entries(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The shipped loop, transcript and `memory` rows, and a layer's own `memory` row whose note
+    sorts after the context files', booted twice over one transcript file: a session, then its
+    resume. The loop keeps the notes it told with a result on its entry (`notes`), the result and
+    the notes still the text the model reads. The resume reads them there, not in the text: the
+    rule for src/db, which the other row's note followed, is not told again; the guidance,
+    cut back since after a paragraph in brackets, is."""
+    project, home = tmp_path / "project", tmp_path / "home"
+    (project / "src" / "db").mkdir(parents=True)
+    (project / ".claude" / "rules").mkdir(parents=True)
+    home.mkdir()
+    (project / "src" / "db" / "models.py").write_text("X = 1\n")
+    guidance = project / "src" / "db" / "CLAUDE.md"
+    guidance.write_text("Use the session.\n\n(Never by script.)")
+    (project / ".claude" / "rules" / "db.md").write_text("---\npaths: src/db/**\n---\nMigrations by hand.")
+    history = tmp_path / "transcript.jsonl"
+    opens = "len(open('src/db/models.py').read())"
+    session = (
+        f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+        f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+        '[[plugin]]\nid = "another-note"\nuse = "fragile:another_note"\n'
+    )
+    guide = (
+        "From src/db/CLAUDE.md, guidance for work under src/db/, where it wins over the guidance before it:"
+    )
+    rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
+    other, trimmed = "Zebra: another row's note.", f"{guide}\n\nUse the session."
+    _answers(True)
+    await run([*layers(), _inputs(composition, opens, extra=session)], [Row("chat", config={"prompt": "go"})])
+
+    guidance.write_text("Use the session.")  # cut back while no session runs
+    _answers(True)  # the resume runs the second input only: the first has its result
+    await run(
+        [*layers(), _inputs(composition, opens, opens, extra=session)], [Row("chat", config={"prompt": "go"})]
+    )
+    out = _shown()
+    assert out.endswith(f"\n[1] 6\n\n{trimmed}\n\n{other}\n"), out
+    first, resumed = [
+        entry for line in history.read_text().splitlines() if (entry := json.loads(line))["role"] == "tool"
+    ]
+    assert first["notes"] == [f"{guide}\n\nUse the session.\n\n(Never by script.)\n\n{rule}", other]
+    assert resumed["notes"] == [trimmed, other]
+    for entry in (first, resumed):
+        assert entry["content"] == "\n\n".join(["6", *entry["notes"]])  # what the model reads, as before

@@ -15,7 +15,8 @@ or `ls` through subprocess, its output printed whole. `programs` is what an inpu
 `shelled` the part of it Python does itself, and `shell_note` how Python does that work here,
 where the result stays in a variable for the next input. `ShellHints` is the `memory` function
 that tells the model so with that input's result, once for each kind of work in a conversation,
-a resumed one too: it reads what the conversation's transcript says the model was told.
+a resumed one too: it reads what the conversation's transcript says the model was told (the
+notes the loop kept on each `tool` entry).
 """
 
 import ast
@@ -137,10 +138,10 @@ def instructions_for(
     if reads:
         where += (
             f" The jail your code runs in reads only these trees: {', '.join(reads)}. Nothing else "
-            "exists in it, the person's home directory included (at most the path to an "
-            "interpreter installed under it): no ~/.gitconfig, ~/.ssh, dotfiles or caches, so don't "
-            "look for files outside these. git commits carry the person's name and email when git "
-            "on their machine knows them."
+            "exists in it, the person's home directory included (at most the paths to an "
+            "interpreter and to bh-02's own code installed under it): no ~/.gitconfig, ~/.ssh, "
+            "dotfiles or caches, so don't look for files outside these. git commits carry the "
+            "person's name and email when git on their machine knows them."
         )
         if confined and theirs:
             where += (
@@ -213,13 +214,15 @@ _HINT = (
     "result in a variable for the next input: {ways}. Keep subprocess for programs such as "
     "tests, git and builds.)"
 )
-# That note in a transcript's `tool` entry, a line of its own: the loop puts each note after a
-# blank line, and another note or the entry's end follows it; before the `memory` broker, the
-# kernel put it after the result's last line, one newline and no blank line, at the entry's end,
-# so one newline before it counts too (as `scripts/model-friction` reads it). `_ways` takes its
-# ways out of the line with `partition`: a pattern with a group for each would take time with the
-# square of a line's length, and the model's code makes a result's lines what it likes. Here each
-# line is tried from the newline or two before it, and given up at its own end.
+# That note in a transcript's `tool` entry: one of its `notes`, whole, where the loop keeps the
+# notes it told. An entry from before the loop kept them (no `notes`) has it only in its text, a
+# line of its own: the loop puts each note after a blank line, and another note or the entry's end
+# follows it; before the `memory` broker, the kernel put it after the result's last line, one
+# newline and no blank line, at the entry's end, so one newline before it counts too (as
+# `scripts/model-friction` reads it). `_ways` takes its ways out of the line with `partition`: a
+# pattern with a group for each would take time with the square of a line's length, and the
+# model's code makes a result's lines what it likes. Here each line is tried from the newline or
+# two before it, and given up at its own end.
 _HINT_HEAD, _HINT_REST = _HINT.split("{commands}")  # what comes before the commands
 _HINT_MIDDLE, _HINT_TAIL = _HINT_REST.split("{ways}")  # between them and the ways; after the ways
 _HINTED = re.compile(r"\n\n?(" + re.escape(_HINT_HEAD) + r"[^\n]*)(?=\n\n|\Z)")
@@ -261,24 +264,36 @@ def shell_note(found: Sequence[tuple[str, str]]) -> str:
 def _hinted(messages: Iterable[Mapping[str, Any]]) -> set[str]:
     """The kinds of work a conversation's transcript (`messages`) says the model was told Python
     does: each shell note (`shell_note`) told with an input's result names its kinds by their
-    ways. A note is told when a `tool` entry holds it whole, a line after a blank line (or, as
-    a transcript from before the `memory` broker has it, after a line of the result) with a
-    blank line or the entry's end after it: not at the entry's start, and not in what the person
-    says. Where the result ends is not marked, so a note an input printed that way counts too."""
+    ways. A note is told when a `tool` entry's `notes` (the loop's record of the notes it told
+    with the result) hold it, not when the result printed one."""
     kinds = {way: kind for kind, way in _INSTEAD.items()}
-    told = (str(m.get("content") or "") for m in messages if m.get("role") == "tool")
     return {
         kinds[way]
-        for content in told
-        for line in _HINTED.findall(content)
-        for way in _ways(line).split("; ")
+        for m in messages
+        if m.get("role") == "tool"
+        for note in _notes(m)
+        for way in _ways(note).split("; ")
         if way in kinds
     }
 
 
-def _ways(line: str) -> str:
-    """The ways a shell note's line (`_HINTED`'s) names, '' for a line that is not one."""
-    _, found, rest = line.partition(_HINT_MIDDLE)
+def _notes(entry: Mapping[str, Any]) -> Sequence[str]:
+    """The notes a `tool` entry says were told with its result: its `notes`. An entry from before
+    the loop kept them has its shell notes only in its text, each a line after a blank line (or,
+    as a transcript from before the `memory` broker has it, after a line of the result) with a
+    blank line or the entry's end after it, not at the entry's start (`_HINTED`). Where the result
+    ends is not marked there, so a note an input printed that way counts too."""
+    notes = entry.get("notes")
+    if isinstance(notes, list | tuple):
+        return [note for note in notes if isinstance(note, str)]
+    return _HINTED.findall(str(entry.get("content") or ""))
+
+
+def _ways(note: str) -> str:
+    """The ways a shell note (`shell_note`, one line) names, '' for a note that is not one."""
+    if not note.startswith(_HINT_HEAD) or "\n" in note:
+        return ""
+    _, found, rest = note.partition(_HINT_MIDDLE)
     return rest.removesuffix(_HINT_TAIL) if found and rest.endswith(_HINT_TAIL) else ""
 
 
@@ -294,7 +309,7 @@ class Memory(Protocol):
 class Transcript(Protocol):
     """What the shell-hints row needs of the `transcript` value (CONTRACTS.md: transcript): the
     conversation so far, whose `tool` entries carry each input's result and the notes told with
-    it."""
+    it (`notes`)."""
 
     @property
     def messages(self) -> Sequence[Mapping[str, Any]]: ...

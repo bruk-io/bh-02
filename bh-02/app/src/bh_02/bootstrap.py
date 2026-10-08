@@ -7,12 +7,14 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from importlib import resources
 from importlib.resources.abc import Traversable
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from bh_02.sessions import Listing
 from cordis import Booted, Effects, Inspection, Row, Runtime, bind, boot, component, enter
 from cordis.loader import read_layer
+from cordis_helpers import config_home
 
 __all__ = [
     "CREDENTIAL_FILE",
@@ -20,6 +22,8 @@ __all__ = [
     "LayerError",
     "NotStarted",
     "Recoverable",
+    "code_directories",
+    "code_packages",
     "config_directories",
     "credential_files",
     "unreadable",
@@ -65,15 +69,17 @@ class _LayerFiles:
     (`paths`), where the model rows look for the credential file, nearest first
     (`credentials`), what no input may read (`secrets`): every one of `credentials`, the
     `local.env` beside and above the project, and the sessions' state (Claude Code's own config
-    and tokens), and bh-02's configuration directories (`trusted`), whose files the host reads
-    and trusts. The jail keeps an input from rewriting the first and from reading the secrets,
-    from writing or creating any secret under a root it may write, and from writing in a
-    configuration directory under one."""
+    and tokens), bh-02's configuration directories (`trusted`), whose files the host reads and
+    trusts, and the directories bh-02 runs its own code from (`code`). The jail keeps an input
+    from rewriting the first and from reading the secrets, from writing or creating any secret
+    under a root it may write, and from writing in a configuration directory or in bh-02's own
+    code under one; and every jail reads bh-02's own code."""
 
     paths: tuple[str, ...] = ()
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
+    code: tuple[str, ...] = ()
 
 
 # The file bh-02's credentials live in (CLAUDE_CODE_OAUTH_TOKEN, and any key a model names),
@@ -108,12 +114,50 @@ def config_directories(environ: Mapping[str, str], home: Path) -> tuple[str, ...
     repository). The host reads what is there and trusts it (the models file, the person's
     context file and their startup file, whose text it hands to the model's REPL), so no jailed
     input may write there: a session run from the home directory would otherwise choose what
-    every later one reads."""
-    default = home / ".config"
+    every later one reads. Where the configuration lives is `cordis_helpers.config_home`, as the
+    model, context and kernel rows find their files there."""
     named = (
         Path(os.path.normpath(Path(base, "bh-02").absolute()))
-        for base in (environ.get("XDG_CONFIG_HOME") or default, default)
+        for base in (config_home(environ, home), config_home({}, home))
     )
+    return tuple(dict.fromkeys(str(path) for each in named for path in (each, each.resolve())))
+
+
+#: The packages bh-02 runs code from besides its plugins: the app, and the libraries they import.
+_OWN_PACKAGES = ("bh_02", "cordis", "cordis_helpers", "brig")
+
+
+def code_packages(plugins: Iterable[str]) -> tuple[str, ...]:
+    """The packages bh-02 runs code from, by name: its own (the app, cordis, cordis_helpers,
+    brig), then the top-level package of each installed plugin (`plugins`: the modules the
+    `cordis.plugins` entry points name), each once. A layer may name any of them, so bh-02 may
+    import it."""
+    named = (module.partition(".")[0] for module in plugins)
+    return tuple(dict.fromkeys((*_OWN_PACKAGES, *(name for name in named if name))))
+
+
+def code_directories(packages: Iterable[str]) -> tuple[str, ...]:
+    """Where bh-02 runs its own code from (the `layers` value's `code`): each of `packages` where
+    it is installed, found by name (`importlib.util.find_spec`, which imports nothing for a
+    top-level name; an import hook's package as much as a `.pth` file's): a package's
+    directories, a single module's file, each as named and as it resolves. With an editable
+    install (`uv run` in the checkout, `uv tool install --editable`) they are the workspace's
+    `src/<package>` directories: the shipped context file is in one (bh-02 trusts it whole), and
+    the extensions' worker imports cordis from another. So every jail reads them and no input
+    may write them. A name that is not installed is left out."""
+    found: list[Path] = []
+    for name in packages:
+        try:
+            spec = find_spec(name)
+        except ImportError, ValueError:
+            continue
+        if spec is None:
+            continue
+        if spec.submodule_search_locations is not None:
+            found += [Path(place) for place in spec.submodule_search_locations]
+        elif spec.has_location and spec.origin:
+            found.append(Path(spec.origin))
+    named = (Path(os.path.normpath(path.absolute())) for path in found)
     return tuple(dict.fromkeys(str(path) for each in named for path in (each, each.resolve())))
 
 
@@ -183,6 +227,7 @@ async def run(
     credentials: Iterable[str] = (),
     secrets: Iterable[str] = (),
     trusted: Iterable[str] = (),
+    code: Iterable[str] = (),
 ) -> None:
     """Boot, wait for the chat row's own work to end (CONTRACTS.md: `done`), then unwind.
 
@@ -192,8 +237,10 @@ async def run(
     files' paths, `credentials`, where the model rows look for the credential file (none: a
     composition booted without them finds no credential unless its model row names an
     `env_file`), `secrets`, where the credential file may be and the sessions' state
-    (CONTRACTS.md: layers; the jail denies an input both), and `trusted`, bh-02's configuration
-    directories (`config_directories`; the jail denies an input writing there), `sessions`, which binds this
+    (CONTRACTS.md: layers; the jail denies an input both), `trusted`, bh-02's configuration
+    directories (`config_directories`; the jail denies an input writing there), and `code`, the
+    directories bh-02 runs its own code from (`code_directories`; every jail reads them, and
+    denies an input writing them), `sessions`, which binds this
     directory's sessions and the running one (`sessions`; the default lists none), and
     `harness`, whose only job is to declare bh-02's dependency on `done`, so a chat row that
     never binds it is an ordinary "waiting on" stall and a `done` of the wrong shape is an
@@ -225,6 +272,7 @@ async def run(
         "credentials": list(credentials),
         "secrets": list(secrets),
         "trusted": list(trusted),
+        "code": list(code),
     }
     booted: Booted = await boot(
         paths,

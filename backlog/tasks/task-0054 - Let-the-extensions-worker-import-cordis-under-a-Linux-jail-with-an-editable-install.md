@@ -3,9 +3,10 @@ id: TASK-0054
 title: >-
   Let the extensions worker import cordis under a Linux jail with an editable
   install
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-07 14:43'
+updated_date: '2026-10-08 01:16'
 labels:
   - extensions
   - brig
@@ -24,7 +25,13 @@ Under a Linux brig:jail (reads by allowlist: the system, the interpreter, the pr
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Under a Linux jail with an editable install, an extension loads (the jail's read allowlist names the source directories the worker imports from, or the worker is given what it needs another way)
-- [ ] #2 Those directories are readable only, never writable, by an input
-- [ ] #3 A test boots the real extensions worker under bubblewrap with an editable install and loads an extension
+- [x] #1 Under a Linux jail with an editable install, an extension loads (the jail's read allowlist names the source directories the worker imports from, or the worker is given what it needs another way)
+- [x] #2 Those directories are readable only, never writable, by an input
+- [x] #3 A test boots the real extensions worker under bubblewrap with an editable install and loads an extension
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Every Linux jail reads layers.code, read-only, so the extensions worker imports cordis from an editable install's src directories; the kernel's reads() lists them. Under bubblewrap the real extensions worker now loads an extension with an editable install (before: ModuleNotFoundError: No module named 'cordis'). Not done: the extensions prompt points at cordis's README, outside the package directories, which a Linux jail with the project elsewhere can't read.
+<!-- SECTION:FINAL_SUMMARY:END -->

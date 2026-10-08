@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 from collections.abc import Callable, Iterable, Sequence
+from importlib.metadata import entry_points
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import TextIO
@@ -26,6 +27,8 @@ from bh_02.bootstrap import (
     LayerError,
     NotStarted,
     Recoverable,
+    code_directories,
+    code_packages,
     config_directories,
     credential_files,
     layers,
@@ -276,12 +279,15 @@ def _launch(
     # token (this run's, and the default one when `XDG_STATE_HOME` moves this run's elsewhere):
     # no jailed input may read any of them. Another state root, of a run with another
     # `XDG_STATE_HOME`, is not known here. And bh-02's configuration (this run's and the default
-    # one), whose files the host reads and trusts: no jailed input may write there.
+    # one), whose files the host reads and trusts: no jailed input may write there. And where
+    # bh-02 runs its own code from, every package a layer may name as installed: every jail reads
+    # it (the extensions' worker imports cordis), and no jailed input may write it.
     credentials = credential_search()
     states = [listing.root, str(sessions.default_state_root())] if listing.root else []
     beside = [Path.cwd() / CREDENTIAL_FILE]
     secrets = unreadable(credentials, beside, (str(Path(state).resolve()) for state in states))
     trusted = config_directories(os.environ, Path.home())
+    code = code_directories(code_packages(ep.module for ep in entry_points(group="cordis.plugins")))
     try:
         asyncio.run(
             run(
@@ -292,6 +298,7 @@ def _launch(
                 credentials=credentials,
                 secrets=secrets,
                 trusted=trusted,
+                code=code,
             )
         )
     except CompositionError as error:
