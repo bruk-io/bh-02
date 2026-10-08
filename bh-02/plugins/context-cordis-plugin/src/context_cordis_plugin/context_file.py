@@ -25,9 +25,10 @@ its own process, outside the jail. So it may name only bh-02's own functions
 that are not hidden (no `~`, `/`, `..` or part starting with `.`), and may not `replace` the
 sections before it. Whether a context file is the project's is whether the model could have
 written it or chosen what it is (`_writable`): as named, as it resolves, or through any
-directory or link on its way (`_way`), it is in the project. So a link in the project to a file
-outside it is the project's, and so is a file of the person's that is a link into it (their
-config kept in dotfiles, and bh-02 run there): the model could repoint the link's end.
+directory or link on its way (`cordis_helpers.walked`), it is in the project. So a link in the
+project to a file outside it is the project's, and so is a file of the person's that is a link
+into it (their config kept in dotfiles, and bh-02 run there): the model could repoint the link's
+end.
 
 And whatever file a section names, bh-02 reads nothing through it that the model could not read
 itself. What it may read is decided when the files are found (`_kept`): a file reached from the
@@ -53,6 +54,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Any
 
+from cordis_helpers import MOST_LINKS, config_home, walked
+
 __all__ = ["ContextFiles", "Section", "parse", "read"]
 
 _OWN = "context_cordis_plugin.sections:"  # the functions a file inside the project may name
@@ -64,7 +67,6 @@ _MAGIC = re.compile(r"[*?\[]")
 _SECRET = re.compile(r"^\.env(\..*)?$|\.env$")  # local.env, .env, .env.local, prod.env: never read
 _SKIPPED = frozenset({"node_modules", "__pycache__", "venv", "build", "dist", "target", "vendor"})
 _LOOKED = 20_000  # directories one search looks in at most, so a project as big as a home ends
-_MOST_LINKS = 40  # links one walk follows at most (Linux's own limit), so a loop of links ends
 
 type Function = Callable[..., Any]
 
@@ -237,7 +239,7 @@ class ContextFiles:
         path = _located(name, root, home, os.environ).absolute()
         stamp = path.stat().st_mtime_ns if path.is_file() else 0
         # walked each time, not only when the file changes: a link on its way may change alone
-        trusted = not _writable((Path(os.path.normpath(path)), *_way(path)), roots)
+        trusted = not _writable((Path(os.path.normpath(path)), *walked(path)), roots)
         if self._read.get(path, (None,))[0] != (stamp, trusted):
             self._read[path] = (
                 (stamp, trusted),
@@ -267,7 +269,7 @@ class ContextFiles:
                 path.parent.resolve() / path.name,
                 path.resolve(),
                 path.stat().st_nlink,
-                () if _under(path, roots) is not None else (path, *_way(path)),
+                () if _under(path, roots) is not None else (path, *walked(path)),
             )
             for path in found
         }
@@ -276,46 +278,24 @@ class ContextFiles:
 
 def _located(name: str, root: Path, home: Path, environ: Mapping[str, str]) -> Path:
     """Where the context file `name` is: one starting `$XDG_CONFIG_HOME/` in the person's config
-    directory (that variable's value, else `home`'s `.config`, as the models file is), one
-    starting `~` in `home`, and any other from the project's root (an absolute one is itself).
-    Whom it is trusted as is not this: that is whether the model could write it (`_writable`)."""
+    directory (`cordis_helpers.config_home`: that variable's value, else `home`'s `.config`, as
+    for the models file and the kernel's startup files), one starting `~` in `home`, and any
+    other from the project's root (an absolute one is itself). Whom it is trusted as is not
+    this: that is whether the model could write it (`_writable`)."""
     if name.startswith(_CONFIG_HOME):
-        return Path(environ.get("XDG_CONFIG_HOME") or home / ".config") / name.removeprefix(_CONFIG_HOME)
+        return config_home(environ, home) / name.removeprefix(_CONFIG_HOME)
     return Path(str(home) + name[1:]) if name.startswith("~") else root / name
 
 
 def _writable(way: Sequence[Path], roots: Sequence[Path]) -> bool:
     """Whether the model could have written a file, or chosen what it is: a place on its way (the
-    file as named, then `_way`'s) is in the project, as named or as it resolves (`roots`). A link
-    in the project (`.bh-02/context.toml`, or `.bh-02` itself) may lead to a file the model wrote
-    outside it, in the jail's own scratch directory; a file of the person's may be a link into
-    it, whose end the model could repoint; and a directory on the way it could swap for a link.
-    As the models file's `in_project` and the kernel's startup files are walked."""
+    file as named, then `cordis_helpers.walked`'s) is in the project, as named or as it resolves
+    (`roots`). A link in the project (`.bh-02/context.toml`, or `.bh-02` itself) may lead to a
+    file the model wrote outside it, in the jail's own scratch directory; a file of the person's
+    may be a link into it, whose end the model could repoint; and a directory on the way it
+    could swap for a link. The same walk holds the models file (`in_project`) and the kernel's
+    startup files."""
     return any(p.is_relative_to(r) for p in way for r in roots)
-
-
-def _way(path: Path) -> list[Path]:
-    """Every place reading the absolute `path` goes through, from the top: each directory and
-    link on the way (a link where it sits, then what it points to, followed), then where it ends."""
-    at, pending, links, out = Path(path.anchor), list(path.parts[1:]), 0, list[Path]()
-    while pending:
-        part = pending.pop(0)
-        if part == "..":  # after the links before it are followed, as the kernel does
-            at = at.parent
-            continue
-        step = at / part
-        out.append(step)
-        try:
-            target = Path(os.readlink(step)) if links < _MOST_LINKS and step.is_symlink() else None
-        except OSError:  # gone since, or can't be read: reading the file will say what is wrong
-            target = None
-        if target is None:
-            at = step
-            continue
-        links += 1
-        at = Path(target.anchor) if target.is_absolute() else at
-        pending[:0] = target.parts[1:] if target.is_absolute() else target.parts
-    return [*out, at]
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,7 +303,7 @@ class _Facts:
     """What `_found` learned of one file a section found, for `_kept`: where it is (its
     directories' links followed), what it finally is (its own link followed too), how many names
     it has, and, for one named outside the project, the file and every place reading it goes
-    through (`_way`)."""
+    through (`cordis_helpers.walked`)."""
 
     place: Path
     real: Path
@@ -390,7 +370,7 @@ def read(path: Path, files: Sequence[Path], root: Path) -> str:
         raise ValueError(
             f"{path} is not one of the files given: pass `read` one of the files a section was given"
         )
-    for _ in range(_MOST_LINKS):
+    for _ in range(MOST_LINKS):
         inside = _under(at, roots)
         if inside is None:
             return named.read_text(encoding="utf-8", errors="replace")
@@ -404,7 +384,7 @@ def read(path: Path, files: Sequence[Path], root: Path) -> str:
                 "did not read it"
             )
         at = named = target
-    raise OSError(f"{path} leads through more than {_MOST_LINKS} links, so bh-02 did not read it")
+    raise OSError(f"{path} leads through more than {MOST_LINKS} links, so bh-02 did not read it")
 
 
 def _opened(root: Path, parts: Sequence[str]) -> tuple[str, str | None]:

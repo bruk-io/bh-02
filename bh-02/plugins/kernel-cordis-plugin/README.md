@@ -99,9 +99,10 @@ A new kernel's first input is also told what the startup files did (`startup`, h
 across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/kernel.py` (else
 `~/.config/bh-02/kernel.py`), for the helpers they want in every project, then the project's,
 `.bh-02/kernel.py`, the model's own. A name starting `$XDG_CONFIG_HOME/` is in the person's
-config directory (that variable's value, else `~/.config`, as for the context file), one
-starting `~/` in their home, any other from `root`; a single string is one file, and anything
-but a name or a list of names is the row's config error. Confined, the kernel runs each that is
+config directory (`cordis_helpers.config_home`: that variable's value, else `~/.config`, as for
+the context file and the models file), one starting `~/` in their home, any other from `root`; a
+single string is one file, and anything but a name or a list of names is the row's config
+error. Confined, the kernel runs each that is
 there as an input of its own and says which names it defined (each its code binds at the top,
 as the compiler reads it, so one bound again to the object it held counts, and any new or
 changed after it; on a line of their own, after whatever the file printed), or its traceback;
@@ -127,10 +128,10 @@ model, and nothing needs keeping from it. Where each is read is the point:
   `linecache`), but `open` on its path finds nothing, a helper that reads a file beside it
   finds nothing either, and `__file__` is not set (nor for the project's: each runs as an
   input). The model is told how to see one (`inspect.getsource(helper)`).
-- But only when reading it goes nowhere an input may write (`_walked`, as the models plugin
-  walks the models file: each directory and link on the way, as named and as resolved): the
-  project, or another root the worker's jail lets an input write (its `writes()`: a `write`
-  the person added to `brig:jail`). A person's file there (bh-02 run from the home directory) or whose way
+- But only when reading it goes nowhere an input may write (`cordis_helpers.walked`, the walk
+  the models file and the context files are held to: each directory and link on the way, as
+  named and as resolved): the project, or another root the worker's jail lets an input write
+  (its `writes()`: a `write` the person added to `brig:jail`). A person's file there (bh-02 run from the home directory) or whose way
   passes through one (a config directory linked into a dotfiles repository being worked on) is
   read as the project's is: the model could have written it, or chosen where it leads, so the
   worker reads it, at its resolved place when that is in such a root. If that fails (the jail

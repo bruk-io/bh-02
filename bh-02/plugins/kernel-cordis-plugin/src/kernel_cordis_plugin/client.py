@@ -20,11 +20,12 @@ inputs are confined: the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
 the worker, in the jail, which decides: the model can write it, and a link there could lead to a
 file the jail hides. The person's is outside the project, where a Linux jail (which reads by
 allowlist, the home directory absent) can't see it, so the host reads it and sends its source;
-but only when reading it goes nowhere an input may write (`_walked`: no directory or link on the
-way is in the project, or in another root the worker's jail lets an input write, its
-`writes()`). One that is there, or whose way passes through there, the worker reads, as it does
-the project's, and if that fails the note says why the host did not; it is still the person's,
-not the model's to edit, which is what the model is told. (The jail also keeps an input from writing in the
+but only when reading it goes nowhere an input may write (`cordis_helpers.walked`, the walk the
+models file and the context files are held to: no directory or link on the way is in the
+project, or in another root the worker's jail lets an input write, its `writes()`). One that is
+there, or whose way passes through there, the worker reads, as it does the project's, and if
+that fails the note says why the host did not; it is still the person's, not the model's to
+edit, which is what the model is told. (The jail also keeps an input from writing in the
 person's config directory, so a session run from the home directory can't choose what a later
 one reads there: brig's `trusted`.) A startup file that ends the worker is passed over by the
 workers after it, until `/restart kernel`, and the input it cut short says which it was, after
@@ -44,6 +45,7 @@ from sys import executable
 from types import TracebackType
 from typing import Any, Protocol, runtime_checkable
 
+from cordis_helpers import config_home, walked
 from kernel_cordis_plugin.approval import is_confined
 from kernel_cordis_plugin.python import PYTHON, instructions_for
 
@@ -55,7 +57,6 @@ _WORKER = Path(__file__).with_name("worker.py")
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
 _LINE_LIMIT = 1 << 20
 _CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a startup file in the person's config directory
-_MOST_LINKS = 40  # links one walk follows at most (Linux's own limit), so a loop of links ends
 
 
 @runtime_checkable
@@ -210,11 +211,11 @@ def _startup_input(path: str, source: str | None = None) -> str:
 
 def _located(name: str, root: Path, home: Path, environ: Mapping[str, str]) -> Path:
     """Where the startup file `name` is: one starting `$XDG_CONFIG_HOME/` in the person's config
-    directory (that variable's value, else `home`'s `.config`, as the context file is), one
-    starting `~/` in `home`, and any other from the project's `root` (an absolute one is itself)."""
+    directory (`cordis_helpers.config_home`: that variable's value, else `home`'s `.config`, as
+    for the context file and the models file; a relative value is from `root`), one starting
+    `~/` in `home`, and any other from the project's `root` (an absolute one is itself)."""
     if name.startswith(_CONFIG_HOME):
-        config = Path(environ.get("XDG_CONFIG_HOME") or home / ".config")
-        return root / config / name.removeprefix(_CONFIG_HOME)
+        return root / config_home(environ, home) / name.removeprefix(_CONFIG_HOME)
     return home / name[2:] if name == "~" or name.startswith("~/") else root / name
 
 
@@ -229,32 +230,6 @@ def _placed(names: Sequence[str], root: Path, home: Path, environ: Mapping[str, 
         project = not (name.startswith(("/", "~/", _CONFIG_HOME)) or name == "~")
         placed.append(_Startup(name if project else str(path), path, project))
     return tuple(placed)
-
-
-def _walked(path: Path) -> list[Path]:
-    """Every place reading the absolute `path` goes through, from the top: each directory and
-    link on the way (a link where it sits, then what it points to, followed), then where it
-    ends. The models plugin's `in_project` walks the models file so: a link the model could
-    repoint, or a directory it could swap for one, would choose what the host reads."""
-    at, pending, links, out = Path(path.anchor), list(path.parts[1:]), 0, list[Path]()
-    while pending:
-        part = pending.pop(0)
-        if part == "..":  # after the links before it are followed, as the kernel does
-            at = at.parent
-            continue
-        step = at / part
-        out.append(step)
-        try:
-            target = Path(os.readlink(step)) if links < _MOST_LINKS and step.is_symlink() else None
-        except OSError:  # gone since, or can't be read: reading the file will say what is wrong
-            target = None
-        if target is None:
-            at = step
-            continue
-        links += 1
-        at = Path(target.anchor) if target.is_absolute() else at
-        pending[:0] = target.parts[1:] if target.is_absolute() else target.parts
-    return [*out, at]
 
 
 def worker_argv(endpoint: str) -> list[str]:
@@ -506,7 +481,7 @@ class Kernel:
             if not startup.path.is_file() or real in seen:
                 continue
             seen.add(real)
-            way = (startup.path, *_walked(startup.path))
+            way = (startup.path, *walked(startup.path))
             meets = next((r for p in way for r in writable if p.is_relative_to(r)), None)
             if startup.project:  # the worker reads it by its name, from the root it starts in
                 ready.append(_Ready(startup.name, startup.name))

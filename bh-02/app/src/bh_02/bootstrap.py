@@ -14,6 +14,7 @@ from typing import Protocol, runtime_checkable
 from bh_02.sessions import Listing
 from cordis import Booted, Effects, Inspection, Row, Runtime, bind, boot, component, enter
 from cordis.loader import read_layer
+from cordis_helpers import config_home
 
 __all__ = [
     "CREDENTIAL_FILE",
@@ -113,11 +114,11 @@ def config_directories(environ: Mapping[str, str], home: Path) -> tuple[str, ...
     repository). The host reads what is there and trusts it (the models file, the person's
     context file and their startup file, whose text it hands to the model's REPL), so no jailed
     input may write there: a session run from the home directory would otherwise choose what
-    every later one reads."""
-    default = home / ".config"
+    every later one reads. Where the configuration lives is `cordis_helpers.config_home`, as the
+    model, context and kernel rows find their files there."""
     named = (
         Path(os.path.normpath(Path(base, "bh-02").absolute()))
-        for base in (environ.get("XDG_CONFIG_HOME") or default, default)
+        for base in (config_home(environ, home), config_home({}, home))
     )
     return tuple(dict.fromkeys(str(path) for each in named for path in (each, each.resolve())))
 

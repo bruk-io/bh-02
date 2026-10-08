@@ -5,6 +5,7 @@ description = "bh-02's `model` row: named models over their providers (Claude th
 requires-python = ">=3.15"
 dependencies = [
     "cordis",
+    "cordis-helpers",
     # claude-code: pinned, the design leans on Claude Code internals a CLI upgrade can change
     # without a type error (the MCP call's `claudecode/toolUseId`, the `next` priority, the
     # session file format; README.md). Bump deliberately and run the e2e tests. records.py also
@@ -28,6 +29,7 @@ models = "models_cordis_plugin"
 
 [tool.uv.sources]
 cordis = { workspace = true }
+cordis-helpers = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -271,8 +271,10 @@ neither. A patch that gives the `model` row a `config` replaces the session laye
 
 ## The plugins
 
-Each depends on the libraries (`cordis`, and `cordis-helpers` for the patterns) and on no
-other plugin; the gate proves it.
+Each depends on the libraries (`cordis`, and `cordis-helpers` for the patterns, and for the
+paths the kernel, models and context plugins and the app must see alike: `config_home`, where
+the person's configuration lives, and `walked`, the link walk the files they trust are held to)
+and on no other plugin; the gate proves it.
 
 | Package | Binds / registers | Consumes |
 |---|---|---|

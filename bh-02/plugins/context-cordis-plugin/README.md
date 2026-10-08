@@ -100,10 +100,11 @@ on_touch = "context_cordis_plugin.sections:place_touched"
 The sections are read in order from bh-02's own file (`context.toml`, in the package), then each
 of `files`: yours, `$XDG_CONFIG_HOME/bh-02/context.toml` (else `~/.config/bh-02/context.toml`),
 then the project's, `.bh-02/context.toml`. A name in `files` starting `$XDG_CONFIG_HOME/` is in
-that directory, or in `home`'s `.config` when the variable is unset or empty (as the models
-file is); one starting `~` is in `home`; any other is from the project's root. Each appends its
-sections; `replace = true` at a file's top starts the list afresh. Each of `files` is read again
-whenever it changes, so a section added reaches the model's next message.
+that directory, or in `home`'s `.config` when the variable is unset or empty
+(`cordis_helpers.config_home`, as for the models file and the kernel's startup files); one
+starting `~` is in `home`; any other is from the project's root. Each appends its sections;
+`replace = true` at a file's top starts the list afresh. Each of `files` is read again whenever
+it changes, so a section added reaches the model's next message.
 
 **bh-02's own file is read once**, as the `system` row starts. It is trusted whole (a function
 it names is imported and run in bh-02's process), so it is bh-02's code, as its modules are,
@@ -124,12 +125,13 @@ functions (`context_cordis_plugin.sections:*`, as `function` and as `on_touch`),
 in the project that are not hidden (no `~`, `/`, `..` or part starting with `.`), and it may not
 `replace` the sections before it. A function or a file outside the project of your own goes in
 your file. A context file is the project's when the model could have written it or chosen what
-it is: as named, as it resolves, or through any directory or link on its way, it is in the
-project. So a file of yours inside it (bh-02 run in your home, a `$XDG_CONFIG_HOME` in the
-project) is the project's; so is `.bh-02/context.toml` (or `.bh-02`) made a link to a file
-outside it, such as one the model wrote in the jail's scratch directory; and so is your file
-when it is a link into the project (`~/.config/bh-02/context.toml` kept in `~/dotfiles`, and
-bh-02 run there), since the model could repoint the file the link leads to.
+it is: as named, as it resolves, or through any directory or link on its way
+(`cordis_helpers.walked`, the walk the models file and the kernel's startup files are held to),
+it is in the project. So a file of yours inside it (bh-02 run in your home, a
+`$XDG_CONFIG_HOME` in the project) is the project's; so is `.bh-02/context.toml` (or `.bh-02`)
+made a link to a file outside it, such as one the model wrote in the jail's scratch directory;
+and so is your file when it is a link into the project (`~/.config/bh-02/context.toml` kept in
+`~/dotfiles`, and bh-02 run there), since the model could repoint the file the link leads to.
 
 And whichever file a section came from, nothing is read through it that the jail keeps from
 the model: a file reached from the project must be in it, a link in the project counts only

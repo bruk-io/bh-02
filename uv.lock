@@ -134,6 +134,7 @@ dependencies = [
     { name = "commands-cordis-plugin" },
     { name = "context-cordis-plugin" },
     { name = "cordis" },
+    { name = "cordis-helpers" },
     { name = "extensions-cordis-plugin" },
     { name = "kernel-cordis-plugin" },
     { name = "models-cordis-plugin" },
@@ -149,6 +150,7 @@ requires-dist = [
     { name = "commands-cordis-plugin", editable = "bh-02/plugins/commands-cordis-plugin" },
     { name = "context-cordis-plugin", editable = "bh-02/plugins/context-cordis-plugin" },
     { name = "cordis", editable = "libs/cordis" },
+    { name = "cordis-helpers", editable = "libs/cordis-helpers" },
     { name = "extensions-cordis-plugin", editable = "bh-02/plugins/extensions-cordis-plugin" },
     { name = "kernel-cordis-plugin", editable = "bh-02/plugins/kernel-cordis-plugin" },
     { name = "models-cordis-plugin", editable = "bh-02/plugins/models-cordis-plugin" },
@@ -503,10 +505,14 @@ version = "0.1.0"
 source = { editable = "bh-02/plugins/kernel-cordis-plugin" }
 dependencies = [
     { name = "cordis" },
+    { name = "cordis-helpers" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cordis", editable = "libs/cordis" }]
+requires-dist = [
+    { name = "cordis", editable = "libs/cordis" },
+    { name = "cordis-helpers", editable = "libs/cordis-helpers" },
+]
 
 [[package]]
 name = "librt"
@@ -639,6 +645,7 @@ source = { editable = "bh-02/plugins/models-cordis-plugin" }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "cordis" },
+    { name = "cordis-helpers" },
     { name = "httpx2" },
     { name = "mcp" },
 ]
@@ -647,6 +654,7 @@ dependencies = [
 requires-dist = [
     { name = "claude-agent-sdk", specifier = "==0.2.158" },
     { name = "cordis", editable = "libs/cordis" },
+    { name = "cordis-helpers", editable = "libs/cordis-helpers" },
     { name = "httpx2", specifier = ">=2.13,<3" },
     { name = "mcp", specifier = ">=2.2,<3" },
 ]

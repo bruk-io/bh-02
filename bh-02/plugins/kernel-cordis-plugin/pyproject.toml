@@ -5,6 +5,7 @@ description = "A persistent Python kernel in a process of its own, started by wh
 requires-python = ">=3.15"
 dependencies = [
     "cordis",
+    "cordis-helpers",
 ]
 
 [project.entry-points."cordis.plugins"]
@@ -12,6 +13,7 @@ kernel = "kernel_cordis_plugin"
 
 [tool.uv.sources]
 cordis = { workspace = true }
+cordis-helpers = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

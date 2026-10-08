@@ -44,6 +44,17 @@ shape, in `CONTRACTS.md`:
   (`cordis-in-wiring-only`); `wiring.py` is the components, which `bind` a value or `acquire` a
   registration.
 - A plugin's tests use fakes from a package's own `testing` module (`chat_cordis_plugin.testing`, `bh_02.testing`), never another package's tests.
+- **What several packages must compute alike, and that names no domain, is one function in
+  `cordis_helpers`**, not a copy in each: `config_home` (where the person's configuration
+  lives: `$XDG_CONFIG_HOME`, else `~/.config`), under which the models file, the person's
+  context and startup files and `layers.trusted` are found, and `walked` (every place reading a
+  path goes through: each directory and link on the way, links followed), which holds the
+  models file, the context files and the person's startup file to whether the model's code
+  could have written or chosen them. Not a key: `layers` could carry the configuration home, but
+  `system` depends on nothing and the kernel on its jail alone, so a `layers` dependency would
+  reload `system`, and a `kernel:unjailed` kernel, at a `/restart layers` (a layer edit,
+  `/model`'s too, never rebinds `layers`: its row's entry doesn't change); and the context row's
+  own `home` decides its `~/.config`.
 
 **The model has one tool, and it carries code.** The kernel is the tool: `kernel:kernel` binds
 `kernel`, a persistent Python namespace whose `spec` is `python(code)`, and `agent:loop` offers
@@ -325,13 +336,15 @@ The kernel never gets it:
 - `brig:jail` also denies writing bh-02's config directory where it is under a root an input may
   write (bh-02 run from the home directory): `layers.trusted`, this run's
   `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`, each as named and as it resolves
-  (`bh_02.bootstrap.config_directories`). The host reads what is there and trusts it (the models
-  file names a key's `local.env` line and a provider that runs in bh-02's process, the person's
-  context file names functions bh-02 runs, the person's startup file goes to the model's REPL
-  as text), so one session's input could otherwise plant something every later session reads: a
-  startup file that is a link to a key the jail hides. On Linux the directory is held like any
-  write deny there (a mount the host can undo, the directories above it pinned). Not when bh-02
-  runs in that directory or below it: denying it would leave the project read-only.
+  (`bh_02.bootstrap.config_directories`, under `cordis_helpers.config_home`, where the model,
+  context and kernel rows look for those files too). The host reads what is there and trusts it
+  (the models file names a key's `local.env` line and a provider that runs in bh-02's process,
+  the person's context file names functions bh-02 runs, the person's startup file goes to the
+  model's REPL as text), so one session's input could otherwise plant something every later
+  session reads: a startup file that is a link to a key the jail hides. On Linux the directory
+  is held like any write deny there (a mount the host can undo, the directories above it
+  pinned). Not when bh-02 runs in that directory or below it: denying it would leave the project
+  read-only.
 - `brig:jail` denies writing bh-02's own code where it is under a root an input may write
   (bh-02 working on its own checkout, an editable install, or run from a home the checkout is
   in): `layers.code`, the directory of every package bh-02 runs (`bh_02`, cordis,
