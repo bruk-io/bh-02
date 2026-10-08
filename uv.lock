@@ -10,11 +10,11 @@ members = [
     "brig-cordis-plugin",
     "chat-cordis-plugin",
     "commands-cordis-plugin",
-    "context-cordis-plugin",
     "cordis",
     "cordis-helpers",
     "extensions-cordis-plugin",
     "kernel-cordis-plugin",
+    "memory-cordis-plugin",
     "models-cordis-plugin",
     "tui-cordis-plugin",
     "warden",
@@ -132,10 +132,10 @@ dependencies = [
     { name = "chat-cordis-plugin" },
     { name = "click" },
     { name = "commands-cordis-plugin" },
-    { name = "context-cordis-plugin" },
     { name = "cordis" },
     { name = "extensions-cordis-plugin" },
     { name = "kernel-cordis-plugin" },
+    { name = "memory-cordis-plugin" },
     { name = "models-cordis-plugin" },
     { name = "tui-cordis-plugin" },
 ]
@@ -147,10 +147,10 @@ requires-dist = [
     { name = "chat-cordis-plugin", editable = "bh-02/plugins/chat-cordis-plugin" },
     { name = "click", specifier = ">=8" },
     { name = "commands-cordis-plugin", editable = "bh-02/plugins/commands-cordis-plugin" },
-    { name = "context-cordis-plugin", editable = "bh-02/plugins/context-cordis-plugin" },
     { name = "cordis", editable = "libs/cordis" },
     { name = "extensions-cordis-plugin", editable = "bh-02/plugins/extensions-cordis-plugin" },
     { name = "kernel-cordis-plugin", editable = "bh-02/plugins/kernel-cordis-plugin" },
+    { name = "memory-cordis-plugin", editable = "bh-02/plugins/memory-cordis-plugin" },
     { name = "models-cordis-plugin", editable = "bh-02/plugins/models-cordis-plugin" },
     { name = "tui-cordis-plugin", editable = "bh-02/plugins/tui-cordis-plugin" },
 ]
@@ -262,21 +262,6 @@ wheels = [
 name = "commands-cordis-plugin"
 version = "0.1.0"
 source = { editable = "bh-02/plugins/commands-cordis-plugin" }
-dependencies = [
-    { name = "cordis" },
-    { name = "cordis-helpers" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cordis", editable = "libs/cordis" },
-    { name = "cordis-helpers", editable = "libs/cordis-helpers" },
-]
-
-[[package]]
-name = "context-cordis-plugin"
-version = "0.1.0"
-source = { editable = "bh-02/plugins/context-cordis-plugin" }
 dependencies = [
     { name = "cordis" },
     { name = "cordis-helpers" },
@@ -631,6 +616,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec9
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
 ]
+
+[[package]]
+name = "memory-cordis-plugin"
+version = "0.1.0"
+source = { editable = "bh-02/plugins/memory-cordis-plugin" }
+dependencies = [
+    { name = "cordis" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cordis", editable = "libs/cordis" }]
 
 [[package]]
 name = "models-cordis-plugin"

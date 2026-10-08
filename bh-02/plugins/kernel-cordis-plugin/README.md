@@ -10,7 +10,7 @@ composition names, and the model's one tool, `python(code)`, which runs an input
 | `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when confined, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
 | `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
-| `kernel:shell_hints` | adds `ShellHints` to `memory` | `memory` (`add`), `transcript` (`messages`) |
+| `kernel:shell_hints` | adds `ShellHints` to `notes` | `notes` (`add`), `transcript` (`messages`) |
 
 `python.py` is the tool, pure: its spec and `instructions_for(confined, startup, reads, theirs=)`, what the
 model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
@@ -28,11 +28,11 @@ one, an input a single `cat`, `sed` or `ls`: `programs(code)` is what an input r
 `ast`, each command of a shell line), `shelled(code)` the part of it Python does itself (reading,
 editing, writing, listing and moving files; searching with `grep` or `rg` is not one, nor are
 tests, git and builds), and `shell_note` what such an input is told after its output, by
-`ShellHints`, the `memory` function the `kernel:shell_hints` row adds: once for each kind of work
+`ShellHints`, the `notes` function the `kernel:shell_hints` row adds: once for each kind of work
 a conversation (the row depends on `transcript`, so `/clear` starts it afresh; at its first
 input it reads the transcript's `tool` entries for the shell notes they hold, each a line after
 a blank line with a blank line or the entry's end after it, but not one an entry starts with, so
-a resumed session is not told a kind again; a transcript from before `memory` has the note after
+a resumed session is not told a kind again; a transcript from before the `notes` broker has the note after
 the result's last line, one newline and no blank line, at the entry's end, and that counts too,
 as `scripts/model-friction` reads it; the search takes time in proportion to an entry, however
 the model's code shapes its lines; where a result ends is not marked, so a note an input printed
@@ -91,13 +91,13 @@ won't, or that died, is started again on the next input, which is told its varia
 and why when its jail ended it (`started.ended()`: a Linux `brig:jail` ends itself when the host
 undoes one of its mounts). A worker that died between inputs is noticed before the next input
 is sent, so that input runs in the new one. After each input, `touched()` is the files under `root` it opened (what the loop gives
-`memory`'s functions).
+`notes`' functions).
 
 A new kernel's first input is also told what the startup files did (`startup`, helpers kept
 across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/kernel.py` (else
 `~/.config/bh-02/kernel.py`), for the helpers they want in every project, then the project's,
 `.bh-02/kernel.py`, the model's own. A name starting `$XDG_CONFIG_HOME/` is in the person's
-config directory (that variable's value, else `~/.config`, as for the context file), one
+config directory (that variable's value, else `~/.config`, as for the models file), one
 starting `~/` in their home, any other from `root`; a single string is one file, and anything
 but a name or a list of names is the row's config error. Confined, the kernel runs each that is
 there as an input of its own and says which names it defined (each its code binds at the top,

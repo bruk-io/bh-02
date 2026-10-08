@@ -178,7 +178,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `jail` | `brig:jail` | `kernel:unjailed` with `--no-jail` |
 | `approval` | `kernel:approval` | |
 | `release` | `kernel:release` | |
-| `system` | `context:project` | |
+| `system` | `agent:system` | |
 | `commands` | `commands:registry` | |
 | `operator` | `commands:operator` | `layer`, `model_row` (`model`), `forget` (the transcript) |
 | `compact` | `agent:compact` (`timeout`: 300) | |
@@ -188,10 +188,11 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `model` | `models:model` (`default`: `sonnet`) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
 | `models` | `models:catalog` | |
 | `transcript` | `agent:transcript` | `path` (the session's `transcript.jsonl`) |
-| `memory` | `agent:memory` | |
+| `notes` | `agent:notes` | |
 | `executor` | `agent:executor` | |
 | `shell-hints` | `kernel:shell_hints` | |
-| `on-touch` | `context:on_touch` | |
+| `memory` | `memory:memory` | |
+| `on-touch` | `memory:on_touch` | |
 | `extensions` | `extensions:extensions` | |
 
 `run()` adds three rows of its own after every layer, pinned on so no layer can remove them:
@@ -201,7 +202,7 @@ nearest first; and `secrets`: every one of those, the `local.env` beside and abo
 and the sessions' state directory, this run's and the default `~/.local/state/bh-02/sessions`
 (Claude Code's own config and tokens), which a jailed input can't read; and `trusted`: bh-02's
 config directory, this run's `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`, as
-named and as resolved, where your models file, context file and startup file are, which bh-02
+named and as resolved, where your models file and startup file are, which bh-02
 reads and trusts, so a jailed input can't write there when it is in the project (bh-02 run from
 your home directory); with `--no-jail` an input runs with your permissions, so one you
 approve could open or write them: only its environment is scrubbed), `sessions` (the running session,
@@ -226,16 +227,17 @@ What the rows depend on, which is what decides what reloads when:
 commands:registry       binds Commands                     depends on nothing
 commands:operator       registers /rows ... /model         depends on Commands, Loader, Models
 commands:shell_command  claims ! (a shell command)         depends on Commands
-context:project         binds System                       depends on nothing
 models:model            binds Model                        depends on Layers (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
 models:catalog          binds Models                       depends on Loader, Layers
 agent:transcript        binds Transcript                   depends on nothing
-agent:memory            binds Memory                       depends on nothing
+agent:system            binds System                       depends on nothing (its config)
+agent:notes             binds Notes                        depends on nothing
 agent:executor          binds Executor                     depends on nothing
-agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Approval, Memory, Executor
+agent:loop              binds Loop                         depends on Model, Kernel, Transcript, System, Approval, Notes, Executor
 agent:compact           registers /compact                 depends on Model, Kernel, Loader, Commands, Output (the transcript row's file, not Transcript)
-kernel:shell_hints      adds the shell hints to Memory     depends on Memory, Transcript
-context:on_touch        adds the on-touch sections         depends on System, Memory, Transcript
+kernel:shell_hints      adds the shell hints to Notes      depends on Notes, Transcript
+memory:memory           binds Memory, registers /memory    depends on System, Commands
+memory:on_touch         adds memory loaded on demand       depends on Memory, Notes, Transcript
 brig:jail               binds Jail                         depends on Layers
 kernel:unjailed         binds Jail                         depends on nothing
 kernel:kernel           binds Kernel (the one tool)        depends on Jail
@@ -272,11 +274,11 @@ other plugin; the gate proves it.
 |---|---|---|
 | `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `palette`) | `frame` and what each row reports on |
 | `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's one tool, `python`, only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are | `layers` (`credentials`: where both look for `local.env`), `loader` (catalog) |
-| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes, its result followed by what `memory`'s functions add), `transcript` (`agent:transcript`), `memory` (`agent:memory`: the broker of what the model is told with an input's result), `executor` (`agent:executor`: where the loop reads the prompt and asks `memory`, off the event loop, one call at a time across the loop's reloads); `agent:compact` registers `/compact`, which begins a new conversation from the model's summary, restarting the loop and the transcript | the loop: `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (its functions, after each input), `executor` (`run`); compact: `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
+| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, each call an input, run only on `approval`'s yes, its result followed by what `notes`' functions add), `transcript` (`agent:transcript`), `system` (`agent:system`: the system prompt, who the model is and where it is working, then the sections rows add; a broker), `notes` (`agent:notes`: the broker of what the model is told with an input's result), `executor` (`agent:executor`: where the loop reads the prompt and asks `notes`, off the event loop, one call at a time across the loop's reloads); `agent:compact` registers `/compact`, which begins a new conversation from the model's summary, restarting the loop and the transcript | the loop: `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `notes` (its functions, after each input), `executor` (`run`); compact: `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
 | `chat-cordis-plugin` | runs `session` (a turn interruptible; a line `commands` claims goes to it, cancelled if the input closes, and what a command left the model, which `commands` holds, goes with the next message) and binds `done` | `loop`, `input`, `output`, `commands` (`claims`, `run`, `take_for_model`) |
-| `context-cordis-plugin` | `system` (`context:project`): who the model is (the model in bh-02, not Claude Code) and what bh-02 is made of, then the project context: the working directory and branch, what the context files' sections say (guidance and rule files, each read by a function), read fresh; a broker other rows add sections to; and what the context files' `on_touch` sections say about the files an input opened (`touched`). `context:on_touch` adds to `memory` that guidance and those rules, each told whole once a conversation, with the result of the first input that opens a file they cover (or of the next, when that one's note was full) | on-touch: `system` (`touched`), `memory` (`add`), `transcript` (`messages`: what a resumed conversation was told) |
+| `memory-cordis-plugin` | `memory` (`memory:memory`): Claude Code's memory, as its docs describe it: the managed policy's CLAUDE.md, yours (`~/.claude/CLAUDE.md`, `~/.claude/rules/`), each directory's CLAUDE.md files from the filesystem's root down to the project's, AGENTS.md where there is none, `@path` imports (four hops) and `.claude/rules/` without `paths`, a section of `system`, read fresh; `/memory` lists them. `memory:on_touch` adds to `notes` what loads on demand (a subdirectory's CLAUDE.md files and rules, every rule whose `paths` match), each told whole once a conversation, with the result of the first input that opens a file it covers (or of the next, when that one's note was full) | memory: `system` (`add`), `commands` (`register`); on-touch: `memory` (`touched`), `notes` (`add`), `transcript` (`messages`: what a resumed conversation was told) |
 | `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system`; each load on `approval`'s yes; after `/release` stopped its worker, none starts until the next input has started the kernel, and then every extension loads again | `jail` (`start`, `released`), `commands`, `frame`, `system`, `approval` |
-| `kernel-cordis-plugin` | `kernel` (`kernel:kernel`): a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, an input run, the files it opened); `approval` (`kernel:approval`): whether the model's code runs, at once when the jail confines it, else on the person's yes; `jail` (`kernel:unjailed`); `kernel:shell_hints` adds to `memory` how Python does what an input ran through a shell (`cat`, `sed`, `ls`), once for each kind of work a conversation; `kernel:release` registers `/release`, which stops the kernel and its jail until the next input | kernel: `jail` (`start`, and its worker's `report`, `notice`, `reads`, `writes`; `report`; `release`); approval: `jail` (`report`), `output` (`confirm`); shell hints: `memory` (`add`), `transcript` (`messages`: what a resumed conversation was told); release: `kernel` (`release`), `commands` (`register`) |
+| `kernel-cordis-plugin` | `kernel` (`kernel:kernel`): a persistent Python worker behind a Unix socket, and the model's one tool, `python(code)` (its spec, its instructions, whether it is confined, an input run, the files it opened); `approval` (`kernel:approval`): whether the model's code runs, at once when the jail confines it, else on the person's yes; `jail` (`kernel:unjailed`); `kernel:shell_hints` adds to `notes` how Python does what an input ran through a shell (`cat`, `sed`, `ls`), once for each kind of work a conversation; `kernel:release` registers `/release`, which stops the kernel and its jail until the next input | kernel: `jail` (`start`, and its worker's `report`, `notice`, `reads`, `writes`; `report`; `release`); approval: `jail` (`report`), `output` (`confirm`); shell hints: `notes` (`add`), `transcript` (`messages`: what a resumed conversation was told); release: `kernel` (`release`), `commands` (`register`) |
 | `brig-cordis-plugin` | `jail`: brig's `scratch_darwin()` on darwin, `strict_linux()` on Linux; the only importer of brig | `layers` |
 | `commands-cordis-plugin` | `commands` (the broker: slash commands, and the line prefixes a layer's rows claim; it says which lines are commands); the operator's commands over the loader; `!COMMAND` (`commands:shell_command`): the person's shell command, its output shown and held (in `commands`) for their next message | `commands`, `loader`, `models` (operator); `commands` (`claim`: shell command) |
 
@@ -310,16 +312,16 @@ the opening had to tell by then (that the REPL was started again, and why). With
 run them as inputs of its own, which you are asked about. The kernel row's `startup` config is
 the list.
 
-After each input, the loop asks `memory` what to tell the model with its result (on `executor`,
+After each input, the loop asks `notes` what to tell the model with its result (on `executor`,
 off the event loop, as it reads the prompt, so neither freezes the app): the functions
 rows add there are given the input's code, its result and the project files it opened (the
 worker hears each `open` with an audit hook, so `kernel.touched()` is what Python in the input
 read or wrote, not what a shell command did). `kernel:shell_hints` adds the shell hint above;
-`context:on_touch` adds the context files' `on_touch` sections, so a subdirectory's AGENTS.md
-or CLAUDE.md, or a rule for some files, arrives whole with the result of the first input that
-opens a file it covers, as Claude Code's do when its Read, Write or Edit touches one. It asks
-the `system` value (`touched`), so the context files are the ones the `system` row's config
-names (`root`, `home`, `files`), read and searched once for the prompt and for this. Both
+`memory:on_touch` adds memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
+`paths` match, arrives whole with the result of the first input that opens a file it covers, as
+Claude Code's do when its Read, Write or Edit touches one. It asks the `memory` value
+(`touched`), so the memory row's config (`root`, `home`, `instruction_files`, `excludes`) holds
+for the prompt and for this. Both
 depend on `transcript`, so after `/clear` or `/compact` they tell the new conversation again, and read what it
 holds, so a resumed session (`--resume`) is not told again a note told with an earlier result.
 

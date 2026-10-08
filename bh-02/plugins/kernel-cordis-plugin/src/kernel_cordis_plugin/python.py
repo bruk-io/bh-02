@@ -13,7 +13,7 @@ each input to the person and runs it only on a yes.
 A model trained on shell tools tends to use the REPL as one: each input a single `cat`, `sed`
 or `ls` through subprocess, its output printed whole. `programs` is what an input runs,
 `shelled` the part of it Python does itself, and `shell_note` how Python does that work here,
-where the result stays in a variable for the next input. `ShellHints` is the `memory` function
+where the result stays in a variable for the next input. `ShellHints` is the `notes` function
 that tells the model so with that input's result, once for each kind of work in a conversation,
 a resumed one too: it reads what the conversation's transcript says the model was told.
 """
@@ -28,7 +28,7 @@ from typing import Any, Protocol, runtime_checkable
 
 __all__ = [
     "PYTHON",
-    "Memory",
+    "Notes",
     "ShellHints",
     "Transcript",
     "instructions_for",
@@ -214,7 +214,7 @@ _HINT = (
     "tests, git and builds.)"
 )
 # That note in a transcript's `tool` entry, a line of its own: the loop puts each note after a
-# blank line, and another note or the entry's end follows it; before the `memory` broker, the
+# blank line, and another note or the entry's end follows it; before the `notes` broker, the
 # kernel put it after the result's last line, one newline and no blank line, at the entry's end,
 # so one newline before it counts too (as `scripts/model-friction` reads it). `_ways` takes its
 # ways out of the line with `partition`: a pattern with a group for each would take time with the
@@ -262,7 +262,7 @@ def _hinted(messages: Iterable[Mapping[str, Any]]) -> set[str]:
     """The kinds of work a conversation's transcript (`messages`) says the model was told Python
     does: each shell note (`shell_note`) told with an input's result names its kinds by their
     ways. A note is told when a `tool` entry holds it whole, a line after a blank line (or, as
-    a transcript from before the `memory` broker has it, after a line of the result) with a
+    a transcript from before the `notes` broker has it, after a line of the result) with a
     blank line or the entry's end after it: not at the entry's start, and not in what the person
     says. Where the result ends is not marked, so a note an input printed that way counts too."""
     kinds = {way: kind for kind, way in _INSTEAD.items()}
@@ -283,8 +283,8 @@ def _ways(line: str) -> str:
 
 
 @runtime_checkable
-class Memory(Protocol):
-    """What the shell-hints row needs of the `memory` value (CONTRACTS.md: memory): a function
+class Notes(Protocol):
+    """What the shell-hints row needs of the `notes` value (CONTRACTS.md: notes): a function
     added, and its remover back."""
 
     def add(self, fn: Callable[[Mapping[str, Any]], str]) -> Callable[[], None]: ...
@@ -301,7 +301,7 @@ class Transcript(Protocol):
 
 
 class ShellHints:
-    """A `memory` function: given an input (`code`, ...), how Python does the shell work it ran
+    """A `notes` function: given an input (`code`, ...), how Python does the shell work it ran
     (`shell_note`), for each kind of work the first time this conversation sees it; '' after.
 
     What the conversation was told before this began (a resumed session's, or this one's before

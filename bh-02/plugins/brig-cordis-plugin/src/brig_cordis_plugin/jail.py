@@ -8,7 +8,7 @@ prefix), brig's own self-modification list (`.git/hooks`, `.git/config`, shell r
 CLAUDE.md, ...), any secret below under a writable root (it may not replace what it can't
 read), and bh-02's configuration directories under one (`trusted`: the person's
 `$XDG_CONFIG_HOME/bh-02` and `~/.config/bh-02`, when bh-02 runs from the home directory), whose
-models file, context file and startup file a later session reads on the host and trusts. What
+models file and startup file a later session reads on the host and trusts. What
 it may not read: brig's credential list under the home directory, `hide`
 under the project, and what the `layers` value names as `secrets` (bh-02's own `local.env`,
 wherever bh-02 runs from, and the sessions' state, where Claude Code keeps its tokens). No

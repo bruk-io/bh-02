@@ -211,6 +211,28 @@ def test_bh_02_s_fakes_that_bound_completion_bind_model_under_new_names() -> Non
     )
 
 
+def test_the_project_context_s_rows_are_the_system_prompt_s_and_memory_s() -> None:
+    """`context:project` is `agent:system` and `context:on_touch` is `memory:on_touch`; a `system`
+    row's `root` and `home` go to a `memory` row too, its `files` are gone; and the broker
+    `agent:memory` is `agent:notes`, under the id `notes`."""
+    rows, changes = translated(
+        [
+            Row("system", "context:project", {"root": "/p", "home": "/h", "files": ["x.toml"]}),
+            Row("on-touch", "context:on_touch"),
+            Row("memory", "agent:memory"),
+        ]
+    )
+    assert rows == [
+        Row("system", "agent:system", {"root": "/p"}),
+        Row("memory", None, {"root": "/p", "home": "/h"}),
+        Row("on-touch", "memory:on_touch"),
+        Row("notes", "agent:notes"),
+    ]
+    assert any("files is gone (context files are gone" in change for change in changes)
+    assert translated(rows) == (rows, [])  # once
+    assert translated([Row("system", config={"root": "/p"})]) == ([Row("system", config={"root": "/p"})], [])
+
+
 def test_the_status_row_s_default_model_is_gone() -> None:
     rows, changes = translated([Row("status", config={"default_model": "fake"})])
     assert rows == [] and changes == [

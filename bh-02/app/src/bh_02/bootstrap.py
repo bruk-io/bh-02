@@ -105,8 +105,8 @@ def config_directories(environ: Mapping[str, str], home: Path) -> tuple[str, ...
     """bh-02's configuration directories of the person's (the `layers` value's `trusted`): this
     run's (`$XDG_CONFIG_HOME/bh-02`, else `~/.config/bh-02`) and the default one, which a run
     without the variable reads, each as named and as it resolves (a link into a dotfiles
-    repository). The host reads what is there and trusts it (the models file, the person's
-    context file and their startup file, whose text it hands to the model's REPL), so no jailed
+    repository). The host reads what is there and trusts it (the models file, and the person's
+    startup file, whose text it hands to the model's REPL), so no jailed
     input may write there: a session run from the home directory would otherwise choose what
     every later one reads."""
     default = home / ".config"

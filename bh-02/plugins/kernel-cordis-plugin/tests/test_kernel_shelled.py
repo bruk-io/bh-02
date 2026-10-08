@@ -1,5 +1,5 @@
 """`shelled` and `shell_note`: the shell commands an input runs for work Python does itself, and
-what the model is told about them; `ShellHints`, which tells it through `memory`, once for each
+what the model is told about them; `ShellHints`, which tells it through `notes`, once for each
 kind of work a conversation, a resumed one too."""
 
 import re
@@ -147,7 +147,7 @@ def test_a_resumed_conversation_is_not_told_again_a_kind_its_transcript_told() -
 
 
 def test_a_transcript_from_before_the_memory_broker_tells_its_shell_notes_too() -> None:
-    """Before `memory`, the kernel put the note after the result's last line, one newline and
+    """Before `notes`, the kernel put the note after the result's last line, one newline and
     no blank line, at the entry's end: a session resumed from then was told them all the same."""
     transcript = _Kept(
         {"role": "assistant", "content": "", "tool_calls": []},
@@ -176,10 +176,10 @@ def test_a_long_result_line_costs_the_search_for_told_notes_little(before: str) 
 
 
 async def test_the_shell_hints_row_adds_its_function_to_memory() -> None:
-    memory: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
-    effects = await drive(shell_hints(memory=memory, transcript=_Kept()))
+    notes: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
+    effects = await drive(shell_hints(notes=notes, transcript=_Kept()))
     assert [e.name for e in effects] == ["acquire"]
-    assert effects[0].args[0] == memory.add and isinstance(effects[0].args[1], ShellHints)
+    assert effects[0].args[0] == notes.add and isinstance(effects[0].args[1], ShellHints)
 
 
 def test_on_linux_the_model_is_told_what_the_jail_reads_and_that_the_home_directory_is_absent() -> None:

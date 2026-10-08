@@ -1,6 +1,6 @@
 """The rows: the kernel, bound under `kernel`; `/release` over it; whether the model's code may
 run, under `approval`; a jail that confines nothing, under `jail`; and the shell hints, added to
-`memory`."""
+`notes`."""
 
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
@@ -8,7 +8,7 @@ from typing import Any, Protocol, runtime_checkable
 from cordis import Effects, acquire, bind, component, enter
 from kernel_cordis_plugin.approval import Approval, Asks, Graded
 from kernel_cordis_plugin.client import Jail, Kernel, KernelConfig
-from kernel_cordis_plugin.python import Memory, ShellHints, Transcript
+from kernel_cordis_plugin.python import Notes, ShellHints, Transcript
 from kernel_cordis_plugin.unjailed import Unjailed
 
 __all__ = ["approval", "kernel", "release", "shell_hints", "unjailed"]
@@ -79,10 +79,10 @@ async def unjailed() -> Effects:
 
 
 @component
-async def shell_hints(*, memory: Memory, transcript: Transcript) -> Effects:
+async def shell_hints(*, notes: Notes, transcript: Transcript) -> Effects:
     """Fills a `shell-hints` row: `use = "kernel:shell_hints"`. The first input of a conversation
     that runs `cat`, `sed`, `ls` or the like through a shell is told, with its result, how Python
     does that kind of work here (`ShellHints`). It depends on `transcript` for its lifetime and
     what it says: a new conversation (`/clear`) starts a new row, which tells each kind again,
     and a resumed one is not told again a kind its transcript's shell notes told."""
-    yield acquire(memory.add, ShellHints(transcript))
+    yield acquire(notes.add, ShellHints(transcript))

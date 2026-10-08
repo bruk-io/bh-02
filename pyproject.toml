@@ -98,12 +98,12 @@ src = [
     "bh-02/plugins/chat-cordis-plugin/tests",
     "bh-02/plugins/commands-cordis-plugin/src",
     "bh-02/plugins/commands-cordis-plugin/tests",
-    "bh-02/plugins/context-cordis-plugin/src",
-    "bh-02/plugins/context-cordis-plugin/tests",
     "bh-02/plugins/extensions-cordis-plugin/src",
     "bh-02/plugins/extensions-cordis-plugin/tests",
     "bh-02/plugins/kernel-cordis-plugin/src",
     "bh-02/plugins/kernel-cordis-plugin/tests",
+    "bh-02/plugins/memory-cordis-plugin/src",
+    "bh-02/plugins/memory-cordis-plugin/tests",
     "bh-02/plugins/models-cordis-plugin/src",
     "bh-02/plugins/models-cordis-plugin/tests",
     "bh-02/plugins/tui-cordis-plugin/src",
@@ -262,18 +262,15 @@ exclude = [
     "models_cordis_plugin.openai.client:OpenAIModel.complete",
     # the stand-in OpenAI-compatible server tests run the provider against: its socket
     "models_cordis_plugin.openai.testing:_Handler.*",
-    # I/O at the edges: the project's files, for the prompt and for the on-touch row
-    "context_cordis_plugin.project:ProjectContext.text", "context_cordis_plugin.project:ProjectContext.touched",
-    # the context files, the files their sections name, and the functions that read those
-    "context_cordis_plugin.context_file:ContextFiles.*", "context_cordis_plugin.context_file:_parsed",
-    "context_cordis_plugin.context_file:_function", "context_cordis_plugin.context_file:_search",
-    "context_cordis_plugin.sections:place", "context_cordis_plugin.sections:rules",
-    "context_cordis_plugin.sections:place_touched", "context_cordis_plugin.sections:rules_touched",
-    "context_cordis_plugin.sections:whole",
-    # a section's file read from the project's root through no link (`read`, which the functions
-    # above read with; `_opened` the walk), and the root resolved, to tell what is in the project
-    "context_cordis_plugin.context_file:read", "context_cordis_plugin.context_file:_opened",
-    "context_cordis_plugin.context_file:_roots",
+    # I/O at the edges: the project's .git/HEAD, for the branch the prompt names, read through no link
+    "agent_cordis_plugin.system:SystemPrompt.text", "agent_cordis_plugin.system:_head",
+    # memory: the CLAUDE.md files, found where Claude Code finds them (`Memory`, `_resolved`: an
+    # import's file) and read through no link the model made (`read`, `_opened` the walk, `_named`
+    # one outside the project), the project's root resolved to tell what is in it; and `/memory`
+    "memory_cordis_plugin.memory:Memory.*", "memory_cordis_plugin.memory:_resolved",
+    "memory_cordis_plugin.reading:read", "memory_cordis_plugin.reading:_opened",
+    "memory_cordis_plugin.reading:_named", "memory_cordis_plugin.reading:roots",
+    "memory_cordis_plugin.wiring:memory.run",
     # the kernel: a socket to a process a jail started, the process itself, and the worker program
     "kernel_cordis_plugin.client:Kernel.*",
     "kernel_cordis_plugin.unjailed:_Process.*", "kernel_cordis_plugin.unjailed:Unjailed.start",

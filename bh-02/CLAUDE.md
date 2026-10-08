@@ -9,7 +9,7 @@ cordis defines them, then bh-02's. A new term in these docs goes there, or is pl
 
 ## Adding a plugin
 
-Copy the shape of `plugins/context-cordis-plugin`: a `pyproject.toml` with
+Copy the shape of `plugins/memory-cordis-plugin`: a `pyproject.toml` with
 `[project.entry-points."cordis.plugins"] <name> = "<name>_cordis_plugin"` and workspace sources
 for the libraries it uses, `src/<name>_cordis_plugin/` with a `wiring.py` and `py.typed`, a
 `README.md`, a `tests/` dir. The workspace's member list, testpaths, mypy files, ruff `src` and
@@ -57,7 +57,7 @@ Replacing a binding reloads every dependent (cordis's rule, and why history live
 
 **The broker pattern is the paper's (section 6.2).** `commands` (slash commands, and line
 prefixes a layer's row claims: `!`), `frame`
-(the app's frame), `system` (its sections) and `memory` (what the model is told with an input's
+(the app's frame), `system` (its sections) and `notes` (what the model is told with an input's
 result) are brokers: one row binds the key, contributors depend on it and `acquire` a
 registration whose return value is its remover, so adding or retiring a command reloads
 nothing. Keep registrations commutative: each takes its own entry, never an ordered chain.
@@ -88,45 +88,39 @@ model (`for_model`: a `!COMMAND`'s output) `commands` holds (a row that never re
 `/model` switch, which reloads the chat row, keeps it) and the chat row takes and puts in front
 of the person's next message (`take_for_model`), so `loop.reply` is still given one message and
 nothing reaches a turn. `system`
-(`context:project`) is organised as Claude Code's is: who the model is (the model in bh-02, not
-Claude Code) and what bh-02 is made of, then the project context: the working directory and
-branch, what the context files say, and the sections rows add (`system.add`: the extensions
-row's is how to extend bh-02 and the part of cordis that takes). A context file is TOML, a list
-of `[[section]]`s, each `files` (patterns) and `function` (a full module path given the files
-that match, returning text): bh-02's own (`context_cordis_plugin/context.toml`: the guidance
-files, AGENTS.md and CLAUDE.md, yours and the project's, and rule files, each read by a function
-in `context_cordis_plugin.sections`), then yours (`$XDG_CONFIG_HOME/bh-02/context.toml`, else
-`~/.config/bh-02/context.toml`), then the project's
-`.bh-02/context.toml`, which the model can write and so may name only bh-02's own functions and
-non-hidden files in the project. Any context file the model could have written or chosen is held
-to the same terms: one that, as named, as it resolves, or through any directory or link on its
-way, is in the project (yours too, when it is a link into the dotfiles bh-02 runs in). Nothing is read through
-any section that the jail keeps from the model (a link out of the project, a `local.env`, a hard
-link, a file of yours whose link leads through the project), and not only when the files are
-found: the model can make a link at any moment, so bh-02's own section functions read a file
-in the project from its root through no link (`O_NOFOLLOW` on every part, then a regular file
-with one name, read from what that opened), a link there only to another of the section's
-files (`context_cordis_plugin.read`). The loop follows it with `kernel.instructions()`: that `python` is the
+(`agent:system`) is organised as Claude Code's is: who the model is (the model in bh-02, not
+Claude Code) and what bh-02 is made of, the working directory and branch, then the sections rows
+add (`system.add`): memory's, then the extensions row's (how to extend bh-02 and the part of
+cordis that takes). Memory (`memory:memory`) is Claude Code's, as its docs describe it: the
+managed policy's CLAUDE.md, yours (`~/.claude/CLAUDE.md` and `~/.claude/rules/`), each
+directory's `CLAUDE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md` from the filesystem's root
+down to the project's, the project's `.claude/rules/` without `paths`, AGENTS.md where there is
+no CLAUDE.md (`instruction_files`), each file's comments out and its `@path` imports after it;
+`/memory` lists them. Nothing is read that the jail keeps from the model: a file in the project
+is read from its root through no link (`O_NOFOLLOW` on every part, then a regular file with one
+name, read from what that opened), a link there only to another memory file
+(`memory_cordis_plugin.read`); a file of yours whose way passes through the project is not read;
+nothing named like a secret is; and a file in the project, which the model can write, imports
+nothing outside it (Claude Code asks; bh-02 says it did not). The loop follows it with `kernel.instructions()`: that `python` is the
 CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
 plain Python, not IPython), and under a Linux jail what its code can read (`kernel.reads()`:
 the system, the interpreter, the project; no home directory). After each input, the loop asks
-`memory` (`agent:memory`, a broker) what to tell the model with its result: each function rows
+`notes` (`agent:notes`, a broker) what to tell the model with its result: each function rows
 add there gets the input's code, its
 result and `kernel.touched()` (the project files Python in the input opened, heard by an audit
 hook in the worker; a shell command's own reads are not heard) and may add a note, never change
 the result. `kernel:shell_hints` tells the first input that runs `cat`, `sed`, `ls` or the like
 through a shell, once for each kind of work, how Python does it (`shell_note`);
-`context:on_touch` gives the context files' `on_touch` sections, so a subdirectory's AGENTS.md
-or CLAUDE.md, or a rule for some files, arrives whole with the first input that opens a file it
-covers (Claude Code's on-demand loading; one that input's 20,000-character note cut short, or
-left out, arrives with the next that opens a file it covers); it has no config of its own and asks the `system`
-value (`system.touched(paths)`), so the context files, and the caches of what was read and
-searched, are `context:project`'s alone. Both depend on `transcript`, so `/clear` and `/compact`
+`memory:on_touch` gives memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
+`paths` match, arrives whole with the first input that opens a file it covers (Claude Code's
+on-demand loading; one that input's 20,000-character note cut short, or left out, arrives with
+the next that opens a file it covers; one the model opened itself is not told after); it has no
+config of its own and asks the `memory` value (`memory.touched(paths)`). Both depend on `transcript`, so `/clear` and `/compact`
 start them afresh, and read its `messages` once, at the first input that may need them
 (on-touch: the first that opens a file), so a resumed session is not told again a note its
-transcript's `tool` entries hold; only layer rows add to `memory`, since its functions
+transcript's `tool` entries hold; only layer rows add to `notes`, since its functions
 run in bh-02's process. The loop reads the prompt before each message the model reads but sends
 the one the conversation began with (the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
 switched, CLAUDE.md edited) is told as a note on that message (`prompt.changes`), because a
@@ -140,9 +134,8 @@ first on the person's message, the first of a conversation and of each day
 (`(Today's date: ...)`, the entry's `today` field saying which it told, so a resume does not
 tell it again and `/clear` and `/compact` do). So the prompt reads the same from day to day,
 and a local model server that keeps its prompt cache can reuse a new session's start. The
-prompt is read, and `memory` asked, on `executor` (`agent:executor`), never on the event loop the
-TUI shares: a section function may read many files and search the project, and must not need the
-event loop. One runs at a time: nothing stops one part-way, so a reading a stopped reply left
+prompt is read, and `notes` asked, on `executor` (`agent:executor`), never on the event loop the
+TUI shares: a section function may read many files, and must not need the event loop. One runs at a time: nothing stops one part-way, so a reading a stopped reply left
 running is waited for before the next begins. `executor` is a row of its own that depends on
 nothing, so `/clear` and `/model`, which reload the loop but not `system` (whose caches take no
 lock), keep the call in flight: Ctrl-C after Ctrl-C leaves at most one, however often the loop
@@ -320,8 +313,7 @@ The kernel never gets it:
   `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`, each as named and as it resolves
   (`bh_02.bootstrap.config_directories`). The host reads what is there and trusts it (the models
   file names a key's `local.env` line and a provider that runs in bh-02's process, the person's
-  context file names functions bh-02 runs, the person's startup file goes to the model's REPL
-  as text), so one session's input could otherwise plant something every later session reads: a
+  startup file goes to the model's REPL as text), so one session's input could otherwise plant something every later session reads: a
   startup file that is a link to a key the jail hides. On Linux the directory is held like any
   write deny there (a mount the host can undo, the directories above it pinned). Not when bh-02
   runs in that directory or below it: denying it would leave the project read-only.

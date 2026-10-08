@@ -25,7 +25,7 @@ from agent_cordis_plugin import (
     executor,
     latest,
     loop,
-    memory,
+    notes,
     refusal,
     transcript,
 )
@@ -223,7 +223,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
 
     rt = Runtime()
     rt.mount(transcript, id="transcript")
-    rt.mount(memory, id="memory")
+    rt.mount(notes, id="notes")
     executor_fiber = rt.mount(executor, id="executor")
     rt.mount(loop, id="loop")
     kernel_fiber = rt.mount(kernel_and_system, id="kernel")
@@ -718,14 +718,12 @@ async def test_memory_s_notes_ride_on_the_input_s_result_and_the_person_sees_eac
     def broken(input: Json) -> str:
         raise RuntimeError("no rules file")
 
-    memory: Hooks[Callable[[Json], str]] = Hooks()
+    notes: Hooks[Callable[[Json], str]] = Hooks()
     for fn in (rules, quiet, broken):
-        memory.add(fn)
+        notes.add(fn)
     history = MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "nope", code="b")], [text("done")])
-    events = [
-        e async for e in LoopModel(scripted, Shouting(), history, Confined(), memory=memory).reply("go")
-    ]
+    events = [e async for e in LoopModel(scripted, Shouting(), history, Confined(), notes=notes).reply("go")]
     assert given == [{"code": "a", "result": "A", "touched": ("/p/a.py",)}]  # c2 never ran
     told = [m["content"] for m in history.messages if m["role"] == "tool"]
     assert told[0].startswith("A\n\n(bh-02 could not make a note with ")
@@ -761,7 +759,7 @@ class _Ticker:
 
 async def test_the_prompt_and_memory_are_read_off_the_event_loop_which_keeps_running() -> None:
     """The TUI runs on cordis's event loop: a section function that walks a big tree, or a
-    memory function that reads rule files, must not freeze it. Each runs in a worker thread,
+    notes function that reads rule files, must not freeze it. Each runs in a worker thread,
     and the event loop goes on ticking while it does."""
     during: list[int] = []  # ticks counted while each slow call ran
     threads: list[int] = []
@@ -783,12 +781,12 @@ async def test_the_prompt_and_memory_are_read_off_the_event_loop_which_keeps_run
             slowly(ticker)
             return "a rule"
 
-        memory: Hooks[Callable[[Json], str]] = Hooks()
-        memory.add(rules)
+        notes: Hooks[Callable[[Json], str]] = Hooks()
+        notes.add(rules)
         scripted = Scripted([call("c1", "python", code="a")], [text("done")])
-        loop = LoopModel(scripted, Shouting(), MemoryTranscript(), Confined(), system=Slow(), memory=memory)
+        loop = LoopModel(scripted, Shouting(), MemoryTranscript(), Confined(), system=Slow(), notes=notes)
         assert await _collect(loop, "go") == "done"
-    assert len(during) == 3  # the prompt with the message, memory, the prompt with the result
+    assert len(during) == 3  # the prompt with the message, notes, the prompt with the result
     assert all(ticks >= 10 for ticks in during), during  # ~30 each when the loop runs free; 0 blocked
     assert threading.get_ident() not in threads
 
@@ -801,13 +799,11 @@ async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_t
         time.sleep(0.2)
         return "a rule"
 
-    memory: Hooks[Callable[[Json], str]] = Hooks()
-    memory.add(slow)
+    notes: Hooks[Callable[[Json], str]] = Hooks()
+    notes.add(slow)
     kernel, history = Shouting(), MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "python", code="b")])
-    task = asyncio.create_task(
-        _collect(LoopModel(scripted, kernel, history, Confined(), memory=memory), "go")
-    )
+    task = asyncio.create_task(_collect(LoopModel(scripted, kernel, history, Confined(), notes=notes), "go"))
     while not started.is_set():
         await asyncio.sleep(0.01)
     task.cancel()
@@ -891,7 +887,7 @@ async def test_on_a_new_day_with_new_instructions_the_date_comes_first_then_what
 
 
 async def test_a_reply_stopped_after_an_input_s_notes_were_made_still_tells_them() -> None:
-    """A memory function marks what it told as told, so a stop while the prompt is read after
+    """A notes function marks what it told as told, so a stop while the prompt is read after
     the input must not lose its note: the call is answered with its result and the note."""
     reading = threading.Event()
 
@@ -905,8 +901,8 @@ async def test_a_reply_stopped_after_an_input_s_notes_were_made_still_tells_them
                 time.sleep(0.2)
             return "in /a"
 
-    memory: Hooks[Callable[[Json], str]] = Hooks()
-    memory.add(lambda input: "a rule, told once")
+    notes: Hooks[Callable[[Json], str]] = Hooks()
+    notes.add(lambda input: "a rule, told once")
     history = MemoryTranscript()
     loop = LoopModel(
         Scripted([call("c1", "python", code="a")]),
@@ -914,7 +910,7 @@ async def test_a_reply_stopped_after_an_input_s_notes_were_made_still_tells_them
         history,
         Confined(),
         system=SlowSecond(),
-        memory=memory,
+        notes=notes,
     )
     task = asyncio.create_task(_collect(loop, "go"))
     while not reading.is_set():

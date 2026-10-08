@@ -1,9 +1,10 @@
 """The rows: the loop, which consumes a model and provides the `loop` value; the transcript;
-`memory`, the broker of what the model is told with an input's result; `executor`, where the
-loop reads the prompt and asks `memory`; and `/compact`.
+`system`, the system prompt rows add sections to; `notes`, the broker of what the model is told
+with an input's result; `executor`, where the loop reads the prompt and asks `notes`; and
+`/compact`.
 
 The transcript is its own row so the history outlives the loop: replace the `model` row
-and the loop reloads against the new provider while the conversation carries on. `memory` is
+and the loop reloads against the new provider while the conversation carries on. `notes` is
 its own row too, depending on nothing, so neither the loop nor a row adding to it reloads the
 other. So is `executor`, so a reloaded loop keeps the call a stopped reply left running and waits
 for it. `/compact` is a row of its own over the model, the kernel's tool spec, the loader,
@@ -30,18 +31,19 @@ from agent_cordis_plugin.loop import (
     Approval,
     Executor,
     LoopModel,
-    Memory,
     Model,
+    Note,
+    Notes,
     Python,
-    Remember,
     System,
     Transcript,
 )
+from agent_cordis_plugin.system import SystemConfig, SystemPrompt
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
 from cordis import Effects, acquire, background, bind, component
 from cordis_helpers import Hooks, Job, perform
 
-__all__ = ["LoopConfig", "TranscriptConfig", "compact", "executor", "loop", "memory", "transcript"]
+__all__ = ["LoopConfig", "TranscriptConfig", "compact", "executor", "loop", "notes", "system", "transcript"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,36 +74,45 @@ async def loop(
     transcript: Transcript,
     system: System,
     approval: Approval,
-    memory: Memory,
+    notes: Notes,
     executor: Executor,
     config: LoopConfig,
 ) -> Effects:
     """Fills the `loop` row from a raw model: `use = "agent:loop"`. The model's one tool is
     the kernel's `python(code)`; each input runs only on `approval`'s yes (the person's, when
-    the jail does not confine the kernel). After each input, the functions in `memory` may add a
-    note to its result. The prompt is read, and `memory` asked, on `executor`. A new ui reloads
+    the jail does not confine the kernel). After each input, the functions in `notes` may add a
+    note to its result. The prompt is read, and `notes` asked, on `executor`. A new ui reloads
     this row (through `approval`), which holds nothing: the transcript, the kernel's namespace
     and the call in flight on `executor` are rows of their own."""
     yield bind(
         "loop",
-        LoopModel(model, kernel, transcript, approval, config.max_nudges, system, memory, executor=executor),
+        LoopModel(model, kernel, transcript, approval, config.max_nudges, system, notes, executor=executor),
     )
 
 
-@component(provides=("memory",))
-async def memory() -> Effects:
-    """Fills a `memory` row: `use = "agent:memory"`. A broker (CONTRACTS.md: memory): a row
-    with something to tell the model about an input `acquire`s `memory.add(fn)`, and the loop
+@component(provides=("system",))
+async def system(*, config: SystemConfig) -> Effects:
+    """Fills a `system` row: `use = "agent:system"`. The system prompt: who the model is, where
+    it is working, then the sections rows add (`system.add`): the memory row's instructions, how
+    to extend bh-02. A broker (CONTRACTS.md: system), depending on its config alone, so a row
+    adding a section, or leaving, reloads nothing."""
+    yield bind("system", SystemPrompt(config))
+
+
+@component(provides=("notes",))
+async def notes() -> Effects:
+    """Fills a `notes` row: `use = "agent:notes"`. A broker (CONTRACTS.md: notes): a row
+    with something to tell the model about an input `acquire`s `notes.add(fn)`, and the loop
     calls each `fn({"code", "result", "touched"}) -> str` after every input it runs, on
     `executor`. Each adds a note or says nothing ('' ); none changes the result, so they compose
     in any order."""
-    yield bind("memory", Hooks[Remember]())
+    yield bind("notes", Hooks[Note]())
 
 
 @component(provides=("executor",))
 async def executor() -> Effects:
     """Fills an `executor` row: `use = "agent:executor"`. Where the loop reads the prompt and
-    asks `memory` (CONTRACTS.md: executor): off the event loop, in a daemon thread, one call at
+    asks `notes` (CONTRACTS.md: executor): off the event loop, in a daemon thread, one call at
     a time, a call a stopped reply left running waited for before the next begins. It depends
     on nothing, so a loop reloaded by `/clear` or `/model` keeps it, and waits for that call
     rather than starting beside it."""

@@ -13,7 +13,7 @@ dependencies = [
     "chat-cordis-plugin",
     "kernel-cordis-plugin",
     "brig-cordis-plugin",
-    "context-cordis-plugin",
+    "memory-cordis-plugin",
     "commands-cordis-plugin",
     "extensions-cordis-plugin",
 ]
@@ -29,7 +29,7 @@ agent-cordis-plugin = { workspace = true }
 chat-cordis-plugin = { workspace = true }
 kernel-cordis-plugin = { workspace = true }
 brig-cordis-plugin = { workspace = true }
-context-cordis-plugin = { workspace = true }
+memory-cordis-plugin = { workspace = true }
 commands-cordis-plugin = { workspace = true }
 extensions-cordis-plugin = { workspace = true }
 

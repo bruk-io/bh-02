@@ -488,7 +488,7 @@ async def test_a_program_s_own_output_reaches_an_input_only_when_captured(tmp_pa
 
 
 async def test_touched_is_the_project_s_files_the_last_input_opened(tmp_path: Path) -> None:
-    """What `memory` is given: files read or written, not a directory listed, a module imported
+    """What `notes` is given: files read or written, not a directory listed, a module imported
     or a file a program read; and nothing outside the project."""
     (tmp_path / "src" / "db").mkdir(parents=True)
     (tmp_path / "src" / "db" / "models.py").write_text("X = 1\n")

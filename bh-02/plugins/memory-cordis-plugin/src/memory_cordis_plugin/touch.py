@@ -1,41 +1,42 @@
-"""The `memory` function of the context files: what their `on_touch` sections say about the
-files an input opened (`system.touched`), told with that input's result. Claude Code's on-demand
-loading, where a path-scoped rule or a subdirectory's CLAUDE.md arrives when the model first
-works on a file it covers, with the files an input opened (`kernel.touched()`) standing in for
-Claude Code's Read, Write and Edit.
+"""The `notes` function of memory: what loads on demand for the files an input opened
+(`memory.touched`), told with that input's result. Claude Code's on-demand loading, where a
+path-scoped rule or a subdirectory's CLAUDE.md arrives when the model first works on a file it
+covers, with the files an input opened (`kernel.touched()`) standing in for Claude Code's Read,
+Write and Edit. A memory file the model opened itself is in the conversation already, so it is
+not told after that, as Claude Code does not load one its own tools read.
 
-The context files are the `system` value's own (`ProjectContext.touched`), so a layer's `files`,
-`root` and `home` on the `system` row reach the prompt and this alike, and each file is read and
-searched once. What this keeps is what it told this conversation; what the conversation was told
-before it began (a resumed session's) is in the `transcript`'s `tool` entries, with the results.
+The memory files are the `memory` value's (`Memory.touched`), so the memory row's `root`, `home`,
+`instruction_files` and `excludes` reach the prompt and this alike. What this keeps is what it
+told this conversation; what the conversation was told before it began (a resumed session's) is
+in the `transcript`'s `tool` entries, with the results.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from itertools import accumulate
 from typing import Any, Protocol, runtime_checkable
 
-__all__ = ["Memory", "OnTouch", "System", "Transcript"]
+__all__ = ["Memory", "Notes", "OnTouch", "Transcript"]
 
 _MAX_CHARS = 20_000  # what one input's result is told at most, as the prompt's sections by default
 # What may follow a text told whole in a `tool` entry, where its note ends (the entry's end aside):
 # the mark of a note cut short (`OnTouch`'s), or another note: bh-02's begin with "(" (a shell
-# hint, a function that failed, a change in the instructions), the context files' with "From ".
+# hint, a function that failed, a change in the instructions), memory's with "From ".
 _ENDS = ("\n... [", "\n\n(", "\n\nFrom ")
 
 
 @runtime_checkable
-class Memory(Protocol):
-    """What the on-touch row needs of the `memory` value (CONTRACTS.md: memory): a function
-    added, and its remover back."""
+class Notes(Protocol):
+    """What the on-touch row needs of the `notes` value (CONTRACTS.md: notes): a function added,
+    and its remover back."""
 
     def add(self, fn: Callable[[Mapping[str, Any]], str]) -> Callable[[], None]: ...
 
 
 @runtime_checkable
-class System(Protocol):
-    """What the on-touch row needs of the `system` value (CONTRACTS.md: system): what the
-    context files' `on_touch` sections say about the files an input opened (absolute), each
-    (file, text), called in the loop's worker thread."""
+class Memory(Protocol):
+    """What the on-touch row needs of the `memory` value (CONTRACTS.md: memory): what loads on
+    demand for the files an input opened (absolute), each (file, text), called in the loop's
+    worker thread."""
 
     def touched(self, paths: Sequence[str]) -> Sequence[tuple[str, str]]: ...
 
@@ -83,13 +84,13 @@ def _cut(texts: Sequence[str]) -> tuple[str, int]:
     if more <= 0:
         return text, len(texts)
     whole = sum(1 for end in accumulate(len(t) + 2 for t in texts) if end - 2 <= _MAX_CHARS)
-    return f"{text[:_MAX_CHARS]}\n... [{more} more chars of guidance]", max(whole, 1)
+    return f"{text[:_MAX_CHARS]}\n... [{more} more chars of memory]", max(whole, 1)
 
 
 class OnTouch:
-    """A `memory` function over what `system`'s context files' `on_touch` sections say: given an
-    input (`touched`, ...), what they say about the files it opened that this conversation has
-    not been told (a file whose text changed since is told again); '' for nothing. At most
+    """A `notes` function over what `memory` loads on demand: given an input (`touched`, ...),
+    what loads for the files it opened that this conversation has not been told (a file whose
+    text changed since is told again, one the model opened itself never); '' for nothing. At most
     `_MAX_CHARS` of it (`_cut`): a text told only in part, cut by that or left out, is not told
     yet, so the next input that opens a file it covers tells it whole; one longer than that by
     itself is told once, cut.
@@ -98,9 +99,12 @@ class OnTouch:
     the row reloaded) is in its `transcript`: read at the first input that opens a file, and
     each text checked against it until it is told."""
 
-    def __init__(self, system: System, transcript: Transcript) -> None:
-        self._system = system
+    def __init__(self, memory: Memory, transcript: Transcript) -> None:
+        self._memory = memory
         self._transcript = transcript
+        # the files the conversation's inputs opened: a memory file among them was read whole by
+        # the model, so it is not told after that
+        self._opened: set[str] = set()
         # (file, what was said), told this conversation (whole, or as much as a note holds) or
         # before this began. Called on the loop's `executor`, one call at a time, so it takes no lock.
         self._told: set[tuple[str, str]] = set()
@@ -115,8 +119,11 @@ class OnTouch:
         if self._before is None:
             self._before = _results(self._transcript.messages)
         before = self._before
-        said = self._system.touched([str(t) for t in touched])
-        unseen = [item for item in dict.fromkeys(said) if item not in self._told]
+        self._opened.update(str(t) for t in touched)
+        said = self._memory.touched([str(t) for t in touched])
+        unseen = [
+            item for item in dict.fromkeys(said) if item not in self._told and item[0] not in self._opened
+        ]
         self._told.update(item for item in unseen if _told_in(before, item[1]))
         new = [item for item in unseen if item not in self._told]
         note, told = _cut([text for _, text in new])

@@ -1,0 +1,21 @@
+[project]
+name = "memory-cordis-plugin"
+version = "0.1.0"
+description = "Claude Code's memory in bh-02: CLAUDE.md and AGENTS.md files, imports, rules and the files loaded when an input opens one they cover, told as a section of the system prompt."
+requires-python = ">=3.15"
+dependencies = [
+    "cordis",
+]
+
+[project.entry-points."cordis.plugins"]
+memory = "memory_cordis_plugin"
+
+[tool.uv.sources]
+cordis = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memory_cordis_plugin"]
