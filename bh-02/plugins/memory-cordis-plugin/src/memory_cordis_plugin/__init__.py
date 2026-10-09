@@ -16,7 +16,7 @@ from memory_cordis_plugin.memory import (
     label,
     where,
 )
-from memory_cordis_plugin.reading import LIMIT, read, roots, secret, under, way, writable
+from memory_cordis_plugin.reading import LIMIT, read, secret, under
 from memory_cordis_plugin.rules import Rule, frontmatter, matches, rule
 from memory_cordis_plugin.touch import Notes, OnTouch, Transcript
 from memory_cordis_plugin.wiring import auto, memory, on_touch
@@ -47,13 +47,10 @@ __all__ = [
     "memory",
     "on_touch",
     "read",
-    "roots",
     "rule",
     "secret",
     "uncommented",
     "under",
-    "way",
     "where",
     "without_trailing",
-    "writable",
 ]

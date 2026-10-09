@@ -107,6 +107,7 @@ nav:
   - cordis:
       - Design: cordis/index.md
       - cordis-helpers: cordis/helpers.md
+      - host-paths: cordis/host-paths.md
       - API reference:
           - cordis: cordis/api/cordis.md
           - cordis.loader: cordis/api/loader.md

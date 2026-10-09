@@ -32,6 +32,7 @@ from bh_02.outdated import translated
 from cordis import Row
 from cordis.composition import format_layer
 from cordis.loader import read_layer
+from host_paths import config_home, state_home
 
 __all__ = [
     "Broken",
@@ -225,17 +226,16 @@ def with_model(rows: Sequence[Row], model: str) -> list[Row]:
 
 
 def state_root() -> Path:
-    """`$XDG_STATE_HOME/bh-02/sessions`, else the default (`default_state_root`)."""
-    if base := os.environ.get("XDG_STATE_HOME"):
-        return Path(base) / "bh-02" / "sessions"
-    return default_state_root()
+    """`$XDG_STATE_HOME/bh-02/sessions`, else the default (`default_state_root`); a relative
+    value counts as unset (`host_paths.state_home`)."""
+    return state_home(os.environ, Path.home()) / "bh-02" / "sessions"
 
 
 def models_file() -> Path:
     """`$XDG_CONFIG_HOME/bh-02/models.toml`, else `~/.config/bh-02/models.toml`: the models file
-    the model row reads when its config names no other (the models plugin resolves it the same way)."""
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "bh-02" / "models.toml"
+    the model row reads when its config names no other (the models plugin resolves it the same way,
+    through `host_paths.config_home`)."""
+    return config_home(os.environ, Path.home()) / "bh-02" / "models.toml"
 
 
 def default_state_root() -> Path:

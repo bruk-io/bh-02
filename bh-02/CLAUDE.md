@@ -26,8 +26,8 @@ not an import error.
 ## How the family stays apart
 
 No package imports another (`plugin-layering`; the units are every package under a gated `src/`,
-the libraries `cordis` and `cordis_helpers` are what all may import). Agreement is by name and
-shape, in `CONTRACTS.md`:
+the libraries `cordis`, `cordis_helpers` and `host_paths` are what all may import). Agreement is
+by name and shape, in `CONTRACTS.md`:
 
 - **A consumer declares what it needs** as a `runtime_checkable` Protocol of its own, on the
   parameter: `session(*, loop: Loop, ...)` keys on `"loop"` and cordis checks the bound value
@@ -43,6 +43,12 @@ shape, in `CONTRACTS.md`:
   `python.py`) is a plain library that must not import cordis
   (`cordis-in-wiring-only`); `wiring.py` is the components, which `bind` a value or `acquire` a
   registration.
+- **What every package must compute alike is a library function, not a key.** Where the
+  person's config and state directories are (`host_paths.config_home`, `state_home`) and every
+  place reading a file goes through (`walked`, `passes`) decide whether the host trusts the
+  models file, the person's startup file and a memory file outside the project; a copy per
+  plugin that drifted would be a hole. A key would not do: the kernel depends on its jail alone
+  and `system` on nothing, so reading one would add reloads, and the walk is code, not a value.
 - A plugin's tests use fakes from a package's own `testing` module (`chat_cordis_plugin.testing`, `bh_02.testing`), never another package's tests.
 
 **The model has one tool, and it carries code.** The kernel is the tool: `kernel:kernel` binds
@@ -327,7 +333,7 @@ The kernel never gets it:
 - `brig:jail` denies writing bh-02's own code where it is under a root an input may write
   (bh-02 working on its own checkout, an editable install, or run from a home the checkout is
   in): `layers.code`, the directory of every package bh-02 runs (`bh_02`, cordis,
-  cordis_helpers, brig and each installed plugin's), each as named and as it resolves, found by
+  cordis_helpers, brig, host_paths and each installed plugin's), each as named and as it resolves, found by
   name from installed metadata (`bh_02.bootstrap.code_directories`; `importlib.util.find_spec`
   imports nothing). bh-02 imports their modules in its own process (a plugin a layer names
   later, say): an input that wrote one, or a module beside one, would choose code bh-02 runs.

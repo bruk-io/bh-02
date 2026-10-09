@@ -110,8 +110,9 @@ model, and nothing needs keeping from it. Where each is read is the point:
   `linecache`), but `open` on its path finds nothing, a helper that reads a file beside it
   finds nothing either, and `__file__` is not set (nor for the project's: each runs as an
   input). The model is told how to see one (`inspect.getsource(helper)`).
-- But only when reading it goes nowhere an input may write (`_walked`, as the models plugin
-  walks the models file: each directory and link on the way, as named and as resolved): the
+- But only when reading it goes nowhere an input may write (`host_paths.walked`, the walk the
+  models file and memory files outside the project are held to: each directory and link on the
+  way, as named and as resolved): the
   project, or another root the worker's jail lets an input write (its `writes()`: a `write`
   the person added to `brig:jail`). A person's file there (bh-02 run from the home directory) or whose way
   passes through one (a config directory linked into a dotfiles repository being worked on) is

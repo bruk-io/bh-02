@@ -5,6 +5,7 @@ description = "bh-02: a coding harness in a Textual TUI, the shell around a cord
 requires-python = ">=3.15"
 dependencies = [
     "cordis",
+    "host-paths",
     "click>=8",
     # The shipped layers name these by entry point; the app imports none of them.
     "models-cordis-plugin",
@@ -23,6 +24,7 @@ bh-02 = "bh_02.cli:main"
 
 [tool.uv.sources]
 cordis = { workspace = true }
+host-paths = { workspace = true }
 models-cordis-plugin = { workspace = true }
 tui-cordis-plugin = { workspace = true }
 agent-cordis-plugin = { workspace = true }

@@ -76,7 +76,8 @@ searched instead.
   its root through no link (`O_NOFOLLOW` on every part) and read only when it is a regular file
   with one name; a link there is read only when it leads to another memory file (a CLAUDE.md
   linking to the AGENTS.md beside it, read once). A file of yours whose way passes through the
-  project (`~/.claude/CLAUDE.md` a link into a dotfiles repository bh-02 runs in) is not read,
+  project (`~/.claude/CLAUDE.md` a link into a dotfiles repository bh-02 runs in;
+  `host_paths.passes`, as the models file is walked) is not read,
   and nothing named like a secret (`local.env`, `.env`) ever is.
 - **`/memory` lists, it doesn't open.** bh-02's app owns the terminal, so `/memory` names each
   file, marked by how it loads (✓ at launch, … on demand, · not there, ✗ excluded or not read),

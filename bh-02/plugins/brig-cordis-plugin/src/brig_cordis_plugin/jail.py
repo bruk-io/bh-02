@@ -90,6 +90,7 @@ from brig.mech.bwrap import DEFAULT_BWRAP_PATH
 from brig.run import Handle, IoPolicy, KillOutcome, SubprocessLauncher, build_compile_ctx
 from brig.stack import CompiledJail, Stack, scratch_darwin, strict_linux
 from brig_cordis_plugin.tripwire import Tripwire
+from host_paths import state_home
 
 __all__ = [
     "MARK",
@@ -455,9 +456,9 @@ def mountable(denies: Sequence[str], instead: Mapping[str, str]) -> tuple[str, .
 
 def records_dir(environ: Mapping[str, str], home: str) -> str:
     """Where a Linux jail records the placeholders it made, one file per jail: bh-02's state
-    directory (`$XDG_STATE_HOME/bh-02`, else `~/.local/state/bh-02`), outside every jail."""
-    state = environ.get("XDG_STATE_HOME") or str(Path(home, ".local", "state"))
-    return str(Path(state, "bh-02", "jails"))
+    directory (`$XDG_STATE_HOME/bh-02`, else `~/.local/state/bh-02`; `host_paths.state_home`),
+    outside every jail."""
+    return str(state_home(environ, Path(home)) / "bh-02" / "jails")
 
 
 def identity(found: os.stat_result) -> str:

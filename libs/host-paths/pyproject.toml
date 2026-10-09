@@ -1,0 +1,39 @@
+[project]
+name = "host-paths"
+version = "0.1.0"
+description = "Paths as bh-02's own process must judge them when the model can write some of them"
+requires-python = ">=3.15"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/host_paths"]
+
+# host-paths' own gate, run by scripts/arch-check from this directory.
+[tool.pypeeker]
+src = ["src", "tests"]
+plugins = ["pypeeker_rules.apps"]
+rules = [
+    "init-reexport-only",
+    "import-time-side-effects",
+    "no-hidden-global-mutation",
+    "no-impure-functions",
+    "under-exposed-access",
+    "over-exposed-module-symbol",
+]
+
+[tool.pypeeker.visibility]
+mode = "library"
+
+[tool.pypeeker.no-impure-functions]
+include = ["host_paths.*"]
+exclude = [
+    # each reads the filesystem (links, and where a path resolves): that is what it is for
+    "host_paths.paths:walked", "host_paths.paths:roots", "host_paths.paths:passes",
+]
+
+[tool.pypeeker.over-exposed-module-symbol]
+allow = ["*test_*", "*test_*:*", "*conftest:*"]

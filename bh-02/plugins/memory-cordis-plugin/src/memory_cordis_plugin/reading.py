@@ -7,9 +7,10 @@ what that opened, only when it is a regular file with one name; a link there is 
 target, the same way, only when that is another of the memory files found (a CLAUDE.md linking
 to the AGENTS.md beside it). A file outside the project (yours, the managed policy's, one in a
 directory above the project) is read as it is named, unless its way passes through the project
-(`way`, `writable`): a link of yours into the project, whose end the model could repoint, is
-not followed. None named like a secret (`local.env`, `.env`, `*.env`) is read, and none larger
-than Claude Code reads (4 MiB).
+(`host_paths.passes`, the walk the models file and the kernel's startup files are held to): a
+link of yours into the project, whose end the model could repoint, is not followed. None named
+like a secret (`local.env`, `.env`, `*.env`) is read, and none larger than Claude Code reads
+(4 MiB).
 """
 
 import os
@@ -18,11 +19,12 @@ import stat
 from collections.abc import Sequence
 from pathlib import Path, PurePath
 
-__all__ = ["LIMIT", "read", "roots", "secret", "under", "way", "writable"]
+from host_paths import MOST_LINKS, passes, roots
+
+__all__ = ["LIMIT", "read", "secret", "under"]
 
 LIMIT = 4 * 1024 * 1024  # a memory file larger than this is skipped, as Claude Code skips one
 _SECRET = re.compile(r"^\.env(\..*)?$|\.env$")  # local.env, .env, .env.local, prod.env: never read
-_MOST_LINKS = 40  # links one walk follows at most (Linux's own limit), so a loop of links ends
 
 
 def secret(path: Path) -> bool:
@@ -30,49 +32,11 @@ def secret(path: Path) -> bool:
     return bool(_SECRET.search(path.name))
 
 
-def roots(root: Path) -> tuple[Path, Path]:
-    """The project's root as named (absolute, `..` taken out) and as it resolves: a path is in
-    the project when it is under either."""
-    return Path(os.path.normpath(root.absolute())), root.resolve()
-
-
 def under(path: Path, found: Sequence[Path]) -> PurePath | None:
     """Where the absolute `path`, as named (`..` taken out), is from the project's root (`found`,
-    as `roots` gives them); None when it is outside."""
+    as `host_paths.roots` gives them); None when it is outside."""
     named = Path(os.path.normpath(path))
     return next((named.relative_to(r) for r in found if named.is_relative_to(r)), None)
-
-
-def writable(steps: Sequence[Path], found: Sequence[Path]) -> bool:
-    """Whether the model could have written a file, or chosen what it is: a place on its way (the
-    file as named, then `way`'s) is in the project, as named or as it resolves (`found`). A file
-    of yours may be a link into the project, whose end the model could repoint, and a directory on
-    the way it could swap for a link."""
-    return any(p.is_relative_to(r) for p in steps for r in found)
-
-
-def way(path: Path) -> list[Path]:
-    """Every place reading the absolute `path` goes through, from the top: each directory and
-    link on the way (a link where it sits, then what it points to, followed), then where it ends."""
-    at, pending, links, out = Path(path.anchor), list(path.parts[1:]), 0, list[Path]()
-    while pending:
-        part = pending.pop(0)
-        if part == "..":  # after the links before it are followed, as the kernel does
-            at = at.parent
-            continue
-        step = at / part
-        out.append(step)
-        try:
-            target = Path(os.readlink(step)) if links < _MOST_LINKS and step.is_symlink() else None
-        except OSError:  # gone since, or can't be read: reading the file will say what is wrong
-            target = None
-        if target is None:
-            at = step
-            continue
-        links += 1
-        at = Path(target.anchor) if target.is_absolute() else at
-        pending[:0] = target.parts[1:] if target.is_absolute() else target.parts
-    return [*out, at]
 
 
 def read(path: Path, files: Sequence[Path], root: Path) -> str:
@@ -89,10 +53,10 @@ def read(path: Path, files: Sequence[Path], root: Path) -> str:
     if secret(path):
         raise OSError(f"{path} is named like a secret, so bh-02 did not read it")
     at, named = _rooted(path, found), path
-    for _ in range(_MOST_LINKS):
+    for _ in range(MOST_LINKS):
         inside = under(at, found)
         if inside is None:
-            if writable(way(Path(os.path.normpath(named))), found):
+            if passes(named, found):
                 raise OSError(
                     f"{named} is reached through the project, where the model could change what it "
                     "is, so bh-02 did not read it"
@@ -107,7 +71,7 @@ def read(path: Path, files: Sequence[Path], root: Path) -> str:
                 f"{at} is a link to {link}, which is not another memory file, so bh-02 did not read it"
             )
         at = named = target
-    raise OSError(f"{path} leads through more than {_MOST_LINKS} links, so bh-02 did not read it")
+    raise OSError(f"{path} leads through more than {MOST_LINKS} links, so bh-02 did not read it")
 
 
 def _named(path: Path) -> str:

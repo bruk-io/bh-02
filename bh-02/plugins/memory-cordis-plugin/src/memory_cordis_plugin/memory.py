@@ -32,8 +32,9 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from sys import platform
 
+from host_paths import roots
 from memory_cordis_plugin.markdown import imports, uncommented, without_trailing
-from memory_cordis_plugin.reading import read, roots, under
+from memory_cordis_plugin.reading import read, under
 from memory_cordis_plugin.rules import matches, rule
 
 __all__ = ["INSTRUCTION_FILES", "Entry", "Memory", "MemoryConfig", "Source", "described", "label", "where"]

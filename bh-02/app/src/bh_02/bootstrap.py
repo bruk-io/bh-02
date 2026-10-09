@@ -15,6 +15,7 @@ from typing import Protocol, runtime_checkable
 from bh_02.sessions import Listing
 from cordis import Booted, Effects, Inspection, Row, Runtime, bind, boot, component, enter
 from cordis.loader import read_layer
+from host_paths import config_home, state_home
 
 __all__ = [
     "CREDENTIAL_FILE",
@@ -119,11 +120,11 @@ def config_directories(environ: Mapping[str, str], home: Path) -> tuple[str, ...
     repository). The host reads what is there and trusts it (the models file, and the person's
     startup file, whose text it hands to the model's REPL), so no jailed
     input may write there: a session run from the home directory would otherwise choose what
-    every later one reads."""
-    default = home / ".config"
+    every later one reads. A relative `$XDG_CONFIG_HOME` counts as unset (`host_paths.config_home`),
+    as it does wherever bh-02 reads the variable."""
     named = (
         Path(os.path.normpath(Path(base, "bh-02").absolute()))
-        for base in (environ.get("XDG_CONFIG_HOME") or default, default)
+        for base in (config_home(environ, home), home / ".config")
     )
     return tuple(dict.fromkeys(str(path) for each in named for path in (each, each.resolve())))
 
@@ -154,17 +155,22 @@ def memory_directory(project: Path, environ: Mapping[str, str], home: Path) -> s
     Code keeps it under `~/.claude/projects/<project>/memory`: machine-local, never in the
     repository. `<project>` is the project's absolute path, every character but a letter or a
     digit a `-` (`/home/me/app` is `-home-me-app`), as Claude Code names it."""
-    state = Path(environ.get("XDG_STATE_HOME") or home / ".local" / "state")
-    return str(state / "bh-02" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(project)) / "memory")
+    return str(
+        state_home(environ, home)
+        / "bh-02"
+        / "projects"
+        / re.sub(r"[^A-Za-z0-9]", "-", str(project))
+        / "memory"
+    )
 
 
 #: The packages bh-02 runs code from besides its plugins: the app, and the libraries they import.
-_OWN_PACKAGES = ("bh_02", "cordis", "cordis_helpers", "brig")
+_OWN_PACKAGES = ("bh_02", "cordis", "cordis_helpers", "brig", "host_paths")
 
 
 def code_packages(plugins: Iterable[str]) -> tuple[str, ...]:
     """The packages bh-02 runs code from, by name: its own (the app, cordis, cordis_helpers,
-    brig), then the top-level package of each installed plugin (`plugins`: the modules the
+    brig, host_paths), then the top-level package of each installed plugin (`plugins`: the modules the
     `cordis.plugins` entry points name), each once. A layer may name any of them, so bh-02 may
     import it."""
     named = (module.partition(".")[0] for module in plugins)

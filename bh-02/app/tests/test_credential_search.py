@@ -134,7 +134,7 @@ def test_the_bh_02_command_boots_handing_the_jail_the_directories_bh_02_runs_cod
     plugins = [ep.module for ep in importlib.metadata.entry_points(group="cordis.plugins")]
     assert code == list(code_directories(code_packages(plugins)))
     packages = code_packages(plugins)
-    assert packages[:4] == ("bh_02", "cordis", "cordis_helpers", "brig")
+    assert packages[:5] == ("bh_02", "cordis", "cordis_helpers", "brig", "host_paths")
     assert {"memory_cordis_plugin", "extensions_cordis_plugin", "kernel_cordis_plugin"} <= set(packages)
     shipped = Path(memory_cordis_plugin.__file__).with_name("memory.py")
     assert str(shipped.parent) in code and str(Path(cordis.__file__).parent) in code
@@ -169,6 +169,7 @@ def test_a_package_s_code_is_where_it_is_installed_as_named_and_as_it_resolves(
         "cordis",
         "cordis_helpers",
         "brig",
+        "host_paths",
         "kernel_cordis_plugin",
         "a",
     )

@@ -56,6 +56,7 @@ These guarantees are asserted as the paper's theorems over random histories of o
 |---|---|
 | [`libs/cordis`](libs/cordis) | the pattern: components, effects, keys, fibers, rows, layers, the loader |
 | [`libs/cordis-helpers`](libs/cordis-helpers) | small building blocks on cordis: a broker's registry, a set of hooks |
+| [`libs/host-paths`](libs/host-paths) | where the person's directories are, and every place reading a file goes through: the one definition for every package that trusts a file by where it is |
 | [`libs/brig`](libs/brig) | a sandbox library, independent of cordis: a spec compiled into honestly graded enforcement |
 | [`bh-02`](bh-02) | a coding agent built as cordis rows: its app in `app/`, its plugins in `plugins/` |
 | [`examples/warden`](examples/warden) | a process supervisor built the same way, with no model in it |

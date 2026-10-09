@@ -205,8 +205,8 @@ config directory, this run's `$XDG_CONFIG_HOME/bh-02` and the default `~/.config
 named and as resolved, where your models file and startup file are, which bh-02
 reads and trusts, so a jailed input can't write there when it is in the project (bh-02 run from
 your home directory); `code`: where bh-02 runs its own code from, the directory of every
-package a layer may name (`bh_02`, cordis, cordis_helpers, brig, each installed plugin's) as
-installed, as named and as resolved (`code_directories`), which every jail reads (with an
+package a layer may name (`bh_02`, cordis, cordis_helpers, brig, host_paths, each installed
+plugin's) as installed, as named and as resolved (`code_directories`), which every jail reads (with an
 editable install, `uv run` here or `uv tool install --editable`, the extensions' worker imports
 cordis from the workspace) and a jailed input can't write when it is in the project (bh-02
 working on its own checkout: bh-02 imports its modules from there); with `--no-jail` an input
@@ -275,8 +275,8 @@ neither. A patch that gives the `model` row a `config` replaces the session laye
 
 ## The plugins
 
-Each depends on the libraries (`cordis`, and `cordis-helpers` for the patterns) and on no
-other plugin; the gate proves it.
+Each depends on the libraries (`cordis`, `cordis-helpers` for the patterns, `host-paths` for
+where a file is and how it is reached) and on no other plugin; the gate proves it.
 
 | Package | Binds / registers | Consumes |
 |---|---|---|

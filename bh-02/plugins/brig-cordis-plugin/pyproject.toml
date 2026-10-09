@@ -5,6 +5,7 @@ description = "A jail from brig: writes confined to the project, no network, cre
 requires-python = ">=3.15"
 dependencies = [
     "cordis",
+    "host-paths",
     "brig",
 ]
 
@@ -13,6 +14,7 @@ brig = "brig_cordis_plugin"
 
 [tool.uv.sources]
 cordis = { workspace = true }
+host-paths = { workspace = true }
 brig = { workspace = true }
 
 [build-system]

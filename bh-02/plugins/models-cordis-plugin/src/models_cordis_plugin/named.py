@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlsplit
 
+from host_paths import config_home, passes, roots
 from models_cordis_plugin.claude_code.credential import TOKEN_VARIABLE
 
 __all__ = [
@@ -127,11 +128,10 @@ class Named:
 
 def models_file(explicit: str | None, environ: Mapping[str, str]) -> Path:
     """The models file: `explicit` (the row's `models`), else `$XDG_CONFIG_HOME/bh-02/models.toml`,
-    else `~/.config/bh-02/models.toml`."""
+    else `~/.config/bh-02/models.toml` (`host_paths.config_home`: a relative value counts as unset)."""
     if explicit:
         return Path(explicit).expanduser()
-    base = environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "bh-02" / "models.toml"
+    return config_home(environ, Path.home()) / "bh-02" / "models.toml"
 
 
 def read_models(path: Path) -> str | None:
@@ -149,15 +149,15 @@ def read_models(path: Path) -> str | None:
 def in_project(path: Path, root: Path) -> str | None:
     """Why the models file `path` is not read, said so the person can fix it: it is in the project
     `root`, which the model's code can write. It is the project's when, as named or anywhere reading
-    it goes (each directory and link on the way, links followed, to where it ends: `_walked`), it is
-    under the root as named or as resolved; a link the model could repoint, or a directory it could
-    swap for one, would choose what is read. None when it is outside. Whether the file is there
-    does not matter: the model could write one."""
-    named = Path(os.path.normpath(path.absolute()))
-    roots = (Path(os.path.normpath(root.absolute())), root.resolve())
-    inside = [p for p in (named, *_walked(path.absolute())) if any(p.is_relative_to(r) for r in roots)]
+    it goes (each directory and link on the way, links followed, to where it ends:
+    `host_paths.passes`, as memory files outside the project and the kernel's startup files are
+    walked), it is under the root as named or as resolved; a link the model could repoint, or a
+    directory it could swap for one, would choose what is read. None when it is outside. Whether
+    the file is there does not matter: the model could write one."""
+    inside = passes(path, roots(root))
     if not inside:
         return None
+    named = Path(os.path.normpath(path.absolute()))
     return _refused(path, root, "" if inside[0] == named else f" as its links lead ({inside[-1]})")
 
 
@@ -171,33 +171,6 @@ def _refused(path: Path, root: Path, how: str) -> str:
         "XDG_CONFIG_HOME (or the model row's `models`) to a directory outside it. Until then only "
         "the built-in models and the model row's `extra` are offered"
     )
-
-
-_MOST_LINKS: Final = 40  # links one walk follows at most (Linux's own limit), so a loop of links ends
-
-
-def _walked(path: Path) -> list[Path]:
-    """Every place reading the absolute `path` goes through, from the top: each directory and link
-    on the way (a link where it sits, then what it points to, followed), then where it ends."""
-    at, pending, links, out = Path(path.anchor), list(path.parts[1:]), 0, list[Path]()
-    while pending:
-        part = pending.pop(0)
-        if part == "..":  # after the links before it are followed, as the kernel does
-            at = at.parent
-            continue
-        step = at / part
-        out.append(step)
-        try:
-            target = Path(os.readlink(step)) if links < _MOST_LINKS and step.is_symlink() else None
-        except OSError:  # gone since, or can't be read: reading the file will say what is wrong
-            target = None
-        if target is None:
-            at = step
-            continue
-        links += 1
-        at = Path(target.anchor) if target.is_absolute() else at
-        pending[:0] = target.parts[1:] if target.is_absolute() else target.parts
-    return [*out, at]
 
 
 def environ() -> Mapping[str, str]:

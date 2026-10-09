@@ -69,7 +69,7 @@ _NOT_TERMINAL = (
 )
 
 # What every unit may import besides itself.
-_LIBRARIES = ("cordis", "cordis_helpers")
+_LIBRARIES = ("cordis", "cordis_helpers", "host_paths")
 
 
 def units() -> tuple[str, ...]:
