@@ -243,7 +243,7 @@ async def test_a_withdrawn_question_comes_down_even_when_it_is_not_on_top() -> N
 
 
 async def test_ctrl_c_with_a_question_up_stops_the_turn_which_withdraws_it() -> None:
-    """As `chat:session` races a turn against `interrupted()`: the turn is cancelled while it
+    """As `chat:converse` races a turn against `interrupted()`: the turn is cancelled while it
     waits on the answer, so it never carries on with one, and the modal comes down."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:

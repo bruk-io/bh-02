@@ -450,13 +450,13 @@ async def test_a_jailed_input_cannot_plant_a_credential_where_the_model_row_look
 
 
 @dataclass(frozen=True)
-class _Layers:
+class _Host:
     paths: tuple[str, ...] = ()
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
-    memory: str = ""
+    auto_memory: str = ""
 
 
 def _python(jail: BrigJail | Runner, config: KernelConfig) -> Kernel:
@@ -480,7 +480,7 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
     project = tmp_path / "project"
     project.mkdir()
     credential = project / "local.env"
-    jail = BrigJail(BrigConfig(), _Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    jail = BrigJail(BrigConfig(), _Host(credentials=(str(credential),), secrets=(str(credential),)))
     reach = (
         "import os\n"
         f"for how in ('r', 'w'):\n"
@@ -519,7 +519,7 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
     assert token_file(None, [str(credential)]) == credential
 
 
-# A program that listens and waits, standing in for the extensions' worker: the runner's
+# A program that listens and waits, standing in for the extensions process: the runner's
 # second program, run from a directory of its own.
 _LISTENS = """
 import socket, sys, time
@@ -533,7 +533,7 @@ time.sleep(60)
 async def test_on_linux_the_kernel_tells_the_model_its_own_worker_s_trees_when_another_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The runner starts the Python process and the extensions' worker, and a Linux jail
+    """The runner starts the Python process and the extensions process, and a Linux jail
     reads the directory of the program it runs. What the kernel tells the model is its own
     worker's jail: another program starting on the same jail, from another directory, leaves
     `kernel.instructions()` as it was, so the loop tells the model no change and names no tree
@@ -545,7 +545,7 @@ async def test_on_linux_the_kernel_tells_the_model_its_own_worker_s_trees_when_a
     project.mkdir()
     elsewhere.mkdir()
     (elsewhere / "worker.py").write_text(_LISTENS)
-    jail = BrigJail(BrigConfig(), _Layers())
+    jail = BrigJail(BrigConfig(), _Host())
     sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
     endpoint = str(sockets / "x.sock")
     try:
@@ -574,7 +574,7 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
     extensions row registers its worker's stop as the python row does), so the path is free and
     nothing claims another session holds it; the runner stays released until the next input
     starts something. (A stand-in program here, stopped by the test as its owner; the real
-    extensions' worker under a Linux jail is
+    extensions process under a Linux jail is
     `test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install`'s.)"""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the hold is bubblewrap's: Linux with /usr/bin/bwrap only")
@@ -584,7 +584,7 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
     elsewhere.mkdir()
     (elsewhere / "worker.py").write_text(_LISTENS)
     credential = project / "local.env"
-    jail = BrigJail(BrigConfig(), _Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    jail = BrigJail(BrigConfig(), _Host(credentials=(str(credential),), secrets=(str(credential),)))
     sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
     endpoint = str(sockets / "x.sock")
     try:
@@ -609,7 +609,7 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
                 for group in groups:
                     assert group is not None
                     with pytest.raises(ProcessLookupError):
-                        os.killpg(group, 0)  # both jails are gone, the extensions' worker's too
+                        os.killpg(group, 0)  # both jails are gone, the extensions process's too
                 assert runner.released()
                 await kernel.run("1")  # the next input
                 assert not runner.released() and credential.is_dir()
@@ -621,7 +621,7 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
 
 def _code() -> tuple[str, ...]:
     """The directories bh-02 runs its own code from, as the `bh-02` command finds them
-    (`layers.code`): with this editable install, the workspace's `src/<package>` directories."""
+    (`host.code`): with this editable install, the workspace's `src/<package>` directories."""
     plugins = (ep.module for ep in importlib.metadata.entry_points(group="cordis.plugins"))
     return code_directories(code_packages(plugins))
 
@@ -670,9 +670,9 @@ async def test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_in
 ) -> None:
     """A Linux jail reads by allowlist, and with an editable install (`uv run` in the checkout,
     `uv tool install --editable`) the environment's `.pth` files name the workspace's `src`
-    directories, outside the project and the interpreter: the extensions' worker could not import
+    directories, outside the project and the interpreter: the extensions process could not import
     cordis, never listened, and no extension loaded. The jail reads the directories bh-02 runs
-    its own code from (`layers.code`, read-only), so the real worker, in a project elsewhere,
+    its own code from (`host.code`, read-only), so the real worker, in a project elsewhere,
     loads the model's extension and what it adds reaches bh-02."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
@@ -682,7 +682,7 @@ async def test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_in
     plugins.mkdir(parents=True)
     (plugins / "hello.py").write_text(_HELLO)
     added = _Added()
-    jail = BrigJail(BrigConfig(), _Layers(code=_code()))
+    jail = BrigJail(BrigConfig(), _Host(code=_code()))
     config = ExtensionsConfig(root=str(project), watch=3600)  # entering looks once
     async with Extensions(
         Runner(jail), added, added, added, ToolBroker(), added, added, config
@@ -701,7 +701,7 @@ async def test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_i
     the directories bh-02 runs its own code from are in it. bh-02 imports their modules in its own
     process (a plugin a layer names later, say), so an input that rewrote one, or wrote a module
     beside one, would choose code bh-02 runs. The jail denies writing every one of them
-    (`layers.code`), as it does a layer file: the module stays as it was, and no module of the
+    (`host.code`), as it does a layer file: the module stays as it was, and no module of the
     input's lands beside it or beside cordis. So it does when the project is a `src` directory of
     the checkout: the host's `sys.path` names that directory, which, being the project, is not
     denied as a host import path."""
@@ -725,7 +725,7 @@ async def test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_i
     said: dict[Path, list[str]] = {}
     try:
         for root in (checkout, shipped.parent.parent):  # the workspace, then the plugin's `src`
-            jail = BrigJail(config, _Layers(code=_code()))
+            jail = BrigJail(config, _Host(code=_code()))
             async with _python(jail, KernelConfig(root=str(root))) as kernel:
                 said[root] = [await kernel.run(code) for code in inputs]
     finally:
@@ -752,7 +752,7 @@ async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_hom
     project = tmp_path / "project"
     (project / ".bh-02").mkdir(parents=True)
     (project / ".bh-02" / "kernel.py").write_text("TOOLS = 2\n")
-    async with _python(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
         out = await kernel.run(f"import os\nprint(os.path.exists({str(person)!r}))\nshow(TOOLS)")
     assert out.startswith(
         f"({person} ran first and defined: show. .bh-02/kernel.py ran next and defined: TOOLS)\n"
@@ -768,7 +768,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     write. A later session elsewhere reads the person's startup file there on the host and hands
     its text to the model, so an input replacing it with a link to a file the jail hides (an SSH
     key) would have the next session hand that file over, in the REPL's linecache and in the
-    failing file's traceback. The jail denies the directory (`layers.trusted`, the app's
+    failing file's traceback. The jail denies the directory (`host.trusted`, the app's
     `config_directories`: this run's `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`),
     as named and as it resolves: no write, link, rename over a file, or moving its parent away."""
     home = tmp_path / "home"
@@ -801,7 +801,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
         attempt(f"os.rename({str(xdg.parent)!r}, 'moved')"),  # then a config directory of its own
         attempt(f"os.rename({str(home / '.config')!r}, 'moved-too')"),
     ]
-    jail = BrigJail(BrigConfig(), _Layers(trusted=trusted))
+    jail = BrigJail(BrigConfig(), _Host(trusted=trusted))
     async with _python(jail, KernelConfig(root=str(home))) as kernel:  # session A, from home
         said = [await kernel.run(code) for code in inputs]
     assert said[0].startswith(f"({person} ran first and defined: HELPER)\n"), said[0]
@@ -813,7 +813,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     project = tmp_path / "work" / "project"  # session B, in another project
     project.mkdir(parents=True)
     async with _python(
-        BrigJail(BrigConfig(), _Layers(trusted=trusted)), KernelConfig(root=str(project))
+        BrigJail(BrigConfig(), _Host(trusted=trusted)), KernelConfig(root=str(project))
     ) as kernel:
         seen = await kernel.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), HELPER")
     assert seen == f"({person} ran first and defined: HELPER)\n('HELPER = 1\\n', 1)", seen
@@ -864,7 +864,7 @@ async def test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_n
     project.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     config = project / ".git" / "config"
-    jail = BrigJail(BrigConfig(), _Layers())
+    jail = BrigJail(BrigConfig(), _Host())
     async with _python(jail, KernelConfig(root=str(project))) as kernel:
         assert "DENIED" in await kernel.run(_append_to(config))
         group = _group(tmp_path / "state")
@@ -905,7 +905,7 @@ async def test_an_input_can_t_put_its_own_git_config_in_place_by_moving_the_dire
         "    except OSError as error:\n"
         "        print(step, 'DENIED', type(error).__name__)\n"
     )
-    async with _python(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
         out = await kernel.run(swap)
     assert "write DENIED" in out, out
     assert "hooksPath" not in config.read_text() if config.exists() else True
@@ -922,7 +922,7 @@ async def test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing(tmp_path
     project.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     config = project / ".git" / "config"
-    async with _python(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
         assert "DENIED" in await kernel.run("x = 1\n" + _append_to(config))
         subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)
         out = await kernel.run("print(x)\n" + _append_to(config))
@@ -943,7 +943,7 @@ async def test_on_linux_an_input_running_when_the_host_renames_over_a_denied_pat
     project.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     config = project / ".git" / "config"
-    async with _python(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
         running = asyncio.ensure_future(kernel.run("import time\ntime.sleep(5)\nprint('slept')"))
         await asyncio.sleep(1.0)
         subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)
@@ -973,7 +973,7 @@ async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_input_
     mine.write_text(row("one"))
     booted = await boot([mine], watch=0.05)
     try:
-        jail = BrigJail(BrigConfig(), _Layers(paths=(str(mine.resolve()),)))
+        jail = BrigJail(BrigConfig(), _Host(paths=(str(mine.resolve()),)))
         async with _python(jail, KernelConfig(root=str(project))) as kernel:
             rewrite = _append_to(mine, "w", row("planted"))
             assert "DENIED" in await kernel.run(rewrite)
@@ -1035,7 +1035,7 @@ async def test_a_layer_file_in_a_directory_of_the_project_can_t_be_swapped_by_mo
         "        print(step, 'DENIED', type(error).__name__)\n"
     )
     try:
-        jail = BrigJail(BrigConfig(), _Layers(paths=(str(mine.resolve()),)))
+        jail = BrigJail(BrigConfig(), _Host(paths=(str(mine.resolve()),)))
         async with _python(jail, KernelConfig(root=str(project))) as kernel:
             saved = project / "conf" / "mine.toml.tmp"
             saved.write_text(row("two"))

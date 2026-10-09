@@ -4,8 +4,8 @@ bh-02's model: named models over their providers, switched by name. Three rows:
 
 | Row | Binds / registers | Consumes |
 |---|---|---|
-| `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | `layers` (`credentials`: where `local.env` is looked for) |
-| `models:catalog` | `models`: the models there are, the one the model row names now, why a name can't be switched to, and why the models file is not read (CONTRACTS.md: models) | `loader`, `layers` |
+| `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | `host` (`credentials`: where `local.env` is looked for) |
+| `models:catalog` | `models`: the models there are, the one the model row names now, why a name can't be switched to, and why the models file is not read (CONTRACTS.md: models) | `loader`, `host` |
 | `models:switch` | registers `/model [NAME]`: lists the models, switches by name in the session's layer, the reload queued in `jobs`; config: `layer` (the session's), `model_row` (`model`) | `commands` (`register`), `loader`, `models`, `jobs` (`put`) |
 
 The model row's config (`ModelConfig`):
@@ -14,7 +14,7 @@ The model row's config (`ModelConfig`):
 - `extra`: models of the row's own, one table per name as in the file (a migrated layer
   writes one: an old Ollama row is an `extra` OpenAI-compatible model).
 - `state`, `env_file`, `cwd`: the claude-code provider's (below). `env_file` is also where the
-  openai provider reads a model's key. Unset, `local.env` is looked for where the `layers`
+  openai provider reads a model's key. Unset, `local.env` is looked for where the `host`
   value's `credentials` say (below). A models file must be outside `cwd` as well as the
   working directory (below).
 
@@ -89,7 +89,7 @@ name only that file could have named (`/model NAME`, and each step of a model ro
 again before it reads local.env (`authorization`): that token is the Claude Code CLI's alone.
 
 `models` (`catalog.py`) reads the model row's config from the loader's entries and the models
-file each time it is asked, and depends on the loader and `layers` (where a key's `local.env` is
+file each time it is asked, and depends on the loader and `host` (where a key's `local.env` is
 looked for) alone: `/model` (the switch row) and the status bar depend on it, never on `model`,
 which a switch replaces.
 
@@ -137,7 +137,7 @@ xAI, DeepSeek, Gemini's compatibility endpoint, vLLM, LM Studio, Ollama (`/v1`).
 - `stop` is the API's `finish_reason` in the loop's words: `stop`, `length`, `tool_calls`
   (and the legacy `function_call`), `content_filter` as `refusal`;
 - `message` is the assistant message in the API's own shape (text or none, calls with their
-  arguments as the JSON text sent), replayed as it came; another provider's turn (Claude's
+  arguments as the JSON text sent), replayed as it came; another provider's step (Claude's
   blocks, an old Ollama message) is rebuilt from the transcript's text and calls;
 - a stream that ends without a `finish_reason` or `[DONE]` is an error, not a silent stop;
 - failures are recoverable and say what to do: 401/403 (`authentication_failed`: the key's
@@ -332,7 +332,7 @@ with calls parked or a step streaming reads as failed, and the session is rebuil
 
 The credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` makes one), kept in the
 git-ignored `local.env` at the repository root. Where it is looked for is not this plugin's to
-decide: both rows depend on `layers`, and its `credentials` (above bh-02's install and its
+decide: both rows depend on `host`, and its `credentials` (above bh-02's install and its
 environment, nearest first, from `bh_02.cli`) are the places searched; `token_file` takes the
 first that is a regular file, so the empty directory a Linux jail holds an absent one with never
 hides the real file, at the first read or at any later one (each Claude Code start, each

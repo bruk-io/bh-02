@@ -17,7 +17,7 @@ conversation is the `.bak` beside the file.
 
 A command runs in the chat row's task, and Ctrl-C stops only a turn, so the model has `timeout`
 seconds to answer, and a note says so as the step begins; the person leaving cancels the
-command (`chat:session`), and nothing is written until the summary is whole. The restart is
+command (`chat:converse`), and nothing is written until the summary is whole. The restart is
 queued in `jobs` (CONTRACTS.md: jobs), never run in the chat row's task, which it reloads, and
 a restart that fails is told to the person, since the new conversation is written by then; the
 chat row reads its next line only once the restart is done, so the line reaches the new loop.

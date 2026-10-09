@@ -73,7 +73,7 @@ plugin:
 | `tools` | `agent:tools` | the tools the model is offered: a broker rows register a tool with, offered in name order |
 | `python` | `python:tool` | the `python(code)` tool it registers: a Python REPL of the model's own, which persists for this run of bh-02 |
 | `runner` | `runner:confined` | what starts the Python process: in brig's sandbox |
-| `ui` | `tui:app` | the terminal app, on [bh-01](https://github.com/bruk-io/bh-01)'s design tokens |
+| `ui` | `tui:ui` | the terminal app, on [bh-01](https://github.com/bruk-io/bh-01)'s design tokens |
 | `extensions` | `extensions:extensions` | the model's own plugins: cordis components it writes, loaded while bh-02 runs, in a jail of their own |
 | `chat`, `transcript`, `system`, `commands`, ... | | the conversation, its record, the project context, the slash commands |
 
@@ -159,16 +159,16 @@ The techniques above, and where to read them in real code:
 
 | Technique | Implemented in | What it shows |
 |---|---|---|
-| **A resource's lifetime is a row's** (`enter`) | `warden:supervised`, `python:tool`, `tui:app` | a process starts when its row loads and is terminated when it unloads; the Python process lives exactly as long as the `python` row; the terminal app's lifetime is the `ui` row's |
+| **A resource's lifetime is a row's** (`enter`) | `warden:supervised`, `python:tool`, `tui:ui` | a process starts when its row loads and is terminated when it unloads; the Python process lives exactly as long as the `python` row; the terminal app's lifetime is the `ui` row's |
 | **A broker** (`acquire`, the remover as undo) | warden's `processes`; bh-02's `commands`, `frame` and `system` | each supervised process registers itself; slash commands register into `commands`; the status bar and palette are entries rows `acquire` in the app's `frame`; sections of the model's prompt are entries in `system`; each gone when its row goes |
 | **One key, swappable providers** | bh-02's `model`, `runner`, `ui` rows | Claude or any OpenAI-compatible model behind `model`; brig's sandbox or none behind `runner`; tests put fakes in the same rows with `--patch` (`bh_02.testing`) |
 | **Reshaping by editing a layer** | `/model` (bh-02); adding a process (warden) | `/model opus` writes the session's layer file and the loader swaps one row; a new `[[plugin]]` block in warden's layer starts one more process, touching nothing else |
 | **An operator over the loader** | `commands:operator` | `/rows`, `/explain`, `/restart` and `/clear` act on the running program through the loader's handle, queued as the operator row's own background work so a restart never cancels the command asking for it |
-| **Work a row owns, and its end** (`background`, `done`) | `chat:session`, bh-02's bootstrap | the conversation is the chat row's background task, bound as `done`; the bootstrap waits on it and follows a new `done` when the chat row reloads, so `/model` never ends the session |
-| **Watching the program change** (`observe`) | `tui:app` | the terminal app hears every lifecycle event and shows `↻ model reloaded` as rows reload |
+| **Work a row owns, and its end** (`background`, `done`) | `chat:converse`, bh-02's bootstrap | the conversation is the chat row's background task, bound as `done`; the bootstrap waits on it and follows a new `done` when the chat row reloads, so `/model` never ends the session |
+| **Watching the program change** (`observe`) | `tui:ui` | the terminal app hears every lifecycle event and shows `↻ model reloaded` as rows reload |
 | **Two consumers, two contracts** | the `runner` key | the python row needs a start (`start`, `on_release`); the grades row needs each start's grades (`report`, `on_start`); each declares its own Protocol for the same value |
 | **Stable rows around volatile ones** | bh-02's `ui`, `status` and `grades` rows | the app's row depends on nothing but its config, so it never reloads; the small status-bar rows depend on what never restarts (the grades row is told each start by the runner), so `/clear` reloads none of the screen |
-| **A program's own user adds parts while it runs** | `extensions:extensions` | the model writes cordis components into the project's `.bh-02/plugins/`; each loads in a second jailed worker, reaches bh-02 only through four keys that add (a command, a status field, prompt text, a tool whose calls run in that worker), and is undone in reverse when its file changes or goes |
+| **A program's own user adds parts while it runs** | `extensions:extensions` | the model writes cordis components into the project's `.bh-02/plugins/`; each loads in the extensions process, a second jailed process, reaches bh-02 only through four keys that add (a command, a status field, prompt text, a tool whose calls run in that process), and is undone in reverse when its file changes or goes |
 | **Who owns the main thread** | `warden --tray` | the macOS menu-bar app needs the main thread, so the composition runs on a background thread and quitting the tray unwinds it through the same shutdown |
 
 ## brig: sandboxes that say what they enforce

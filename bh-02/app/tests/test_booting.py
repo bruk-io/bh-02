@@ -43,8 +43,8 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     for row in rows.values():
         assert row.use is not None
         resolve(row.use)
-    assert resolve(rows["chat"].use or "").name == "session"
-    assert resolve(rows["ui"].use or "").name == "app"  # the TUI (tui:app)
+    assert resolve(rows["chat"].use or "").name == "converse"
+    assert resolve(rows["ui"].use or "").name == "ui"  # the TUI (tui:ui)
     assert resolve(rows["loop"].use or "").name == "loop"  # bh-02's own loop, whichever model
     assert rows["model"].use == "models:model" and rows["models"].use == "models:catalog"
     assert "completion" not in rows
@@ -76,7 +76,7 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
 
 async def test_a_composition_that_cannot_start_says_what_it_is_waiting_on(tmp_path: Path) -> None:
     layer = tmp_path / "broken.toml"
-    layer.write_text('[[plugin]]\nid = "chat"\nuse = "chat:session"\n')  # no loop, no ui
+    layer.write_text('[[plugin]]\nid = "chat"\nuse = "chat:converse"\n')  # no loop, no ui
     with pytest.raises(CompositionError) as raised:
         await asyncio.wait_for(run([layer]), 2)
     assert "could not start" in raised.value.message
@@ -86,7 +86,7 @@ async def test_a_composition_that_cannot_start_says_what_it_is_waiting_on(tmp_pa
 async def test_a_chat_row_that_never_binds_done_fails_the_composition(
     composition: Callable[..., Path],
 ) -> None:
-    """task-0008: `done` is now bh-02's own declared dependency (the `harness` row), not a
+    """task-0008: `done` is now bh-02's own declared dependency (the `shell` row), not a
     hand-checked binding lookup — a row that activates but never binds it is an ordinary
     "waiting on" stall, diagnosed the same way a missing `loop`/`input`/`output` is."""
     layer = composition('[[plugin]]\nid = "chat"\nuse = "fragile:echo_model"\n')  # binds loop, not done
@@ -100,7 +100,7 @@ async def test_a_done_binding_of_the_wrong_shape_is_a_contract_violation(
     composition: Callable[..., Path],
 ) -> None:
     """task-0008: the shape check is cordis's own check_contract now, not a hand-rolled
-    isinstance -- a non-awaitable `done` fails `harness`'s own contract, not bh-02's bootstrap."""
+    isinstance -- a non-awaitable `done` fails `shell`'s own contract, not bh-02's bootstrap."""
     layer = composition('[[plugin]]\nid = "chat"\nuse = "fragile:bad_done_mode"\n')
     with pytest.raises(CompositionError) as raised:
         await asyncio.wait_for(run([layer]), 2)
@@ -114,7 +114,7 @@ async def test_a_row_that_leaves_mid_run_is_reported_rather_than_a_silent_exit(
     layer = composition(
         '[[plugin]]\nid = "loop"\nuse = "fragile:fragile_model"\n'
         '[[plugin]]\nid = "ui"\nuse = "fragile:silent_ui"\n'
-        '[[plugin]]\nid = "chat"\nuse = "chat:session"\n'
+        '[[plugin]]\nid = "chat"\nuse = "chat:converse"\n'
         '[[plugin]]\nid = "commands"\nuse = "commands:registry"\n'
         '[[plugin]]\nid = "jobs"\nuse = "commands:jobs"\n'
     )

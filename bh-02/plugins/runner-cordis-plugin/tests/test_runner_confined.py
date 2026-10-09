@@ -59,13 +59,13 @@ from runner_cordis_plugin import (
 
 
 @dataclass(frozen=True)
-class Layers:
+class Host:
     paths: tuple[str, ...] = ()
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
-    memory: str = ""
+    auto_memory: str = ""
 
 
 def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> None:
@@ -175,7 +175,7 @@ def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> 
 
 
 _CHECKOUT = "/home/me/src/bh-02"  # bh-02's own workspace, installed editable
-_CODE = (  # the directory of every package bh-02 runs code from (`layers.code`)
+_CODE = (  # the directory of every package bh-02 runs code from (`host.code`)
     f"{_CHECKOUT}/bh-02/plugins/memory-cordis-plugin/src/memory_cordis_plugin",
     f"{_CHECKOUT}/bh-02/plugins/python-cordis-plugin/src/python_cordis_plugin",
     f"{_CHECKOUT}/libs/cordis/src/cordis",
@@ -186,7 +186,7 @@ _CODE = (  # the directory of every package bh-02 runs code from (`layers.code`)
 def test_bh_02_s_own_code_under_a_writable_root_is_denied_as_its_layer_files_are() -> None:
     """bh-02 working on its own checkout (an editable install), or run from the home directory
     with the checkout under it: the directory of every package bh-02 runs code from
-    (`layers.code`) is under a root an input may write. bh-02 imports its modules from there in
+    (`host.code`) is under a root an input may write. bh-02 imports its modules from there in
     its own process (a plugin a layer names later, say), so an input that wrote one would choose
     code bh-02 runs. Each is denied as a layer
     file is, whatever the host's `sys.path` holds (`host` names nothing here). Not one the project
@@ -220,9 +220,9 @@ def test_bh_02_s_own_code_under_a_writable_root_is_denied_as_its_layer_files_are
 
 
 def test_a_linux_jail_reads_bh_02_s_own_code_and_writes_none_of_it(tmp_path: Path) -> None:
-    """A Linux jail reads by allowlist. The extensions' worker imports cordis, and with an
+    """A Linux jail reads by allowlist. The extensions process imports cordis, and with an
     editable install that is the workspace's `src/cordis`, outside the project and the
-    interpreter: so the allowlist names bh-02's own code (`layers.code`), read-only (outside
+    interpreter: so the allowlist names bh-02's own code (`host.code`), read-only (outside
     every writable root nothing writes it; under one, it is denied above), and never the
     workspace itself, whose `local.env` an input must not read."""
     readable = readable_roots(
@@ -252,7 +252,7 @@ def test_a_linux_jail_reads_bh_02_s_own_code_and_writes_none_of_it(tmp_path: Pat
     package.mkdir(parents=True)
     project = tmp_path / "project"
     project.mkdir()
-    jail = BrigJail(BrigConfig(), Layers(code=(str(package),)), platform="linux")
+    jail = BrigJail(BrigConfig(), Host(code=(str(package),)), platform="linux")
     compiled, _ = jail.compile(str(tmp_path / "j"), str(tmp_path / "k" / "k.sock"), str(project), ())
     assert str(package) in compiled.spec.fs.read_allows
     argv = compiled.wrap(("w",))
@@ -270,7 +270,7 @@ def test_allow_takes_names_off_brig_s_self_modification_list_and_only_those() ->
 
 
 async def test_the_row_binds_a_runner_over_a_brig_jail_over_the_layers_it_was_given() -> None:
-    effects = await drive(confined(config=BrigConfig(), layers=Layers()))
+    effects = await drive(confined(config=BrigConfig(), host=Host()))
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "runner")]
     assert isinstance(effects[0].args[1], Runner)
 
@@ -459,7 +459,7 @@ async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_h
     (project / "pkg").mkdir(parents=True)
     secret, absent, seen = project / "local.env", project / "pkg" / "local.env", project / "seen"
     secret.write_text("OLD=1\n")  # a stand-in: never the real file
-    one = BrigJail(BrigConfig(), Layers(credentials=(str(absent),), secrets=(str(absent),)))
+    one = BrigJail(BrigConfig(), Host(credentials=(str(absent),), secrets=(str(absent),)))
 
     async def jailed() -> Any:
         sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
@@ -537,7 +537,7 @@ async def test_a_linux_jail_ends_when_the_host_renames_over_a_write_deny_and_a_n
         sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
         endpoint = str(sock_dir / "k.sock")
         argv = [sys.executable, "-I", "-c", _LISTEN_THEN_APPEND, endpoint, str(config)]
-        return await BrigJail(BrigConfig(), Layers()).start(argv, cwd=str(project), endpoint=endpoint)
+        return await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), endpoint=endpoint)
 
     started = await jailed()
     try:
@@ -696,7 +696,7 @@ time.sleep(60)
 
 @pytest.mark.usefixtures("_plain_launch")
 async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp_path: Path) -> None:
-    """The runner starts two programs, the Python process and the extensions' worker, each
+    """The runner starts two programs, the Python process and the extensions process, each
     from a command of its own. What a start is (the trees its program reads, which name the
     program's own directory; the roots it writes; its notice and grades) is that start's: the
     second start replaces none of the first's, so the kernel never tells the model the
@@ -707,7 +707,7 @@ async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp
     for name in ("kernel", "extensions"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "worker.py").write_text(_LISTEN)
-    one = BrigJail(BrigConfig(), Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    one = BrigJail(BrigConfig(), Host(credentials=(str(credential),), secrets=(str(credential),)))
     before = dict(one.report())
     started = []
     try:
@@ -747,9 +747,7 @@ async def test_release_frees_what_the_programs_held_once_each_owner_stopped_its_
     project = tmp_path / "project"
     project.mkdir()
     credential = project / "local.env"
-    runner = Runner(
-        BrigJail(BrigConfig(), Layers(credentials=(str(credential),), secrets=(str(credential),)))
-    )
+    runner = Runner(BrigJail(BrigConfig(), Host(credentials=(str(credential),), secrets=(str(credential),))))
     started = []
     for _ in ("python", "extensions"):
         endpoint = _endpoint()
@@ -789,9 +787,7 @@ async def test_release_never_stops_a_program_its_owner_did_not_and_says_it_still
     project = tmp_path / "project"
     project.mkdir()
     credential = project / "local.env"
-    runner = Runner(
-        BrigJail(BrigConfig(), Layers(credentials=(str(credential),), secrets=(str(credential),)))
-    )
+    runner = Runner(BrigJail(BrigConfig(), Host(credentials=(str(credential),), secrets=(str(credential),))))
     endpoint = _endpoint()
     kept = await runner.start(
         [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(project), endpoint=endpoint
@@ -821,7 +817,7 @@ async def test_release_waits_for_a_start_under_way_and_says_it_still_runs(
         return launched[-1]
 
     monkeypatch.setattr("brig.run.SubprocessLauncher.launch", slow)
-    runner = Runner(BrigJail(BrigConfig(), Layers()))
+    runner = Runner(BrigJail(BrigConfig(), Host()))
     endpoint = _endpoint()
     argv = [sys.executable, "-I", "-c", _LISTEN, endpoint]
     starting = asyncio.ensure_future(runner.start(argv, cwd=str(project), endpoint=endpoint))
@@ -850,7 +846,7 @@ async def test_an_input_creating_the_project_s_own_absent_local_env_leaves_the_j
     created, done = project / "local.env", project / "done"
     endpoint = _endpoint()
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_CREATE, endpoint, str(created), str(done)]
-    started = await BrigJail(BrigConfig(), Layers()).start(argv, cwd=str(project), endpoint=endpoint)
+    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), endpoint=endpoint)
     try:
         group = _recorded_group(tmp_path)
         for _ in range(250):
@@ -875,8 +871,8 @@ import asyncio, os, sys, tempfile
 from pathlib import Path
 from runner_cordis_plugin import BrigConfig, BrigJail
 
-class Layers:
-    paths, credentials, secrets, trusted, code, memory = (), (), (), (), (), ""
+class Host:
+    paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
 
 async def main():
     sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
@@ -885,7 +881,7 @@ async def main():
         "s.listen(1); time.sleep(2)"
     )
     argv = [sys.executable, "-I", "-c", worker, sock]
-    await BrigJail(BrigConfig(), Layers()).start(argv, cwd=sys.argv[1], endpoint=sock)
+    await BrigJail(BrigConfig(), Host()).start(argv, cwd=sys.argv[1], endpoint=sock)
     os._exit(9)
 
 asyncio.run(main())
@@ -902,8 +898,8 @@ import asyncio, sys, time
 from runner_cordis_plugin import Approval, BrigConfig, BrigJail, Runner
 from python_cordis_plugin import Kernel, KernelConfig
 
-class Layers:
-    paths, credentials, secrets, trusted, code, memory = (), (), (), (), (), ""
+class Host:
+    paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
 
 LOOP = (
     "import os, sys, time\\n"
@@ -919,7 +915,7 @@ LOOP = (
 )
 
 async def main():
-    runner = Runner(BrigJail(BrigConfig(), Layers()))
+    runner = Runner(BrigJail(BrigConfig(), Host()))
     kernel = Kernel(runner, KernelConfig(root=sys.argv[1]), rule=Approval(runner))
     await kernel.__aenter__()
     setsid = sys.argv[2] == "setsid"
@@ -989,7 +985,7 @@ async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what
         with contextlib.suppress(ProcessLookupError):
             os.killpg(group, signal.SIGKILL)
     assert (project / ".claude").is_dir() and not list((project / ".claude").iterdir())
-    one = BrigJail(BrigConfig(), Layers())
+    one = BrigJail(BrigConfig(), Host())
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1043,7 +1039,7 @@ async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
     record = records / "bh-j-living.json"
     record.write_text(record_text([(str(held), identity(held.stat()))], living.pid))
     try:
-        one = BrigJail(BrigConfig(), Layers())
+        one = BrigJail(BrigConfig(), Host())
         sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
         endpoint = str(sock_dir / "k.sock")
         argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1052,7 +1048,7 @@ async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
     finally:
         living.kill()
         await living.wait()
-    one = BrigJail(BrigConfig(), Layers())
+    one = BrigJail(BrigConfig(), Host())
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1069,8 +1065,8 @@ import asyncio
 from brig.run import SubprocessLauncher
 from runner_cordis_plugin import BrigConfig, BrigJail
 
-class Layers:
-    paths, credentials, secrets, trusted, code, memory = (), (), (), (), (), ""
+class Host:
+    paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
 
 def crash(self, *args, **kwargs):
     os._exit(9)
@@ -1078,7 +1074,7 @@ def crash(self, *args, **kwargs):
 SubprocessLauncher.launch = crash
 sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
 argv = [sys.executable, "-c", "pass"]
-asyncio.run(BrigJail(BrigConfig(), Layers()).start(argv, cwd=sys.argv[1], endpoint=sock))
+asyncio.run(BrigJail(BrigConfig(), Host()).start(argv, cwd=sys.argv[1], endpoint=sock))
 """
 
 
@@ -1099,7 +1095,7 @@ async def test_a_placeholder_is_made_and_marked_before_bubblewrap_starts(
     assert {".claude", ".vscode", ".envrc", ".git"} <= set(left), left
     if sys.platform == "linux":  # os.getxattr is Linux's
         assert {os.getxattr(project / name, MARK).decode() for name in left} == {record.stem}
-    one = BrigJail(BrigConfig(), Layers())
+    one = BrigJail(BrigConfig(), Host())
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1128,7 +1124,7 @@ time.sleep(60)
 async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_nothing_beside_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The project's auto memory directory (`layers.memory`) is a root an input may write, in the
+    """The project's auto memory directory (`host.auto_memory`) is a root an input may write, in the
     real jail: the model keeps its notes there with plain Python. Another project's, beside it,
     is not even there to read; and the model is told it may write the directory (`writes()`)."""
     _needs_bwrap()
@@ -1137,7 +1133,7 @@ async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_no
     memory, beside = projects / "-project" / "memory", projects / "-other" / "memory"
     for directory in (project, memory, beside):
         directory.mkdir(parents=True)
-    one = BrigJail(BrigConfig(), Layers(memory=str(memory)))
+    one = BrigJail(BrigConfig(), Host(auto_memory=str(memory)))
     endpoint = _endpoint()
     notes = (str(memory / "MEMORY.md"), str(beside / "MEMORY.md"))
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_NOTE, endpoint, *notes, str(project / "done")]
@@ -1171,7 +1167,7 @@ async def test_a_jail_that_fails_to_launch_leaves_nothing_on_the_host(
     monkeypatch.setattr("brig.run.SubprocessLauncher.launch", refused)
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     with pytest.raises(RuntimeError, match="no launch today"):
-        await BrigJail(BrigConfig(), Layers()).start(
+        await BrigJail(BrigConfig(), Host()).start(
             [sys.executable, "-c", "pass"], cwd=str(project), endpoint=str(sock_dir / "k.sock")
         )
     assert list(project.iterdir()) == []
@@ -1203,7 +1199,7 @@ async def test_a_jail_start_cancelled_while_it_launches_ends_what_the_launch_sta
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
     starting = asyncio.ensure_future(
-        BrigJail(BrigConfig(), Layers()).start(argv, cwd=str(project), endpoint=endpoint)
+        BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), endpoint=endpoint)
     )
     await asyncio.sleep(0.1)
     starting.cancel()
@@ -1234,7 +1230,7 @@ async def test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove(
     records.mkdir(parents=True)
     record = records / "bh-j-crashed.json"
     record.write_text(record_text([(str(mine), None), (str(project / "gone"), None)]))
-    one = BrigJail(BrigConfig(), Layers())
+    one = BrigJail(BrigConfig(), Host())
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1273,7 +1269,7 @@ async def test_placeholders_a_crashed_session_left_are_removed_by_the_next_jail_
     (project / ".claude" / "mine.json").write_text("{}")  # the person's, since
     (project / ".vscode").rmdir()
     (project / ".vscode").mkdir()  # the person's own, made again
-    one = BrigJail(BrigConfig(), Layers())
+    one = BrigJail(BrigConfig(), Host())
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1295,7 +1291,7 @@ async def test_git_init_on_the_host_works_while_a_jail_runs_in_a_project_that_is
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
     project.mkdir()
-    one = BrigJail(BrigConfig(), Layers())
+    one = BrigJail(BrigConfig(), Host())
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     git_config = project / ".git" / "config"
@@ -1326,7 +1322,7 @@ async def test_a_second_jail_s_carve_out_outlives_the_first_jail_in_the_same_pro
     project = tmp_path / "project"
     project.mkdir()
     claude = project / ".claude"
-    jails = [BrigJail(BrigConfig(), Layers()) for _ in range(2)]
+    jails = [BrigJail(BrigConfig(), Host()) for _ in range(2)]
     started = []
     for n, one in enumerate(jails):
         sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
@@ -1347,7 +1343,7 @@ def test_a_platform_brig_has_no_preset_for_is_refused_by_name() -> None:
     assert stack_for("darwin") and stack_for("linux")
     with pytest.raises(RuntimeError, match=r"this is freebsd.*`runner:unconfined`"):
         stack_for("freebsd")
-    assert BrigJail(BrigConfig(), Layers(), platform="freebsd").report() == {}
+    assert BrigJail(BrigConfig(), Host(), platform="freebsd").report() == {}
 
 
 def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_project_s_secret(
@@ -1362,7 +1358,7 @@ def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_projec
     project = tmp_path / "project"
     project.mkdir()
     secret = project / "local.env"
-    jail = BrigJail(BrigConfig(), Layers(), platform="linux")
+    jail = BrigJail(BrigConfig(), Host(), platform="linux")
     report = jail.report()
     assert report["fs_write"] == report["network"] == report["env"] == "enforced"
 
@@ -1370,7 +1366,7 @@ def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_projec
     detail = next(g.detail for axis, g in compiled.report.axes.items() if axis.value == "fs_read")
     assert graded["fs_read"] == "best_effort" and str(secret.resolve()) in detail
     assert str(secret.resolve()) not in compiled.wrap(("w",))  # the project's own: nothing made
-    looked = BrigJail(BrigConfig(), Layers(credentials=(str(secret.resolve()),)), platform="linux")
+    looked = BrigJail(BrigConfig(), Host(credentials=(str(secret.resolve()),)), platform="linux")
     compiled, graded = looked.compile(str(tmp_path / "j"), str(tmp_path / "k" / "k.sock"), str(project), ())
     argv = compiled.wrap(("w",))
     at = argv.index(str(secret.resolve()))

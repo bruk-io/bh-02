@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from cordis import Effects, acquire, bind, component
 from runner_cordis_plugin.approval import Approval, Graded
-from runner_cordis_plugin.jail import BrigConfig, BrigJail, Layers
+from runner_cordis_plugin.jail import BrigConfig, BrigJail, Host
 from runner_cordis_plugin.runner import Runner
 from runner_cordis_plugin.unconfined import Unjailed
 
@@ -30,11 +30,11 @@ class _Registrar(Protocol):
 
 
 @component(provides=("runner",))
-async def confined(*, config: BrigConfig, layers: Layers) -> Effects:
+async def confined(*, config: BrigConfig, host: Host) -> Effects:
     """Fills a `runner` row: `use = "runner:confined"`. A brig jail for each program it starts:
     writes confined to the project, no network, credentials unreadable, graded honestly. Depends
-    on `layers` so a program can never write the files the running composition is read from."""
-    yield bind("runner", Runner(BrigJail(config, layers)))
+    on `host` so a program can never write the files the running composition is read from."""
+    yield bind("runner", Runner(BrigJail(config, host)))
 
 
 @component(provides=("runner",))
@@ -56,7 +56,7 @@ async def approval(*, runner: Graded) -> Effects:
 @component
 async def release(*, runner: _Releasing, commands: _Registrar) -> Effects:
     """Fills a `release` row: `use = "runner:release"`. `/release` asks each row that started a
-    program in the runner to stop its own (the Python process, the extensions' worker), then has
+    program in the runner to stop its own (the Python process, the extensions process), then has
     the runner let go of what it holds on the host (on Linux, where bh-02 looks for its
     credential) until the next start: the way to add a credential mid-session."""
 

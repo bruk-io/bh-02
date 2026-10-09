@@ -1,9 +1,9 @@
 # bh-02
 
 The coding harness in a terminal app: a model (Claude through Claude Code on the Claude
-subscription, or any OpenAI-compatible model you name, driven by bh-02's own loop) acts in Python, through the tools rows register (the shipped one, `python`, runs in a jailed Python process), inside a Textual TUI (`tui:app`), with every part of the program a plugin that can be replaced while it
+subscription, or any OpenAI-compatible model you name, driven by bh-02's own loop) acts in Python, through the tools rows register (the shipped one, `python`, runs in a jailed Python process), inside a Textual TUI (`tui:ui`), with every part of the program a plugin that can be replaced while it
 runs. `bh_02` is the shell: `cli.py` (the `bh-02` command), `bootstrap.py` (`run()`: read
-every layer, boot, follow the chat row's `done`, unwind; its own `harness`, `layers` and `sessions`
+every layer, boot, follow the chat row's `done`, unwind; its own `shell`, `host` and `session`
 rows), `sessions.py` (a session is `$XDG_STATE_HOME/bh-02/sessions/<id>/`), the
 layer file (`bh-02.toml`) and `testing.py`. Every capability is a
 `*-cordis-plugin` workspace member (`../plugins/`) that a layer names by string; no package
@@ -20,8 +20,12 @@ uv run bh-02 update-layer mine.toml                # rewrite a layer in today's 
 ```
 
 **Layer files from an earlier bh-02.** Some of bh-02's rows were renamed (`llm` is `loop`,
-`mode` is `chat`), the three status-bar rows (`jail_status`, `model_status`, a session's
-`session`) are one `status` row, and the tool rows from before CodeAct (`fs`, `approve`,
+`mode` is `chat`, `jail_status` is `grades`; the shell's own `harness` is `shell`, `layers` is
+`host` and `sessions` is `session`), and so were some components (`chat:session` is
+`chat:converse`, `tui:app` is `tui:ui`; the shell's `bh_02.bootstrap:harness`, `layer_files` and
+`session_list` are `bh_02.bootstrap:shell`, `host` and `session`). The status-bar rows
+(`model_status`, and the `session` row an earlier session's layer filled with `tui:status`) are
+one `status` row, and the tool rows from before CodeAct (`fs`, `approve`,
 `actions`, `guard`, and any row using the old `tools:` plugin; a `tools` row naming no plugin is
 today's broker, `agent:tools`) are gone, as is the sidebar's (`sidebar`, or any row using
 `tui:sessions`; `bh-02 sessions` lists the sessions). A session's own layer is brought up to date on
@@ -51,7 +55,7 @@ model row (its claude-code provider) reads that file itself and passes the token
 CLI it starts, never into bh-02's own environment. The Python process's inputs never get it: the jail
 scrubs the environment and denies reading `local.env`, and `--no-jail` drops
 `CLAUDE_CODE_OAUTH_TOKEN`, every other `CLAUDE*` variable (a Claude Code that launched bh-02
-leaves its own, a messaging token among them) and `ANTHROPIC_*` from the worker's environment. But an unjailed input
+leaves its own, a messaging token among them) and `ANTHROPIC_*` from the Python process's environment. But an unjailed input
 runs with your permissions, so one you approve could still open `local.env` itself, or read
 the environment of any process you own, the Claude Code child's (which holds the token)
 included: read an input before you answer `y`. Without the token, bh-02 starts anyway and each message answers with an
@@ -102,7 +106,7 @@ process and its variables (the screen keeps only the note carrying the summary, 
 is kept as the session's `transcript.jsonl.bak`, a later /compact's as `.bak.2`, and so on; the
 model has 300 seconds, the `conversation` row's `timeout`, since Ctrl-C doesn't stop a command, and a
 note says so as it begins; quitting stops it and changes nothing), `/model [NAME]` lists the models or switches
-to one, `/release` stops the Python process and the extensions' worker until the next input
+to one, `/release` stops the Python process and the extensions process until the next input
 (on Linux, the way to add your credential mid-session: each row stops its own, then the runner
 frees where bh-02 looks for it; the extensions load again once the next input has started the
 Python process). A command never reaches the
@@ -147,13 +151,13 @@ use = "bh_02.testing:echo"
 ```
 
 Two more replace only the `model` row, so the shipped loop, its transcript and the session's
-layer run as they do with Claude: `echo_model` (each turn echoes the last message and
+layer run as they do with Claude: `echo_model` (each step echoes the last message and
 says which user message of the conversation it was, `(message 2)`, so a screen shows whether
 `/clear` forgot the transcript and a resume restored it) and `slow_model` (the same, taking 3 s
 to start). And three are providers a models file names for a model of its own, under the
 shipped `models:model` row, so `--model` picks one and `/model` switches between them (or to
 an OpenAI-compatible model) as between Claude and any other: `echo_provider` (`echo_model`'s
-turn, said as `[ID] echo: ...`, so a screen shows which model answered), `slow_provider` (the
+step, said as `[ID] echo: ...`, so a screen shows which model answered), `slow_provider` (the
 same, taking 3 s to start: what the status bar and a message typed meanwhile say while
 `/model` restarts the model) and `repl_provider` (`repl_model`'s):
 
@@ -175,8 +179,8 @@ stand-in server (`-m "not real_launch"` deselects it).
 | Row | `bh-02.toml` | a session's layer |
 |---|---|---|
 | `loop` | `agent:loop` | |
-| `ui` | `tui:app` | `history` (the session's `events.jsonl`) |
-| `chat` | `chat:session` | |
+| `ui` | `tui:ui` | `history` (the session's `events.jsonl`) |
+| `chat` | `chat:converse` | |
 | `python` | `python:tool` | |
 | `runner` | `runner:confined` | `runner:unconfined` with `--no-jail` |
 | `approval` | `runner:approval` | |
@@ -202,7 +206,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `extensions` | `extensions:extensions` | |
 
 `run()` adds three rows of its own after every layer, pinned on so no layer can remove them:
-`layers` (the files above, as paths, so the jail can keep an input from rewriting them;
+`host` (`paths`: the files above, as paths, so the jail can keep an input from rewriting them;
 `credentials`: where the model rows look for `local.env`, above bh-02's install and environment,
 nearest first; and `secrets`: every one of those, the `local.env` beside and above the project,
 and the sessions' state directory, this run's and the default `~/.local/state/bh-02/sessions`
@@ -213,14 +217,14 @@ reads and trusts, so a jailed input can't write there when it is in the project 
 your home directory); `code`: where bh-02 runs its own code from, the directory of every
 package a layer may name (`bh_02`, cordis, cordis_helpers, brig, host_paths, each installed
 plugin's) as installed, as named and as resolved (`code_directories`), which every jail reads (with an
-editable install, `uv run` here or `uv tool install --editable`, the extensions' worker imports
+editable install, `uv run` here or `uv tool install --editable`, the extensions process imports
 cordis from the workspace) and a jailed input can't write when it is in the project (bh-02
 working on its own checkout: bh-02 imports its modules from there); with `--no-jail` an input
 runs with your permissions, so one you approve could open or write them: only its environment
-is scrubbed; and `memory`: the project's auto memory directory,
+is scrubbed; and `auto_memory`: the project's auto memory directory,
 `$XDG_STATE_HOME/bh-02/projects/<project>/memory`, which the command line makes and a jailed
-input may write), `sessions` (the running session,
-whose id the status bar shows) and `harness` (which follows the chat row's `done`, across a
+input may write), `session` (the running session,
+whose id the status bar shows) and `shell` (which follows the chat row's `done`, across a
 restart of the chat row).
 
 A row's `id` is its role; `use` is `plugin:component`, a `cordis.plugins` entry point, or
@@ -242,8 +246,8 @@ commands:registry       binds Commands                     depends on nothing
 commands:jobs           binds Jobs                         depends on Output
 commands:operator       registers /rows ... /restart       depends on Commands, Loader, Jobs
 commands:shell_command  claims ! (a shell command)         depends on Commands
-models:model            binds Model                        depends on Layers (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
-models:catalog          binds Models                       depends on Loader, Layers
+models:model            binds Model                        depends on Host (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
+models:catalog          binds Models                       depends on Loader, Host
 models:switch           registers /model                   depends on Commands, Loader, Models, Jobs
 agent:transcript        binds Transcript                   depends on nothing
 agent:system            binds System                       depends on nothing (its config)
@@ -253,19 +257,19 @@ agent:executor          binds Executor                     depends on nothing
 agent:tools             binds Tools                        depends on nothing
 agent:loop              binds Loop                         depends on Model, Tools, Transcript, System, Approval, Output, Notes, Executor
 agent:conversation      registers /clear, /compact         depends on Model, Tools, Loader, Commands, Output, Jobs (the transcript row's file, not Transcript)
-memory:files            binds Memory, registers /memory    depends on System, Commands, Layers
+memory:files            binds Memory, registers /memory    depends on System, Commands, Host
 memory:on_touch         adds memory loaded on demand       depends on Memory, Notes, Transcript, Access
-memory:auto             adds auto memory to System         depends on System, Layers, Transcript
-runner:confined         binds Runner                       depends on Layers
+memory:auto             adds auto memory to System         depends on System, Host, Transcript
+runner:confined         binds Runner                       depends on Host
 runner:unconfined       binds Runner                       depends on nothing
 runner:approval         binds Approval                     depends on Runner
 runner:release          registers /release                 depends on Runner, Commands
 python:tool             registers python, its stop         depends on Runner, Approval, Tools, System, Access
-tui:app                 binds Input, Output, Frame         depends on nothing (its config)
-tui:status              pushes session and model fields    depends on Loader, Models, Sessions, Frame
+tui:ui                  binds Input, Output, Frame         depends on nothing (its config)
+tui:status              pushes session and model fields    depends on Loader, Models, Session, Frame
 tui:grades              pushes the jail field              depends on Runner, Approval, Frame, Output
 tui:palette             pushes the palette's commands      depends on Commands, Frame
-chat:session            runs the chat, binds Done          depends on Loop, Input, Output, Commands, Jobs
+chat:converse           runs the chat, binds Done          depends on Loop, Input, Output, Commands, Jobs
 extensions:extensions   loads the model's own plugins      depends on Runner, Commands, Frame, System, Tools, Approval, Output
 ```
 
@@ -293,19 +297,19 @@ where a file is and how it is reached) and on no other plugin; the gate proves i
 | Package | Binds / registers | Consumes |
 |---|---|---|
 | `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `palette`) | `frame` and what each row reports on |
-| `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's tools only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are; `/model` (`models:switch`), which lists them and switches by name | `layers` (`credentials`: where both look for `local.env`), `loader` (catalog, switch), `commands`, `output` (switch) |
-| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, the registered tools offered, read once at the first request after those it `requires`, each call run through its tool at once when the `approval` rule lets it run unasked, else on the person's yes (`output.confirm`), its result followed by what `notes`' functions add), `tools` (`agent:tools`: the broker of the model's tools, offered in name order), `transcript` (`agent:transcript`), `system` (`agent:system`: the system prompt, who the model is and where it is working, then the sections rows add; a broker), `notes` (`agent:notes`: the broker of what the model is told with a call's result), `access` (`agent:access`: the broker of what is asked before a file is read or written), `executor` (`agent:executor`: where the loop reads the prompt and asks `notes`, off the event loop, one call at a time across the loop's reloads); `agent:conversation` registers `/clear` and `/compact`, which begin a new conversation, empty or from the model's summary, over the transcript row's file (the old kept as `.bak`), restarting the loop and the transcript (and for `/clear` the python row) | the loop: `model` (`complete`), `tools` (`specs`, `get`, `ready`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `notes` (its functions, after each call), `executor` (`run`); compact: `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
-| `chat-cordis-plugin` | runs `session` (a turn interruptible; a line `commands` claims goes to it, cancelled if the input closes, and what a command left the model, which `commands` holds, goes with the next message) and binds `done` | `loop`, `input`, `output`, `commands` (`claims`, `run`, `take_for_model`) |
-| `memory-cordis-plugin` | `memory` (`memory:files`): Claude Code's memory, as its docs describe it: the managed policy's CLAUDE.md, yours (`~/.claude/CLAUDE.md`, `~/.claude/rules/`), each directory's CLAUDE.md files from the filesystem's root down to the project's, AGENTS.md where there is none, `@path` imports (four hops) and `.claude/rules/` without `paths`, a section of `system`, read fresh; `/memory` lists them. `memory:auto` adds auto memory: how the model keeps notes of its own in the project's directory outside the repository, and their MEMORY.md index, read once a conversation. `memory:on_touch` adds to `notes` what loads on demand (a subdirectory's CLAUDE.md files and rules, every rule whose `paths` match), each told whole once a conversation, with the result of the first input that opens a file it covers (or of the next, when that one's note was full) | memory: `system` (`add`), `commands` (`register`), `layers` (`memory`); auto: `system` (`add`), `layers` (`memory`), `transcript` (its lifetime); on-touch: `memory` (`touched`), `notes` (`add`), `transcript` (`messages`: what a resumed conversation was told) |
-| `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the runner starts; what they add (commands, status fields, prompt sections, tools whose calls run in that worker) goes into `commands`, `frame`, `system` and `tools`; each load at once when the `approval` rule lets it run unasked, else on the person's yes; on `/release` it stops its own worker, and none starts until something starts in the runner (the next input) or an extension changes, and then every extension loads again | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `tools` (`register`, `specs`), `approval` (`confined`, `unasked`), `output` (`confirm`) |
+| `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's tools only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are; `/model` (`models:switch`), which lists them and switches by name | `host` (`credentials`: where both look for `local.env`), `loader` (catalog, switch), `commands`, `output` (switch) |
+| `agent-cordis-plugin` | `loop` (`agent:loop`: steps classified after harness, bounded nudges, the registered tools offered, read once at the first request after those it `requires`, each call run through its tool at once when the `approval` rule lets it run unasked, else on the person's yes (`output.confirm`), its result followed by what `notes`' functions add), `tools` (`agent:tools`: the broker of the model's tools, offered in name order), `transcript` (`agent:transcript`), `system` (`agent:system`: the system prompt, who the model is and where it is working, then the sections rows add; a broker), `notes` (`agent:notes`: the broker of what the model is told with a call's result), `access` (`agent:access`: the broker of what is asked before a file is read or written), `executor` (`agent:executor`: where the loop reads the prompt and asks `notes`, off the event loop, one call at a time across the loop's reloads); `agent:conversation` registers `/clear` and `/compact`, which begin a new conversation, empty or from the model's summary, over the transcript row's file (the old kept as `.bak`), restarting the loop and the transcript (and for `/clear` the python row) | the loop: `model` (`complete`), `tools` (`specs`, `get`, `ready`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `notes` (its functions, after each call), `executor` (`run`); compact: `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
+| `chat-cordis-plugin` | runs the chat (`chat:converse`: a turn interruptible; a line `commands` claims goes to it, cancelled if the input closes, and what a command left the model, which `commands` holds, goes with the next message) and binds `done` | `loop`, `input`, `output`, `commands` (`claims`, `run`, `take_for_model`), `jobs` (`settled`) |
+| `memory-cordis-plugin` | `memory` (`memory:files`): Claude Code's memory, as its docs describe it: the managed policy's CLAUDE.md, yours (`~/.claude/CLAUDE.md`, `~/.claude/rules/`), each directory's CLAUDE.md files from the filesystem's root down to the project's, AGENTS.md where there is none, `@path` imports (four hops) and `.claude/rules/` without `paths`, a section of `system`, read fresh; `/memory` lists them. `memory:auto` adds auto memory: how the model keeps notes of its own in the project's directory outside the repository, and their MEMORY.md index, read once a conversation. `memory:on_touch` adds to `notes` what loads on demand (a subdirectory's CLAUDE.md files and rules, every rule whose `paths` match), each told whole once a conversation, with the result of the first input that opens a file it covers (or of the next, when that one's note was full) | memory: `system` (`add`), `commands` (`register`), `host` (`auto_memory`); auto: `system` (`add`), `host` (`auto_memory`), `transcript` (its lifetime); on-touch: `memory` (`touched`), `notes` (`add`), `transcript` (`messages`: what a resumed conversation was told) |
+| `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into the extensions process, which the runner starts; what they add (commands, status fields, prompt sections, tools whose calls run in that process) goes into `commands`, `frame`, `system` and `tools`; each load at once when the `approval` rule lets it run unasked, else on the person's yes; on `/release` it stops the extensions process, and none starts until something starts in the runner (the next input) or an extension changes, and then every extension loads again | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `tools` (`register`, `specs`), `approval` (`confined`, `unasked`), `output` (`confirm`) |
 | `python-cordis-plugin` | nothing: `python:tool` starts a persistent Python process in the runner, behind a Unix socket, and registers the `python(code)` tool with `tools` (a call runs as an input and answers with the files it opened), tells the model about it in the `system` section `python`, and stops it on `/release` | `runner` (`start`, and its start's `report`, `notice`, `reads`, `writes`; `report`; `on_release`), `approval` (`confined`), `tools` (`register`), `system` (`add`), `access` (`asking`, `refusal`) |
-| `runner-cordis-plugin` | `runner`: what starts the Python process and the extensions' worker, `runner:confined` (a brig jail per start: `scratch_darwin()` on darwin, `strict_linux()` on Linux; the only importer of brig) or `runner:unconfined` (`--no-jail`); `approval` (`runner:approval`): whether what the model asked for runs unasked, when it runs in a runner that confines it; `runner:release` registers `/release`, which has each row stop its own program, then frees what the jails held | confined: `layers`; approval: `runner` (`report`); release: `runner` (`release`), `commands` (`register`) |
+| `runner-cordis-plugin` | `runner`: what starts the Python process and the extensions process, `runner:confined` (a brig jail per start: `scratch_darwin()` on darwin, `strict_linux()` on Linux; the only importer of brig) or `runner:unconfined` (`--no-jail`); `approval` (`runner:approval`): whether what the model asked for runs unasked, when it runs in a runner that confines it; `runner:release` registers `/release`, which has each row stop its own program, then frees what the jails held | confined: `host`; approval: `runner` (`report`); release: `runner` (`release`), `commands` (`register`) |
 | `commands-cordis-plugin` | `commands` (the broker: slash commands, and the line prefixes a layer's rows claim; it says which lines are commands); `jobs` (`commands:jobs`: the restarts commands queue, which the chat waits on); the operator's commands over the loader; `!COMMAND` (`commands:shell_command`): the person's shell command, its output shown and held (in `commands`) for their next message | `commands`, `loader`, `models` (operator); `commands` (`claim`: shell command) |
 
 Every model runs in the same composition: `agent:loop` offers the registered tools on every
 request (the python row's `python`, in the shipped layer), runs every call through its tool, and
-classifies every turn (harness's rule: never read a
-truncated or silent turn as the answer); only the model row's provider differs.
+classifies every step (harness's rule: never read a
+truncated or silent step as the answer); only the model row's provider differs.
 
 ## CodeAct
 
@@ -336,7 +340,7 @@ the list.
 After each call, the loop asks `notes` what to tell the model with its result (on `executor`,
 off the event loop, as it reads the prompt, so neither freezes the app): the functions
 rows add there are given the tool's name, the call's input, its result and the files it opened
-(for an input, the worker hears each `open` with an audit hook, so `touched()` is what Python in the input
+(for an input, the Python process hears each `open` with an audit hook, so `touched()` is what Python in the input
 read or wrote, not what a shell command did). `memory:on_touch` adds memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
 `paths` match, arrives whole with the result of the first input that opens a file it covers, as
 Claude Code's do when its Read, Write or Edit touches one. It asks the `memory` value
@@ -346,17 +350,17 @@ the new conversation again, and reads the notes the loop keeps with each result 
 result's entry), so a resumed session (`--resume`) is not told again a note told with an earlier
 result.
 
-The Python process is a worker started by the runner. `runner:confined` confines it: writes
+The Python process is a program the runner starts. `runner:confined` confines it: writes
 only inside the project (and never to the layer files, the host's import paths, bh-02's own
 code, `.git/hooks`, `.git/config`, `.claude`, bh-02's config directory, ...), no network,
 credentials unreadable, and an environment scrubbed to a short allowlist; the programs an input starts are inside the same jail. A confined
-input runs without asking. brig's host process, which starts the worker from outside the
+input runs without asking. brig's host process, which starts the Python process from outside the
 jail, keeps the environment bh-02 was launched with (brig's launcher passes it on, and bh-02
 never puts its own token there); a jailed input can't read it. `--no-jail` uses
 `runner:unconfined`: an input runs with your permissions, so every input is shown to you, code and
 all, and runs only if you say `y`. For a moment after it comes up (0.4 s, its keys dimmed) the
 question ignores keys, so the rest of a message you were typing can't answer it; those keys are
-dropped. Only the worker's environment is scrubbed of `CLAUDE*` and
+dropped. Only the Python process's environment is scrubbed of `CLAUDE*` and
 `ANTHROPIC_*`: an approved input can still read `local.env`, or the environment of any process
 you own, the Claude Code child's included.
 
@@ -366,9 +370,9 @@ The model can extend bh-02 itself, while it runs: it writes a module of cordis c
 `.bh-02/plugins/NAME.py` in the project, and the `extensions` row loads it within half a second,
 again whenever it changes, and unloads it when it is deleted. An extension can add a slash
 command for you, a status-bar field, text in the model's own prompt, or a tool the model is
-offered, and nothing else: it runs in a worker the runner starts, as confined as an input, and
-reaches bh-02 only through those four keys, each of which only adds (a call to its tool runs in
-that worker, and with `--no-jail` each call is put to you, shown by its name and arguments). Jailed, it loads without asking, as an input runs
+offered, and nothing else: it runs in the extensions process, which the runner starts, as
+confined as an input, and reaches bh-02 only through those four keys, each of which only adds (a
+call to its tool runs in that process, and with `--no-jail` each call is put to you, shown by its name and arguments). Jailed, it loads without asking, as an input runs
 without asking; with `--no-jail` each one is put to you first, with its source. The status bar's
 `ext:` field lists them (`ext: todo ✓`), and `.bh-02/plugins/status.json` is what the model
 reads to see whether one loaded. bh-02 reads those files with your permissions, so it follows no

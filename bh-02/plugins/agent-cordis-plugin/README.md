@@ -16,7 +16,8 @@ and asks `notes`, and `/compact`, which begins a new conversation from the model
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
 | `agent:conversation` | registers `/clear` and `/compact [WHAT TO KEEP]`, each restart queued in `jobs`; config: `timeout` (seconds, 300: /compact's summary), `loop` and `transcript` (the rows /compact restarts), `clear` (the rows /clear restarts: `loop`, `transcript`, `python`) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`), `jobs` (`put`) |
 
-A turn is one model step plus the calls it asked for, until it asks for none. The model is
+A turn is the reply to one message: a model step, the calls it asked for, and again, until a
+step asks for none. The model is
 offered the tools rows register with `tools` (`agent:tools`, a broker; CodeAct's `python(code)`
 is the python row's registration, and the loop knows of no tool by name), through the
 provider's standard tool calling. The loop reads the list at a conversation's first request
@@ -75,8 +76,8 @@ hold (an entry from before the loop kept them is searched; CONTRACTS.md: transcr
 
 Each model step is classified by `stops.classify` (pure; the table is in its docstring): only
 `act` runs calls, only `answered` ends the reply, and a
-truncated, silent or undecodable turn is fed back with harness's own wording up to
-`max_nudges` times per reply. A turn that did not act keeps no calls on its transcript
+truncated, silent or undecodable step is fed back with harness's own wording up to
+`max_nudges` times per reply. A step that did not act keeps no calls on its transcript
 entry, so nothing is left for a result to answer. A provider's assistant message rides on its
 entry as `provider`, for the model to replay unchanged.
 
@@ -160,7 +161,7 @@ summary, nothing said since, is not compacted again. A command runs in the chat 
 Ctrl-C stops only a turn, so the step has `timeout` seconds, and a note says so as it begins
 (the row shows it itself, `output.show`, since the chat row shows a command's answer only once
 it has one); past them it is closed (its provider stops) and nothing changes. The person
-leaving cancels the command (`chat:session` races it against `input.closed()`): the step is
+leaving cancels the command (`chat:converse` races it against `input.closed()`): the step is
 closed and nothing has been written. The summary then begins the new conversation (`seeded`:
 bh-02's note that the conversation carries on from an earlier one, as the person's message,
 then the summary as the model's answer, so the roles alternate; the note stays at the

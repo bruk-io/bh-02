@@ -10,9 +10,9 @@
 | stop          | no   | none  | silent: said nothing             |
 
 and a fourth, one level down: a call the model made whose arguments would not decode
-(undecodable). A turn the provider refused (`refusal`) is none of these: it is `refused`,
+(undecodable). A step the provider refused (`refusal`) is none of these: it is `refused`,
 never run and never fed back, since asking again won't change the answer. The rule for all
-of them: never synthesize an action the model did not call; always decode one it did. A turn
+of them: never synthesize an action the model did not call; always decode one it did. A step
 that is not `act`, `answered` or `refused` is fed back to the model, never read as its answer.
 """
 
@@ -49,10 +49,10 @@ FEEDBACK: Final[Mapping[str, str]] = {
 
 
 def classify(finish: str | None, text: str, calls: Sequence[Mapping[str, Any]]) -> str:
-    """What the loop should do next about one completed turn.
+    """What the loop should do next about one completed model step.
 
     `finish` is the provider's own stop reason, if it gave one; `calls` are the tool calls
-    the turn carried, each with an `error` when its arguments did not decode.
+    the step carried, each with an `error` when its arguments did not decode.
     """
     if finish in _REFUSAL:
         return REFUSED

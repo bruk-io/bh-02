@@ -19,7 +19,7 @@ reaches the terminal that a terminal acts on (an escape, a control character).
 
 Its answer (CONTRACTS.md: commands) is a `note` for the person, what it printed and how it
 ended, and a `for_model` event, the same framed for the model, which the `commands` value
-holds and `chat:session` puts in front of the person's next message: the model reads it with
+holds and `chat:converse` puts in front of the person's next message: the model reads it with
 that, never during a turn.
 """
 

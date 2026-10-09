@@ -23,7 +23,7 @@ from tui_cordis_plugin.status import (
     StatusSink,
     TuiConfig,
 )
-from tui_cordis_plugin.wiring import grades, palette, status, tui
+from tui_cordis_plugin.wiring import grades, palette, status, ui
 
 __all__ = [
     "AppCrashed",
@@ -52,5 +52,5 @@ __all__ = [
     "replayable",
     "running",
     "status",
-    "tui",
+    "ui",
 ]

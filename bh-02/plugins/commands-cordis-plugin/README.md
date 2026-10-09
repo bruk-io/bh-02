@@ -23,7 +23,7 @@ not one that ordinary words start with (a letter, a digit), a space or `/`; any 
 accepted, so which one messages don't start with is the layer's author's to choose: `$` starts
 a price, `#`, `-` and `>` Markdown, `{` pasted JSON, and a claimed one takes those messages from
 the model (`!` is the shipped one). `claims(line)` is how
-`chat:session` asks whether a line is the harness's (a slash command, known or not, or a
+`chat:converse` asks whether a line is the harness's (a slash command, known or not, or a
 claimed prefix's) rather than the model's, so what counts as a command is decided here alone.
 Only a row in a layer may claim: an extension's `commands` (extensions-cordis-plugin) refuses
 `claim`, and its host passes on nothing but a command, a field and a section, since a prefix
@@ -41,12 +41,12 @@ a reset) and no control character but tab and newline is left in it, and a line 
 (`\r`, a progress bar) reads as it ended up. Ctrl-C doesn't stop a command (CONTRACTS.md:
 `input`; the ui says so when it is pressed while one runs), so it is stopped at its `timeout`:
 its process group gets SIGTERM, then SIGKILL. The person leaving (`input.closed()`) stops it
-the same way: `chat:session` cancels it. A program it left running in the background that
+the same way: `chat:converse` cancels it. A program it left running in the background that
 still holds its output is ended once the shell has exited; one whose output goes elsewhere
 (`cmd > log &`) is the person's to keep. A command that can't start (no such `shell` or `cwd`)
 says why and which of the row's config to set. Its answer is a `note` for the person (what it
 printed, how it ended) and a `for_model` event (CONTRACTS.md: event), which the `commands`
-value holds rather than answering; `chat:session` takes it (`take_for_model()`) and puts it in
+value holds rather than answering; `chat:converse` takes it (`take_for_model()`) and puts it in
 front of the person's next message, so the model reads the output with it, never during a turn
 (a line typed during a turn runs once the turn has ended). The registry depends on nothing, so
 a restart of the chat row (`/model` switching reloads it) keeps what is held; a new

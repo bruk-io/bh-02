@@ -88,14 +88,14 @@ _ANSWER_S = 30.0  # a load's answer: the worker waits up to 10 s for an extensio
 _STATUS = "status.json"
 _FIELD = "extensions"
 _ENDED = (
-    "the extensions' worker ended (an extension may have ended it, or the jail did); change a "
+    "the extensions process ended (an extension may have ended it, or the jail did); change a "
     "file in the extensions directory to load them all again"
 )
 _SOURCE_LIMIT = 256 * 1024  # an extension larger than this is not read (the worker's line holds it)
 _NEW = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC  # status.json's next
 
 _RELEASED = (
-    "/release stopped the extensions' worker; every extension loads again, in a new one, once "
+    "/release stopped the extensions process; every extension loads again, in a new one, once "
     "something starts in the runner again (the next input) or one of them changes"
 )
 
@@ -310,7 +310,7 @@ class Extensions:
         self._statuses = {name: Status(error=_RELEASED) for name in found}
         self._publish()
         return (
-            "The extensions' worker is stopped, and what the extensions added with it: they load "
+            "The extensions process is stopped, and what the extensions added with it: they load "
             "again once something starts in the runner (the next input) or one of them changes."
         )
 
@@ -615,7 +615,7 @@ class Extensions:
             async with asyncio.timeout(_ANSWER_S):
                 return await answer
         except TimeoutError:
-            raise _Gone(f"the extensions' worker did not answer within {_ANSWER_S:.0f} s") from None
+            raise _Gone(f"the extensions process did not answer within {_ANSWER_S:.0f} s") from None
         finally:
             self._answers.pop(name, None)
 

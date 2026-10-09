@@ -44,7 +44,7 @@ A function the model defines in an input and a registered tool differ in what ho
 | How long | until the process ends (`/clear`, a restart, a resume) | as long as its row: an extension's lasts as long as its file, across sessions |
 | Who can call it | later inputs | the model directly, and inputs as `tools.NAME(...)` |
 | Asked about, noted | no: the input that calls it was | each call, as any tool call |
-| Where it runs | in the Python process | where its row says: an extension's in its worker, a layer row's in bh-02 |
+| Where it runs | in the Python process | where its row says: an extension's in the extensions process, a layer row's in bh-02 |
 
 A helper worth keeping between sessions goes in the project's startup file; a capability the
 model should have as a tool, or that should run outside the Python process, is an extension's

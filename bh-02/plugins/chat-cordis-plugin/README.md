@@ -4,12 +4,13 @@ The chat row: what runs once a `loop`, an `input`, an `output`, `commands` and `
 
 | Row | Consumes | What it does |
 |---|---|---|
-| `chat:session` | `loop`, `input`, `output`, `commands` (`claims`, `run`, `take_for_model`), `jobs` (`settled`) | wait until no restart a command queued is pending, read, show the streamed reply, repeat until the input ends; a line `commands` claims (a `/command`, or `!` and a shell command) goes to it and its answer is shown (the command is cancelled if the input closes first); what commands left for the model (`for_model`, which `commands` holds) is taken and put in front of the person's next message; a recoverable failure is shown and the chat carries on. Binds `done` |
+| `chat:converse` | `loop`, `input`, `output`, `commands` (`claims`, `run`, `take_for_model`), `jobs` (`settled`) | wait until no restart a command queued is pending, read, show the streamed reply, repeat until the input ends; a line `commands` claims (a `/command`, or `!` and a shell command) goes to it and its answer is shown (the command is cancelled if the input closes first); what commands left for the model (`for_model`, which `commands` holds) is taken and put in front of the person's next message; a recoverable failure is shown and the chat carries on. Binds `done` |
 
 It is one `background` effect, so it stops when a value it uses leaves and starts again
 against the replacement. It binds that task as `done`, which resolves when the chat ends (the
-shell waits on it). `chat.py` declares the four shapes it needs (`Loop`, `Input`, `Output`,
-`Commands`) and `Recoverable`; `testing.py` ships fakes for them.
+shell waits on it). `chat.py` is the logic the row runs (`converse`), the shapes it needs
+(`Loop`, `Input`, `Output`, `Commands`, `Jobs`) and `Recoverable`; `testing.py` ships fakes for
+the shapes.
 
 Which lines are commands is the `commands` value's to say (`claims(line)`), never the chat's:
 a slash command, or a line starting with a prefix a layer's row claimed (`!`). A command runs

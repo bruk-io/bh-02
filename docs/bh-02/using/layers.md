@@ -44,8 +44,8 @@ id = "memory-auto"
 disabled = true
 ```
 
-`/rows` then shows the row as `disabled`. Three rows bh-02 adds itself (`layers`, `sessions` and
-`harness`) are pinned on, so no layer removes them.
+`/rows` then shows the row as `disabled`. Three rows bh-02 adds itself (`host`, `session` and
+`shell`) are pinned on, so no layer removes them.
 
 A session remembers the names of the patches it started with, and `bh-02 sessions` lists them,
 but a resume applies only the patches you give it then.
@@ -69,7 +69,8 @@ The model's code can't write a layer file: the jail protects them.
 ## Layers from an earlier bh-02
 
 Some rows have been renamed or merged since earlier versions (`llm` is now `loop`, `kernel` is
-`python` and `jail` is `runner`, for three). A session's own layer is brought up to date when
+`python`, `jail` is `runner` and `layers` is `host`, for four), and so have some components
+(`chat:session` is now `chat:converse`, `tui:app` is `tui:ui`). A session's own layer is brought up to date when
 you resume it. A `--patch` file is yours, so bh-02 stops before the app starts and says what to
 change:
 

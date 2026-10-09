@@ -23,7 +23,7 @@ makes comes back here and goes to `tools.call`, which runs it as the model's own
 tool is registered. What changed in it since the model was last told is told before the input's
 own output (`_offered`).
 
-A new kernel runs its startup files before its first input (`KernelConfig.startup`), when its
+A new Python process runs its startup files before its first input (`KernelConfig.startup`), when its
 inputs are confined: the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
 `~/.config/bh-02/kernel.py`), then the project's (`.bh-02/kernel.py`). The project's is read by
 the worker, in the jail, which decides: the model can write it, and a link there could lead to a
@@ -86,7 +86,7 @@ class Jailed(Protocol):
 
 @runtime_checkable
 class Access(Protocol):
-    """What the kernel needs of the `access` value (CONTRACTS.md: access): the kinds of opening
+    """What the Python process needs of the `access` value (CONTRACTS.md: access): the kinds of opening
     some row is asked about, and its answer about one file, called off the event loop."""
 
     def asking(self) -> tuple[str, ...]: ...
@@ -307,8 +307,8 @@ class Kernel:
         self._lock = asyncio.Lock()
         self._dir: str | None = None
         self._process: Jailed | None = None
-        # the last worker this kernel started, kept once it has stopped: what its jail is (`reads`,
-        # `notice`, `report`, `writes`) is this kernel's, never another program's of the same jail,
+        # the last worker this python row started, kept once it has stopped: what its jail is (`reads`,
+        # `notice`, `report`, `writes`) is this row's, never another program's of the same jail,
         # and stays what the model was told until a new worker starts
         self._worker: Jailed | None = None
         self._reader: asyncio.StreamReader | None = None
@@ -459,7 +459,7 @@ class Kernel:
             return _Output(prefix + ran.output, ran.error, ran.touched, ran.refused) if prefix else ran
 
     async def _opening(self) -> str:
-        """What a new kernel's first input is told before its own output, when there is anything
+        """What a new Python process's first input is told before its own output, when there is anything
         to tell: that the worker was started again, and what the startup files did. Jailed, each
         runs here, in order, whether or not the one before failed; unjailed, they would run
         unasked with the person's permissions, so the model is told to run them as an input of
@@ -670,15 +670,15 @@ class Kernel:
 
     def _send(self, message: Mapping[str, Any]) -> None:
         if self._writer is None:
-            raise ConnectionError("the kernel is not running")
+            raise ConnectionError("the Python process is not running")
         self._writer.write((json.dumps(message) + "\n").encode("utf-8"))
 
     async def _receive(self) -> dict[str, Any]:
         if self._reader is None:
-            raise ConnectionError("the kernel is not running")
+            raise ConnectionError("the Python process is not running")
         line = await self._reader.readline()
         if not line:
-            raise ConnectionError("the kernel process ended")
+            raise ConnectionError("the Python process ended")
         message: dict[str, Any] = json.loads(line)
         return message
 

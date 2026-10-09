@@ -34,7 +34,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **the shell**: `bh_02` (`app/`): the `bh-02` command, which reads the layers, boots them and waits for the chat to end.
 - **layer files**: `bh-02.toml` (the whole harness), a session's `session.toml`, and your `--patch` files, applied in that order.
 - **stack**: what a session started on, as `bh-02 sessions` lists it: the model's name (an earlier bh-02's session: `claude` or `ollama`).
-- **loop** (row and key): the agent loop, `agent:loop`: sends the conversation to the model, runs each call it makes as an input, and nudges a turn that didn't count.
+- **loop** (row and key): the agent loop, `agent:loop`: sends the conversation to the model, runs each call it makes as an input, and nudges a step that didn't count.
 - **model** (row and key), **the model row**: the model itself, one step at a time (`models:model`), the one its `default` names. `/model NAME` switches it by name; `--model NAME` picks it at launch. An earlier bh-02 called it `completion`.
 - **named model**: a name the model row can take, with its provider and id: the built-ins `sonnet`, `opus` and `haiku`, and yours in the models file.
 - **model provider** (a model's `provider` field): what reaches a model: `claude-code` (Claude through Claude Code, on the subscription) or `openai` (any OpenAI-compatible endpoint: OpenAI, OpenRouter, Groq, Ollama's `/v1`, ...). The status bar shows it after the model's name.
@@ -44,7 +44,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **nudge**: the loop telling the model why its last step didn't count (cut off, silent, unreadable), a bounded number of times.
 - **transcript** (row and key): the conversation the model is sent again each step, kept in the session's `transcript.jsonl`.
 - **the model's context**: what the model reads each step: the system prompt and the transcript. Not the namespace, which it sees only through what inputs print.
-- **chat** (row): `chat:session`: reads your messages, shows the replies, runs the lines `commands` claims (slash commands, `!`); it binds `done`, which ends when you leave.
+- **chat** (row): `chat:converse`: reads your messages, shows the replies, runs the lines `commands` claims (slash commands, `!`); it binds `done`, which ends when you leave.
 - **turn**: one reply to one message, however many model steps and inputs it takes.
 - **event**: one thing that happened in a turn, a dict with a `type` (`text`, `thinking`, `tool_call`, `tool_result`, `usage`, `stop`, `note`, `cleared`, `restarting`), which the ui draws; a **chunk** is the same from one model step. A command's answer may also carry `for_model` (`!COMMAND`'s output), which `commands` holds, never shown, until the chat puts it in front of your next message to the model. [`CONTRACTS.md`](CONTRACTS.md) has each shape.
 - **CodeAct**: how the model works in bh-02. It acts by writing code, which the `python` tool carries to the Python process; the namespace keeps its data between inputs, and only what an input prints enters the model's context. bh-02 runs it inside the jail, and approval decides whether each input runs unasked.
@@ -68,9 +68,9 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **release** (row): `runner:release`: `/release` has each row stop its own program (the Python process, the extensions process) until the next input, and the runner free what their jails held (they load again after that input): on Linux, how you add your credential (`local.env`) mid-session where the jail holds that path.
 - **approval** (row and key): `runner:approval`, the one rule for whether what the model asked for runs unasked: a call (the loop asks) or an extension to load (the extensions row asks). Run in a runner that confines it, at once; unconfined, or run in bh-02's own process, the asker puts it to you in the modal, showing the call as its tool shows it. Only a layer replaces it.
 - **the modal**: the question the model's code is put to you in when it is unjailed: `y` runs it, `n` or Esc doesn't. It ignores keys for its first 0.4 s, so typing can't answer it.
-- **host**: the side outside the jail: bh-02's own process (and brig's host process, which starts the Python process and the extensions process), whose import paths, environment and files a jailed input can't reach; the python row's `client.py` is its end of the Python process's socket.
+- **host**: the side outside the jail: bh-02's own process (and brig's host process, which starts the Python process and the extensions process), whose import paths, environment and files a jailed input can't reach; the python row's `client.py` is its end of the Python process's socket. The `host` key (below) says which of its files the jail keeps from an input.
 - **composer**: the box along the bottom of the app where you type a message or a command; the palette puts a command that takes arguments there to finish.
-- **ui** (row): `tui:app`, the Textual app. It binds `input`, `output` and `frame`, and depends on nothing, so it never reloads.
+- **ui** (row): `tui:ui`, the Textual app. It binds `input`, `output` and `frame`, and depends on nothing, so it never reloads.
 - **input**, **output** (keys): what the chat reads your lines from and shows replies, notes and questions through; the ui binds both.
 - **port**: a word in the tui plugin's code (`ports.py`): the values the ui binds for other rows, `input`, `output` and `frame`.
 - **frame** (key): the app around the conversation, which rows push into: status bar fields and palette commands. A broker.
@@ -96,11 +96,14 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **extension**: a plugin the model writes itself, `.bh-02/plugins/NAME.py` in the project: cordis components bh-02 loads while it runs, into the extensions process, jailed, which can add a command, a status field, prompt text or a tool (its calls run there) and nothing else. **extensions** (row): `extensions:extensions`, which loads them.
 - **run**: one launch of bh-02, from start to leaving. The Python process and its namespace last one run.
 - **session**: what a run keeps under `$XDG_STATE_HOME/bh-02/sessions/<id>/` (its layer, transcript and history), so `--resume` continues it in a later run. The namespace is not kept.
-- **sessions** (key), **layers** (key), **harness** (row): rows the shell adds itself, **pinned** after every layer so no layer can remove them: the running session, whose id the status bar shows; the layer files, the paths no input may read, where bh-02's own code is (which every jail reads and no input may write), and the auto memory directory it may write; the wait for the chat's `done`.
+- **pinned** (row): one of the three rows the shell adds itself after every layer (`session`, `host`, `shell`), `disabled = false`, so no layer can remove it.
+- **session** (row and key): `bh_02.bootstrap:session`, pinned: the running session, its id (`current`), which the status bar shows, and whether it was resumed (`resumed`).
+- **host** (row and key): `bh_02.bootstrap:host`, pinned: what the host is, for the rows that keep the model's code from it and those that read its files: the layer files (`paths`), bh-02's config directories (`trusted`) and where its own code is (`code`, which every jail reads), which no input may write; where the credential is looked for (`credentials`) and what no input may read (`secrets`); and the project's auto memory directory (`auto_memory`), which an input may write.
+- **shell** (row): `bh_02.bootstrap:shell`, pinned: the shell's wait for the chat's `done`, declared as a dependency so cordis checks it like any other.
 - **done** (key): what the chat binds; the shell waits on it, and follows it across a restart of the chat row.
-- **usage**: tokens and cost, per turn and summed for the session, in the status bar.
+- **usage**: tokens and cost, per model step and summed for the session, in the status bar.
 - **credential**: `CLAUDE_CODE_OAUTH_TOKEN` in `local.env` at the repository root, read by the model row alone; an OpenAI-compatible model's `key` names another line of the same file.
 - **fakes**: stand-in models in `bh_02.testing` (`echo`, `repl_model`, ...) that a `--patch` names, or (`echo_provider`, ...) a models file's model names as its provider, for tests without a login.
-- **update-layer**: `bh-02 update-layer FILE`: rewrites a layer that names rows bh-02 renamed (`llm`, `mode`, `completion`) or merged (`jail_status`, `model_status`) or dropped (`tools`, `sidebar`, ...), keeping `FILE.bak`.
+- **update-layer**: `bh-02 update-layer FILE`: rewrites a layer that names rows bh-02 renamed (`llm`, `mode`, `completion`, `harness`, `layers`, `sessions`, ...) or merged (`model_status`) or dropped (`tools`, `sidebar`, ...), or components it renamed (`chat:session`, `tui:app`, ...), keeping `FILE.bak`.
 - **gate**: the architecture check (pypeeker) that `scripts/check` runs: which packages may import which, and what must stay pure.
 - **value half**, **wiring**: a plugin's two parts: the plain library (no cordis), and `wiring.py`, the components that bind it.

@@ -18,8 +18,10 @@ from cordis import Row
 __all__ = ["clashes", "translated"]
 
 # Rows (and the keys they bind) that were renamed: the kernel row is the python tool's, the jail
-# row the runner, which starts the python tool's process and the extensions' worker, and the jail
-# field's row, `jail_status`, the runner's grades (`grades`).
+# row the runner, which starts the python tool's process and the extensions process, and the jail
+# field's row, `jail_status`, the runner's grades (`grades`). The shell's own rows: `harness` is
+# `shell`, `layers` (what the host is, not only its layer files) is `host`, and `sessions` (the
+# one running) is `session`.
 _RENAMED = {
     "llm": "loop",
     "mode": "chat",
@@ -27,6 +29,9 @@ _RENAMED = {
     "kernel": "python",
     "jail": "runner",
     "jail_status": "grades",
+    "harness": "shell",
+    "layers": "host",
+    "sessions": "session",
 }
 # A row a config names for its model (`model_row`, an old `model_status`'s `row`): before the
 # completion row, the model was the `llm` row's; then the completion row's; it is the model
@@ -57,6 +62,11 @@ _RENAMED_USES = {
     "brig:jail": "runner:confined",
     "memory:memory": "memory:files",
     "tui:jail_status": "tui:grades",
+    "chat:session": "chat:converse",
+    "tui:app": "tui:ui",
+    "bh_02.bootstrap:harness": "bh_02.bootstrap:shell",
+    "bh_02.bootstrap:layer_files": "bh_02.bootstrap:host",
+    "bh_02.bootstrap:session_list": "bh_02.bootstrap:session",
 }
 # The broker of what an input's result is told was `memory` (`agent:memory`); it is `notes` now,
 # and `memory` is Claude Code's memory, the memory plugin's row.
@@ -93,8 +103,10 @@ _REMOVED_IDS = {
     "approve": _ONE_TOOL,
     "actions": _ONE_TOOL,
     "guard": _ONE_TOOL,
-    "session": "the status row shows the session's id itself",
 }
+# The status-bar field an earlier session layer had for the session's id (`tui:status` under the
+# id `session`, which is the running session's row now).
+_SESSION_FIELD = "the status row shows the session's id itself"
 _REMOVED_USES = ("tools:", "fs:", "codeact:", "tui:approver", "bh_02.bootstrap:layer_guard")
 # The sidebar: the shipped `sidebar` row, filled by `tui:sessions`, which listed this
 # directory's sessions. A `sidebar` row that names a plugin of the person's own still runs, so
@@ -120,7 +132,7 @@ _CONVERSATION, _CONVERSATION_USE = "conversation", "agent:conversation"
 # The restarts commands ask for run in the `jobs` row (`commands:jobs`), which the chat row waits
 # on before it reads a line: a layer that fills the chat row or the operator itself needs it.
 _JOBS, _JOBS_USE = "jobs", "commands:jobs"
-_CHAT_USE = "chat:session"
+_CHAT_USE = "chat:converse"
 _COMPACT, _COMPACT_USE = "compact", "agent:compact"
 _CLEARED = "/clear is the conversation row's now (agent:conversation)"
 _FORGOTTEN = (
@@ -133,7 +145,8 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
     """`rows` in this bh-02's names, and one line per change saying what changed and what to do.
 
     - A renamed row takes its new id (`llm` is `loop`, `mode` is `chat`, `completion` is
-      `model`, `kernel` is `python`, `jail` is `runner`), and a `clear` naming one names the new
+      `model`, `kernel` is `python`, `jail` is `runner`, `harness` is `shell`, `layers` is `host`,
+      `sessions` is `session`), and a `clear` naming one names the new
       one; a `model_row` (or an old
       `model_status`'s `row`) naming `llm` or `completion` names `model`, the row that holds
       the model now. A renamed row whose
@@ -168,6 +181,9 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       runner, which the brig plugin became (`brig:jail` is `runner:confined`, `kernel:unjailed`
       `runner:unconfined`, `kernel:approval` `runner:approval`, `kernel:release`
       `runner:release`). Memory's row is `memory:files`.
+    - The chat row is `chat:converse` (was `chat:session`, which named it after something
+      else), the ui's `tui:ui` (was `tui:app`), and the shell's own rows `shell`, `host` and
+      `session` (were `harness`, `layers` and `sessions`, each `bh_02.bootstrap:` the same).
 
     - `/model` is the models plugin's `switch` row (`models:switch`): an operator's `layer` and
       `model_row` move to it (added after the operator, unless the layer has one, when the
@@ -177,7 +193,7 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       the `compact` row (or any using `agent:compact`) is renamed to it, an operator's `clear`
       moves to it (added after the operator, as for the switch row), its `forget` is gone, and a
       layer that fills the operator itself and has neither gets one.
-    - A layer that fills the chat row or the operator itself (`chat:session`,
+    - A layer that fills the chat row or the operator itself (`chat:converse`,
       `commands:operator`) and has no `jobs` row gets one (`commands:jobs`): the restarts commands
       ask for run there, and the chat row waits on it.
 
@@ -444,6 +460,8 @@ def _removed(row: Row) -> str | None:
     """Why bh-02 no longer has `row`, or None when it still does."""
     if row.id in _REMOVED_IDS:
         return _REMOVED_IDS[row.id]
+    if row.id == "session" and row.use == _STATUS_USE:
+        return _SESSION_FIELD
     if row.use is not None and row.use.startswith(_REMOVED_USES):
         return f"{row.use} is gone: {_ONE_TOOL}"
     if row.use == _SIDEBAR_USE:

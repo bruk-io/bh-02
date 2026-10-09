@@ -14,7 +14,7 @@ read), and bh-02's configuration directories under one (`trusted`: the person's
 `$XDG_CONFIG_HOME/bh-02` and `~/.config/bh-02`, when bh-02 runs from the home directory), whose
 models file and startup file a later session reads on the host and trusts. What
 it may not read: brig's credential list under the home directory, `hide`
-under the project, and what the `layers` value names as `secrets` (bh-02's own `local.env`,
+under the project, and what the `host` value names as `secrets` (bh-02's own `local.env`,
 wherever bh-02 runs from, and the sessions' state, where Claude Code keeps its tokens). No
 network: the program's own socket is the one way in or out. The worker's environment is scrubbed
 to a short allowlist. brig's host process, which starts the worker from outside the jail,
@@ -31,13 +31,13 @@ One policy, two platforms; only the stack and the read model differ:
 - Linux: brig's `strict_linux()` (bubblewrap). Reads by allowlist, so `allowlisted` turns the
   policy into one: what is readable is the system tree (`/usr`, `/etc`, ...), the interpreter
   (`sys.base_prefix`, `sys.prefix`), the directories the command names, bh-02's own code
-  (`code`, read-only: the extensions' worker imports cordis, with an editable install from the
+  (`code`, read-only: the extensions process imports cordis, with an editable install from the
   workspace), and what the policy lets an input write. Everything else does not exist in the
   jail, the home directory included.
   The secrets stay `read_denies`, now brig's carve-outs: one inside that tree (a `local.env` at
   the project root) is masked if it exists, and one that does not exist yet is not, which
   brig's `fs_read` grade says (`best_effort`, naming it); an absent one where bh-02 looks for
-  its credential (`layers.credentials`) keeps its write deny, so an input can't plant one there.
+  its credential (`host.credentials`) keeps its write deny, so an input can't plant one there.
   bubblewrap holds each absent write-denied path (`.envrc`, `.vscode`, such a `local.env`, ...)
   by mounting over an empty directory on the host, which the jail makes (and marks as its own)
   before bubblewrap starts; the jail removes the ones it made once brig has verified the worker
@@ -98,7 +98,7 @@ __all__ = [
     "SYSTEM_READABLE",
     "BrigConfig",
     "BrigJail",
-    "Layers",
+    "Host",
     "allowlisted",
     "git_author",
     "graded",
@@ -135,13 +135,13 @@ _STACKS: Mapping[str, Callable[[], Stack]] = {"darwin": scratch_darwin, "linux":
 
 
 @runtime_checkable
-class Layers(Protocol):
-    """What the jail needs of the `layers` value (CONTRACTS.md: layers): the composition's files,
+class Host(Protocol):
+    """What the jail needs of the `host` value (CONTRACTS.md: host): the composition's files,
     which an input may not write; where bh-02 looks for its credential, where an input may
     create nothing; the secrets, which it may not read; bh-02's configuration directories
     (`trusted`), whose files the host reads and trusts, which it may not write; the directories
     bh-02 runs its own code from (`code`), which every jail reads and no input writes; and the
-    project's auto memory directory (`memory`), which it may write ('' for none)."""
+    project's auto memory directory (`auto_memory`), which it may write ('' for none)."""
 
     @property
     def paths(self) -> tuple[str, ...]: ...
@@ -154,12 +154,12 @@ class Layers(Protocol):
     @property
     def code(self) -> tuple[str, ...]: ...
     @property
-    def memory(self) -> str: ...
+    def auto_memory(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
 class BrigConfig:
-    """`write`: where an input may write besides its scratch dir (relative to the kernel's root).
+    """`write`: where an input may write besides its scratch dir (relative to the python row's root).
     `deny`: more paths it may not write. `allow`: names from brig's self-modification list
     (`SELF_MODIFY_WORKSPACE_RELATIVE`: `.git/hooks`, `CLAUDE.md`, ...) an input may write after all;
     by default the project's guidance files, which editing is ordinary work. The rest stay denied:
@@ -380,7 +380,7 @@ def released_for(free: Sequence[str], still: Sequence[str], running: bool = Fals
 def told_reads(trees: Sequence[str], own: Sequence[str]) -> tuple[str, ...]:
     """The trees a jail reads, as the model is told them: each once, none that another of them
     holds (bh-02's own code, or the interpreter's environment, inside the project), the jail's
-    own directories (its scratch and the kernel's socket, named anew at every start) as `$TMPDIR`
+    own directories (its scratch and the program's socket, named anew at every start) as `$TMPDIR`
     alone, so the prompt is the same from one kernel to the next (the claude-code provider starts
     Claude Code again when it changes)."""
     kept = [t for t in trees if not any(t == o or t.startswith(o + "/") for o in own)]
@@ -445,12 +445,12 @@ def mountable(denies: Sequence[str], instead: Mapping[str, str]) -> tuple[str, .
     """The write denies bubblewrap can mount, each once, with `instead` mapping a deny to the
     path denied in its place. An absent one under a path that exists as a FILE (`.git/hooks`
     where `.git` is a worktree's or submodule's `gitdir:` pointer) can't have a mount point made
-    for it (bwrap: "Can't mkdir parents ... Not a directory", and the kernel never starts), so it
+    for it (bwrap: "Can't mkdir parents ... Not a directory", and the Python process never starts), so it
     maps to that file, bound read-only over itself: neither rewritten nor removed, so nothing is
     ever created under it. An absent one whose parent is absent too (`.git/config` in a project
     that is not a repository) maps to its topmost absent ancestor (`.git`): one empty directory
     held on the host rather than a `.git/config` directory inside one, which would break the
-    person's own `git init` there while the kernel runs."""
+    person's own `git init` there while the Python process runs."""
     return tuple(dict.fromkeys(instead.get(deny, deny) for deny in denies))
 
 
@@ -533,7 +533,7 @@ class _Facts:
     runner): its grades (`graded`), what the person should know about it (`notice_for`), the trees
     its program reads when that is all it reads (`told_reads`: a Linux jail's; empty on darwin)
     and the roots it may write but its scratch. A jail starts more than one program (the
-    Python process, the extensions' worker), each from its own command: what one start is never
+    Python process, the extensions process), each from its own command: what one start is never
     replaces what another is."""
 
     report: Mapping[str, str]
@@ -721,9 +721,9 @@ def _mark_of(path: str) -> str | None:
 class BrigJail:
     """The confined runner's mechanism (`runner.Mechanism`): brig's preset for this platform."""
 
-    def __init__(self, config: BrigConfig, layers: Layers, *, platform: str = host_platform) -> None:
+    def __init__(self, config: BrigConfig, host: Host, *, platform: str = host_platform) -> None:
         self._config = config
-        self._layers = layers
+        self._host = host
         self._platform = platform
         # The grades are known before anything starts: compile once against a throwaway directory.
         # A platform brig has no preset for grades nothing; `start` says what to use instead.
@@ -803,7 +803,7 @@ class BrigJail:
             absent = self._absent_secrets(jail.spec)
             facts = self._facts(jail.spec, report, absent, jail_dir, endpoint)
             if self._platform == "linux":
-                held_now = holding(self._layers.credentials, jail.spec.fs.write_denies)
+                held_now = holding(self._host.credentials, jail.spec.fs.write_denies)
                 self._holding = tuple(dict.fromkeys((*self._holding, *held_now)))
             made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
             if made:
@@ -884,19 +884,19 @@ class BrigJail:
             scratch=scratch,
             home=str(Path.home()),
             config=self._config,
-            layers=self._layers.paths,
+            layers=self._host.paths,
             host=host,
-            secrets=self._layers.secrets,
-            trusted=self._layers.trusted,
-            code=self._layers.code,
-            memory=self._layers.memory,
+            secrets=self._host.secrets,
+            trusted=self._host.trusted,
+            code=self._host.code,
+            memory=self._host.auto_memory,
         )
         if self._platform == "linux":
             readable = readable_roots(
-                argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE, code=self._layers.code
+                argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE, code=self._host.code
             )
             links = [link for arg in argv if arg.startswith("/") for link in self._linked_dirs(arg)]
-            hold = [c for c in self._layers.credentials if not Path(c).exists()]
+            hold = [c for c in self._host.credentials if not Path(c).exists()]
             spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()], hold)
             denies = uncovered(mountable(spec.fs.write_denies, self._instead(spec)))
             spec = replace(spec, fs=replace(spec.fs, write_denies=denies))

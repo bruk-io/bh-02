@@ -286,7 +286,7 @@ def _launch(
     # `XDG_STATE_HOME`, is not known here. And bh-02's configuration (this run's and the default
     # one), whose files the host reads and trusts: no jailed input may write there. And where
     # bh-02 runs its own code from, every package a layer may name as installed: every jail reads
-    # it (the extensions' worker imports cordis), and no jailed input may write it. And the
+    # it (the extensions process imports cordis), and no jailed input may write it. And the
     # project's auto memory directory, made here so the jail can let an input write it.
     credentials = credential_search()
     states = [listing.root, str(sessions.default_state_root())] if listing.root else []
@@ -302,12 +302,12 @@ def _launch(
                 layers,
                 trace=trace,
                 report=report,
-                sessions=listing,
+                session=listing,
                 credentials=credentials,
                 secrets=secrets,
                 trusted=trusted,
                 code=code,
-                memory=memory,
+                auto_memory=memory,
             )
         )
     except CompositionError as error:
@@ -326,7 +326,7 @@ def _launch(
 def credential_search() -> tuple[str, ...]:
     """Where the model rows look for bh-02's `local.env`, nearest first: above bh-02's own
     install and above its environment, so the workspace's own is found from any working
-    directory. The one list: the model rows read the first that is a file (the `layers`
+    directory. The one list: the model rows read the first that is a file (the `host`
     value's `credentials`), and every one is a secret the jail keeps an input from reading,
     writing or creating. Not the project's own `local.env`: a project's may hold anything."""
     return credential_files([Path(__file__).resolve(), Path(sys.prefix).resolve()])

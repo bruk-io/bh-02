@@ -53,9 +53,9 @@ def test_an_index_the_model_made_a_link_or_a_second_name_is_not_read(tmp_path: P
     assert "FAKE" not in AutoMemory(directory, "/m")()
 
 
-class _Layers:
-    def __init__(self, memory: str) -> None:
-        self.memory = memory
+class _Host:
+    def __init__(self, auto_memory: str) -> None:
+        self.auto_memory = auto_memory
 
 
 class _Prompt:
@@ -65,10 +65,10 @@ class _Prompt:
 
 async def test_the_row_adds_the_section_and_adds_nothing_without_a_directory(tmp_path: Path) -> None:
     prompt = _Prompt()
-    effects = await drive(auto(system=prompt, layers=_Layers(str(tmp_path)), transcript=object()))
+    effects = await drive(auto(system=prompt, host=_Host(str(tmp_path)), transcript=object()))
     assert [(e.name, e.args[0]) for e in effects] == [("acquire", prompt.add)]
     assert effects[0].args[1] == "memory: auto" and isinstance(effects[0].args[2], AutoMemory)
-    assert await drive(auto(system=prompt, layers=_Layers(""), transcript=object())) == []
+    assert await drive(auto(system=prompt, host=_Host(""), transcript=object())) == []
 
 
 def test_memory_lists_the_index(tmp_path: Path) -> None:

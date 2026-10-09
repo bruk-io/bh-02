@@ -195,7 +195,7 @@ def test_a_session_from_before_the_one_tool_resumes(composition: Callable[..., P
 
 def test_a_session_started_earlier_drops_its_session_row(tmp_path: Path) -> None:
     """Sessions wrote a `session` row (`tui:status`, a fixed field holding their id); the status
-    row now shows the id itself, from the `sessions` value, so a resume drops the row."""
+    row now shows the id itself, from the `session` value, so a resume drops the row."""
     session = create(tmp_path, "/work/a", model=None, no_jail=False)
     rows = read_layer(session.layer)
     old = Row("session", "tui:status", {"field": "session", "text": session.id, "shorter": ["x"]})

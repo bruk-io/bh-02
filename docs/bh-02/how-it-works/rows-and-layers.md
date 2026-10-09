@@ -13,7 +13,7 @@ keyword-only parameters are the keys it needs.
 
 For example, the `loop` row is filled by `agent:loop`. It needs `model`, `tools`, `transcript`,
 `system`, `approval`, `output`, `notes` and `executor`, and binds `loop`. The `chat` row
-(`chat:session`) needs `loop`, and reads your messages and shows the replies.
+(`chat:converse`) needs `loop`, and reads your messages and shows the replies.
 
 A consumer states what it needs of a key as a Protocol of its own, and cordis checks the bound
 value against it before the consumer starts. A provider imports nothing to satisfy it; it just
@@ -31,7 +31,7 @@ their own:
 - **The namespace survives a new model or app.** The `python` row depends on the runner, the
   `approval` rule and brokers that never reload, so a new model or ui keeps the Python process
   and what it holds. A new runner starts a new one.
-- **The screen never reloads.** The `ui` row (`tui:app`) depends on nothing but its config. Small
+- **The screen never reloads.** The `ui` row (`tui:ui`) depends on nothing but its config. Small
   rows such as `status` and `grades` depend on what they show and push into the app's frame, so a
   change to what they show reloads them instead of the app. What they show is never replaced by
   `/clear`, so it reloads none of the status bar.
@@ -55,8 +55,8 @@ loader watches every layer file, so editing one reshapes the running program: `/
 edit to the session's layer, and the loader swaps the one row that changed.
 
 The shell adds three rows of its own after every layer, pinned so no layer removes them:
-`layers` (the layer files, and the paths the jail must protect), `sessions` (the running session)
-and `harness` (which waits for the chat to end, and follows it across a restart of the chat
+`host` (the layer files, and the paths the jail must protect), `session` (the running session)
+and `shell` (which waits for the chat to end, and follows it across a restart of the chat
 row).
 
 [Layers](../using/layers.md) shows how to write a layer of your own. cordis's design doc has the

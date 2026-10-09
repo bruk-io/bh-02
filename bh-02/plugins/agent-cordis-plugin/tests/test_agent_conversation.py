@@ -366,7 +366,7 @@ async def test_a_summary_not_written_in_time_closes_the_step_and_says_so() -> No
 
 
 async def test_a_summary_step_cancelled_is_closed() -> None:
-    """The person leaving cancels the command (`chat:session`): the step closes, so its
+    """The person leaving cancels the command (`chat:converse`): the step closes, so its
     provider stops, and nothing is said."""
     model = Scripted([text("x holds")], hang=True)
     step = asyncio.create_task(summarise(model, asked(CONVERSATION), [PYTHON], 60))

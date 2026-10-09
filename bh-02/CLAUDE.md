@@ -30,8 +30,8 @@ the libraries `cordis`, `cordis_helpers` and `host_paths` are what all may impor
 by name and shape, in `CONTRACTS.md`:
 
 - **A consumer declares what it needs** as a `runtime_checkable` Protocol of its own, on the
-  parameter: `session(*, loop: Loop, ...)` keys on `"loop"` and cordis checks the bound value
-  against `chat`'s `Loop` before `session` runs. The loop's `Tools` asks the `tools` value for
+  parameter: `converse(*, loop: Loop, ...)` keys on `"loop"` and cordis checks the bound value
+  against `chat`'s `Loop` before `converse` runs. The loop's `Tools` asks the `tools` value for
   `specs`, `get` and `ready`; `/compact`'s `Offered` asks the same value for `specs` alone. Two
   consumers, two contracts.
 - **A provider just has the methods.** `ClaudeCodeModel.complete`, `OpenAIModel.complete`, `Kernel.run`, nothing to
@@ -94,8 +94,8 @@ jail denies them, and on Linux a save by rename ends the jail so the next input'
 file). The layer files are the only way the composition's *shape* changes durably; the loader's
 `restart(row)` (`/restart`, `/clear`, `/compact`) gives a row a fresh fiber, and can't outlive
 the session. The shell pins three rows of its own after every layer (`disabled = false`, so no
-layer can remove them): `layers`, `sessions` (the running session, whose id the status bar
-shows) and `harness`.
+layer can remove them): `host`, `session` (the running session, whose id the status bar
+shows) and `shell`.
 A session is a directory under `$XDG_STATE_HOME/bh-02/sessions/` whose `session.toml` carries
 every per-run choice, so a resume is booting with it again. An
 override's `config` replaces the row's, it doesn't merge. The bootstrap follows the chat row's
@@ -104,9 +104,9 @@ override's `config` replaces the row's, it doesn't merge. The bootstrap follows 
 **What the model sees and how a turn looks.** `loop.reply` yields events (text, thinking,
 tool_call, tool_result, usage, stop, note). `approval.approve` decides whether the model's code
 runs (unjailed, by asking through `output.confirm`);
-`input.interrupted()` is Ctrl-C, which `chat:session` races against the reply, and
+`input.interrupted()` is Ctrl-C, which `chat:converse` races against the reply, and
 `input.closed()` the person leaving, which it races against a command. Which lines are the
-harness's, not the model's, `chat:session` asks `commands` (`claims`); what a command gives the
+harness's, not the model's, `chat:converse` asks `commands` (`claims`); what a command gives the
 model (`for_model`: a `!COMMAND`'s output) `commands` holds (a row that never reloads, so a
 `/model` switch, which reloads the chat row, keeps it) and the chat row takes and puts in front
 of the person's next message (`take_for_model`), so `loop.reply` is still given one message and
@@ -121,7 +121,7 @@ directory's `CLAUDE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md` from the file
 down to the project's, the project's `.claude/rules/` without `paths`, AGENTS.md where there is
 no CLAUDE.md (`instruction_files`), each file's comments out and its `@path` imports after it;
 `/memory` lists them. Auto memory (`memory:auto`) is the notes the model keeps for itself, with
-whatever tools it has, in the project's directory outside the repository (`layers.memory`:
+whatever tools it has, in the project's directory outside the repository (`host.auto_memory`:
 `$XDG_STATE_HOME/bh-02/projects/<project>/memory`, which the jail lets an input write); its
 MEMORY.md index is read once a conversation, so the model's own writes are not told back. Nothing is read that the jail keeps from the model: a file in the project
 is read from its root through no link (`O_NOFOLLOW` on every part, then a regular file with one
@@ -137,7 +137,7 @@ the system, the interpreter, bh-02's own code, the project; no home directory). 
 call, the loop asks `notes` (`agent:notes`, a broker) what to tell the model with its result:
 each function rows add there gets the tool's name, the call's input, its result and the files
 it opened, as its tool answered (the python tool's: what Python in the input opened, heard by an
-audit hook in the worker, `touched()`; a shell command's own reads are not heard) and may
+audit hook in the Python process, `touched()`; a shell command's own reads are not heard) and may
 add a note, never change the result. `memory:on_touch` gives memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
 `paths` match, arrives whole with the first input that opens a file it covers (Claude Code's
 on-demand loading; one that input's 20,000-character note cut short, or left out, arrives with
@@ -148,7 +148,7 @@ a file whose on-demand instructions this conversation has not been told is refus
 PermissionError in the input, and a line in brackets ending its result even when the code caught
 it), and the instructions follow as that call's note, so they arrive before the file changes and
 the next write goes ahead (Claude Code's Edit and Write refuse a file not Read first, to the same
-end). The python tool asks from the worker's audit hook, only about the kinds some row asks
+end). The python tool asks from the Python process's audit hook, only about the kinds some row asks
 about (no shipped row asks about reads), once per file an input; it hears what that hook hears
 and no more (not a program an input runs, `os.open`, a rename or a delete), so this is a way to
 say something first, not a wall: the jail is the wall. It depends on `transcript`, so `/clear` and `/compact`
@@ -200,7 +200,7 @@ The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reload
 `agent:loop` classifies each model step (`stops.classify`) and replays
 a provider's message as it came.
 
-**The TUI.** `tui:app` runs a Textual app on cordis's own event loop and binds `input`, `output`
+**The TUI.** `tui:ui` runs a Textual app on cordis's own event loop and binds `input`, `output`
 and `frame` (the app's frame: status fields and commands, each pushed with a remover).
 It depends on its config alone, so it never reloads with anything else. The app owns the
 terminal: a child process that inherits fd 2 paints over it, so every child's stderr goes to
@@ -216,7 +216,7 @@ installed script in a pty with a fake model from `bh_02.testing`: `run_test()` a
 what only a real launch does.
 
 **CodeAct, the Python process and the runner.** The Python process (`python:tool`) is a
-stdlib-only worker (`worker.py`, run by path, its one channel a Unix socket that carries an input
+stdlib-only program (`worker.py`, run by path, its one channel a Unix socket that carries an input
 in and its output back; `worker-stdlib-only`) started by the runner (`runner`: `runner:confined`,
 a brig jail per start, or `runner:unconfined`). Approval is one rule in one row,
 `runner:approval` (key `approval`, a capability, not a broker, `unasked(request)`): confined (the
@@ -236,46 +236,46 @@ row of its own over the runner (`tui:grades`), told each start (`on_start`), so 
 none of the status bar. A new Python process runs its startup files first when
 confined (`startup`): the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
 `~/.config/bh-02/kernel.py`), which the host reads and sends in, since a Linux jail has no home
-in it, then the project's `.bh-02/kernel.py`, which only the worker reads, in the jail (never
+in it, then the project's `.bh-02/kernel.py`, which only the Python process reads, in the jail (never
 read a file the model can write, or reach through a link it could make, on the host and hand
 its text to the model: the link could lead to a secret). So a person's file in the project or
-another root the jail lets an input write (the worker's `writes()`), or whose way passes
+another root the jail lets an input write (its start's `writes()`), or whose way passes
 through one, is read as the project's is, and if that fails the note says why the host did not;
-and the jail denies every input writing bh-02's config directory (`layers.trusted`, below), so a
+and the jail denies every input writing bh-02's config directory (`host.trusted`, below), so a
 session run from the home directory can't choose what a later one reads there. A startup file that ends the
-worker is passed over by the workers after it, until `/restart python`; the input it cut short
+Python process is passed over by the ones started after it, until `/restart python`; the input it cut short
 says which, after what the opening had to tell by then (that the REPL was started again, and
 why: told nowhere else). `instructions()` tells
 the model only the project's is its to edit. Only `runner_cordis_plugin` imports brig
 (`brig-one-adapter`). darwin is jailed by seatbelt (reads by denylist), Linux by bubblewrap
 (reads by allowlist: the system, the interpreter, bh-02's own code, the project; the policy,
-`spec_for`, is the same). bh-02's own code is `layers.code`, the directory of every package it
+`spec_for`, is the same). bh-02's own code is `host.code`, the directory of every package it
 runs (`bh_02.bootstrap.code_directories`): with an editable install those are the workspace's
-`src/<package>` directories, outside the interpreter's trees, and the extensions' worker
+`src/<package>` directories, outside the interpreter's trees, and the extensions process
 imports cordis from one, so a Linux jail reads them, read-only. The Linux jail's tests skip on
 darwin; `scripts/linux-jail-check` runs them in a container with bubblewrap.
 
 **The model's own plugins.** `extensions:extensions` loads the cordis components the model
 writes to `.bh-02/plugins/NAME.py` while bh-02 runs (looked at every half second; changed,
 loaded afresh; deleted, unloaded), so the model can evolve the harness without anyone editing
-a layer. They run in a second worker the runner starts (`extensions_cordis_plugin.worker`,
-a cordis runtime of its own, listed in `cordis-in-wiring-only`'s `shell`), never in bh-02's
+a layer. They run in the extensions process, a second process the runner starts
+(`extensions_cordis_plugin.worker`, a cordis runtime of its own, listed in `cordis-in-wiring-only`'s `shell`), never in bh-02's
 process: each load goes through the `approval` rule with its source, as an input does (jailed,
 without asking; unjailed, the person decides). An extension reaches bh-02 only through four keys bound in
-that worker, each of which only adds (`commands.register`, `frame.status`, `system.add`,
-`tools.register`, a tool whose calls run in that worker, checked and decided as an input; never
+that process, each of which only adds (`commands.register`, `frame.status`, `system.add`,
+`tools.register`, a tool whose calls run in that process, checked and decided as an input; never
 `commands.claim`, a line prefix, which takes every line the person starts with it); the host
 registers what arrives into the real keys and keeps the removers. Its own `system` section
 tells the model how, and `.bh-02/plugins/status.json` tells it how each load went. The model
 writes that directory from the jail and the host reads it, so the host follows no link there
 (the rule of the startup files, again): it opens the directory from the project's root a name at
 a time with `O_NOFOLLOW`, reads a file only when the descriptor it opened says it is a regular
-file with one name (else a link, or a hard link, would hand the worker, and the model, a file the
+file with one name (else a link, or a hard link, would hand the extensions process, and the model, a file the
 jail hides: as source, or as a SyntaxError's line in status.json), says why in status.json when
 it is not, and writes status.json as a new file renamed over the old; a link on the way (`.bh-02`,
 the directory itself) loads nothing, writes nothing there, and is told in the model's prompt. Don't give an
 extension a key that replaces or reaches the composition (the loader, `runner`, `model`): the
-worker's process boundary is what keeps a model's plugin as contained as its inputs.
+extensions process's boundary is what keeps a model's plugin as contained as its inputs.
 
 **The model, by name.** The model row is `models:model` (`models_cordis_plugin`): named models
 over their providers, the one its config's `default` names (`sonnet` unless a layer says
@@ -294,7 +294,7 @@ project, a link into it). The built-ins and `extra` still work, and `models.prob
 and the error of a name only that file could name say why and where the file must be instead.
 A model that can't be used binds anyway and each step says what is wrong. `models:catalog`
 binds `models` (the models there are, and which one the row names), depending on the loader
-and `layers` alone, so `/model` (`models:switch`) and the status bar depend on it and never
+and `host` alone, so `/model` (`models:switch`) and the status bar depend on it and never
 reload with a switch. The models plugin's README has the providers' details.
 
 **The Claude provider.** Claude is the `claude-code` provider (`models_cordis_plugin.claude_code`):
@@ -340,10 +340,10 @@ git-ignored `local.env` at the repository root, so `uv run bh-02` needs no `--en
 
 The Python process never gets it:
 - `runner:unconfined` drops every `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a launching
-  Claude Code leaves) and `ANTHROPIC_*` from the worker's environment.
+  Claude Code leaves) and `ANTHROPIC_*` from the environment of every program it starts.
 - `runner:confined` scrubs the environment, and denies reading `local.env`: the project's, and every
-  place the model rows look for it (`layers.credentials`: above bh-02's install and environment,
-  from `bh_02.cli.credential_search`, the one definition of that search; `layers.secrets` names
+  place the model rows look for it (`host.credentials`: above bh-02's install and environment,
+  from `bh_02.cli.credential_search`, the one definition of that search; `host.secrets` names
   them all). So the workspace's own is hidden from whatever directory bh-02 runs in, and an input
   can't create or replace one where the model row looks (a planted `local.env` would hand the
   next launch's conversations to someone else's account). On Linux the jail holds each of these
@@ -352,15 +352,15 @@ The Python process never gets it:
   (`.git/config`, a layer file): when the host undoes one, the jail ends itself at once and the
   next input's jail holds it again (a few milliseconds' window, measured in the runner plugin's
   README); `/release` (`runner:release`) has each row stop its own program, the Python process
-  and the extensions' worker, until the next input (`runner.released()` until then, when the
-  extensions row starts no worker, then loads every extension again), which frees them so the
+  and the extensions process, until the next input (`runner.released()` until then, when the
+  extensions row starts no extensions process, then loads every extension again), which frees them so the
   person can add a credential mid-session: the runner plugin's README has the details. `secrets` also names the
   sessions' state directory: each session's `claude/` holds the Claude Code child's config and
   its messaging peer token. That is this run's (`$XDG_STATE_HOME/bh-02/sessions`) and the
   default one (`~/.local/state/bh-02/sessions`); a third, of a run with another
   `XDG_STATE_HOME`, is not known to this one and is not hidden.
 - `runner:confined` also denies writing bh-02's config directory where it is under a root an input may
-  write (bh-02 run from the home directory): `layers.trusted`, this run's
+  write (bh-02 run from the home directory): `host.trusted`, this run's
   `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`, each as named and as it resolves
   (`bh_02.bootstrap.config_directories`). The host reads what is there and trusts it (the models
   file names a key's `local.env` line and a provider that runs in bh-02's process, the person's
@@ -370,7 +370,7 @@ The Python process never gets it:
   runs in that directory or below it: denying it would leave the project read-only.
 - `runner:confined` denies writing bh-02's own code where it is under a root an input may write
   (bh-02 working on its own checkout, an editable install, or run from a home the checkout is
-  in): `layers.code`, the directory of every package bh-02 runs (`bh_02`, cordis,
+  in): `host.code`, the directory of every package bh-02 runs (`bh_02`, cordis,
   cordis_helpers, brig, host_paths and each installed plugin's), each as named and as it resolves, found by
   name from installed metadata (`bh_02.bootstrap.code_directories`; `importlib.util.find_spec`
   imports nothing). bh-02 imports their modules in its own process (a plugin a layer names
@@ -400,6 +400,6 @@ In the root gate (`pypeeker_rules/apps.py`, options in the root `pyproject.toml`
 `terminal-io` and `print-input` (only the modules their `allowed` lists name touch the
 terminal, so the interface stays swappable; anything the user sees during a run goes through the
 `ui` (its `output`); names in `sys` that are not terminal I/O, such as `argv`, `executable`, `path`, may be
-imported by name anywhere; the Python process's worker is exempt from `print-input` because its stdout is
-what an input printed), `cordis-in-wiring-only` (`*.wiring` plus the `shell` list),
+imported by name anywhere; the Python process's program, `python_cordis_plugin.worker`, is exempt from `print-input`
+because its stdout is what an input printed), `cordis-in-wiring-only` (`*.wiring` plus the `shell` list),
 `worker-stdlib-only`, `brig-one-adapter`.

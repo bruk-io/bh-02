@@ -6,7 +6,7 @@ restart; what keeps that safe is where the code runs, not who reads it first.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame`, `system` and `tools`; its own `system` section tells the model how; registers its worker's stop with the runner (`/release`) | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `tools` (`register`, `specs`), `approval` (`confined`, `unasked`), `output` (`confirm`) |
+| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame`, `system` and `tools`; its own `system` section tells the model how; registers the extensions process's stop with the runner (`/release`) | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `tools` (`register`, `specs`), `approval` (`confined`, `unasked`), `output` (`confirm`) |
 
 Config (`ExtensionsConfig`): `root` (the project, `.`), `path` (the extensions directory under
 it, `.bh-02/plugins`), `watch` (how often it is looked at, 0.5 s).
@@ -40,8 +40,8 @@ What an extension reaches of bh-02, each only to add to it, each returning its r
 - `commands.register(spec, run)`: a slash command for the person (`spec`: `name`, `help`,
   `usage`; `run`: async, argument text in, text out). A name bh-02 already has is refused. Not
   `commands.claim`, a line prefix (`!`): a prefix takes every line the person starts with it
-  (`!` runs it in their shell, unjailed), so only a row in a layer may claim one. The worker's
-  `commands.claim` raises `PermissionError` saying so, and the host adds nothing an extension
+  (`!` runs it in their shell, unjailed), so only a row in a layer may claim one. The extensions
+  process's `commands.claim` raises `PermissionError` saying so, and the host adds nothing an extension
   sends but a command, a status field, a prompt section and a tool (anything else is a `problem`).
 - `frame.status(field, text, *shorter)`: a status-bar field, pushed as `NAME:field`, so it
   can't cover another row's.
@@ -49,14 +49,14 @@ What an extension reaches of bh-02, each only to add to it, each returning its r
   (the loop keeps the prompt a conversation began with and tells a change as a note).
 - `tools.register(spec, run)`: a tool offered to the model (`spec`: `name`, `description`,
   `parameters`, a JSON Schema object; `run`: async, the call's arguments as a dict in, the text
-  the model reads out, anything else sent as JSON). The host does not trust what the worker
-  sends: it rebuilds the spec from those three parts (`offered.offered_tool`) and refuses, as a
+  the model reads out, anything else sent as JSON). The host does not trust what the extensions
+  process sends: it rebuilds the spec from those three parts (`offered.offered_tool`) and refuses, as a
   `problem`, a name that is not lowercase letters, digits and `_` (48 at most), one of bh-02's
   own (`python`, and every name a layer row has registered, kept even while that row restarts),
   parameters that are no object schema, or a spec over 16 KiB. It registers the tool with
   `runs = "jail"`, so the `approval` rule decides each call as it does an input, and `show`
   (`offered.shown_tool_call`): unjailed, the person is asked, shown the tool's name, its
-  extension and the arguments as JSON. A call goes to the worker (`call`) and its answer, or the
+  extension and the arguments as JSON. A call goes to the extensions process (`call`) and its answer, or the
   error `run` raised, is the result; a redefined extension offers its new spec, a deleted one
   takes the tool back, and a call after that is answered as a tool that is gone. The model is
   told of each change as the loop tells any (`agent_cordis_plugin.toolset`), so a tool added
@@ -64,7 +64,7 @@ What an extension reaches of bh-02, each only to add to it, each returning its r
 
 A component may also `bind` keys of its own, which another extension's components can depend
 on. It can't replace a row, rebind one of bh-02's keys or reach the loader: those don't exist
-where it runs. Whatever it added leaves with it, through `acquire` or not: the worker takes back
+where it runs. Whatever it added leaves with it, through `acquire` or not: the extensions process takes back
 any entry an extension never removed (a field pushed from background work) when it unloads.
 
 What the model is told (`watch.instructions`, the row's `system` section) is enough cordis to
@@ -88,8 +88,8 @@ bh-02 refused). The status bar's `extensions` field shows the same to the person
 
 ## Where it runs, and who is asked
 
-Not in bh-02's process. `host.py` starts `worker.py` through the runner, which jails it as it
-does the Python process, where inputs run: with `runner:confined` an extension can write only
+Not in bh-02's process. `host.py` starts the extensions process (`worker.py`) through the
+runner, which jails it as it does the Python process, where inputs run: with `runner:confined` an extension can write only
 inside the project, can't reach the network, and can't read `local.env` or the sessions' state.
 Each load is put to the `approval` rule (`runner:approval`), the rule the loop asks about
 inputs too, so an extension loads without asking exactly when an input runs without asking; the
@@ -99,10 +99,10 @@ row puts each load to the person itself (`output.confirm`), the source shown who
 model's extension todo into bh-02, unjailed (12 lines)?`), and a no leaves it unloaded until
 the file changes. What the model is told about it follows `approval.confined`.
 
-Nothing of an extension crosses into bh-02 but data over the worker's socket: a command's spec
+Nothing of an extension crosses into bh-02 but data over the extensions process's socket: a command's spec
 and, when the person runs it, its argument text out and its answer back; a field's text; a
 section's text. `host.py` registers each into the real key and keeps the remover. A changed or
-deleted extension, a failed one, the worker ending, and the row leaving each take back what was
+deleted extension, a failed one, the extensions process ending, and the row leaving each take back what was
 added.
 
 A project that ships a `.bh-02/plugins/` (a repository cloned from someone else) loads its
@@ -115,7 +115,7 @@ The model writes the extensions directory from the jail, and `host.py` reads it 
 with the person's permissions, so it follows no link there (the python row's rule for its startup
 files: never read a file the model could write, or reach through a link it could make, and hand
 its text to the model). A link to `local.env`, or a hard link to it, would otherwise send the
-secret to the worker as an extension's source, where an extension already loaded could keep
+secret to the extensions process as an extension's source, where an extension already loaded could keep
 it, and a SyntaxError on its first line would put that line in status.json and the prompt.
 - The directory is opened from the project's root a name at a time (`.bh-02`, then `plugins`)
   with `O_NOFOLLOW` (`host_paths.directory_beneath`, the opener memory and the prompt's
@@ -124,7 +124,7 @@ it, and a SyntaxError on its first line would put that line in status.json and t
 - An extension is opened beneath it with `O_NOFOLLOW` (and `O_NONBLOCK`, so a FIFO swapped in
   never blocks; `host_paths.read_beneath`), and read only when `fstat` on that descriptor says it
   is a regular file with one name (`watch.refusal`), of at most 256 KiB (the source goes to the
-  worker as one line). So a file swapped for a link after it was found, or as it is opened, is
+  extensions process as one line). So a file swapped for a link after it was found, or as it is opened, is
   not read either.
 - A file refused is not loaded (what an earlier version of it added goes), and status.json says
   why and what to write instead: `.bh-02/plugins/leak.py is a link, which bh-02 does not follow
@@ -137,9 +137,10 @@ it, and a SyntaxError on its first line would put that line in status.json and t
   link the model left at `status.json` is replaced, not written through, and an input never
   reads half of one.
 
-## The worker
+## The extensions process
 
-`worker.py` runs by path (`python -I worker.py SOCKET`) and holds a cordis `Runtime`. An
+The extensions process is `worker.py`, run by path (`python -I worker.py SOCKET`), and holds a
+cordis `Runtime`. An
 extension is one fiber that binds its own `commands`, `frame` and `system` (isolated, so each
 registration carries the extension's name), with the module's components mounted as its
 children (`NAME.component`); a load waits up to 10 s for them to come up and reports each one's
@@ -147,43 +148,43 @@ state. Its module is run from the source the host sent (so what the person appro
 runs), registered in `sys.modules` under a name of its own while it is loaded, since cordis's
 scan finds a component by its module.
 
-Wire, newline-delimited JSON. Host to worker: `hello` once, then `load` (`name`, `path`,
+Wire, newline-delimited JSON. Host to extensions process: `hello` once, then `load` (`name`, `path`,
 `source`), `unload` (`name`), `run` (`call`, `command`, `args`), `call` (`call`, `tool`,
-`input`: a call to a tool). Worker to host: `loaded` (`name`, `rows`, `error`), `unloaded`
+`input`: a call to a tool). Extensions process to host: `loaded` (`name`, `rows`, `error`), `unloaded`
 (`name`), `ran` (`call`, `answer`, a command's or a tool's), and, whenever an extension adds or
 takes back an entry, `add` (`id`, `extension`, `kind`: `command` with `spec`, `status` with
 `field` and `forms`, `context` with `text`, `tool` with `spec`) and `remove` (`id`). Texts
 are capped at 20,000 characters.
 
-The worker starts with the first extension there is to load. One that ends (an extension can
-end it: `os._exit` at import) takes every extension down; nothing loads again, and no worker is
-started, until the directory changes, so an extension that ends the worker as it loads isn't
-loaded again every `watch`.
+The extensions process starts with the first extension there is to load. One that ends (an
+extension can end it: `os._exit` at import) takes every extension down; nothing loads again, and
+no new one is started, until the directory changes, so an extension that ends the process as it
+loads isn't loaded again every `watch`.
 
-`/release` stops the worker too, and the row does it itself: it registers its worker's stop
-with the runner (`Extensions.stopped`, `runner.on_release`), which asks each owner to stop its
-own program and stops none itself, since the worker's jail holds the same placeholders as the
-Python process's (where bh-02 looks for its credential, the person's to fill now). The stop
-takes back what the extensions added and answers `The extensions' worker is stopped, and what
+`/release` stops the extensions process too, and the row does it itself: it registers the
+process's stop with the runner (`Extensions.stopped`, `runner.on_release`), which asks each owner to stop its
+own program and stops none itself, since the extensions process's jail holds the same
+placeholders as the Python process's (where bh-02 looks for its credential, the person's to fill now). The stop
+takes back what the extensions added and answers `The extensions process is stopped, and what
 the extensions added with it: ...`. That is not an ending: while the runner is `released()` and
-nothing in the directory changed, no worker starts (each extension's status says why), and once
-the next input has started the Python process, every extension there is loads again in a new
-worker, with nothing changed (`test_after_release_stops_the_worker_every_extension_loads_again_once_the_jail_runs`).
+nothing in the directory changed, no extensions process starts (each extension's status says
+why), and once the next input has started the Python process, every extension there is loads
+again in a new one, with nothing changed (`test_after_release_stops_the_worker_every_extension_loads_again_once_the_jail_runs`).
 A change to one of them while released (the person, or the model, edited it) is asked for, so
-its worker starts at once, and that start ends the release, as the next input's would
+the extensions process starts at once, and that start ends the release, as the next input's would
 (`test_a_change_while_released_loads_at_once_and_ends_the_release`).
-What a command of theirs kept in memory starts afresh, as after any new worker.
+What a command of theirs kept in memory starts afresh, as after any new extensions process.
 
 ## Tests
 
 - `test_extensions_watch.py` is pure: names, changes, which files may be read, what the model
   and the status bar are told.
-- `test_extensions_host.py` runs `Extensions` against a real worker the runner plugin's
+- `test_extensions_host.py` runs `Extensions` against a real extensions process the runner plugin's
   `Runner` starts over `extensions_cordis_plugin.testing.PlainJail` (a mechanism that starts a
   plain subprocess; it confines nothing and says so) and fakes for the keys, `approval` among
   them (confined or not): an extension loaded and its command run, changed and deleted, the ways
-  one fails to load, a command name bh-02 has, the unjailed question, a worker an extension
-  ends, one `/release` stops (the row's own stop, as the runner asks it; `PlainJail`'s `release`
+  one fails to load, a command name bh-02 has, the unjailed question, an extensions process an
+  extension ends, one `/release` stops (the row's own stop, as the runner asks it; `PlainJail`'s `release`
   holds nothing and stops nothing), one changed while released, and the links it does
   not follow: a link to a file outside, a hard link, `.bh-02` or `.bh-02/plugins` a link, a file
   swapped for a link between being found and read (by an extension loaded just before it), and a

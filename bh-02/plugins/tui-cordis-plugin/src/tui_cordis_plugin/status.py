@@ -91,7 +91,7 @@ class Notes(Protocol):
 
 @runtime_checkable
 class Running(Protocol):
-    """What the status row needs of the `sessions` value (CONTRACTS.md: sessions): the running
+    """What the status row needs of the `session` value (CONTRACTS.md: session): the running
     session's id (empty when the composition runs without one) and whether it was resumed."""
 
     @property

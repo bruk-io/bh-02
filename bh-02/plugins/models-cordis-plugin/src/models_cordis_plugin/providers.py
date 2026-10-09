@@ -82,7 +82,7 @@ def resolved(config: ModelConfig) -> Named:
 
 def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any:
     """The provider's value for `named`: not entered yet. `searched`: where `local.env` is
-    looked for when the config names no `env_file` (the `layers` value's `credentials`)."""
+    looked for when the config names no `env_file` (the `host` value's `credentials`)."""
     if named.provider == CLAUDE_CODE:
         return ClaudeCodeModel(
             ClaudeCodeConfig(
@@ -121,7 +121,7 @@ def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any
 async def opened(config: ModelConfig, searched: Sequence[str] = ()) -> AsyncIterator[Any]:
     """The `model` value, for as long as the row is up: the named model's provider, entered
     when it is a context manager (Claude Code's process, an HTTP client), else `Unusable`.
-    `searched`: where the provider looks for `local.env` (the `layers` value's `credentials`)."""
+    `searched`: where the provider looks for `local.env` (the `host` value's `credentials`)."""
     try:
         value = _provided(resolved(config), config, searched)
     except ModelsError as error:

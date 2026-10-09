@@ -25,12 +25,12 @@ from tui_cordis_plugin.status import (
     TuiConfig,
 )
 
-__all__ = ["grades", "palette", "status", "tui"]
+__all__ = ["grades", "palette", "status", "ui"]
 
 
-@component(name="app", provides=("input", "output", "frame"))
-async def tui(*, config: TuiConfig) -> Effects:
-    """Fills a `ui` row: `use = "tui:app"`. Depends on nothing but its config, so no reload
+@component(provides=("input", "output", "frame"))
+async def ui(*, config: TuiConfig) -> Effects:
+    """Fills a `ui` row: `use = "tui:ui"`. Depends on nothing but its config, so no reload
     elsewhere ever restarts the app (and loses the transcript). Runs the app on cordis's loop
     for as long as the row is up, and notes the composition changing (a reload, a failure).
     With `history` configured, the app draws that file again (its last `replay` entries) and
@@ -57,7 +57,7 @@ async def status(
     *,
     loader: Entries,
     models: ModelSource,
-    sessions: Running,
+    session: Running,
     frame: StatusSink,
     config: StatusConfig,
 ) -> Effects:
@@ -70,8 +70,8 @@ async def status(
     this one) shows the new model, `starting…` until it is up: it asks `models` (which never
     reloads) which model and provider the model row names, never `model` itself, which a switch
     replaces."""
-    if sessions.current:
-        shown = render.session_forms(sessions.current, resumed=sessions.resumed)
+    if session.current:
+        shown = render.session_forms(session.current, resumed=session.resumed)
         yield acquire(frame.status, "session", *shown)
     field = ModelField(frame.status, loader, config.model_row, models.current)
     yield acquire(field.show)

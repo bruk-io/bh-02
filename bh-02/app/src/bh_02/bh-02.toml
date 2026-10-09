@@ -98,11 +98,11 @@ use = "memory:auto"
 # config alone, so no reload elsewhere restarts it.
 [[plugin]]
 id = "ui"
-use = "tui:app"
+use = "tui:ui"
 
 [[plugin]]
 id = "chat"
-use = "chat:session"
+use = "chat:converse"
 
 # The python tool: a persistent Python process the runner starts, and the `python(code)` tool,
 # which it registers with `tools`, adding what the model is told about it to the system prompt.
@@ -115,7 +115,7 @@ use = "chat:session"
 id = "python"
 use = "python:tool"
 
-# What runs the model's code: each program (the Python process, the extensions' worker) in a
+# What runs the model's code: each program (the Python process, the extensions process) in a
 # brig jail of its own. `bh-02 --no-jail` puts `runner:unconfined` here, which confines nothing.
 [[plugin]]
 id = "runner"
@@ -131,7 +131,7 @@ id = "approval"
 use = "runner:approval"
 
 # `/release`: asks each row that started something in the runner to stop it (the Python
-# process, the extensions' worker), then lets go of what the runner holds on the host (on
+# process, the extensions process), then lets go of what the runner holds on the host (on
 # Linux, where bh-02 looks for its credential: how to add one mid-session). The next start
 # ends it: the next input, or a change to an extension.
 [[plugin]]
@@ -139,7 +139,7 @@ id = "release"
 use = "runner:release"
 
 # The status bar: the session's id and the model and its provider (usage is the app's own).
-# A small row over `loader`, `models`, `sessions` and `frame`, none of which /clear or /model
+# A small row over `loader`, `models`, `session` and `frame`, none of which /clear or /model
 # replaces, so it never reloads with them.
 [[plugin]]
 id = "status"

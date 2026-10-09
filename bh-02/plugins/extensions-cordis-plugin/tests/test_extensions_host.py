@@ -326,7 +326,7 @@ async def test_an_extension_that_ends_the_worker_is_not_loaded_again_until_somet
         await h.extensions.look()
         assert h.commands.runs == {}  # the worker took every extension down with it
         status = h.status()
-        assert "worker ended" in status["exits"]["error"] and "worker ended" in status["todo"]["error"]
+        assert "process ended" in status["exits"]["error"] and "process ended" in status["todo"]["error"]
         for _ in range(3):
             await h.extensions.look()
         assert len(h.jail.started) == 1  # no worker started again for an unchanged directory
@@ -483,7 +483,7 @@ async def test_after_release_stops_the_worker_every_extension_loads_again_once_t
         await h.extensions.look()
         assert await h.commands.runs["todo"]("milk") == "milk"
         said = await h.runner.release()
-        assert said.startswith("The extensions' worker is stopped"), said
+        assert said.startswith("The extensions process is stopped"), said
         assert h.jail.started[0].process.returncode is not None
         assert "todo" not in h.commands.runs and "todo:count" not in h.frame.fields()
         assert "/release" in h.status()["todo"]["error"], h.status()

@@ -1,7 +1,7 @@
 # tui-cordis-plugin
 
 bh-02's ui: a Textual app bound as `input`, `output` (whose `confirm` asks about the model's code in a
-modal) and `frame` by `tui:app`, and small rows that push into the app's frame: the status
+modal) and `frame` by `tui:ui`, and small rows that push into the app's frame: the status
 bar's fields (`tui:status`: the session's id and the model; `tui:grades`: the jail's grades)
 and the palette's commands (`tui:palette`). The screen is the conversation (the transcript over the composer),
 the whole width, and the status bar along the bottom. Imports nothing from any other plugin;
@@ -17,7 +17,7 @@ the shapes are in `../../CONTRACTS.md`.
   `bh01_theme.py` (every colour: generated, never edited), `tokens.py` (bh-01's token CSS to
   that module's source, pure), `widgets/` (one module per widget: `Transcript`, `Composer`,
   `StatusBar`, `ApprovalScreen`, and the palette's `CommandsProvider`).
-- **`wiring.py`**: the rows. `tui:app` depends on its config alone, so no reload elsewhere
+- **`wiring.py`**: the rows. `tui:ui` depends on its config alone, so no reload elsewhere
   restarts the app and loses the transcript.
 
 The input, output and frame never touch a widget: cordis's coroutines run outside the app's task, so they post a
@@ -46,14 +46,14 @@ after the push is offered with no reload; choosing one sends `/name` through the
 typed, or puts `/name ` in the composer when it takes arguments; a spec's `choices` (read each
 time it opens too) are entries of their own that run at once (`/model haiku`, one per model).
 `/help` and `/exit` are the ui's own entries. `tui:status` shows the running session's id (from
-the `sessions` value, `(resumed)` after it on a resume), and asks
+the `session` value, `(resumed)` after it on a resume), and asks
 the `models` value which model the model row names now and on which provider (`models.current()`;
 `config.model_row`, `model`, names the row whose lifecycle it follows): `sonnet (claude-code)`
 (narrow: `sonnet`). It observes lifecycle events to show it again at each of that row's events:
 `sonnet (claude-code, starting…)` (narrow: `sonnet…`) from the row's unloading until it is active again, so a
 `/model` or `/clear` shows the new model at once and that it is still starting (the Claude
 CLI takes seconds); its first push reads the row's state from the loader's `status()`. It
-depends on the loader, `models`, `sessions`, `frame` and its config, none of which `/clear` or
+depends on the loader, `models`, `session`, `frame` and its config, none of which `/clear` or
 `/model` replaces, so it never reloads with them. `tui:grades` is the jail field (`GradesField`),
 a row of its own over the `runner`, the `approval` rule, `frame` and `output`: the grades of the
 runner's last start (before any, the runner's own), `jailed` or `unjailed` as the rule's
@@ -69,7 +69,7 @@ reads says `⧗ waiting for loop to start; ...` and is read once it is up. The c
 again only once a restart a command queued is done (`jobs`), so a line typed right after
 `/model` or `/clear` stays in the bridge for the new chat row; the command's `restarting` event
 names the rows, which such a line says it waits for. The bridge holds nothing back itself. The `usage` field is the output's own: the session's running totals of usage
-events (each event is one turn's usage, so they sum), starting from what the session's history
+events (each event is one step's usage, so they sum), starting from what the session's history
 already holds, so a resumed session's field counts its earlier runs too.
 
 `running` puts the loop's task factory back once the app is up (Textual makes it eager at

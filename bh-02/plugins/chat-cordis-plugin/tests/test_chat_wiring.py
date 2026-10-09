@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from chat_cordis_plugin import session
 from chat_cordis_plugin.testing import Echo, Noted, Queued, Screen, Typed
+from chat_cordis_plugin.wiring import converse
 from cordis import Effects, Inspection, Runtime, State, bind, component
 
 
@@ -39,7 +39,7 @@ async def test_the_session_ends_when_the_input_runs_out() -> None:
     rt.mount(model_row(echo), id="loop")
     rt.mount(ui_row(Typed("hello", None), screen), id="ui")
     rt.mount(commands_row, id="commands")
-    rt.mount(session, id="chat")
+    rt.mount(converse, id="chat")
     await asyncio.wait_for(rt.idle(), 2)  # returns when the loop has ended: nothing left running
     assert screen.shown == ["hello "]
     await rt.shutdown()
@@ -52,7 +52,7 @@ async def test_replacing_the_ui_restarts_the_loop_and_keeps_the_conversation() -
     loop = rt.mount(model_row(echo), id="loop")
     ui = rt.mount(ui_row(Typed("to the first"), first), id="ui")
     rt.mount(commands_row, id="commands")
-    chat = rt.mount(session, id="chat")
+    chat = rt.mount(converse, id="chat")
     await rt.settle()
     await asyncio.sleep(0.01)
     assert first.shown == ["to the first "]
@@ -85,7 +85,7 @@ async def test_what_a_command_left_for_the_model_survives_the_chat_row_s_restart
     loop = rt.mount(model_row(first), id="loop")
     rt.mount(ui_row(typed, screen), id="ui")
     rt.mount(held_commands, id="commands")
-    chat = rt.mount(session, id="chat")
+    chat = rt.mount(converse, id="chat")
     await rt.settle()
     await asyncio.sleep(0.01)
     assert commands.ran == ["!git diff"]
@@ -116,7 +116,7 @@ async def test_an_unexpected_failure_in_the_loop_reaches_the_bootstrap() -> None
     rt.mount(model_row(Echo()), id="loop")
     rt.mount(ui_row(Broken(), Screen()), id="ui")
     rt.mount(commands_row, id="commands")
-    rt.mount(session, id="chat")
+    rt.mount(converse, id="chat")
     with pytest.raises(RuntimeError, match="the terminal fell over"):
         await asyncio.wait_for(rt.idle(), 2)
     await rt.shutdown()
@@ -127,7 +127,7 @@ async def test_a_row_bound_to_the_wrong_shape_fails_the_chat_at_load_with_a_mess
     rt.mount(model_row("not a model"), id="loop")
     rt.mount(ui_row(Typed(), Screen()), id="ui")
     rt.mount(commands_row, id="commands")
-    chat = rt.mount(session, id="chat")
+    chat = rt.mount(converse, id="chat")
     await rt.settle()
     assert chat.state is State.FAILED
     assert "chat: loop is bound to a str, which is missing reply" in str(chat.error)
@@ -156,7 +156,7 @@ async def test_a_line_typed_during_a_restart_a_command_queued_reaches_the_new_lo
     loop = rt.mount(model_row(first), id="loop")
     rt.mount(ui_row(typed, screen), id="ui")
     rt.mount(commands_and_jobs, id="commands")
-    rt.mount(session, id="chat")
+    rt.mount(converse, id="chat")
     await rt.settle()
     await asyncio.sleep(0.01)
     assert first.seen == []  # waiting on the restart, not reading `again`

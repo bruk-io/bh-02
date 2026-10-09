@@ -1,9 +1,9 @@
 """bh-02's tool as Claude Code sees it: declared through an in-process MCP server, never run there.
 
-Claude Code is told about the tool the loop offers (`server_for`: the kernel's `python`), and when
-the model calls it Claude Code calls the server, which runs nothing: the call parks
-(`Parking.wait`) until `agent:loop` has run it as an input in the kernel and the next request
-brings its result (`Parking.deliver`).
+Claude Code is told about the tools the loop offers (`server_for`: the python row's `python`,
+and any other), and when the model calls one Claude Code calls the server, which runs nothing:
+the call parks (`Parking.wait`) until `agent:loop` has run it through its tool and the next
+request brings its result (`Parking.deliver`).
 A result can arrive before Claude Code gets round to the call; it waits for it. Every exit
 answers what is parked ("resolve, never reject"): a call Claude Code waits on forever would hold
 its process.

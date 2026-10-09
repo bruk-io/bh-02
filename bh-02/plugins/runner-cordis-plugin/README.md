@@ -1,13 +1,13 @@
 # runner-cordis-plugin
 
 What runs the model's code: the `runner`, which starts each program (the Python process, the
-extensions' worker) in a jail from [brig](../../../libs/brig), or in none; the `approval` rule
+extensions process) in a jail from [brig](../../../libs/brig), or in none; the `approval` rule
 over it; and `/release`. The only package in the workspace that imports brig (the gate's
 `brig-one-adapter`).
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (default `["local.env"]`), `env` (the names that survive the scrub) | `layers` |
+| `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (default `["local.env"]`), `env` (the names that survive the scrub) | `host` |
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` or `ANTHROPIC_*` | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(request) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
@@ -18,11 +18,11 @@ over it; and `/release`. The only package in the workspace that imports brig (th
   and each watcher (`on_start(watch) -> remover`) is told of it after, so the status bar's jail
   field (`tui:grades`) follows a Python process started again in place. What one start is stays
   with it (`started.report()`, `notice()`, `reads()`, `writes()`): the Python process and the
-  extensions' worker each start from a command of their own. `report()` and `notice()` are the
+  extensions process each start from a command of their own. `report()` and `notice()` are the
   last start's (before any, the mechanism's grades and "").
 - **Each owner stops its own program.** A row that starts something registers its stop
   (`on_release(stop) -> remover`, `stop: async () -> str`): the python row its Python process,
-  the extensions row its worker. `release()` asks each in turn, then has the mechanism let go of
+  the extensions row the extensions process. `release()` asks each in turn, then has the mechanism let go of
   what it holds on the host (on Linux, the placeholders where bh-02 looks for its credential,
   below), and joins what each said
   (`test_release_asks_each_owner_to_stop_its_own_then_the_mechanism_and_says_what_each_said`).
@@ -31,7 +31,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
   says so (`A program this runner started still runs (its row did not stop it on /release), and
   its jail holds what it holds: /rows shows the rows; /restart one, then /release again.`).
 - `released()` is true from `release()` until the next start, whoever starts: an owner that
-  would start only to keep something warm (the extensions' worker) waits while it is, and one
+  would start only to keep something warm (the extensions process) waits while it is, and one
   the person asked for (the next input's Python process, a changed extension) starts, and so
   ends it.
 
@@ -57,16 +57,16 @@ policy seam, not this).
 `spec_for` is the policy, as a pure function:
 
 - **writes**: the project root, a scratch directory of the jail's own (`TMPDIR`), and the
-  project's auto memory directory (`layers.memory`, outside the project: the model keeps its
+  project's auto memory directory (`host.auto_memory`, outside the project: the model keeps its
   notes there across sessions, and only the memory rows read it, through no link), except
-  the composition's layer files (`layers`), every path the host imports code from that sits
+  the composition's layer files (`host.paths`), every path the host imports code from that sits
   under a writable root (`sys.path` entries, the interpreter's prefix), brig's
   self-modification list (`.git/hooks`, `.git/config`, `.claude`, shell rc files, editor
   settings, ...: what can run code outside the jail later) minus what `allow` names, and `deny`.
   `allow` defaults to the project's guidance files (CLAUDE.md, AGENTS.md), which editing is
   ordinary work; a name not on brig's list is a config error, since `write` is for other paths.
   An `allow` in a layer replaces the default, so name every file it should let through. Nor
-  bh-02's configuration directories (`layers.trusted`: `$XDG_CONFIG_HOME/bh-02` and
+  bh-02's configuration directories (`host.trusted`: `$XDG_CONFIG_HOME/bh-02` and
   `~/.config/bh-02`, as named and as resolved) where one is under a writable root, as when bh-02
   runs from the home directory: the host reads the models file and the person's startup file
   there and trusts them, so an input there could choose what every later
@@ -77,7 +77,7 @@ policy seam, not this).
   itself, an absent one a placeholder, the directories above it pinned, a host change ending the
   jail). Not when the project is that directory or inside it: the deny would leave the project
   read-only, so bh-02 run in its own config lets the model write there, as in any project.
-  Nor bh-02's own code (`layers.code`: the directory of every package bh-02 runs, its own,
+  Nor bh-02's own code (`host.code`: the directory of every package bh-02 runs, its own,
   cordis's, cordis_helpers's, brig's and each installed plugin's, as installed, as named and as
   resolved) where one is under a writable root: bh-02 working on its own checkout (`uv run` in
   it, `uv tool install --editable`), or run from a home the checkout is in. bh-02 imports
@@ -92,10 +92,10 @@ policy seam, not this).
   the next start. A started program's `writes()` names the roots its inputs may write (the
   python row reads nothing on the host whose way passes through one);
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
-  what `layers` names as `secrets` (bh-02's `local.env`, the sessions' state);
+  what `host` names as `secrets` (bh-02's `local.env`, the sessions' state);
 - **network**: none; the program's own LISTEN socket is the one way in or out. The runner
   starts two programs, each with a jail of its own compiled from this one policy: the Python
-  process (`python:tool`), and the extensions' worker (`extensions:extensions`), where the
+  process (`python:tool`), and the extensions process (`extensions:extensions`), where the
   model's own plugins run;
 - **env**: scrubbed to `env`.
 
@@ -106,9 +106,9 @@ One policy, two stacks (`stack_for`):
   what is readable: `SYSTEM_READABLE` (`/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/etc`, those
   that exist), the interpreter (`sys.base_prefix`, `sys.prefix`, and every symlinked directory
   on the way to the executable: a uv venv's `python` goes through `cpython-3.15-...`), the
-  directory of each absolute path the command names (the worker's), bh-02's own code
-  (`layers.code`, read-only: with an editable install the environment's `.pth` files name the
-  workspace's `src` directories, outside the interpreter's trees, and the extensions' worker
+  directory of each absolute path the command names (the program's own `worker.py`), bh-02's own code
+  (`host.code`, read-only: with an editable install the environment's `.pth` files name the
+  workspace's `src` directories, outside the interpreter's trees, and the extensions process
   imports cordis from there; without them it never listened and no extension loaded:
   `test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install`; the package
   directories, never the workspace, whose `local.env` stays out), and the writable roots.
@@ -117,10 +117,10 @@ One policy, two stacks (`stack_for`):
   `reads()`, each tree once and none inside another (`told_reads`), which the python row names to
   the model. The policy's read denies are brig's
   carve-outs inside that tree. A secret under the project (its `local.env`, and when bh-02 runs
-  inside its own workspace every place the model row looks for one: `layers.secrets` names
+  inside its own workspace every place the model row looks for one: `host.secrets` names
   them) is held in place by a mount on its path: one that exists is masked (reads fail with
   EACCES, and so do writes, removal and a rename over it). One that doesn't exist has nothing to
-  mask. Where the model row looks for its credential (`layers.credentials`) it is write-denied,
+  mask. Where the model row looks for its credential (`host.credentials`) it is write-denied,
   an empty read-only directory, so an input can create nothing there (a planted `local.env` would
   be read by the next launch; the lookup takes only a regular file, so the directory never hides
   the real one). Anywhere else (the project's own absent `local.env`, which nothing of bh-02's
@@ -146,8 +146,8 @@ one early, and neither should you.
 **Adding your credential mid-session (`/release`).** Where bh-02 looks for its credential and
 there is none, the jail holds the path with a placeholder, so you can't create `local.env` there
 while a jail runs. `/release` (the `runner:release` row) asks each owner to stop its own program
-(above): the python row ends the Python process and its jail, and the extensions row its
-worker and its jail, which holds the same placeholders and a share of the jail lock, so while it
+(above): the python row ends the Python process and its jail, and the extensions row the
+extensions process and its jail, which holds the same placeholders and a share of the jail lock, so while it
 ran nothing could be freed
 (`test_release_frees_what_the_programs_held_once_each_owner_stopped_its_own`,
 `test_on_linux_release_frees_the_credential_path_while_the_extensions_worker_runs`). Each jail's
@@ -158,9 +158,9 @@ your local.env there now, then send your message. ...`), which another session's
 holds, and whether a program it started still runs, its owner not having stopped it
 (`test_release_never_stops_a_program_its_owner_did_not_and_says_it_still_holds`,
 `test_release_waits_for_a_start_under_way_and_says_it_still_runs`). The runner is then
-`released()` until its next start, which is the next input's Python process, or the worker of an
-extension that changed: the extensions row starts no worker while it is released and nothing
-changed, and once it is not, loads every extension again in a new one, so they are back within
+`released()` until its next start, which is the next input's Python process, or the extensions
+process, for an extension that changed: the extensions row starts none while it is released and
+nothing changed, and once it is not, loads every extension again in a new one, so they are back within
 half a second of the next input starting the Python process. Create the file then, and send
 your message: the model row reads it at its next start (with no credential, every step starts
 afresh, so the next one does; a model already running keeps the one it started with until
@@ -172,7 +172,7 @@ changes meanwhile. `/restart python` is not the step:
 it stops and starts the Python process and its jail at once, holding the path again before you could create anything
 (`test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input`).
 
-When they go: the jail removes the ones it made once brig has verified the worker is gone and
+When they go: the jail removes the ones it made once brig has verified the program it ran is gone and
 no other bh-02 jail of the same user is running (a shared `flock` on
 `/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken exclusively to clean up: a
 second session in the same project binds the first one's placeholders read-only, and removing
@@ -301,7 +301,7 @@ Known gaps on Linux, beyond darwin's:
   `.git/config` are denied, which cannot exist under a file anyway.
 - There is no home directory in the jail (at most the paths to an interpreter and to bh-02's own
   code installed under it), so `~/.gitconfig` isn't read. The person's `user.name` and `user.email`, as git resolves
-  them on the host for the project, are set in the worker's environment as `GIT_AUTHOR_*` and
+  them on the host for the project, are set in the jailed program's environment as `GIT_AUTHOR_*` and
   `GIT_COMMITTER_*` (`git_author`), so a jailed `git commit` is theirs; nothing else of their git
   config (aliases, credential helpers, includes) reaches the jail, and an input can read the two
   values from its environment, as it could from any commit. Chosen over a generated

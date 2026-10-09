@@ -1179,7 +1179,7 @@ class Counting(Confined):
 
 
 async def test_the_kernel_tells_its_own_worker_s_jail_whatever_else_the_jail_starts() -> None:
-    """One jail starts more than one program (the extensions' worker is another): what each
+    """One jail starts more than one program (the extensions process is another): what each
     start is stays with it, and the kernel's `reads()`, `notice()` and `report()`, and so what
     the model is told, are its own worker's. Another program starting changes none of them, nor
     does the worker stopping for `/release`, until the next input starts a new one."""

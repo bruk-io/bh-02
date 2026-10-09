@@ -1,7 +1,8 @@
 """The chat row: what runs once a `loop`, an `input`, an `output`, `commands` and `jobs` are
 bound.
 
-`chat` is the logic (`converse`), `wiring` the row, `testing` fakes for the values."""
+`chat` is the logic (`converse`), `wiring` the row (`chat:converse`, which runs it), `testing`
+fakes for the values."""
 
 from chat_cordis_plugin.chat import (
     Commands,
@@ -12,7 +13,6 @@ from chat_cordis_plugin.chat import (
     Recoverable,
     converse,
 )
-from chat_cordis_plugin.wiring import session
 
 __all__ = [
     "Commands",
@@ -22,5 +22,4 @@ __all__ = [
     "Output",
     "Recoverable",
     "converse",
-    "session",
 ]

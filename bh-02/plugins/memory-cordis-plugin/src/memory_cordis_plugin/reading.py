@@ -7,7 +7,7 @@ what that opened, only when it is a regular file with one name; a link there is 
 target, the same way, only when that is another of the memory files found (a CLAUDE.md linking
 to the AGENTS.md beside it). A file outside the project (yours, the managed policy's, one in a
 directory above the project) is read as it is named, unless its way passes through the project
-(`host_paths.passes`, the walk the models file and the kernel's startup files are held to): a
+(`host_paths.passes`, the walk the models file and the python row's startup files are held to): a
 link of yours into the project, whose end the model could repoint, is not followed. None named
 like a secret (`local.env`, `.env`, `*.env`) is read, and none larger than Claude Code reads
 (4 MiB).

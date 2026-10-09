@@ -9,8 +9,8 @@ section to it.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `memory:files` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `layers` (`memory`: for `/memory`) |
-| `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index | `system` (`add`), `layers` (`memory`), `transcript` (its lifetime) |
+| `memory:files` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `host` (`auto_memory`: for `/memory`) |
+| `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index | `system` (`add`), `host` (`auto_memory`), `transcript` (its lifetime) |
 | `memory:on_touch` | adds `OnTouch` to `notes`, and its `before_write` to `access`; no config: the memory files are `memory`'s | `memory` (`touched`), `notes` (`add`), `transcript` (`messages`), `access` (`before_write`) |
 
 ## What loads at launch
@@ -106,7 +106,7 @@ conversations. Each project has a directory of its own outside the repository,
 `<project>` is the git repository's root (a worktree's main repository, so its worktrees share
 one), named as Claude Code names it (every character but a letter or a digit a `-`). The
 command line works it out (`bh_02.bootstrap.memory_directory`), makes it, and hands it to the
-`layers` value, whose `memory` the jail lets an input write. On Linux it is the one directory
+`host` value, whose `auto_memory` the jail lets an input write. On Linux it is the one directory
 outside the project the jail lets an input read, so another project's memory is not there.
 
 The model is told how to keep it (`auto_section`): what is worth a memory and what is not, its

@@ -1,10 +1,11 @@
 """Claude Code, through the Claude Agent SDK, as a `model`: one model step per call.
 
-bh-02's own `agent:loop` runs the loop (CONTRACTS.md: model): it classifies each step,
-nudges, runs every call as an input in the kernel (which asks the person when unjailed) and keeps the
-transcript. Claude Code is the subscription's sanctioned way to the model, and nothing else: it
-runs no built-in tool, loads no settings, CLAUDE.md or connector, and the tools it knows are only
-declared to it (`declared.py`). Each call to `complete` streams exactly one model step:
+bh-02's own `agent:loop` runs the loop (CONTRACTS.md: model): it classifies each step, nudges,
+runs every call through its tool (python's as an input in the Python process; asking the person
+when unjailed) and keeps the transcript. Claude Code is the subscription's sanctioned way to the
+model, and nothing else: it runs no built-in tool, loads no settings, CLAUDE.md or connector,
+and the tools it knows are only declared to it (`declared.py`). Each call to `complete` streams
+exactly one model step:
 
 - a new user line starts a query (`Send`);
 - a step that asks for tools ends at its `message_stop` with the query left open: Claude Code
@@ -159,7 +160,7 @@ class ClaudeCodeConfig:
     conversation's Claude Code state lives in (its `CLAUDE_CONFIG_DIR`, the saved session, the
     CLI's stderr); a session's layer points it into the session's directory, and without one a
     temporary directory is used and removed. `env_file`: where the credential is; when unset,
-    the first `local.env` of `searched` that is a file (the `layers` value's `credentials`:
+    the first `local.env` of `searched` that is a file (the `host` value's `credentials`:
     above bh-02's install and its environment, nearest first). `cwd`: the project Claude Code
     is told it works in (bh-02's working directory when unset)."""
 

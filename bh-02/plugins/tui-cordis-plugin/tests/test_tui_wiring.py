@@ -20,7 +20,7 @@ from tui_cordis_plugin import (
     grades,
     render,
     status,
-    tui,
+    ui,
 )
 
 _CONFINED = {"fs_write": "enforced", "network": "enforced"}
@@ -115,7 +115,7 @@ class _Sessions:
 
 async def test_the_app_row_binds_input_output_and_frame_from_the_app_it_runs() -> None:
     app = BhApp()
-    effects = await drive(tui(config=TuiConfig(headless=True)), replies=[app])
+    effects = await drive(ui(config=TuiConfig(headless=True)), replies=[app])
     assert [e.name for e in effects] == ["enter", "acquire", "observe", "bind", "bind", "bind"]
     assert [e.args[0] for e in effects[3:]] == ["input", "output", "frame"]
     output = effects[4].args[1]
@@ -134,7 +134,7 @@ async def test_with_a_history_the_app_row_enters_it_first_then_the_app(tmp_path:
     app = BhApp()
     async with History(str(path)) as history:
         assert history.recorded[0] == {"type": "user", "text": "hi"}  # entering reads it
-        effects = await drive(tui(config=TuiConfig(headless=True, history=str(path))), replies=[history, app])
+        effects = await drive(ui(config=TuiConfig(headless=True, history=str(path))), replies=[history, app])
     assert [e.name for e in effects] == ["enter", "enter", "acquire", "observe", "bind", "bind", "bind"]
     entered = effects[0].args[0]
     assert isinstance(entered, History) and entered.path == str(path)
@@ -148,7 +148,7 @@ async def test_the_status_row_pushes_the_session_and_the_model_and_hears_the_mod
     frame = Frame(lambda message: True)
     sessions = _Sessions("20260923-011910-58d9", resumed=True)
     effects = await drive(
-        status(loader=_Loader(), models=_Models(), sessions=sessions, frame=frame, config=StatusConfig())
+        status(loader=_Loader(), models=_Models(), session=sessions, frame=frame, config=StatusConfig())
     )
     assert [e.name for e in effects] == ["acquire", "acquire", "observe"]
     assert effects[0].args == (frame.status, "session", "20260923-011910-58d9 (resumed)", "58d9 ↻")
@@ -162,7 +162,7 @@ async def test_the_status_row_pushes_the_session_and_the_model_and_hears_the_mod
 async def test_with_no_session_the_status_row_shows_no_session_field() -> None:
     frame = Frame(lambda message: True)
     effects = await drive(
-        status(loader=_Loader(), models=_Models(), sessions=_Sessions(), frame=frame, config=StatusConfig())
+        status(loader=_Loader(), models=_Models(), session=_Sessions(), frame=frame, config=StatusConfig())
     )
     assert [e.name for e in effects] == ["acquire", "observe"]  # the model field alone
 
@@ -171,7 +171,7 @@ async def test_the_grades_row_shows_each_start_s_grades_and_tells_a_new_notice_o
     """The jail field is the runner's last start's grades, as the `approval` rule counts them: a
     Python process started again in place (no row reloading) moves it. A start's notice (a
     Linux jail's paths held with a mount the host can undo) is a note in the conversation, once
-    for as long as it reads the same: the extensions' worker's start says what the Python
+    for as long as it reads the same: the extensions process's start says what the Python
     process's did."""
     frame, output = Frame(lambda message: True), _Output()
     runner = _Runner({"fs_write": "unenforced"})
@@ -187,7 +187,7 @@ async def test_the_grades_row_shows_each_start_s_grades_and_tells_a_new_notice_o
         runner.started(_Start(_CONFINED, held))
         assert frame.fields() == {"jail": render.jail_forms(True, _CONFINED)[0]}
         assert frame.fields()["jail"] == "jailed fs_write ✓ network ✓"
-        runner.started(_Start(_CONFINED, held))  # the extensions' worker: the same notice
+        runner.started(_Start(_CONFINED, held))  # the extensions process: the same notice
         runner.started(_Start({**_CONFINED, "network": "best_effort"}))  # nothing to say
         assert frame.fields()["jail"].startswith("unjailed")
         await asyncio.sleep(0)
@@ -206,16 +206,16 @@ async def test_the_app_row_under_a_runtime_and_a_row_over_frame_leaving_first() 
 
     runner = _Runner({"fs_write": "unenforced"})
 
-    @component(provides=("runner", "approval", "loader", "models", "sessions"))
+    @component(provides=("runner", "approval", "loader", "models", "session"))
     async def reported() -> Effects:
         yield bind("runner", runner)
         yield bind("approval", _Rule(runner))
         yield bind("loader", _Loader())
         yield bind("models", _Models())
-        yield bind("sessions", _Sessions("20260924-1"))
+        yield bind("session", _Sessions("20260924-1"))
 
     rt = Runtime()
-    ui = rt.mount(tui, config={"headless": True}, id="ui")
+    app_row = rt.mount(ui, config={"headless": True}, id="ui")
     rt.mount(reported, id="reported")
     rt.mount(status, id="status")
     rt.mount(grades, id="grades")
@@ -229,7 +229,7 @@ async def test_the_app_row_under_a_runtime_and_a_row_over_frame_leaving_first() 
     }
     input = rt.root.get("input")
     reading = asyncio.ensure_future(input.read())
-    await ui.retire()
+    await app_row.retire()
     await rt.settle()
     assert await asyncio.wait_for(reading, 2) is None
     assert rt.root.get("frame") is None and frame.fields() == {}  # status left before the app

@@ -56,25 +56,26 @@ class _ChatDone(Awaitable[None], Protocol):
 
 
 @component
-async def harness(*, done: _ChatDone) -> Effects:
-    """Exists only to declare bh-02's own dependency on `done` (CONTRACTS.md), mounted as an
+async def shell(*, done: _ChatDone) -> Effects:
+    """Exists only to declare the shell's own dependency on `done` (CONTRACTS.md), mounted as an
     extra row by `run()`. Its presence and shape are then checked the way any component's
     dependency is: `unsatisfiable()` before any effect runs, `check_contract` at commit,
-    and a `harness` row that never activates is just another row `_raise_if_stalled`
+    and a `shell` row that never activates is just another row `_raise_if_stalled`
     already reports — no bespoke check in the bootstrap itself.
     """
     yield enter(contextlib.nullcontext())
 
 
 @dataclass(frozen=True, slots=True)
-class _LayerFiles:
-    """The composition's own files (CONTRACTS.md: layers): every layer the loader is watching
+class _Host:
+    """What the host is, as the rows that keep the model's code from it read it (CONTRACTS.md:
+    host): every layer the loader is watching
     (`paths`), where the model rows look for the credential file, nearest first
     (`credentials`), what no input may read (`secrets`): every one of `credentials`, the
     `local.env` beside and above the project, and the sessions' state (Claude Code's own config
     and tokens), bh-02's configuration directories (`trusted`), whose files the host reads and
     trusts, the directories bh-02 runs its own code from (`code`), and the project's auto memory
-    directory (`memory`), which the model writes and the memory rows read. The jail keeps an
+    directory (`auto_memory`), which the model writes and the memory rows read. The jail keeps an
     input from rewriting the first and from reading the secrets, from writing or creating any
     secret under a root it may write, and from writing in a configuration directory or in bh-02's
     own code under one; lets it write the memory directory; and every jail reads bh-02's own
@@ -85,7 +86,7 @@ class _LayerFiles:
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
-    memory: str = ""
+    auto_memory: str = ""
 
 
 # The file bh-02's credentials live in (CLAUDE_CODE_OAUTH_TOKEN, and any key a model names),
@@ -96,14 +97,14 @@ CREDENTIAL_FILE = "local.env"
 def credential_files(anchors: Iterable[Path]) -> tuple[str, ...]:
     """`local.env` in every directory above each anchor, nearest first, resolved anchors in.
     Above bh-02's installed package and its environment, that is where the model rows look for
-    the credential (the `layers` value's `credentials`), so from any working directory the
+    the credential (the `host` value's `credentials`), so from any working directory the
     workspace's own `local.env` is among them."""
     found = (str(parent / CREDENTIAL_FILE) for anchor in anchors for parent in anchor.parents)
     return tuple(dict.fromkeys(found))
 
 
 def unreadable(credentials: Iterable[str], anchors: Iterable[Path], states: Iterable[str]) -> tuple[str, ...]:
-    """What no jailed input may read (the `layers` value's `secrets`): every place the model rows
+    """What no jailed input may read (the `host` value's `secrets`): every place the model rows
     look for the credential (`credentials`, all of them, so none can be planted), the
     `local.env` above each of `anchors` (the project's, beside it), and `states`, the sessions'
     state directories (this run's and the default one), where each session's Claude Code child
@@ -114,7 +115,7 @@ def unreadable(credentials: Iterable[str], anchors: Iterable[Path], states: Iter
 
 
 def config_directories(environ: Mapping[str, str], home: Path) -> tuple[str, ...]:
-    """bh-02's configuration directories of the person's (the `layers` value's `trusted`): this
+    """bh-02's configuration directories of the person's (the `host` value's `trusted`): this
     run's (`$XDG_CONFIG_HOME/bh-02`, else `~/.config/bh-02`) and the default one, which a run
     without the variable reads, each as named and as it resolves (a link into a dotfiles
     repository). The host reads what is there and trusts it (the models file, and the person's
@@ -150,7 +151,7 @@ def project_of(cwd: Path) -> Path:
 
 
 def memory_directory(project: Path, environ: Mapping[str, str], home: Path) -> str:
-    """Where the project's auto memory is kept (the `layers` value's `memory`):
+    """Where the project's auto memory is kept (the `host` value's `auto_memory`):
     `$XDG_STATE_HOME/bh-02/projects/<project>/memory`, else under `~/.local/state`, as Claude
     Code keeps it under `~/.claude/projects/<project>/memory`: machine-local, never in the
     repository. `<project>` is the project's absolute path, every character but a letter or a
@@ -178,13 +179,13 @@ def code_packages(plugins: Iterable[str]) -> tuple[str, ...]:
 
 
 def code_directories(packages: Iterable[str]) -> tuple[str, ...]:
-    """Where bh-02 runs its own code from (the `layers` value's `code`): each of `packages` where
+    """Where bh-02 runs its own code from (the `host` value's `code`): each of `packages` where
     it is installed, found by name (`importlib.util.find_spec`, which imports nothing for a
     top-level name; an import hook's package as much as a `.pth` file's): a package's
     directories, a single module's file, each as named and as it resolves. With an editable
     install (`uv run` in the checkout, `uv tool install --editable`) they are the workspace's
     `src/<package>` directories, which hold the modules bh-02 imports (a plugin a layer names
-    later is imported then; the extensions' worker imports cordis from one): an input that wrote
+    later is imported then; the extensions process imports cordis from one): an input that wrote
     one would choose code bh-02 runs. So every jail reads them and no input may write them. A
     name that is not installed is left out."""
     found: list[Path] = []
@@ -203,18 +204,20 @@ def code_directories(packages: Iterable[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(path) for each in named for path in (each, each.resolve())))
 
 
-@component(provides=("layers",))
-async def layer_files(*, config: _LayerFiles) -> Effects:
-    """Binds the layer files `run()` was given, mounted by `run()` as a row of its own, so a
-    jail can keep an input from rewriting the program it runs in."""
-    yield bind("layers", config)
+@component(provides=("host",))
+async def host(*, config: _Host) -> Effects:
+    """Binds what the host is (the layer files `run()` was given, where the credential is and
+    what else no input may read or write, bh-02's own code, the auto memory directory), mounted
+    by `run()` as a row of its own, so a jail can keep an input from rewriting the program it
+    runs in."""
+    yield bind("host", config)
 
 
-@component(provides=("sessions",))
-async def session_list(*, config: Listing) -> Effects:
-    """Binds the running session (CONTRACTS.md: sessions), mounted by `run()` as a row of its
+@component(provides=("session",))
+async def session(*, config: Listing) -> Effects:
+    """Binds the running session (CONTRACTS.md: session), mounted by `run()` as a row of its
     own, so the status bar can show its id without knowing where sessions live."""
-    yield bind("sessions", config)
+    yield bind("session", config)
 
 
 class CompositionError(Exception):
@@ -254,8 +257,9 @@ def read_layers(paths: Iterable[str | Path | Traversable]) -> None:
 
 
 def layers() -> list[Traversable]:
-    """The shipped layers: the harness (`bh-02.toml`). Every later file is a patch over it, so
-    a session's own layer and a user's `--patch` compose the same way whichever model runs."""
+    """The shipped layers: the whole shipped composition (`bh-02.toml`). Every later file is a
+    patch over it, so a session's own layer and a user's `--patch` compose the same way whichever
+    model runs."""
     return [resources.files("bh_02") / "bh-02.toml"]
 
 
@@ -265,29 +269,28 @@ async def run(
     *,
     trace: Callable[[str], None] | None = None,
     report: Callable[[str], None] | None = None,
-    sessions: Listing | None = None,
+    session: Listing | None = None,
     credentials: Iterable[str] = (),
     secrets: Iterable[str] = (),
     trusted: Iterable[str] = (),
     code: Iterable[str] = (),
-    memory: str = "",
+    auto_memory: str = "",
 ) -> None:
     """Boot, wait for the chat row's own work to end (CONTRACTS.md: `done`), then unwind.
 
     Every layer is read once first: one that can't be read is a `LayerError` naming it.
 
-    Adds three rows of its own after `overrides`, pinned on: `layers`, which binds the layer
+    Adds three rows of its own after `overrides`, pinned on: `host`, which binds the layer
     files' paths, `credentials`, where the model rows look for the credential file (none: a
     composition booted without them finds no credential unless its model row names an
     `env_file`), `secrets`, where the credential file may be and the sessions' state
-    (CONTRACTS.md: layers; the jail denies an input both), `trusted`, bh-02's configuration
+    (CONTRACTS.md: host; the jail denies an input both), `trusted`, bh-02's configuration
     directories (`config_directories`; the jail denies an input writing there), `code`, the
     directories bh-02 runs its own code from (`code_directories`; every jail reads them, and
-    denies an input writing them), and `memory`, the project's auto memory directory
-    (`memory_directory`; the jail lets an input write it, and none when empty), `sessions`, which
-    binds this
-    directory's sessions and the running one (`sessions`; the default lists none), and
-    `harness`, whose only job is to declare bh-02's dependency on `done`, so a chat row that
+    denies an input writing them), and `auto_memory`, the project's auto memory directory
+    (`memory_directory`; the jail lets an input write it, and none when empty), `session`, which
+    binds this directory's sessions and the running one (`session`; the default lists none), and
+    `shell`, whose only job is to declare the shell's dependency on `done`, so a chat row that
     never binds it is an ordinary "waiting on" stall and a `done` of the wrong shape is an
     ordinary contract violation -- both diagnosed by cordis itself, not by this function.
 
@@ -318,21 +321,16 @@ async def run(
         "secrets": list(secrets),
         "trusted": list(trusted),
         "code": list(code),
-        "memory": memory,
+        "auto_memory": auto_memory,
     }
     booted: Booted = await boot(
         paths,
         [
             *overrides,
             # bh-02's own rows, after every layer and pinned on, so no layer can take them away
-            Row("harness", "bh_02.bootstrap:harness", disabled=False),
-            Row("layers", "bh_02.bootstrap:layer_files", config=watched, disabled=False),
-            Row(
-                "sessions",
-                "bh_02.bootstrap:session_list",
-                config=asdict(sessions or Listing()),
-                disabled=False,
-            ),
+            Row("shell", "bh_02.bootstrap:shell", disabled=False),
+            Row("host", "bh_02.bootstrap:host", config=watched, disabled=False),
+            Row("session", "bh_02.bootstrap:session", config=asdict(session or Listing()), disabled=False),
         ],
         rt,
         report=report,
@@ -348,7 +346,7 @@ async def run(
 async def _await_chat(booted: Booted) -> None:
     """Wait for the chat row's `done` task, not every fiber's background work.
 
-    `harness` (mounted alongside every composition `run()` boots) declares `done` as its
+    `shell` (mounted alongside every composition `run()` boots) declares `done` as its
     own dependency, so by the time `_raise_if_stalled(booted, "could not start")` has
     passed, cordis has already confirmed it is bound and shaped right: nothing left to
     check here but the wait itself.

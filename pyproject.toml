@@ -137,7 +137,7 @@ rules = [
     "no-impure-functions",         # the functions whose purity the design rests on
     "under-exposed-access",        # no reaching into another module's _names
     "over-exposed-module-symbol",  # a public name only its own module uses should be _private
-    "worker-stdlib-only",          # the kernel's worker runs in a jail: the standard library only
+    "worker-stdlib-only",          # the Python process's worker runs in a jail: the standard library only
     "brig-one-adapter",            # only runner_cordis_plugin imports brig
 ]
 
@@ -149,7 +149,7 @@ mode = "library"  # what a package __init__ re-exports is protected public API (
 [tool.pypeeker.terminal-io]
 allowed = ["tui_cordis_plugin", "bh_02.cli", "warden.cli"]
 
-# The kernel's worker is a separate program whose stdout is the input's output.
+# The Python process's worker is a separate program whose stdout is the input's output.
 [tool.pypeeker.print-input]
 allowed = ["python_cordis_plugin.worker"]
 
@@ -160,7 +160,7 @@ shell = [
     # bh_02.outdated: an earlier bh-02's layers in today's row names (cordis's `Row`)
     "bh_02.bootstrap", "bh_02.cli", "bh_02.outdated", "bh_02.sessions", "bh_02.testing",
     "warden.bootstrap", "warden.cli",
-    # the extensions' worker: a program of its own, run in the jail, whose whole job is a cordis
+    # the extensions process: a program of its own, run in the jail, whose whole job is a cordis
     # runtime of the components the model wrote
     "extensions_cordis_plugin.worker",
 ]
@@ -179,14 +179,14 @@ extra-impure = ["itertools.count", "importlib.resources.files", "threading.Condi
 # guard is not something the rule models. Exact and per-module; nothing else inherits it.
 allow = [
     "bh_02.__main__", "warden.__main__",
-    # the kernel's worker and the extensions' worker, each run by path (`python -I worker.py
+    # the Python process's worker and the extensions process's, each run by path (`python -I worker.py
     # SOCKET`) inside a jail
     "python_cordis_plugin.worker", "extensions_cordis_plugin.worker",
 ]
 
-# A function may not mutate module-level state. The extensions' worker puts each model-written
+# A function may not mutate module-level state. The extensions process puts each model-written
 # module in `sys.modules` while it loads (cordis's scan finds a component by its module's name)
-# and takes it out when it unloads; the kernel's worker puts each input's source in `linecache`
+# and takes it out when it unloads; the Python process's worker puts each input's source in `linecache`
 # (where a traceback looks for a line, so the model sees the line that failed); nothing else may.
 [tool.pypeeker.no-hidden-global-mutation]
 allow = [
@@ -215,7 +215,7 @@ exclude = [
     "bh_02.sessions:scanned",                                 # reads every meta.json under the state dir
     "bh_02.sessions:listed",                                  # scanned, without the broken records
     "bh_02.sessions:find",                                    # resolves --resume: reads the state dir (scanned)
-    "bh_02.sessions:Listing.listed",                          # the `sessions` value, read fresh per call
+    "bh_02.sessions:Listing.listed",                          # the `session` value, read fresh per call
     "bh_02.cli:_session", "bh_02.cli:main", "bh_02.cli:sessions_command",
     "bh_02.cli:update_layer_command",                         # rewrites a layer file, keeping FILE.bak
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
@@ -285,7 +285,7 @@ exclude = [
     "memory_cordis_plugin.wiring:files.run",
     # auto memory's index, read once a conversation from its directory through no link
     "memory_cordis_plugin.auto:AutoMemory.*",
-    # the kernel: a socket to a process a jail started, the process itself, and the worker program
+    # the python tool: a socket to a process a jail started, the process itself, and the worker program
     "python_cordis_plugin.client:Kernel.*",
     "runner_cordis_plugin.unconfined:_Process.*", "runner_cordis_plugin.unconfined:Unjailed.start",
     "runner_cordis_plugin.unconfined:_until_listening",
@@ -303,7 +303,7 @@ exclude = [
     "runner_cordis_plugin.jail:_clear_up",            # take the jail lock alone, then remove_placeholders
     "runner_cordis_plugin.tripwire:Tripwire.*",       # inotify on the held paths' directories; kills the jail at a lift
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
-    "chat_cordis_plugin.wiring:session", "models_cordis_plugin.wiring:model",
+    "chat_cordis_plugin.wiring:converse", "models_cordis_plugin.wiring:model",
 ]
 
 [tool.pypeeker.over-exposed-module-symbol]
@@ -312,7 +312,7 @@ allow = [
     "*test_*", "*test_*:*", "*conftest:*",
     # components a layer file (or run() itself) names as a string: re-exported, never called by name
     "*_cordis_plugin.wiring:*",
-    "bh_02.bootstrap:harness", "bh_02.bootstrap:layer_files", "bh_02.bootstrap:session_list",
+    "bh_02.bootstrap:shell", "bh_02.bootstrap:host", "bh_02.bootstrap:session",
     "bh_02.testing:echo", "bh_02.testing:bomb", "bh_02.testing:showcase", "bh_02.testing:slow_start",
     "bh_02.testing:echo_model", "bh_02.testing:slow_model", "bh_02.testing:repl_model",
     "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:repl_provider",

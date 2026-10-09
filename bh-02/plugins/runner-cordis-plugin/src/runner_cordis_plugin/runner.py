@@ -1,6 +1,6 @@
 """The `runner` value: what starts the programs that run the model's code, and `/release`.
 
-A runner starts a program (the Python process, the extensions' worker) through a mechanism: a
+A runner starts a program (the Python process, the extensions process) through a mechanism: a
 brig jail (`jail.BrigJail`, `runner:confined`) or none (`unconfined.Unjailed`,
 `runner:unconfined`). This adds what is the same whichever it is:
 
@@ -10,7 +10,7 @@ brig jail (`jail.BrigJail`, `runner:confined`) or none (`unconfined.Unjailed`,
   the placeholders where bh-02 looks for its credential). The runner never stops another row's
   program.
 - A release ends with the next start, whoever starts: while `released()`, an owner that would
-  start only to keep something warm (the extensions' worker) waits, and one the person asked for
+  start only to keep something warm (the extensions process) waits, and one the person asked for
   (an input, a change the model made) starts, ending it.
 - The grades of each start are reported to whoever watches (`on_start`): the status bar's
   field, and an owner waiting for a release to end.

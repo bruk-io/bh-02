@@ -577,8 +577,8 @@ def test_compact_is_the_conversation_row_and_an_operator_s_forget_is_gone() -> N
 
 
 def test_a_layer_that_fills_the_chat_row_gets_the_jobs_row() -> None:
-    rows, changes = translated([Row("chat", "chat:session"), Row("loop", "agent:loop")])
-    assert rows == [Row("chat", "chat:session"), Row("jobs", "commands:jobs"), Row("loop", "agent:loop")]
+    rows, changes = translated([Row("chat", "chat:converse"), Row("loop", "agent:loop")])
+    assert rows == [Row("chat", "chat:converse"), Row("jobs", "commands:jobs"), Row("loop", "agent:loop")]
     assert changes == [
         "the chat row waits on `jobs` now, where commands queue the restarts they ask for: add a "
         "'jobs' row with use = \"commands:jobs\""
@@ -623,3 +623,39 @@ def test_the_kernel_and_brig_plugins_rows_read_as_the_python_and_runner_plugins(
     assert translated(rows) == (rows, [])
     unconfined = [Row("jail", "kernel:unjailed")]  # a --no-jail session's layer
     assert translated(unconfined)[0] == [Row("runner", "runner:unconfined")]
+
+
+def test_the_chat_row_the_ui_and_the_shell_s_own_rows_read_in_their_new_names() -> None:
+    """`chat:session` named the chat row after something else (a session is a directory a run
+    resumes); the ui had three names; the shell's rows `harness`, `layers` and `sessions` are
+    `shell`, `host` (what the host is, not only its layer files) and `session` (the one
+    running). The old status field under the id `session` is still dropped."""
+    rows, changes = translated(
+        [
+            Row("chat", "chat:session"),
+            Row("ui", "tui:app", {"headless": True}),
+            Row("layers", "bh_02.bootstrap:layer_files"),
+            Row("harness", disabled=False),
+            Row("sessions", "bh_02.bootstrap:session_list"),
+        ]
+    )
+    assert rows == [
+        Row("chat", "chat:converse"),
+        Row("jobs", "commands:jobs"),  # the chat row waits on it
+        Row("ui", "tui:ui", {"headless": True}),
+        Row("host", "bh_02.bootstrap:host"),
+        Row("shell", disabled=False),
+        Row("session", "bh_02.bootstrap:session"),
+    ]
+    assert changes[:2] == [
+        "row 'chat': chat:session is now chat:converse; make it use = \"chat:converse\"",
+        "row 'ui': tui:app is now tui:ui; make it use = \"tui:ui\"",
+    ]
+    assert "row 'layers' is now 'host'; rename its id" in changes
+    assert "row 'sessions' is now 'session'; rename its id" in changes
+    assert translated(rows) == (rows, [])
+    field = [Row("session", "tui:status", {"field": "session", "text": "1"})]
+    assert translated(field) == (
+        [],
+        ["row 'session' was removed: the status row shows the session's id itself; delete it"],
+    )
