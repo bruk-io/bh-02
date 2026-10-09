@@ -273,14 +273,15 @@ exclude = [
     "models_cordis_plugin.openai.client:OpenAIModel.complete",
     # the stand-in OpenAI-compatible server tests run the provider against: its socket
     "models_cordis_plugin.openai.testing:_Handler.*",
-    # I/O at the edges: the project's .git/HEAD, for the branch the prompt names, read through no link
-    "agent_cordis_plugin.system:SystemPrompt.text", "agent_cordis_plugin.system:_head",
+    # I/O at the edges: the project's root resolved, for the prompt (its .git/HEAD is read through
+    # host_paths' opener)
+    "agent_cordis_plugin.system:SystemPrompt.text",
     # memory: the CLAUDE.md files, found where Claude Code finds them (`Memory`, `_resolved`: an
-    # import's file) and read through no link the model made (`read`, `_opened` the walk, `_named`
-    # one outside the project), the project's root resolved to tell what is in it; and `/memory`
+    # import's file) and read through no link the model made (`read`; one in the project through
+    # host_paths' opener, `_named` one outside it), the project's root resolved to tell what is in
+    # it; and `/memory`
     "memory_cordis_plugin.memory:Memory.*", "memory_cordis_plugin.memory:_resolved",
-    "memory_cordis_plugin.reading:read", "memory_cordis_plugin.reading:_opened",
-    "memory_cordis_plugin.reading:_named",
+    "memory_cordis_plugin.reading:read", "memory_cordis_plugin.reading:_named",
     "memory_cordis_plugin.wiring:memory.run",
     # auto memory's index, read once a conversation from its directory through no link
     "memory_cordis_plugin.auto:AutoMemory.*",

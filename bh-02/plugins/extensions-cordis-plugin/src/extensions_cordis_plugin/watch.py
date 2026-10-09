@@ -20,6 +20,7 @@ __all__ = [
     "refusal",
     "status_file",
     "status_forms",
+    "too_large",
 ]
 
 _NAME = re.compile(r"[a-z][a-z0-9_]*")
@@ -99,7 +100,17 @@ def refusal(file: str, mode: int, names: int) -> str | None:
             f"{file} has {names} names (a hard link), and bh-02 does not read one there (another "
             f"name could be a file the jail hides): write the extension at {file} as a file of its own"
         )
+    if names < 1:
+        return f"{file} was removed as bh-02 opened it: it loads when it is written again"
     return None
+
+
+def too_large(file: str, limit: int) -> str:
+    """Why bh-02 does not read the extension `file`: it is larger than `limit` bytes."""
+    return (
+        f"{file} is larger than {limit // 1024} KiB, so bh-02 did not read it: split it into "
+        "extensions of their own"
+    )
 
 
 def linked(where: str, way: str) -> str:

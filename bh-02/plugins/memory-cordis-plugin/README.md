@@ -84,8 +84,8 @@ searched instead.
   it says in the prompt that it did not import that file, and why. Your own files
   (`~/.claude/CLAUDE.md`, a directory above the project) may import from anywhere.
 - **No link the model could have made is followed.** A file in the project is walked to from
-  its root through no link (`O_NOFOLLOW` on every part) and read only when it is a regular file
-  with one name; a link there is read only when it leads to another memory file (a CLAUDE.md
+  its root through no link (`O_NOFOLLOW` on every part, `host_paths.read_beneath`) and read
+  only when it is a regular file with one name; a link there is read only when it leads to another memory file (a CLAUDE.md
   linking to the AGENTS.md beside it, read once). A file of yours whose way passes through the
   project (`~/.claude/CLAUDE.md` a link into a dotfiles repository bh-02 runs in;
   `host_paths.passes`, as the models file is walked) is not read,

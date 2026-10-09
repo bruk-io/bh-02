@@ -437,6 +437,22 @@ async def test_a_file_swapped_for_a_link_after_it_was_found_is_not_read(tmp_path
         assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
 
 
+async def test_a_large_extension_loads_and_one_over_the_cap_is_not_read(tmp_path: Path) -> None:
+    """The source goes to the worker as one line: 200 KiB of it (escaped, more) is held whole, and
+    one over 256 KiB is not read, status.json saying why, rather than ending the worker."""
+    padding = "\n".join(f"# {'é' * 60}" for _ in range(1700))  # ~200 KiB, twice that escaped
+    async with _running(tmp_path) as h:
+        h.write("todo", _TODO + padding)
+        h.write("huge", _TODO.replace('"todo", "help"', '"huge", "help"') + padding * 2)
+        await h.extensions.look()
+        assert h.extensions.statuses["todo"].ok and "todo" in h.commands.runs
+        assert h.status()["huge"]["error"] == (
+            ".bh-02/plugins/huge.py is larger than 256 KiB, so bh-02 did not read it: split it into "
+            "extensions of their own"
+        )
+        assert len(h.jail.started) == 1 and h.jail.started[0].process.returncode is None
+
+
 async def test_after_release_stops_the_worker_every_extension_loads_again_once_the_jail_runs(
     tmp_path: Path,
 ) -> None:

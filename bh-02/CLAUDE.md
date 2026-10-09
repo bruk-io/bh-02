@@ -46,10 +46,12 @@ by name and shape, in `CONTRACTS.md`:
 - **What every package must compute alike is a library function, not a key.** Where the
   person's config and state directories are (`host_paths.config_home`, `state_home`) and every
   place reading a file goes through (`walked`, `passes`) decide whether the host trusts the
-  models file, the person's startup file and a memory file outside the project; a copy per
-  plugin that drifted would be a hole. A key would not do: the kernel depends on its jail and two
-  brokers that never reload, and `system` on nothing, so reading one would add reloads, and the
-  walk is code, not a value.
+  models file, the person's startup file and a memory file outside the project, and one opener
+  (`host_paths.read_beneath`, `directory_beneath`) reads a file the model may have written
+  beneath a root through no link (memory files in the project, `.git/HEAD`, the extensions); a
+  copy per plugin that drifted would be a hole. A key would not do: the kernel depends on its
+  jail and two brokers that never reload, and `system` on nothing, so reading one would add
+  reloads, and the walk is code, not a value.
 - A plugin's tests use fakes from a package's own `testing` module (`chat_cordis_plugin.testing`, `bh_02.testing`), never another package's tests.
 
 **The model is offered the tools rows register, and CodeAct's carries code.** `tools`

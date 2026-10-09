@@ -52,6 +52,7 @@ _COMMAND = re.compile(r"[a-z][a-z-]*")  # a name the `commands` broker can parse
 _MAX_TEXT = 20_000  # an answer, a field or a section: the host reads one line per message
 _HELLO_S = 60.0
 _LOOK_S = 0.5
+_LINE_LIMIT = 2 << 20  # a load's line: a source of up to 256 KiB (the host's cap), JSON-escaped
 _SETTLE_S = 10.0  # how long a load waits for its rows to come up before saying how they are
 
 
@@ -324,7 +325,7 @@ async def _main(endpoint: str, hello_s: float) -> None:
             writer.close()  # the server's close waits for every connection it handed out
             served.set_result(None)
 
-    server = await asyncio.start_unix_server(connected, path=endpoint)
+    server = await asyncio.start_unix_server(connected, path=endpoint, limit=_LINE_LIMIT)
     async with server:
         while not heard.is_set():
             if os.getppid() != parent or time.monotonic() > deadline:

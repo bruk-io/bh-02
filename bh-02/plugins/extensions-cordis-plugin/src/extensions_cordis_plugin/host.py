@@ -22,9 +22,10 @@ the jail is `released` no worker starts, whatever changes, and once the next inp
 the kernel every extension there is loads again, in a new worker, with nothing changed.
 
 The model writes the extensions directory from the jail, and this reads it on the host, so it
-follows no link there (`_opened`, `_read`): the directory is opened from the project's root one
-name at a time, with `O_NOFOLLOW`, and a file is read only if the descriptor it was opened as says
-it is a regular file with one name (`watch.refusal`). A link, or a hard link, could otherwise hand
+follows no link there (`_opened`, `_read`, through `host_paths`): the directory is opened from
+the project's root one name at a time, with `O_NOFOLLOW`, and a file is read only if the
+descriptor it was opened as says it is a regular file with one name (`watch.refusal`), of at
+most 256 KiB. A link, or a hard link, could otherwise hand
 the model a file the jail hides (`local.env`), as an extension's source, or as the line of its
 SyntaxError in status.json. status.json is written through the same descriptor, as a new file
 renamed over the old, so a link there leads no write elsewhere either.
@@ -32,7 +33,6 @@ renamed over the old, so a link there leads no write elsewhere either.
 
 import asyncio
 import contextlib
-import errno
 import functools
 import importlib.util
 import itertools
@@ -58,7 +58,9 @@ from extensions_cordis_plugin.watch import (
     refusal,
     status_file,
     status_forms,
+    too_large,
 )
+from host_paths import Link, Linked, NotOneFile, TooLarge, directory_beneath, read_beneath
 
 __all__ = [
     "Approval",
@@ -80,11 +82,7 @@ _ENDED = (
     "the extensions' worker ended (an extension may have ended it, or the jail did); change a "
     "file in the extensions directory to load them all again"
 )
-# How the extensions directory is opened beneath the root, a name at a time, and an extension in
-# it: following no link, and never waiting on a FIFO the model left in a file's place.
-_ROOT = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
-_DIRECTORY = _ROOT | os.O_NOFOLLOW | os.O_NONBLOCK
-_FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+_SOURCE_LIMIT = 256 * 1024  # an extension larger than this is not read (the worker's line holds it)
 _NEW = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC  # status.json's next
 
 _RELEASED = (
@@ -332,29 +330,19 @@ class Extensions:
     @contextlib.contextmanager
     def _opened(self) -> Iterator[int]:
         """The extensions directory, opened from the project's root (the person's, so a link to
-        it is theirs to follow) one name at a time, following no link: the descriptor it is
-        listed, read and written through. Raises `_Refused` when a name on the way (`.bh-02`, the
-        directory itself) is a link, and OSError when there is no such directory."""
-        at = os.open(Path(self._config.root).resolve(), _ROOT)
+        it is theirs to follow) one name at a time, following no link
+        (`host_paths.directory_beneath`): the descriptor it is listed, read and written through.
+        Raises `_Refused` when a name on the way (`.bh-02`, the directory itself) is a link, and
+        OSError when there is no such directory."""
         try:
-            way = Path()
-            for name in Path(self._config.path).parts:
-                way /= name
-                try:
-                    below = os.open(name, _DIRECTORY, dir_fd=at)
-                except OSError:  # a link is ENOTDIR here, or ELOOP: which it was, for the model
-                    if stat.S_ISLNK(os.stat(name, dir_fd=at, follow_symlinks=False).st_mode):
-                        raise _Refused(linked(self._config.path, str(way))) from None
-                    raise
-                os.close(at)
-                at = below
-            yield at
-        finally:
-            os.close(at)
+            with directory_beneath(Path(self._config.root).resolve(), Path(self._config.path).parts) as at:
+                yield at
+        except Linked as way:
+            raise _Refused(linked(self._config.path, str(way.part))) from None
 
     def _read(self, name: str) -> str:
         """The extension `name`'s source, read from the descriptor it was opened as, beneath the
-        root and following no link (`_opened`, then the file with `O_NOFOLLOW`), and only when
+        root and following no link (`_opened`, then `host_paths.read_beneath`), and only when
         that descriptor says it may be (`refusal`): so a file swapped for a link after it was
         found, or as it is opened, is not read. Raises `_Refused` with why it is not read, or
         OSError, or UnicodeDecodeError."""
@@ -362,16 +350,14 @@ class Extensions:
         shown = str(Path(self._config.path) / file)
         with self._opened() as directory:
             try:
-                descriptor = os.open(file, _FILE, dir_fd=directory)
-            except OSError as error:
-                if error.errno == errno.ELOOP:  # O_NOFOLLOW's answer for a link
-                    raise _Refused(refusal(shown, stat.S_IFLNK, 1)) from None
-                raise
-            with open(descriptor, "rb") as opened:
-                found = os.fstat(opened.fileno())
-                if (why := refusal(shown, found.st_mode, found.st_nlink)) is not None:
-                    raise _Refused(why)
-                return opened.read().decode("utf-8")
+                found = read_beneath(directory, [file], cap=_SOURCE_LIMIT)
+            except NotOneFile as error:
+                raise _Refused(refusal(shown, error.mode, error.names) or str(error)) from None
+            except TooLarge:
+                raise _Refused(too_large(shown, _SOURCE_LIMIT)) from None
+        if isinstance(found, Link):
+            raise _Refused(refusal(shown, stat.S_IFLNK, 1))
+        return found.decode("utf-8")
 
     # -- one extension ---------------------------------------------------------------------
 

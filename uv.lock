@@ -44,12 +44,14 @@ source = { editable = "bh-02/plugins/agent-cordis-plugin" }
 dependencies = [
     { name = "cordis" },
     { name = "cordis-helpers" },
+    { name = "host-paths" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cordis", editable = "libs/cordis" },
     { name = "cordis-helpers", editable = "libs/cordis-helpers" },
+    { name = "host-paths", editable = "libs/host-paths" },
 ]
 
 [[package]]
@@ -357,12 +359,14 @@ source = { editable = "bh-02/plugins/extensions-cordis-plugin" }
 dependencies = [
     { name = "cordis" },
     { name = "cordis-helpers" },
+    { name = "host-paths" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cordis", editable = "libs/cordis" },
     { name = "cordis-helpers", editable = "libs/cordis-helpers" },
+    { name = "host-paths", editable = "libs/host-paths" },
 ]
 
 [[package]]

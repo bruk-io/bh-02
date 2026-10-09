@@ -103,12 +103,14 @@ its text to the model). A link to `local.env`, or a hard link to it, would other
 secret to the worker as an extension's source, where an extension already loaded could keep
 it, and a SyntaxError on its first line would put that line in status.json and the prompt.
 - The directory is opened from the project's root a name at a time (`.bh-02`, then `plugins`)
-  with `O_NOFOLLOW`, and listed and read through that descriptor (`_opened`). The root itself
+  with `O_NOFOLLOW` (`host_paths.directory_beneath`, the opener memory and the prompt's
+  `.git/HEAD` use too), and listed and read through that descriptor (`_opened`). The root itself
   is the person's, and may be reached through a link of theirs.
 - An extension is opened beneath it with `O_NOFOLLOW` (and `O_NONBLOCK`, so a FIFO swapped in
-  never blocks), and read only when `fstat` on that descriptor says it is a regular file with
-  one name (`watch.refusal`). So a file swapped for a link after it was found, or as it is
-  opened, is not read either.
+  never blocks; `host_paths.read_beneath`), and read only when `fstat` on that descriptor says it
+  is a regular file with one name (`watch.refusal`), of at most 256 KiB (the source goes to the
+  worker as one line). So a file swapped for a link after it was found, or as it is opened, is
+  not read either.
 - A file refused is not loaded (what an earlier version of it added goes), and status.json says
   why and what to write instead: `.bh-02/plugins/leak.py is a link, which bh-02 does not follow
   there (it could lead to a file the jail hides): write the extension itself at
