@@ -39,6 +39,7 @@ _HEAD = 6_000  # of those, how many are its start; the rest are its end (a test 
 _CHUNK = 1 << 16
 _LEFT_OPEN_S = 0.5  # after the shell exits, how long a program it left running may hold the output
 _STOP_GRACE_S = 2.0  # between SIGTERM and SIGKILL
+_EXITED_POLL_S = 0.05  # how often whether the shell has exited is looked at
 _GONE = (ProcessLookupError, PermissionError)  # a group already ended (darwin: only zombies left)
 _HOST_ONLY = ("ANTHROPIC_", "CLAUDE")
 # What a program writes for a terminal though it has none (colour, `tput sgr0`'s `ESC ( B`)
@@ -158,7 +159,7 @@ async def run_command(command: str, config: ShellCommandConfig) -> Ran:
     stopped = False
     try:
         async with asyncio.timeout(config.timeout):
-            await process.wait()
+            await _exited(process)
             await asyncio.wait({reading}, timeout=_LEFT_OPEN_S)
     except TimeoutError:
         stopped = process.returncode is None
@@ -174,6 +175,14 @@ async def run_command(command: str, config: ShellCommandConfig) -> Ran:
     return Ran(command, output.text(), None if stopped else process.returncode)
 
 
+async def _exited(process: asyncio.subprocess.Process) -> None:
+    """Return once the shell itself has exited. Not `process.wait()`: that also waits for the
+    shell's pipes to close (CPython 3.15 does), which a program the command left running holds
+    open, so it would wait for that program too."""
+    while process.returncode is None:
+        await asyncio.sleep(_EXITED_POLL_S)
+
+
 async def _end(process: asyncio.subprocess.Process) -> None:
     """End the command's process group: SIGTERM, a moment for the shell to go, then SIGKILL for
     whatever of the group is left."""
@@ -181,10 +190,10 @@ async def _end(process: asyncio.subprocess.Process) -> None:
         os.killpg(process.pid, signal.SIGTERM)
     with contextlib.suppress(TimeoutError):
         async with asyncio.timeout(_STOP_GRACE_S):
-            await process.wait()
+            await _exited(process)
     with contextlib.suppress(*_GONE):
         os.killpg(process.pid, signal.SIGKILL)
-    await process.wait()
+    await _exited(process)
 
 
 def _ended(status: int | None, timeout: float) -> str:
