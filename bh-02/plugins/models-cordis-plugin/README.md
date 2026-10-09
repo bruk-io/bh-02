@@ -156,6 +156,45 @@ the line is removed since; no key sends none.
 Connecting times out after 10 s; reading does not (a local model can take minutes to its first
 token). Closing the step (Ctrl-C) closes the HTTP stream.
 
+## When the tools change mid-conversation
+
+A request sends the tool list before anything else, so a list that changes partway through a
+conversation makes the whole conversation new to a model server's cache. The loop keeps the
+list a conversation began with in its transcript and tells a change as a note (CONTRACTS.md:
+tools); each provider says which list a request offers (`tool_changes`), and both say `fixed`,
+the list the conversation began with, for its life.
+
+- **openai**: a chat template renders the tool list at the start of the prompt (llama.cpp,
+  Ollama, vLLM, LM Studio), and OpenAI's own prompt cache is a prefix of the request too. A
+  changed list would make a local model process the whole conversation again (minutes on a long
+  one, looking frozen) and a hosted one bill it uncached. With `fixed` a change costs nothing
+  but the note (it is part of the next message, after the cached prefix); the price is that an
+  added tool is not offered natively until the next conversation (`/clear`, `/compact`).
+- **claude-code**: Claude Code sends the tools first too. Offering a changed list means
+  restarting Claude Code on its session with the new list (what a changed tool set does, above):
+  it works, and costs the conversation's cache, as the request's prefix changes at its first
+  byte. With `fixed` nothing restarts and the cache holds.
+
+What Claude Code itself would do with a tool-list change, read from the code of the CLI this
+plugin pins (2.1.280) rather than measured (a measurement needs a subscription token, and the
+change below cannot be sent today):
+- it refreshes an MCP server's tools when the server sends `notifications/tools/list_changed`
+  (`Received tools/list_changed notification, refreshing tools`), and refetches them after a
+  reconnect;
+- tools added or removed mid-conversation are sent as `tool_addition` and `tool_removal` blocks
+  in a mid-conversation system message, under the beta `mid-conversation-tool-changes-2026-07-01`
+  (with the definitions inline under `inline-tools-2026-09-15`), which keeps the cached prefix;
+- if the API rejects that (`[late-tool-additions] tool_addition rejected`), it falls back to
+  declaring the tools in `tools[]`, which costs the cache, and stays so until `/clear` or
+  `/compact`.
+
+That route is closed to bh-02 for now: the Agent SDK (0.2.158) drops what an in-process MCP
+server sends on its own (its bridge: "notifications (logging, progress, list_changed) are
+dropped"), so bh-02's server cannot tell Claude Code its tools changed. `reconnect_mcp_server`
+would make Claude Code list them again, but whether it then adds them as a late addition (cache
+kept) or redeclares them (cache lost) is not measured. Until an SDK carries the notification,
+`fixed` is the cheapest route that works.
+
 ## claude-code: Claude through Claude Code
 
 Claude, on a Claude subscription, as the model under bh-02's own `agent:loop`. The model is
@@ -271,10 +310,11 @@ A transcript that ends in tool results, not a user line, is continued with a one
 (`CONTINUE`).
 
 A changed system prompt or tool set restarts the process on its own session before the next user
-line, never while calls are parked. `agent:loop` sends a conversation the prompt it began with
-and tells later changes (the branch, an extension) as notes, and the date with the person's
-message (its `today` field is the loop's own: both providers send a user entry's `content`
-alone), so within a conversation this is a new tool set's restart, not a new prompt's.
+line, never while calls are parked. `agent:loop` sends a conversation the prompt and the tools
+it began with and tells later changes (the branch, an extension, a tool added) as notes, and the
+date with the person's message (its `today` field is the loop's own: both providers send a user
+entry's `content` alone), so within a conversation neither changes and the process is restarted
+only for a new conversation (`/clear`, `/compact`).
 
 ### State, per session
 

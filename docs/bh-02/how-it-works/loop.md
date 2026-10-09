@@ -24,12 +24,19 @@ A call to a tool the loop did not offer, or one whose input doesn't fit the tool
 
 ## The tools
 
-The loop reads the list of tools once, at a conversation's first request, after the ones its
+The loop reads the list of tools at a conversation's first request, after the ones its
 `requires` names have registered (the shipped layer requires `python`; a message typed right
-after `/clear`, when the kernel is starting again, says it waits). It offers that same list,
-in name order, for the rest of the conversation: the list is the start of what a model server
-caches, so a list that changed would cost the cache. A tool's row tells the model about its tool
-in a section of the system prompt, never in the tool's description.
+after `/clear`, when the kernel is starting again, says it waits), and keeps it in the
+transcript. It offers that same list, in name order, for the rest of the conversation: the list
+is the start of what a model server caches, so a list that changed would cost the cache.
+
+When the tools change partway through (an extension registers one, a layer edit adds a row),
+the loop keeps the change in the transcript and tells the model on the next message it reads,
+the way it tells a changed system prompt, and you see "told the model its tools changed since
+the conversation began". The list offered stays as it was: an added tool is offered from the
+next conversation (`/clear` or `/compact`), and a call to a removed one doesn't run. A resumed
+session sends the same requests it would have. A tool's row tells the model about its tool in a
+section of the system prompt, never in the tool's description.
 
 The transcript is a row of its own (`agent:transcript`), written to the session's
 `transcript.jsonl`. So a `/model` switch, which reloads the loop, keeps the conversation.

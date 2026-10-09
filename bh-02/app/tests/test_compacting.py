@@ -53,8 +53,18 @@ async def test_compact_begins_a_new_conversation_from_the_summary_and_the_kernel
     assert str(last[3]["content"]).startswith("(Today's date: ")  # told again in the new one
     assert not any("6 * 7" in str(m["content"]) for m in last)
     kept = [json.loads(line) for line in history.read_text().splitlines()]
-    assert kept[:2] == last[1:3] and kept[2]["role"] == "system"  # the prompt, kept when first read
+    assert kept[:2] == last[1:3]
+    # the new conversation's tools, then its prompt, each kept when first read
+    assert kept[2] == {"role": "tools", "tools": [*tools_of(kept)]} and kept[3]["role"] == "system"
     assert "py:x = 6 * 7" in Path(f"{history}.bak").read_text()
+
+
+def tools_of(kept: list[dict[str, object]]) -> list[object]:
+    """The tools the new conversation's `tools` entry keeps: the python tool's spec alone."""
+    (entry,) = [m for m in kept if m["role"] == "tools"]
+    listed = entry["tools"]
+    assert isinstance(listed, list) and [t["name"] for t in listed] == ["python"]
+    return listed
 
 
 async def test_leaving_while_the_model_writes_the_summary_ends_bh_02_at_once_and_changes_nothing(

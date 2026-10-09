@@ -157,7 +157,7 @@ async def test_a_text_turn_is_one_model_step_and_two_transcript_entries() -> Non
         )
         == "hello"
     )
-    assert [m["role"] for m in history.messages] == ["user", "assistant"]
+    assert [m["role"] for m in history.messages] == ["tools", "user", "assistant"]  # the list it began with
     ((messages, offered),) = scripted.requests
     assert offered == ("python",)  # the one tool, offered through tool calling
     assert messages == (
@@ -172,8 +172,8 @@ async def test_a_tool_turn_runs_the_call_as_an_input_and_asks_again() -> None:
         await _collect(LoopModel(scripted, as_tool(Shouting()), history, Confined()), "shout for me")
         == "let me QUIET it is"
     )
-    assert [m["role"] for m in history.messages] == ["user", "assistant", "tool", "assistant"]
-    assert history.messages[2] == {"role": "tool", "content": "QUIET", "call_id": "c1", "notes": []}
+    assert [m["role"] for m in history.messages] == ["tools", "user", "assistant", "tool", "assistant"]
+    assert history.messages[3] == {"role": "tool", "content": "QUIET", "call_id": "c1", "notes": []}
     assert scripted.requests[1][0][-1]["content"] == "QUIET"  # the result went back to the model
 
 
@@ -272,7 +272,8 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
     assert await _collect(rt.root.get("loop"), "second") == "two"
     history = rt.root.get("transcript")
     # one conversation (its first message told the date first)
-    assert [m["content"].rpartition("\n\n")[2] for m in history.messages] == ["first", "one", "second", "two"]
+    said = [m for m in history.messages if m["role"] != "tools"]
+    assert [m["content"].rpartition("\n\n")[2] for m in said] == ["first", "one", "second", "two"]
     assert Inspection(rt).fiber("kernel") is kernel_fiber  # the kernel's row stayed up throughout
     assert Inspection(rt).fiber("executor") is executor_fiber  # and so did the call in flight's
     await rt.shutdown()
@@ -296,7 +297,7 @@ async def test_a_truncated_turn_is_fed_back_not_read_as_the_answer() -> None:
     history = MemoryTranscript()
     events = [e async for e in LoopModel(scripted, as_tool(Shouting()), history, Confined()).reply("q")]
     assert [e for e in events if e["type"] == "stop"] == [stop("truncated"), stop("answered")]
-    feedback = history.messages[2]
+    feedback = history.messages[3]
     assert feedback["role"] == "user" and feedback["feedback"] == "truncated"
     assert "output token limit" in feedback["content"]
     assert scripted.requests[1][0][-1] is feedback  # the model was told, then asked again
@@ -327,7 +328,7 @@ async def test_the_provider_message_rides_on_its_transcript_entry() -> None:
     scripted = Scripted([call("c1", "python", code="x"), {"type": "message", "message": raw}], [text("done")])
     history = MemoryTranscript()
     await _collect(LoopModel(scripted, as_tool(Shouting()), history, Confined()), "go")
-    assert history.messages[1]["provider"] is raw
+    assert history.messages[2]["provider"] is raw
 
 
 async def test_an_answered_turn_keeps_its_provider_message_so_its_thinking_is_replayed() -> None:
@@ -337,7 +338,7 @@ async def test_an_answered_turn_keeps_its_provider_message_so_its_thinking_is_re
     scripted = Scripted([text("hi"), stop("end_turn"), {"type": "message", "message": raw}])
     history = MemoryTranscript()
     await _collect(LoopModel(scripted, as_tool(Shouting()), history, Confined()), "go")
-    assert history.messages[1]["provider"] is raw
+    assert history.messages[2]["provider"] is raw
 
 
 async def test_a_turn_whose_calls_never_ran_drops_its_provider_message() -> None:
@@ -431,6 +432,7 @@ async def test_a_conversation_keeps_the_prompt_it_began_with_and_is_told_what_ch
     }
     assert scripted.requests[2][0][-1]["content"] == "third"  # told once
     assert [m["role"] for m in history.messages] == [
+        "tools",
         "system",
         "user",
         "assistant",
@@ -442,7 +444,7 @@ async def test_a_conversation_keeps_the_prompt_it_began_with_and_is_told_what_ch
         "assistant",
     ]
     # the change is kept as what turns the last reading into this one, not a whole prompt
-    assert history.messages[3] == {"role": "system", "edits": [{"at": 0, "drop": 1, "add": ["in /b"]}]}
+    assert history.messages[4] == {"role": "system", "edits": [{"at": 0, "drop": 1, "add": ["in /b"]}]}
     # a reloaded loop (a new model, a new ui) carries on from what the transcript says it told
     again = LoopModel(scripted, as_tool(_Guided()), history, Confined(), system=where)
     await _collect(again, "fourth")
@@ -618,7 +620,7 @@ async def test_a_change_made_by_an_input_is_told_with_that_input_s_result() -> N
 async def test_a_conversation_with_no_prompt_is_sent_none() -> None:
     scripted, history = Scripted([text("hi")]), MemoryTranscript()
     await _collect(LoopModel(scripted, as_tool(Shouting()), history, Confined()), "hello")
-    assert [m["role"] for m in scripted.requests[0][0]] == ["user"] and history.messages[0]["role"] == "user"
+    assert [m["role"] for m in scripted.requests[0][0]] == ["user"] and history.messages[1]["role"] == "user"
 
 
 async def test_a_refused_turn_never_runs_its_call_and_is_not_asked_again() -> None:
@@ -696,7 +698,7 @@ async def test_a_reply_caninputed_while_its_model_waits_answers_its_message_too(
         await asyncio.sleep(0)
     task.cancel()  # cancelled inside the model step, where it waits for the stream
     await asyncio.gather(task, return_exceptions=True)
-    assert _roles(history.messages) == ["user", "assistant"]
+    assert _roles(history.messages) == ["tools", "user", "assistant"]
     assert history.messages[-1]["content"].endswith(STOPPED)
     await _collect(model, "say NEXT-OK")
     assert _roles(story.requests[1]) == ["user", "assistant", "user"]
@@ -928,7 +930,7 @@ async def test_a_reply_stopped_while_the_prompt_is_read_keeps_the_message_answer
         await asyncio.sleep(0.01)
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
-    assert history.messages == (
+    assert tuple(m for m in history.messages if m["role"] != "tools") == (
         {"role": "user", "content": "(Today's date: 2026-10-07.)\n\ngo", "today": "2026-10-07"},
         {"role": "assistant", "content": STOPPED},
     )
@@ -967,7 +969,7 @@ async def test_the_date_is_told_with_a_conversation_s_first_message_and_the_firs
     await _collect(
         LoopModel(scripted, as_tool(Shouting()), cleared, Confined(), today=lambda: day[-1]), "after /clear"
     )
-    assert cleared.messages[0]["content"] == "(Today's date: 2026-10-08.)\n\nafter /clear"
+    assert cleared.messages[1]["content"] == "(Today's date: 2026-10-08.)\n\nafter /clear"
 
 
 async def test_on_a_new_day_with_new_instructions_the_date_comes_first_then_what_changed() -> None:

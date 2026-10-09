@@ -312,17 +312,116 @@ async def test_a_call_to_a_tool_whose_row_is_restarting_waits_for_it() -> None:
     assert next(e for e in events if e["type"] == "tool_result")["content"] == "echo: later"
 
 
-async def test_a_tool_registered_after_the_first_request_is_not_offered_until_the_next_loop() -> None:
-    """The list is read once a loop: a tool that comes later is offered by the next loop (TASK-0057
-    tells a running conversation), and a call naming it meanwhile answers as one it was not offered."""
+def _conversation(history: MemoryTranscript) -> list[Json]:
+    """The transcript's `tools` entries: the list the conversation began with, then each change."""
+    return [m for m in history.messages if m["role"] == "tools"]
+
+
+async def _said(looped: LoopModel, message: str) -> list[Json]:
+    return [e async for e in looped.reply(message)]
+
+
+async def test_a_tool_added_mid_conversation_is_told_and_offered_from_the_next_conversation() -> None:
+    """The list a conversation began with is in its transcript and every request offers it (a
+    provider's default, `fixed`): a tool registered later is told on the next message, with
+    what it takes, and kept as a change; a call naming it says it comes with the next
+    conversation. A resumed loop over the same transcript offers the same list and tells
+    nothing again; a new conversation (/clear, /compact: a fresh transcript) offers it."""
+    broker = ToolBroker()
+    broker.register(ECHO, _echo)
+    model = _Scripted([_text("first")], [_call("c1", "late", text="x")], [_text("done")], [_text("again")])
+    history = MemoryTranscript()
+    looped = LoopModel(model, broker, history, _Approval())
+    await _said(looped, "one")
+    broker.register(_spec("late", text="string"), _echo)
+    events = await _said(looped, "two")
+    assert model.offered == [("echo",), ("echo",), ("echo",)]
+    asked = next(m for m in reversed(history.messages) if m["role"] == "user")["content"]
+    assert (
+        "(bh-02: your tools have changed since this conversation began. Added: `late` (The late tool.)"
+        in asked
+    )
+    assert "taking `text`" in asked and "offered to you from the next conversation" in asked
+    assert {"type": "note", "text": "told the model its tools changed since the conversation began"} in events
+    result = next(e for e in events if e["type"] == "tool_result")
+    assert result["content"].startswith("error: 'late' was added after this conversation began")
+    assert _conversation(history) == [
+        {"role": "tools", "tools": [ECHO]},
+        {"role": "tools", "added": [_spec("late", text="string")]},
+    ]
+    resumed = LoopModel(model, broker, history, _Approval())  # a resume: the same transcript
+    await _said(resumed, "three")
+    assert model.offered[-1] == ("echo",) and len(_conversation(history)) == 2  # told once
+    fresh = _Scripted([_text("new")])
+    await _said(LoopModel(fresh, broker, MemoryTranscript(), _Approval()), "after /clear")
+    assert fresh.offered == [("echo", "late")]
+
+
+async def test_a_tool_removed_or_redefined_is_told_and_a_call_to_a_removed_one_does_not_run() -> None:
+    broker = ToolBroker()
+    remove_echo = broker.register(ECHO, _echo)
+    remove_other = broker.register(_spec("other", text="string"), _echo)
+    clock = [0.0]
+    model = _Scripted([_text("first")], [_call("c1", "echo", text="x")], [_text("done")], [_text("ok")])
+    history = MemoryTranscript()
+    looped = LoopModel(model, broker, history, _Approval(), wait=5, clock=lambda: clock[-1])
+    await _said(looped, "one")
+    remove_echo()
+    await _said(looped, "two")  # missing for less than `wait`: restarting, not removed
+    assert len(_conversation(history)) == 1
+    clock.append(10.0)
+    remove_other()
+    broker.register(_spec("other", text="string", more="integer"), _echo)
+    await _said(looped, "three")
+    assert _conversation(history)[1:] == [
+        {"role": "tools", "removed": ["echo"], "redefined": [_spec("other", text="string", more="integer")]}
+    ]
+    told = next(m for m in reversed(history.messages) if m["role"] == "user")["content"]
+    assert "Redefined: `other` (The other tool.), taking `text`, `more`." in told
+    assert "Removed: `echo`; a call to one does not run." in told
+    assert model.offered[-1] == ("echo", "other")  # the list it began with: the cache holds
+    resumed = _Scripted([_call("c2", "echo", text="y")], [_text("done")])
+    events = await _said(LoopModel(resumed, broker, history, _Approval(), wait=5), "four")
+    result = next(e for e in events if e["type"] == "tool_result")
+    assert (
+        result["content"]
+        == "error: the echo tool was removed since this conversation began, so this call did not run"
+    )
+    assert resumed.offered[0] == ("echo", "other")  # a resume rebuilds the same request
+    assert len(_conversation(history)) == 2  # nothing more changed
+
+
+async def test_a_provider_that_takes_the_list_as_it_reads_now_is_offered_it() -> None:
+    """A provider whose cache a changed list does not cost, or that tells a change its own way,
+    says so (`tool_changes = "listed"`): each request offers the list as it reads now, and the
+    change is still told and kept, so a resume offers the same."""
     broker = ToolBroker()
     broker.register(ECHO, _echo)
     model = _Scripted([_text("first")], [_call("c1", "late", text="x")], [_text("done")])
+    model.tool_changes = "listed"  # type: ignore[attr-defined]
     history = MemoryTranscript()
     looped = LoopModel(model, broker, history, _Approval())
-    [e async for e in looped.reply("one")]
+    await _said(looped, "one")
     broker.register(_spec("late", text="string"), _echo)
-    events = [e async for e in looped.reply("two")]
-    assert model.offered == [("echo",), ("echo",), ("echo",)]
-    result = next(e for e in events if e["type"] == "tool_result")
-    assert result["content"] == "error: there is no tool named 'late'; your tools are echo"
+    events = await _said(looped, "two")
+    assert model.offered == [("echo",), ("echo", "late"), ("echo", "late")]
+    assert next(e for e in events if e["type"] == "tool_result")["content"] == "echo: x"
+    told = next(m for m in reversed(history.messages) if m["role"] == "user")["content"]
+    assert (
+        told.startswith("(bh-02: your tools have changed")
+        and "Your tool list reads as they are now.)" in told
+    )
+
+
+async def test_a_conversation_begun_before_the_loop_kept_its_tools_begins_its_list_now() -> None:
+    """A resumed transcript with no `tools` entry (kept before the loop kept them) takes the list
+    as it reads at its next request, telling nothing."""
+    broker = ToolBroker()
+    broker.register(ECHO, _echo)
+    history = MemoryTranscript()
+    history.append({"role": "user", "content": "old"})
+    history.append({"role": "assistant", "content": "answer"})
+    model = _Scripted([_text("hi")])
+    events = await _said(LoopModel(model, broker, history, _Approval()), "new")
+    assert _conversation(history) == [{"role": "tools", "tools": [ECHO]}]
+    assert not [e for e in events if e["type"] == "note"]

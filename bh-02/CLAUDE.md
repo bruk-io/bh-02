@@ -59,9 +59,12 @@ by name and shape, in `CONTRACTS.md`:
 runs a call and answers `{"content", "touched"}`, where a call runs, `runs`, and how one is put
 to the person, `show`), and `agent:loop` offers every registered spec, in name order, through
 the provider's standard tool calling, and runs each call through the tool its name has. The
-loop reads the list once, at its first request, after the tools its config `requires` have
-registered (the shipped layer: `["python"]`), and offers that list for its life, so a model
-server's cache of the conversation's start holds. The shipped tool is `python(code)`:
+loop reads the list at a conversation's first request, after the tools its config `requires`
+have registered (the shipped layer: `["python"]`), and keeps it in the transcript; a later
+change is kept there too and told on the next message, as a prompt change is (`toolset`), and
+each request offers the list the model's `tool_changes` asks for (both shipped providers:
+`fixed`, the one the conversation began with), so a model server's cache of the conversation's
+start holds and a resume sends the same requests. The shipped tool is `python(code)`:
 `kernel:kernel` binds `kernel`, a persistent Python namespace, registers `python` (its call,
 `kernel.call`, runs the code as an input) and adds what the model is told about it as the
 `system` section `python`. To the model the kernel is a Python REPL of its own that persists:

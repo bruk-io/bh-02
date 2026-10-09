@@ -302,7 +302,16 @@ class ClaudeCodeModel:
 
     An async context manager: leaving it answers any parked call, interrupts what runs, and ends
     the process. `open` builds the session from its options (the SDK's client; a test's fake).
+
+    `tool_changes` is `fixed` (CONTRACTS.md: model): a conversation is offered the tools it began
+    with for its life, and a change is told as a note. Claude Code sends the tool list before
+    everything else in a request, so a changed list would cost the whole conversation's cache,
+    and the in-process MCP server has no way to tell Claude Code its tools changed (the Agent
+    SDK drops a server's `notifications/tools/list_changed`): the models README has what Claude
+    Code would do with one.
     """
+
+    tool_changes: Final = "fixed"
 
     def __init__(self, config: ClaudeCodeConfig, open: Opener | None = None) -> None:
         self._config = config

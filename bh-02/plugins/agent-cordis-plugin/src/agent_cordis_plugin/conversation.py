@@ -231,7 +231,7 @@ def _unsaid(messages: Sequence[Json]) -> str | None:
     a summary's seed (`seeded`), nothing said since (compacting it again would summarise a
     summary, with no prompt to begin the request, and replace the backup of the conversation
     before it)."""
-    said = [m for m in messages if m.get("role") != "system"]
+    said = [m for m in messages if m.get("role") not in ("system", "tools")]
     if not said:
         return "nothing to compact: the conversation is empty"
     if len(said) == 2 and str(said[0].get("content", "")).startswith(_SEEDED_START):

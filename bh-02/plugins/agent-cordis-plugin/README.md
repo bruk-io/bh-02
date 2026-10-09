@@ -7,7 +7,7 @@ and asks `notes`, and `/compact`, which begins a new conversation from the model
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`), `tools` (`specs`, `get`, `ready`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `notes` (iterated), `executor` (`run`) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `notes` (iterated), `executor` (`run`) |
 | `agent:tools` | `tools`: a `ToolBroker`, the tools rows `acquire` with `register(spec, run, *, runs, show)`, offered in name order | |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
 | `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch, then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
@@ -19,13 +19,24 @@ and asks `notes`, and `/compact`, which begins a new conversation from the model
 A turn is one model step plus the calls it asked for, until it asks for none. The model is
 offered the tools rows register with `tools` (`agent:tools`, a broker; CodeAct's `python(code)`
 is the kernel row's registration, and the loop knows of no tool by name), through the
-provider's standard tool calling. The loop reads the list once, at its first request
+provider's standard tool calling. The loop reads the list at a conversation's first request
 (`tools.specs()`, in name order, so a row registering again after a restart changes nothing),
 after the tools its config `requires` have registered: a message typed while one has not (right
 after `/clear`, which restarts the kernel with the loop) shows a `note` that it waits, `wait`
 seconds at most, and one that never registers fails the message (`Unstarted`, `kind`
-`tools_missing`, the message kept and answered `FAILED`). It offers that list for its life,
-since the list is the start of what a model server caches. Each call runs through the tool its
+`tools_missing`, the message kept and answered `FAILED`). It keeps that list in the transcript
+as a `tools` entry, since the list is the start of what a model server caches (`toolset.py`).
+Before each message the model reads it reads the list again; a tool added, removed or redefined
+since is kept as another `tools` entry (`changed`) and told on that message, as a changed prompt
+is (`told`: each tool by name, the start of its description and its input's names), and the
+person sees `told the model its tools changed since the conversation began`. A tool the
+conversation has that is missing for less than `wait` seconds is taken for restarting, not
+removed. What each request offers is the model's to choose (`tool_changes`): `fixed`, the
+default and both shipped providers', offers the list the conversation began with for its life
+(an added tool comes with the next conversation, `/clear` or `/compact`, and a call naming it
+now says so; a call to a removed one answers that it was removed); `listed` offers the list as
+the transcript last recorded it. A resumed session reads the lists from its transcript, so it
+sends the same requests. Each call runs through the tool its
 name has now (`called`: a tool that raises, or answers with something other than `{"content":
 str, ...}`, answers with an error the model reads), one restarting waited for `wait` seconds,
 and only on `approval`'s yes (`approval.approve({"name", "input", "runs", "title", "lines",
