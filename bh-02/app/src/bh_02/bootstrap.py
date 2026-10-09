@@ -76,7 +76,8 @@ class _LayerFiles:
     directory (`memory`), which the model writes and the memory rows read. The jail keeps an
     input from rewriting the first and from reading the secrets, from writing or creating any
     secret under a root it may write, and from writing in a configuration directory or in bh-02's
-    own code under one; and lets it write the memory directory."""
+    own code under one; lets it write the memory directory; and every jail reads bh-02's own
+    code."""
 
     paths: tuple[str, ...] = ()
     credentials: tuple[str, ...] = ()
@@ -177,8 +178,9 @@ def code_directories(packages: Iterable[str]) -> tuple[str, ...]:
     directories, a single module's file, each as named and as it resolves. With an editable
     install (`uv run` in the checkout, `uv tool install --editable`) they are the workspace's
     `src/<package>` directories, which hold the modules bh-02 imports (a plugin a layer names
-    later is imported then): an input that wrote one would choose code bh-02 runs in its own
-    process. So no input may write them. A name that is not installed is left out."""
+    later is imported then; the extensions' worker imports cordis from one): an input that wrote
+    one would choose code bh-02 runs. So every jail reads them and no input may write them. A
+    name that is not installed is left out."""
     found: list[Path] = []
     for name in packages:
         try:
@@ -274,9 +276,10 @@ async def run(
     `env_file`), `secrets`, where the credential file may be and the sessions' state
     (CONTRACTS.md: layers; the jail denies an input both), `trusted`, bh-02's configuration
     directories (`config_directories`; the jail denies an input writing there), `code`, the
-    directories bh-02 runs its own code from (`code_directories`; the jail denies an input
-    writing them), and `memory`, the project's auto memory directory (`memory_directory`; the
-    jail lets an input write it, and none when empty), `sessions`, which binds this
+    directories bh-02 runs its own code from (`code_directories`; every jail reads them, and
+    denies an input writing them), and `memory`, the project's auto memory directory
+    (`memory_directory`; the jail lets an input write it, and none when empty), `sessions`, which
+    binds this
     directory's sessions and the running one (`sessions`; the default lists none), and
     `harness`, whose only job is to declare bh-02's dependency on `done`, so a chat row that
     never binds it is an ordinary "waiting on" stall and a `done` of the wrong shape is an

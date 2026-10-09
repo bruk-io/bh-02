@@ -282,9 +282,9 @@ def _launch(
     # no jailed input may read any of them. Another state root, of a run with another
     # `XDG_STATE_HOME`, is not known here. And bh-02's configuration (this run's and the default
     # one), whose files the host reads and trusts: no jailed input may write there. And where
-    # bh-02 runs its own code from, every package a layer may name as installed: no jailed input
-    # may write it. And the project's auto memory directory, made here so the jail can let an
-    # input write it.
+    # bh-02 runs its own code from, every package a layer may name as installed: every jail reads
+    # it (the extensions' worker imports cordis), and no jailed input may write it. And the
+    # project's auto memory directory, made here so the jail can let an input write it.
     credentials = credential_search()
     states = [listing.root, str(sessions.default_state_root())] if listing.root else []
     beside = [Path.cwd() / CREDENTIAL_FILE]

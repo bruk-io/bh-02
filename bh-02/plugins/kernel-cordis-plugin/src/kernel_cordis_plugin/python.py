@@ -119,10 +119,10 @@ def instructions_for(
     if reads:
         where += (
             f" The jail your code runs in reads only these trees: {', '.join(reads)}. Nothing else "
-            "exists in it, the person's home directory included (at most the path to an "
-            "interpreter installed under it): no ~/.gitconfig, ~/.ssh, dotfiles or caches, so don't "
-            "look for files outside these. git commits carry the person's name and email when git "
-            "on their machine knows them."
+            "exists in it, the person's home directory included (at most the paths to an "
+            "interpreter and to bh-02's own code installed under it): no ~/.gitconfig, ~/.ssh, "
+            "dotfiles or caches, so don't look for files outside these. git commits carry the "
+            "person's name and email when git on their machine knows them."
         )
         if confined and theirs:
             where += (

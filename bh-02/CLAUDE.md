@@ -111,8 +111,8 @@ CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for thi
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
 plain Python, not IPython), and under a Linux jail what its code can read (`kernel.reads()`:
-the system, the interpreter, the project; no home directory). After each input, the loop asks
-`notes` (`agent:notes`, a broker) what to tell the model with its result: each function rows
+the system, the interpreter, bh-02's own code, the project; no home directory). After each
+input, the loop asks `notes` (`agent:notes`, a broker) what to tell the model with its result: each function rows
 add there gets the input's code, its
 result and `kernel.touched()` (the project files Python in the input opened, heard by an audit
 hook in the worker; a shell command's own reads are not heard) and may add a note, never change
@@ -204,9 +204,12 @@ says which, after what the opening had to tell by then (that the REPL was starte
 why: told nowhere else). `instructions()` tells
 the model only the project's is its to edit. Only `brig_cordis_plugin` imports brig
 (`brig-one-adapter`). darwin is jailed by seatbelt (reads by denylist), Linux by bubblewrap
-(reads by allowlist: the system, the interpreter, the project; the policy, `spec_for`, is the
-same). The Linux jail's tests skip on darwin; `scripts/linux-jail-check` runs them in a
-container with bubblewrap.
+(reads by allowlist: the system, the interpreter, bh-02's own code, the project; the policy,
+`spec_for`, is the same). bh-02's own code is `layers.code`, the directory of every package it
+runs (`bh_02.bootstrap.code_directories`): with an editable install those are the workspace's
+`src/<package>` directories, outside the interpreter's trees, and the extensions' worker
+imports cordis from one, so a Linux jail reads them, read-only. The Linux jail's tests skip on
+darwin; `scripts/linux-jail-check` runs them in a container with bubblewrap.
 
 **The model's own plugins.** `extensions:extensions` loads the cordis components the model
 writes to `.bh-02/plugins/NAME.py` while bh-02 runs (looked at every half second; changed,
