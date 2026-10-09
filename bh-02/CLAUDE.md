@@ -320,9 +320,22 @@ The kernel never gets it:
   startup file that is a link to a key the jail hides. On Linux the directory is held like any
   write deny there (a mount the host can undo, the directories above it pinned). Not when bh-02
   runs in that directory or below it: denying it would leave the project read-only.
+- `brig:jail` denies writing bh-02's own code where it is under a root an input may write
+  (bh-02 working on its own checkout, an editable install, or run from a home the checkout is
+  in): `layers.code`, the directory of every package bh-02 runs (`bh_02`, cordis,
+  cordis_helpers, brig and each installed plugin's), each as named and as it resolves, found by
+  name from installed metadata (`bh_02.bootstrap.code_directories`; `importlib.util.find_spec`
+  imports nothing). bh-02 imports their modules in its own process (a plugin a layer names
+  later, say): an input that wrote one, or a module beside one, would choose code bh-02 runs.
+  By package, whatever the host's `sys.path` holds (a package an
+  import hook finds is on none, and a `src` that is the project is not denied as a host import
+  path), held on Linux like any write deny there. Not one the project is (bh-02 run in a
+  package's own directory), which would leave the project read-only; then the context plugin's
+  own rule holds: it reads its shipped file once, before any of the model's code runs, so what
+  an input wrote waits for the next start, as an edit to any module does.
 - An approved `--no-jail` input runs with the person's permissions and could open `local.env`
-  itself, or rewrite bh-02's config directory; only its environment is scrubbed, and every
-  input is put to the person, its code shown, before it runs.
+  itself, or rewrite bh-02's config directory or its own code; only its environment is
+  scrubbed, and every input is put to the person, its code shown, before it runs.
 
 Without a token the row still binds, and each step answers with an `authentication_failed` error
 naming the variable, `local.env` and `claude setup-token`.

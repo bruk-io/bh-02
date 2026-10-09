@@ -4,6 +4,7 @@ runs programs itself, the jail decides what it may touch, and unjailed every inp
 
 import asyncio
 import contextlib
+import importlib.metadata
 import json
 import os
 import shutil
@@ -16,8 +17,18 @@ from pathlib import Path
 
 import pytest
 
-from bh_02.bootstrap import config_directories, credential_files, layers, run, unreadable
-from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group
+import cordis
+import memory_cordis_plugin
+from bh_02.bootstrap import (
+    code_directories,
+    code_packages,
+    config_directories,
+    credential_files,
+    layers,
+    run,
+    unreadable,
+)
+from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group, self_modify_denied
 from cordis import Row
 from cordis.loader import boot
 from kernel_cordis_plugin import Kernel, KernelConfig, worker_argv
@@ -414,6 +425,7 @@ class _Layers:
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
+    code: tuple[str, ...] = ()
     memory: str = ""
 
 
@@ -554,6 +566,56 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
                 await extensions.stop()
     finally:
         shutil.rmtree(sockets, ignore_errors=True)
+
+
+def _code() -> tuple[str, ...]:
+    """The directories bh-02 runs its own code from, as the `bh-02` command finds them
+    (`layers.code`): with this editable install, the workspace's `src/<package>` directories."""
+    plugins = (ep.module for ep in importlib.metadata.entry_points(group="cordis.plugins"))
+    return code_directories(code_packages(plugins))
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_its_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bh-02 working on its own checkout (an editable install): the project is the workspace, and
+    the directories bh-02 runs its own code from are in it. bh-02 imports their modules in its own
+    process (a plugin a layer names later, say), so an input that rewrote one, or wrote a module
+    beside one, would choose code bh-02 runs. The jail denies writing every one of them
+    (`layers.code`), as it does a layer file: the module stays as it was, and no module of the
+    input's lands beside it or beside cordis. So it does when the project is a `src` directory of
+    the checkout: the host's `sys.path` names that directory, which, being the project, is not
+    denied as a host import path."""
+    shipped = Path(memory_cordis_plugin.__file__).with_name("memory.py")
+    checkout = next((p for p in shipped.parents if (p / "uv.lock").is_file()), None)
+    if checkout is None:
+        pytest.skip("bh-02 is not installed editable from its workspace here")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    planted = [
+        shipped.with_name("planted_by_an_input.py"),
+        Path(cordis.__file__).with_name("planted_by_an_input.py"),
+    ]
+    before = shipped.read_bytes()
+    # brig's self-modification list let through, so the jail makes no placeholder in the checkout
+    # (`.envrc/`, ...): what this is about is bh-02's own code alone
+    config = BrigConfig(allow=self_modify_denied(()))
+    inputs = [
+        _append_to(shipped, text=""),  # opened to append, nothing written: the real file stays as it was
+        *(_append_to(path, mode="x", text="import os\n") for path in planted),
+    ]
+    said: dict[Path, list[str]] = {}
+    try:
+        for root in (checkout, shipped.parent.parent):  # the workspace, then the plugin's `src`
+            jail = BrigJail(config, _Layers(code=_code()))
+            async with Kernel(jail, KernelConfig(root=str(root))) as kernel:
+                said[root] = [await kernel.run(code) for code in inputs]
+    finally:
+        for path in planted:
+            path.unlink(missing_ok=True)
+    for root, answers in said.items():
+        assert [a.splitlines()[-1].split()[0] for a in answers] == ["DENIED"] * len(inputs), (root, answers)
+    assert shipped.read_bytes() == before
 
 
 @pytest.mark.usefixtures("_needs_a_jail")

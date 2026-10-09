@@ -200,14 +200,18 @@ stand-in server (`-m "not real_launch"` deselects it).
 `credentials`: where the model rows look for `local.env`, above bh-02's install and environment,
 nearest first; and `secrets`: every one of those, the `local.env` beside and above the project,
 and the sessions' state directory, this run's and the default `~/.local/state/bh-02/sessions`
-(Claude Code's own config and tokens), which a jailed input can't read; and `trusted`: bh-02's
+(Claude Code's own config and tokens), which a jailed input can't read; `trusted`: bh-02's
 config directory, this run's `$XDG_CONFIG_HOME/bh-02` and the default `~/.config/bh-02`, as
 named and as resolved, where your models file and startup file are, which bh-02
 reads and trusts, so a jailed input can't write there when it is in the project (bh-02 run from
-your home directory); with `--no-jail` an input runs with your permissions, so one you
-approve could open or write them: only its environment is scrubbed; and `memory`: the
-project's auto memory directory, `$XDG_STATE_HOME/bh-02/projects/<project>/memory`, which the
-command line makes and a jailed input may write), `sessions` (the running session,
+your home directory); `code`: where bh-02 runs its own code from, the directory of every
+package a layer may name (`bh_02`, cordis, cordis_helpers, brig, each installed plugin's) as
+installed, as named and as resolved (`code_directories`), which a jailed input can't write when
+it is in the project (bh-02 working on its own checkout, an editable install: bh-02 imports its
+modules from there); with `--no-jail` an input runs with your permissions, so one you approve
+could open or write them: only its environment is scrubbed; and `memory`: the project's auto
+memory directory, `$XDG_STATE_HOME/bh-02/projects/<project>/memory`, which the command line
+makes and a jailed input may write), `sessions` (the running session,
 whose id the status bar shows) and `harness` (which follows the chat row's `done`, across a
 restart of the chat row).
 
@@ -326,9 +330,9 @@ depends on `transcript`, so after `/clear` or `/compact` it tells the new conver
 holds, so a resumed session (`--resume`) is not told again a note told with an earlier result.
 
 The kernel is a worker process started by the `jail` row. `brig:jail` confines it: writes
-only inside the project (and never to the layer files, the host's import paths, `.git/hooks`,
-`.git/config`, `.claude`, bh-02's config directory, ...), no network, credentials unreadable, and an environment
-scrubbed to a short allowlist; the programs an input starts are inside the same jail. A confined
+only inside the project (and never to the layer files, the host's import paths, bh-02's own
+code, `.git/hooks`, `.git/config`, `.claude`, bh-02's config directory, ...), no network,
+credentials unreadable, and an environment scrubbed to a short allowlist; the programs an input starts are inside the same jail. A confined
 input runs without asking. brig's host process, which starts the worker from outside the
 jail, keeps the environment bh-02 was launched with (brig's launcher passes it on, and bh-02
 never puts its own token there); a jailed input can't read it. `--no-jail` uses

@@ -290,9 +290,9 @@ async def echo_model() -> Effects:
 
 @component
 async def layers_seen(*, layers: Any, config: Mapping[str, Any]) -> Effects:
-    """Writes the `layers` value's `credentials`, `secrets` and `trusted` to `config["out"]` as
-    JSON: what the model rows search and what the jail keeps an input from, as the composition
-    was booted."""
+    """Writes the `layers` value's `credentials`, `secrets`, `trusted` and `code` to
+    `config["out"]` as JSON: what the model rows search and what the jail keeps an input from, as
+    the composition was booted."""
     import json
     from pathlib import Path
 
@@ -300,6 +300,7 @@ async def layers_seen(*, layers: Any, config: Mapping[str, Any]) -> Effects:
         "credentials": list(layers.credentials),
         "secrets": list(layers.secrets),
         "trusted": list(layers.trusted),
+        "code": list(layers.code),
     }
     Path(config["out"]).write_text(json.dumps(seen))
     return
