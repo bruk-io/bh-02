@@ -16,6 +16,13 @@ input, and that input is told its earlier variables are gone, and why, when the 
 After each input, `touched()` is the project's files it opened, read or written (the worker's
 audit hook): what a `notes` function is given to say what applies to them.
 
+bh-02's other tools are functions in the namespace (`tools.NAME(...)`): each input carries their
+specs, read from `tools` as it is sent, and the worker rebuilds `tools` from them; a call one
+makes comes back here and goes to `tools.call`, which runs it as the model's own calls run
+(the loop serves it: asked about, noted). The namespace is a view of the registry, never where a
+tool is registered. What changed in it since the model was last told is told before the input's
+own output (`_offered`).
+
 A new kernel runs its startup files before its first input (`KernelConfig.startup`), when its
 inputs are confined: the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
 `~/.config/bh-02/kernel.py`), then the project's (`.bh-02/kernel.py`). The project's is read by
@@ -93,6 +100,15 @@ class Runner(Protocol):
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
+
+
+@runtime_checkable
+class Calls(Protocol):
+    """What the Python process needs of the `tools` value (CONTRACTS.md: tools): the tools there
+    are, offered to an input as functions, and a call one makes run as the model's own are."""
+
+    def specs(self) -> Sequence[Mapping[str, Any]]: ...
+    async def call(self, name: str, input: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
 
 @runtime_checkable
@@ -274,10 +290,18 @@ class Kernel:
     manager: entering starts the worker in the runner, leaving stops it."""
 
     def __init__(
-        self, runner: Runner, config: KernelConfig, access: Access | None = None, *, rule: Rule
+        self,
+        runner: Runner,
+        config: KernelConfig,
+        access: Access | None = None,
+        *,
+        rule: Rule,
+        tools: Calls | None = None,
     ) -> None:
         self._runner = runner
         self._rule = rule
+        self._tools = tools  # bh-02's other tools, offered to an input as functions
+        self._told_tools: dict[str, str] | None = None  # what the model was last told of them
         self._config = config
         self._access = access  # asked before an input opens a project file, for what it asks about
         self._lock = asyncio.Lock()
@@ -406,6 +430,7 @@ class Kernel:
                     # never twice in one worker: an opening stopped part-way (Ctrl-C) is not rerun
                     self._fresh = False
                     prefix, self._restarted = prefix + await self._opening(), False
+                prefix += self._offered()
                 ran = await self._exchange(code)
             except ConnectionError as error:
                 why = self._ended()
@@ -550,7 +575,7 @@ class Kernel:
 
     async def _exchange(self, code: str) -> _Output:
         asking = list(self._access.asking()) if self._access is not None else []
-        self._send({"op": "exec", "code": code, "ask": asking})
+        self._send({"op": "exec", "code": code, "ask": asking, "tools": self._offered_specs()})
         try:
             return await self._until_done()
         except asyncio.CancelledError:
@@ -559,12 +584,16 @@ class Kernel:
 
     async def _until_done(self) -> _Output:
         """Read the worker until the input ends, answering what it asks on the way: whether the
-        input may open a file (`access.refusal`, in a thread: a row's answer may read files)."""
+        input may open a file (`access.refusal`, in a thread: a row's answer may read files), and
+        what a call to one of bh-02's tools answered (`tools.call`)."""
         while True:
             message = await self._receive()
             if message.get("op") == "ask":
                 refusal = await self._refusal(message)
                 self._send({"op": "answer", "id": message.get("id"), "refuse": refusal})
+            elif message.get("op") == "call":
+                answer = await self._called(message)
+                self._send({"op": "answer", "id": message.get("id"), **answer})
             elif message.get("op") == "done":
                 touched, refused = message.get("touched"), message.get("refused")
                 return _Output(
@@ -573,6 +602,49 @@ class Kernel:
                     tuple(str(p) for p in touched) if isinstance(touched, list) else (),
                     tuple(str(r) for r in refused) if isinstance(refused, list) else (),
                 )
+
+    async def _called(self, question: Mapping[str, Any]) -> dict[str, Any]:
+        """A call the input made to one of bh-02's tools (`tools.NAME(...)`), run as the model's
+        own calls are (`tools.call`): `{"content", "failed"}`. Never `python` itself, whose
+        input this is (the worker's code is the model's to run, so what it sends is read as
+        data)."""
+        name, input = question.get("name"), question.get("input")
+        if not isinstance(name, str) or not isinstance(input, Mapping):
+            return {"content": "error: a call names a tool and gives its arguments by name", "failed": True}
+        if name == PYTHON["name"] or self._tools is None:
+            return {"content": f"error: there is no {name} tool to call from an input", "failed": True}
+        answer = await self._tools.call(name, input)
+        return {"content": str(answer.get("content", "")), "failed": bool(answer.get("failed"))}
+
+    def _offered_specs(self) -> list[Mapping[str, Any]]:
+        """bh-02's tools as an input is offered them: every one but `python`."""
+        if self._tools is None:
+            return []
+        return [spec for spec in self._tools.specs() if spec.get("name") != PYTHON["name"]]
+
+    def _offered(self) -> str:
+        """What the model is told before an input's own output of bh-02's tools as functions in
+        its namespace, when that changed since it was last told: which there are, the first
+        time; then which were added, redefined or removed. "" when nothing changed."""
+        now = {str(spec.get("name")): str(spec.get("description", "")) for spec in self._offered_specs()}
+        before, self._told_tools = self._told_tools, now
+        if before is None:
+            if not now:
+                return ""
+            listed = ", ".join(f"tools.{name}" for name in sorted(now))
+            return (
+                f"(bh-02's other tools are functions in your namespace: {listed}; "
+                "help(tools.NAME) says what one takes)\n"
+            )
+        added = sorted(now.keys() - before.keys())
+        removed = sorted(before.keys() - now.keys())
+        redefined = sorted(name for name in now.keys() & before.keys() if now[name] != before[name])
+        said = [
+            f"{', '.join(f'tools.{name}' for name in names)} {what}"
+            for names, what in ((added, "added"), (redefined, "redefined"), (removed, "removed"))
+            if names
+        ]
+        return f"(bh-02's tools in your namespace changed: {'; '.join(said)})\n" if said else ""
 
     async def _refusal(self, question: Mapping[str, Any]) -> str | None:
         """What `access` says about the file the worker asks about; None (go ahead) when there is

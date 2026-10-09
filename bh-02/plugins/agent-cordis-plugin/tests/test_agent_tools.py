@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from agent_cordis_plugin import (
+    DECLINED,
     FAILED,
     LoopConfig,
     LoopModel,
@@ -71,18 +72,19 @@ def _text(said: str) -> Json:
 
 
 class _Approval:
-    """An `approval` rule that lets nothing run unasked, and an `output` whose person says yes to
-    everything; it keeps what was asked."""
+    """An `approval` rule that lets nothing run unasked, and an `output` whose person says
+    `answer` (yes) to everything; it keeps what was asked."""
 
-    def __init__(self) -> None:
+    def __init__(self, answer: bool = True) -> None:
         self.asked: list[Any] = []
+        self.answer = answer
 
     def unasked(self, request: Any) -> bool:
         return False
 
     async def confirm(self, request: Any) -> bool:
         self.asked.append(request)
-        return True
+        return self.answer
 
     async def approve(self, request: Any) -> bool:  # the loop's own, as `Asked` gives it
         return self.unasked(request) or await self.confirm(request)
@@ -170,14 +172,15 @@ async def test_a_call_answers_what_its_tool_said_and_a_tool_s_fault_is_the_model
     def tool(name: str) -> Any:
         return broker.get(name)
 
-    assert await called(tool("echo"), "echo", {"text": "hi"}) == ("echo: hi", ("/p/said.txt",))
+    assert await called(tool("echo"), "echo", {"text": "hi"}) == ("echo: hi", ("/p/said.txt",), False)
     assert await called(tool("fails"), "fails", {}) == (
         "error: the fails tool failed (OSError: disk gone); tell the person",
         (),
+        True,
     )
-    content, touched = await called(tool("mumbles"), "mumbles", {})
+    content, touched, failed = await called(tool("mumbles"), "mumbles", {})
     assert content.startswith("error: the mumbles tool answered with something other than its result")
-    assert touched == ()
+    assert touched == () and failed
 
 
 def test_a_call_is_shown_as_its_tool_says_else_as_its_input() -> None:
@@ -433,3 +436,48 @@ async def test_a_conversation_begun_before_the_loop_kept_its_tools_begins_its_li
     events = await _said(LoopModel(model, broker, history, _Approval()), "new")
     assert _conversation(history) == [{"role": "tools", "tools": [ECHO]}]
     assert not [e for e in events if e["type"] == "note"]
+
+
+async def test_a_call_a_tool_makes_with_no_loop_serving_fails_saying_so() -> None:
+    broker = ToolBroker()
+    broker.register(ECHO, _echo)
+    assert await broker.call("echo", {"text": "hi"}) == {
+        "content": "error: no conversation is running to call echo in",
+        "failed": True,
+    }
+
+
+async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_notes_told_with_the_call_it_came_from() -> None:
+    """An input's `tools.echo(...)` (here a tool `outer` whose run calls `echo` through the
+    broker): put to `approval` and asked of `notes` as the model's own call is, its notes told
+    with the call it was made from; a declined, unknown or malformed one is why it did not run."""
+    broker, approval, history = ToolBroker(), _Approval(), MemoryTranscript()
+    answers: list[Any] = []
+
+    async def outer(input: Any) -> Json:
+        answers.append(await broker.call("echo", {"text": "inside"}))
+        answers.append(await broker.call("nothing", {}))
+        answers.append(await broker.call("echo", {"words": "no text"}))
+        return {"content": "outer done"}
+
+    broker.register(ECHO, _echo)
+    broker.register(_spec("outer"), outer)
+
+    def said(call: Any) -> str:
+        return f"noted {call['name']}: {call['result']}" if call["touched"] else ""
+
+    model = _Scripted([_call("c1", "outer")], [_text("done")])
+    looped = LoopModel(model, broker, history, approval, notes=[said])
+    broker.serve(looped.nested)
+    await _said(looped, "go")
+    assert answers == [
+        {"content": "echo: inside", "failed": False},
+        {"content": "error: there is no nothing tool now", "failed": True},
+        {"content": "error: echo needs `text`", "failed": True},
+    ]
+    assert [request["name"] for request in approval.asked] == ["outer", "echo"]  # each put to approval
+    (answer,) = [m for m in history.messages if m["role"] == "tool"]
+    assert answer["notes"] == ["noted echo: echo: inside"]  # told with the call it came from
+    assert answer["content"] == "outer done\n\nnoted echo: echo: inside"
+    refused = LoopModel(_Scripted(), broker, MemoryTranscript(), _Approval(answer=False))
+    assert await refused.nested("echo", {"text": "hi"}) == {"content": DECLINED, "failed": True}

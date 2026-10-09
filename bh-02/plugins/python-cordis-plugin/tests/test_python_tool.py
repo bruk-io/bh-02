@@ -18,6 +18,7 @@ from cordis import Effects, Runtime, bind, component
 from python_cordis_plugin import (
     PYTHON,
     Access,
+    Calls,
     Kernel,
     KernelConfig,
     instructions_for,
@@ -28,11 +29,16 @@ from python_cordis_plugin import (
 from runner_cordis_plugin import UNENFORCED, Approval, Mechanism, Runner, Unjailed
 
 
-def _kernel(mechanism: Mechanism | Runner, config: KernelConfig, access: Access | None = None) -> Kernel:
+def _kernel(
+    mechanism: Mechanism | Runner,
+    config: KernelConfig,
+    access: Access | None = None,
+    tools: Calls | None = None,
+) -> Kernel:
     """The python tool's process as the python row builds it: started by a runner over
     `mechanism`, its inputs confined as the approval rule says of that runner."""
     runner = mechanism if isinstance(mechanism, Runner) else Runner(mechanism)
-    return Kernel(runner, config, access, rule=Approval(runner))
+    return Kernel(runner, config, access, rule=Approval(runner), tools=tools)
 
 
 async def test_a_traceback_shows_each_line_and_the_input_it_came_from() -> None:
@@ -979,6 +985,12 @@ class _Brokers:
         self.tools[str(spec["name"])] = (spec, run, how)
         return lambda: self.tools.pop(str(spec["name"]), None)
 
+    def specs(self) -> list[Mapping[str, Any]]:
+        return [spec for spec, _, _ in self.tools.values()]
+
+    async def call(self, name: str, input: Mapping[str, Any]) -> Mapping[str, Any]:
+        return {"content": f"no loop here to call {name}", "failed": True}
+
     def add(self, name: str, section: Any) -> Any:
         self.sections[name] = section
         return lambda: self.sections.pop(name, None)
@@ -1261,3 +1273,72 @@ async def test_only_the_kinds_of_opening_a_row_asks_about_are_asked_and_only_in_
     async with _kernel(Unjailed(), KernelConfig(root=str(project)), none) as k:
         assert await k.run("open('new.txt', 'w').write('again')") == "5"
     assert none.asked == []
+
+
+class _Offering:
+    """The `tools` value as an input's functions see it: the specs there are (`python` among
+    them, which an input is never offered), and each call run as the loop would, kept here."""
+
+    def __init__(self, *names: str) -> None:
+        self.names = list(names)
+        self.calls: list[tuple[str, Mapping[str, Any]]] = []
+
+    def specs(self) -> list[Mapping[str, Any]]:
+        said = {
+            "type": "object",
+            "properties": {"text": {"type": "string"}, "times": {"type": "integer"}},
+            "required": ["text"],
+        }
+        return [
+            PYTHON,
+            *({"name": name, "description": f"The {name} tool.", "parameters": said} for name in self.names),
+        ]
+
+    async def call(self, name: str, input: Mapping[str, Any]) -> Mapping[str, Any]:
+        self.calls.append((name, dict(input)))
+        if input.get("text") == "no":
+            return {"content": "denied: the person said no to this call", "failed": True}
+        return {"content": f"{name}: {input.get('text')}", "failed": False}
+
+
+async def test_bh_02_s_other_tools_are_functions_an_input_calls_as_the_model_would() -> None:
+    """Every registered tool but `python` is `tools.NAME(...)` in the namespace: a call goes to
+    the `tools` value (which runs it as the model's own calls run), its result comes back as
+    text, and one that did not run raises `tools.Error`. The first input says which there are;
+    a later one says what changed; an input that binds `tools` itself keeps its own."""
+    offering = _Offering("echo")
+    async with _kernel(Unjailed(), KernelConfig(), tools=offering) as k:
+        first = await k.run("tools.echo(text='hi')")
+        assert first == (
+            "(bh-02's other tools are functions in your namespace: tools.echo; help(tools.NAME) "
+            "says what one takes)\n'echo: hi'"
+        )
+        assert offering.calls == [("echo", {"text": "hi"})]
+        caught = await k.run(
+            "try:\n    tools.echo(text='no')\nexcept tools.Error as error:\n    print(error)"
+        )
+        assert caught == "denied: the person said no to this call"
+        assert "no tool 'python'" in await k.run("tools.python")  # its own tool is not offered
+        assert "The echo tool." in await k.run(
+            "help(tools.echo)"
+        ) and "text (string, required)" in await k.run("print(tools.echo.__doc__)")
+        offering.names = ["shout"]
+        changed = await k.run("sorted(dir(tools))")
+        assert changed == (
+            "(bh-02's tools in your namespace changed: tools.shout added; tools.echo removed)\n['shout']"
+        )
+        assert await k.run("tools = 'mine'") == "(no output)"
+        offering.names = ["echo", "shout"]
+        kept = await k.run("tools")
+        assert kept.endswith("'mine'")  # bound by an input: left as it is
+        offering.names = []
+        assert (
+            await k.run("del tools")
+            == "(bh-02's tools in your namespace changed: tools.echo, tools.shout removed)"
+        )
+        assert "NameError" in await k.run("tools")  # none to offer: no `tools` at all
+
+
+async def test_with_no_tools_to_offer_the_namespace_has_no_tools() -> None:
+    async with _kernel(Unjailed(), KernelConfig(), tools=_Offering()) as k:
+        assert await k.run("'tools' in globals()") == "False"

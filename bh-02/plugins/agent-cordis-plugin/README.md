@@ -7,7 +7,7 @@ and asks `notes`, and `/compact`, which begins a new conversation from the model
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `notes` (iterated), `executor` (`run`) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`, `serve`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `notes` (iterated), `executor` (`run`) |
 | `agent:tools` | `tools`: a `ToolBroker`, the tools rows `acquire` with `register(spec, run, *, runs, show)`, offered in name order | |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
 | `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch, then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
@@ -50,8 +50,13 @@ is answered with text saying so, runs nothing, and is put to nobody. A turn stop
 still answers every call: the one with its tool when the stop came with `interrupted: ... it may
 have partly run`, one that had its result (the stop came while its notes were made or the prompt
 read) with that result, the rest (the one at the approval question included) with `not run:
-...`. The transcript and the tools are rows of their own, so the history and the namespace
-outlive the loop: replace `model` (or the ui) and the loop reloads while the conversation
+...`. A call a tool's own call makes (an input's `tools.NAME(...)`) runs the same way: the loop
+row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.call`), so it is put
+to the rule and the person as the model's own would be, run through the tool its name has now,
+and given to `notes`, whose notes go with the result of the call that made it (`_nested`); it
+answers `{"content", "failed"}`, `failed` when it did not run (no such tool, its input malformed,
+a no) or the tool failed. The transcript and the tools are rows of their own, so the history and
+the namespace outlive the loop: replace `model` (or the ui) and the loop reloads while the conversation
 carries on.
 
 After each call that ran, the loop calls every function in `notes` with

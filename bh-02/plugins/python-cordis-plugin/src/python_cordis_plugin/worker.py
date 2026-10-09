@@ -15,7 +15,12 @@ names the kinds (`read`, `write`) the host wants to be asked about: before the i
 opens such a file to one of them, the worker sends ``{"op": "ask", "id", "kind", "path"}`` and
 waits for ``{"op": "answer", "id", "refuse"}``, once per file and kind per input; a `refuse` that
 is text stops the open with a PermissionError carrying it, and `refused` is every such refusal,
-so the model is told of it even when the input's code caught the error. A worker nobody says hello to
+so the model is told of it even when the input's code caught the error. `tools` (each input's) are
+bh-02's tools other than `python`, as their specs: the namespace's `tools` is rebuilt from them
+(`_Offered`), each a function that sends ``{"op": "call", "id", "name", "input"}`` and waits for
+``{"op": "answer", "id", "content", "failed"}``, the host running it as the model's own call runs
+(asked about, noted), and returns `content`, or raises `tools.Error` with it when `failed`. A
+worker nobody says hello to
 (its host was killed while starting it) exits once its parent is gone, or after `_HELLO_S` (a
 second argument overrides it), rather than wait in `accept` for ever; one whose host disconnects
 exits too, even mid-input.
@@ -28,6 +33,7 @@ running, SIGINT is ignored.
 import ast
 import contextlib
 import errno
+import inspect
 import io
 import json
 import linecache
@@ -54,6 +60,85 @@ _TOUCHED = 1_000
 _HELLO_S = 60.0  # the host says hello within milliseconds of the worker listening
 _READ, _WRITE = "read", "write"  # the kinds of opening the host may ask to be asked about
 _LOOK_S = 0.5  # how often a worker waiting for its hello checks that its parent is still there
+_TOOLS = "tools"  # the name an input calls bh-02's other tools by: `tools.NAME(...)`
+
+
+class ToolError(Exception):
+    """A call to one of bh-02's tools that did not run (declined, unknown, its arguments wrong)
+    or failed: why, as bh-02 says it. `tools.Error` in an input."""
+
+
+def _function(
+    spec: Mapping[str, Any], ask: Callable[[Mapping[str, Any]], dict[str, Any]]
+) -> Callable[..., str]:
+    """One of bh-02's tools as a function of its arguments (keyword arguments, as its spec names
+    them): the host runs the call, and its result is returned as text, or raised as a ToolError
+    when it did not run or failed."""
+    name = str(spec.get("name"))
+    properties: Mapping[str, Any] = {}
+    required: list[Any] = []
+    match spec.get("parameters"):
+        case {"properties": Mapping() as given, "required": list() as named}:
+            properties, required = given, named
+        case {"properties": Mapping() as given}:
+            properties = given
+
+    def call(**arguments: Any) -> str:
+        answer = ask({"op": "call", "name": name, "input": arguments})
+        content = str(answer.get("content", ""))
+        if answer.get("failed"):
+            raise ToolError(content)
+        return content
+
+    call.__name__ = call.__qualname__ = name
+    wanted = [
+        f"  {key} ({(each or {}).get('type', 'any') if isinstance(each, Mapping) else 'any'}"
+        f"{', required' if key in required else ''})"
+        for key, each in properties.items()
+    ]
+    call.__doc__ = "\n".join(
+        [str(spec.get("description", "")), *(["", "Arguments:", *wanted] if wanted else [])]
+    )
+    call.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+        [
+            inspect.Parameter(
+                str(key),
+                inspect.Parameter.KEYWORD_ONLY,
+                default=inspect.Parameter.empty if key in required else None,
+            )
+            for key in properties
+            if str(key).isidentifier()
+        ]
+    )
+    return call
+
+
+class _Offered:
+    """`tools` in an input's namespace: bh-02's tools other than `python`, each a function
+    (`tools.NAME(arg=...)`, `help(tools.NAME)`); `tools.Error` is what one raises when its call
+    did not run or failed. A view of bh-02's tools, rebuilt before each input: never where a tool
+    is made."""
+
+    Error = ToolError
+
+    def __init__(self, functions: Mapping[str, Callable[..., str]]) -> None:
+        self._functions = dict(functions)
+
+    def __getattr__(self, name: str) -> Callable[..., str]:
+        try:
+            return self._functions[name]
+        except KeyError:
+            listed = ", ".join(sorted(self._functions)) or "none"
+            raise AttributeError(f"bh-02 has no tool {name!r} now; its tools here: {listed}") from None
+
+    def __dir__(self) -> list[str]:
+        return sorted(self._functions)
+
+    def __repr__(self) -> str:
+        listed = ", ".join(sorted(self._functions)) or "none"
+        return (
+            f"<bh-02's tools: {listed}; tools.NAME(arg=...) calls one, help(tools.NAME) says what it takes>"
+        )
 
 
 def split_last_expression(code: str, name: str = "<input>") -> tuple[ast.Module, ast.Expression | None]:
@@ -203,7 +288,28 @@ class _Kernel:
                 self._asking = (
                     frozenset(str(kind) for kind in asked) if isinstance(asked, list) else frozenset()
                 )
+                self._offer(message.get("tools"))
                 self._channel.send(self._run(str(message.get("code", ""))))
+
+    def _offer(self, specs: object) -> None:
+        """Rebuild the namespace's `tools` from the specs the host sent with the input (none: no
+        `tools` at all, so the namespace holds only what inputs put there), unless an input bound
+        `tools` to something of its own, which is left as it is."""
+        if not isinstance(self._namespace.get(_TOOLS, _Offered({})), _Offered):
+            return
+        given = specs if isinstance(specs, list) else []
+        if not given:
+            self._namespace.pop(_TOOLS, None)
+            return
+        self._namespace[_TOOLS] = _Offered(
+            {
+                str(spec["name"]): _function(spec, self._channel.ask)
+                for spec in given
+                if isinstance(spec, Mapping)
+                and isinstance(spec.get("name"), str)
+                and spec["name"].isidentifier()
+            }
+        )
 
     def _run(self, code: str) -> dict[str, Any]:
         out = io.StringIO()

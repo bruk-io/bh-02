@@ -9,7 +9,7 @@ Python REPL of its own that persists for the run.
 ## What an input can do
 
 Each call is an input to one Python process, the one the runner started. It is plain Python, not
-IPython, and nothing of bh-02's is in its namespace. An input:
+IPython, and nothing of bh-02's is in its namespace but `tools` (below). An input:
 
 - reads and edits files with `open` or `pathlib`;
 - runs programs (`git`, a test runner, `python`) with `subprocess`, in the project directory;
@@ -22,6 +22,33 @@ What comes back is what the input printed, and the value of its last expression.
 and error is capped at 20,000 characters: a longer one keeps its first 6,000 and last 14,000,
 and the whole is saved to a file the cut names. A traceback names each line as `<input N>`, so the
 model sees the line that failed, even in a function it defined inputs ago.
+
+## bh-02's other tools, from an input
+
+Every other tool bh-02 offers the model (a layer row's, an extension's) is also a function in the
+namespace: `tools.NAME(arg=...)`. A call goes back to bh-02 and runs as the model's own call to
+that tool would: put to the approval rule (and so to you, when it is unjailed or runs in bh-02's
+own process), run by the tool, then given to `notes`, whose notes reach the model with the result
+of the input that made the call. It returns the tool's result as text, and raises `tools.Error`
+when the call did not run or failed. `help(tools.NAME)` shows what one takes. Each input is
+sent the tools as they are, and the first input that sees a change says so before its output, so
+a tool added mid-conversation can be called from code at once, even where the model's own list
+of tools stays as the conversation began (TASK-0057's `fixed` providers). The namespace is a
+view of the registry, never where a tool is registered.
+
+A function the model defines in an input and a registered tool differ in what holds them:
+
+| | A function defined in an input | A registered tool |
+|---|---|---|
+| Where it lives | the Python process's namespace | `tools`, the registry a row (or an extension) registers into |
+| How long | until the process ends (`/clear`, a restart, a resume) | as long as its row: an extension's lasts as long as its file, across sessions |
+| Who can call it | later inputs | the model directly, and inputs as `tools.NAME(...)` |
+| Asked about, noted | no: the input that calls it was | each call, as any tool call |
+| Where it runs | in the Python process | where its row says: an extension's in its worker, a layer row's in bh-02 |
+
+A helper worth keeping between sessions goes in the project's startup file; a capability the
+model should have as a tool, or that should run outside the Python process, is an extension's
+tool.
 
 ## How long the namespace lasts
 

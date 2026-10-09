@@ -117,6 +117,31 @@ async def test_unjailed_inputs_share_a_namespace_of_plain_python_and_each_is_ask
     assert not (tmp_path / "declined.txt").exists()  # a no ran nothing
 
 
+async def test_an_input_calls_another_row_s_tool_as_a_function_put_to_the_person_as_the_model_s_call_is(
+    composition: Callable[..., Path],
+) -> None:
+    """Booted from the shipped layers with a layer row's `echo` tool: an input calls it as
+    `tools.echo(...)`, and the call goes through the loop as the model's own would, put to the
+    person (it runs in bh-02's own process) and run only on a yes; a no raises `tools.Error`."""
+    patch = _inputs(
+        composition,
+        "print(tools.echo(text='from code'))",
+        "try:\n    tools.echo(text='again')\nexcept tools.Error as error:\n    print('not run:', error)",
+        extra='[[plugin]]\nid = "echo"\nuse = "fragile:echo_tool"\n',
+    )
+    _answers(True, True, True, False)  # the first input, its call; the second input, not its call
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+    out = _shown()
+    import fragile
+
+    assert [request["name"] for request in fragile.ASKED] == ["python", "echo", "python", "echo"]
+    echo = fragile.ASKED[1]
+    assert echo["runs"] == "host" and echo["input"] == {"text": "from code"}
+    assert "[0] (bh-02's other tools are functions in your namespace: tools.echo;" in out
+    assert "echo: from code" in out
+    assert "[1] not run: denied: the person said no to this call" in out
+
+
 async def test_unjailed_an_input_and_an_extension_are_both_put_to_the_person_by_the_approval_row(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:

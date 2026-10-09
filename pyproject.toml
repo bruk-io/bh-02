@@ -320,4 +320,7 @@ allow = [
     "bh_02.cli:sessions_command", "bh_02.cli:update_layer_command", "models_cordis_plugin.claude_code.detach:main",
     # the documentation site's MkDocs hook: MkDocs calls these by name (mkdocs.yml `hooks`)
     "bh_docs:on_config", "bh_docs:on_page_markdown",
+    # what a call from an input to one of bh-02's tools raises (`tools.Error`): the model reads its
+    # name in a traceback, so it reads as an error's, not a private name
+    "python_cordis_plugin.worker:ToolError",
 ]

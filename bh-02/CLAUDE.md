@@ -67,7 +67,9 @@ each request offers the list the model's `tool_changes` asks for (both shipped p
 start holds and a resume sends the same requests. The shipped tool is `python(code)`: the
 python row (`python:tool`) starts a persistent Python process in the runner, registers `python`
 (its call runs the code as an input) and adds what the model is told about it as the `system`
-section `python`; it binds no key. To the model it is a Python REPL of its own that persists:
+section `python`; it binds no key. Every other registered tool is a function in that namespace
+(`tools.NAME(...)`), whose call the loop runs as its own (served through `tools.serve`, so put to
+the approval rule and to `notes`). To the model it is a Python REPL of its own that persists:
 the namespace holds what its inputs put there, and nothing an input does reaches back into
 bh-02 but the extensions it writes (below); an input reads and writes files with `open`/`pathlib` and runs
 programs with `subprocess`, and the jail decides what it may touch.

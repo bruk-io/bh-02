@@ -11,8 +11,8 @@ runner for `/release`. It binds no key. Whether an input runs unasked is the `ap
 |---|---|---|
 | `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `Kernel`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file) |
 
-`Kernel` (`client.py`) is the value the row enters: `call(input)`, `instructions()`, `run(code)
--> str`, `confined` (the `approval` rule's), `report()`, `notice()` and `reads()` (its own start's:
+`Kernel` (`client.py`) is the value the row enters (given `tools` too, the `Calls` it offers
+an input: `specs()`, `call(name, input)`): `call(input)`, `instructions()`, `run(code) -> str`, `confined` (the `approval` rule's), `report()`, `notice()` and `reads()` (its own start's:
 the process it last started, never another program the runner started), `stopped()`,
 `touched()`.
 

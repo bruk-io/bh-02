@@ -161,6 +161,21 @@ def answers(*these: bool) -> None:
     ASKED.clear()
 
 
+@component
+async def echo_tool(*, tools: Any) -> Effects:
+    """A layer row's tool, run in bh-02's own process: `echo(text)`."""
+
+    async def run(input: Mapping[str, Any]) -> Mapping[str, Any]:
+        return {"content": "echo: " + str(input["text"]), "touched": []}
+
+    spec = {
+        "name": "echo",
+        "description": "Echo the text.",
+        "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+    }
+    yield acquire(tools.register, spec, run, runs="host")
+
+
 class Record(Drop):
     async def show(self, chunks: AsyncIterator[Mapping[str, Any]]) -> None:
         async for chunk in chunks:

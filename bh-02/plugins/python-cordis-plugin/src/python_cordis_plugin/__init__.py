@@ -2,13 +2,14 @@
 composition's `runner`, and the `python(code)` tool, which runs an input in it, registered with
 `tools`."""
 
-from python_cordis_plugin.client import Access, Jailed, Kernel, KernelConfig, Rule, Runner, worker_argv
+from python_cordis_plugin.client import Access, Calls, Jailed, Kernel, KernelConfig, Rule, Runner, worker_argv
 from python_cordis_plugin.python import PYTHON, instructions_for, shown_call
 from python_cordis_plugin.wiring import tool
 
 __all__ = [
     "PYTHON",
     "Access",
+    "Calls",
     "Jailed",
     "Kernel",
     "KernelConfig",

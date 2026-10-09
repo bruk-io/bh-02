@@ -114,25 +114,25 @@ async def loop(
     tools rows register (`tools`), read at a conversation's first request once those `requires`
     names have registered; each call runs at once when the `approval` rule says it runs unasked
     (in a runner that confines it), else only on the person's yes (`output.confirm`). After each
-    call, the functions in `notes` may add a note to its result. The prompt is read, and `notes`
-    asked, on `executor`. A new ui reloads this row (through `output`), which holds nothing: the
-    transcript, the tools (the Python process's namespace among them) and the call in flight on
-    `executor` are rows of their own."""
-    yield bind(
-        "loop",
-        LoopModel(
-            model,
-            tools,
-            transcript,
-            Asked(approval, output),
-            config.max_nudges,
-            system,
-            notes,
-            executor=executor,
-            requires=config.requires,
-            wait=config.wait,
-        ),
+    call, the functions in `notes` may add a note to its result. A call an input makes from the
+    Python process (`tools.NAME(...)`) runs the same way, served through `tools.serve`. The
+    prompt is read, and `notes` asked, on `executor`. A new ui reloads this row (through
+    `output`), which holds nothing: the transcript, the tools (the Python process's namespace
+    among them) and the call in flight on `executor` are rows of their own."""
+    looped = LoopModel(
+        model,
+        tools,
+        transcript,
+        Asked(approval, output),
+        config.max_nudges,
+        system,
+        notes,
+        executor=executor,
+        requires=config.requires,
+        wait=config.wait,
     )
+    yield bind("loop", looped)
+    yield acquire(tools.serve, looped.nested)  # an input's `tools.NAME(...)` runs as the model's calls do
 
 
 @component(provides=("tools",))

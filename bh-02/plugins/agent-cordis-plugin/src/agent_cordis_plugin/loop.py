@@ -115,11 +115,13 @@ class Tool(Protocol):
 @runtime_checkable
 class Tools(Protocol):
     """What the loop needs of the `tools` value: the specs to offer (in name order), the tool a
-    call names, and a wait for the ones it requires."""
+    call names, a wait for the ones it requires, and the seam through which it runs the calls a
+    tool's own call makes (`serve`, CONTRACTS.md: tools)."""
 
     def specs(self) -> Sequence[Json]: ...
     def get(self, name: str) -> Tool | None: ...
     async def ready(self, names: Iterable[str], timeout: float) -> tuple[str, ...]: ...
+    def serve(self, call: Callable[[str, Json], Awaitable[Json]]) -> Callable[[], None]: ...
 
 
 type Note = Callable[[Json], str]
@@ -368,22 +370,23 @@ def shown(tool: Tool, name: str, input: Json) -> dict[str, Any]:
     return title | {"lines": lines, "language": "json"}
 
 
-async def called(tool: Tool, name: str, input: Json) -> tuple[str, tuple[str, ...]]:
-    """One call run through `tool`: what the model reads, and the files it opened. A tool that
-    fails, or answers with something other than `{"content": str, ...}`, answers with an error
-    the model reads, so one tool's fault is never the reply's."""
+async def called(tool: Tool, name: str, input: Json) -> tuple[str, tuple[str, ...], bool]:
+    """One call run through `tool`: what the model reads, the files it opened, and whether the
+    tool failed. A tool that fails, or answers with something other than `{"content": str,
+    ...}`, answers with an error the model reads, so one tool's fault is never the reply's."""
     try:
         ran = await tool.run(input)
     except Exception as error:
-        return f"error: the {name} tool failed ({type(error).__name__}: {error}); tell the person", ()
+        return f"error: the {name} tool failed ({type(error).__name__}: {error}); tell the person", (), True
     content = ran.get("content") if isinstance(ran, Mapping) else None
     if not isinstance(content, str):
         return (
             f"error: the {name} tool answered with something other than its result as text; tell the person",
             (),
+            True,
         )
     touched = ran.get("touched") or ()
-    return content, tuple(str(path) for path in touched) if isinstance(touched, list | tuple) else ()
+    return content, tuple(str(path) for path in touched) if isinstance(touched, list | tuple) else (), False
 
 
 class LoopModel:
@@ -462,6 +465,7 @@ class LoopModel:
         self._clock = clock
         self._ready = False  # whether the tools `requires` names have registered, once
         self._missing: dict[str, float] = {}  # a tool the conversation has, missing since when
+        self._nested: list[str] = []  # what `notes` said of the calls the running call made (`nested`)
 
     def _prompt(self) -> str:
         """The system prompt as it reads now. Run on `executor` (`_told`)."""
@@ -571,6 +575,26 @@ class LoopModel:
             )
         return malformed(tool.spec, call["input"]) or tool
 
+    async def nested(self, name: str, input: Json) -> Json:
+        """A call a tool's own call makes (an input's `tools.NAME(...)`, CONTRACTS.md: tools,
+        `serve`), run as the model's are: through the tool its name has now, if its input fits,
+        once `approval` says yes, then asked of `notes`, whose notes are told with the call it
+        was made from. Answers `{"content", "failed"}`: what the caller reads, and whether that
+        is why it did not run or failed rather than its result."""
+        tool = self._tools.get(name)
+        if tool is None:
+            return {"content": f"error: there is no {name} tool now", "failed": True}
+        if (why := malformed(tool.spec, input)) is not None:
+            return {"content": why, "failed": True}
+        if not await self._approval.approve(
+            {"name": name, "input": input, "runs": tool.runs, **shown(tool, name, input)}
+        ):
+            return {"content": DECLINED, "failed": True}
+        result, touched, failed = await called(tool, name, input)
+        ran = {"name": name, "input": input, "result": result, "touched": touched}
+        self._nested += await self._executor.run(partial(noted, tuple(self._notes or ()), ran))
+        return {"content": result, "failed": failed}
+
     def _unanswered(self, message: str, dated: str | None, why: str) -> None:
         """Keep the person's message, answered with `why`: the reply ended before the model was asked."""
         self._transcript.append(_asked(message, dated, ""))
@@ -635,8 +659,8 @@ class LoopModel:
                         ):
                             result = DECLINED
                         else:
-                            running = True
-                            result, touched = await called(tool, name, input)
+                            running, self._nested = True, []
+                            result, touched, _ = await called(tool, name, input)
                             running = False
                             ran = {"name": name, "input": input, "result": result, "touched": touched}
                             # off the event loop too (an on-touch section reads rule files), over
@@ -650,6 +674,8 @@ class LoopModel:
                             except asyncio.CancelledError:
                                 notes = await asked
                                 raise
+                            # what the calls it made said too: each marked its note as told
+                            notes, self._nested = sorted([*notes, *self._nested]), []
                         note, shown_told = await self._told()
                         said = "\n\n".join([result, *notes, *([note] if note else [])])
                         self._transcript.append(_answer(call, said, notes))

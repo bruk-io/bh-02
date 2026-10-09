@@ -40,8 +40,10 @@ async def test_loop_binds_a_model_over_what_it_was_given() -> None:
             config=LoopConfig(),
         )  # type: ignore[arg-type]
     )
-    assert [(e.name, e.args[0]) for e in effects] == [("bind", "loop")]
-    assert isinstance(effects[0].args[1], LoopModel)
+    assert [e.name for e in effects] == ["bind", "acquire"]
+    looped = effects[0].args[1]
+    assert effects[0].args[0] == "loop" and isinstance(looped, LoopModel)
+    assert effects[1].args[1] == looped.nested  # serves the calls an input makes (`tools.serve`)
 
 
 async def test_memory_binds_an_empty_broker() -> None:
