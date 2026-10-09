@@ -1,0 +1,53 @@
+# The documentation site (mkdocs.yml, docs/) on GitHub Pages: every push to main builds it with
+# --strict, as scripts/check does, and deploys it to https://bruk-io.github.io/bh-02/. The site
+# includes READMEs from every member, so any change can change it. A pull request builds it too,
+# without deploying, so a broken link shows before the merge.
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer push to main replaces a queued one, never one already deploying.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv fetches Python 3.15 (the workspace's requires-python) and the dev dependencies,
+      # MkDocs among them, from uv.lock.
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build the site
+        run: uv run --locked mkdocs build --strict
+
+      - name: Upload it for Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

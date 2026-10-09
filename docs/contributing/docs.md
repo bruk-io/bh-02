@@ -15,6 +15,13 @@ uv run mkdocs build --strict    # build into site/, failing on any warning
 `site/` is git-ignored. `scripts/check` runs the strict build as its `docs` step, so a broken link
 or a missing page fails the check.
 
+## Where it is published
+
+The site is at <https://bruk-io.github.io/bh-02/>. The `docs` workflow
+(`.github/workflows/docs.yml`) builds it the same way, with `--strict`, on every pull request, and
+on every push to `main` it deploys the result to GitHub Pages. Pages serves the site under
+`/bh-02/`, so the theme links and fetches everything relative to the page it is on.
+
 ## Where the pages come from
 
 `mkdocs.yml` holds the navigation. The pages are under `docs/`, in three kinds:
