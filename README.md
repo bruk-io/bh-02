@@ -69,7 +69,7 @@ plugin:
 |---|---|---|
 | `model` | `models:model` | the model: Claude via Claude Code, or any OpenAI-compatible endpoint |
 | `loop` | `agent:loop` | the agent loop: sends the conversation, runs the tool calls |
-| `kernel` | `kernel:kernel` | the one tool, `python(code)`: a Python REPL of the model's own, which persists for the session |
+| `kernel` | `kernel:kernel` | the one tool, `python(code)`: a Python REPL of the model's own, which persists for this run of bh-02 |
 | `jail` | `brig:jail` | where the kernel runs: brig's sandbox |
 | `ui` | `tui:app` | the terminal app, on [bh-01](https://github.com/bruk-io/bh-01)'s design tokens |
 | `extensions` | `extensions:extensions` | the model's own plugins: cordis components it writes, loaded while bh-02 runs, in a jail of their own |
@@ -107,7 +107,7 @@ The plugins and libraries are installed from the checkout itself, so `local.env`
 still found. After a pull that adds a plugin or changes a dependency, run the same command with
 `--reinstall`.
 
-The model acts in Python, at a REPL of its own that persists for the session. In the sandbox its
+The model acts in Python, at a REPL of its own that persists for this run of bh-02. In the sandbox its
 code runs without asking: it can write inside
 the project, but it can't reach the network, read credentials, or touch what could run code later
 (`.git/hooks`, shell rc files, bh-02's own layers). With `--no-jail`, every input asks first.
@@ -185,8 +185,8 @@ brig stands alone: it imports only the standard library, knows nothing of cordis
 has its own architecture gate. bh-02 reaches it through one plugin, `brig:jail`, which turns
 bh-02's rules into a `Spec`: the project writable, bh-02's own files and credentials not, no
 network. bh-02's status bar shows the grades it got (`jail: jailed fs_write ✓ network ✓ ...`).
-bh-02 wires only the macOS stack today. [`libs/brig/SPEC.md`](libs/brig/SPEC.md) is its
-contract.
+bh-02 wires brig's macOS stack (seatbelt) and its Linux one (bubblewrap).
+[`libs/brig/SPEC.md`](libs/brig/SPEC.md) is its contract.
 
 ## Development
 

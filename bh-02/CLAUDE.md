@@ -64,7 +64,8 @@ nothing. Keep registrations commutative: each takes its own entry, never an orde
 
 ## The running harness
 
-The shell's base layer is the whole harness (CodeAct always); each later file (the session's own
+The shell's base layer is the whole shipped composition (CodeAct, the `python` tool, is its
+default, not a requirement); each later file (the session's own
 `session.toml`, `--patch`) is a patch over it. The loader watches every layer file: editing one,
 by hand or by `/model`, reshapes the running composition (a jailed input can't write one: the
 jail denies them, and on Linux a save by rename ends the jail so the next input's holds the new
@@ -90,8 +91,9 @@ of the person's next message (`take_for_model`), so `loop.reply` is still given 
 nothing reaches a turn. `system`
 (`agent:system`) is organised as Claude Code's is: who the model is (the model in bh-02) and
 what bh-02 is made of, the working directory and branch, then the sections rows
-add (`system.add`): memory's, then the extensions row's (how to extend bh-02 and the part of
-cordis that takes). Memory (`memory:memory`) is Claude Code's, as its docs describe it: the
+add (`system.add(name, section)`), sorted by name so the order rows add them in means nothing:
+the extensions row's (how to extend bh-02 and the part of cordis that takes, then each
+extension's own), then memory's. Memory (`memory:memory`) is Claude Code's, as its docs describe it: the
 managed policy's CLAUDE.md, yours (`~/.claude/CLAUDE.md` and `~/.claude/rules/`), each
 directory's `CLAUDE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md` from the filesystem's root
 down to the project's, the project's `.claude/rules/` without `paths`, AGENTS.md where there is
@@ -158,7 +160,7 @@ finding the row's file from the row as the loader mounted it (`loader.rows`); it
 summary, the step's usage as one event, then `restarting`, and a restart that fails is told
 through `output.notice`.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
-`agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays
+`agent:loop` classifies each model step (`stops.classify`) and replays
 a provider's message as it came.
 
 **The TUI.** `tui:app` runs a Textual app on cordis's own event loop and binds `input`, `output`

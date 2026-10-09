@@ -31,4 +31,4 @@ async def extensions(
     into `commands`, `frame` and `system`, each entry with its remover, so the row leaving takes
     every one of them back."""
     running = yield enter(Extensions(jail, commands, frame, system, approval, config))
-    yield acquire(system.add, running.section)
+    yield acquire(system.add, "extensions", running.section)

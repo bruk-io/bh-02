@@ -21,7 +21,7 @@ from typing import Any, Protocol, runtime_checkable
 from commands_cordis_plugin.registry import Answer, CommandSpec, Run
 from cordis_helpers import Job
 
-__all__ = ["Loader", "Models", "Operator", "OperatorConfig", "model_list", "rows_table"]
+__all__ = ["Loader", "Models", "Operator", "OperatorConfig", "model_list", "rows_table", "unfinished"]
 
 
 @runtime_checkable
@@ -71,6 +71,17 @@ def _restarting(rows: Sequence[str], running: Mapping[str, str]) -> list[Mapping
     """The `restarting` event for the rows among `rows` that are running, or none if none are."""
     named = [rid for rid in rows if rid in running]
     return [{"type": "restarting", "rows": named}] if named else []
+
+
+def unfinished(why: str) -> str:
+    """What the person is told when a restart a command queued (/clear, /model, /restart) failed
+    (`why`): the command answered before its restart ran, so what it said may not hold (after
+    /clear the loop may still hold the old conversation, and write it to the emptied file)."""
+    return (
+        f"a command's restart failed ({why}), so the rows may not be as it said (after /clear the "
+        "loop may still hold the old conversation); /rows shows what is running, and /restart ROW "
+        "tries again"
+    )
 
 
 def rows_table(status: Mapping[str, str], uses: Mapping[str, str]) -> str:

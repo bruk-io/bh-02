@@ -31,6 +31,29 @@ def test_the_prompt_says_the_model_is_in_bh_02_and_names_no_other_harness() -> N
     assert "bh-02 is a cordis composition" in text  # what it is made of, and that it changes live
 
 
+def test_sections_are_told_by_name_whatever_order_rows_added_them(tmp_path: Path) -> None:
+    """A broker's entries must commute: a row that adds its section again (memory:auto on every
+    /clear) keeps its place, so the prompt does not read as changed. Two of one name go by their
+    text."""
+    first, second = (
+        SystemPrompt(SystemConfig(root=str(tmp_path))),
+        SystemPrompt(SystemConfig(root=str(tmp_path))),
+    )
+    first.add("memory", lambda: "M")
+    remove = first.add("memory: auto", lambda: "A")
+    first.add("extensions", lambda: "E")
+    second.add("extensions", lambda: "E")
+    second.add("memory: auto", lambda: "A")
+    second.add("memory", lambda: "M")
+    assert first.text() == second.text() and first.text().endswith("E\n\nM\n\nA")
+    remove()
+    first.add("memory: auto", lambda: "A")  # added again, as after a restart: the same place
+    assert first.text() == second.text()
+    first.add("extensions: b", lambda: "2")
+    first.add("extensions: b", lambda: "1")
+    assert first.text().endswith("E\n\n1\n\n2\n\nM\n\nA")
+
+
 def test_a_detached_head_names_no_branch() -> None:
     assert branch_of("ref: refs/heads/feature/x\n") == "feature/x"
     assert branch_of("3f1c0de\n") is None
@@ -67,8 +90,8 @@ def test_a_head_the_model_made_a_link_is_not_read(tmp_path: Path) -> None:
 def test_a_row_adds_a_section_read_fresh_and_its_remover_takes_it_out(tmp_path: Path) -> None:
     prompt = SystemPrompt(SystemConfig(root=str(tmp_path)))
     said = ["first"]
-    remove = prompt.add(lambda: said[-1])
-    prompt.add(lambda: "")  # a section with nothing to say adds nothing
+    remove = prompt.add("a", lambda: said[-1])
+    prompt.add("b", lambda: "")  # a section with nothing to say adds nothing
     assert prompt.text().endswith("\n\nfirst")
     said.append("second")
     assert prompt.text().endswith("\n\nsecond")  # read each time, not when added

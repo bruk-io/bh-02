@@ -154,7 +154,7 @@ class _Prompt:
     def __init__(self) -> None:
         self.sections: list[Callable[[], str]] = []
 
-    def add(self, section: Callable[[], str]) -> Callable[[], None]:
+    def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]:
         self.sections.append(section)
         return lambda: self.sections.remove(section)
 
@@ -183,7 +183,7 @@ async def test_the_memory_row_binds_memory_adds_its_section_and_offers_slash_mem
         ("acquire", commands.register),
     ]
     found = effects[0].args[1]
-    assert isinstance(found, Memory) and effects[1].args[1] == found.text
+    assert isinstance(found, Memory) and effects[1].args[1:] == ("memory", found.text)
     assert "Contents of CLAUDE.md (project instructions" in found.text()
     run = effects[2].args[2]
     assert "  ✓ CLAUDE.md: project instructions, checked into the codebase" in await run("")

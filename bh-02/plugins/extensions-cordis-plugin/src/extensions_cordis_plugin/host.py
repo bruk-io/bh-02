@@ -132,7 +132,7 @@ class Frame(Protocol):
 class System(Protocol):
     """What the extensions need of the `system` value: a prompt section and its remover."""
 
-    def add(self, section: Callable[[], str]) -> Callable[[], None]: ...
+    def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]: ...
 
 
 @runtime_checkable
@@ -484,7 +484,7 @@ class Extensions:
                 case "context":
                     text = str(message["text"])
                     label = "a prompt section"
-                    remove = self._system.add(lambda: text)
+                    remove = self._system.add(f"extensions: {extension}", lambda: text)
                 case _:  # a line prefix among them: only a layer's row may claim one
                     raise ValueError(
                         "an extension adds a slash command, a status field or a prompt section, "

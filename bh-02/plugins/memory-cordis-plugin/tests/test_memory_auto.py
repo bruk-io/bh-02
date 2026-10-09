@@ -59,7 +59,7 @@ class _Layers:
 
 
 class _Prompt:
-    def add(self, section: object) -> object:
+    def add(self, name: str, section: object) -> object:
         return lambda: None
 
 
@@ -67,7 +67,7 @@ async def test_the_row_adds_the_section_and_adds_nothing_without_a_directory(tmp
     prompt = _Prompt()
     effects = await drive(auto(system=prompt, layers=_Layers(str(tmp_path)), transcript=object()))
     assert [(e.name, e.args[0]) for e in effects] == [("acquire", prompt.add)]
-    assert isinstance(effects[0].args[1], AutoMemory)
+    assert effects[0].args[1] == "memory: auto" and isinstance(effects[0].args[2], AutoMemory)
     assert await drive(auto(system=prompt, layers=_Layers(""), transcript=object())) == []
 
 

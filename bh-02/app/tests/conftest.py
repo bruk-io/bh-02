@@ -261,7 +261,7 @@ class Held:
             self.running -= 1
         return "held"
 
-    def add(self, section: Any) -> Any:
+    def add(self, name: str, section: Any) -> Any:
         return lambda: None
 
     def touched(self, paths: Any) -> list[Any]:

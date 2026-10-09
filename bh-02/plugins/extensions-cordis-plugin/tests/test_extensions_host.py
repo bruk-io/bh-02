@@ -77,7 +77,7 @@ class _System:
     def __init__(self) -> None:
         self._sections: dict[object, Callable[[], str]] = {}
 
-    def add(self, section: Callable[[], str]) -> Remover:
+    def add(self, name: str, section: Callable[[], str]) -> Remover:
         token = object()
         self._sections[token] = section
         return lambda: self._sections.pop(token, None) and None
@@ -486,4 +486,5 @@ async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -
         [SimpleNamespace(section=lambda: "told")],  # what entering would have given back
     )
     assert [effect.name for effect in effects] == ["enter", "acquire"]
-    assert isinstance(effects[0].args[0], Extensions) and effects[1].args[1]() == "told"
+    assert isinstance(effects[0].args[0], Extensions) and effects[1].args[1] == "extensions"
+    assert effects[1].args[2]() == "told"

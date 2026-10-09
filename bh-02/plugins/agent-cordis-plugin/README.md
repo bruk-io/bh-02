@@ -8,7 +8,7 @@ and asks `notes`, and `/compact`, which begins a new conversation from the model
 |---|---|---|
 | `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `notes` (iterated), `executor` (`run`) |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
-| `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch, then the sections rows add); a broker, `add(section)`; config: `root` (default `.`) | |
+| `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch, then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
 | `agent:notes` | `notes`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
 | `agent:compact` | registers `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300), `loop` and `transcript` (the rows it restarts) | `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
@@ -38,8 +38,8 @@ other; a row that adds to it (`memory:on_touch`) depends on
 its `messages` too, so a resumed one is not told again a note a `tool` entry holds (CONTRACTS.md:
 transcript).
 
-Each turn is classified by `stops.classify` (pure; the table is in its docstring, after
-../harness/ARCHITECTURE.MD): only `act` runs calls, only `answered` ends the reply, and a
+Each model step is classified by `stops.classify` (pure; the table is in its docstring): only
+`act` runs calls, only `answered` ends the reply, and a
 truncated, silent or undecodable turn is fed back with harness's own wording up to
 `max_nudges` times per reply. A turn that did not act keeps no calls on its transcript
 entry, so nothing is left for a result to answer. A provider's assistant message rides on its
@@ -103,7 +103,7 @@ call in flight, and the next waits for it before it begins, so stopping reply af
 a slow prompt is read leaves one reading running, not one per stop. `executor` is a row of its
 own (`agent:executor`) that depends on nothing, like `notes`: `/model` and `/clear` reload the
 loop, a new `LoopModel`, but not `system`, whose caches take no lock, nor `executor`, so the new
-loop's first reading waits for the one the last loop left running too, and the context plugin's
+loop's first reading waits for the one the last loop left running too, and `system`'s sections'
 caches are used by one thread at a time. Only a new `executor` (its row restarted, or replaced
 by a layer) knows nothing of a call the last one left running, and may start one beside it. A
 `LoopModel` built without one (a test, direct use) makes its own. Each call's thread is a daemon's, not the

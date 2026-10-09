@@ -227,7 +227,7 @@ What the rows depend on, which is what decides what reloads when:
 
 ```
 commands:registry       binds Commands                     depends on nothing
-commands:operator       registers /rows ... /model         depends on Commands, Loader, Models
+commands:operator       registers /rows ... /model         depends on Commands, Loader, Models, Output
 commands:shell_command  claims ! (a shell command)         depends on Commands
 models:model            binds Model                        depends on Layers (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
 models:catalog          binds Models                       depends on Loader, Layers
@@ -291,7 +291,7 @@ truncated or silent turn as the answer); only the model row's provider differs.
 ## CodeAct
 
 bh-02 offers the model exactly one tool, `python(code)`, over the provider's standard tool
-calling (../harness/ARCHITECTURE.MD: "one tool, and it carries code"). To the model it is a
+calling: one tool, and it carries code. To the model it is a
 Python REPL of its own that persists, and each call is one input to it: plain Python (not IPython),
 with nothing of bh-02's in the namespace, and nothing an input does calls back into bh-02. An input reads and edits files with `open` or `pathlib` and runs programs (`python`, `git`,
 a test runner) with `subprocess`, in the project directory. The model is told to work in Python
