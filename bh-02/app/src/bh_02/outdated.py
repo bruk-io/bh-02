@@ -100,6 +100,10 @@ _SWITCHED = "/model is the models plugin's now (models:switch)"
 # agent plugin's `conversation` row's now (`agent:conversation`), which finds the transcript's
 # file from the transcript row and keeps the old conversation as `.bak`.
 _CONVERSATION, _CONVERSATION_USE = "conversation", "agent:conversation"
+# The restarts commands ask for run in the `jobs` row (`commands:jobs`), which the chat row waits
+# on before it reads a line: a layer that fills the chat row or the operator itself needs it.
+_JOBS, _JOBS_USE = "jobs", "commands:jobs"
+_CHAT_USE = "chat:session"
 _COMPACT, _COMPACT_USE = "compact", "agent:compact"
 _CLEARED = "/clear is the conversation row's now (agent:conversation)"
 _FORGOTTEN = (
@@ -150,6 +154,9 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       the `compact` row (or any using `agent:compact`) is renamed to it, an operator's `clear`
       moves to it (added after the operator, as for the switch row), its `forget` is gone, and a
       layer that fills the operator itself and has neither gets one.
+    - A layer that fills the chat row or the operator itself (`chat:session`,
+      `commands:operator`) and has no `jobs` row gets one (`commands:jobs`): the restarts commands
+      ask for run there, and the chat row waits on it.
 
     Nothing changed is `(list(rows), [])`, so translating twice changes nothing more.
     """
@@ -220,7 +227,22 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
             out[at:at] = kept
     out, said = _switched(out)
     out, cleared = _conversation(out)
-    return out, changes + said + cleared
+    out, jobbed = _jobs(out)
+    return out, changes + said + cleared + jobbed
+
+
+def _jobs(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
+    """`rows` with a `jobs` row when the layer fills the chat row or the operator itself and has
+    none, and what changed."""
+    if any(row.id == _JOBS for row in rows):
+        return list(rows), []
+    at = next((n for n, row in enumerate(rows) if row.use in (_CHAT_USE, _OPERATOR_USE)), None)
+    if at is None:
+        return list(rows), []
+    return [*rows[: at + 1], Row(_JOBS, _JOBS_USE), *rows[at + 1 :]], [
+        f"the chat row waits on `jobs` now, where commands queue the restarts they ask for: add a "
+        f'{_JOBS!r} row with use = "{_JOBS_USE}"'
+    ]
 
 
 def _conversation(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:

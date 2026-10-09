@@ -6,7 +6,7 @@ bh-02's model: named models over their providers, switched by name. Three rows:
 |---|---|---|
 | `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | `layers` (`credentials`: where `local.env` is looked for) |
 | `models:catalog` | `models`: the models there are, the one the model row names now, why a name can't be switched to, and why the models file is not read (CONTRACTS.md: models) | `loader`, `layers` |
-| `models:switch` | registers `/model [NAME]`: lists the models, switches by name in the session's layer; a reload it queued that fails is told to the person; config: `layer` (the session's), `model_row` (`model`) | `commands` (`register`), `loader`, `models`, `output` (`notice`) |
+| `models:switch` | registers `/model [NAME]`: lists the models, switches by name in the session's layer, the reload queued in `jobs`; config: `layer` (the session's), `model_row` (`model`) | `commands` (`register`), `loader`, `models`, `jobs` (`put`) |
 
 The model row's config (`ModelConfig`):
 - `default`: the model's name, `sonnet` unless a layer says another; `--model` and `/model` set it.
@@ -108,14 +108,15 @@ names NAME as the model row's `default` in the session's layer (`layer`, on the 
 the layers (the watcher would notice too, half a second later), so the choice is composition
 and a resumed session keeps it. A NAME the row already names changes nothing; a later layer
 that sets the model row's config (a `--patch`, `shadowing`) would replace the session's whole,
-so `/model` says so and records nothing. The reload is the row's own background work
-(cordis-helpers' `perform`), run after the command has answered, since it restarts the chat
-row the command's answer is shown in; one that fails is told through `output.notice`. Its
-spec carries `choices`, one per usable model, which the palette offers as entries of their own
+so `/model` says so and records nothing. The reload is queued in `jobs` (CONTRACTS.md: jobs),
+run after the command has answered, since it restarts the chat row the command's answer is
+shown in; one that fails is told through `output.notice` there. The chat row reads its next
+line only once the reload is done, so a line typed meanwhile reaches the new model. Its spec
+carries `choices`, one per usable model, which the palette offers as entries of their own
 (`/model haiku`). The row depends on `models`, not on `model`, so a switch reloads the model
 row and what uses it, never the row running the switch. The answer ends with `restarting`
-(CONTRACTS.md: event), naming the model row, so the ui holds a line typed meanwhile for it
-rather than handing it to the old model.
+(CONTRACTS.md: event), naming the model row, which the ui names in what a line typed meanwhile
+says it waits for.
 
 ## openai: any OpenAI-compatible endpoint
 

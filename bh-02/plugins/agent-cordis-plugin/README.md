@@ -14,7 +14,7 @@ and asks `notes`, and `/compact`, which begins a new conversation from the model
 | `agent:notes` | `notes`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 | `agent:access` | `access`: an `Access`, the functions rows `acquire` with `before_read(fn)` and `before_write(fn)`, which a tool asks before it opens a file (`refusal(kind, path)`) | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
-| `agent:conversation` | registers `/clear` and `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300: /compact's summary), `loop` and `transcript` (the rows /compact restarts), `clear` (the rows /clear restarts: `loop`, `transcript`, `kernel`) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
+| `agent:conversation` | registers `/clear` and `/compact [WHAT TO KEEP]`, each restart queued in `jobs`; config: `timeout` (seconds, 300: /compact's summary), `loop` and `transcript` (the rows /compact restarts), `clear` (the rows /clear restarts: `loop`, `transcript`, `kernel`) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`), `jobs` (`put`) |
 
 A turn is one model step plus the calls it asked for, until it asks for none. The model is
 offered the tools rows register with `tools` (`agent:tools`, a broker; CodeAct's `python(code)`
@@ -171,16 +171,15 @@ new conversation. The answer is `cleared` (not `compacted`, so what `commands` h
 model is dropped), a note saying so and where the old conversation is kept, then
 `restarting`.
 
-The conversation row depends on `model`, `tools` (only its `specs`), the loader, `commands` and
-`output`, and on neither `loop` nor `transcript`: a restart of them reloads what depends on them,
+The conversation row depends on `model`, `tools` (only its `specs`), the loader, `commands`,
+`output` and `jobs`, and on neither `loop` nor `transcript`: a restart of them reloads what depends on them,
 which would cancel the row's own work half-way. It finds the conversation's file from the
 transcript row as the loader mounted it (`loader.rows`: a running `agent:transcript` row's
 `path`, whatever the layer files say now), so it needs a session's transcript (one kept in
 memory, or a row another component fills, can't begin again from a summary, and /compact says
-so). Both commands' restarts are queued for the row's own `background` (cordis-helpers'
-`perform`), never run in the chat row's task, which they reload. A restart
-that fails is told to the person (`output.notice`), since the new conversation is written by
-then; a row restarted while the model wrote the summary writes nothing, since its queue went
-with it. Both are one row's, beside the transcript they rewrite, rather than the operator's:
+so). Both commands' restarts are queued in `jobs` (CONTRACTS.md: jobs), never run in the chat
+row's task, which they reload; the chat row reads its next line once they are done. A restart
+that fails is told to the person (the jobs row's `output.notice`), since the new conversation
+is written by then. Both are one row's, beside the transcript they rewrite, rather than the operator's:
 the operator keeps not depending on the model, and nothing outside the row (once the
 operator's `forget`) has to be kept in step with the transcript row's file.

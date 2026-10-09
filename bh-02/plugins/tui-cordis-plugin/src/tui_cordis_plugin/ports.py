@@ -14,12 +14,12 @@ may take a moment) waits
 in the bridge for the next `read()`. The bridge hears which rows are coming up (the output's
 lifecycle), so the app can say the line is waiting and for what (`waiting_on`).
 
-A command that restarts rows says so in its answer (a `restarting` event, CONTRACTS.md), which
-the output hands the bridge (`announce`): from then until those rows are up again, no line
-goes out, not even to a reader still there (the chat row reads again before the restart
-has begun), so a line typed right after `/model` waits for the new model rather than going
-to the old one or starting a turn the restart would stop. A row announced that never begins
-(nothing changed after all) lapses a moment later (`_LAPSE`).
+A command that restarts rows queues the restart in `jobs`, and the chat row reads its next line
+only once that is done (CONTRACTS.md: jobs), so a line typed right after `/model` waits in the
+bridge for the new model rather than going to the old one. The command says which rows in its
+answer (a `restarting` event), which the output hands the bridge (`announce`) only so a line
+kept meanwhile can say what it waits for; it holds nothing back, and is forgotten at the next
+read.
 
 Whatever ends the app (Ctrl-Q, `/exit`, a crash) ends the bridge, and that settles everything
 waiting on it: a pending `read()` returns None (or raises `AppCrashed` after a crash, so the
@@ -51,11 +51,6 @@ from tui_cordis_plugin.messages import (
 
 __all__ = ["AppCrashed", "Bridge", "Frame", "TuiInput", "TuiOutput"]
 
-# How long a row announced as restarting may take to begin (while no held row has begun)
-# before the bridge stops holding lines for it: a restart begins within a tick of the command
-# (the operator's queued job), and the gap inside one (`inactive` to `reload`) is shorter.
-_LAPSE = 2.0
-
 type Post = Callable[[Message], bool]
 type Remover = Callable[[], None]
 
@@ -72,10 +67,9 @@ class AppCrashed(Exception):
 
 
 class Bridge:
-    """The state the app and its ports share, on one event loop. `lapse`: how long a row
-    announced as restarting may take to begin before lines stop being held for it."""
+    """The state the app and its ports share, on one event loop."""
 
-    def __init__(self, lapse: float = _LAPSE) -> None:
+    def __init__(self) -> None:
         self._lines: deque[str] = deque()
         self._readers: deque[asyncio.Future[str | None]] = deque()
         self._interrupts: set[asyncio.Future[None]] = set()
@@ -89,9 +83,7 @@ class Bridge:
         self._starting: frozenset[str] = frozenset()  # rows coming (back) up, by lifecycle
         self._keyless = frame.Keyless()  # rows that bind no key: no line waits on them
         self._unnoted = False  # a line was kept while no row was coming up: it has not said it waits
-        self._held = frame.Held()  # rows announced as restarting: no line goes out until they are up
-        self._lapse: asyncio.TimerHandle | None = None  # lets go of rows announced that never began
-        self._lapse_after = lapse
+        self._announced: frozenset[str] = frozenset()  # rows a command said it restarts, until a read
 
     @property
     def ended(self) -> bool:
@@ -118,22 +110,18 @@ class Bridge:
         return tuple(self._lines)
 
     @property
-    def holding(self) -> bool:
-        """Whether lines are held for rows a command announced as restarting."""
-        return bool(self._held.rows)
-
-    @property
     def waiting_on(self) -> frozenset[str]:
-        """The rows a line kept for later waits on: the rows held for (a command announced
-        their restart); else, with nothing in hand (no turn running, no line being handled,
-        such as a slash command), those coming (back) up, as the chat row is down with them,
-        except a row that binds no key (a status-bar row such as `status`): the chat row
-        depends on none of them. A line typed during a turn or a command waits for it, as it
-        always has, and does not name a row reloading meanwhile that it does not wait on."""
+        """The rows a line kept for later waits on: those a command announced it restarts
+        (the chat row reads again once they are: `jobs`); else, with nothing in hand (no turn
+        running, no line being handled, such as a slash command), those coming (back) up, as
+        the chat row is down with them, except a row that binds no key (a status-bar row such
+        as `status`): the chat row depends on none of them. A line typed during a turn or a
+        command waits for it, as it always has, and does not name a row reloading meanwhile
+        that it does not wait on."""
         if self.turn_running:
             return frozenset()
-        if self.holding:
-            return self._held.rows
+        if self._announced:
+            return self._announced
         return frozenset() if self._busy else self._starting - self._keyless.unwaited
 
     @property
@@ -150,20 +138,15 @@ class Bridge:
         """
         self._starting = frame.starting_after(self._starting, kind, row)
         self._keyless = frame.keyless_after(self._keyless, kind, row)
-        held = self._held
-        self._held = frame.held_after(held, kind, row)
-        if self._held != held:
-            self._hold_changed()
         return self._to_note()
 
     def announce(self, rows: Iterable[str]) -> frozenset[str]:
-        """A command is restarting `rows` (CONTRACTS.md: `restarting`): hold every line until
-        they are up again. Return the rows a line kept (while the command ran) now waits on,
-        when it has not said so yet, else nothing."""
-        if self._ended or not (rows := frozenset(rows) - self._held.rows):
+        """A command is restarting `rows` (CONTRACTS.md: `restarting`): a line kept until the
+        chat row reads again waits on them, and says so. Return the rows a line kept (while the
+        command ran) now waits on, when it has not said so yet, else nothing."""
+        if self._ended or not (rows := frozenset(rows) - self._announced):
             return frozenset()
-        self._held = frame.Held(self._held.expected | rows, self._held.begun)
-        self._hold_changed()
+        self._announced |= rows
         return self._to_note()
 
     def _to_note(self) -> frozenset[str]:
@@ -174,34 +157,10 @@ class Bridge:
         self._unnoted = False
         return waiting
 
-    def _hold_changed(self) -> None:
-        """Time the lapse while no held row has begun; hand kept lines out once nothing is held."""
-        if self._lapse is not None:
-            self._lapse.cancel()
-            self._lapse = None
-        if self._held.expected and not self._held.begun:
-            self._lapse = asyncio.get_running_loop().call_later(self._lapse_after, self._lapsed)
-        self._release()
-
-    def _lapsed(self) -> None:
-        """Rows announced that never began: nothing restarted after all; stop holding for them."""
-        self._lapse = None
-        self._held = frame.Held(frozenset(), self._held.begun)
-        self._release()
-
-    def _release(self) -> None:
-        """Hand kept lines to the readers waiting, oldest first, once nothing is held."""
-        while not self.holding and self._lines and self._readers:
-            reader = self._readers.popleft()
-            if not reader.done():
-                self._busy = True
-                reader.set_result(self._lines.popleft())
-        self._unnoted = self._unnoted and bool(self._lines)
-
     def submit(self, line: str) -> bool:
         """Hand a line to the oldest waiting reader, or keep it for the next read; say whether
         a reader took it."""
-        while self._readers and not self.holding:
+        while self._readers:
             reader = self._readers.popleft()
             if not reader.done():
                 self._busy = True
@@ -214,11 +173,12 @@ class Bridge:
     async def line(self) -> str | None:
         """Return the next line, None once the app has ended, or raise its crash.
 
-        Reading is where the last line's work ended: a Ctrl-C still held is dropped. While
-        lines are held (`announce`), even a kept one waits.
+        Reading is where the last line's work ended: a Ctrl-C still held is dropped, and the
+        rows a command announced are up (the chat row reads only once its restarts are done).
         """
         self._interrupt_held = False
-        if self._lines and not self.holding:
+        self._announced = frozenset()
+        if self._lines:
             kept = self._lines.popleft()
             self._busy = True
             self._unnoted = self._unnoted and bool(self._lines)
@@ -293,9 +253,6 @@ class Bridge:
             return
         self._ended, self._crash = True, crash
         self._closed.set()
-        if self._lapse is not None:
-            self._lapse.cancel()
-            self._lapse = None
         while self._readers:
             reader = self._readers.popleft()
             if not reader.done():
@@ -444,8 +401,8 @@ class TuiOutput:
             self._post(TurnEnded())
 
     def _announce(self, event: Mapping[str, Any]) -> None:
-        """A command is restarting rows (CONTRACTS.md: `restarting`): the bridge holds lines
-        for them, and a line already kept says it waits."""
+        """A command is restarting rows (CONTRACTS.md: `restarting`): a line already kept says
+        it waits for them."""
         rows = event.get("rows")
         if not isinstance(rows, Sequence) or isinstance(rows, str):
             return

@@ -54,10 +54,10 @@ the `models` value which model the model row names now and on which provider (`m
 `/model` or `/clear` shows the new model at once and that it is still starting (the Claude
 CLI takes seconds); its first push reads the row's state from the loader's `status()`. The
 output's lifecycle tells the bridge which rows are coming up, so a line typed while nobody
-reads says `⧗ waiting for loop to start; ...` and is read once it is up. A command's
-`restarting` event (`/model`, `/clear`) makes the bridge hold every line, even from the chat
-row still reading, until the rows it names are active again, so a line typed right after the
-command waits for the new model and says so. The `usage` field is the output's own: the session's running totals of usage
+reads says `⧗ waiting for loop to start; ...` and is read once it is up. The chat row reads
+again only once a restart a command queued is done (`jobs`), so a line typed right after
+`/model` or `/clear` stays in the bridge for the new chat row; the command's `restarting` event
+names the rows, which such a line says it waits for. The bridge holds nothing back itself. The `usage` field is the output's own: the session's running totals of usage
 events (each event is one turn's usage, so they sum), starting from what the session's history
 already holds, so a resumed session's field counts its earlier runs too.
 

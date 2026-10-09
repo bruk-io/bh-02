@@ -1,10 +1,10 @@
-"""Fakes for the four values the chat row consumes, shaped as CONTRACTS.md says. For tests, no terminal."""
+"""Fakes for the values the chat row consumes, shaped as CONTRACTS.md says. For tests, no terminal."""
 
 import asyncio
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
-__all__ = ["Angry", "Echo", "Noted", "Screen", "Typed"]
+__all__ = ["Angry", "Echo", "Noted", "Queued", "Screen", "Typed"]
 
 
 class Echo:
@@ -121,3 +121,21 @@ class Noted:
     def take_for_model(self) -> list[str]:
         taken, self.held = self.held, []
         return taken
+
+
+class Queued:
+    """A `jobs` value: settled until a test says a restart is pending (`hold`), and again once
+    it says it is done (`done`), as the jobs row is while a command's restart runs."""
+
+    def __init__(self) -> None:
+        self._settled = asyncio.Event()
+        self._settled.set()
+
+    def hold(self) -> None:
+        self._settled.clear()
+
+    def done(self) -> None:
+        self._settled.set()
+
+    async def settled(self) -> None:
+        await self._settled.wait()

@@ -183,6 +183,7 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `system` | `agent:system` | |
 | `commands` | `commands:registry` | |
 | `operator` | `commands:operator` | |
+| `jobs` | `commands:jobs` | |
 | `switch` | `models:switch` | `layer` (the session's), `model_row` (`model`) |
 | `conversation` | `agent:conversation` (`timeout`: 300) | |
 | `shell-command` | `commands:shell_command` | |
@@ -236,11 +237,12 @@ What the rows depend on, which is what decides what reloads when:
 
 ```
 commands:registry       binds Commands                     depends on nothing
-commands:operator       registers /rows ... /restart       depends on Commands, Loader, Output
+commands:jobs           binds Jobs                         depends on Output
+commands:operator       registers /rows ... /restart       depends on Commands, Loader, Jobs
 commands:shell_command  claims ! (a shell command)         depends on Commands
 models:model            binds Model                        depends on Layers (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
 models:catalog          binds Models                       depends on Loader, Layers
-models:switch           registers /model                   depends on Commands, Loader, Models, Output
+models:switch           registers /model                   depends on Commands, Loader, Models, Jobs
 agent:transcript        binds Transcript                   depends on nothing
 agent:system            binds System                       depends on nothing (its config)
 agent:notes             binds Notes                        depends on nothing
@@ -248,7 +250,7 @@ agent:access            binds Access                       depends on nothing
 agent:executor          binds Executor                     depends on nothing
 agent:tools             binds Tools                        depends on nothing
 agent:loop              binds Loop                         depends on Model, Tools, Transcript, System, Approval, Notes, Executor
-agent:conversation      registers /clear, /compact         depends on Model, Tools, Loader, Commands, Output (the transcript row's file, not Transcript)
+agent:conversation      registers /clear, /compact         depends on Model, Tools, Loader, Commands, Output, Jobs (the transcript row's file, not Transcript)
 memory:memory           binds Memory, registers /memory    depends on System, Commands, Layers
 memory:on_touch         adds memory loaded on demand       depends on Memory, Notes, Transcript, Access
 memory:auto             adds auto memory to System         depends on System, Layers, Transcript
@@ -260,7 +262,7 @@ kernel:release          registers /release                 depends on Kernel, Co
 tui:app                 binds Input, Output, Frame         depends on nothing (its config)
 tui:status              pushes the status bar's fields     depends on Kernel, Loader, Models, Sessions, Frame, Output
 tui:palette             pushes the palette's commands      depends on Commands, Frame
-chat:session            runs the chat, binds Done          depends on Loop, Input, Output, Commands
+chat:session            runs the chat, binds Done          depends on Loop, Input, Output, Commands, Jobs
 extensions:extensions   loads the model's own plugins      depends on Jail, Commands, Frame, System, Approval
 ```
 
@@ -294,7 +296,7 @@ where a file is and how it is reached) and on no other plugin; the gate proves i
 | `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system`; each load on `approval`'s yes; after `/release` stopped its worker, none starts until the next input has started the kernel, and then every extension loads again | `jail` (`start`, `released`), `commands`, `frame`, `system`, `approval` |
 | `kernel-cordis-plugin` | `kernel` (`kernel:kernel`): a persistent Python worker behind a Unix socket, and the `python(code)` tool, which it registers with `tools` (a call runs as an input and answers with the files it opened) and tells the model about in the `system` section `python`; `approval` (`kernel:approval`): whether a call runs, at once when it runs in a jail that confines it, else on the person's yes; `jail` (`kernel:unjailed`); `kernel:release` registers `/release`, which stops the kernel and its jail until the next input | kernel: `tools` (`register`), `system` (`add`), `jail` (`start`, and its worker's `report`, `notice`, `reads`, `writes`; `report`; `release`); approval: `jail` (`report`), `output` (`confirm`); release: `kernel` (`release`), `commands` (`register`) |
 | `brig-cordis-plugin` | `jail`: brig's `scratch_darwin()` on darwin, `strict_linux()` on Linux; the only importer of brig | `layers` |
-| `commands-cordis-plugin` | `commands` (the broker: slash commands, and the line prefixes a layer's rows claim; it says which lines are commands); the operator's commands over the loader; `!COMMAND` (`commands:shell_command`): the person's shell command, its output shown and held (in `commands`) for their next message | `commands`, `loader`, `models` (operator); `commands` (`claim`: shell command) |
+| `commands-cordis-plugin` | `commands` (the broker: slash commands, and the line prefixes a layer's rows claim; it says which lines are commands); `jobs` (`commands:jobs`: the restarts commands queue, which the chat waits on); the operator's commands over the loader; `!COMMAND` (`commands:shell_command`): the person's shell command, its output shown and held (in `commands`) for their next message | `commands`, `loader`, `models` (operator); `commands` (`claim`: shell command) |
 
 Every model runs in the same composition: `agent:loop` offers the registered tools on every
 request (the kernel's `python`, in the shipped layer), runs every call through its tool, and

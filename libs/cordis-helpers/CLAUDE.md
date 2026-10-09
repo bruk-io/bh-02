@@ -7,7 +7,7 @@ is where things go and what the gate holds.
 
 - `src/cordis_helpers/registry.py`: `Registry[T]` and `Hooks[F]`. `__init__.py` only re-exports.
 - `src/cordis_helpers/jobs.py`: `perform` and `Job`, a row's queue of its own work (bh-02's
-  operator and `/compact` restart rows through one).
+  `jobs` row runs the restarts commands ask for through one).
 - `tests/test_helpers_registry.py`: tests through the public names; the one that runs a
   `Runtime` checks that contributors come and go as `acquire` undos without reloading the broker.
 - `tests/test_helpers_jobs.py`: the queue, and the same on a `Runtime`: jobs one at a time, in

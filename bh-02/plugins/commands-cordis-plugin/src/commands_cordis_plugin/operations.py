@@ -2,21 +2,20 @@
 
 They act through the loader's handle (cordis's operator API) and never through the runtime.
 A restart replaces a row the chat session depends on, which restarts the session itself: so
-restarts are queued for work the operator row owns (`jobs`, run by cordis-helpers' `perform`),
-never run in the session's own task, which they would cancel half-way. (`/model` is the models
-plugin's, beside the catalog it reads; `/clear` and `/compact` the agent plugin's conversation
-row's, beside the transcript they rewrite.)
+restarts are queued in `jobs` (CONTRACTS.md: jobs), never run in the session's own task, which
+they would cancel half-way, and `/restart` answers with a `restarting` event naming the row.
+(`/model` is the models plugin's, beside the catalog it reads; `/clear` and `/compact` the agent
+plugin's conversation row's, beside the transcript they rewrite.)
 """
 
-import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from commands_cordis_plugin.registry import CommandSpec, Run
+from commands_cordis_plugin.registry import Answer, CommandSpec, Run
 from cordis_helpers import Job
 
-__all__ = ["Loader", "Operator", "rows_table", "unfinished"]
+__all__ = ["Loader", "Operator", "Queue", "rows_table"]
 
 
 @runtime_checkable
@@ -29,11 +28,19 @@ class Loader(Protocol):
     def entries(self) -> Sequence[Any]: ...
 
 
+@runtime_checkable
+class Queue(Protocol):
+    """What a command that restarts rows needs of the `jobs` value: a restart queued, and what
+    the person is told if it fails."""
+
+    def put(self, job: Job, failed: Callable[[str], str]) -> None: ...
+
+
 def _spec(name: str, help: str, usage: str = "") -> CommandSpec:
     return {"name": name, "help": help, "usage": usage}
 
 
-def unfinished(why: str) -> str:
+def _unfinished(why: str) -> str:
     """What the person is told when a restart `/restart` queued failed (`why`): the command
     answered before its restart ran, so what it said may not hold."""
     return f"a command's restart failed ({why}); /rows shows what is running, and /restart ROW tries again"
@@ -54,7 +61,7 @@ class Operator:
     """The commands, as `(spec, run)` pairs a row registers, over one loader and one job queue."""
 
     loader: Loader
-    jobs: asyncio.Queue[Job]
+    jobs: Queue
     specs: list[tuple[CommandSpec, Run]] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -71,8 +78,8 @@ class Operator:
     async def explain(self, args: str) -> str:
         return self.loader.explain(args) if args else "which row? /rows lists them"
 
-    async def restart(self, args: str) -> str:
+    async def restart(self, args: str) -> Answer:
         if args not in self.loader.status():
             return f"no row {args!r}; /rows lists them"
-        await self.jobs.put(lambda: self.loader.restart(args))
-        return f"restarting {args}"
+        self.jobs.put(lambda: self.loader.restart(args), _unfinished)
+        return [{"type": "note", "text": f"restarting {args}"}, {"type": "restarting", "rows": [args]}]

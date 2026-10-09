@@ -186,7 +186,11 @@ summary names. It depends on neither `loop` nor `transcript` (their restart woul
 finding the row's file from the row as the loader mounted it (`loader.rows`); `/compact`'s
 answer is `cleared` (`compacted`, so what `commands` holds for the model is kept), the note
 carrying the summary, the step's usage as one event, then `restarting` (`/clear`'s: `cleared`,
-a note, `restarting`), and a restart that fails is told through `output.notice`.
+a note, `restarting`), and a restart that fails is told through `output.notice`. No command
+restarts rows in the chat row's task: `/clear`, `/compact`, `/model NAME` and `/restart` queue
+it in `jobs` (`commands:jobs`, a capability over `output` alone), and the chat row reads its
+next line only once none is pending (`jobs.settled()`), so the restart reloads it while it
+waits and a line typed meanwhile reaches the new loop.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each model step (`stops.classify`) and replays
 a provider's message as it came.

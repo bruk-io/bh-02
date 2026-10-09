@@ -1,22 +1,20 @@
 """The rows: the model itself, bound under `model`; the models there are, under `models`; and
 `/model`, which lists them and switches by name."""
 
-import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from cordis import Effects, Row, acquire, background, bind, component, enter
+from cordis import Effects, Row, acquire, bind, component, enter
 from cordis.composition import format_layer
 from cordis.loader import Loader as _Mounting
 from cordis.loader import read_layer
-from cordis_helpers import Job, perform
 from models_cordis_plugin.catalog import Catalog, Entries
 from models_cordis_plugin.local_env import Credentials
 from models_cordis_plugin.named import ModelConfig
 from models_cordis_plugin.providers import opened
-from models_cordis_plugin.switch import Models, Reloads, Switch, SwitchConfig, unfinished
+from models_cordis_plugin.switch import Models, Queue, Reloads, Switch, SwitchConfig
 
 __all__ = ["CatalogConfig", "catalog", "model", "set_model", "shadowing", "switch"]
 
@@ -28,13 +26,6 @@ class _Registrar(Protocol):
     def register(
         self, spec: Mapping[str, Any], run: Callable[[str], Awaitable[Any]]
     ) -> Callable[[], None]: ...
-
-
-@runtime_checkable
-class _Notices(Protocol):
-    """What `/model` needs of the `output` value: a line told to the person."""
-
-    async def notice(self, message: str) -> None: ...
 
 
 @component(provides=("model",))
@@ -73,16 +64,13 @@ async def catalog(*, loader: Entries, layers: Credentials, config: CatalogConfig
 
 @component
 async def switch(
-    *, commands: _Registrar, loader: Reloads, models: Models, output: _Notices, config: SwitchConfig
+    *, commands: _Registrar, loader: Reloads, models: Models, jobs: Queue, config: SwitchConfig
 ) -> Effects:
     """Fills a `switch` row: `use = "models:switch"`. `/model` lists the models (`models`), the
     current one marked, and `/model NAME` names NAME as the model row's `default` in the
-    session's layer (`layer`, on the row `model_row`) and reloads the layers. The reload is the
-    row's own background work, run after the command has answered, so one that fails is told to
-    the person (`output.notice`). It depends on `models`, not `model`, so a switch never reloads
-    it."""
-    jobs: asyncio.Queue[Job] = asyncio.Queue()
-    yield background(perform(jobs, lambda why: output.notice(unfinished(why))))
+    session's layer (`layer`, on the row `model_row`) and reloads the layers. The reload is
+    queued in `jobs`, run after the command has answered, and one that fails is told to the
+    person there. It depends on `models`, not `model`, so a switch never reloads it."""
     files = [str(path) for path in loader.config.layers] if isinstance(loader, _Mounting) else []
     chosen = Switch(loader, models, config, jobs, set_model, lambda layer, rid: shadowing(files, layer, rid))
     yield acquire(commands.register, chosen.spec(), chosen.run)

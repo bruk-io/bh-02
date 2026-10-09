@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from chat_cordis_plugin import session
-from chat_cordis_plugin.testing import Echo, Noted, Screen, Typed
+from chat_cordis_plugin.testing import Echo, Noted, Queued, Screen, Typed
 from cordis import Effects, Inspection, Runtime, State, bind, component
 
 
@@ -28,8 +28,9 @@ def ui_row(input: object, output: object) -> object:
 
 @component
 async def commands_row() -> Effects:
-    """The commands a session also needs, a row of its own as in a real composition."""
+    """The commands and jobs a session also needs, a row of its own as in a real composition."""
     yield bind("commands", Noted())
+    yield bind("jobs", Queued())
 
 
 async def test_the_session_ends_when_the_input_runs_out() -> None:
@@ -78,6 +79,7 @@ async def test_what_a_command_left_for_the_model_survives_the_chat_row_s_restart
     @component
     async def held_commands() -> Effects:
         yield bind("commands", commands)
+        yield bind("jobs", Queued())
 
     rt = Runtime()
     loop = rt.mount(model_row(first), id="loop")
@@ -129,4 +131,40 @@ async def test_a_row_bound_to_the_wrong_shape_fails_the_chat_at_load_with_a_mess
     await rt.settle()
     assert chat.state is State.FAILED
     assert "chat: loop is bound to a str, which is missing reply" in str(chat.error)
+    await rt.shutdown()
+
+
+async def test_a_line_typed_during_a_restart_a_command_queued_reaches_the_new_loop() -> None:
+    """`/clear` queues the loop's restart in `jobs` and answers; the chat row reads its next line
+    only once that is done, so a line typed meanwhile is not read by the row the restart takes
+    down (the old loop never sees it, and it is not dropped): the new row reads it, for the new
+    loop."""
+    pending = Queued()
+
+    class Restarting(Noted):
+        async def run(self, line: str) -> str | list[dict[str, object]]:
+            pending.hold()  # the command queued a restart
+            return await super().run(line)
+
+    @component
+    async def commands_and_jobs() -> Effects:
+        yield bind("commands", Restarting())
+        yield bind("jobs", pending)
+
+    typed, screen, first, second = Typed("/clear", "again"), Screen(), Echo(), Echo()
+    rt = Runtime()
+    loop = rt.mount(model_row(first), id="loop")
+    rt.mount(ui_row(typed, screen), id="ui")
+    rt.mount(commands_and_jobs, id="commands")
+    rt.mount(session, id="chat")
+    await rt.settle()
+    await asyncio.sleep(0.01)
+    assert first.seen == []  # waiting on the restart, not reading `again`
+    await loop.retire()  # the restart: the chat row goes down with the loop, holding no line
+    rt.mount(model_row(second), id="loop")
+    await rt.settle()
+    pending.done()
+    typed.type(None)
+    await asyncio.wait_for(rt.idle(), 2)
+    assert first.seen == [] and second.seen == ["again"]
     await rt.shutdown()

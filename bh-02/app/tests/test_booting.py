@@ -73,7 +73,7 @@ async def test_a_composition_that_cannot_start_says_what_it_is_waiting_on(tmp_pa
     with pytest.raises(CompositionError) as raised:
         await asyncio.wait_for(run([layer]), 2)
     assert "could not start" in raised.value.message
-    assert "waiting on: commands, input, loop, output" in raised.value.message
+    assert "waiting on: commands, input, jobs, loop, output" in raised.value.message
 
 
 async def test_a_chat_row_that_never_binds_done_fails_the_composition(
@@ -109,6 +109,7 @@ async def test_a_row_that_leaves_mid_run_is_reported_rather_than_a_silent_exit(
         '[[plugin]]\nid = "ui"\nuse = "fragile:silent_ui"\n'
         '[[plugin]]\nid = "chat"\nuse = "chat:session"\n'
         '[[plugin]]\nid = "commands"\nuse = "commands:registry"\n'
+        '[[plugin]]\nid = "jobs"\nuse = "commands:jobs"\n'
     )
     with pytest.raises(CompositionError) as raised:
         await asyncio.wait_for(run([layer]), 2)

@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 __all__ = [
-    "Held",
     "Keyless",
     "PaletteEntry",
     "Usage",
@@ -19,7 +18,6 @@ __all__ = [
     "phase_after",
     "phase_of",
     "starting_after",
-    "held_after",
     "keyless_after",
     "palette_entries",
     "total_usage",
@@ -237,38 +235,6 @@ def keyless_after(keyless: Keyless, kind: str, row: str) -> Keyless:
             return Keyless(rows - {row}, keyed, rising - {row}, bound - {row})
         return Keyless(rows | {row}, keyed - {row}, rising - {row}, bound)
     return keyless
-
-
-@dataclass(frozen=True, slots=True)
-class Held:
-    """The rows a restart a command announced (CONTRACTS.md: `restarting`) holds lines for:
-    `expected` have not begun coming back up yet, `begun` have and are not up yet."""
-
-    expected: frozenset[str] = frozenset()
-    begun: frozenset[str] = frozenset()
-
-    @property
-    def rows(self) -> frozenset[str]:
-        return self.expected | self.begun
-
-
-def held_after(held: Held, kind: str, row: str) -> Held:
-    """The rows still held for after one lifecycle event of `row`.
-
-    A held row has begun at `unloading` or `reload`, and is let go when it is up (`active`) or
-    down for good (failed, cancelled). Unlike `starting_after`, `inactive` does not let it go:
-    it is the moment between a restarted row's old fiber and its new one, so the row is
-    expected to begin again (and lapses with the rest of `expected` if it never does). A row
-    not held is not taken on."""
-    if row not in held.rows:
-        return held
-    if kind in _BEGINS:
-        return Held(held.expected - {row}, held.begun | {row})
-    if kind == "inactive":
-        return Held(held.expected | {row}, held.begun - {row})
-    if kind in _ENDS:
-        return Held(held.expected - {row}, held.begun - {row})
-    return held
 
 
 @dataclass(frozen=True, slots=True)

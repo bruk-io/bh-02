@@ -364,11 +364,11 @@ def _notes(posted: Posted) -> list[str]:
     return [m.text for m in posted.messages if isinstance(m, Noted)]
 
 
-async def test_a_line_typed_right_after_model_waits_for_the_new_model_not_the_old() -> None:
-    """`/model` answers `restarting` (CONTRACTS.md) before the restart begins, and the chat row
-    reads again at once: a line typed then is held, not handed to that reader (the old model
-    would answer it, or the restart stop it), and says it waits. It goes to the chat row that
-    reads once the model is up again, through the `inactive` inside the restart."""
+async def test_a_line_typed_while_the_chat_row_waits_on_a_restart_says_so_and_is_read_after() -> None:
+    """`/model` answers `restarting` (CONTRACTS.md), and the chat row reads again only once the
+    reload it queued in `jobs` is done: a line typed meanwhile is kept, not handed to anyone,
+    and says what it waits for. The new chat row's read gets it, and the announcement is
+    forgotten with that read."""
     posted = Posted()
     bridge = Bridge()
     output = TuiOutput(posted, bridge)
@@ -376,20 +376,14 @@ async def test_a_line_typed_right_after_model_waits_for_the_new_model_not_the_ol
     await asyncio.sleep(0)
     assert bridge.submit("/model sonnet") and await reading == "/model sonnet"
     await output.show(
-        _answered({"type": "note", "text": "switching"}, {"type": "restarting", "rows": ["loop"]})
+        _answered({"type": "note", "text": "switching"}, {"type": "restarting", "rows": ["model"]})
     )
-    old = asyncio.ensure_future(bridge.line())  # the chat row reads again, still up
-    await asyncio.sleep(0)
-    assert bridge.waiting_on == {"loop"}
-    assert not bridge.submit("hello") and not old.done()  # held, not handed to the old chat
-    for kind in ("unloading", "inactive"):
-        output.lifecycle(_Event(kind, "loop"))
-    old.cancel()  # the restart takes the chat row down with the model
-    output.lifecycle(_Event("reload", "loop"))
-    assert bridge.holding and bridge.waiting_on == {"loop"}
-    output.lifecycle(_Event("active", "loop"))
-    assert not bridge.holding
+    assert bridge.waiting_on == {"model"}  # the chat row waits on `jobs`: no reader
+    assert not bridge.submit("hello")
+    for kind in ("unloading", "inactive", "reload", "active"):
+        output.lifecycle(_Event(kind, "model"))  # the restart takes the chat row down and up
     assert await asyncio.wait_for(bridge.line(), 1) == "hello"  # the new chat row reads it
+    assert bridge.waiting_on == frozenset()  # forgotten at the read
 
 
 async def test_a_line_kept_while_the_command_ran_says_it_waits_once_the_restart_is_announced() -> None:
@@ -402,32 +396,7 @@ async def test_a_line_kept_while_the_command_ran_says_it_waits_once_the_restart_
     assert _notes(posted) == []
     await output.show(_answered({"type": "cleared"}, {"type": "restarting", "rows": ["loop", "kernel"]}))
     assert _notes(posted) == ["⧗ waiting for kernel, loop to start; this message is sent once they are up"]
-    reading = asyncio.ensure_future(bridge.line())
-    await asyncio.sleep(0)
-    assert not reading.done()  # even a kept line is held
-    reading.cancel()
-
-
-async def test_a_restart_announced_that_never_begins_lapses_and_the_line_goes_out() -> None:
-    """`/model` to the model already running changes nothing, so no row restarts: the line
-    is held only for a moment (the bridge's `lapse`), then handed to the chat row reading."""
-    bridge = Bridge(lapse=0.05)
-    reading = asyncio.ensure_future(bridge.line())
-    await asyncio.sleep(0)
-    assert bridge.announce(["loop"]) == frozenset()  # nothing kept to note
-    assert not bridge.submit("hello")
-    assert await asyncio.wait_for(reading, 1) == "hello"
-    assert not bridge.holding
-
-
-async def test_a_held_row_that_goes_inactive_and_never_comes_back_lapses() -> None:
-    bridge = Bridge(lapse=0.05)
-    bridge.announce(["loop"])
-    for kind in ("unloading", "inactive"):
-        bridge.row_changed(kind, "loop")
-    assert bridge.holding  # the moment inside a restart, for now
-    await asyncio.sleep(0.1)
-    assert not bridge.holding  # no new fiber came: down for good
+    assert await bridge.line() == "again"  # the bridge holds nothing back: the chat row's read is when
 
 
 async def test_a_line_kept_during_a_command_names_no_row_reloading_meanwhile() -> None:

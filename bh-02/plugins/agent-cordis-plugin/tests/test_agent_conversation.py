@@ -145,9 +145,19 @@ class Screen:
         self.notices.append(message)
 
 
-def _up() -> asyncio.Future[None]:
-    """The compact row's work, still running."""
-    return asyncio.get_running_loop().create_future()
+class Jobs:
+    """The `jobs` value as /clear and /compact need it: each restart queued, with what the person
+    would be told if it failed; `drain` runs them, as the jobs row would after the answer."""
+
+    def __init__(self) -> None:
+        self.queued: list[tuple[Job, Callable[[str], str]]] = []
+        self.told: list[str] = []
+
+    def put(self, job: Job, failed: Callable[[str], str]) -> None:
+        self.queued.append((job, failed))
+
+    def empty(self) -> bool:
+        return not self.queued
 
 
 async def _compact(
@@ -157,8 +167,7 @@ async def _compact(
     *,
     loader: Loader | None = None,
     screen: Screen | None = None,
-    jobs: asyncio.Queue[Job] | None = None,
-    worker: asyncio.Future[None] | None = None,
+    jobs: Jobs | None = None,
 ) -> Any:
     """`/compact ARGS` over the session's file at `path`, as the conversation row runs it."""
     return await compact_conversation(
@@ -168,8 +177,7 @@ async def _compact(
         loader=loader or Loader(str(path) if path else None),
         output=screen or Screen(),
         config=ConversationConfig(),
-        jobs=jobs if jobs is not None else asyncio.Queue(),
-        worker=worker or _up(),
+        jobs=jobs if jobs is not None else Jobs(),
     )
 
 
@@ -191,9 +199,14 @@ def _session(tmp_path: Path, messages: Sequence[Json] = CONVERSATION) -> Path:
     return path
 
 
-async def _drain(jobs: asyncio.Queue[Job]) -> None:
-    while not jobs.empty():
-        await (await jobs.get())()
+async def _drain(jobs: Jobs) -> None:
+    """Run what was queued, one at a time, a failure told as the jobs row tells it."""
+    while jobs.queued:
+        job, failed = jobs.queued.pop(0)
+        try:
+            await job()
+        except Exception as error:
+            jobs.told.append(failed(f"{type(error).__name__}: {error}"))
 
 
 def test_the_summary_request_is_the_loop_s_request_then_the_ask() -> None:
@@ -381,7 +394,7 @@ async def test_compact_writes_the_new_conversation_and_queues_the_loop_and_trans
     row's own work."""
     path = _session(tmp_path)
     old = path.read_bytes()
-    loader, jobs, screen = Loader(str(path)), asyncio.Queue[Job](), Screen()
+    loader, jobs, screen = Loader(str(path)), Jobs(), Screen()
     early: Json = {"type": "usage", "input_tokens": 1200, "output_tokens": 0, "partial": True}
     late: Json = {"type": "usage", "input_tokens": 0, "output_tokens": 80, "cost_usd": 0.01}
     summary = "x holds 42; next, write it to answer.txt"
@@ -457,7 +470,7 @@ async def test_compact_with_nothing_to_compact_says_so_and_asks_nothing(
     tmp_path: Path, setup: Callable[[Loader, Path], object], said: str
 ) -> None:
     path = _session(tmp_path)
-    loader, jobs, model, screen = Loader(str(path)), asyncio.Queue[Job](), Scripted(), Screen()
+    loader, jobs, model, screen = Loader(str(path)), Jobs(), Scripted(), Screen()
     setup(loader, path)
     answer = await _compact(path, model, loader=loader, screen=screen, jobs=jobs)
     assert isinstance(answer, str) and answer.startswith(said.format(path=path))
@@ -476,7 +489,7 @@ async def test_a_seed_with_a_message_after_it_compacts_again(tmp_path: Path) -> 
 async def test_compact_without_a_summary_changes_nothing_and_counts_what_it_cost(tmp_path: Path) -> None:
     path = _session(tmp_path)
     old = path.read_bytes()
-    jobs = asyncio.Queue[Job]()
+    jobs = Jobs()
     call = {"type": "tool_call", "id": "c", "name": "python", "input": {}}
     said = await _compact(path, Scripted([USAGE, call, stop("tool_use")]), jobs=jobs)
     assert said == [
@@ -490,21 +503,6 @@ async def test_compact_without_a_summary_changes_nothing_and_counts_what_it_cost
     said = await _compact(path, Scripted([call, stop("tool_use")]), jobs=jobs)
     assert isinstance(said, str) and said.startswith("the model called python")  # no usage: text
     assert path.read_bytes() == old and jobs.empty() and not Path(f"{path}.bak").exists()
-
-
-async def test_compact_writes_nothing_once_its_row_has_restarted(tmp_path: Path) -> None:
-    """The row's work ended while the model wrote the summary (a layer edit reloaded it): its
-    queue is gone with it, so nothing would restart the rows, and nothing is written."""
-    path = _session(tmp_path)
-    old = path.read_bytes()
-    ended = _up()
-    ended.cancel()
-    said = await _compact(path, Scripted([text("x holds 42"), stop("end_turn")]), worker=ended)
-    assert said == (
-        "the conversation row restarted while the model wrote the summary, so nothing changed; "
-        "try /compact again"
-    )
-    assert path.read_bytes() == old and not Path(f"{path}.bak").exists()
 
 
 class Registry:
@@ -523,24 +521,25 @@ class Registry:
         return remove
 
 
-async def test_the_conversation_row_registers_clear_and_compact_and_restarts_as_its_own_work(
+async def test_the_conversation_row_registers_clear_and_compact_and_queues_restarts_in_jobs(
     tmp_path: Path,
 ) -> None:
-    """It depends on the model, `tools` (the specs), the loader, `commands` and `output`, never on
-    the loop or the transcript, which it restarts: the restart would reload it, cancelling its
-    own work. A restart that fails is told to the person: the new conversation is written."""
-    assert resolve("agent:conversation").inject == {"model", "tools", "loader", "commands", "output"}
+    """It depends on the model, `tools` (the specs), the loader, `commands`, `output` and `jobs`,
+    never on the loop or the transcript, which it restarts. Each restart is queued in `jobs`,
+    with what the person is told if it fails: the new conversation is written by then."""
+    assert resolve("agent:conversation").inject == {"model", "tools", "loader", "commands", "output", "jobs"}
     path = _session(tmp_path)
-    loader, commands, screen = Loader(str(path)), Registry(), Screen()
+    loader, commands, screen, jobs = Loader(str(path)), Registry(), Screen(), Jobs()
     model = Scripted([text("x holds 42"), stop("end_turn")], [text("x holds 42"), stop("end_turn")])
 
-    @component(provides=("model", "tools", "loader", "commands", "output"))
+    @component(provides=("model", "tools", "loader", "commands", "output", "jobs"))
     async def values() -> Effects:
         yield bind("model", model)
         yield bind("tools", Offered())
         yield bind("loader", loader)
         yield bind("commands", commands)
         yield bind("output", screen)
+        yield bind("jobs", jobs)
 
     rt = Runtime()
     rt.mount(values, id="values")
@@ -551,20 +550,21 @@ async def test_the_conversation_row_registers_clear_and_compact_and_restarts_as_
     assert spec["usage"] == "[WHAT TO KEEP]"
     said = await run("")
     assert said[-1] == {"type": "restarting", "rows": ["loop", "transcript"]}
-    await asyncio.sleep(0.01)
-    assert loader.batches == [("loop", "transcript")]  # the row's own background work ran it
+    assert loader.batches == []  # queued, not run in the command's task
+    await _drain(jobs)
+    assert loader.batches == [("loop", "transcript")]
     _, clear = commands.commands["clear"]
     assert (await clear(""))[-1] == {"type": "restarting", "rows": ["loop", "transcript", "kernel"]}
-    await asyncio.sleep(0.01)
-    assert loader.batches[-1] == ("loop", "transcript", "kernel")  # the same queue
+    await _drain(jobs)
+    assert loader.batches[-1] == ("loop", "transcript", "kernel")
     path.write_text("".join(json.dumps(m) + "\n" for m in CONVERSATION))
     loader.fails = True
     await run("")
-    await asyncio.sleep(0.01)
-    assert screen.notices == [
+    await _drain(jobs)
+    assert jobs.told == [
         unrestarted(ConversationConfig(), "LookupError: no row 'transcript'; the rows are loop")
     ]
-    assert screen.notices[0].endswith(
+    assert jobs.told[0].endswith(
         "so the loop may still hold the old one; /rows shows what is running, and /restart "
         "transcript begins the new one"
     )
@@ -574,10 +574,8 @@ async def test_the_conversation_row_registers_clear_and_compact_and_restarts_as_
     await rt.shutdown()
 
 
-async def _clear(loader: Loader, jobs: asyncio.Queue[Job] | None = None) -> Any:
-    return await clear_conversation(
-        "", loader=loader, config=ConversationConfig(), jobs=jobs if jobs is not None else asyncio.Queue()
-    )
+async def _clear(loader: Loader, jobs: Jobs | None = None) -> Any:
+    return await clear_conversation("", loader=loader, config=ConversationConfig(), jobs=jobs or Jobs())
 
 
 async def test_clear_writes_an_empty_conversation_keeping_the_old_and_restarts_its_rows(
@@ -587,7 +585,7 @@ async def test_clear_writes_an_empty_conversation_keeping_the_old_and_restarts_i
     file, never lost, and the loop, the transcript and the kernel restart together."""
     path = _session(tmp_path)
     old = path.read_bytes()
-    loader, jobs = Loader(str(path)), asyncio.Queue[Job]()
+    loader, jobs = Loader(str(path)), Jobs()
     said = await _clear(loader, jobs)
     assert said == [
         {"type": "cleared"},  # not `compacted`: what commands hold for the model is dropped
@@ -635,7 +633,7 @@ async def test_clear_that_can_t_write_changes_nothing(
     try:
         if os.access(tmp_path, os.W_OK):
             pytest.skip("this user writes a read-only directory (root)")
-        jobs = asyncio.Queue[Job]()
+        jobs = Jobs()
         said = await _clear(Loader(str(path)), jobs)
         assert said.startswith(f"the conversation in {path} could not be cleared (")
         assert jobs.empty() and path.read_bytes() == old

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from commands_cordis_plugin import Commands, Operator, operator, parse, registry, rows_table
+from commands_cordis_plugin import Commands, Jobs, Operator, jobs, operator, parse, registry, rows_table
 from cordis import Effects, Runtime, bind, component
 
 
@@ -183,21 +183,52 @@ class Loader:
         ]
 
 
-async def _drain(jobs: asyncio.Queue[Any]) -> None:
-    while not jobs.empty():
-        await (await jobs.get())()
+async def _drain(queued: Jobs) -> None:
+    """Run what was queued, as the jobs row's work does."""
+    while not queued.queue.empty():
+        await (await queued.queue.get())()
 
 
 async def test_the_operator_shows_explains_and_queues_restarts(tmp_path: Path) -> None:
-    loader, jobs = Loader(), asyncio.Queue()
-    op = Operator(loader, jobs)
+    loader, told = Loader(), _Output()
+    queued = Jobs(told.notice)
+    op = Operator(loader, queued)
     run = {spec["name"]: fn for spec, fn in op.specs}
     assert "loop    agent:loop     active" in await run["rows"]("")
     assert await run["explain"]("loop") == "loop: all about it"
     assert await run["restart"]("nope") == "no row 'nope'; /rows lists them"
-    assert await run["restart"]("fs") == "restarting fs" and loader.restarted == []  # queued, not run here
-    await _drain(jobs)
-    assert loader.restarted == ["fs"]
+    assert await run["restart"]("fs") == [
+        {"type": "note", "text": "restarting fs"},
+        {"type": "restarting", "rows": ["fs"]},  # a ui names it in what a line typed meanwhile waits for
+    ]
+    assert loader.restarted == [] and queued.pending()  # queued, not run here
+    await _drain(queued)
+    assert loader.restarted == ["fs"] and not queued.pending()
+
+
+async def test_jobs_run_in_order_tell_a_failure_and_settle_once_none_is_pending() -> None:
+    """The restarts commands queue run one at a time, in order; one that fails is told to the
+    person as its command says, and the next still runs; `settled` returns once none is
+    pending, which is when the chat row reads its next line."""
+    told, ran = _Output(), list[str]()
+
+    async def fine() -> None:
+        ran.append("fine")
+
+    async def broken() -> None:
+        raise RuntimeError("no row 'loop'")
+
+    queued = Jobs(told.notice)
+    await asyncio.wait_for(queued.settled(), 1)  # none pending: at once
+    queued.put(fine, lambda why: f"first: {why}")
+    queued.put(broken, lambda why: f"second: {why}")
+    queued.put(fine, lambda why: f"third: {why}")
+    waiting = asyncio.ensure_future(queued.settled())
+    await asyncio.sleep(0)
+    assert not waiting.done()
+    await _drain(queued)
+    await asyncio.wait_for(waiting, 1)
+    assert ran == ["fine", "fine"] and told.notices == ["second: RuntimeError: no row 'loop'"]
 
 
 def test_rows_line_up() -> None:
@@ -231,6 +262,7 @@ def _operator_on(rt: Runtime, loader: object) -> _Output:
     rt.mount(registry, id="commands")
     rt.mount(fake_loader, id="loader")
     rt.mount(fake_output, id="output")
+    rt.mount(jobs, id="jobs")
     return told
 
 
@@ -245,9 +277,9 @@ async def test_the_operator_row_registers_its_commands_and_takes_them_when_it_le
     commands = rt.root.get("commands")
     assert [s["name"] for s in commands.specs()] == ["rows", "explain", "restart"]
     assert "loop    agent:loop     active" in await commands.run("/rows")
-    assert await commands.run("/restart fs") == "restarting fs"
+    assert (await commands.run("/restart fs"))[0] == {"type": "note", "text": "restarting fs"}
     await asyncio.sleep(0.01)
-    assert loader.restarted == ["fs"]  # the row's own background work ran it
+    assert loader.restarted == ["fs"]  # the jobs row's own work ran it
     assert told.notices == []  # a restart that worked tells nothing more
     await row.retire()
     await rt.settle()
@@ -261,13 +293,13 @@ class _Failing(Loader):
 
 
 async def test_a_restart_that_fails_after_the_command_answered_is_told_to_the_person() -> None:
-    """/restart answers, then its restart runs as the row's own background work: one that fails
-    must reach the person, not vanish."""
+    """/restart answers, then its restart runs as the jobs row's own work: one that fails must
+    reach the person, not vanish."""
     rt = Runtime()
     told = _operator_on(rt, _Failing())
     rt.mount(operator, id="operator")
     await rt.settle()
-    assert await rt.root.get("commands").run("/restart fs") == "restarting fs"
+    assert (await rt.root.get("commands").run("/restart fs"))[0]["text"] == "restarting fs"
     await asyncio.sleep(0.01)
     (notice,) = told.notices
     assert notice.startswith("a command's restart failed (RuntimeError: fs would not start)")

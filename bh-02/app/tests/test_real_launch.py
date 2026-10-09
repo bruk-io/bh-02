@@ -685,8 +685,7 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     """`/model` restarts the model row, which may take a while to come up (`slow-2` takes 3 s):
     the model field says it is starting until the row is active, and a message
     typed meanwhile says it is waiting, then gets its reply. `/clear` restarts the loop, its
-    transcript and the kernel, and a message typed meanwhile waits for whichever of them are
-    still coming up, the same way."""
+    transcript and the kernel, and a message typed then reaches the new loop."""
     app = launch("slow")
     ready = app.wait_for(_READY, 60)
     app.type("first")
@@ -702,13 +701,13 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     assert status.startswith("model: slow-2 "), status[:80]  # active again
     app.type("/clear")  # the loop, its transcript and the kernel restart; the model stays up
     app.type("again")
-    # `Loader.restart` retires the rows together, then mounts them, so which of them are still
-    # coming up when `again` arrives is timing: the note names some of them, never the model.
-    noted = app.wait_for("⧗ waiting for ", 5, after=replied)
-    waiting = app.wait_for("to start; this message is sent once", 5, after=noted)
-    rows = app.text()[noted:waiting].removesuffix(" to start; this message is sent once")
-    assert rows and set(rows.split(", ")) <= {"kernel", "loop", "transcript"}, rows
-    app.wait_for("echo: AGAIN", 20, after=waiting)
+    # the chat row reads `again` once the restart /clear queued is done (`jobs`): typed while it
+    # runs, the line says it waits for the rows /clear named; typed after, the new loop says it
+    # waits for `python` (the kernel coming up). Which is timing; the new loop answers either way.
+    again = app.wait_for("echo: AGAIN (message 1)", 20, after=replied)
+    said = app.text()[replied:again]
+    assert "⧗ waiting for kernel, loop, transcript to start" in said or "waiting for `python`" in said, said
+    assert "stopped: interrupted" not in said
     app.press(b"\x11")
     assert app.exit_code() == 0
 
@@ -735,6 +734,27 @@ def test_a_message_typed_the_moment_after_model_waits_for_the_new_model(launch: 
     waiting = app.wait_for("⧗ waiting for kernel, loop, transcript to start", 10, after=replied)
     again = app.wait_for("echo: AGAIN", 20, after=waiting)
     assert "stopped: interrupted" not in app.text()[replied:again]
+    app.press(b"\x11")
+    assert app.exit_code() == 0
+
+
+def test_a_line_typed_with_compact_or_restart_loop_reaches_the_new_loop(launch: Launch) -> None:
+    """The chat row reads its next line only once the restart a command queued in `jobs` is done,
+    so a line typed in the same burst of keys as `/compact` or `/restart loop` reaches the new
+    loop: it is the compacted conversation's second message, and no restart stops a turn it
+    started (`/restart loop` answered and announced nothing before, so one could)."""
+    app = launch("fake")
+    ready = app.wait_for(_READY, 60)
+    app.type("hello there")
+    replied = app.wait_for("echo: HELLO THERE (message 1)", after=ready)
+    app.press(b"/compact\rafter\r")
+    compacted = app.wait_for("the conversation was compacted", 20, after=replied)
+    after = app.wait_for("echo: AFTER (message 2)", 20, after=compacted)  # the new conversation's
+    app.press(b"/restart loop\rnext\r")
+    restarted = app.wait_for("restarting loop", 10, after=after)
+    nexted = app.wait_for("echo: NEXT (message 3)", 20, after=restarted)
+    shown = app.text()[replied:nexted]
+    assert "stopped: interrupted" not in shown and "AFTER (message 3)" not in shown, shown[-3000:]
     app.press(b"\x11")
     assert app.exit_code() == 0
 

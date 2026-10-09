@@ -6,7 +6,8 @@ Slash commands and line prefixes, as a broker (paper 6.2), on `cordis-helpers`' 
 | Row | Binds / registers | Consumes |
 |---|---|---|
 | `commands:registry` | `commands`: `register(spec, run) -> remover`, `claim(prefix, spec, run) -> remover`, `specs()`, `claims(line)`, `run(line)`, `take_for_model()`; `/help` is its own | |
-| `commands:operator` | registers `/rows`, `/explain ROW`, `/restart ROW`; a restart `/restart` queued that fails is told to the person | `commands`, `loader`, `output` (`notice`) |
+| `commands:jobs` | `jobs`: the restarts commands ask for, run one at a time in its own work (`put(job, failed)`), a failure told to the person; `pending()`, `settled()`, which the chat row waits on before it reads a line | `output` (`notice`) |
+| `commands:operator` | registers `/rows`, `/explain ROW`, `/restart ROW` (the restart queued in `jobs`) | `commands`, `loader`, `jobs` (`put`) |
 | `commands:shell_command` | claims `!`: `!COMMAND` runs in the person's shell; config: `prefix` (`!`), `cwd` (`.`, the project), `timeout` (120 s), `shell` (empty: `$SHELL`, else `/bin/sh`) | `commands` (`claim`) |
 
 A row offers commands by `acquire(commands.register, spec, run)`, so a row that leaves takes
@@ -55,8 +56,15 @@ model read, which never held it.
 
 The operator acts through cordis's loader handle (`status`, `entries`, `restart`, `explain`),
 never the runtime. A restart replaces rows the chat session depends on, which restarts the
-session itself, so restarts are queued to the operator row's own background work
-(cordis-helpers' `perform`) rather than run in the session's task.
+session itself, so a command never restarts rows in the session's task: it queues the restart
+in `jobs` (`commands:jobs`, `jobs.py`) and answers, ending with a `restarting` event naming the
+rows. The jobs row runs what is queued one at a time, in its own work (cordis-helpers'
+`perform`), and tells the person through `output.notice` when one fails, worded as the command
+that queued it says (`failed`). The chat row reads its next line only once nothing is pending
+(`settled`), so the restart reloads it while it waits, holding no line, and a line typed
+meanwhile reaches the new loop. Every command that restarts rows queues there: `/restart`,
+`/clear` and `/compact` (the conversation row), `/model NAME` (the switch row). The jobs row
+depends on `output` alone, which never reloads, so no restart it runs reloads it.
 
 `/model` is the models plugin's (`models:switch`), beside the catalog it reads; `/clear` and
 `/compact` are the agent plugin's conversation row's (`agent:conversation`), beside the

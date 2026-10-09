@@ -14,7 +14,6 @@ model, `tools`, the loader, `commands` and `output`, which depends on neither th
 transcript, which they restart.
 """
 
-import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -26,11 +25,11 @@ from agent_cordis_plugin.conversation import (
     COMPACT,
     ConversationConfig,
     Offered,
+    Queue,
     Rows,
     Shown,
     clear_conversation,
     compact_conversation,
-    unrestarted,
 )
 from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.loop import (
@@ -47,8 +46,8 @@ from agent_cordis_plugin.loop import (
 from agent_cordis_plugin.system import SystemConfig, SystemPrompt
 from agent_cordis_plugin.tools import ToolBroker
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
-from cordis import Effects, acquire, background, bind, component
-from cordis_helpers import Hooks, Job, perform
+from cordis import Effects, acquire, bind, component
+from cordis_helpers import Hooks
 
 __all__ = [
     "LoopConfig",
@@ -198,6 +197,7 @@ async def conversation(
     loader: Rows,
     commands: _Registrar,
     output: Shown,
+    jobs: Queue,
     config: ConversationConfig,
 ) -> Effects:
     """Fills a `conversation` row: `use = "agent:conversation"`. `/clear` and `/compact`, a new
@@ -207,22 +207,12 @@ async def conversation(
     `config.timeout` seconds: Ctrl-C stops only a turn; a note says so as it begins), and the
     loop and the transcript restart, the kernel keeping its namespace.
 
-    It depends on neither the loop nor the transcript: the restart would reload this row too,
-    cancelling its own work half-way. It finds the conversation's file from the transcript row
-    as the loader mounted it (`loader.rows`), and its restarts are its own background work,
-    never run in the chat row's task, which they reload. A restart that fails is told to the
-    person (`output.notice`): the new conversation is written by then."""
-    jobs: asyncio.Queue[Job] = asyncio.Queue()
-    worker = yield background(perform(jobs, lambda why: output.notice(unrestarted(config, why))))
+    It depends on neither the loop nor the transcript, which it restarts. It finds the
+    conversation's file from the transcript row as the loader mounted it (`loader.rows`), and
+    queues each restart in `jobs`, never running it in the chat row's task, which it reloads; a
+    restart that fails is told to the person there: the new conversation is written by then."""
     compacting = partial(
-        compact_conversation,
-        model=model,
-        tools=tools,
-        loader=loader,
-        output=output,
-        config=config,
-        jobs=jobs,
-        worker=worker,
+        compact_conversation, model=model, tools=tools, loader=loader, output=output, config=config, jobs=jobs
     )
     yield acquire(
         commands.register, CLEAR, partial(clear_conversation, loader=loader, config=config, jobs=jobs)

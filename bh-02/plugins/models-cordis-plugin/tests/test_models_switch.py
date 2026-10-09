@@ -1,7 +1,6 @@
 """`/model`, beside the catalog it reads: listing the models, switching by name in the session's
 layer, and the row that registers it on a runtime."""
 
-import asyncio
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -65,16 +64,35 @@ class _Models:
         return known[name].get("problem")
 
 
-async def _drain(jobs: asyncio.Queue[Any]) -> None:
-    while not jobs.empty():
-        await (await jobs.get())()
+class _Jobs:
+    """The `jobs` value as `/model` needs it: each reload queued, with what the person would be
+    told if it failed; `drain` runs them, as the jobs row would after the answer."""
+
+    def __init__(self) -> None:
+        self.queued: list[tuple[Any, Any]] = []
+        self.told: list[str] = []
+
+    def put(self, job: Any, failed: Any) -> None:
+        self.queued.append((job, failed))
+
+    def empty(self) -> bool:
+        return not self.queued
+
+
+async def _drain(jobs: _Jobs) -> None:
+    while jobs.queued:
+        job, failed = jobs.queued.pop(0)
+        try:
+            await job()
+        except Exception as error:
+            jobs.told.append(failed(f"{type(error).__name__}: {error}"))
 
 
 async def test_model_lists_the_models_and_switches_by_name_in_the_session_s_layer(tmp_path: Path) -> None:
     layer = tmp_path / "session.toml"
     layer.write_text('[[plugin]]\nid = "model"\nconfig = { state = "/s/claude" }\n')
     calls: list[tuple[str, str, str]] = []
-    loader, jobs, models = _Loader(), asyncio.Queue(), _Models()
+    loader, jobs, models = _Loader(), _Jobs(), _Models()
     run = Switch(loader, models, SwitchConfig(layer=str(layer)), jobs, lambda *a: calls.append(a)).run
     assert str(await run("")).splitlines() == [
         "  sonnet  claude-code  sonnet",
@@ -97,7 +115,7 @@ async def test_model_lists_the_models_and_switches_by_name_in_the_session_s_laye
     for bad in ("/model sonnet-x", "/sonnet", "sonnet x"):  # a command typed twice, two words
         assert str(await run(bad)).startswith(f"not a model name: {bad!r}; type /model and one name")
     assert calls == [(str(layer), "model", "llama")]  # none of them was recorded
-    unsessioned = Switch(_Loader(), _Models(), SwitchConfig(), asyncio.Queue(), lambda *a: None)
+    unsessioned = Switch(_Loader(), _Models(), SwitchConfig(), _Jobs(), lambda *a: None)
     assert "no session layer" in str(await unsessioned.run("x"))
     set_model(str(layer), "model", "llama")
     (row,) = read_layer(layer)
@@ -117,7 +135,7 @@ async def test_model_refuses_when_a_later_layer_sets_the_model_row_s_config(tmp_
     assert shadowing(files[:3], str(layer), "model") is None
     assert shadowing([str(patch), str(layer)], str(layer), "model") is None  # before it: overridden by it
     calls: list[tuple[str, str, str]] = []
-    jobs: asyncio.Queue[Any] = asyncio.Queue()
+    jobs = _Jobs()
     chosen = Switch(
         _Loader(),
         _Models(),
@@ -136,7 +154,7 @@ async def test_model_refuses_when_a_later_layer_sets_the_model_row_s_config(tmp_
 
 def test_the_model_command_offers_each_usable_model_as_a_choice() -> None:
     models = _Models()
-    spec = Switch(_Loader(), models, SwitchConfig(), asyncio.Queue(), lambda *a: None).spec()
+    spec = Switch(_Loader(), models, SwitchConfig(), _Jobs(), lambda *a: None).spec()
     choices = spec["choices"]()
     assert [c["args"] for c in choices] == ["sonnet", "haiku", "llama"]  # not the one with a problem
     assert choices[0]["help"] == "switch to sonnet (claude-code: sonnet)"
@@ -166,7 +184,7 @@ async def test_the_model_list_says_why_the_models_file_is_not_read_instead_of_wh
     there, and still lists the models there are."""
     models = _Models()
     models.problem = "the models file /p/.config/bh-02/models.toml is not read: it is in the project (/p)"
-    chosen = Switch(_Loader(), models, SwitchConfig(), asyncio.Queue(), lambda *a: None)
+    chosen = Switch(_Loader(), models, SwitchConfig(), _Jobs(), lambda *a: None)
     said = str(await chosen.run("")).splitlines()
     assert said[0] == "  sonnet  claude-code  sonnet"
     assert said[-1] == f"/model NAME switches; {models.problem}" and "add models in" not in said[-1]
@@ -183,47 +201,34 @@ class _Commands:
         return lambda: self.runs.pop(spec["name"], None)
 
 
-class _Output:
-    def __init__(self) -> None:
-        self.notices: list[str] = []
-
-    async def notice(self, message: str) -> None:
-        self.notices.append(message)
-
-
 class _Failing(_Loader):
     async def reload(self) -> None:
         raise RuntimeError("the layer does not parse")
 
 
-def _switch_on(rt: Runtime, loader: object, layer: Path) -> tuple[_Commands, _Output]:
-    commands, told = _Commands(), _Output()
+async def test_the_switch_row_registers_model_and_queues_the_reload_in_jobs(tmp_path: Path) -> None:
+    """The reload `/model NAME` asks for is queued in `jobs`, run after the command answered,
+    with what the person is told if it fails."""
+    layer = tmp_path / "session.toml"
+    layer.write_text('[[plugin]]\nid = "model"\nconfig = { default = "haiku" }\n')
+    commands, jobs, loader = _Commands(), _Jobs(), _Failing()
 
-    @component(provides=("commands", "loader", "models", "output"))
+    @component(provides=("commands", "loader", "models", "jobs"))
     async def around() -> Effects:
         yield bind("commands", commands)
         yield bind("loader", loader)
         yield bind("models", _Models())
-        yield bind("output", told)
+        yield bind("jobs", jobs)
 
+    rt = Runtime()
     rt.mount(around, id="around")
     rt.mount(switch, id="switch", config=SwitchConfig(layer=str(layer)))
-    return commands, told
-
-
-async def test_the_switch_row_registers_model_and_tells_a_reload_that_failed(tmp_path: Path) -> None:
-    """The reload `/model NAME` queued runs as the row's own background work, after the command
-    answered: one that fails reaches the person rather than vanishing."""
-    layer = tmp_path / "session.toml"
-    layer.write_text('[[plugin]]\nid = "model"\nconfig = { default = "haiku" }\n')
-    rt = Runtime()
-    commands, told = _switch_on(rt, _Failing(), layer)
     await rt.settle()
     answer: Sequence[Any] = await commands.runs["model"]("sonnet")
     assert answer[0]["text"].startswith("switching to sonnet")
-    await asyncio.sleep(0.01)
-    (notice,) = told.notices
-    assert notice.startswith("the model switch's reload failed (RuntimeError: the layer does not parse)")
     assert read_layer(layer) == [Row("model", config={"default": "sonnet"})]
+    await _drain(jobs)
+    (told,) = jobs.told
+    assert told.startswith("the model switch's reload failed (RuntimeError: the layer does not parse)")
     await rt.shutdown()
     assert commands.runs == {}

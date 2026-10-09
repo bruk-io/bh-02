@@ -519,6 +519,7 @@ def test_a_layer_that_fills_the_operator_gets_the_switch_row() -> None:
     rows, changes = translated(own)
     assert rows == [
         Row("operator", "commands:operator"),
+        Row("jobs", "commands:jobs"),
         Row("conversation", "agent:conversation"),
         Row("switch", "models:switch"),
     ]
@@ -526,6 +527,8 @@ def test_a_layer_that_fills_the_operator_gets_the_switch_row() -> None:
         "/model is the models plugin's now (models:switch): add a 'switch' row with use = \"models:switch\"",
         "/clear is the conversation row's now (agent:conversation): add a 'conversation' row with "
         'use = "agent:conversation"',
+        "the chat row waits on `jobs` now, where commands queue the restarts they ask for: add a "
+        "'jobs' row with use = \"commands:jobs\"",
     ]
     assert translated(rows) == (rows, [])
     assert translated([Row("operator", disabled=False)]) == (
@@ -561,13 +564,25 @@ def test_compact_is_the_conversation_row_and_an_operator_s_forget_is_gone() -> N
     rows, changes = translated(both)
     assert rows == [
         Row("operator", "commands:operator"),
+        Row("jobs", "commands:jobs"),
         Row("switch", "models:switch"),
         Row("conversation", "agent:conversation"),
     ]
-    assert changes[-1] == (
+    assert changes[-2] == (
         "row 'operator': `forget` is gone: /clear writes an empty conversation over the transcript "
         "row's file, keeping the old as .bak; /clear is the conversation row's now "
         '(agent:conversation), which reads config = { clear = ["loop"] }: set it on the '
         "'conversation' row by hand; delete its config"
     )
     assert translated(rows) == (rows, [])
+
+
+def test_a_layer_that_fills_the_chat_row_gets_the_jobs_row() -> None:
+    rows, changes = translated([Row("chat", "chat:session"), Row("loop", "agent:loop")])
+    assert rows == [Row("chat", "chat:session"), Row("jobs", "commands:jobs"), Row("loop", "agent:loop")]
+    assert changes == [
+        "the chat row waits on `jobs` now, where commands queue the restarts they ask for: add a "
+        "'jobs' row with use = \"commands:jobs\""
+    ]
+    assert translated(rows) == (rows, [])
+    assert translated([Row("chat", config={"prompt": "hi"})])[1] == []  # a change to the shipped row

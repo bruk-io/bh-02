@@ -162,6 +162,13 @@ use = "commands:registry"
 id = "operator"
 use = "commands:operator"
 
+# The restarts commands ask for (/clear, /compact, /model NAME, /restart ROW), run one at a time
+# after the command has answered, a failure told to you; the chat row reads your next line only
+# once none is pending, so a line typed during a restart reaches the new loop. Over `output`.
+[[plugin]]
+id = "jobs"
+use = "commands:jobs"
+
 # `/model`: lists the models (the `models` row's), the current one marked, and `/model NAME`
 # switches by name, writing it in the session's layer and reloading the layers. Beside the
 # catalog it reads, over `commands`, the loader and `output`.

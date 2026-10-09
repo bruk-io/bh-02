@@ -18,15 +18,15 @@ conversation is the `.bak` beside the file.
 A command runs in the chat row's task, and Ctrl-C stops only a turn, so the model has `timeout`
 seconds to answer, and a note says so as the step begins; the person leaving cancels the
 command (`chat:session`), and nothing is written until the summary is whole. The restart is
-queued for the conversation row's own work (cordis-helpers' `perform`), never run in the chat
-row's task, which it reloads, and a restart that fails is told to the person, since the new
-conversation is written by then. The pure parts (`asked`, `seeded`, `kept_in`, `_unsaid`,
-`_unusable`, `_summed`, `_answer`, `_unchanged`, `_cleared`, `unrestarted`) decide; the rest
-reads, writes and asks.
+queued in `jobs` (CONTRACTS.md: jobs), never run in the chat row's task, which it reloads, and
+a restart that fails is told to the person, since the new conversation is written by then; the
+chat row reads its next line only once the restart is done, so the line reaches the new loop.
+The pure parts (`asked`, `seeded`, `kept_in`, `_unsaid`, `_unusable`, `_summed`, `_answer`,
+`_unchanged`, `_cleared`, `unrestarted`) decide; the rest reads, writes and asks.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -42,6 +42,7 @@ __all__ = [
     "COMPACT",
     "ConversationConfig",
     "Offered",
+    "Queue",
     "Rows",
     "Shown",
     "Unchanged",
@@ -150,6 +151,14 @@ class Rows(Protocol):
     @property
     def rows(self) -> Mapping[str, Any]: ...
     async def restart(self, *rids: str) -> None: ...
+
+
+@runtime_checkable
+class Queue(Protocol):
+    """What /clear and /compact need of the `jobs` value: a restart queued, and what the person
+    is told if it fails."""
+
+    def put(self, job: Job, failed: Callable[[str], str]) -> None: ...
 
 
 @runtime_checkable
@@ -365,8 +374,7 @@ async def compact_conversation(
     loader: Rows,
     output: Shown,
     config: ConversationConfig,
-    jobs: asyncio.Queue[Job],
-    worker: asyncio.Future[None],
+    jobs: Queue,
 ) -> str | list[Json]:
     """`/compact [WHAT TO KEEP]`: ask the model for a summary of the conversation (a note says so
     as it begins), write the new conversation it begins in the transcript row's file (the old
@@ -394,10 +402,6 @@ async def compact_conversation(
         summary, usage = await summarise(model, asked(messages, args), list(tools.specs()), config.timeout)
     except Unchanged as why:
         return _unchanged(str(why), why.usage)
-    if worker.done():  # the row restarted meanwhile: nothing would run the restart
-        return _unchanged(
-            f"the conversation row restarted while the model wrote the summary, {_AGAIN}", usage
-        )
     try:
         # on the loop, not in a thread: from the rewrite to queueing the restart nothing may
         # cancel it (the person leaving), or the file would hold the new conversation and the
@@ -413,12 +417,12 @@ async def compact_conversation(
     rows = [rid for rid in (config.loop, config.transcript) if rid in running]
     if rows:
         # together: a row depending on both (the chat row, through `loop`) reloads once
-        await jobs.put(partial(loader.restart, *rows))
+        jobs.put(partial(loader.restart, *rows), partial(unrestarted, config))
     return _answer(summary, usage, backup, rows)
 
 
 async def clear_conversation(
-    args: str, *, loader: Rows, config: ConversationConfig, jobs: asyncio.Queue[Job]
+    args: str, *, loader: Rows, config: ConversationConfig, jobs: Queue
 ) -> str | list[Json]:
     """`/clear`: write an empty conversation over the transcript row's file (the old kept beside
     it, as /compact keeps it) and queue the restart of the `clear` rows that are running; answer
@@ -444,5 +448,5 @@ async def clear_conversation(
     rows = [rid for rid in config.clear if rid in running]
     if rows:
         # together: a row depending on several of them (the chat row, on `loop`) reloads once
-        await jobs.put(partial(loader.restart, *rows))
+        jobs.put(partial(loader.restart, *rows), partial(unrestarted, config))
     return _cleared(backup, rows)
