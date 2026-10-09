@@ -25,9 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # uv fetches Python 3.15 (the workspace's requires-python) and the dev dependencies,
-      # MkDocs among them, from uv.lock.
+      # uv installs the dev dependencies, MkDocs among them, from uv.lock.
       - uses: astral-sh/setup-uv@v6
+
+      # The workspace needs Python 3.15, a pre-release, which `uv run` does not download by itself
+      # ("No interpreter found for Python >=3.15"); scripts/linux-jail-check installs it the same way.
+      - name: Install Python 3.15
+        run: uv python install 3.15
 
       - name: Build the site
         run: uv run --locked mkdocs build --strict
