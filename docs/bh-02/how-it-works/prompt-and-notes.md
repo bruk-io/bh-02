@@ -10,11 +10,13 @@ The `system` row (`agent:system`) builds the prompt, in the order Claude Code bu
 
 1. who the model is (the model in bh-02) and what bh-02 is made of;
 2. where it is working: the directory and its git branch;
-3. the sections other rows add: memory's instruction files ([Memory](../using/memory.md)), auto
-   memory, and how to extend bh-02 with extensions of its own.
+3. the sections other rows add, sorted by name: how to extend bh-02 with extensions of its own,
+   memory's instruction files ([Memory](../using/memory.md)) and auto memory, and the `python`
+   tool's instructions (the kernel row's section): what the tool is, how to use it, and, under a
+   Linux jail, what its code can read.
 
-The loop follows it with the `python` tool's instructions: what the tool is, how to use it, and,
-under a Linux jail, what its code can read.
+The prompt names no tool itself: the tools are the rows' that register them with `tools`, and a
+tool's row says what the model should know of it in a section of its own.
 
 `system` is a broker: a row with something to tell the model registers a section, and the
 section goes when the row does.
@@ -40,11 +42,12 @@ can reuse a new session's start.
 
 `/clear` and `/compact` begin a new conversation, and with it a fresh reading of the prompt.
 
-## Notes after an input
+## Notes after a call
 
-After each input, the loop asks `notes` (`agent:notes`, another broker) what to tell the model with
-its result. Each function a row has added there gets the input's code, its result and the project
-files it opened (`kernel.touched()`). It may add a note; it can't change the result.
+After each call, the loop asks `notes` (`agent:notes`, another broker) what to tell the model with
+its result. Each function a row has added there gets the tool's name, the call's input, its result
+and the files it opened, as its tool answered (for a `python` input, what its own Python code
+opened, `kernel.touched()`). It may add a note; it can't change the result.
 
 The shipped one is memory's on-demand loading (`memory:on_touch`): the first time an input in a
 conversation opens a file that a subdirectory's `CLAUDE.md`, or a rule with matching `paths`,

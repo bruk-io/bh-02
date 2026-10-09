@@ -83,8 +83,8 @@ def main(
     no_jail: bool,
     resume: str | None,
 ) -> None:
-    """A coding agent in a terminal app. The model acts in Python, its one tool, in a persistent
-    kernel inside a jail. Claude is reached through Claude Code on the Claude
+    """A coding agent in a terminal app. The model acts in Python, through the python tool, in a
+    persistent kernel inside a jail. Claude is reached through Claude Code on the Claude
     subscription, with the CLAUDE_CODE_OAUTH_TOKEN in local.env (`claude setup-token` makes
     one); any OpenAI-compatible model can be added to the models file. Every run is a session
     that `--resume` continues."""

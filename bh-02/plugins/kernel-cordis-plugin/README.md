@@ -1,18 +1,21 @@
 # kernel-cordis-plugin
 
 A persistent Python namespace in a process of its own, started by whatever jail the
-composition names, and the model's one tool, `python(code)`, which runs an input in it. Also
-`approval`: the one place that decides whether the model's code runs unasked.
+composition names, and the `python(code)` tool, which runs an input in it: the kernel row
+registers it with `tools` (`agent:tools`, a broker) and tells the model about it in the system
+prompt's `python` section. Also `approval`: the one place that decides whether what the model
+asked for runs unasked.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `kernel:kernel` | `kernel`: `spec` (`python(code)`), `instructions()`, `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its worker's jail's: the worker it last started, never another program of the same jail), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `jail` (`start`, and of the worker it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()`, for `confined`; `release()`) |
-| `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when confined, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
+| `kernel:kernel` | `kernel`: `call(input) -> {"content", "touched"}` (the `python` tool's call, registered with `tools` as `PYTHON`, shown as its code, `shown_call`), `instructions()` (the `system` section `python`), `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its worker's jail's: the worker it last started, never another program of the same jail), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `tools` (`register`: `python`), `system` (`add`: `python`), `jail` (`start`, and of the worker it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()`, for `confined`; `release()`) |
+| `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when it runs in the jail, `runs` (the jail when it says nothing), and that confines it, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
 | `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
 
-`python.py` is the tool, pure: its spec and `instructions_for(confined, startup, reads, theirs=, elsewhere=)`, what the
-model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
+`python.py` is the tool, pure: its spec (`PYTHON`), how a call is put to the person
+(`shown_call`: its code, whole) and `instructions_for(confined, startup, reads, theirs=,
+elsewhere=)`, what the model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
 long as this run of bh-02 (a /model switch keeps it; a start, a resume, /clear or a dead worker
 empties it), and that helpers worth keeping go in the project's startup file (`startup`), the
 only one that is its to edit, the person's own (`theirs`), which comes first, being theirs; how to use it (work in
@@ -28,8 +31,9 @@ asks, so it depends on its jail alone and a new ui or model keeps the namespace.
 
 `approval.py` is the rule, written once: `is_confined(report)` (the jail enforces `fs_write` and
 `network`), and `Approval`, the `approval` value over a jail and an `output`. The loop asks it
-about every input (`{"name": "python", "input": {"code"}}`) and the extensions row about every
-extension it loads; the kernel's own `confined` is `is_confined` over the same jail. Its row,
+about every call (`{"name", "input", "runs", "title", "lines", ...}`: a call to a tool that
+runs in bh-02's own process, `runs = "host"`, is put to the person however confined the jail)
+and the extensions row about every extension it loads; the kernel's own `confined` is `is_confined` over the same jail. Its row,
 `kernel:approval`, depends on `jail` and `output`, not `kernel`, so `/clear` (a new kernel)
 leaves it up, and the extensions row that depends on it. It is a capability, bound by one row:
 two rows' answers could not be combined, so it is not a broker. It runs in bh-02's own process,
@@ -75,8 +79,8 @@ it. Cancelling `run` interrupts the input and waits `grace` seconds for it to en
 won't, or that died, is started again on the next input, which is told its variables are gone,
 and why when its jail ended it (`started.ended()`: a Linux `brig:jail` ends itself when the host
 undoes one of its mounts). A worker that died between inputs is noticed before the next input
-is sent, so that input runs in the new one. After each input, `touched()` is the files under `root` it opened (what the loop gives
-`notes`' functions).
+is sent, so that input runs in the new one. After each input, `touched()` is the files under
+`root` it opened, which `call` answers with (what the loop gives `notes`' functions).
 
 A new kernel's first input is also told what the startup files did (`startup`, helpers kept
 across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/kernel.py` (else

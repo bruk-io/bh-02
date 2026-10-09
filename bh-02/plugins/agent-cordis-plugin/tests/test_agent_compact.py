@@ -17,6 +17,7 @@ from agent_cordis_plugin import (
     FileTranscript,
     LoopModel,
     MemoryTranscript,
+    ToolBroker,
     Unchanged,
     asked,
     compact,
@@ -92,12 +93,11 @@ class Limited(Exception):
         self.kind, self.message = "rate_limit", "rate limited; wait a minute"
 
 
-class Tool:
-    """The `kernel` value as /compact needs it: the one tool's spec."""
+class Offered:
+    """The `tools` value as /compact needs it: the specs the loop offers."""
 
-    @property
-    def spec(self) -> Json:
-        return PYTHON
+    def specs(self) -> list[Json]:
+        return [PYTHON]
 
 
 class Loader:
@@ -163,7 +163,7 @@ async def _compact(
     return await compact_conversation(
         args,
         model=model,
-        kernel=Tool(),
+        tools=Offered(),
         loader=loader or Loader(str(path) if path else None),
         output=screen or Screen(),
         config=CompactConfig(),
@@ -231,17 +231,12 @@ async def test_the_new_conversation_is_bh_02_s_note_then_the_summary_and_the_loo
         async def approve(self, request: Json) -> bool:
             return True
 
-    class Kernel(Tool):
-        def instructions(self) -> str:
-            return ""
+    async def nothing(input: Json) -> Json:
+        return {"content": ""}
 
-        async def run(self, code: str) -> str:
-            return ""
-
-        def touched(self) -> tuple[str, ...]:
-            return ()
-
-    loop = LoopModel(model, Kernel(), history, Approved(), system=Prompt(), today=lambda: "2026-10-07")
+    tools = ToolBroker()
+    tools.register(PYTHON, nothing)
+    loop = LoopModel(model, tools, history, Approved(), system=Prompt(), today=lambda: "2026-10-07")
     events = [e async for e in loop.reply("next")]
     assert not [e for e in events if e["type"] == "note"]  # nothing told as changed
     ((messages, _),) = model.requests
@@ -527,18 +522,18 @@ class Registry:
 
 
 async def test_the_compact_row_registers_compact_and_restarts_as_its_own_work(tmp_path: Path) -> None:
-    """It depends on the model, the kernel's spec, the loader, `commands` and `output`, never on
+    """It depends on the model, `tools` (the specs), the loader, `commands` and `output`, never on
     the loop or the transcript, which it restarts: the restart would reload it, cancelling its
     own work. A restart that fails is told to the person: the new conversation is written."""
-    assert resolve("agent:compact").inject == {"model", "kernel", "loader", "commands", "output"}
+    assert resolve("agent:compact").inject == {"model", "tools", "loader", "commands", "output"}
     path = _session(tmp_path)
     loader, commands, screen = Loader(str(path)), Registry(), Screen()
     model = Scripted([text("x holds 42"), stop("end_turn")], [text("x holds 42"), stop("end_turn")])
 
-    @component(provides=("model", "kernel", "loader", "commands", "output"))
+    @component(provides=("model", "tools", "loader", "commands", "output"))
     async def values() -> Effects:
         yield bind("model", model)
-        yield bind("kernel", Tool())
+        yield bind("tools", Offered())
         yield bind("loader", loader)
         yield bind("commands", commands)
         yield bind("output", screen)

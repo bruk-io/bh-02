@@ -1,4 +1,4 @@
-"""The one tool booted from the shipped layers: a real loop, kernel and jail; only the model
+"""The python tool booted from the shipped layers: a real loop, kernel and jail; only the model
 is a fake, which calls scripted inputs. An input is plain Python: it reads and writes files and
 runs programs itself, the jail decides what it may touch, and unjailed every input is asked about."""
 
@@ -110,7 +110,7 @@ async def test_unjailed_inputs_share_a_namespace_of_plain_python_and_each_is_ask
     assert "[2] 'read with open()'" in out  # a file, read with plain Python
     assert "[3] ['x']" in out  # nothing in the namespace but what inputs put there
     assert "[4] Traceback" in out and "NameError" in out
-    assert "[5] denied: the person said no to this input" in out
+    assert "[5] denied: the person said no to this call" in out
     assert not (tmp_path / "declined.txt").exists()  # a no ran nothing
 
 
@@ -128,7 +128,7 @@ async def test_unjailed_an_input_and_an_extension_are_both_put_to_the_person_by_
     _answers(False, False)  # which is asked first is a race between two rows: both are noes
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     assert sorted(_asked()) == sorted([source, "6 * 7"])
-    assert "[0] denied: the person said no to this input" in _shown()
+    assert "[0] denied: the person said no to this call" in _shown()
     status = json.loads((plugins / "status.json").read_text())
     assert status["todo"]["error"] == "the person declined to load it"
 

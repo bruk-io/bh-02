@@ -1,5 +1,6 @@
 """The `kernel` value: the host's end of the worker's socket, the process a jail started, and
-the model's one tool, `python(code)`, which runs an input in it.
+the `python(code)` tool's call (`call`), which runs an input in it; the kernel row registers that
+with `tools`.
 
 An input is one request and one answer: the worker runs the code and says it is done. Whether
 the person is asked first is the `approval` row's to answer and the loop's to ask, so the kernel
@@ -247,9 +248,9 @@ def _inside(paths: Sequence[str], root: str) -> tuple[str, ...]:
 
 
 class Kernel:
-    """Implements `kernel` (CONTRACTS.md): a persistent namespace, and the model's one tool
-    (`spec`, `instructions()`, `run(code)`). An async context manager: entering starts the
-    worker in the jail, leaving stops it."""
+    """Implements `kernel` (CONTRACTS.md): a persistent namespace, and the `python` tool's call
+    (`call(input)`, over `run(code)`) and what the model is told about it (`instructions()`). An
+    async context manager: entering starts the worker in the jail, leaving stops it."""
 
     def __init__(self, jail: Jail, config: KernelConfig) -> None:
         self._jail = jail
@@ -288,11 +289,6 @@ class Kernel:
         reads everything but what it hides (or is no jail at all)."""
         return self._worker.reads() if self._worker is not None else ()
 
-    @property
-    def spec(self) -> Mapping[str, Any]:
-        """The one tool, as the model is offered it."""
-        return PYTHON
-
     def instructions(self) -> str:
         """What the model is told about the tool and where its code runs, read per request: the
         project's startup files are the model's to edit, the person's are theirs; and where its
@@ -317,6 +313,17 @@ class Kernel:
         self, kind: type[BaseException] | None, error: BaseException | None, tb: TracebackType | None
     ) -> None:
         await self._stop()
+
+    async def call(self, input: Mapping[str, Any]) -> dict[str, Any]:
+        """One call of the `python` tool (CONTRACTS.md: tools): its `code` run as an input,
+        answered with what the model reads (`content`) and the files under the root it opened
+        (`touched`, as `touched()` gives them). A call with no `code` string runs nothing and
+        says why."""
+        code = input.get("code")
+        if not isinstance(code, str):
+            return {"content": f"error: {PYTHON['name']} takes `code`, the Python to run, as a string"}
+        content = await self.run(code)
+        return {"content": content, "touched": list(self._touched)}
 
     async def run(self, code: str) -> str:
         """Run one input and return it as the model reads it: what it printed and its error."""

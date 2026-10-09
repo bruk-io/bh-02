@@ -70,7 +70,8 @@ plugin:
 |---|---|---|
 | `model` | `models:model` | the model: Claude via Claude Code, or any OpenAI-compatible endpoint |
 | `loop` | `agent:loop` | the agent loop: sends the conversation, runs the tool calls |
-| `kernel` | `kernel:kernel` | the one tool, `python(code)`: a Python REPL of the model's own, which persists for this run of bh-02 |
+| `tools` | `agent:tools` | the tools the model is offered: a broker rows register a tool with, offered in name order |
+| `kernel` | `kernel:kernel` | the `python(code)` tool it registers: a Python REPL of the model's own, which persists for this run of bh-02 |
 | `jail` | `brig:jail` | where the kernel runs: brig's sandbox |
 | `ui` | `tui:app` | the terminal app, on [bh-01](https://github.com/bruk-io/bh-01)'s design tokens |
 | `extensions` | `extensions:extensions` | the model's own plugins: cordis components it writes, loaded while bh-02 runs, in a jail of their own |

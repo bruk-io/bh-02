@@ -56,6 +56,17 @@ async def test_unconfined_code_runs_on_the_person_s_answer_to_the_request_as_it_
     assert not Approval(_Jail(UNENFORCED), yes).confined
 
 
+async def test_a_call_that_runs_in_bh_02_s_own_process_is_asked_about_however_confined_the_jail() -> None:
+    """A tool whose calls run on the host (`runs = "host"`, CONTRACTS.md: tools) is outside every
+    jail, so the jail's grades decide nothing: the person is asked, and nobody to ask is a no."""
+    host = {**_REQUEST, "name": "search", "runs": "host"}
+    person = _Person(True)
+    assert await Approval(_Jail(_CONFINED), person).approve(host)
+    assert person.asked == [host]
+    assert not await Approval(_Jail(_CONFINED)).approve(host)
+    assert await Approval(_Jail(_CONFINED)).approve({**_REQUEST, "runs": "jail"})
+
+
 async def test_with_nobody_to_ask_unconfined_code_never_runs() -> None:
     assert not await Approval(_Jail(UNENFORCED)).approve(_REQUEST)
     assert await Approval(_Jail(_CONFINED)).approve(_REQUEST)  # confined: nobody needed

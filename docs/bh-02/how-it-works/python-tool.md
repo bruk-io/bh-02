@@ -1,7 +1,9 @@
 # The python tool
 
-The model has one tool, `python(code)`, and it carries code. This is CodeAct: the model acts by
-writing Python, and only what that Python prints reaches the model. To the model the tool is a
+The tool bh-02 ships is `python(code)`, and it carries code. This is CodeAct: the model acts by
+writing Python, and only what that Python prints reaches the model. The kernel row registers it
+with `tools`, beside whatever tools other rows register, and tells the model about it in a
+section of the system prompt. To the model the tool is a
 Python REPL of its own that persists for the run.
 
 ## What an input can do
@@ -48,7 +50,7 @@ it. So whatever your file holds, the model can read. The project's file is read 
 ## What an input touched
 
 The Python process hears each file an input's own code opens under the project, with an audit
-hook. After each input the loop hands that list (`kernel.touched()`) to the rows that add notes,
+hook. The tool answers each call with that list (`kernel.touched()`), and the loop hands it to the rows that add notes,
 which is how a subdirectory's `CLAUDE.md` arrives when the model first opens a file there. Files a
 program the input runs opens are not heard, since that happens in another process.
 

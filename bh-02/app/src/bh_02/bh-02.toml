@@ -1,21 +1,32 @@
 # The shipped composition, a Textual app with CodeAct (the `python` tool) as its default.
 # bh-02's own loop drives Claude through Claude Code (the Claude Agent SDK, on the
-# subscription), one model step at a time; the model has one tool, `python(code)`, through
-# standard tool calling, and its inputs run in a persistent kernel inside a brig jail. A row's
+# subscription), one model step at a time; the model is offered the tools rows register (here
+# the kernel's `python(code)`), through standard tool calling, and its inputs run in a
+# persistent kernel inside a brig jail. A row's
 # id is its role; `use` is which plugin fills it, as `plugin:component` (a `cordis.plugins`
 # entry point) or `module:attribute`. Order carries no meaning: dependencies decide what
 # activates when.
 # A session's own layer and `bh-02 --patch mine.toml` are layers over this one.
 
-# The model: bh-02's own loop (`agent:loop`: steps classified, each call run as an input in the
-# kernel) over one model, named: `sonnet` (Claude through Claude Code, which only carries the
+# The model: bh-02's own loop (`agent:loop`: steps classified, each call run through the tool it
+# names) over one model, named: `sonnet` (Claude through Claude Code, which only carries the
 # steps; credential: CLAUDE_CODE_OAUTH_TOKEN in local.env, which the row reads itself) unless
 # the row's `default` says another. `opus` and `haiku` are built in too, and the models file
 # (~/.config/bh-02/models.toml) adds any OpenAI-compatible model. The transcript is a row of its
-# own, so switching the model (`/model NAME`) keeps the conversation.
+# own, so switching the model (`/model NAME`) keeps the conversation. The loop reads the tools at
+# a conversation's first request, once those it `requires` have registered (`wait` seconds at
+# most, 30), and offers that list for the rest of it.
 [[plugin]]
 id = "loop"
 use = "agent:loop"
+config = { requires = ["python"] }
+
+# The tools the model is offered: a broker rows register a tool with (a standard spec and the
+# function that runs a call), offered in name order. It depends on nothing, so a tool's row
+# restarting (the kernel's, on /clear) reloads neither the loop nor any other row.
+[[plugin]]
+id = "tools"
+use = "agent:tools"
 
 [[plugin]]
 id = "model"
@@ -40,9 +51,9 @@ use = "agent:transcript"
 id = "executor"
 use = "agent:executor"
 
-# What the model is told with an input's result: a broker of functions rows add, each given the
-# input's code, its result and the project files it opened (`kernel.touched()`), the loop
-# calling each after every input. Memory's on-demand files (a subdirectory's CLAUDE.md, a rule
+# What the model is told with a call's result: a broker of functions rows add, each given the
+# tool's name, the call's input, its result and the files it opened, the loop calling each after
+# every call. Memory's on-demand files (a subdirectory's CLAUDE.md, a rule
 # for some files, given when an input first opens a file they cover) add to it, depending on
 # `transcript`, so a new conversation (/clear) is told afresh and a resumed one is not told
 # again what its transcript holds.
@@ -83,8 +94,9 @@ use = "tui:app"
 id = "chat"
 use = "chat:session"
 
-# The kernel: a persistent Python namespace, and the model's one tool, `python(code)`. Jailed,
-# its inputs run without asking; unjailed (`kernel:unjailed` below), each is put to the person
+# The kernel: a persistent Python namespace, and the `python(code)` tool, which it registers with
+# `tools`, adding what the model is told about it to the system prompt. Jailed, its inputs run
+# without asking; unjailed (`kernel:unjailed` below), each is put to the person
 # first (the `approval` row). A new kernel runs its startup files first (config `startup`, by
 # default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`,
 # the only one the model may edit); unjailed, the model is told to run them as inputs instead.
@@ -97,9 +109,9 @@ use = "kernel:kernel"
 id = "jail"
 use = "brig:jail"
 
-# Whether the model's code may run: each input (the loop asks) and each extension to load (the
-# extensions row asks). At once when the jail confines it (writes and network enforced); else
-# the person is asked, through the ui's approval modal, and only a yes runs it. It depends on the
+# Whether what the model asked for may run: each call (the loop asks) and each extension to load
+# (the extensions row asks). At once when it runs in a jail that confines it (writes and network
+# enforced); else (an unconfined jail, a tool that runs in bh-02's own process) the person is asked, through the ui's approval modal, and only a yes runs it. It depends on the
 # jail and the ui, not the kernel, so `/clear` leaves it up. It runs in bh-02's own process:
 # only a layer replaces it; an extension has no way to.
 [[plugin]]
@@ -143,8 +155,8 @@ use = "commands:operator"
 # `/compact [WHAT TO KEEP]`: the model summarises the conversation, and a new one begins from
 # the summary, written over the transcript row's file (its `path`; the old kept as `.bak`, then
 # `.bak.2`, ...): the loop and the transcript restart, so the prompt is read afresh, and the
-# kernel keeps its namespace, which the summary names. A row of its own over `model`, `kernel`
-# (its tool spec), the loader, `commands` and `output`, not the operator, which never depends on
+# kernel keeps its namespace, which the summary names. A row of its own over `model`, `tools`
+# (the specs, offered as the loop offers them), the loader, `commands` and `output`, not the operator, which never depends on
 # the model. Ctrl-C doesn't stop a command (quitting does), so the model has `timeout` seconds
 # (300) to answer, and a note says so as it begins.
 [[plugin]]

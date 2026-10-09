@@ -99,7 +99,10 @@ class ApprovalScreen(ModalScreen[bool]):
             if code:
                 with VerticalScroll(id="approval-code"):
                     # highlighted as the transcript highlights code: the theme's colours
-                    yield Static(render.code("\n".join(code)), id="approval-source")
+                    yield Static(
+                        render.code("\n".join(code), render.approval_language(self.request)),
+                        id="approval-source",
+                    )
             yield Static(
                 "y  allow     n / Esc  decline     Ctrl-C  stop the turn",
                 id="approval-keys",

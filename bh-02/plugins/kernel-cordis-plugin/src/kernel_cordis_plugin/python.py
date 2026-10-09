@@ -1,9 +1,11 @@
-"""The model's one tool, `python(code)`, and what the model is told about it.
+"""The `python(code)` tool, what the model is told about it, and how a call is put to the person.
 
 CodeAct (Wang et al., arXiv:2402.01030), done as one tool over the provider's standard tool
-calling, and it carries code. To the model the tool is a Python REPL of its own that persists
-(the kernel): each call is one input to it, plain Python that reads and writes files with
-`open` or `pathlib` and runs programs with `subprocess`, and the jail decides what it may touch.
+calling, and it carries code; the kernel row registers it with `tools`, beside whatever tools
+other rows register, and adds what the model is told about it as a `system` section of its own.
+To the model the tool is a Python REPL of its own that persists (the kernel): each call is one
+input to it, plain Python that reads and writes files with `open` or `pathlib` and runs programs
+with `subprocess`, and the jail decides what it may touch.
 
 What the model is told follows the jail (`confined`): a confined REPL is contained, so its
 inputs run without asking; an unconfined one can do anything the person can, so the loop shows
@@ -13,7 +15,7 @@ each input to the person and runs it only on a yes.
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-__all__ = ["PYTHON", "instructions_for"]
+__all__ = ["PYTHON", "instructions_for", "shown_call"]
 
 PYTHON: Mapping[str, Any] = {
     "name": "python",
@@ -33,7 +35,7 @@ PYTHON: Mapping[str, Any] = {
 }
 
 _REPL = (
-    "Your one tool is `python`: a Python REPL of your own, the CodeAct tool bh-02 ships with. "
+    "The `python` tool is a Python REPL of your own, the CodeAct tool bh-02 ships with. "
     "Each call sends it `code`, as if you typed it at the prompt, and you get back what it "
     "printed. It is one process, whose working directory is the project, and it persists for "
     "this run of bh-02: the variables, imports and functions an input defines are there for "
@@ -58,8 +60,8 @@ and a later input, with `uses` still there, edits one of those files:
     p.write_text(text.replace("retries = 3", "retries = 5"))"""
 _USE = (
     "How to use it:",
-    "- Work in Python, not through a shell: there is no shell tool, and an input that only runs "
-    "cat, grep, sed or ls through subprocess and prints what it said leaves the REPL unused. "
+    "- Work in Python, not through a shell: an input that only runs cat, grep, sed or ls "
+    "through subprocess and prints what it said leaves the REPL unused. "
     "Read a file with Path(p).read_text(), list files with Path(d).rglob('*.py') (or `git "
     "ls-files`, which leaves out what git ignores), search with re over the lines, and edit by "
     "replacing text you checked occurs once. Do several steps in one input, and keep what they "
@@ -90,6 +92,16 @@ _USE = (
 )
 
 
+def shown_call(input: Mapping[str, Any]) -> dict[str, Any]:
+    """How a call is put to the person (CONTRACTS.md: tools, `show`): the code it runs, whole,
+    highlighted as Python; nobody approves code unseen."""
+    return {
+        "title": "Run this python code?",
+        "lines": str(input.get("code") or "").strip("\n").splitlines(),
+        "language": "python",
+    }
+
+
 def instructions_for(
     confined: bool,
     startup: Sequence[str] = (".bh-02/kernel.py",),
@@ -98,7 +110,7 @@ def instructions_for(
     theirs: Sequence[str] = (),
     elsewhere: Sequence[str] = (),
 ) -> str:
-    """What the model is told about acting in code: the one tool, its REPL and how long that
+    """What the model is told about acting in code: the python tool, its REPL and how long that
     lasts, the startup files (`startup`, the project's, which are the model's to write; `theirs`,
     the person's own, which run before them and are not), how to use it, and where its code
     runs. `reads`, the trees the jail lets code read when it reads by allowlist (a Linux jail), is

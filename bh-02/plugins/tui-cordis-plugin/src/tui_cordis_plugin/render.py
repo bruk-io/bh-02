@@ -15,6 +15,7 @@ from textual.content import Content
 from textual.highlight import highlight
 
 __all__ = [
+    "approval_language",
     "approval_lines",
     "approval_title",
     "code",
@@ -268,10 +269,10 @@ def waiting_line(rows: Iterable[str]) -> str:
 
 
 def approval_title(request: Event) -> str:
-    """The question an approval asks: run this input, and how long it is, in one line; or the
-    request's own `title`, when it asks about something other than an input."""
-    input: Mapping[str, Any] = request.get("input") or {}
-    lines = str(input.get("code") or "").strip().splitlines()
+    """The question an approval asks, in one line, with how long what it shows is: the request's
+    own `title` (a tool's call as its registration shows it, an extension to load), else run this
+    code."""
+    lines = approval_lines(request)
     size = f"{len(lines)} line{'s' if len(lines) != 1 else ''}"
     if title := str(request.get("title") or ""):
         question = title.removesuffix("?")
@@ -280,9 +281,17 @@ def approval_title(request: Event) -> str:
 
 
 def approval_lines(request: Event) -> list[str]:
-    """The input's code, whole: nobody approves code unseen."""
+    """What an approval shows, whole (nobody approves code unseen): the request's own `lines` (a
+    tool's call as its registration shows it), else the code its input carries."""
+    if isinstance(lines := request.get("lines"), list | tuple):
+        return [str(line) for line in lines]
     input: Mapping[str, Any] = request.get("input") or {}
     return str(input.get("code") or "").strip("\n").splitlines()
+
+
+def approval_language(request: Event) -> str:
+    """The language an approval's lines are highlighted as: the request's `language`, else Python."""
+    return str(request.get("language") or "python")
 
 
 def jail_forms(confined: bool, report: Mapping[str, str]) -> tuple[str, ...]:

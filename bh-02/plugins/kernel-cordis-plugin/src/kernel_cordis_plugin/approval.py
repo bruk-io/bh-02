@@ -1,11 +1,12 @@
-"""The `approval` value: whether code the model wrote may run, decided by one rule for every row
-that runs some.
+"""The `approval` value: whether what the model asked for may run, decided by one rule for every
+row that runs some.
 
-The rule: code runs without asking when the jail confines it (`is_confined`: the jail enforces
-writes and the network); otherwise it is put to the person first (`output.confirm`) and runs
-only on a yes, a no when there is nobody to ask. The loop asks about each input, the extensions
-row about each extension it loads. The kernel reads `is_confined` itself, to tell the model
-whether its inputs are asked about.
+The rule: a call runs without asking when it runs in the jail (`runs`, "jail" when the request
+says nothing) and the jail confines it (`is_confined`: the jail enforces writes and the
+network); otherwise (an unconfined jail, or a tool that runs in bh-02's own process, "host") it
+is put to the person first (`output.confirm`) and runs only on a yes, a no when there is nobody
+to ask. The loop asks about each call, the extensions row about each extension it loads. The
+kernel reads `is_confined` itself, to tell the model whether its inputs are asked about.
 
 It answers about code bh-02 is about to hand to the jail, not about each effect a component
 yields: that seam is cordis's, and not built yet.
@@ -18,6 +19,7 @@ from typing import Any, Protocol, runtime_checkable
 __all__ = ["Approval", "Asks", "Graded", "is_confined"]
 
 _CONFINING = ("fs_write", "network")  # the axes a jail must enforce for what runs in it to count as confined
+_JAIL = "jail"  # where a call runs when its request says nothing (CONTRACTS.md: tools, `runs`)
 
 
 @runtime_checkable
@@ -54,8 +56,9 @@ class Approval:
         return is_confined(self.jail.report())
 
     async def approve(self, request: Mapping[str, Any]) -> bool:
-        """Whether the code `request` carries may run: yes at once when the jail confines it;
-        otherwise the person's answer (`output.confirm(request)`), or no with nobody to ask."""
-        if self.confined:
+        """Whether what `request` asks for may run: yes at once when it runs in the jail
+        (`request["runs"]`, the jail when it says nothing) and the jail confines it; otherwise the
+        person's answer (`output.confirm(request)`), or no with nobody to ask."""
+        if request.get("runs", _JAIL) == _JAIL and self.confined:
             return True
         return self.output is not None and await self.output.confirm(request)
