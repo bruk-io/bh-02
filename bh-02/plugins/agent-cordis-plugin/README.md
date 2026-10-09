@@ -2,8 +2,8 @@
 
 A harness-owned agent loop, the transcript it reads, `tools`, the tools it offers the model,
 `system`, the system prompt it sends, `notes`, what it tells the model with a call's result,
-`executor`, where it reads the prompt and asks `notes`, and `/compact`, which begins a new
-conversation from the model's summary.
+`access`, what is asked before a file is read or written, `executor`, where it reads the prompt
+and asks `notes`, and `/compact`, which begins a new conversation from the model's summary.
 
 | Row | Binds | Consumes |
 |---|---|---|
@@ -12,6 +12,7 @@ conversation from the model's summary.
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
 | `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch, then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
 | `agent:notes` | `notes`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
+| `agent:access` | `access`: an `Access`, the functions rows `acquire` with `before_read(fn)` and `before_write(fn)`, which a tool asks before it opens a file (`refusal(kind, path)`) | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
 | `agent:compact` | registers `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300), `loop` and `transcript` (the rows it restarts) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
 

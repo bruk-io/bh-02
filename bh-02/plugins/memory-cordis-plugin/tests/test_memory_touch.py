@@ -191,12 +191,48 @@ def test_a_file_cut_back_after_a_paragraph_in_brackets_is_told_again_after_a_res
     assert OnTouch(_Said(*said), transcript)({"touched": ("/p/src/db/x.py",)}) == f"{trimmed}\n\n{_RULE}"
 
 
-async def test_the_on_touch_row_adds_its_function_to_notes(tmp_path: Path) -> None:
+class _Access:
+    """The `access` value as the on-touch row needs it: what it asks before a write."""
+
+    def __init__(self) -> None:
+        self.writes: Hooks[Callable[[str], str | None]] = Hooks()
+
+    def before_write(self, fn: Callable[[str], str | None]) -> Callable[[], None]:
+        return self.writes.add(fn)
+
+
+async def test_the_on_touch_row_adds_its_function_to_notes_and_asks_before_a_write(tmp_path: Path) -> None:
     notes: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
+    access = _Access()
     found = Memory(MemoryConfig(root=str(tmp_path), home=str(tmp_path)))
-    effects = await drive(on_touch(memory=found, notes=notes, transcript=_Kept()))
-    assert [e.name for e in effects] == ["acquire"]
-    assert effects[0].args[0] == notes.add and isinstance(effects[0].args[1], OnTouch)
+    effects = await drive(on_touch(memory=found, notes=notes, transcript=_Kept(), access=access))
+    assert [e.name for e in effects] == ["acquire", "acquire"]
+    assert effects[0].args[0] == notes.add and isinstance(told := effects[0].args[1], OnTouch)
+    assert effects[1].args == (access.before_write, told.before_write)
+
+
+def test_the_first_write_to_a_file_with_untold_instructions_is_refused_until_they_are_told(
+    tmp_path: Path,
+) -> None:
+    """Before a write, a file covered by what loads on demand that this conversation has not been
+    told is refused, naming those files; the refused file is among what the call touched, so they
+    follow as its note, and the next write goes ahead. A memory file itself, and a file with none,
+    are never refused."""
+    told, root = _project(tmp_path)
+    guide = _write(root / "src/db/CLAUDE.md", "Use the session.")
+    _write(root / ".claude/rules/db.md", "---\npaths: src/db/**\n---\nMigrations by hand.")
+    models = str(root / "src/db/models.py")
+    refused = told.before_write(models)
+    assert refused == (
+        f"instructions that apply to it ({guide}, {root / '.claude/rules/db.md'}) have not been told "
+        "in this conversation; they come with this input's result, and nothing was written to it: "
+        "read them, then write it again"
+    )
+    assert told.before_write(models) == refused  # asking does not tell them
+    assert "Use the session." in told({"touched": (models,)})  # the refused call's note
+    assert told.before_write(models) is None
+    assert told.before_write(str(root / "README.md")) is None  # nothing applies to it
+    assert told.before_write(str(guide)) is None  # the memory file itself: its text is what changes
 
 
 class _Prompt:

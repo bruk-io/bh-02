@@ -1,7 +1,8 @@
 """The rows: the loop, which consumes a model and provides the `loop` value; the transcript;
 `tools`, the broker of the tools the model is offered; `system`, the system prompt rows add
-sections to; `notes`, the broker of what the model is told with a call's result; `executor`,
-where the loop reads the prompt and asks `notes`; and `/compact`.
+sections to; `notes`, the broker of what the model is told with a call's result; `access`, the
+broker of what is asked before a file is read or written; `executor`, where the loop reads the
+prompt and asks `notes`; and `/compact`.
 
 The transcript is its own row so the history outlives the loop: replace the `model` row
 and the loop reloads against the new provider while the conversation carries on. `notes` is
@@ -18,6 +19,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
+from agent_cordis_plugin.access import Access
 from agent_cordis_plugin.compact import (
     SPEC,
     CompactConfig,
@@ -48,6 +50,7 @@ from cordis_helpers import Hooks, Job, perform
 __all__ = [
     "LoopConfig",
     "TranscriptConfig",
+    "access",
     "compact",
     "executor",
     "loop",
@@ -153,6 +156,16 @@ async def notes() -> Effects:
     `executor`. Each adds a note or says nothing ('' ); none changes the result, so they compose
     in any order."""
     yield bind("notes", Hooks[Note]())
+
+
+@component(provides=("access",))
+async def access() -> Effects:
+    """Fills an `access` row: `use = "agent:access"`. A broker (CONTRACTS.md: access): a row with
+    something to say before a file is opened `acquire`s `access.before_read(fn)` or
+    `access.before_write(fn)`, and a tool asks (`refusal(kind, path)`) before it opens one for a
+    call: the python tool before an input's own Python opens a file in the project. It depends
+    on nothing, so neither a tool's row nor a row asking reloads the other."""
+    yield bind("access", Access())
 
 
 @component(provides=("executor",))

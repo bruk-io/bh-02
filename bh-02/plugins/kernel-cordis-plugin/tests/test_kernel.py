@@ -954,11 +954,21 @@ async def test_a_worker_its_jail_ended_between_inputs_is_started_again_for_the_n
 
 
 class _Brokers:
-    """The `tools` and `system` values as the kernel row needs them: what it registered, by name."""
+    """The `tools`, `system` and `access` values as the kernel row needs them: what it registered,
+    by name, and an `access` that refuses every write (`refusing`) and keeps what it was asked."""
 
-    def __init__(self) -> None:
+    def __init__(self, refusing: str | None = None) -> None:
         self.tools: dict[str, tuple[Mapping[str, Any], Any, dict[str, Any]]] = {}
         self.sections: dict[str, Any] = {}
+        self.refusing = refusing
+        self.asked: list[tuple[str, str]] = []
+
+    def asking(self) -> tuple[str, ...]:
+        return ("write",) if self.refusing else ()
+
+    def refusal(self, kind: str, path: str) -> str | None:
+        self.asked.append((kind, path))
+        return self.refusing
 
     def register(self, spec: Mapping[str, Any], run: Any, **how: Any) -> Any:
         self.tools[str(spec["name"])] = (spec, run, how)
@@ -971,15 +981,17 @@ class _Brokers:
 
 async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it() -> None:
     """The kernel row registers `python` with `tools` (its call, shown as its code, run in the
-    jail) and what the model is told about it as the `system` section `python`; both leave with
-    the row, and so does the worker."""
-    brokers = _Brokers()
+    jail) and what the model is told about it as the `system` section `python`, and asks `access`
+    before an input writes a project file; the registrations leave with the row, and so does the
+    worker."""
+    brokers = _Brokers(refusing="not here")
 
-    @component(provides=("jail", "tools", "system"))
+    @component(provides=("jail", "tools", "system", "access"))
     async def around() -> Effects:
         yield bind("jail", Unjailed())
         yield bind("tools", brokers)
         yield bind("system", brokers)
+        yield bind("access", brokers)
 
     rt = Runtime()
     rt.mount(around, id="around")
@@ -991,6 +1003,10 @@ async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it()
     assert brokers.sections["python"]() == k.instructions()
     pid = int((await run({"code": "import os; os.getpid()"}))["content"])
     assert not k.confined and k.report() == UNENFORCED
+    probe = Path("bh-02-refused-probe.txt").resolve()  # under the row's root, the working directory
+    refused = await run({"code": f"open({str(probe)!r}, 'w')"})
+    assert brokers.asked == [("write", str(probe))] and not probe.exists()
+    assert refused["content"].endswith(f"(bh-02 refused to let this input write {probe}: not here)")
     await row.retire()
     await rt.settle()
     assert brokers.tools == {} and brokers.sections == {}
@@ -1179,3 +1195,75 @@ async def test_the_release_row_offers_slash_release_over_the_kernel() -> None:
         ((spec, run),) = registered
         assert spec["name"] == "release" and "credential" in spec["help"]
         assert (await run("")).startswith("The kernel is stopped")
+
+
+class _Gate:
+    """An `access` value asking about `kinds`, refusing the files named in `refuse` (by name), and
+    keeping every question it was asked, as (kind, file name)."""
+
+    def __init__(self, kinds: tuple[str, ...], refuse: Mapping[str, str]) -> None:
+        self.kinds = kinds
+        self.refuse = refuse
+        self.asked: list[tuple[str, str]] = []
+
+    def asking(self) -> tuple[str, ...]:
+        return self.kinds
+
+    def refusal(self, kind: str, path: str) -> str | None:
+        self.asked.append((kind, os.path.basename(path)))
+        return self.refuse.get(os.path.basename(path))
+
+
+async def test_an_input_asks_before_it_writes_a_project_file_and_a_refusal_stops_the_write(
+    tmp_path: Path,
+) -> None:
+    """Before an input's own Python opens a project file to write it, the worker asks `access`
+    (once per file an input): a refusal is a PermissionError at the input's own line, the file
+    untouched, and is told after the output too; the refused file is among what it touched."""
+    gate = _Gate(("write",), {"guarded.txt": "read src/CLAUDE.md first"})
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path)), gate) as k:
+        assert await k.run("open('free.txt', 'w').write('a'); open('free.txt', 'a').write('b')") == "1"
+        refused = await k.call({"code": "x = 1\nopen('guarded.txt', 'w').write('no')"})
+    guarded = tmp_path.resolve() / "guarded.txt"
+    content = refused["content"]
+    assert 'File "<input 2>", line 2, in <module>' in content and "worker.py" not in content
+    refusal = "bh-02 refused to let this input write this file: read src/CLAUDE.md first"
+    assert f"PermissionError: [Errno 13] {refusal}" in content
+    assert content.endswith(f"(bh-02 refused to let this input write {guarded}: read src/CLAUDE.md first)")
+    assert refused["touched"] == [str(guarded)] and not guarded.exists()
+    assert gate.asked == [("write", "free.txt"), ("write", "guarded.txt")]  # free.txt once in its input
+
+
+async def test_a_refusal_the_input_caught_is_still_told_with_its_result(tmp_path: Path) -> None:
+    """An input's code may catch the error (`except OSError: pass`): the write still doesn't
+    happen, and the model is told of it after the output, so it never passes unseen."""
+    gate = _Gate(("write",), {"guarded.txt": "not yet"})
+    async with Kernel(Unjailed(), KernelConfig(root=str(tmp_path)), gate) as k:
+        said = await k.run("try:\n    open('guarded.txt', 'w')\nexcept OSError:\n    pass\n'carried on'")
+    guarded = tmp_path.resolve() / "guarded.txt"
+    assert said == f"'carried on'\n(bh-02 refused to let this input write {guarded}: not yet)"
+
+
+async def test_only_the_kinds_of_opening_a_row_asks_about_are_asked_and_only_in_the_project(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """No row asking about writes: a write goes ahead unasked. Reads asked about: a read is, and
+    `r+` asks both when both are asked about. A file outside the project is never asked about."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "secret.txt").write_text("s")
+    (project / "both.txt").write_text("b")
+    outside = tmp_path_factory.mktemp("outside") / "elsewhere.txt"
+    reads = _Gate(("read",), {"secret.txt": "not this one"})
+    async with Kernel(Unjailed(), KernelConfig(root=str(project)), reads) as k:
+        assert await k.run("open('new.txt', 'w').write('n')") == "1"
+        said = await k.run(f"open({str(outside)!r}, 'w').write('o'); open('secret.txt').read()")
+    assert reads.asked == [("read", "secret.txt")] and "PermissionError" in said
+    both = _Gate(("read", "write"), {})
+    async with Kernel(Unjailed(), KernelConfig(root=str(project)), both) as k:
+        assert await k.run("open('both.txt', 'r+').read()") == "'b'"
+    assert both.asked == [("read", "both.txt"), ("write", "both.txt")]
+    none = _Gate((), {"new.txt": "never asked"})
+    async with Kernel(Unjailed(), KernelConfig(root=str(project)), none) as k:
+        assert await k.run("open('new.txt', 'w').write('again')") == "5"
+    assert none.asked == []

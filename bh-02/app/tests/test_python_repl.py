@@ -1182,6 +1182,47 @@ async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_
     assert out.count("Use the session.") == 1
 
 
+async def test_a_write_to_a_file_with_untold_instructions_waits_until_they_are_told(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The shipped `access` and memory rows, booted: an input's first write to a file under
+    src/db is refused (its CLAUDE.md and rule have not been told), and they follow with its
+    result; the next input's write to it goes ahead. A program run through a shell is not asked
+    about: what a tool does not hear, it cannot stop."""
+    project, home = tmp_path / "project", tmp_path / "home"
+    (project / "src" / "db").mkdir(parents=True)
+    (project / ".claude" / "rules").mkdir(parents=True)
+    home.mkdir()
+    models = project / "src" / "db" / "models.py"
+    models.write_text("X = 1\n")
+    (project / "src" / "db" / "CLAUDE.md").write_text("Use the session.")
+    (project / ".claude" / "rules" / "db.md").write_text("---\npaths: src/db/**\n---\nMigrations by hand.")
+    inputs = (
+        "import pathlib; pathlib.Path('src/db/models.py').write_text('X = 2\\n')",
+        "pathlib.Path('src/db/models.py').write_text('X = 3\\n')",
+        "import subprocess; subprocess.run(['sh', '-c', 'echo X = 4 > src/db/other.py']).returncode",
+    )
+    patch = _inputs(
+        composition,
+        *inputs,
+        extra=(
+            f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+            f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
+            f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
+        ),
+    )
+    _answers(True, True, True)
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
+    out = _shown()
+    refused = out[out.index("[0] ") : out.index("[1] ")]
+    assert "PermissionError: [Errno 13] bh-02 refused to let this input write this file" in refused, out
+    assert "From src/db/CLAUDE.md, instructions for work under src/db/:\n\nUse the session." in refused
+    assert "Migrations by hand." in refused
+    assert "[1] 6\n" in out and models.read_text() == "X = 3\n"  # told, so the second write went ahead
+    assert "[2] 0" in out and (project / "src" / "db" / "other.py").exists()  # a shell's write: not asked
+    assert out.count("Use the session.") == 1
+
+
 async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:

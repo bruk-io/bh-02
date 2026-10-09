@@ -51,7 +51,7 @@ from host_paths import config_home, walked
 from kernel_cordis_plugin.approval import is_confined
 from kernel_cordis_plugin.python import PYTHON, instructions_for
 
-__all__ = ["Jail", "Jailed", "Kernel", "KernelConfig", "worker_argv"]
+__all__ = ["Access", "Jail", "Jailed", "Kernel", "KernelConfig", "worker_argv"]
 
 _WORKER = Path(__file__).with_name("worker.py")
 # The longest line the worker sends: its output and its error are capped at 20,000 characters
@@ -75,6 +75,15 @@ class Jailed(Protocol):
     def notice(self) -> str: ...
     def reads(self) -> tuple[str, ...]: ...
     def writes(self) -> tuple[str, ...]: ...
+
+
+@runtime_checkable
+class Access(Protocol):
+    """What the kernel needs of the `access` value (CONTRACTS.md: access): the kinds of opening
+    some row is asked about, and its answer about one file, called off the event loop."""
+
+    def asking(self) -> tuple[str, ...]: ...
+    def refusal(self, kind: str, path: str) -> str | None: ...
 
 
 @runtime_checkable
@@ -150,18 +159,21 @@ class _StartupEnded(ConnectionError):
 
 @dataclass(frozen=True, slots=True)
 class _Output:
-    """What running one input produced: what it printed, the error it ended with, if any, and
-    the files it opened (absolute paths, each once)."""
+    """What running one input produced: what it printed, the error it ended with, if any, the
+    files it opened (absolute paths, each once), and what it was refused (`access`)."""
 
     output: str
     error: str | None = None
     touched: tuple[str, ...] = ()
+    refused: tuple[str, ...] = ()
 
     def text(self) -> str:
-        """The input as the model reads it."""
+        """The input as the model reads it: a refusal last, each in brackets, so it is told
+        whether or not the input's code caught the error it raised."""
         parts = [self.output.rstrip("\n")] if self.output.strip() else []
         if self.error:
             parts.append(self.error)
+        parts += [f"({refused})" for refused in self.refused]
         return "\n".join(parts) or "(no output)"
 
 
@@ -252,9 +264,10 @@ class Kernel:
     (`call(input)`, over `run(code)`) and what the model is told about it (`instructions()`). An
     async context manager: entering starts the worker in the jail, leaving stops it."""
 
-    def __init__(self, jail: Jail, config: KernelConfig) -> None:
+    def __init__(self, jail: Jail, config: KernelConfig, access: Access | None = None) -> None:
         self._jail = jail
         self._config = config
+        self._access = access  # asked before an input opens a project file, for what it asks about
         self._lock = asyncio.Lock()
         self._dir: str | None = None
         self._process: Jailed | None = None
@@ -406,7 +419,7 @@ class Kernel:
                     f"error: the REPL's answer to this input could not be read ({error}); a new "
                     "REPL starts with the next input, without the earlier variables",
                 )
-            return _Output(prefix + ran.output, ran.error, ran.touched) if prefix else ran
+            return _Output(prefix + ran.output, ran.error, ran.touched, ran.refused) if prefix else ran
 
     async def _opening(self) -> str:
         """What a new kernel's first input is told before its own output, when there is anything
@@ -524,7 +537,8 @@ class Kernel:
         return self._process.ended() if self._process is not None else ""
 
     async def _exchange(self, code: str) -> _Output:
-        self._send({"op": "exec", "code": code})
+        asking = list(self._access.asking()) if self._access is not None else []
+        self._send({"op": "exec", "code": code, "ask": asking})
         try:
             return await self._until_done()
         except asyncio.CancelledError:
@@ -532,16 +546,32 @@ class Kernel:
             raise
 
     async def _until_done(self) -> _Output:
-        """Read the worker until the input ends."""
+        """Read the worker until the input ends, answering what it asks on the way: whether the
+        input may open a file (`access.refusal`, in a thread: a row's answer may read files)."""
         while True:
             message = await self._receive()
-            if message.get("op") == "done":
-                touched = message.get("touched")
+            if message.get("op") == "ask":
+                refusal = await self._refusal(message)
+                self._send({"op": "answer", "id": message.get("id"), "refuse": refusal})
+            elif message.get("op") == "done":
+                touched, refused = message.get("touched"), message.get("refused")
                 return _Output(
                     str(message.get("output", "")),
                     message.get("error"),
                     tuple(str(p) for p in touched) if isinstance(touched, list) else (),
+                    tuple(str(r) for r in refused) if isinstance(refused, list) else (),
                 )
+
+    async def _refusal(self, question: Mapping[str, Any]) -> str | None:
+        """What `access` says about the file the worker asks about; None (go ahead) when there is
+        no `access`, or the question is not one it answers (the worker's code is the model's to
+        run, so what it sends is read as data)."""
+        kind, path = question.get("kind"), question.get("path")
+        if self._access is None or not isinstance(kind, str) or not isinstance(path, str):
+            return None
+        if kind not in self._access.asking():
+            return None
+        return await asyncio.to_thread(self._access.refusal, kind, path)
 
     async def _interrupt(self) -> None:
         """Stop the running input and wait for it to end; a worker that won't is restarted."""

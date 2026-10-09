@@ -31,9 +31,9 @@ by name and shape, in `CONTRACTS.md`:
 
 - **A consumer declares what it needs** as a `runtime_checkable` Protocol of its own, on the
   parameter: `session(*, loop: Loop, ...)` keys on `"loop"` and cordis checks the bound value
-  against `chat`'s `Loop` before `session` runs. The loop's `Python` asks the `kernel` for
-  `spec`, `instructions`, `run` and `touched`; `tui:status`'s `Confinement` asks the same
-  value for `confined`, `report` and `notice`. Two consumers, two contracts.
+  against `chat`'s `Loop` before `session` runs. The loop's `Tools` asks the `tools` value for
+  `specs`, `get` and `ready`; `/compact`'s `Offered` asks the same value for `specs` alone. Two
+  consumers, two contracts.
 - **A provider just has the methods.** `ClaudeCodeModel.complete`, `OpenAIModel.complete`, `Kernel.run`, nothing to
   import. Data crosses as dicts (`{"type": "text", ...}`, a tool spec, a message); a package
   types the part it reads with a `TypedDict` or `Mapping`.
@@ -71,8 +71,9 @@ Replacing a binding reloads every dependent (cordis's rule, and why history live
 
 **The broker pattern is the paper's (section 6.2).** `commands` (slash commands, and line
 prefixes a layer's row claims: `!`), `frame`
-(the app's frame), `system` (its sections), `tools` (the model's tools) and `notes` (what the
-model is told with a call's result) are brokers: one row binds the key, contributors depend on
+(the app's frame), `system` (its sections), `tools` (the model's tools), `notes` (what the
+model is told with a call's result) and `access` (what is asked before a file is opened) are
+brokers: one row binds the key, contributors depend on
 it and `acquire` a registration whose return value is its remover, so adding or retiring a command reloads
 nothing. Keep registrations commutative: each takes its own entry, never an ordered chain.
 
@@ -134,7 +135,16 @@ add a note, never change the result. `memory:on_touch` gives memory's on-demand 
 `paths` match, arrives whole with the first input that opens a file it covers (Claude Code's
 on-demand loading; one that input's 20,000-character note cut short, or left out, arrives with
 the next that opens a file it covers; one the model opened itself is not told after); it has no
-config of its own and asks the `memory` value (`memory.touched(paths)`). It depends on `transcript`, so `/clear` and `/compact`
+config of its own and asks the `memory` value (`memory.touched(paths)`). It also asks before a
+write (`access`, `agent:access`, a broker a tool asks before it opens a file): the first write to
+a file whose on-demand instructions this conversation has not been told is refused (a
+PermissionError in the input, and a line in brackets ending its result even when the code caught
+it), and the instructions follow as that call's note, so they arrive before the file changes and
+the next write goes ahead (Claude Code's Edit and Write refuse a file not Read first, to the same
+end). The python tool asks from the worker's audit hook, only about the kinds some row asks
+about (no shipped row asks about reads), once per file an input; it hears what that hook hears
+and no more (not a program an input runs, `os.open`, a rename or a delete), so this is a way to
+say something first, not a wall: the jail is the wall. It depends on `transcript`, so `/clear` and `/compact`
 start it afresh, and reads its `messages` once, at the first input that opens a file, so a
 resumed session is not told again a note its transcript's `tool` entries hold: the loop keeps
 the notes it told on each as a list (`notes`) beside the text the model reads, and an entry from
