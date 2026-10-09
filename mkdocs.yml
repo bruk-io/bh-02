@@ -7,6 +7,8 @@ site_name: bh-02
 site_description: >-
   Programs made of parts that can be added, replaced and removed while they run: cordis, and
   two programs built with it, bh-02 (a coding agent) and warden (a process supervisor).
+# where GitHub Pages serves it (.github/workflows/docs.yml deploys every push to main)
+site_url: https://bruk-io.github.io/bh-02/
 repo_url: https://github.com/bruk-io/bh-02
 edit_uri: ""
 copyright: AGPL-3.0-or-later
