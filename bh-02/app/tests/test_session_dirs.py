@@ -29,11 +29,9 @@ from cordis.loader import read_layer
 
 def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_row() -> None:
     rows = session_layer(Path("/s/1"), model="haiku", no_jail=True)
-    forget = ["/s/1/transcript.jsonl"]  # the ui keeps its own history across a /clear
     assert rows == [
         Row("ui", config={"history": "/s/1/events.jsonl"}),  # what the ui showed, drawn again on a resume
         Row("transcript", config={"path": "/s/1/transcript.jsonl"}),  # what the model is sent again
-        Row("operator", config={"forget": forget}),
         Row("switch", config={"layer": "/s/1/session.toml", "model_row": "model"}),  # /model edits it
         # Claude Code's own state (its session, which a resume continues) in the session's directory
         Row("model", config={"state": "/s/1/claude", "default": "haiku"}),
@@ -101,15 +99,15 @@ def test_a_claude_code_session_moves_to_the_model_row_and_a_second_update_change
 ) -> None:
     session = _old_session(tmp_path, "/work/a", "claude", [])
     rows, state = _base(session.dir), str(session.dir / "claude")
-    operator = next(r for r in rows if r.id == "operator")
-    old_operator = Row("operator", config={**(operator.config or {}), "model_row": "completion"})
-    old = [*(r for r in rows if r.id != "operator"), old_operator]
+    switch = next(r for r in rows if r.id == "switch")
+    old = [*rows, Row("operator", config={"model_row": "completion"})]  # /model was the operator's
     session.layer.write_text(
         format_layer([*old, Row("completion", config={"state": state, "model": "haiku"})])
     )
     update(session)
     now = read_layer(session.layer)
-    assert next(r for r in now if r.id == "operator") == operator  # /model edits the model row now
+    assert next(r for r in now if r.id == "switch") == switch  # /model edits the model row now
+    assert next(r for r in now if r.id == "operator") == Row("operator")
     assert next(r for r in now if r.id == "model") == Row(
         "model", config={"state": state, "default": "haiku"}
     )

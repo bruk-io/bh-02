@@ -24,7 +24,7 @@ A line is a command when it starts with `/name` followed by a space or nothing. 
 | Command | What it does |
 |---|---|
 | `/help` | lists the commands |
-| `/clear` | starts a new conversation and an empty Python process. The screen clears to one note; the session's usage totals stay. |
+| `/clear` | starts a new conversation and an empty Python process, the old conversation kept as `transcript.jsonl.bak`. The screen clears to one note; the session's usage totals stay. |
 | `/compact [WHAT TO KEEP]` | asks the model to summarise the conversation, then carries on in a new one that starts from the summary. The Python process keeps its namespace. |
 | `/model [NAME]` | lists the models, or switches to `NAME` for this session ([Models](models.md)) |
 | `/memory` | lists the memory files the model is told and how each loads ([Memory](memory.md)) |
@@ -40,12 +40,12 @@ The model's own extensions can add commands to this list while bh-02 runs
 ### `/compact`
 
 Use `/compact` when a conversation has grown long. The model has 300 seconds to write the summary
-(the `compact` row's `timeout`), and a note says so as it starts. `Ctrl+C` doesn't stop it, since
+(the `conversation` row's `timeout`), and a note says so as it starts. `Ctrl+C` doesn't stop it, since
 it is a command, not a reply; leaving bh-02 does, and then nothing changes. Add what you want kept
 after the command: `/compact the failing test and its fix`.
 
 The old conversation is kept beside the new one as `transcript.jsonl.bak` in the session's
-directory, and a later compaction's as `.bak.2`, and so on.
+directory, and a later one's as `.bak.2`, and so on. `/clear` keeps it the same way.
 
 ### `/restart` and `/rows`
 

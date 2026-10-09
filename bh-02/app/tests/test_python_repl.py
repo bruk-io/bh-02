@@ -1272,8 +1272,8 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     opens src/db/models.py is told the guidance and the rule for src/db, and its input that reads
     the file through a shell is told nothing (a shell command's reads are not heard); a resumed
     run (the same file, read back: `--resume`) whose inputs do both again is told none of them;
-    after /clear (the file emptied and the rows started afresh, as the session layer has it) the
-    same inputs are told them again."""
+    after /clear (an empty conversation written over the file, the old kept as .bak, and the
+    rows started afresh) the same inputs are told them again."""
     project, home = tmp_path / "project", tmp_path / "home"
     (project / "src" / "db").mkdir(parents=True)
     (project / ".claude" / "rules").mkdir(parents=True)
@@ -1303,8 +1303,7 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     code = json.dumps([opens, cats, opens, cats])
     resumed = composition(
         f'[[plugin]]\nid = "model"\nuse = "fragile:input_model"\nconfig = {{ code = {code} }}\n'
-        '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n'
-        f'[[plugin]]\nid = "operator"\nconfig = {{ forget = ["{history}"] }}\n' + session
+        '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n' + session
     )
     fragile.script("go", "/clear", "go")
     _answers(*[True] * 6)
@@ -1312,7 +1311,10 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     again, afresh = fragile.SHOWN
     assert again.startswith(told) and again.endswith("\n[2] 6\n[3] 0\n"), again  # resumed: none again
     assert afresh.startswith(told) and afresh.endswith("\n[2] 6\n[3] 0\n"), afresh  # /clear: told afresh
-    assert "the conversation was cleared; starting afresh: loop, transcript, kernel" in fragile.NOTES
+    assert (
+        f"the conversation was cleared (the old one is kept as {history}.bak); starting afresh: loop, "
+        "transcript, kernel"
+    ) in fragile.NOTES
 
 
 async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_on_their_entries(

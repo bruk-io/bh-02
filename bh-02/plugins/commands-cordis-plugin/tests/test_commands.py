@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from commands_cordis_plugin import Commands, Operator, OperatorConfig, operator, parse, registry, rows_table
+from commands_cordis_plugin import Commands, Operator, operator, parse, registry, rows_table
 from cordis import Effects, Runtime, bind, component
 
 
@@ -190,7 +190,7 @@ async def _drain(jobs: asyncio.Queue[Any]) -> None:
 
 async def test_the_operator_shows_explains_and_queues_restarts(tmp_path: Path) -> None:
     loader, jobs = Loader(), asyncio.Queue()
-    op = Operator(loader, OperatorConfig(), jobs)
+    op = Operator(loader, jobs)
     run = {spec["name"]: fn for spec, fn in op.specs}
     assert "loop    agent:loop     active" in await run["rows"]("")
     assert await run["explain"]("loop") == "loop: all about it"
@@ -198,21 +198,6 @@ async def test_the_operator_shows_explains_and_queues_restarts(tmp_path: Path) -
     assert await run["restart"]("fs") == "restarting fs" and loader.restarted == []  # queued, not run here
     await _drain(jobs)
     assert loader.restarted == ["fs"]
-
-
-async def test_clear_forgets_the_history_then_starts_the_rows_that_exist_afresh(tmp_path: Path) -> None:
-    history = tmp_path / "transcript.jsonl"
-    history.write_text("abc\n")
-    loader, jobs = Loader(), asyncio.Queue()
-    op = Operator(loader, OperatorConfig(forget=(str(history),)), jobs)
-    run = {spec["name"]: fn for spec, fn in op.specs}
-    assert await run["clear"]("") == [  # the ui drops the old conversation, then says why
-        {"type": "cleared"},
-        {"type": "note", "text": "the conversation was cleared; starting afresh: loop, kernel"},
-        {"type": "restarting", "rows": ["loop", "kernel"]},  # a line typed meanwhile waits for them
-    ]  # no transcript row here
-    await _drain(jobs)
-    assert history.read_text() == "" and loader.batches == [("loop", "kernel")]  # together: one reload each
 
 
 def test_rows_line_up() -> None:
@@ -250,15 +235,15 @@ def _operator_on(rt: Runtime, loader: object) -> _Output:
 
 
 async def test_the_operator_row_registers_its_commands_and_takes_them_when_it_leaves() -> None:
-    """With no `models:catalog` (nor any model) in the composition, /rows, /explain, /restart
-    and /clear are there: `/model` is the models plugin's."""
+    """With no `models:catalog` (nor any model) in the composition, /rows, /explain and /restart
+    are there: `/model` is the models plugin's, `/clear` and `/compact` the agent plugin's."""
     loader = Loader()
     rt = Runtime()
     told = _operator_on(rt, loader)
     row = rt.mount(operator, id="operator")
     await rt.settle()
     commands = rt.root.get("commands")
-    assert [s["name"] for s in commands.specs()] == ["rows", "explain", "restart", "clear"]
+    assert [s["name"] for s in commands.specs()] == ["rows", "explain", "restart"]
     assert "loop    agent:loop     active" in await commands.run("/rows")
     assert await commands.run("/restart fs") == "restarting fs"
     await asyncio.sleep(0.01)
@@ -276,9 +261,8 @@ class _Failing(Loader):
 
 
 async def test_a_restart_that_fails_after_the_command_answered_is_told_to_the_person() -> None:
-    """/clear and /restart answer, then their restart runs as the row's own background work: one
-    that fails must reach the person, not vanish, since /clear has emptied the conversation's
-    file by then and the old loop may still be writing to it."""
+    """/restart answers, then its restart runs as the row's own background work: one that fails
+    must reach the person, not vanish."""
     rt = Runtime()
     told = _operator_on(rt, _Failing())
     rt.mount(operator, id="operator")

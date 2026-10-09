@@ -62,8 +62,10 @@ Two commands start the conversation over without leaving the session:
 - `/clear` starts a new conversation and an empty Python process. The screen clears to one note.
   The usage totals in the status bar are the session's, so they stay.
 - `/compact [WHAT TO KEEP]` asks the model to summarise the conversation and carries on in a new
-  one that starts from the summary. The Python process keeps its namespace. The old transcript is
-  kept beside the new one as `transcript.jsonl.bak` (a later one as `.bak.2`, and so on).
+  one that starts from the summary. The Python process keeps its namespace.
+
+Either way the old transcript is kept beside the new one as `transcript.jsonl.bak` (a later one
+as `.bak.2`, and so on), so a cleared conversation isn't lost.
 
 [Commands](commands.md) has both in full.
 

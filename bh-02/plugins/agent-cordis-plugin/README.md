@@ -14,7 +14,7 @@ and asks `notes`, and `/compact`, which begins a new conversation from the model
 | `agent:notes` | `notes`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 | `agent:access` | `access`: an `Access`, the functions rows `acquire` with `before_read(fn)` and `before_write(fn)`, which a tool asks before it opens a file (`refusal(kind, path)`) | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
-| `agent:compact` | registers `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300), `loop` and `transcript` (the rows it restarts) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
+| `agent:conversation` | registers `/clear` and `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300: /compact's summary), `loop` and `transcript` (the rows /compact restarts), `clear` (the rows /clear restarts: `loop`, `transcript`, `kernel`) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
 
 A turn is one model step plus the calls it asked for, until it asks for none. The model is
 offered the tools rows register with `tools` (`agent:tools`, a broker; CodeAct's `python(code)`
@@ -129,7 +129,7 @@ interpreter at exit, so a reading left running would hold bh-02 open until it fi
 daemon's is left to the end of the process, and its answer to an event loop that has closed
 goes nowhere.
 
-`/compact` (`agent:compact`, `compact.py`) is for a conversation grown long: a local model
+`/compact` (`agent:conversation`, `conversation.py`) is for a conversation grown long: a local model
 processes more prompt before each first token, and any model nears its context window. It asks
 the model for a summary in one step: the request is the loop's own (`loop.request_for`: the
 prompt the conversation began with, then the conversation) with the registered tools offered
@@ -162,15 +162,25 @@ the two rows, so the ui drops the old conversation and a resume's replay starts 
 The restart is queued before the chat row shows the answer, and stops the chat row: the note
 comes second whatever the provider sent, as `/clear`'s does, so it is shown before then.
 
-The compact row depends on `model`, `tools` (only its `specs`), the loader, `commands` and
+`/clear` (the same row) is that rewrite with an empty conversation: written over the
+transcript row's file in one step, the old kept as `.bak` (`.bak.2`, ...), so a cleared
+conversation is never lost, and the rows in `clear` restart together (the loop, the transcript
+and the kernel, so the namespace empties with the conversation). A transcript with nothing in
+it yet, one kept in memory, or a row another component fills is not written: its restart is the
+new conversation. The answer is `cleared` (not `compacted`, so what `commands` holds for the
+model is dropped), a note saying so and where the old conversation is kept, then
+`restarting`.
+
+The conversation row depends on `model`, `tools` (only its `specs`), the loader, `commands` and
 `output`, and on neither `loop` nor `transcript`: a restart of them reloads what depends on them,
 which would cancel the row's own work half-way. It finds the conversation's file from the
 transcript row as the loader mounted it (`loader.rows`: a running `agent:transcript` row's
 `path`, whatever the layer files say now), so it needs a session's transcript (one kept in
 memory, or a row another component fills, can't begin again from a summary, and /compact says
-so). The restart is queued for the row's own `background` (cordis-helpers' `perform`), never
-run in the chat row's task, which it reloads: the operator's `/clear` does the same. A restart
+so). Both commands' restarts are queued for the row's own `background` (cordis-helpers'
+`perform`), never run in the chat row's task, which they reload. A restart
 that fails is told to the person (`output.notice`), since the new conversation is written by
 then; a row restarted while the model wrote the summary writes nothing, since its queue went
-with it. It is a row of its own rather than one of the operator's commands, so the operator
-keeps not depending on the model (a `/model` switch never reloads it).
+with it. Both are one row's, beside the transcript they rewrite, rather than the operator's:
+the operator keeps not depending on the model, and nothing outside the row (once the
+operator's `forget`) has to be kept in step with the transcript row's file.

@@ -95,6 +95,17 @@ _OPERATOR, _OPERATOR_USE = "operator", "commands:operator"
 _SWITCH, _SWITCH_USE = "switch", "models:switch"
 _TO_SWITCH = ("layer", "model_row")
 _SWITCHED = "/model is the models plugin's now (models:switch)"
+# `/clear` was the operator's too (its config's `clear`, the rows it restarted, and `forget`, the
+# files it emptied first), and `/compact` the `compact` row's (`agent:compact`): both are the
+# agent plugin's `conversation` row's now (`agent:conversation`), which finds the transcript's
+# file from the transcript row and keeps the old conversation as `.bak`.
+_CONVERSATION, _CONVERSATION_USE = "conversation", "agent:conversation"
+_COMPACT, _COMPACT_USE = "compact", "agent:compact"
+_CLEARED = "/clear is the conversation row's now (agent:conversation)"
+_FORGOTTEN = (
+    "`forget` is gone: /clear writes an empty conversation over the transcript row's file, keeping "
+    "the old as .bak"
+)
 
 
 def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
@@ -135,6 +146,10 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       `model_row` move to it (added after the operator, unless the layer has one, when the
       change says to set them there by hand), and a layer that fills the operator itself
       (`use = "commands:operator"`) and has no `switch` row gets one.
+    - `/clear` and `/compact` are the agent plugin's `conversation` row (`agent:conversation`):
+      the `compact` row (or any using `agent:compact`) is renamed to it, an operator's `clear`
+      moves to it (added after the operator, as for the switch row), its `forget` is gone, and a
+      layer that fills the operator itself and has neither gets one.
 
     Nothing changed is `(list(rows), [])`, so translating twice changes nothing more.
     """
@@ -204,7 +219,62 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
                 kept.append(part)
             out[at:at] = kept
     out, said = _switched(out)
-    return out, changes + said
+    out, cleared = _conversation(out)
+    return out, changes + said + cleared
+
+
+def _conversation(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
+    """`rows` with `/clear` and `/compact` as the agent plugin's `conversation` row, and what
+    changed: the `compact` row renamed to it, an operator's `clear` moved to it and its `forget`
+    dropped, and a layer that fills the operator itself given one."""
+    changes: list[str] = []
+    renamed: list[Row] = []
+    for row in rows:
+        if row.id == _COMPACT and row.use in (None, _COMPACT_USE) or row.use == _COMPACT_USE:
+            use = _CONVERSATION_USE if row.use is not None else None
+            rid = _CONVERSATION if row.id == _COMPACT else row.id
+            said = ", ".join(
+                [
+                    *([f'id = "{rid}"'] if rid != row.id else []),
+                    *([f"use = {json.dumps(use)}"] if use else []),
+                ]
+            )
+            changes.append(
+                f"row {row.id!r}: /compact is the conversation row's now, with /clear; make it {said}"
+            )
+            row = Row(rid, use, row.config, row.disabled)
+        renamed.append(row)
+    has_conversation = any(row.id == _CONVERSATION for row in renamed)
+    out: list[Row] = []
+    for row in renamed:
+        out.append(row)
+        if row.id != _OPERATOR and row.use != _OPERATOR_USE:
+            continue
+        config = dict(row.config or {})
+        moved = {"clear": config.pop("clear")} if "clear" in config else {}
+        forgot = config.pop("forget", None) is not None
+        adds = not has_conversation and (bool(moved) or row.use == _OPERATOR_USE)
+        use = _CONVERSATION_USE if row.use is not None else None
+        added = ", ".join(
+            [*([f"use = {json.dumps(use)}"] if use else []), *([_inline(moved)] if moved else [])]
+        )
+        told = [_FORGOTTEN] if forgot else []
+        if moved and not adds:
+            told.append(
+                f"{_CLEARED}, which reads {_inline(moved)}: set it on the {_CONVERSATION!r} row by hand"
+            )
+        elif adds:
+            told.append(f"{_CLEARED}: add a {_CONVERSATION!r} row with {added}")
+        if moved or forgot:
+            out[-1] = Row(row.id, row.use, config or None, row.disabled)
+            keep = f"make it {_inline(config)}" if config else "delete its config"
+            changes.append(f"row {row.id!r}: {'; '.join(told)}; {keep}")
+        elif adds:
+            changes.append(told[0])
+        if adds:
+            out.append(Row(_CONVERSATION, use, moved or None))
+            has_conversation = True
+    return out, changes
 
 
 def _switched(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:

@@ -173,19 +173,20 @@ reloads between. Each call's thread is a daemon's, not the default executor's, w
 `asyncio.run` and the interpreter join as they end, so one left running never holds bh-02 open. The claude-code provider
 opens the prompt with a note naming which of Claude Code's `mcp__bh__` tool names is which of
 bh-02's tools.
-`/compact` (`agent:compact`, a row of its own over `model`, the kernel's `spec`, the loader,
-`commands` and `output`) begins a new conversation from the model's summary of this one: one
+`/clear` and `/compact` are one row's (`agent:conversation`, over `model`, `tools`, the loader,
+`commands` and `output`), each a new conversation written over the transcript row's file in one
+step, the old kept as `.bak` (`.bak.2`, ... after it): `/clear`'s empty, the loop, the
+transcript and the kernel restarting; `/compact`'s from the model's summary of this one: one
 step, the loop's own request with bh-02 asking for the summary after it (a call it makes never
 runs), in `timeout` seconds (Ctrl-C stops only a turn; a note says so as the step begins, and
 the person leaving cancels it before anything is written); the new conversation (bh-02's note,
-then the summary as the model's answer) is written over the transcript row's file in one step,
-the old kept as `.bak` (`.bak.2`, ... after it), and the loop and the transcript restart, so the
-prompt is read afresh and the date told again, while the kernel keeps the namespace the summary
-names. It depends on neither `loop` nor `transcript` (their restart would reload it mid-job),
-finding the row's file from the row as the loader mounted it (`loader.rows`); its answer is
-`cleared` (`compacted`, so what `commands` holds for the model is kept), the note carrying the
-summary, the step's usage as one event, then `restarting`, and a restart that fails is told
-through `output.notice`.
+then the summary as the model's answer) is written, and the loop and the transcript restart, so
+the prompt is read afresh and the date told again, while the kernel keeps the namespace the
+summary names. It depends on neither `loop` nor `transcript` (their restart would reload it mid-job),
+finding the row's file from the row as the loader mounted it (`loader.rows`); `/compact`'s
+answer is `cleared` (`compacted`, so what `commands` holds for the model is kept), the note
+carrying the summary, the step's usage as one event, then `restarting` (`/clear`'s: `cleared`,
+a note, `restarting`), and a restart that fails is told through `output.notice`.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
 `agent:loop` classifies each model step (`stops.classify`) and replays
 a provider's message as it came.

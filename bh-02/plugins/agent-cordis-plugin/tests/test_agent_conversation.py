@@ -1,4 +1,4 @@
-"""/compact over fake models, a fake loader and a temporary session's transcript file: the summary
+"""/clear and /compact over fake models, a fake loader and a temporary session's transcript file: the summary
 request, the new conversation, the file written in one step, and the restart it queues."""
 
 import asyncio
@@ -13,15 +13,16 @@ from typing import Any
 import pytest
 
 from agent_cordis_plugin import (
-    CompactConfig,
+    ConversationConfig,
     FileTranscript,
     LoopModel,
     MemoryTranscript,
     ToolBroker,
     Unchanged,
     asked,
-    compact,
+    clear_conversation,
     compact_conversation,
+    conversation,
     kept_in,
     rewrite,
     seeded,
@@ -159,14 +160,14 @@ async def _compact(
     jobs: asyncio.Queue[Job] | None = None,
     worker: asyncio.Future[None] | None = None,
 ) -> Any:
-    """`/compact ARGS` over the session's file at `path`, as the compact row runs it."""
+    """`/compact ARGS` over the session's file at `path`, as the conversation row runs it."""
     return await compact_conversation(
         args,
         model=model,
         tools=Offered(),
         loader=loader or Loader(str(path) if path else None),
         output=screen or Screen(),
-        config=CompactConfig(),
+        config=ConversationConfig(),
         jobs=jobs if jobs is not None else asyncio.Queue(),
         worker=worker or _up(),
     )
@@ -390,7 +391,7 @@ async def test_compact_writes_the_new_conversation_and_queues_the_loop_and_trans
         {
             "type": "note",
             "text": "compacting: the model is writing a summary of the conversation, in up to 300 "
-            "seconds (the compact row's `timeout`). Nothing changes until it is written; Ctrl-C "
+            "seconds (the conversation row's `timeout`). Nothing changes until it is written; Ctrl-C "
             "doesn't stop it, leaving bh-02 does.",
         }
     ]
@@ -500,7 +501,8 @@ async def test_compact_writes_nothing_once_its_row_has_restarted(tmp_path: Path)
     ended.cancel()
     said = await _compact(path, Scripted([text("x holds 42"), stop("end_turn")]), worker=ended)
     assert said == (
-        "the compact row restarted while the model wrote the summary, so nothing changed; try /compact again"
+        "the conversation row restarted while the model wrote the summary, so nothing changed; "
+        "try /compact again"
     )
     assert path.read_bytes() == old and not Path(f"{path}.bak").exists()
 
@@ -521,11 +523,13 @@ class Registry:
         return remove
 
 
-async def test_the_compact_row_registers_compact_and_restarts_as_its_own_work(tmp_path: Path) -> None:
+async def test_the_conversation_row_registers_clear_and_compact_and_restarts_as_its_own_work(
+    tmp_path: Path,
+) -> None:
     """It depends on the model, `tools` (the specs), the loader, `commands` and `output`, never on
     the loop or the transcript, which it restarts: the restart would reload it, cancelling its
     own work. A restart that fails is told to the person: the new conversation is written."""
-    assert resolve("agent:compact").inject == {"model", "tools", "loader", "commands", "output"}
+    assert resolve("agent:conversation").inject == {"model", "tools", "loader", "commands", "output"}
     path = _session(tmp_path)
     loader, commands, screen = Loader(str(path)), Registry(), Screen()
     model = Scripted([text("x holds 42"), stop("end_turn")], [text("x holds 42"), stop("end_turn")])
@@ -540,25 +544,100 @@ async def test_the_compact_row_registers_compact_and_restarts_as_its_own_work(tm
 
     rt = Runtime()
     rt.mount(values, id="values")
-    row = rt.mount(compact, id="compact", config=CompactConfig(timeout=5))
+    row = rt.mount(conversation, id="conversation", config=ConversationConfig(timeout=5))
     await rt.settle()
+    assert sorted(commands.commands) == ["clear", "compact"]
     spec, run = commands.commands["compact"]
     assert spec["usage"] == "[WHAT TO KEEP]"
     said = await run("")
     assert said[-1] == {"type": "restarting", "rows": ["loop", "transcript"]}
     await asyncio.sleep(0.01)
     assert loader.batches == [("loop", "transcript")]  # the row's own background work ran it
+    _, clear = commands.commands["clear"]
+    assert (await clear(""))[-1] == {"type": "restarting", "rows": ["loop", "transcript", "kernel"]}
+    await asyncio.sleep(0.01)
+    assert loader.batches[-1] == ("loop", "transcript", "kernel")  # the same queue
     path.write_text("".join(json.dumps(m) + "\n" for m in CONVERSATION))
     loader.fails = True
     await run("")
     await asyncio.sleep(0.01)
     assert screen.notices == [
-        unrestarted(CompactConfig(), "LookupError: no row 'transcript'; the rows are loop")
+        unrestarted(ConversationConfig(), "LookupError: no row 'transcript'; the rows are loop")
     ]
     assert screen.notices[0].endswith(
-        "so the loop may still hold the old one; /restart transcript begins the new one"
+        "so the loop may still hold the old one; /rows shows what is running, and /restart "
+        "transcript begins the new one"
     )
     await row.retire()
     await rt.settle()
     assert commands.commands == {}
     await rt.shutdown()
+
+
+async def _clear(loader: Loader, jobs: asyncio.Queue[Job] | None = None) -> Any:
+    return await clear_conversation(
+        "", loader=loader, config=ConversationConfig(), jobs=jobs if jobs is not None else asyncio.Queue()
+    )
+
+
+async def test_clear_writes_an_empty_conversation_keeping_the_old_and_restarts_its_rows(
+    tmp_path: Path,
+) -> None:
+    """/clear is /compact's rewrite with an empty conversation: the old is the `.bak` beside the
+    file, never lost, and the loop, the transcript and the kernel restart together."""
+    path = _session(tmp_path)
+    old = path.read_bytes()
+    loader, jobs = Loader(str(path)), asyncio.Queue[Job]()
+    said = await _clear(loader, jobs)
+    assert said == [
+        {"type": "cleared"},  # not `compacted`: what commands hold for the model is dropped
+        {
+            "type": "note",
+            "text": f"the conversation was cleared (the old one is kept as {path}.bak); starting "
+            "afresh: loop, transcript, kernel",
+        },
+        {"type": "restarting", "rows": ["loop", "transcript", "kernel"]},
+    ]
+    assert path.read_text() == "" and Path(f"{path}.bak").read_bytes() == old
+    assert loader.batches == []  # queued, not run in the command's task
+    await _drain(jobs)
+    assert loader.batches == [("loop", "transcript", "kernel")]
+    path.write_text(old.decode())
+    await _clear(loader)
+    assert Path(f"{path}.bak.2").read_bytes() == old  # an earlier backup is never replaced
+
+
+async def test_clear_with_nothing_to_keep_or_no_file_of_its_own_only_restarts(tmp_path: Path) -> None:
+    """An empty transcript, one kept in memory, or one another component fills (its file may be
+    another shape) is not written: the restart is the new conversation. Rows not running are not
+    named."""
+    empty = tmp_path / "transcript.jsonl"
+    empty.write_text("")
+    loader = Loader(str(empty))
+    del loader.states["kernel"]
+    said = await _clear(loader)
+    assert said[1]["text"] == "the conversation was cleared; starting afresh: loop, transcript"
+    assert not Path(f"{empty}.bak").exists()
+    in_memory = await _clear(Loader(None))
+    assert in_memory[-1] == {"type": "restarting", "rows": ["loop", "transcript", "kernel"]}
+    other = Loader(str(_session(tmp_path)))
+    other.rows["transcript"] = Mounted(Entry("transcript", "mine:transcript", {"path": str(tmp_path / "t")}))
+    await _clear(other)
+    assert not Path(f"{tmp_path / 'transcript.jsonl'}.bak").exists()
+
+
+async def test_clear_that_can_t_write_changes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _session(tmp_path)
+    old = path.read_bytes()
+    os.chmod(tmp_path, 0o500)
+    try:
+        if os.access(tmp_path, os.W_OK):
+            pytest.skip("this user writes a read-only directory (root)")
+        jobs = asyncio.Queue[Job]()
+        said = await _clear(Loader(str(path)), jobs)
+        assert said.startswith(f"the conversation in {path} could not be cleared (")
+        assert jobs.empty() and path.read_bytes() == old
+    finally:
+        os.chmod(tmp_path, 0o700)

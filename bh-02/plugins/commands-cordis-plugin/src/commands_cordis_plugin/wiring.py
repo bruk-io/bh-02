@@ -6,7 +6,7 @@ import functools
 from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
-from commands_cordis_plugin.operations import Loader, Operator, OperatorConfig, unfinished
+from commands_cordis_plugin.operations import Loader, Operator, unfinished
 from commands_cordis_plugin.registry import Commands, CommandSpec, Run
 from commands_cordis_plugin.shell_command import ShellCommandConfig, run_line
 from cordis import Effects, acquire, background, bind, component
@@ -59,15 +59,13 @@ async def shell_command(*, commands: _Claimant, config: ShellCommandConfig) -> E
 
 
 @component
-async def operator(
-    *, commands: _Registrar, loader: Loader, output: _Notices, config: OperatorConfig
-) -> Effects:
-    """Fills an `operator` row: `use = "commands:operator"`. /rows, /explain, /restart and
-    /clear, over the loader that mounted it. Its restarts are its own background work, run after
-    the command has answered, so one that fails is told to the person (`output.notice`). It
-    depends on neither `model` nor `models`, so a composition without them keeps these commands,
-    and a switch never reloads it."""
+async def operator(*, commands: _Registrar, loader: Loader, output: _Notices) -> Effects:
+    """Fills an `operator` row: `use = "commands:operator"`. /rows, /explain and /restart, over
+    the loader that mounted it. Its restarts are its own background work, run after the command
+    has answered, so one that fails is told to the person (`output.notice`). It depends on
+    neither `model` nor `models`, so a composition without them keeps these commands, and a
+    switch never reloads it."""
     jobs: asyncio.Queue[Job] = asyncio.Queue()
     yield background(perform(jobs, lambda why: output.notice(unfinished(why))))
-    for spec, run in Operator(loader, config, jobs).specs:
+    for spec, run in Operator(loader, jobs).specs:
         yield acquire(commands.register, spec, run)

@@ -6,7 +6,7 @@ Slash commands and line prefixes, as a broker (paper 6.2), on `cordis-helpers`' 
 | Row | Binds / registers | Consumes |
 |---|---|---|
 | `commands:registry` | `commands`: `register(spec, run) -> remover`, `claim(prefix, spec, run) -> remover`, `specs()`, `claims(line)`, `run(line)`, `take_for_model()`; `/help` is its own | |
-| `commands:operator` | registers `/rows`, `/explain ROW`, `/restart ROW`, `/clear`; a restart one of them queued that fails is told to the person; config: `clear`, `forget` | `commands`, `loader`, `output` (`notice`) |
+| `commands:operator` | registers `/rows`, `/explain ROW`, `/restart ROW`; a restart `/restart` queued that fails is told to the person | `commands`, `loader`, `output` (`notice`) |
 | `commands:shell_command` | claims `!`: `!COMMAND` runs in the person's shell; config: `prefix` (`!`), `cwd` (`.`, the project), `timeout` (120 s), `shell` (empty: `$SHELL`, else `/bin/sh`) | `commands` (`claim`) |
 
 A row offers commands by `acquire(commands.register, spec, run)`, so a row that leaves takes
@@ -53,18 +53,12 @@ conversation (`/clear`'s `cleared`) drops it, with a note saying so, and one car
 summary (`/compact`'s `cleared`, `compacted`) keeps it: the summary was written from what the
 model read, which never held it.
 
-The operator acts through cordis's loader handle (`status`, `entries`, `restart`,
-`explain`), never the runtime. A restart replaces rows the chat session depends on, which
-restarts the session itself, so restarts are queued to the operator row's own background work
-(cordis-helpers' `perform`) rather than run in the session's task. `/clear` empties the
-`forget` files first (Claude Code's session id, the loop's transcript), since a restarted model
-row would otherwise read the old conversation back, and answers with events rather than text:
-`cleared` (CONTRACTS.md: event), so the ui drops the old conversation from its screen, then a
-note saying so. (`/compact`, which asks the model for a summary, is the agent plugin's
-`agent:compact` row, so the operator never depends on the model.)
+The operator acts through cordis's loader handle (`status`, `entries`, `restart`, `explain`),
+never the runtime. A restart replaces rows the chat session depends on, which restarts the
+session itself, so restarts are queued to the operator row's own background work
+(cordis-helpers' `perform`) rather than run in the session's task.
 
-`/model` is the models plugin's (`models:switch`), beside the catalog it reads: the operator
-depends on neither `model` nor `models`, so a composition without them keeps `/rows`,
-`/explain`, `/restart` and `/clear`. `/clear`'s answer ends with `restarting` (CONTRACTS.md:
-event), naming the rows about to restart, so the ui holds a line typed meanwhile for them
-rather than handing it to the old loop.
+`/model` is the models plugin's (`models:switch`), beside the catalog it reads; `/clear` and
+`/compact` are the agent plugin's conversation row's (`agent:conversation`), beside the
+transcript they rewrite. So the operator depends on neither `model` nor `models`, and a
+composition without them keeps `/rows`, `/explain` and `/restart`.

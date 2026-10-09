@@ -614,12 +614,11 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
     app.resize(_COLS - 20)
     app.wait_for("echo: HELLO THERE", 10, after=narrowed)  # /model: the conversation is still shown
     app.type("/clear")
-    cleared = app.wait_for(
-        "the conversation was cleared; starting afresh: loop, transcript, kernel", 10, after=narrowed
-    )
+    # the note names where the old conversation is kept (the session's transcript.jsonl.bak)
+    cleared = app.wait_for("the conversation was cleared (the old one is kept as", 10, after=narrowed)
     app.wait_for("↻ status reloaded", 20, after=cleared)  # the last row /clear restarts
     app.settle(1.0)
-    app.type("again")  # the model's transcript was forgotten too: this is its first message
+    app.type("again")  # the model's transcript was written over too: this is its first message
     app.wait_for("echo: AGAIN (message 1)", 20, after=cleared)
     # the kernel's restart reloads status: the jail field keeps its text meanwhile
     bars = re.findall(r"session: [^\n]*", app.text()[narrowed:])  # every status bar drawn since

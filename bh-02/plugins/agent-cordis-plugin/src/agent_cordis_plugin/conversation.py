@@ -1,4 +1,5 @@
-"""`/compact`: a new conversation, begun from the model's summary of the one so far.
+"""`/clear` and `/compact`: a new conversation, empty or begun from the model's summary of the
+one so far, written over the transcript row's file in one step, the old kept beside it.
 
 A long conversation makes every request longer: a local model processes more prompt before its
 first token, and any model nears its context window. `/compact` asks the model for a summary
@@ -10,22 +11,25 @@ answers gives no summary. The summary then seeds the transcript's file (`seeded`
 by `transcript.rewrite`, the old file kept beside it), and the loop and its transcript restart:
 the new conversation holds no prompt yet, so the loop reads it afresh, folding in whatever
 changed since the old one began, and tells the date again. The kernel is left alone, since the
-summary names what its namespace holds.
+summary names what its namespace holds. `/clear` is the same rewrite with an empty
+conversation, and restarts the kernel too (`clear`): nothing is lost for good, the old
+conversation is the `.bak` beside the file.
 
 A command runs in the chat row's task, and Ctrl-C stops only a turn, so the model has `timeout`
 seconds to answer, and a note says so as the step begins; the person leaving cancels the
 command (`chat:session`), and nothing is written until the summary is whole. The restart is
-queued for the compact row's own work (cordis-helpers' `perform`), never run in the chat row's
-task, which it reloads (the operator's `/clear` does the same), and a restart that fails is told
-to the person, since the new conversation is written by then. The pure parts (`asked`,
-`seeded`, `kept_in`, `_unsaid`, `_unusable`, `_summed`, `_answer`, `_unchanged`, `unrestarted`)
-decide; the rest reads, writes and asks.
+queued for the conversation row's own work (cordis-helpers' `perform`), never run in the chat
+row's task, which it reloads, and a restart that fails is told to the person, since the new
+conversation is written by then. The pure parts (`asked`, `seeded`, `kept_in`, `_unsaid`,
+`_unusable`, `_summed`, `_answer`, `_unchanged`, `_cleared`, `unrestarted`) decide; the rest
+reads, writes and asks.
 """
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from agent_cordis_plugin.loop import Model, request_for
@@ -34,13 +38,15 @@ from agent_cordis_plugin.transcript import FileTranscript, rewrite
 from cordis_helpers import Job
 
 __all__ = [
-    "SPEC",
-    "CompactConfig",
+    "CLEAR",
+    "COMPACT",
+    "ConversationConfig",
     "Offered",
     "Rows",
     "Shown",
     "Unchanged",
     "asked",
+    "clear_conversation",
     "compact_conversation",
     "kept_in",
     "seeded",
@@ -50,14 +56,15 @@ __all__ = [
 
 type Json = Mapping[str, Any]
 
-SPEC: Json = {
+COMPACT: Json = {
     "name": "compact",
     "help": "a new conversation from the model's summary of this one; the kernel is kept",
     "usage": "[WHAT TO KEEP]",
 }
+CLEAR: Json = {"name": "clear", "help": "a new conversation and an empty kernel (the old one kept as .bak)"}
 
-# The component whose file /compact writes the new conversation to: a row another fills may keep
-# its file in another shape, which /compact must not write over.
+# The component whose file /clear and /compact write the new conversation to: a row another
+# fills may keep its file in another shape, which they must not write over.
 _TRANSCRIPT = "agent:transcript"
 
 # What the model is asked, after the conversation: what the summary is for, what it must carry,
@@ -87,7 +94,7 @@ _SEEDED = (
 # Shown as the summary step begins: a command shows nothing until it answers.
 _ASKING = (
     "compacting: the model is writing a summary of the conversation, in up to {timeout:g} seconds "
-    "(the compact row's `timeout`). Nothing changes until it is written; Ctrl-C doesn't stop it, "
+    "(the conversation row's `timeout`). Nothing changes until it is written; Ctrl-C doesn't stop it, "
     "leaving bh-02 does."
 )
 _NOTE = (
@@ -155,16 +162,18 @@ class Shown(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class CompactConfig:
-    """`timeout`: the seconds the model has to write the summary (Ctrl-C stops only a turn, so
-    this is the longest /compact keeps the person waiting). `loop` and `transcript`: the rows
-    /compact restarts, together; the transcript row's config `path` is the file the new
+class ConversationConfig:
+    """`timeout`: the seconds the model has to write `/compact`'s summary (Ctrl-C stops only a
+    turn, so this is the longest /compact keeps the person waiting). `loop` and `transcript`:
+    the rows /compact restarts, together; the transcript row's config `path` is the file the new
     conversation is written to. The kernel is not among them: the summary refers to its
-    namespace."""
+    namespace. `clear`: the rows /clear restarts, together (the kernel among them, so the
+    namespace empties with the conversation)."""
 
     timeout: float = 300.0
     loop: str = "loop"
     transcript: str = "transcript"
+    clear: Sequence[str] = ("loop", "transcript", "kernel")
 
 
 def kept_in(row: str, mounted: object, state: str | None) -> str:
@@ -278,7 +287,7 @@ async def summarise(
             raise  # the model's own, not the time it had: a bug
         raise Unchanged(
             f"the model wrote no summary within {timeout:g} seconds, so nothing changed; try again, "
-            "or give the compact row a longer `timeout`",
+            "or give the conversation row a longer `timeout`",
             usage,
         ) from None
     except Exception as error:
@@ -319,14 +328,29 @@ def _unchanged(why: str, usage: Sequence[Json]) -> str | list[Json]:
     return [{"type": "note", "text": why}, *_summed(usage)] if usage else why
 
 
-def unrestarted(config: CompactConfig, why: str) -> str:
-    """What the person is told when the restart /compact queued failed (`why`), after the new
-    conversation was written: the loop may still hold the old one, and how to begin the new."""
+def unrestarted(config: ConversationConfig, why: str) -> str:
+    """What the person is told when the restart /clear or /compact queued failed (`why`), after
+    the new conversation was written: the loop may still hold the old one, and how to begin the
+    new."""
     return (
-        f"/compact wrote the new conversation, but restarting {config.loop!r} and "
-        f"{config.transcript!r} failed ({why}), so the loop may still hold the old one; "
-        f"/restart {config.transcript} begins the new one"
+        f"a new conversation was written, but restarting its rows failed ({why}), so the loop may "
+        f"still hold the old one; /rows shows what is running, and /restart {config.transcript} "
+        "begins the new one"
     )
+
+
+def _cleared(backup: str | None, rows: Sequence[str]) -> list[Json]:
+    """/clear's answer (CONTRACTS.md: event): `cleared` (the ui drops the old conversation, and
+    what commands hold for the model is dropped with it), a note saying so and where the old
+    conversation is kept, then `restarting` the `rows`, last: the restart may stop the chat row
+    showing this answer, and the note is what must not be lost."""
+    kept = f" (the old one is kept as {backup})" if backup else ""
+    started = f"; starting afresh: {', '.join(rows)}" if rows else ""
+    return [
+        {"type": "cleared"},
+        {"type": "note", "text": f"the conversation was cleared{kept}{started}"},
+        *([{"type": "restarting", "rows": list(rows)}] if rows else []),
+    ]
 
 
 async def _once(event: Json) -> AsyncIterator[Json]:
@@ -340,14 +364,14 @@ async def compact_conversation(
     tools: Offered,
     loader: Rows,
     output: Shown,
-    config: CompactConfig,
+    config: ConversationConfig,
     jobs: asyncio.Queue[Job],
     worker: asyncio.Future[None],
 ) -> str | list[Json]:
     """`/compact [WHAT TO KEEP]`: ask the model for a summary of the conversation (a note says so
     as it begins), write the new conversation it begins in the transcript row's file (the old
     kept beside it), and queue the restart of the loop and the transcript; answer `_answer`'s
-    events, or why nothing changed (`_unchanged`). `jobs` is the compact row's queue and
+    events, or why nothing changed (`_unchanged`). `jobs` is the conversation row's queue and
     `worker` the work that runs it, which a restart of the row ends: then nothing is written,
     since nothing would restart the rows."""
     row = config.transcript
@@ -371,7 +395,9 @@ async def compact_conversation(
     except Unchanged as why:
         return _unchanged(str(why), why.usage)
     if worker.done():  # the row restarted meanwhile: nothing would run the restart
-        return _unchanged(f"the compact row restarted while the model wrote the summary, {_AGAIN}", usage)
+        return _unchanged(
+            f"the conversation row restarted while the model wrote the summary, {_AGAIN}", usage
+        )
     try:
         # on the loop, not in a thread: from the rewrite to queueing the restart nothing may
         # cancel it (the person leaving), or the file would hold the new conversation and the
@@ -389,3 +415,34 @@ async def compact_conversation(
         # together: a row depending on both (the chat row, through `loop`) reloads once
         await jobs.put(partial(loader.restart, *rows))
     return _answer(summary, usage, backup, rows)
+
+
+async def clear_conversation(
+    args: str, *, loader: Rows, config: ConversationConfig, jobs: asyncio.Queue[Job]
+) -> str | list[Json]:
+    """`/clear`: write an empty conversation over the transcript row's file (the old kept beside
+    it, as /compact keeps it) and queue the restart of the `clear` rows that are running; answer
+    `_cleared`'s events. A transcript that keeps the conversation in memory, or is filled by
+    another component (whose file may be another shape), or has no file yet, is not written:
+    its restart is the new conversation."""
+    row, running = config.transcript, loader.status()
+    try:
+        path: str | None = kept_in(row, loader.rows.get(row), running.get(row))
+    except Unchanged:
+        path = None
+    backup = None
+    if path is not None and Path(path).is_file() and Path(path).stat().st_size:
+        try:
+            # on the loop, not in a thread: from the rewrite to queueing the restart nothing may
+            # cancel it (the person leaving), or the file would be empty and the loop hold the old
+            backup = rewrite(path, [])
+        except OSError as error:
+            return (
+                f"the conversation in {path} could not be cleared ({error.strerror or error}), so "
+                "nothing changed; check the directory's space and permissions"
+            )
+    rows = [rid for rid in config.clear if rid in running]
+    if rows:
+        # together: a row depending on several of them (the chat row, on `loop`) reloads once
+        await jobs.put(partial(loader.restart, *rows))
+    return _cleared(backup, rows)

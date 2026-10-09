@@ -108,7 +108,7 @@ class Broken:
 
 def session_layer(dir: Path, *, model: str | None, no_jail: bool) -> list[Row]:
     """The session's layer: where its history goes, what this run chose, and what the
-    operator's /clear and the switch row's /model act on.
+    switch row's /model acts on.
 
     bh-02's own loop runs over the `model` row, which names its model (`default`, which
     `--model` and /model set): the conversation is the `transcript` row's, kept in the
@@ -118,16 +118,15 @@ def session_layer(dir: Path, *, model: str | None, no_jail: bool) -> list[Row]:
     stderr), whichever model runs first: /model can switch to Claude at any time. (The status
     bar's session id is the `status` row's, read from the `sessions` value, not written here.)
     The `ui` row is told where to keep what it shows, which it draws again on a resume from
-    the last /clear on (the ui hears `cleared` and keeps its own file; /clear empties only the
-    model's history).
+    the last /clear on (the ui hears `cleared` and keeps its own file; /clear writes over only
+    the model's history, the conversation row finding it from the transcript row's `path`).
     """
     ui = {"history": str(dir / _EVENTS)}
     history = dir / TRANSCRIPT
     rows = [
         Row("ui", config=ui),
         Row("transcript", config={"path": str(history)}),
-        # /clear empties the model's history before starting afresh; /model edits this very file
-        Row("operator", config={"forget": [str(history)]}),
+        # /model edits this very file
         Row("switch", config={"layer": str(dir / _LAYER), "model_row": _MODEL_ROW}),
     ]
     rows.append(Row(_MODEL_ROW, config={"state": str(dir / _CLAUDE_STATE)}))

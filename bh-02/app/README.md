@@ -94,12 +94,13 @@ models plugin's README has every setting.
 
 In a session: `/help` lists the commands (Ctrl-P opens them as a palette). `/rows` shows the
 running composition, `/explain ROW` what cordis knows about a row, `/restart ROW` starts one
-afresh, `/clear` starts a new conversation and an empty kernel (and clears the screen, leaving
-one note; the usage totals are the session's and stay), `/compact [WHAT TO KEEP]` asks the model
+afresh, `/clear` starts a new conversation and an empty kernel (the old conversation kept as
+the session's `transcript.jsonl.bak`; it clears the screen, leaving one note; the usage totals
+are the session's and stay), `/compact [WHAT TO KEEP]` asks the model
 to summarise the conversation and carries on in a new one from the summary, keeping the kernel
 and its variables (the screen keeps only the note carrying the summary, and the old transcript
 is kept as the session's `transcript.jsonl.bak`, a later /compact's as `.bak.2`, and so on; the
-model has 300 seconds, the `compact` row's `timeout`, since Ctrl-C doesn't stop a command, and a
+model has 300 seconds, the `conversation` row's `timeout`, since Ctrl-C doesn't stop a command, and a
 note says so as it begins; quitting stops it and changes nothing), `/model [NAME]` lists the models or switches
 to one, `/release` stops the kernel until the next input (on Linux, the way to add your
 credential mid-session: the jail frees where bh-02 looks for it, stopping the extensions'
@@ -181,9 +182,9 @@ stand-in server (`-m "not real_launch"` deselects it).
 | `release` | `kernel:release` | |
 | `system` | `agent:system` | |
 | `commands` | `commands:registry` | |
-| `operator` | `commands:operator` | `forget` (the transcript) |
+| `operator` | `commands:operator` | |
 | `switch` | `models:switch` | `layer` (the session's), `model_row` (`model`) |
-| `compact` | `agent:compact` (`timeout`: 300) | |
+| `conversation` | `agent:conversation` (`timeout`: 300) | |
 | `shell-command` | `commands:shell_command` | |
 | `status` | `tui:status` | |
 | `palette` | `tui:palette` | |
@@ -235,7 +236,7 @@ What the rows depend on, which is what decides what reloads when:
 
 ```
 commands:registry       binds Commands                     depends on nothing
-commands:operator       registers /rows ... /clear         depends on Commands, Loader, Output
+commands:operator       registers /rows ... /restart       depends on Commands, Loader, Output
 commands:shell_command  claims ! (a shell command)         depends on Commands
 models:model            binds Model                        depends on Layers (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
 models:catalog          binds Models                       depends on Loader, Layers
@@ -247,7 +248,7 @@ agent:access            binds Access                       depends on nothing
 agent:executor          binds Executor                     depends on nothing
 agent:tools             binds Tools                        depends on nothing
 agent:loop              binds Loop                         depends on Model, Tools, Transcript, System, Approval, Notes, Executor
-agent:compact           registers /compact                 depends on Model, Tools, Loader, Commands, Output (the transcript row's file, not Transcript)
+agent:conversation      registers /clear, /compact         depends on Model, Tools, Loader, Commands, Output (the transcript row's file, not Transcript)
 memory:memory           binds Memory, registers /memory    depends on System, Commands, Layers
 memory:on_touch         adds memory loaded on demand       depends on Memory, Notes, Transcript, Access
 memory:auto             adds auto memory to System         depends on System, Layers, Transcript
@@ -287,7 +288,7 @@ where a file is and how it is reached) and on no other plugin; the gate proves i
 |---|---|---|
 | `tui-cordis-plugin` | `ui`: `input`, `output` (whose `confirm` asks in a modal), `frame` (the Textual app); the frame's rows (`status`: session, model and provider, jail; `palette`) | `frame` and what each row reports on |
 | `models-cordis-plugin` | `model`: named models over their providers (`models:model`): `claude-code`, Claude through Claude Code (the Claude Agent SDK) on the subscription (one model step per call, the loop's tools only declared to it through an in-process MCP server whose calls wait for the loop's results, any other tool denied; one Claude Code process per conversation, its session checked against the transcript and rebuilt from it when they differ), and `openai`, any OpenAI-compatible `/chat/completions` (streamed, a call's arguments assembled from their deltas, a key from `local.env` in its header); each streams text, thinking and tool calls, usage, the API's stop reason and its message for replay. `models` (`models:catalog`): the models there are; `/model` (`models:switch`), which lists them and switches by name | `layers` (`credentials`: where both look for `local.env`), `loader` (catalog, switch), `commands`, `output` (switch) |
-| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, the registered tools offered, read once at the first request after those it `requires`, each call run through its tool only on `approval`'s yes, its result followed by what `notes`' functions add), `tools` (`agent:tools`: the broker of the model's tools, offered in name order), `transcript` (`agent:transcript`), `system` (`agent:system`: the system prompt, who the model is and where it is working, then the sections rows add; a broker), `notes` (`agent:notes`: the broker of what the model is told with a call's result), `access` (`agent:access`: the broker of what is asked before a file is read or written), `executor` (`agent:executor`: where the loop reads the prompt and asks `notes`, off the event loop, one call at a time across the loop's reloads); `agent:compact` registers `/compact`, which begins a new conversation from the model's summary, restarting the loop and the transcript | the loop: `model` (`complete`), `tools` (`specs`, `get`, `ready`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `notes` (its functions, after each call), `executor` (`run`); compact: `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
+| `agent-cordis-plugin` | `loop` (`agent:loop`: turns classified after harness, bounded nudges, the registered tools offered, read once at the first request after those it `requires`, each call run through its tool only on `approval`'s yes, its result followed by what `notes`' functions add), `tools` (`agent:tools`: the broker of the model's tools, offered in name order), `transcript` (`agent:transcript`), `system` (`agent:system`: the system prompt, who the model is and where it is working, then the sections rows add; a broker), `notes` (`agent:notes`: the broker of what the model is told with a call's result), `access` (`agent:access`: the broker of what is asked before a file is read or written), `executor` (`agent:executor`: where the loop reads the prompt and asks `notes`, off the event loop, one call at a time across the loop's reloads); `agent:conversation` registers `/clear` and `/compact`, which begin a new conversation, empty or from the model's summary, over the transcript row's file (the old kept as `.bak`), restarting the loop and the transcript (and for `/clear` the kernel) | the loop: `model` (`complete`), `tools` (`specs`, `get`, `ready`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `notes` (its functions, after each call), `executor` (`run`); compact: `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
 | `chat-cordis-plugin` | runs `session` (a turn interruptible; a line `commands` claims goes to it, cancelled if the input closes, and what a command left the model, which `commands` holds, goes with the next message) and binds `done` | `loop`, `input`, `output`, `commands` (`claims`, `run`, `take_for_model`) |
 | `memory-cordis-plugin` | `memory` (`memory:memory`): Claude Code's memory, as its docs describe it: the managed policy's CLAUDE.md, yours (`~/.claude/CLAUDE.md`, `~/.claude/rules/`), each directory's CLAUDE.md files from the filesystem's root down to the project's, AGENTS.md where there is none, `@path` imports (four hops) and `.claude/rules/` without `paths`, a section of `system`, read fresh; `/memory` lists them. `memory:auto` adds auto memory: how the model keeps notes of its own in the project's directory outside the repository, and their MEMORY.md index, read once a conversation. `memory:on_touch` adds to `notes` what loads on demand (a subdirectory's CLAUDE.md files and rules, every rule whose `paths` match), each told whole once a conversation, with the result of the first input that opens a file it covers (or of the next, when that one's note was full) | memory: `system` (`add`), `commands` (`register`), `layers` (`memory`); auto: `system` (`add`), `layers` (`memory`), `transcript` (its lifetime); on-touch: `memory` (`touched`), `notes` (`add`), `transcript` (`messages`: what a resumed conversation was told) |
 | `extensions-cordis-plugin` | nothing: loads the cordis components the model writes to `.bh-02/plugins/` while bh-02 runs, into a worker the `jail` row starts; what they add (commands, status fields, prompt sections) goes into `commands`, `frame` and `system`; each load on `approval`'s yes; after `/release` stopped its worker, none starts until the next input has started the kernel, and then every extension loads again | `jail` (`start`, `released`), `commands`, `frame`, `system`, `approval` |

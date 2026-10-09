@@ -92,8 +92,8 @@ whole, removes its temporary file and says so in the transcript. `/clear` reache
 `cleared` event: the transcript drops every block and the note that follows is all it shows,
 with any line typed after `/clear` that is still waiting to be read (it is drawn again);
 the file records `cleared` like any event, and a replay starts after the last one, while the
-usage before it still counts (the session's totals). A session made before `cleared` existed
-also empties the file underneath the app; the next write then puts a `carried` entry first for
+usage before it still counts (the session's totals). An older bh-02 emptied the file underneath
+the app (the operator's `forget`, gone now); the next write then puts a `carried` entry first for
 what was forgotten, so the usage a resume adds up is the usage shown live. The file is the ui's own; the row still
 depends on its config alone.
 

@@ -70,7 +70,8 @@ def test_an_old_layer_reads_in_today_s_names_and_says_what_changed() -> None:
         # though jail_status was off (turning all of it off would hide the session and model)
         Row("status", None, {"model_row": "model"}),
         Row("chat", config={"greeting": "hi"}),
-        Row("operator", config={"clear": ["loop", "transcript", "kernel"]}),
+        Row("operator"),
+        Row("conversation", config={"clear": ["loop", "transcript", "kernel"]}),  # /clear is its now
     ]
     assert changes == [
         "row 'llm' is now 'loop'; rename its id",
@@ -85,6 +86,8 @@ def test_an_old_layer_reads_in_today_s_names_and_says_what_changed() -> None:
         "the person in the modal; delete it",
         "row 'operator': its config names a renamed row; make it "
         'config = { clear = ["loop", "transcript", "kernel"] }',
+        "row 'operator': /clear is the conversation row's now (agent:conversation): add a "
+        '\'conversation\' row with config = { clear = ["loop", "transcript", "kernel"] }; delete its config',
     ]
     assert translated(rows) == (rows, [])  # once is enough
 
@@ -178,10 +181,15 @@ def test_an_old_model_row_named_llm_or_completion_is_the_model_row_not_the_loop(
     rows, _ = translated([Row("model_status", config={key: "llm", "default": "x"})])
     assert rows == [Row("status", None, {"model_row": "model"})]
     rows, _ = translated([Row("operator", config={"model_row": "llm", "clear": ["llm"]})])
-    assert rows == [Row("operator", config={"clear": ["loop"]}), Row("switch", config={"model_row": "model"})]
+    assert rows == [
+        Row("operator"),
+        Row("conversation", config={"clear": ["loop"]}),
+        Row("switch", config={"model_row": "model"}),
+    ]
     rows, _ = translated([Row("operator", config={"model_row": "completion", "clear": ["completion"]})])
     assert rows == [
-        Row("operator", config={"clear": ["model"]}),
+        Row("operator"),
+        Row("conversation", config={"clear": ["model"]}),
         Row("switch", config={"model_row": "model"}),
     ]
 
@@ -367,7 +375,7 @@ def test_a_patch_naming_old_rows_is_refused_with_each_row_and_what_to_change(sta
     )
     hint = f"run `bh-02 update-layer {patch}` to rewrite it (the original is kept beside it as .bak)"
     assert lines[-1] == f"{hint}, then run again"
-    assert len(lines) == 8  # the heading, a line per row, the hint
+    assert len(lines) == 9  # the heading, a line per change, the hint
     assert "Traceback" not in result.output
     assert "no sessions" in CliRunner().invoke(main, ["sessions"]).stderr  # none left behind
     assert patch.read_text() == _OLD  # refused, not rewritten behind the person's back
@@ -495,14 +503,13 @@ def test_model_moves_from_the_operator_to_the_switch_row() -> None:
     layer and model row it read, and translating again changes nothing more."""
     session = [Row("operator", config={"layer": "/s/session.toml", "model_row": "model", "forget": ["/s/t"]})]
     rows, changes = translated(session)
-    assert rows == [
-        Row("operator", config={"forget": ["/s/t"]}),
-        Row("switch", config={"layer": "/s/session.toml", "model_row": "model"}),
-    ]
+    assert rows == [Row("operator"), Row("switch", config={"layer": "/s/session.toml", "model_row": "model"})]
     assert changes == [
         "row 'operator': /model is the models plugin's now (models:switch): make it config = "
         '{ forget = ["/s/t"] }, and add a \'switch\' row with config = { layer = "/s/session.toml", '
-        'model_row = "model" }'
+        'model_row = "model" }',
+        "row 'operator': `forget` is gone: /clear writes an empty conversation over the transcript "
+        "row's file, keeping the old as .bak; delete its config",
     ]
     assert translated(rows) == (rows, [])
 
@@ -510,13 +517,19 @@ def test_model_moves_from_the_operator_to_the_switch_row() -> None:
 def test_a_layer_that_fills_the_operator_gets_the_switch_row() -> None:
     own = [Row("operator", "commands:operator")]
     rows, changes = translated(own)
-    assert rows == [Row("operator", "commands:operator"), Row("switch", "models:switch")]
+    assert rows == [
+        Row("operator", "commands:operator"),
+        Row("conversation", "agent:conversation"),
+        Row("switch", "models:switch"),
+    ]
     assert changes == [
-        "/model is the models plugin's now (models:switch): add a 'switch' row with use = \"models:switch\""
+        "/model is the models plugin's now (models:switch): add a 'switch' row with use = \"models:switch\"",
+        "/clear is the conversation row's now (agent:conversation): add a 'conversation' row with "
+        'use = "agent:conversation"',
     ]
     assert translated(rows) == (rows, [])
-    assert translated([Row("operator", config={"clear": ["loop"]})]) == (
-        [Row("operator", config={"clear": ["loop"]})],
+    assert translated([Row("operator", disabled=False)]) == (
+        [Row("operator", disabled=False)],
         [],
     )  # a change to the shipped operator: the shipped layer has the switch row
     taken = [Row("switch", config={"layer": "/x"}), Row("operator", config={"model_row": "model"})]
@@ -526,3 +539,35 @@ def test_a_layer_that_fills_the_operator_gets_the_switch_row() -> None:
         "row 'operator': /model is the models plugin's now (models:switch), which reads config = "
         "{ model_row = \"model\" }: delete its config, and set it on the 'switch' row by hand"
     ]
+
+
+def test_compact_is_the_conversation_row_and_an_operator_s_forget_is_gone() -> None:
+    """/clear and /compact are one row's: the `compact` row is renamed to it, keeping its
+    config, and an operator's `forget` (the files /clear emptied) is gone, since /clear writes
+    over the transcript row's file, keeping the old."""
+    rows, changes = translated([Row("compact", "agent:compact", {"timeout": 60})])
+    assert rows == [Row("conversation", "agent:conversation", {"timeout": 60})]
+    assert changes == [
+        "row 'compact': /compact is the conversation row's now, with /clear; make it "
+        'id = "conversation", use = "agent:conversation"'
+    ]
+    assert translated([Row("compact", config={"timeout": 60})])[0] == [
+        Row("conversation", config={"timeout": 60})
+    ]
+    both = [
+        Row("operator", "commands:operator", {"clear": ["loop"], "forget": ["/x"]}),
+        Row("compact", "agent:compact"),
+    ]
+    rows, changes = translated(both)
+    assert rows == [
+        Row("operator", "commands:operator"),
+        Row("switch", "models:switch"),
+        Row("conversation", "agent:conversation"),
+    ]
+    assert changes[-1] == (
+        "row 'operator': `forget` is gone: /clear writes an empty conversation over the transcript "
+        "row's file, keeping the old as .bak; /clear is the conversation row's now "
+        '(agent:conversation), which reads config = { clear = ["loop"] }: set it on the '
+        "'conversation' row by hand; delete its config"
+    )
+    assert translated(rows) == (rows, [])
