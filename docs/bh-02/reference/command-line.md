@@ -42,6 +42,10 @@ Commands:
 
 When you leave, bh-02 prints the session's id and the command that continues it, on stderr.
 
+The app owns the terminal while it runs, so nothing else writes there: `--trace` appends to a
+file, a layer file that could not be reloaded is reported after the app exits, and the Python
+process's and brig's children write their stderr to files.
+
 ## `bh-02 sessions`
 
 ```text

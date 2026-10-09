@@ -26,7 +26,7 @@ exactly one model step:
   can't be shown without saying that part twice, so it fails as a restarted stream does;
 - a stream that stalls or drops before it is done, Claude Code may close where it is (the open
   block, then `message_stop` with no `message_delta`, so no stop reason) and stream again
-  from the start (CLI 2.1.282: before any text or call began, and on a dropped connection
+  from the start (measured: before any text or call began, and on a dropped connection
   before any block was complete): the close is not the step's end, and the stream that
   follows is the step; its thinking shown so far stays shown, but once text or a call was
   shown it fails as a restarted stream does (a call the close cut off, its arguments
@@ -115,7 +115,7 @@ _DRAIN_S: Final = 15.0  # how long an interrupted query gets to reach its result
 _FINAL: Final = frozenset({"end_turn", "stop_sequence"})
 _CLOSED: Final = "closed: bh-02 ended this conversation's Claude Code process before this call ran"
 # What an alias resolves to, for a rebuilt session written before this process has seen the
-# model answer (measured, CLI 2.1.280); the model's own answer replaces it once there is one.
+# model answer (measured); the model's own answer replaces it once there is one.
 _ALIASES: Final[Mapping[str, str]] = {
     "sonnet": "claude-sonnet-5",
     "opus": "claude-opus-5-5",

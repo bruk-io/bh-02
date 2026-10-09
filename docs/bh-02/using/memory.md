@@ -7,24 +7,10 @@ place of its own to keep notes across conversations: auto memory.
 ## Instruction files
 
 These files become a section of the model's system prompt. They are read again before each
-message the model reads, so an edit reaches its next one. In order:
-
-1. **The managed policy**: `/etc/claude-code/CLAUDE.md` on Linux,
-   `/Library/Application Support/ClaudeCode/CLAUDE.md` on macOS.
-2. **Yours**: `~/.claude/CLAUDE.md`, then each rule in `~/.claude/rules/` that has no `paths`.
-3. **Each directory from `/` down to the project**: its `CLAUDE.md`, its `.claude/CLAUDE.md`, and
-   its `CLAUDE.local.md`. At the project itself, the rules in `.claude/rules/` with no `paths`
-   come before `CLAUDE.local.md`.
-4. **`AGENTS.md`** and `.claude/AGENTS.md`, by default only where no directory above has a
-   `CLAUDE.md` of any kind.
-
-Where two files disagree, the later one wins, so the files nearest the project count most. A file
-can pull in another with `@path` (relative, absolute, or `@~/...`), up to four imports deep.
-HTML comments on lines of their own are taken out.
-
-Some files load only when the model needs them: a subdirectory's `CLAUDE.md`, and a rule whose
-`paths` match a file. The first time an input in a conversation opens a file they cover, they
-arrive whole with that input's result. Claude Code does the same when its own tools touch a file.
+message the model reads, so an edit reaches its next one. Which files load, in what order (the
+nearest the project count most), how `@path` imports work, and which load only when an input
+opens a file they cover: [what loads at launch](../reference/plugins/memory.md#what-loads-at-launch)
+and [on demand](../reference/plugins/memory.md#what-loads-on-demand).
 
 `/memory` lists every file, marked by how it loads: `✓` at launch, `…` on demand, `·` not there,
 `✗` excluded or not read. Open them in your own editor: bh-02's app owns the terminal.

@@ -158,11 +158,10 @@ token). Closing the step (Ctrl-C) closes the HTTP stream.
 
 ## When the tools change mid-conversation
 
-A request sends the tool list before anything else, so a list that changes partway through a
-conversation makes the whole conversation new to a model server's cache. The loop keeps the
-list a conversation began with in its transcript and tells a change as a note (CONTRACTS.md:
-tools); each provider says which list a request offers (`tool_changes`), and both say `fixed`,
-the list the conversation began with, for its life.
+The loop keeps the list a conversation began with in its transcript and tells a change as a
+note ([why](../../../docs/bh-02/how-it-works/prompt-and-notes.md#why-the-prompt-stays-fixed-for-a-conversation)); each provider says which list a request offers (`tool_changes`), and both say
+`fixed`, the list the conversation began with, for its life. What each would do with a changed
+list:
 
 - **openai**: a chat template renders the tool list at the start of the prompt (llama.cpp,
   Ollama, vLLM, LM Studio), and OpenAI's own prompt cache is a prefix of the request too. A
@@ -176,7 +175,7 @@ the list the conversation began with, for its life.
   byte. With `fixed` nothing restarts and the cache holds.
 
 What Claude Code itself would do with a tool-list change, read from the code of the CLI this
-plugin pins (2.1.280) rather than measured (a measurement needs a subscription token, and the
+plugin pins ([Pinned](#pinned-and-why)) rather than measured (a measurement needs a subscription token, and the
 change below cannot be sent today):
 - it refreshes an MCP server's tools when the server sends `notifications/tools/list_changed`
   (`Received tools/list_changed notification, refreshing tools`), and refetches them after a
@@ -188,7 +187,7 @@ change below cannot be sent today):
   declaring the tools in `tools[]`, which costs the cache, and stays so until `/clear` or
   `/compact`.
 
-That route is closed to bh-02 for now: the Agent SDK (0.2.158) drops what an in-process MCP
+That route is closed to bh-02 for now: the pinned Agent SDK drops what an in-process MCP
 server sends on its own (its bridge: "notifications (logging, progress, list_changed) are
 dropped"), so bh-02's server cannot tell Claude Code its tools changed. `reconnect_mcp_server`
 would make Claude Code list them again, but whether it then adds them as a late addition (cache
@@ -204,6 +203,13 @@ route. bh-02 never imitates Claude Code's requests by hand. The shape is pi's
 runs the loop. It is `claude_code/` (`ClaudeCodeModel`, `ClaudeCodeConfig`): `model` is
 the named model's id, `state` the session's own directory (which the session layer sets on the
 model row), `env_file` where the credential is, `cwd` the project directory.
+
+Why this shape, and not the two bh-02 ran before: Claude Code's own loop (the first stack) would
+own the conversation, the approvals and the tool, and the plain Messages API with the
+subscription token (the second) answered only on Haiku, since the subscription reaches every
+model only through Claude Code. As a `model` under the loop, the same shape as the `openai`
+provider, every model step reaches the loop as one step, so approval is in one place for every
+provider, and nothing about the loop depends on which one runs.
 
 Failures are `ClaudeCodeError(kind, message)` (CONTRACTS.md: Errors). The kinds are
 Claude Code's own (`authentication_failed`, `rate_limit`, `billing_error`, `invalid_request`,
@@ -244,9 +250,9 @@ One Claude Code process holds a conversation. It starts on the first step and us
   before the results.
 - **An answered step** (`end_turn` with text) is read to the query's result.
 - **Any other end** is interrupted at once: the output limit, a silent step, a refusal, or a
-  call that did not decode. The loop's classification and nudges then decide. Left alone,
-  Claude Code's own recovery continued a truncated step three times and then failed
-  (measured).
+  call that did not decode. The loop's classification and nudges then decide. Claude Code has
+  recoveries of its own for most of these (it continues a truncated step, retries a silent
+  one): left alone, it continued a truncated step three times and then failed (measured).
 - **Closing the step** interrupts Claude Code and reads it to its result. This is Ctrl-C:
   chat cancels the reply's task and the loop closes this generator. Closed on the step's last
   chunks (the final `usage`, which the loop is still showing), an answered or cut step has
@@ -263,9 +269,13 @@ One Claude Code process holds a conversation. It starts on the first step and us
   `mcp__bh__python`); one whose arguments did not decode (or never began) waits, with
   whatever follows it, for the step's stop reason, and only then arrives with its `error`.
   Claude Code closes a stream it will retry with the open block's end and no stop reason
-  (CLI 2.1.282), so a call that connection cut off is never shown;
+  (measured), so a call that connection cut off is never shown;
 - two usage parts, the first `partial`;
-- the API's own stop reason, so `stops.classify` works unchanged;
+- the API's own stop reason, so `stops.classify` works unchanged: `end_turn`, `tool_use`,
+  `max_tokens`, `stop_sequence`, `refusal` and `model_context_window_exceeded` (truncated, like
+  `max_tokens`). `pause_turn` comes only for a request with server tools, which bh-02 never
+  sends, so the loop has no case for it. A call's arguments stream as JSON, so a call can be
+  undecodable;
 - the assistant message as received, for replay.
 
 On `haiku`, Claude Code sends each thinking block with its text empty and only the signature
@@ -330,28 +340,43 @@ with calls parked or a step streaming reads as failed, and the session is rebuil
 
 ### The credential
 
-The credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` makes one), kept in the
-git-ignored `local.env` at the repository root. Where it is looked for is not this plugin's to
-decide: both rows depend on `host`, and its `credentials` (above bh-02's install and its
-environment, nearest first, from `bh_02.cli`) are the places searched; `token_file` takes the
-first that is a regular file, so the empty directory a Linux jail holds an absent one with never
-hides the real file, at the first read or at any later one (each Claude Code start, each
-openai request). The same list is among the jail's `secrets`, so no place searched is one a
-jailed input can read, write or create. `parse_env` (pure) reads it with one read, and the
-token goes only into the SDK options' `env` for the Claude Code child:
-- never into bh-02's `os.environ`, so the Python process and the jail can't inherit it;
-- never on a command line.
+These are the credential's rules; every other page that mentions them points here.
 
-The child's env is a `ChildEnv`, whose repr names its keys only (Textual prints a crash with
-every frame's locals). Without a token, the row still binds, and each step answers
-`authentication_failed`, naming the file it read (the row's `env_file` when set), whether that
-file is missing or lacks the variable, and to make a token with `claude setup-token`.
+The credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` makes one), one line of the
+git-ignored `local.env` at the repository root (mode 600), so `uv run bh-02` needs no
+`--env-file`.
+- **Who reads it: the model rows, from the file.** Where it is looked for is not this plugin's
+  to decide: both rows depend on `host`, and its `credentials` (above bh-02's install and its
+  environment, nearest first: `bh_02.cli.credential_search`, the one definition of that search)
+  are the places searched; `token_file` takes the first that is a regular file (the row's
+  `env_file` instead, when set), so the empty directory a Linux jail holds an absent one with
+  never hides the real file, at the first read or at any later one (each Claude Code start, each
+  openai request). `parse_env` (pure) reads it with one read.
+- **Where it goes: only to the Claude Code CLI.** The token goes only into the SDK options' `env`
+  for the Claude Code child: never into bh-02's `os.environ`, so no program the runner starts
+  can inherit it; never on a command line; never in a repr (the child's env is a `ChildEnv`,
+  whose repr names its keys only, since Textual prints a crash with every frame's locals). The
+  child starts detached, with every other `ANTHROPIC_*` and `CLAUDE_*` removed (below).
+- **Never `ANTHROPIC_API_KEY`.** bh-02 never sets or reads `ANTHROPIC_API_KEY` or
+  `ANTHROPIC_AUTH_TOKEN`, and the token is never printed, logged or committed. No model's `key`
+  may name it (above).
+- **The model's code never gets it.** The same list is among the jail's `secrets`, so no place
+  searched is one a jailed input can read, write or create; `runner:unconfined` (`--no-jail`)
+  starts every program without `CLAUDE*` or `ANTHROPIC_*`, and `!COMMAND` runs without them too
+  (the commands plugin's README). An input approved under `--no-jail` runs with the person's
+  permissions, so it could still open `local.env` itself: the
+  [runner plugin's README](../runner-cordis-plugin/README.md) has the jail's policy, and how
+  `/release` lets the person add a credential mid-session.
+- **Without it** the row still binds, and each step answers `authentication_failed`, naming the
+  file it read (the row's `env_file` when set), whether that file is missing or lacks the
+  variable, and to make a token with `claude setup-token`.
 
 ### Detached, and on the subscription only
 
 The SDK starts the CLI through this plugin's `claude-code-detached` console script
 (`detach.py`). The script calls `setsid`, because a terminal's Ctrl-C signals the whole process
-group and the CLI exits on SIGINT. It then `execve`s the SDK's bundled CLI with every
+group and the CLI exits on SIGINT: in a session of its own, the terminal's SIGINT never reaches
+it, and a stop is the loop closing its step. It then `execve`s the SDK's bundled CLI with every
 `ANTHROPIC_*` and `CLAUDE_*` variable removed but the ones the SDK and the options set (the
 token, `CLAUDE_CONFIG_DIR`, the SDK's entry point and version). The SDK merges bh-02's
 environment into the child's, and its options can override a key but not remove one; without

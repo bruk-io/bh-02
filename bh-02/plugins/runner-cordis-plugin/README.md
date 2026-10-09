@@ -8,7 +8,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 | Row | Binds | Consumes |
 |---|---|---|
 | `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (default `["local.env"]`), `env` (the names that survive the scrub) | `host` |
-| `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` or `ANTHROPIC_*` | |
+| `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them) or `ANTHROPIC_*` | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(request) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
 
@@ -31,9 +31,12 @@ over it; and `/release`. The only package in the workspace that imports brig (th
   says so (`A program this runner started still runs (its row did not stop it on /release), and
   its jail holds what it holds: /rows shows the rows; /restart one, then /release again.`).
 - `released()` is true from `release()` until the next start, whoever starts: an owner that
-  would start only to keep something warm (the extensions process) waits while it is, and one
-  the person asked for (the next input's Python process, a changed extension) starts, and so
-  ends it.
+  would start only to keep something warm (the extensions process) waits while it is, asking
+  with nothing awaited between the question and the start, and one the person asked for (the
+  next input's Python process, a changed extension) starts, and so ends it.
+- The runner knows nothing of inputs, or of which program is the Python process: what a start
+  is (`report()`, `notice()`, `reads()`, `writes()`) is all it says, and each owner asks it
+  of its own start.
 
 `/release` (`runner:release`) is `release()` as a command; with nothing to say, it answers
 `Nothing runs in the runner, and it holds nothing.`
@@ -78,8 +81,9 @@ policy seam, not this).
   jail). Not when the project is that directory or inside it: the deny would leave the project
   read-only, so bh-02 run in its own config lets the model write there, as in any project.
   Nor bh-02's own code (`host.code`: the directory of every package bh-02 runs, its own,
-  cordis's, cordis_helpers's, brig's and each installed plugin's, as installed, as named and as
-  resolved) where one is under a writable root: bh-02 working on its own checkout (`uv run` in
+  cordis's, cordis_helpers's, brig's, host_paths's and each installed plugin's, as installed, as
+  named and as resolved, found by name with `importlib.util.find_spec`, which imports nothing)
+  where one is under a writable root: bh-02 working on its own checkout (`uv run` in
   it, `uv tool install --editable`), or run from a home the checkout is in. bh-02 imports
   those modules in its own process (a plugin a layer names later, say), so an input that rewrote
   one, or wrote a module beside one, would choose code bh-02 runs
@@ -87,17 +91,26 @@ policy seam, not this).
   package, whatever `sys.path` holds: a package an import hook finds is on no `sys.path`, and a
   `src` directory that is the project itself is not denied as a host import path (the test runs
   there too). Held on Linux as any write deny there is. Not one the project is (bh-02 run in a
-  package's own directory), which would leave the project read-only: there the context plugin
-  reading its shipped file once, as it starts, is what keeps a change from taking effect before
-  the next start. A started program's `writes()` names the roots its inputs may write (the
+  package's own directory), which would leave the project read-only. A started program's `writes()` names the roots its inputs may write (the
   python row reads nothing on the host whose way passes through one);
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
-  what `host` names as `secrets` (bh-02's `local.env`, the sessions' state);
+  what `host` names as `secrets`: every place the model rows look for `local.env`
+  (`host.credentials`, so the workspace's own is hidden whatever directory bh-02 runs in), the
+  `local.env` beside and above the project, and the sessions' state directories, this run's
+  (`$XDG_STATE_HOME/bh-02/sessions`) and the default one (`~/.local/state/bh-02/sessions`),
+  where each session's `claude/` holds its Claude Code child's config and messaging peer token.
+  A third, of a run with another `XDG_STATE_HOME`, is not known to this one and is not hidden;
 - **network**: none; the program's own LISTEN socket is the one way in or out. The runner
   starts two programs, each with a jail of its own compiled from this one policy: the Python
   process (`python:tool`), and the extensions process (`extensions:extensions`), where the
   model's own plugins run;
 - **env**: scrubbed to `env`.
+
+Without the jail (`runner:unconfined`, `--no-jail`) none of this holds but the scrub of
+`CLAUDE*` and `ANTHROPIC_*`: every axis is `unenforced`, so the `approval` rule asks about every
+input and extension, its code shown, and one the person approves runs with their permissions. It
+could open `local.env` itself, read the environment of any process the person owns (the Claude
+Code child's, which holds the token), or rewrite bh-02's config directory or its own code.
 
 One policy, two stacks (`stack_for`):
 
@@ -122,7 +135,8 @@ One policy, two stacks (`stack_for`):
   EACCES, and so do writes, removal and a rename over it). One that doesn't exist has nothing to
   mask. Where the model row looks for its credential (`host.credentials`) it is write-denied,
   an empty read-only directory, so an input can create nothing there (a planted `local.env` would
-  be read by the next launch; the lookup takes only a regular file, so the directory never hides
+  be read by the next launch, handing its conversations to someone else's account; the lookup
+  takes only a regular file, so the directory never hides
   the real one). Anywhere else (the project's own absent `local.env`, which nothing of bh-02's
   reads) it is left alone, and `fs_read` names it: a file created there later is readable.
   A write deny inside another (an absent secret in a directory the

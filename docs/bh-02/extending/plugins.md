@@ -82,7 +82,8 @@ async def hello(*, commands: Commands) -> Effects:
 `acquire` keeps the remover `register` returns and calls it when the row goes, so the command
 leaves with the row and nothing else reloads. cordis checks the value bound under `commands`
 against the Protocol before the component starts; bind the wrong thing there and the row fails
-with a message naming what is missing.
+at load with a message naming what is missing (`hello: commands is bound to a X, which is
+missing register`).
 
 Then name it in a layer and start bh-02 with it:
 
@@ -116,6 +117,58 @@ provider just has the methods; a consumer declares the part it reads. Data cross
 
 To change a shipped part, bind the same key with the same shape from your own component, and put
 your component in that row's `use`. The rows that depend on the key reload against yours.
+
+## Trying it without a login: fake models
+
+`bh_02.testing` has stand-in models, so you can launch the real app with your plugin and no
+credential. It is a module of the shell's (the gate lets it know cordis without putting test rows
+into a plugin). A patch layer names one:
+
+```toml
+[[plugin]]
+id = "loop"
+use = "bh_02.testing:echo"
+```
+
+These replace the whole `loop` row:
+
+- `echo`: shouts the message back, a word at a time;
+- `slow_start`: `echo`, taking 3 s to start every time;
+- `showcase`: one of every kind of event the transcript draws, usage and an unusual stop
+  included; `lines N` streams N lines all at once (a burst that never waits), and `slow N`
+  streams N lines 50 ms apart, so a Ctrl-C can land mid-reply;
+- `bomb`: crashes the app.
+
+These replace only the `model` row (`id = "model"`), so the shipped loop, its transcript and the
+session's layer run as they do with Claude:
+
+- `repl_model`: each message is a `python` call, run as an input in the Python process, so
+  `--no-jail` asks about it in the modal;
+- `echo_model`: each step echoes the last message and says which user message of the
+  conversation it was (`(message 2)`), so a screen shows whether `/clear` forgot the transcript
+  and a resume restored it;
+- `slow_model`: `echo_model`, taking 3 s to start.
+
+And three are providers a models file names for a model of its own, under the shipped
+`models:model` row, so `--model` picks one and `/model` switches between them (or to an
+OpenAI-compatible model) as between Claude and any other:
+
+```toml
+[fake]
+provider = "bh_02.testing:echo_provider"
+id = "fake"
+```
+
+- `echo_provider`: `echo_model`'s step, said as `[ID] echo: ...`, so a screen shows which model
+  answered;
+- `slow_provider`: the same, taking 3 s to start: what the status bar and a message typed
+  meanwhile say while `/model` restarts the model;
+- `repl_provider`: `repl_model`'s.
+
+`bh-02/app/tests/test_real_launch.py` starts the installed `bh-02` in a pseudo-terminal with these,
+in a models file of its own, and an OpenAI-compatible model on
+`models_cordis_plugin.openai.testing`'s stand-in server; `uv run pytest -m "not real_launch"`
+skips it.
 
 ## Shipping it with bh-02
 

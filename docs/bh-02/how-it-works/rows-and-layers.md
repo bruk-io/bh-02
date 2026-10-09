@@ -34,18 +34,57 @@ their own:
 - **The screen never reloads.** The `ui` row (`tui:ui`) depends on nothing but its config. Small
   rows such as `status` and `grades` depend on what they show and push into the app's frame, so a
   change to what they show reloads them instead of the app. What they show is never replaced by
-  `/clear`, so it reloads none of the status bar.
+  `/clear` or `/model`, so neither reloads the status bar.
 
 `/rows` shows each row and its state. [The app](../reference/app.md#the-compositions) has the
 shipped rows and what each depends on.
 
+## Why the shipped rows are cut where they are
+
+Several parts of `bh-02.toml` are rows of their own only so that a reload elsewhere leaves them
+alone:
+
+- **`tools`**, the broker of the model's tools (each a standard spec and the function that runs a
+  call, offered in name order), depends on nothing. A tool's row restarting (the python row's, on
+  `/clear`) reloads neither the loop nor any other row.
+- **`models`** (`models:catalog`) is the models there are and which one the model row names, read
+  fresh each time and depending on the loader and `host` alone. `/model` (the `switch` row) and
+  the status bar read it, not `model`, so a switch reloads neither.
+- **`executor`** depends on nothing, so `/clear` and `/model`, which reload the loop, keep it.
+  Nothing stops a reading of the prompt part-way, so however often the loop reloads, Ctrl-C
+  after Ctrl-C leaves at most one reading running, and the next waits for it.
+- **`notes`**, **`access`** and **`system`** are brokers that depend on nothing (`system` on its
+  config alone). The row that adds to `notes` and `access`, memory's on-touch row, depends on
+  `transcript`, so a new conversation (`/clear`) is told afresh and a resumed one is not told
+  again what its transcript holds. It has no config of its own: it asks the `memory` row, whose
+  `root`, `home`, `instruction_files` and `excludes` hold for both.
+- **`memory-auto`** is a row of its own over `transcript`, so a new conversation reads the
+  MEMORY.md index afresh, and `disabled = true` on it turns auto memory off.
+- **`status`** depends on the loader, `models`, `session` and `frame`; **`grades`** on the runner,
+  the `approval` rule (which tell it each start), `frame` and `output`. None of these does
+  `/clear` or `/model` replace.
+- **`jobs`** runs the restarts commands ask for (`/clear`, `/compact`, `/model NAME`,
+  `/restart ROW`) one at a time, after the command has answered, a failure told to you. It
+  depends on `output` alone, and the chat reads your next line only once none is pending, so a
+  line typed during a restart reaches the new loop.
+- **`conversation`** (`/clear` and `/compact`) depends on `model`, `tools` (the specs, offered as
+  the loop offers them), the loader, `commands`, `output` and `jobs`, never on the loop or the
+  transcript it restarts: their restart would reload it mid-command. It finds the transcript's
+  file from the row as the loader mounted it.
+- **`shell-command`** claims the `!` prefix in `commands`, which only a row in a layer can do; an
+  extension can't.
+
+Each row's own README has its config: [The app](../reference/app.md#the-plugins) links them.
+
 ## Brokers
 
 Some keys hold a collection that many rows add to: the slash commands (`commands`), the app's
-status bar and palette (`frame`), the sections of the system prompt (`system`), and what the
-model is told after each input (`notes`). One row binds the collection. Each contributor
-registers an entry with `acquire`, which keeps the remover the registration returns and calls it
-when the contributor's row goes. So adding or retiring a command reloads nothing else.
+status bar and palette (`frame`), the sections of the system prompt (`system`), the model's tools
+(`tools`), what the model is told after each call (`notes`) and what is asked before a file is
+opened (`access`). One row binds the collection. Each contributor registers an entry with
+`acquire`, which keeps the remover the registration returns and calls it when the contributor's
+row goes. So adding or retiring a command reloads nothing else. This is the paper's service
+broker (section 6.2).
 
 ## Layers
 

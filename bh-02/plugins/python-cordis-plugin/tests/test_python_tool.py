@@ -642,7 +642,7 @@ _CONFINED: Mapping[str, str] = {**UNENFORCED, "fs_write": "enforced", "network":
 
 class Told:
     """A program an unjailed process stands in for, with what its jail says this start is
-    (CONTRACTS.md: jail): its grades, its notice, the trees it reads and the roots it writes."""
+    (CONTRACTS.md: report): its grades, its notice, the trees it reads and the roots it writes."""
 
     def __init__(
         self,

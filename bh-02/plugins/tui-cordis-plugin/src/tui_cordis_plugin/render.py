@@ -49,7 +49,7 @@ _MAX_DIFF_LINES = 40
 # Every provider's word for "the model finished on its own"; anything else is worth showing.
 _QUIET_STOPS = frozenset({"answered", "end_turn", "stop", "success", "stop_sequence", "tool_use"})
 _FAILURES = frozenset({"failed", "work-failed", "observe-failed", "teardown-error"})
-# brig's grades, strongest first, as one glyph each (CONTRACTS.md: jail).
+# brig's grades, strongest first, as one glyph each (CONTRACTS.md: report).
 _GRADES = {"enforced": "✓", "best_effort": "~", "cooperative": "?", "unenforced": "✗"}
 # The axes worth a glance in a status bar; the rest are in `report()` for whoever asks.
 _AXES = ("fs_write", "network", "fs_read", "env")

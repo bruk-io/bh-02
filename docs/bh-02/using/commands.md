@@ -12,7 +12,9 @@ reach the model: slash commands, and `!` followed by a shell command.
 | `Ctrl+P` | opens the command palette |
 | `Ctrl+Q` | leaves bh-02 (so do `/exit` and `/quit`) |
 
-A line you send while a reply runs waits for the reply to end.
+A line you send while a reply runs waits for the reply to end. One you send while a command's
+restart runs (`/clear`, `/compact`, `/model NAME`, `/restart`) waits for the restart, and reaches
+the new loop.
 
 ## Slash commands
 
@@ -39,13 +41,10 @@ The model's own extensions can add commands to this list while bh-02 runs
 
 ### `/compact`
 
-Use `/compact` when a conversation has grown long. The model has 300 seconds to write the summary
-(the `conversation` row's `timeout`), and a note says so as it starts. `Ctrl+C` doesn't stop it, since
-it is a command, not a reply; leaving bh-02 does, and then nothing changes. Add what you want kept
-after the command: `/compact the failing test and its fix`.
-
-The old conversation is kept beside the new one as `transcript.jsonl.bak` in the session's
-directory, and a later one's as `.bak.2`, and so on. `/clear` keeps it the same way.
+Use `/compact` when a conversation has grown long, and add what you want kept after the command:
+`/compact the failing test and its fix`. The screen keeps only the note carrying the summary. How
+long the model has to write it, what stops it, and where the old conversation is kept (for `/clear`
+too): [the conversation row](../reference/plugins/agent.md).
 
 ### `/restart` and `/rows`
 
@@ -71,8 +70,9 @@ reads that output with your next message, never in the middle of a reply. A `/mo
 `/compact` in between keeps it for the model; `/clear` drops it.
 
 bh-02's app owns the terminal, so the command gets none: it has no input, and a program that
-needs the terminal (a password prompt, an editor) fails. `Ctrl+C` doesn't stop it. It is stopped
-after 120 seconds (the `shell-command` row's `timeout`), or when you leave bh-02.
+needs the terminal (a password prompt, an editor) fails. `Ctrl+C` doesn't stop it, and says so if
+you press it while one runs. It is stopped after 120 seconds (the `shell-command` row's
+`timeout`), or when you leave bh-02.
 
 ## The command palette
 

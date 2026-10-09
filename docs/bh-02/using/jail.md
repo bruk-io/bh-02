@@ -6,14 +6,19 @@ the jail holds, bh-02 runs the model's code without asking you first.
 
 ## What the jail allows
 
+In short; the policy itself, path by path and why, is the
+[runner plugin's](../reference/plugins/runner.md).
+
 | | Inside the jail |
 |---|---|
-| **Writes** | the project, a scratch directory of the jail's own, and the project's auto memory directory. Not, even in the project: bh-02's layer files, `.git/hooks`, `.git/config`, `.claude`, shell rc files, editor settings, and other files that could run code later. `CLAUDE.md` and `AGENTS.md` may be edited. |
+| **Writes** | the project, a scratch directory of the jail's own, and the project's auto memory directory. Not, even in the project: bh-02's layer files, its own code and the paths it imports from, its config directory, `.git/hooks`, `.git/config`, `.claude`, shell rc files, editor settings, and other files that could run code later. `CLAUDE.md` and `AGENTS.md` may be edited. |
 | **Reads** | everything but credentials: `~/.ssh`, `~/.aws` and the like, bh-02's `local.env`, and the sessions' state. On Linux, only the system, the Python interpreter, the project and its auto memory directory are there at all; your home directory is not. |
 | **Network** | none |
 | **Environment** | scrubbed to a short list of variables |
 
-Programs the model's code starts run inside the same jail.
+Programs the model's code starts run inside the same jail. brig's host process, which starts the
+Python process from outside the jail, keeps the environment bh-02 was launched with (brig's
+launcher passes it on, and bh-02 never puts its own token there); a jailed input can't read it.
 
 The jail is brig's. On macOS it is Seatbelt; on Linux it is bubblewrap, which must be installed
 (the `bubblewrap` package). Without it, bh-02 tells you to install it or run with `--no-jail`.
@@ -29,7 +34,8 @@ jail: jailed fs_write ✓ network ✓ fs_read ~ env ✓
 
 Each part is graded as brig can enforce it: `✓` enforced, `~` best effort, `?` cooperative, `✗`
 unenforced. On a narrow terminal the field shortens to initials (`w✓ n✓ r~ e✓`), then to the
-marks alone. It is never cut.
+marks alone. It is never cut. What a start says you should know (on Linux, the paths its jail
+holds with a mount the host can undo) is shown once, as a note in the conversation.
 
 ## Without the jail: `--no-jail`
 
@@ -39,13 +45,15 @@ bh-02 --no-jail
 
 Use this where the jail can't run. The model's code then runs with your own permissions, so bh-02
 asks you about each input before it runs: the code is shown, `y` runs it, and `n` or `Esc`
-doesn't. The question ignores keys for its first 0.4 seconds, so a message you were typing can't
-answer it. The model's own extensions are put to you the same way before each loads.
+doesn't. The question ignores keys for its first 0.4 seconds, its keys dimmed meanwhile, so a
+message you were typing can't answer it; those keys are dropped. The model's own extensions are
+put to you the same way before each loads.
 
 !!! warning
     An input you approve can do anything you can. Its environment has no `CLAUDE*` or
-    `ANTHROPIC_*` variables, but it could still open `local.env` itself, or read the environment
-    of a process you own. Read an input before you answer `y`.
+    `ANTHROPIC_*` variables, but it could still open `local.env` itself, rewrite bh-02's config
+    directory or its own code, or read the environment of a process you own (the Claude Code
+    process's, which holds the token, among them). Read an input before you answer `y`.
 
 A session keeps the jail it started with: `--resume` refuses `--no-jail`.
 

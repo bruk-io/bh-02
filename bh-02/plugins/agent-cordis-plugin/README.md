@@ -10,7 +10,7 @@ and asks `notes`, and `/compact`, which begins a new conversation from the model
 | `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`, `serve`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `notes` (iterated), `executor` (`run`) |
 | `agent:tools` | `tools`: a `ToolBroker`, the tools rows `acquire` with `register(spec, run, *, runs, show)`, offered in name order | |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
-| `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch, then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
+| `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch (its `.git/HEAD`, read from the root through no link), then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
 | `agent:notes` | `notes`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 | `agent:access` | `access`: an `Access`, the functions rows `acquire` with `before_read(fn)` and `before_write(fn)`, which a tool asks before it opens a file (`refusal(kind, path)`) | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
@@ -44,7 +44,8 @@ and only once it may (`Asked`): at once when the `approval` rule says it runs un
 (`approval.unasked({"name", "input", "runs", "title", "lines", ...})`, `shown`: the tool's own
 `show(input)`, else its input as JSON; it runs in a runner that confines it), else on the
 person's yes, which the loop asks itself (`output.confirm`, the approval modal). A no is its
-answer (`DECLINED`), so approval is one rule for any model provider and any tool, and the loop
+answer (`DECLINED`: `denied: ...`), so approval is one rule for any model provider and any tool,
+and the loop
 keeps no copy of it. A call to a name it did not offer (`refusal`), or one whose input doesn't
 fit the spec (`malformed`: a `required` property missing, one not of its schema's simple type),
 is answered with text saying so, runs nothing, and is put to nobody. A turn stopped part-way
@@ -78,15 +79,17 @@ Each model step is classified by `stops.classify` (pure; the table is in its doc
 `act` runs calls, only `answered` ends the reply, and a
 truncated, silent or undecodable step is fed back with harness's own wording up to
 `max_nudges` times per reply. A step that did not act keeps no calls on its transcript
-entry, so nothing is left for a result to answer. A provider's assistant message rides on its
+entry, so nothing is left for a result to answer. A reply the person stops while a step streams
+(Ctrl-C closes it) still answers its message in the transcript: what the step said so far, then
+`[the person stopped this reply here]` (`STOPPED`), so the next request does not ask the stopped
+message again; a model step that raises (a 429, a dropped connection) is answered the same way,
+with `[this reply failed here; the person saw the error]` (`FAILED`). A provider's assistant
+message rides on its
 entry as `provider`, for the model to replay unchanged.
 
 Every request begins with the system prompt the conversation began with (`system.text()`, the
-python tool's section among the rest), kept in the transcript as its first `{"role": "system"}` entry. A
-model server reuses its work on a conversation only up to the first token that differs from
-the last request, so a prompt sent fresh each time would make the whole conversation new to it
-whenever the prompt changed: minutes of prompt processing with a local model before the first
-new token, a restart of Claude Code and the loss of its cache with Claude. The loop still reads
+python tool's section among the rest), kept in the transcript as its first `{"role": "system"}` entry
+([why](../../../docs/bh-02/how-it-works/prompt-and-notes.md#why-the-prompt-stays-fixed-for-a-conversation)). The loop still reads
 the prompt before each message the model reads (the person's message, an input's result, a
 nudge); when it reads differently from what the model was last told, what changed
 (`prompt.changes`, pure: each part, a paragraph, that is new or reads differently, whole, and
@@ -108,18 +111,13 @@ new model, a new ui), or one over a resumed session, carries on from what the tr
 the model was told; `/clear` empties it, so the next conversation begins with the prompt as it
 reads then.
 
-The date is not in the prompt, which would then read differently every midnight: the model would
-be told its instructions changed, and the transcript would keep another change, each day.
-The loop tells it with the person's message instead (`reply`), when the transcript has told no
+The date is not in the prompt, which would then read differently every midnight. The loop tells it with the person's message instead (`reply`), when the transcript has told no
 date yet or the last one it told is another day's: the entry's content starts
 `(Today's date: 2026-10-07.)` and the entry carries the date as `"today"`, which is how the loop
 finds the last one told. So a resumed session (the transcript is a file) does not tell it again
 the same day, and `/clear` (an empty transcript) does. A message that also tells a change in the
 instructions has the date first, then the change, then the person's words. The clock is
-`LoopModel`'s `today` (the real date in the `agent:loop` row; a test gives its own). And a new
-session begins with the same prompt as one the day before in the same project (unless the
-branch, a CLAUDE.md or an extension changed it), so a local model server that keeps its
-prompt cache across conversations can reuse it. The providers send
+`LoopModel`'s `today` (the real date in the `agent:loop` row; a test gives its own). The providers send
 `content` alone, so `today` never reaches a model.
 
 Reading the prompt (`system.text()`, whose sections may read many files: memory's reads every

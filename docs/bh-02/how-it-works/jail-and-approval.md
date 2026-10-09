@@ -59,7 +59,8 @@ bh-02's `local.env` holds the Claude token. The jail denies reading it wherever 
 it, and denies creating one there, so an input can't plant a credential for the next launch to
 read. It also hides the sessions' state, where Claude Code keeps its own config. The Python
 process's environment is scrubbed: without the jail, `runner:unconfined` still drops every
-`CLAUDE*` and `ANTHROPIC_*` variable.
+`CLAUDE*` and `ANTHROPIC_*` variable. The models plugin's README has the credential's rules in
+full: [models-cordis-plugin](../reference/plugins/models.md#the-credential).
 
 ## When the jail ends
 

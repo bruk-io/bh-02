@@ -9,7 +9,7 @@ tool message as a user record holding one `tool_result`, an assistant message fr
 from its text and calls when there is none. Every assistant record names the resolved model id:
 with an alias (`sonnet`) in it, Claude Code resent the whole conversation uncached (measured).
 
-The record format is Claude Code's own and undocumented (CLI 2.1.280, pinned with the SDK); the
+The record format is Claude Code's own and undocumented (the CLI the SDK pins, README.md); the
 e2e tests resume a rebuilt session and check the model recalls what it held.
 """
 

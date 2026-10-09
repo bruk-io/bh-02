@@ -8,7 +8,12 @@ The chat row: what runs once a `loop`, an `input`, an `output`, `commands` and `
 
 It is one `background` effect, so it stops when a value it uses leaves and starts again
 against the replacement. It binds that task as `done`, which resolves when the chat ends (the
-shell waits on it). `chat.py` is the logic the row runs (`converse`), the shapes it needs
+shell waits on it). `done` is how "the chat is finished" reaches the bootstrap without
+`Runtime.idle()`, which is process-wide and would also wait on a provider's own background work
+(a heartbeat, a reconnect loop) that has nothing to do with the chat. The shell doesn't reach
+into the store for it: its own `shell` row depends on `done` as any component depends on
+anything, so a composition whose chat row doesn't bind it is a bootstrap error, not a silent
+hang. `chat.py` is the logic the row runs (`converse`), the shapes it needs
 (`Loop`, `Input`, `Output`, `Commands`, `Jobs`) and `Recoverable`; `testing.py` ships fakes for
 the shapes.
 

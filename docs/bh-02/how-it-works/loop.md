@@ -27,8 +27,9 @@ turn down is answered with that.
 The loop reads the list of tools at a conversation's first request, after the ones its
 `requires` names have registered (the shipped layer requires `python`; a message typed right
 after `/clear`, when the Python process is starting again, says it waits), and keeps it in the
-transcript. It offers that same list, in name order, for the rest of the conversation: the list
-is the start of what a model server caches, so a list that changed would cost the cache.
+transcript. It offers that same list, in name order, for the rest of the conversation, since the
+list is the start of what a model server caches
+([why](prompt-and-notes.md#why-the-prompt-stays-fixed-for-a-conversation)).
 
 When the tools change partway through (an extension registers one, a layer edit adds a row),
 the loop keeps the change in the transcript and tells the model on the next message it reads,
@@ -54,7 +55,8 @@ a reply (2 by default). So a cut-off step is never taken for the answer.
 interrupts Claude Code, the `openai` provider closes its stream. Every call the model asked for is
 still answered in the transcript: the one running as interrupted (it may have partly run), the
 rest as not run. The stopped reply stays in the transcript with what it said and that it was
-stopped, so your next message doesn't redo it.
+stopped, so your next message doesn't redo it. A step that fails (a 429, a dropped connection)
+is kept the same way, with what it said and that it failed.
 
 ## The model row and its providers
 

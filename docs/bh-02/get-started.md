@@ -45,13 +45,11 @@ token in a file of its own:
 3. Make the file readable only by you: `chmod 600 local.env`.
 
 `local.env` is git-ignored. bh-02 looks for it above its own install, so it finds the checkout's
-file from any directory you work in. The model row reads it itself and hands the token only to
-the Claude Code process it starts. The model's code never gets it: the jail hides the file and
-scrubs the environment.
+file from any directory you work in.
 
 !!! warning
-    Keep the token in `local.env` and nowhere else. Don't commit it, put it on a command line or
-    in another file, and don't set `ANTHROPIC_API_KEY` in its place.
+    Keep the token in `local.env` and nowhere else. Where it goes, and the rules for keeping it,
+    are in [the credential](reference/plugins/models.md#the-credential).
 
 Without a token bh-02 still starts, and each message answers with an error that says where to
 put one.

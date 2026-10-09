@@ -28,7 +28,9 @@ programs with `subprocess.run(..., capture_output=True, text=True, timeout=...)`
 they print as data, since one not captured never reaches the input, no stdin, the person sees
 every input); and where its code runs, and under a jail that reads by allowlist (Linux) the
 trees it reads (`reads`, its start's `reads()`) and that nothing else, the home directory
-included, is there. `confined` is what the model is
+included, is there, and, confined, where it may write (`elsewhere`: the project, and what its
+start's `writes()` names outside it, the auto memory directory among them). `confined` is what
+the model is
 told (`instructions_for`) and whether the startup files run unasked, and it is the `approval`
 rule's (`approval.confined`, read each time), so what the model is told and what the loop does
 agree. The python row itself never asks, so it depends on nothing a new ui or model replaces
@@ -83,10 +85,21 @@ it (`access`, `agent:access`): each input's `exec` names the kinds some row asks
 input (any thread may ask; the answer goes to the one waiting). A `refuse` that is text raises a
 PermissionError at the open, so the file is never opened, and the traceback ends at the input's
 own line (`worker.py`'s frames are left out); the `done` carries every refusal (`refused`), which
-ends the input's text in brackets, so the model hears of it even when the code caught the error.
+ends the input's text in brackets (`(bh-02 refused to let this input write PATH: ...)`), so the
+model hears of it even when the code caught the error.
 What it does not see: a program an input runs (`subprocess`), an `os.open`, a rename, a replace
 or a delete, a file outside the project. It tells the model something before a file changes; the
 jail is what stops what must never happen.
+
+Every other tool there is is a function in each input's namespace, `tools.NAME(arg=...)`,
+rebuilt before each input from `tools.specs()` (sent with its `exec`; `help(tools.NAME)` says
+what one takes). A call goes back to bh-02 (`{"op": "call", "id", "name", "input"}`, answered
+`{"op": "answer", "id", "content", "failed"}`) and to `tools.call`, so it runs as the model's
+own call to that tool would: put to the `approval` rule, then to `notes`, whose notes go with the
+result of the input that made it. It returns the tool's `content`, and raises `tools.Error` with
+it when the call did not run or failed. What changed in them since the model was last told is
+told before the input's own output. An input that binds `tools` itself keeps its own: the
+namespace's is a view of the registry, never where a tool is registered.
 
 A new Python process's first input is also told what the startup files did (`startup`, helpers kept
 across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/kernel.py` (else

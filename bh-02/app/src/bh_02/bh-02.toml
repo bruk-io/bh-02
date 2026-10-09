@@ -1,220 +1,142 @@
-# The shipped composition, a Textual app with CodeAct (the `python` tool) as its default.
-# bh-02's own loop drives Claude through Claude Code (the Claude Agent SDK, on the
-# subscription), one model step at a time; the model is offered the tools rows register (here
-# the python row's `python(code)`), through standard tool calling, and its inputs run in a
-# persistent Python process the runner starts in a brig jail. A row's
-# id is its role; `use` is which plugin fills it, as `plugin:component` (a `cordis.plugins`
-# entry point) or `module:attribute`. Order carries no meaning: dependencies decide what
-# activates when.
-# A session's own layer and `bh-02 --patch mine.toml` are layers over this one.
+# The shipped composition, a layer (docs/bh-02/using/layers.md); its rows: docs/bh-02/how-it-works/rows-and-layers.md.
 
-# The model: bh-02's own loop (`agent:loop`: steps classified, each call run through the tool it
-# names) over one model, named: `sonnet` (Claude through Claude Code, which only carries the
-# steps; credential: CLAUDE_CODE_OAUTH_TOKEN in local.env, which the row reads itself) unless
-# the row's `default` says another. `opus` and `haiku` are built in too, and the models file
-# (~/.config/bh-02/models.toml) adds any OpenAI-compatible model. The transcript is a row of its
-# own, so switching the model (`/model NAME`) keeps the conversation. The loop reads the tools at
-# a conversation's first request, once those it `requires` have registered (`wait` seconds at
-# most, 30), and offers that list for the rest of it.
+# The agent loop; `requires`: the tools a conversation waits for (`wait`, 30 s) before it begins.
 [[plugin]]
 id = "loop"
 use = "agent:loop"
 config = { requires = ["python"] }
 
-# The tools the model is offered: a broker rows register a tool with (a standard spec and the
-# function that runs a call), offered in name order. It depends on nothing, so a tool's row
-# restarting (the python row's, on /clear) reloads neither the loop nor any other row.
+# The broker of the model's tools; it depends on nothing, so a tool's restart reloads no other row.
 [[plugin]]
 id = "tools"
 use = "agent:tools"
 
+# The model, by name: `default` (`sonnet`), which `--model` and `/model` set in the session's layer.
 [[plugin]]
 id = "model"
 use = "models:model"
 
-# The models there are, and which one the model row names: read fresh each time, depending on
-# the loader alone, so `/model` (the switch row) and the status bar never reload with a switch.
+# The models there are and which one the model row names; `/model` and the status bar read it.
 [[plugin]]
 id = "models"
 use = "models:catalog"
 
+# The conversation, its own row so a model switch keeps it; the session's layer sets its `path`.
 [[plugin]]
 id = "transcript"
 use = "agent:transcript"
 
-# Where the loop reads the prompt (a section function may read many files) and asks `notes`:
-# off the event loop the app shares, one call at a time. Nothing
-# stops a reading part-way, so one a stopped reply left running is waited for before the next
-# begins. A row of its own that depends on nothing, so /clear and /model, which reload the loop,
-# keep it: Ctrl-C after Ctrl-C leaves one reading running, however often the loop reloads.
+# Where the loop reads the prompt and asks `notes`, off the event loop; it depends on nothing.
 [[plugin]]
 id = "executor"
 use = "agent:executor"
 
-# What the model is told with a call's result: a broker of functions rows add, each given the
-# tool's name, the call's input, its result and the files it opened, the loop calling each after
-# every call. Memory's on-demand files (a subdirectory's CLAUDE.md, a rule
-# for some files, given when an input first opens a file they cover) add to it, depending on
-# `transcript`, so a new conversation (/clear) is told afresh and a resumed one is not told
-# again what its transcript holds.
+# The broker of what the model is told with a call's result; only rows in a layer add to it.
 [[plugin]]
 id = "notes"
 use = "agent:notes"
 
-# What is asked before a file is read or written: a broker of functions rows add, each given the
-# file's path and answering None to let it go ahead or why it may not. The python tool asks
-# before an input's own Python opens a project file (only for the kinds some row asks about);
-# memory's on-touch row refuses the first write to a file whose on-demand instructions this
-# conversation has not been told, and they follow with the input's result. It sees only what a
-# tool reports (python: Python's own `open`, not a program an input runs).
+# The broker asked before a tool opens a file; the on-touch row refuses a first write.
 [[plugin]]
 id = "access"
 use = "agent:access"
 
-# Memory, as Claude Code has it: the managed policy's CLAUDE.md, yours (~/.claude/CLAUDE.md and
-# ~/.claude/rules/), the CLAUDE.md files from the filesystem's root down to the project's (and
-# AGENTS.md where there is none), the files they import and the project's rules, a section of the
-# system prompt; `/memory` lists them. The on-touch row asks it what loads for the files an input
-# opened, so it has no config: set `root`, `home`, `instruction_files` or `excludes` on the
-# `memory` row and they hold for both.
+# Claude Code's memory files, a section of the prompt; its config holds for `on-touch` too.
 [[plugin]]
 id = "memory"
 use = "memory:files"
 
+# Memory that loads on demand, told with the first input that opens a file it covers.
 [[plugin]]
 id = "on-touch"
 use = "memory:on_touch"
 
-# Auto memory: the notes the model keeps for itself across conversations, in the project's own
-# directory outside the repository ($XDG_STATE_HOME/bh-02/projects/<project>/memory, which the
-# jail lets an input write), and the MEMORY.md index, read at the start of each conversation. A
-# row of its own over `transcript`, so a new conversation reads the index afresh; set
-# `disabled = true` on it to turn auto memory off.
+# Auto memory, the notes the model keeps for itself; `disabled = true` turns it off.
 [[plugin]]
 id = "memory-auto"
 use = "memory:auto"
 
-# The app: binds `input`, `output` and `frame` (where rows push status). It depends on its
-# config alone, so no reload elsewhere restarts it.
+# The Textual app: binds `input`, `output` and `frame`, and depends on its config alone.
 [[plugin]]
 id = "ui"
 use = "tui:ui"
 
+# The chat: reads your lines, shows replies, runs commands; binds `done`, which the shell awaits.
 [[plugin]]
 id = "chat"
 use = "chat:converse"
 
-# The python tool: a persistent Python process the runner starts, and the `python(code)` tool,
-# which it registers with `tools`, adding what the model is told about it to the system prompt.
-# Confined, its inputs run without asking; unconfined (`runner:unconfined` below), each is put
-# to the person first (the `approval` rule says which). A new process runs its startup files
-# first (config `startup`, by default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the
-# project's `.bh-02/kernel.py`, the only one the model may edit); unconfined, the model is told
-# to run them as inputs instead. On /release it stops its own process.
+# The python tool and its Python process; config `startup`: the files a new process runs first.
 [[plugin]]
 id = "python"
 use = "python:tool"
 
-# What runs the model's code: each program (the Python process, the extensions process) in a
-# brig jail of its own. `bh-02 --no-jail` puts `runner:unconfined` here, which confines nothing.
+# Starts the model's code, each program in a brig jail; `--no-jail` puts `runner:unconfined` here.
 [[plugin]]
 id = "runner"
 use = "runner:confined"
 
-# The rule for what runs unasked: what runs in the runner, when the runner confines it (writes
-# and network enforced). Anything else (an unconfined runner, a tool that runs in bh-02's own
-# process) the loop and the extensions row put to the person, through the ui's approval modal.
-# Over the runner alone, so `/clear` leaves it up. It runs in bh-02's own process: only a layer
-# replaces it; an extension has no way to.
+# The one rule for what runs unasked; it runs in bh-02's process, so only a layer replaces it.
 [[plugin]]
 id = "approval"
 use = "runner:approval"
 
-# `/release`: asks each row that started something in the runner to stop it (the Python
-# process, the extensions process), then lets go of what the runner holds on the host (on
-# Linux, where bh-02 looks for its credential: how to add one mid-session). The next start
-# ends it: the next input, or a change to an extension.
+# `/release`: each row stops its own program, then the runner frees what its jails held.
 [[plugin]]
 id = "release"
 use = "runner:release"
 
-# The status bar: the session's id and the model and its provider (usage is the app's own).
-# A small row over `loader`, `models`, `session` and `frame`, none of which /clear or /model
-# replaces, so it never reloads with them.
+# The status bar's session and model fields.
 [[plugin]]
 id = "status"
 use = "tui:status"
 
-# The status bar's jail field: the grades of the runner's last start, over the runner and the
-# `approval` rule, which tell it each start; and, once, what a start says you should know.
+# The status bar's jail field: the grades of the runner's last start.
 [[plugin]]
 id = "grades"
 use = "tui:grades"
 
-# The system prompt: who the model is, where it is working (the directory and the git branch),
-# then the sections rows add, sorted by name (how to extend bh-02, then memory's). A broker,
-# depending on its config alone.
+# The system prompt: a broker of the sections rows add, sorted by name.
 [[plugin]]
 id = "system"
 use = "agent:system"
 
-# Slash commands: a broker rows register commands into (and a layer's rows claim line prefixes
-# in), and the operator's own (/rows, /explain, /restart), which act through the loader's
-# handle. The chat row asks it which lines are commands (`claims`).
+# The broker of slash commands and line prefixes; the chat asks it which lines are commands.
 [[plugin]]
 id = "commands"
 use = "commands:registry"
 
+# `/rows`, `/explain ROW` and `/restart ROW`, through the loader.
 [[plugin]]
 id = "operator"
 use = "commands:operator"
 
-# The restarts commands ask for (/clear, /compact, /model NAME, /restart ROW), run one at a time
-# after the command has answered, a failure told to you; the chat row reads your next line only
-# once none is pending, so a line typed during a restart reaches the new loop. Over `output`.
+# The restarts commands ask for, one at a time; the chat reads your next line once none is pending.
 [[plugin]]
 id = "jobs"
 use = "commands:jobs"
 
-# `/model`: lists the models (the `models` row's), the current one marked, and `/model NAME`
-# switches by name, writing it in the session's layer and reloading the layers. Beside the
-# catalog it reads, over `commands`, the loader and `output`.
+# `/model [NAME]`: lists the models, or switches by name in the session's layer.
 [[plugin]]
 id = "switch"
 use = "models:switch"
 
-# The conversation's commands: `/clear` and `/compact [WHAT TO KEEP]`, each a new conversation
-# written over the transcript row's file (its `path`; the old kept as `.bak`, then `.bak.2`,
-# ...), then the rows restarted, so the prompt is read afresh. `/clear`'s is empty, and the
-# Python process restarts too (`clear`); `/compact`'s begins from the model's summary, and the
-# Python process keeps its namespace, which the summary names. A row of its own over `model`,
-# `tools` (the specs, offered as the loop offers them), the loader, `commands`, `output` and
-# `jobs`, never the loop or the transcript it restarts. Ctrl-C doesn't stop a command (quitting does), so the model has
-# `timeout` seconds (300) to write the summary, and a note says so as it begins.
+# `/clear` and `/compact`; config `timeout`: the seconds `/compact`'s summary may take (300).
 [[plugin]]
 id = "conversation"
 use = "agent:conversation"
 
-# `!COMMAND`: a line starting with `!` runs as a shell command, as you (not in the jail), in the
-# project, through your $SHELL. The app owns the terminal, so its output is captured, and Ctrl-C
-# can't stop a command, so it is stopped at its `timeout` (120 s; config: `prefix`, `cwd`,
-# `timeout`, `shell`), or when you quit. What it printed is shown, and the model reads it with
-# your next message, never mid-turn (`commands` holds it meanwhile, so `/model` keeps it). The
-# prefix is claimed in `commands`, which only a row in a layer can do: an extension can't.
+# `!COMMAND`: your shell, as you, unjailed; config `timeout` (120 s), `prefix`, `cwd`, `shell`.
 [[plugin]]
 id = "shell-command"
 use = "commands:shell_command"
 
-# The command palette (Ctrl-P) offers the commands broker's commands.
+# The command palette (Ctrl-P), offering the commands broker's commands.
 [[plugin]]
 id = "palette"
 use = "tui:palette"
 
-# The model's own extensions: cordis components it writes to the project's `.bh-02/plugins/`,
-# loaded while bh-02 runs into a worker the runner starts, so they run as confined as its
-# inputs (confined, they load without asking; unconfined, each is put to you first). What they
-# add, slash commands, status fields and sections of the model's prompt, goes into `commands`,
-# `frame` and `system`, and leaves with them. Its own section tells the model how.
+# The model's own extensions, `.bh-02/plugins/NAME.py`, loaded into the extensions process.
 [[plugin]]
 id = "extensions"
 use = "extensions:extensions"

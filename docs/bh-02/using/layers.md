@@ -68,11 +68,32 @@ The model's code can't write a layer file: the jail protects them.
 
 ## Layers from an earlier bh-02
 
-Some rows have been renamed or merged since earlier versions (`llm` is now `loop`, `kernel` is
-`python`, `jail` is `runner` and `layers` is `host`, for four), and so have some components
-(`chat:session` is now `chat:converse`, `tui:app` is `tui:ui`). A session's own layer is brought up to date when
-you resume it. A `--patch` file is yours, so bh-02 stops before the app starts and says what to
-change:
+Some rows have been renamed, merged or dropped since earlier versions, and so have some
+components:
+
+| An earlier bh-02's | Is now |
+|---|---|
+| rows `llm`, `mode`, `kernel`, `jail`, `jail_status` | `loop`, `chat`, `python`, `runner`, `grades` |
+| the model row `completion`, filled by a provider's own row | `model` (`models:model`), below |
+| the shell's own rows `harness`, `layers`, `sessions` | `shell`, `host`, `session` |
+| the status-bar rows: `model_status`, and the `session` row an earlier session's layer filled with `tui:status` | one `status` row |
+| components `chat:session`, `tui:app` | `chat:converse`, `tui:ui` |
+| the shell's `bh_02.bootstrap:harness`, `layer_files`, `session_list` | `bh_02.bootstrap:shell`, `host`, `session` |
+| the tool rows from before CodeAct: `fs`, `approve`, `actions`, `guard`, and any row using the old `tools:` plugin | gone (a `tools` row naming no plugin is today's broker, `agent:tools`) |
+| the sidebar: `sidebar`, or any row using `tui:sessions` | gone (`bh-02 sessions` lists the sessions) |
+
+The old model row's provider becomes a named model. `claude-code:completion`'s `model` is the
+model row's `default` now; an id that is no built-in name becomes an `extra` model of the row's
+own. `ollama:completion` becomes an `extra` OpenAI-compatible model at its host's `/v1`, named as
+its model and chosen; a session started with `--ollama` is given that model on `--resume`. An old
+`model_status` naming `llm` names `model`, the row that holds the model now, and a status row's
+`default_model` is gone: the status bar asks the `models` row. An old status-bar row that was
+`disabled` is not carried over: `status` can't turn off one part, so the bar stays on, and the
+change line says to give `status` `disabled = true` to turn off all of it.
+
+A session's own layer is brought up to date when you resume it, silently. A `--patch` file is
+yours, so bh-02 stops before the app starts (exit code 1, and no session is made) and says what
+to change:
 
 ```text
 error: a --patch file names rows this bh-02 renamed or no longer has:
@@ -91,5 +112,7 @@ $ bh-02 update-layer mine.toml
 mine.toml is up to date: nothing to change
 ```
 
-A file with both an old row and its new name (`llm` and `loop`) is refused unchanged: which one's
-settings win is yours to decide.
+A file it can't read is one line saying what is wrong, exit code 1, and nothing written. A file
+with both an old row and its new name (`llm` and `loop`) is refused unchanged: which one's
+settings win is yours to decide. A resumed session whose `session.toml` has both is refused the
+same way.

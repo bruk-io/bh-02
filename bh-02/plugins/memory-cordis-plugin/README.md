@@ -73,8 +73,13 @@ does not load one its own tools read. It depends on `transcript`, so a new conve
 (`/clear`, `/compact`) is told afresh, and a resumed one is not told again what its transcript's
 `tool` entries hold: the notes the loop keeps on each (`notes`), where a text of this row's ends
 where the note does, where it was cut short, or where the next text begins (`From FILE,
-instructions ...` or `From FILE, a rule for ...`). An entry from before the loop kept them is
-searched instead.
+instructions ...` or `From FILE, a rule for ...`; a file a text imports is part of it, so a text
+whose imports changed reads as changed, and is told again). Every note there was told before the
+row began (a resumed session's, or before a reload), wherever it sorted among the others and
+whatever the result printed. It reads them once, at the first input that opens a file. An entry from before the loop kept them
+is searched instead: a text told whole after a blank line, up to the entry's end or the next
+note, though not one the entry starts with; where the result ends is not marked there, so a
+text an input printed that way counts too.
 
 ## What bh-02 does differently, and why
 
