@@ -865,6 +865,7 @@ source = { editable = "bh-02/plugins/models-cordis-plugin" }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "cordis" },
+    { name = "cordis-helpers" },
     { name = "host-paths" },
     { name = "httpx2" },
     { name = "mcp" },
@@ -874,6 +875,7 @@ dependencies = [
 requires-dist = [
     { name = "claude-agent-sdk", specifier = "==0.2.158" },
     { name = "cordis", editable = "libs/cordis" },
+    { name = "cordis-helpers", editable = "libs/cordis-helpers" },
     { name = "host-paths", editable = "libs/host-paths" },
     { name = "httpx2", specifier = ">=2.13,<3" },
     { name = "mcp", specifier = ">=2.2,<3" },

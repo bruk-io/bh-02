@@ -178,9 +178,12 @@ def test_an_old_model_row_named_llm_or_completion_is_the_model_row_not_the_loop(
     rows, _ = translated([Row("model_status", config={key: "llm", "default": "x"})])
     assert rows == [Row("status", None, {"model_row": "model"})]
     rows, _ = translated([Row("operator", config={"model_row": "llm", "clear": ["llm"]})])
-    assert rows == [Row("operator", config={"model_row": "model", "clear": ["loop"]})]
+    assert rows == [Row("operator", config={"clear": ["loop"]}), Row("switch", config={"model_row": "model"})]
     rows, _ = translated([Row("operator", config={"model_row": "completion", "clear": ["completion"]})])
-    assert rows == [Row("operator", config={"model_row": "model", "clear": ["model"]})]
+    assert rows == [
+        Row("operator", config={"clear": ["model"]}),
+        Row("switch", config={"model_row": "model"}),
+    ]
 
 
 def test_claude_code_s_row_is_the_model_row_naming_its_model_by_name() -> None:
@@ -485,3 +488,41 @@ def test_update_layer_refuses_a_file_it_can_t_read_and_writes_nothing(
     assert result.stderr.startswith(f"error: {patch}: ") and why in result.stderr
     assert "Traceback" not in result.output
     assert patch.read_text() == text and not (state / "broken.toml.bak").exists()
+
+
+def test_model_moves_from_the_operator_to_the_switch_row() -> None:
+    """`/model` is the models plugin's `switch` row: a session's operator config hands it the
+    layer and model row it read, and translating again changes nothing more."""
+    session = [Row("operator", config={"layer": "/s/session.toml", "model_row": "model", "forget": ["/s/t"]})]
+    rows, changes = translated(session)
+    assert rows == [
+        Row("operator", config={"forget": ["/s/t"]}),
+        Row("switch", config={"layer": "/s/session.toml", "model_row": "model"}),
+    ]
+    assert changes == [
+        "row 'operator': /model is the models plugin's now (models:switch): make it config = "
+        '{ forget = ["/s/t"] }, and add a \'switch\' row with config = { layer = "/s/session.toml", '
+        'model_row = "model" }'
+    ]
+    assert translated(rows) == (rows, [])
+
+
+def test_a_layer_that_fills_the_operator_gets_the_switch_row() -> None:
+    own = [Row("operator", "commands:operator")]
+    rows, changes = translated(own)
+    assert rows == [Row("operator", "commands:operator"), Row("switch", "models:switch")]
+    assert changes == [
+        "/model is the models plugin's now (models:switch): add a 'switch' row with use = \"models:switch\""
+    ]
+    assert translated(rows) == (rows, [])
+    assert translated([Row("operator", config={"clear": ["loop"]})]) == (
+        [Row("operator", config={"clear": ["loop"]})],
+        [],
+    )  # a change to the shipped operator: the shipped layer has the switch row
+    taken = [Row("switch", config={"layer": "/x"}), Row("operator", config={"model_row": "model"})]
+    rows, changes = translated(taken)
+    assert rows == [Row("switch", config={"layer": "/x"}), Row("operator")]
+    assert changes == [
+        "row 'operator': /model is the models plugin's now (models:switch), which reads config = "
+        "{ model_row = \"model\" }: delete its config, and set it on the 'switch' row by hand"
+    ]

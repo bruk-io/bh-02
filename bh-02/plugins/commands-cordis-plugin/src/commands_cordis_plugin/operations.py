@@ -1,19 +1,17 @@
-"""Commands over the running composition: see it, explain a row, restart one, clear, switch model.
+"""Commands over the running composition: see it, explain a row, restart one, clear.
 
 They act through the loader's handle (cordis's operator API) and never through the runtime.
 A restart replaces a row the chat session depends on, which restarts the session itself: so
 restarts are queued for work the operator row owns (`jobs`, run by cordis-helpers' `perform`),
 never run in the session's own task, which they would cancel half-way. `/clear` answers with a
-`cleared` event (CONTRACTS.md: event), so a ui drops the old conversation from its screen. `/model` edits
-the session's own layer file and queues a reload of the layers (the loader's watcher would
-notice the edit too, half a second later): the layer files stay the only way the program's
-shape changes, and a resumed session keeps the choice. Both end their answer with a
-`restarting` event naming the rows they restart, so a ui holds a line typed meanwhile for
-them instead of handing it to the old model.
+`cleared` event (CONTRACTS.md: event), so a ui drops the old conversation from its screen, and
+ends with a `restarting` event naming the rows it restarts, so a ui holds a line typed
+meanwhile for them instead of handing it to the old loop. (`/model` is the models plugin's,
+beside the catalog it reads.)
 """
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -21,7 +19,7 @@ from typing import Any, Protocol, runtime_checkable
 from commands_cordis_plugin.registry import Answer, CommandSpec, Run
 from cordis_helpers import Job
 
-__all__ = ["Loader", "Models", "Operator", "OperatorConfig", "model_list", "rows_table", "unfinished"]
+__all__ = ["Loader", "Operator", "OperatorConfig", "rows_table", "unfinished"]
 
 
 @runtime_checkable
@@ -31,34 +29,14 @@ class Loader(Protocol):
     def status(self) -> dict[str, str]: ...
     def explain(self, rid: str) -> str: ...
     async def restart(self, *rids: str) -> None: ...
-    async def reload(self) -> None: ...
     def entries(self) -> Sequence[Any]: ...
-
-
-@runtime_checkable
-class Models(Protocol):
-    """What the operator needs of the `models` value (CONTRACTS.md: models): the models there
-    are, the one the model row names now, why a name can't be switched to, the models file, and
-    why that file is not read."""
-
-    @property
-    def path(self) -> str: ...
-    @property
-    def problem(self) -> str | None: ...
-    def listed(self) -> Sequence[Mapping[str, Any]]: ...
-    def current(self) -> Mapping[str, str]: ...
-    def check(self, name: str) -> str | None: ...
 
 
 @dataclass(frozen=True, slots=True)
 class OperatorConfig:
-    """`layer`: the session's layer file `/model` edits (none outside a session). `model_row`:
-    the row that chooses the model there (`model`: its config's `default`). `clear`: the
-    rows `/clear` starts afresh, together; `forget`: the files it empties first (the loop's
-    transcript), or the restarted rows would just read the old conversation back."""
+    """`clear`: the rows `/clear` starts afresh, together; `forget`: the files it empties first
+    (the loop's transcript), or the restarted rows would just read the old conversation back."""
 
-    layer: str | None = None
-    model_row: str = "model"
     clear: Sequence[str] = ("loop", "transcript", "kernel")
     forget: Sequence[str] = ()
 
@@ -74,7 +52,7 @@ def _restarting(rows: Sequence[str], running: Mapping[str, str]) -> list[Mapping
 
 
 def unfinished(why: str) -> str:
-    """What the person is told when a restart a command queued (/clear, /model, /restart) failed
+    """What the person is told when a restart a command queued (/clear, /restart) failed
     (`why`): the command answered before its restart ran, so what it said may not hold (after
     /clear the loop may still hold the old conversation, and write it to the emptied file)."""
     return (
@@ -94,34 +72,13 @@ def rows_table(status: Mapping[str, str], uses: Mapping[str, str]) -> str:
     )
 
 
-def model_list(models: Sequence[Mapping[str, Any]], path: str, problem: str | None = None) -> str:
-    """`/model`'s answer: every model, the current one marked, aligned, with where to add more,
-    or, when the models file is not read (`problem`), why and where it must be instead."""
-    width = max((len(str(m["name"])) for m in models), default=0)
-    kinds = max((len(str(m["provider"])) for m in models), default=0)
-    lines = []
-    for m in models:
-        mark = "●" if m.get("current") else " "
-        where = f"  at {m['where']}" if m.get("where") else ""
-        line = f"{mark} {str(m['name']).ljust(width)}  {str(m['provider']).ljust(kinds)}  {m['id']}{where}"
-        notes = [str(m[k]) for k in ("shadows", "problem") if m.get(k)]
-        lines.append(line.rstrip() + "".join(f"\n    {note}" for note in notes))
-    add = problem if problem is not None else f"add models in {path}"
-    return "\n".join([*lines, f"/model NAME switches; {add}"])
-
-
 @dataclass
 class Operator:
     """The commands, as `(spec, run)` pairs a row registers, over one loader and one job queue."""
 
     loader: Loader
-    models: Models
     config: OperatorConfig
     jobs: asyncio.Queue[Job]
-    set_model: Callable[[str, str, str], None]  # (layer file, row, model name): edit a layer
-    # (layer file, row): a later layer file that sets the row's config, and so replaces the one
-    # `set_model` edits whole (a `--patch` naming the model row); None when none does
-    shadowed: Callable[[str, str], str | None] = lambda layer, row: None
     specs: list[tuple[CommandSpec, Run]] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -130,7 +87,6 @@ class Operator:
             (_spec("explain", "what cordis knows about a row", "ROW"), self.explain),
             (_spec("restart", "start a row afresh (its dependents reload)", "ROW"), self.restart),
             (_spec("clear", "a new conversation and an empty kernel"), self.clear),
-            (self._model_spec(), self.model),
         ]
 
     async def rows(self, args: str) -> str:
@@ -167,52 +123,3 @@ class Operator:
             {"type": "note", "text": f"the conversation was cleared; starting afresh: {', '.join(chosen)}"},
             *_restarting(chosen, running),
         ]
-
-    def _model_spec(self) -> CommandSpec:
-        """`/model`'s spec, with a choice for each model, which the palette offers as its own
-        entry (`/model haiku`), read each time the palette opens."""
-        spec = _spec("model", "list the models, or switch to NAME for this session", "[NAME]")
-        spec["choices"] = self._model_choices
-        return spec
-
-    def _model_choices(self) -> list[Mapping[str, str]]:
-        try:
-            listed = self.models.listed()
-        except Exception:  # a models file that can't be read: /model says what is wrong
-            return []
-        return [
-            {
-                "args": str(m["name"]),
-                "help": f"the model now ({m['provider']}: {m['id']})"
-                if m.get("current")
-                else f"switch to {m['name']} ({m['provider']}: {m['id']})",
-            }
-            for m in listed
-            if not m.get("problem")
-        ]
-
-    async def model(self, args: str) -> Answer:
-        """List the models, the current one marked; or record NAME in the session's layer and
-        reload it now. A name the row already has changes nothing, so nothing restarts; a name
-        that isn't a usable model says why and changes nothing either."""
-        row = self.config.model_row
-        if not args:
-            return model_list(self.models.listed(), self.models.path, self.models.problem)
-        if args.startswith("/") or len(args.split()) != 1:
-            return f"not a model name: {args!r}; type /model and one name, e.g. /model sonnet"
-        if self.config.layer is None:
-            return "no session layer to record the model in; start bh-02 with --model instead"
-        if args == self.models.current()["name"]:
-            return f"model: {args} already; nothing to switch"
-        if (why := self.models.check(args)) is not None:
-            return f"not switched: {why}"
-        if (patch := self.shadowed(self.config.layer, row)) is not None:
-            return (
-                f"not switched: {patch} sets the {row!r} row's config, which replaces the session's "
-                "(where /model records the model) whole, so the model that file names stays. Set "
-                f'`default = "{args}"` in that file\'s {row!r} row, or run without it'
-            )
-        self.set_model(self.config.layer, row, args)
-        await self.jobs.put(self.loader.reload)
-        note = f"switching to {args} (the session's layer is reloaded; the conversation carries on)"
-        return [{"type": "note", "text": note}, *_restarting([row], self.loader.status())]

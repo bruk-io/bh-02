@@ -8,20 +8,8 @@ from typing import Any
 
 import pytest
 
-from commands_cordis_plugin import (
-    Commands,
-    Operator,
-    OperatorConfig,
-    model_list,
-    operator,
-    parse,
-    registry,
-    rows_table,
-    set_model,
-    shadowing,
-)
-from cordis import Effects, Row, Runtime, bind, component
-from cordis.loader import read_layer
+from commands_cordis_plugin import Commands, Operator, OperatorConfig, operator, parse, registry, rows_table
+from cordis import Effects, Runtime, bind, component
 
 
 def test_a_command_is_a_slash_a_name_and_the_rest() -> None:
@@ -175,7 +163,6 @@ class Loader:
     def __init__(self) -> None:
         self.restarted: list[str] = []
         self.batches: list[tuple[str, ...]] = []
-        self.reloads = 0
         self.rows = {"loop": "active", "model": "active", "kernel": "active", "fs": "active"}
 
     def status(self) -> dict[str, str]:
@@ -188,57 +175,12 @@ class Loader:
         self.restarted.extend(rids)
         self.batches.append(rids)
 
-    async def reload(self) -> None:
-        self.reloads += 1
-
     def entries(self) -> Sequence[Entry]:
         return [
             Entry("loop", "agent:loop", {"max_nudges": 2}),
             Entry("model", "models:model", {"default": "haiku"}),
             Entry("kernel", "kernel:kernel"),
         ]
-
-
-class Models:
-    """The `models` value: two Claude models and a local one, haiku the model row's now."""
-
-    path = "/home/me/.config/bh-02/models.toml"
-
-    def __init__(self) -> None:
-        self.now = "haiku"
-        self.broken = False
-        self.problem: str | None = None  # why the models file is not read (it is in the project)
-
-    def listed(self) -> list[dict[str, Any]]:
-        if self.broken:
-            raise ValueError("the models file is not TOML")
-        return [
-            {"name": "sonnet", "provider": "claude-code", "id": "sonnet", "current": self.now == "sonnet"},
-            {"name": "haiku", "provider": "claude-code", "id": "haiku", "current": self.now == "haiku"},
-            {
-                "name": "llama",
-                "provider": "openai",
-                "id": "llama3.2",
-                "current": False,
-                "where": "http://localhost:11434/v1",
-            },
-            {
-                "name": "typo",
-                "provider": "",
-                "id": "",
-                "current": False,
-                "problem": "model 'typo' names no provider",
-            },
-        ]
-
-    def current(self) -> dict[str, str]:
-        return {"name": self.now, "provider": "claude-code"}
-
-    def check(self, name: str) -> str | None:
-        known = {m["name"]: m for m in self.listed()}
-        if name not in known:
-            return f"no model named {name!r}"
-        return known[name].get("problem")
 
 
 async def _drain(jobs: asyncio.Queue[Any]) -> None:
@@ -248,7 +190,7 @@ async def _drain(jobs: asyncio.Queue[Any]) -> None:
 
 async def test_the_operator_shows_explains_and_queues_restarts(tmp_path: Path) -> None:
     loader, jobs = Loader(), asyncio.Queue()
-    op = Operator(loader, Models(), OperatorConfig(), jobs, lambda *a: None)
+    op = Operator(loader, OperatorConfig(), jobs)
     run = {spec["name"]: fn for spec, fn in op.specs}
     assert "loop    agent:loop     active" in await run["rows"]("")
     assert await run["explain"]("loop") == "loop: all about it"
@@ -262,7 +204,7 @@ async def test_clear_forgets_the_history_then_starts_the_rows_that_exist_afresh(
     history = tmp_path / "transcript.jsonl"
     history.write_text("abc\n")
     loader, jobs = Loader(), asyncio.Queue()
-    op = Operator(loader, Models(), OperatorConfig(forget=(str(history),)), jobs, lambda *a: None)
+    op = Operator(loader, OperatorConfig(forget=(str(history),)), jobs)
     run = {spec["name"]: fn for spec, fn in op.specs}
     assert await run["clear"]("") == [  # the ui drops the old conversation, then says why
         {"type": "cleared"},
@@ -271,111 +213,6 @@ async def test_clear_forgets_the_history_then_starts_the_rows_that_exist_afresh(
     ]  # no transcript row here
     await _drain(jobs)
     assert history.read_text() == "" and loader.batches == [("loop", "kernel")]  # together: one reload each
-
-
-async def test_model_lists_the_models_and_switches_by_name_in_the_session_s_layer(tmp_path: Path) -> None:
-    layer = tmp_path / "session.toml"
-    layer.write_text('[[plugin]]\nid = "model"\nconfig = { state = "/s/claude" }\n')
-    calls: list[tuple[str, str, str]] = []
-    loader, jobs, models = Loader(), asyncio.Queue(), Models()
-    op = Operator(loader, models, OperatorConfig(layer=str(layer)), jobs, lambda *a: calls.append(a))
-    run = {spec["name"]: fn for spec, fn in op.specs}
-    assert (await run["model"]("")).splitlines() == [
-        "  sonnet  claude-code  sonnet",
-        "● haiku   claude-code  haiku",
-        "  llama   openai       llama3.2  at http://localhost:11434/v1",
-        "  typo",
-        "    model 'typo' names no provider",
-        f"/model NAME switches; add models in {models.path}",
-    ]
-    assert await run["model"]("haiku") == "model: haiku already; nothing to switch"
-    assert await run["model"]("gpt-9") == "not switched: no model named 'gpt-9'"
-    assert await run["model"]("typo") == "not switched: model 'typo' names no provider"
-    assert calls == [] and jobs.empty()  # nothing changed: no reload, no restart announced
-    note, restarting = await run["model"]("llama")  # across providers, by name
-    assert str(note["text"]).startswith("switching to llama")
-    assert restarting == {"type": "restarting", "rows": ["model"]}  # the ui holds lines for it
-    assert calls == [(str(layer), "model", "llama")] and loader.reloads == 0  # queued, not run here
-    await _drain(jobs)
-    assert loader.reloads == 1  # the layers are read again now, not when the watcher next looks
-    for bad in ("/model sonnet-x", "/sonnet", "sonnet x"):  # a command typed twice, two words
-        assert (await run["model"](bad)).startswith(f"not a model name: {bad!r}; type /model and one name")
-    assert calls == [(str(layer), "model", "llama")]  # none of them was recorded
-    unsessioned = Operator(Loader(), Models(), OperatorConfig(), asyncio.Queue(), lambda *a: None)
-    assert "no session layer" in await dict((s["name"], f) for s, f in unsessioned.specs)["model"]("x")
-    set_model(str(layer), "model", "llama")
-    (row,) = read_layer(layer)
-    assert row == Row("model", config={"state": "/s/claude", "default": "llama"})
-
-
-async def test_model_refuses_when_a_later_layer_sets_the_model_row_s_config(tmp_path: Path) -> None:
-    """A `--patch` that sets the model row's config replaces the session layer's whole: /model
-    would record a name that never runs, so it says so and records nothing."""
-    base, layer, patch, other = (tmp_path / n for n in ("base.toml", "session.toml", "p.toml", "q.toml"))
-    base.write_text('[[plugin]]\nid = "model"\nuse = "models:model"\n')
-    layer.write_text('[[plugin]]\nid = "model"\nconfig = { default = "haiku" }\n')
-    patch.write_text('[[plugin]]\nid = "model"\nconfig = { env_file = "/x/local.env" }\n')
-    other.write_text('[[plugin]]\nid = "model"\ndisabled = false\n')  # no config: shadows nothing
-    files = [str(base), str(layer), str(other), str(patch)]
-    assert shadowing(files, str(layer), "model") == str(patch)
-    assert shadowing(files[:3], str(layer), "model") is None
-    assert shadowing([str(patch), str(layer)], str(layer), "model") is None  # before it: overridden by it
-    calls: list[tuple[str, str, str]] = []
-    jobs: asyncio.Queue[Any] = asyncio.Queue()
-    op = Operator(
-        Loader(),
-        Models(),
-        OperatorConfig(layer=str(layer)),
-        jobs,
-        lambda *a: calls.append(a),
-        lambda mine, rid: shadowing(files, mine, rid),
-    )
-    said = await dict((s["name"], f) for s, f in op.specs)["model"]("llama")
-    assert said == (
-        f"not switched: {patch} sets the 'model' row's config, which replaces the session's (where "
-        "/model records the model) whole, so the model that file names stays. Set "
-        "`default = \"llama\"` in that file's 'model' row, or run without it"
-    )
-    assert calls == [] and jobs.empty()
-
-
-def test_the_model_command_offers_each_usable_model_as_a_choice() -> None:
-    models = Models()
-    op = Operator(Loader(), models, OperatorConfig(), asyncio.Queue(), lambda *a: None)
-    spec = next(spec for spec, _ in op.specs if spec["name"] == "model")
-    choices = spec["choices"]()
-    assert [c["args"] for c in choices] == ["sonnet", "haiku", "llama"]  # not the one with a problem
-    assert choices[0]["help"] == "switch to sonnet (claude-code: sonnet)"
-    assert choices[1]["help"] == "the model now (claude-code: haiku)"
-    models.broken = True
-    assert spec["choices"]() == []  # read each time; a broken file offers none, /model says why
-
-
-def test_the_model_list_marks_a_shadowed_built_in() -> None:
-    listed = [
-        {
-            "name": "sonnet",
-            "provider": "openai",
-            "id": "x",
-            "current": True,
-            "shadows": "shadows the built-in 'sonnet' (f)",
-        }
-    ]
-    assert model_list(listed, "f").splitlines()[:2] == [
-        "● sonnet  openai  x",
-        "    shadows the built-in 'sonnet' (f)",
-    ]
-
-
-async def test_the_model_list_says_why_the_models_file_is_not_read_instead_of_where_to_add() -> None:
-    """A models file in the project is not read: /model says so where it would say to add models
-    there, and still lists the models there are."""
-    models = Models()
-    models.problem = "the models file /p/.config/bh-02/models.toml is not read: it is in the project (/p)"
-    op = Operator(Loader(), models, OperatorConfig(), asyncio.Queue(), lambda *a: None)
-    said = (await dict((s["name"], f) for s, f in op.specs)["model"]("")).splitlines()
-    assert said[0] == "  sonnet  claude-code  sonnet"
-    assert said[-1] == f"/model NAME switches; {models.problem}" and "add models in" not in said[-1]
 
 
 def test_rows_line_up() -> None:
@@ -394,7 +231,8 @@ class _Output:
 
 
 def _operator_on(rt: Runtime, loader: object) -> _Output:
-    """Mount the operator and fakes of the rows it depends on; the output fake back."""
+    """Mount the operator and fakes of the rows it depends on (no `models`, no `model`); the
+    output fake back."""
     told = _Output()
 
     @component
@@ -402,28 +240,26 @@ def _operator_on(rt: Runtime, loader: object) -> _Output:
         yield bind("loader", loader)
 
     @component
-    async def fake_models() -> Effects:
-        yield bind("models", Models())
-
-    @component
     async def fake_output() -> Effects:
         yield bind("output", told)
 
     rt.mount(registry, id="commands")
     rt.mount(fake_loader, id="loader")
-    rt.mount(fake_models, id="models")
     rt.mount(fake_output, id="output")
     return told
 
 
 async def test_the_operator_row_registers_its_commands_and_takes_them_when_it_leaves() -> None:
+    """With no `models:catalog` (nor any model) in the composition, /rows, /explain, /restart
+    and /clear are there: `/model` is the models plugin's."""
     loader = Loader()
     rt = Runtime()
     told = _operator_on(rt, loader)
     row = rt.mount(operator, id="operator")
     await rt.settle()
     commands = rt.root.get("commands")
-    assert [s["name"] for s in commands.specs()] == ["rows", "explain", "restart", "clear", "model"]
+    assert [s["name"] for s in commands.specs()] == ["rows", "explain", "restart", "clear"]
+    assert "loop    agent:loop     active" in await commands.run("/rows")
     assert await commands.run("/restart fs") == "restarting fs"
     await asyncio.sleep(0.01)
     assert loader.restarted == ["fs"]  # the row's own background work ran it

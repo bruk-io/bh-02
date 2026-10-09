@@ -30,11 +30,11 @@ from cordis.loader import read_layer
 def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_row() -> None:
     rows = session_layer(Path("/s/1"), model="haiku", no_jail=True)
     forget = ["/s/1/transcript.jsonl"]  # the ui keeps its own history across a /clear
-    operator = {"layer": "/s/1/session.toml", "model_row": "model", "forget": forget}
     assert rows == [
         Row("ui", config={"history": "/s/1/events.jsonl"}),  # what the ui showed, drawn again on a resume
         Row("transcript", config={"path": "/s/1/transcript.jsonl"}),  # what the model is sent again
-        Row("operator", config=operator),
+        Row("operator", config={"forget": forget}),
+        Row("switch", config={"layer": "/s/1/session.toml", "model_row": "model"}),  # /model edits it
         # Claude Code's own state (its session, which a resume continues) in the session's directory
         Row("model", config={"state": "/s/1/claude", "default": "haiku"}),
         Row("jail", "kernel:unjailed"),

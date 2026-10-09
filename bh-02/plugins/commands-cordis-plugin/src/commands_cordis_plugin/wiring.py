@@ -3,20 +3,16 @@ and `!`, a shell command, the prefix claimed in it."""
 
 import asyncio
 import functools
-from collections.abc import Callable, Sequence
-from pathlib import Path
+from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
-from commands_cordis_plugin.operations import Loader, Models, Operator, OperatorConfig, unfinished
+from commands_cordis_plugin.operations import Loader, Operator, OperatorConfig, unfinished
 from commands_cordis_plugin.registry import Commands, CommandSpec, Run
 from commands_cordis_plugin.shell_command import ShellCommandConfig, run_line
-from cordis import Effects, Row, acquire, background, bind, component
-from cordis.composition import format_layer
-from cordis.loader import Loader as _Mounting
-from cordis.loader import read_layer
+from cordis import Effects, acquire, background, bind, component
 from cordis_helpers import Job, perform
 
-__all__ = ["operator", "registry", "set_model", "shadowing", "shell_command"]
+__all__ = ["operator", "registry", "shell_command"]
 
 
 @runtime_checkable
@@ -64,43 +60,14 @@ async def shell_command(*, commands: _Claimant, config: ShellCommandConfig) -> E
 
 @component
 async def operator(
-    *, commands: _Registrar, loader: Loader, models: Models, output: _Notices, config: OperatorConfig
+    *, commands: _Registrar, loader: Loader, output: _Notices, config: OperatorConfig
 ) -> Effects:
-    """Fills an `operator` row: `use = "commands:operator"`. /rows, /explain, /restart, /clear
-    and /model, over the loader that mounted it and the `models` there are. Its restarts are its
-    own background work, run after the command has answered, so one that fails is told to the
-    person (`output.notice`). It depends on `models`, not `model`, so a switch never reloads it."""
+    """Fills an `operator` row: `use = "commands:operator"`. /rows, /explain, /restart and
+    /clear, over the loader that mounted it. Its restarts are its own background work, run after
+    the command has answered, so one that fails is told to the person (`output.notice`). It
+    depends on neither `model` nor `models`, so a composition without them keeps these commands,
+    and a switch never reloads it."""
     jobs: asyncio.Queue[Job] = asyncio.Queue()
     yield background(perform(jobs, lambda why: output.notice(unfinished(why))))
-    files = [str(path) for path in loader.config.layers] if isinstance(loader, _Mounting) else []
-    for spec, run in Operator(
-        loader, models, config, jobs, set_model, lambda layer, rid: shadowing(files, layer, rid)
-    ).specs:
+    for spec, run in Operator(loader, config, jobs).specs:
         yield acquire(commands.register, spec, run)
-
-
-def set_model(layer: str, rid: str, model: str) -> None:
-    """Name `model` as row `rid`'s `default` in the layer file `layer`, keeping the rest of its
-    config (the model row's `default` is the model's name)."""
-    rows = read_layer(layer)
-    current = next((r for r in rows if r.id == rid), Row(rid))
-    kept = [r for r in rows if r.id != rid]
-    chosen = Row(rid, current.use, {**(current.config or {}), "default": model}, current.disabled)
-    Path(layer).write_text(format_layer([*kept, chosen], "This session's own layer; /model edits it."))
-
-
-def shadowing(files: Sequence[str], layer: str, rid: str) -> str | None:
-    """The first of the layer `files` composed after `layer` that sets row `rid`'s config, which
-    replaces the config `layer` gives it whole (a `--patch` naming the model row, over the
-    session's layer that /model edits); None when none does. A file that can't be read is
-    skipped: the loader reports it."""
-    mine = Path(layer).resolve()
-    at = next((n for n, path in enumerate(files) if Path(path).resolve() == mine), None)
-    for path in files[at + 1 :] if at is not None else []:
-        try:
-            rows = read_layer(path)
-        except OSError, ValueError:
-            continue
-        if any(row.id == rid and row.config is not None for row in rows):
-            return path
-    return None

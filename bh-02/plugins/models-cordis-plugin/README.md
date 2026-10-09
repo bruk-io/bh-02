@@ -1,11 +1,12 @@
 # models-cordis-plugin
 
-bh-02's model: named models over their providers, switched by name. Two rows:
+bh-02's model: named models over their providers, switched by name. Three rows:
 
-| Row | Binds | Consumes |
+| Row | Binds / registers | Consumes |
 |---|---|---|
 | `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | `layers` (`credentials`: where `local.env` is looked for) |
 | `models:catalog` | `models`: the models there are, the one the model row names now, why a name can't be switched to, and why the models file is not read (CONTRACTS.md: models) | `loader`, `layers` |
+| `models:switch` | registers `/model [NAME]`: lists the models, switches by name in the session's layer; a reload it queued that fails is told to the person; config: `layer` (the session's), `model_row` (`model`) | `commands` (`register`), `loader`, `models`, `output` (`notice`) |
 
 The model row's config (`ModelConfig`):
 - `default`: the model's name, `sonnet` unless a layer says another; `--model` and `/model` set it.
@@ -89,8 +90,32 @@ again before it reads local.env (`authorization`): that token is the Claude Code
 
 `models` (`catalog.py`) reads the model row's config from the loader's entries and the models
 file each time it is asked, and depends on the loader and `layers` (where a key's `local.env` is
-looked for) alone: `/model` (the operator) and the status bar depend on it, never on `model`,
+looked for) alone: `/model` (the switch row) and the status bar depend on it, never on `model`,
 which a switch replaces.
+
+## /model
+
+`models:switch` (`switch.py`, its row in `wiring.py`) registers `/model` with `commands`, beside
+the catalog it reads, so the commands plugin knows nothing of how a model is chosen and a
+composition without the catalog keeps the operator's commands. `/model` lists the models (the
+`models` value: the built-ins, the models file's, the model row's own), the one the model row
+names marked `●`, each with its provider and id, and says where the models file is, or, when it
+is in the project and so not read (`models.problem`), why and where it must be instead.
+`/model NAME` switches by name, across providers: it asks `models.check(NAME)` first, so a name
+that is no model, or a model whose table has a problem, is said and changes nothing; then it
+names NAME as the model row's `default` in the session's layer (`layer`, on the row
+`model_row`) with cordis's `read_layer`/`format_layer` (`set_model`) and queues a `reload` of
+the layers (the watcher would notice too, half a second later), so the choice is composition
+and a resumed session keeps it. A NAME the row already names changes nothing; a later layer
+that sets the model row's config (a `--patch`, `shadowing`) would replace the session's whole,
+so `/model` says so and records nothing. The reload is the row's own background work
+(cordis-helpers' `perform`), run after the command has answered, since it restarts the chat
+row the command's answer is shown in; one that fails is told through `output.notice`. Its
+spec carries `choices`, one per usable model, which the palette offers as entries of their own
+(`/model haiku`). The row depends on `models`, not on `model`, so a switch reloads the model
+row and what uses it, never the row running the switch. The answer ends with `restarting`
+(CONTRACTS.md: event), naming the model row, so the ui holds a line typed meanwhile for it
+rather than handing it to the old model.
 
 ## openai: any OpenAI-compatible endpoint
 

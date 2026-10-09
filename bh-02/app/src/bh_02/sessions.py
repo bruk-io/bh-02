@@ -108,7 +108,7 @@ class Broken:
 
 def session_layer(dir: Path, *, model: str | None, no_jail: bool) -> list[Row]:
     """The session's layer: where its history goes, what this run chose, and what the
-    operator's /model and /clear act on.
+    operator's /clear and the switch row's /model act on.
 
     bh-02's own loop runs over the `model` row, which names its model (`default`, which
     `--model` and /model set): the conversation is the `transcript` row's, kept in the
@@ -126,10 +126,9 @@ def session_layer(dir: Path, *, model: str | None, no_jail: bool) -> list[Row]:
     rows = [
         Row("ui", config=ui),
         Row("transcript", config={"path": str(history)}),
-        # /model edits this very file; /clear empties the model's history before starting afresh
-        Row(
-            "operator", config={"layer": str(dir / _LAYER), "model_row": _MODEL_ROW, "forget": [str(history)]}
-        ),
+        # /clear empties the model's history before starting afresh; /model edits this very file
+        Row("operator", config={"forget": [str(history)]}),
+        Row("switch", config={"layer": str(dir / _LAYER), "model_row": _MODEL_ROW}),
     ]
     rows.append(Row(_MODEL_ROW, config={"state": str(dir / _CLAUDE_STATE)}))
     if model is not None:

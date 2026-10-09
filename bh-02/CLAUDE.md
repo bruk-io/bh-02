@@ -278,8 +278,8 @@ project, a link into it). The built-ins and `extra` still work, and `models.prob
 and the error of a name only that file could name say why and where the file must be instead.
 A model that can't be used binds anyway and each step says what is wrong. `models:catalog`
 binds `models` (the models there are, and which one the row names), depending on the loader
-and `layers` alone, so `/model` (the operator) and the status bar depend on it and never reload
-with a switch. The models plugin's README has the providers' details.
+and `layers` alone, so `/model` (`models:switch`) and the status bar depend on it and never
+reload with a switch. The models plugin's README has the providers' details.
 
 **The Claude provider.** Claude is the `claude-code` provider (`models_cordis_plugin.claude_code`):
 Claude through Claude Code (the Claude Agent SDK), which is the subscription's sanctioned route.

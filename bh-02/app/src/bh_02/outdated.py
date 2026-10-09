@@ -89,6 +89,12 @@ _SIDEBAR, _SIDEBAR_USE = "sidebar", "tui:sessions"
 # that id naming a plugin of the person's own still runs.
 _NO_SHELL_HINTS = "bh-02 no longer tells the model how Python does what an input ran through a shell"
 _SHELL_HINTS, _SHELL_HINTS_USE = "shell-hints", "kernel:shell_hints"
+# `/model` was the operator's (`commands:operator`, whose config's `layer` and `model_row` it
+# read); it is the models plugin's `switch` row now (`models:switch`), beside the catalog.
+_OPERATOR, _OPERATOR_USE = "operator", "commands:operator"
+_SWITCH, _SWITCH_USE = "switch", "models:switch"
+_TO_SWITCH = ("layer", "model_row")
+_SWITCHED = "/model is the models plugin's now (models:switch)"
 
 
 def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
@@ -124,6 +130,11 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       is no built-in name as an `extra` model of its own; `ollama:completion` is an `extra`
       OpenAI-compatible model at its host's `/v1`. bh-02's fakes that bound `completion` bind
       `model` under new names (`echo_completion` is `echo_model`).
+
+    - `/model` is the models plugin's `switch` row (`models:switch`): an operator's `layer` and
+      `model_row` move to it (added after the operator, unless the layer has one, when the
+      change says to set them there by hand), and a layer that fills the operator itself
+      (`use = "commands:operator"`) and has no `switch` row gets one.
 
     Nothing changed is `(list(rows), [])`, so translating twice changes nothing more.
     """
@@ -192,6 +203,43 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
                     part = Row(part.id, part.use, config, part.disabled)
                 kept.append(part)
             out[at:at] = kept
+    out, said = _switched(out)
+    return out, changes + said
+
+
+def _switched(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
+    """`rows` with `/model` as the models plugin's `switch` row, and what changed: an operator's
+    `layer` and `model_row` move to it, and a layer that fills the operator itself gets one."""
+    has_switch = any(row.id == _SWITCH for row in rows)
+    out: list[Row] = []
+    changes: list[str] = []
+    for row in rows:
+        out.append(row)
+        if row.id != _OPERATOR and row.use != _OPERATOR_USE:
+            continue
+        config = dict(row.config or {})
+        moved = {key: config.pop(key) for key in _TO_SWITCH if key in config}
+        if moved:
+            out[-1] = Row(row.id, row.use, config or None, row.disabled)
+            keep = f"make it {_inline(config)}" if config else "delete its config"
+            if has_switch:
+                changes.append(
+                    f"row {row.id!r}: {_SWITCHED}, which reads {_inline(moved)}: {keep}, and set it on "
+                    f"the {_SWITCH!r} row by hand"
+                )
+                continue
+        elif has_switch or row.use != _OPERATOR_USE:
+            continue
+        use = _SWITCH_USE if row.use is not None else None
+        out.append(Row(_SWITCH, use, moved or None))
+        has_switch = True
+        added = ", ".join(
+            [*([f"use = {json.dumps(use)}"] if use else []), *([_inline(moved)] if moved else [])]
+        )
+        if moved:
+            changes.append(f"row {row.id!r}: {_SWITCHED}: {keep}, and add a {_SWITCH!r} row with {added}")
+        else:
+            changes.append(f"{_SWITCHED}: add a {_SWITCH!r} row with {added}")
     return out, changes
 
 
