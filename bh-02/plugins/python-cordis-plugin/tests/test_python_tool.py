@@ -155,7 +155,7 @@ async def test_a_failing_startup_file_says_why_and_the_next_one_still_runs(tmp_p
 
 async def test_a_startup_file_that_ends_the_repl_is_named_and_passed_over_after(tmp_path: Path) -> None:
     """A file that ends the worker (os._exit, a crash) would end every new one: the input it
-    cut short names it, and the workers after it pass it over, saying so, until `/restart kernel`
+    cut short names it, and the workers after it pass it over, saying so, until `/restart python`
     (a new kernel) runs it again. The project's still runs."""
     person = _person_s("import os\nos._exit(3)\n")
     _project_s(tmp_path, "TOOLS = 2\n")
@@ -163,12 +163,12 @@ async def test_a_startup_file_that_ends_the_repl_is_named_and_passed_over_after(
         ended = await k.run("1")
         assert ended == (
             f"the REPL's process ended as {person} ran, before this input, so this input did not run; "
-            f"a new one starts with the next, without {person} (`/restart kernel` runs it again)"
+            f"a new one starts with the next, without {person} (`/restart python` runs it again)"
         )
         passed = await k.run("TOOLS")
         assert passed.startswith(
             f"(the REPL was started again; what earlier inputs defined is gone. {person} was not run: it "
-            "ended the REPL's process when it last ran, so what it defines is missing (`/restart kernel` "
+            "ended the REPL's process when it last ran, so what it defines is missing (`/restart python` "
             "runs it again). .bh-02/kernel.py ran next and defined: TOOLS)\n"
         ), passed
         assert passed.endswith("\n2") and await k.run("TOOLS + 1") == "3"
@@ -189,7 +189,7 @@ async def test_a_startup_file_that_ends_the_repl_keeps_what_the_opening_had_to_t
         "(the REPL was started again, because the host undid the jail's hold on /w/local.env; the "
         "next one holds it again; what earlier inputs defined is gone)\n"
         f"the REPL's process ended as {person} ran, before this input, so this input did not run; "
-        f"a new one starts with the next, without {person} (`/restart kernel` runs it again)"
+        f"a new one starts with the next, without {person} (`/restart python` runs it again)"
     ), ended
 
 
@@ -242,7 +242,7 @@ async def test_a_startup_file_stopped_part_way_is_not_run_again_in_that_repl(tmp
         told = await asyncio.wait_for(k.run("TOOLS"), 5)
     assert told == (
         f"(the REPL was started again; what earlier inputs defined is gone. {person} was not run: it would "
-        "not stop at Ctrl-C when it last ran, so what it defines is missing (`/restart kernel` runs it "
+        "not stop at Ctrl-C when it last ran, so what it defines is missing (`/restart python` runs it "
         "again). .bh-02/kernel.py ran next and defined: TOOLS)\n2"
     ), told
 

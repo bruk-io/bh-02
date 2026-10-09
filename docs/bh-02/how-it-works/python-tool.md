@@ -1,14 +1,14 @@
 # The python tool
 
 The tool bh-02 ships is `python(code)`, and it carries code. This is CodeAct: the model acts by
-writing Python, and only what that Python prints reaches the model. The kernel row registers it
+writing Python, and only what that Python prints reaches the model. The python row registers it
 with `tools`, beside whatever tools other rows register, and tells the model about it in a
 section of the system prompt. To the model the tool is a
 Python REPL of its own that persists for the run.
 
 ## What an input can do
 
-Each call is an input to one Python process, the one the jail started. It is plain Python, not
+Each call is an input to one Python process, the one the runner started. It is plain Python, not
 IPython, and nothing of bh-02's is in its namespace. An input:
 
 - reads and edits files with `open` or `pathlib`;
@@ -26,7 +26,7 @@ model sees the line that failed, even in a function it defined inputs ago.
 ## How long the namespace lasts
 
 The namespace lasts the run. A `/model` switch and `/compact` keep it. A new Python process starts
-empty: at launch and on a resume, after `/clear`, `/release` or `/restart kernel`, and when the
+empty: at launch and on a resume, after `/clear`, `/release` or `/restart python`, and when the
 last one died or its jail ended. The first input in a new one is told its variables are gone, and
 why when it knows. The transcript is the record; the namespace is a cache.
 
@@ -50,7 +50,7 @@ it. So whatever your file holds, the model can read. The project's file is read 
 ## What an input touched
 
 The Python process hears each file an input's own code opens under the project, with an audit
-hook. The tool answers each call with that list (`kernel.touched()`), and the loop hands it to the rows that add notes,
+hook. The tool answers each call with that list (its `touched()`), and the loop hands it to the rows that add notes,
 which is how a subdirectory's `CLAUDE.md` arrives when the model first opens a file there. Files a
 program the input runs opens are not heard, since that happens in another process.
 
@@ -58,8 +58,9 @@ program the input runs opens are not heard, since that happens in another proces
 
 The Python process is `worker.py`, run as `python -I worker.py SOCKET` inside the jail. It uses
 the standard library only, so nothing of bh-02's own crosses into the jail with it. Its one
-channel is a Unix socket that carries an input in and its output back. The `kernel` row
-(`kernel:kernel`) is bh-02's end of it: it starts the process through the jail, sends each input,
-and starts a new process when the last one died.
+channel is a Unix socket that carries an input in and its output back. The `python` row
+(`python:tool`) is bh-02's end of it: it starts the process through the runner, sends each input,
+starts a new process when the last one died, and stops its own process on `/release`. It binds
+no key: it reaches the loop through `tools` and the model through `system`.
 
 The python plugin's README has the details: [python-cordis-plugin](../reference/plugins/python.md).

@@ -20,8 +20,8 @@ The jail is brig's. On macOS it is Seatbelt; on Linux it is bubblewrap, which mu
 
 ## The status bar
 
-The `jail:` field says whether the model's code is confined and how well each part of the jail
-holds:
+The `jail:` field (the `grades` row) says whether the model's code is confined and how well each
+part of the jail holds:
 
 ```text
 jail: jailed fs_write ✓ network ✓ fs_read ~ env ✓
@@ -51,12 +51,12 @@ A session keeps the jail it started with: `--resume` refuses `--no-jail`.
 
 ## Letting the model write more
 
-The `jail` row's config changes what the jail lets through. Put it in a layer of your own and
+The `runner` row's config changes what the jail lets through. Put it in a layer of your own and
 start bh-02 with `--patch` ([Layers](layers.md)). This lets inputs write `.git/config` too:
 
 ```toml
 [[plugin]]
-id = "jail"
+id = "runner"
 config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }
 ```
 
@@ -88,14 +88,16 @@ before you edit a layer file while one runs.
 Where bh-02 looks for `local.env` and finds none, the jail holds the path, so you can't create the
 file while the Python process runs. To add it:
 
-1. Type `/release`. It stops the Python process and its jail until the next input, and says
-   which paths that freed.
+1. Type `/release`. Each row stops what it runs in the jail (the Python process, and the
+   extensions' process if one runs) until the next input, and it says which paths that freed.
 2. Create `local.env` ([Get started](../get-started.md#the-credential)).
 3. Send your message. The model row reads the file at its next step, and the next input starts a
    new jail that hides it again.
 
-`/restart kernel` won't do here: it starts the jail again at once.
+Anything that starts in the jail before you create the file holds the path again (an input, or
+an extension you edit): `/release` again. `/restart python` won't do here: it starts the Python
+process and its jail again at once.
 
 [The jail and approval](../how-it-works/jail-and-approval.md) explains how the jail and the
-approval rule fit together, and the brig plugin's README has every detail:
+approval rule fit together, and the runner plugin's README has every detail:
 [runner-cordis-plugin](../reference/plugins/runner.md).

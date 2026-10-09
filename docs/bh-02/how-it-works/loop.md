@@ -12,21 +12,21 @@ A turn is the reply to one message. It takes one model step or more:
    the tools rows have registered with `tools` (`agent:tools`, a broker), through the provider's
    standard tool calling. In the shipped composition that is one tool, `python`.
 2. The model answers, or asks for calls to its tools.
-3. The loop asks `approval` whether each call may run, runs it through the tool its name has (a
-   `python` call is an **input** to the Python process), and adds the tool's answer to the
-   transcript as the call's result, with any notes rows add
-   ([The prompt and notes](prompt-and-notes.md)).
+3. The loop asks the `approval` rule whether each call may run unasked (and you, when it says
+   no), runs it through the tool its name has (a `python` call is an **input** to the Python
+   process), and adds the tool's answer to the transcript as the call's result, with any notes
+   rows add ([The prompt and notes](prompt-and-notes.md)).
 4. Back to 1, until the model answers without asking for a call.
 
 A call to a tool the loop did not offer, or one whose input doesn't fit the tool's spec (a
-`python` call without `code`), is answered with text saying so, and nothing runs. A call
-`approval` turns down is answered with that.
+`python` call without `code`), is answered with text saying so, and nothing runs. A call you
+turn down is answered with that.
 
 ## The tools
 
 The loop reads the list of tools at a conversation's first request, after the ones its
 `requires` names have registered (the shipped layer requires `python`; a message typed right
-after `/clear`, when the kernel is starting again, says it waits), and keeps it in the
+after `/clear`, when the Python process is starting again, says it waits), and keeps it in the
 transcript. It offers that same list, in name order, for the rest of the conversation: the list
 is the start of what a model server caches, so a list that changed would cost the cache.
 

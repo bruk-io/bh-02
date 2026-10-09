@@ -53,14 +53,15 @@ async def notes(*, commands) -> Effects:
 
 ## Where it runs
 
-Not in bh-02's process. The `jail` row starts a second process for extensions, in the same jail
-as the model's inputs. Each load is put to `approval`, as an input is: jailed, it loads without
-asking; with `--no-jail`, you are asked first, with the extension's source shown, and a no leaves
-it unloaded until the file changes. What crosses back to bh-02 is data only: a command's spec, its
-arguments and its answer, a field's text, a section's text.
+Not in bh-02's process. The runner starts a second process for extensions, jailed as the
+model's inputs are. Each load is put to the `approval` rule, as an input is: jailed, it loads
+without asking; with `--no-jail`, you are asked first, with the extension's source shown, and a
+no leaves it unloaded until the file changes. What crosses back to bh-02 is data only: a
+command's spec, its arguments and its answer, a field's text, a section's text.
 
-`/release` stops the extensions' process along with the Python process. Every extension loads
-again once the next input has started the Python process.
+`/release` stops the extensions' process along with the Python process: each row stops its own.
+Every extension loads again once the next input has started the Python process, or at once when
+one of them changes.
 
 ## How it went
 

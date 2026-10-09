@@ -1,8 +1,8 @@
 # Rows and layers
 
 bh-02 is a cordis program. Every part of it is a row: the model, the agent loop, the Python
-process, the jail, the app on screen, the slash commands. No part imports another. They agree on
-keys, and any of them can be replaced while bh-02 runs.
+process, the runner that jails it, the app on screen, the slash commands. No part imports
+another. They agree on keys, and any of them can be replaced while bh-02 runs.
 
 ## A row, a component, a key
 
@@ -11,9 +11,9 @@ A **row** is one part of the running program: an `id` (its role), the **componen
 values under **keys**, registers entries in other rows' registries, starts background work. Its
 keyword-only parameters are the keys it needs.
 
-For example, the `loop` row is filled by `agent:loop`. It needs `model`, `kernel`, `transcript`,
-`system`, `approval`, `notes` and `executor`, and binds `loop`. The `chat` row (`chat:session`)
-needs `loop`, and reads your messages and shows the replies.
+For example, the `loop` row is filled by `agent:loop`. It needs `model`, `tools`, `transcript`,
+`system`, `approval`, `output`, `notes` and `executor`, and binds `loop`. The `chat` row
+(`chat:session`) needs `loop`, and reads your messages and shows the replies.
 
 A consumer states what it needs of a key as a Protocol of its own, and cordis checks the bound
 value against it before the consumer starts. A provider imports nothing to satisfy it; it just
@@ -28,11 +28,13 @@ their own:
 
 - **The conversation survives a model switch.** The transcript is its own row, so `/model`
   reloads the model row and the loop over it, and the conversation carries on.
-- **The namespace survives a new model or app.** The `kernel` row depends on its jail alone, so a
-  new model or ui keeps the Python process and what it holds. A new jail starts a new one.
+- **The namespace survives a new model or app.** The `python` row depends on the runner, the
+  `approval` rule and brokers that never reload, so a new model or ui keeps the Python process
+  and what it holds. A new runner starts a new one.
 - **The screen never reloads.** The `ui` row (`tui:app`) depends on nothing but its config. Small
-  rows such as `status` depend on the volatile parts and push into the app's frame, so they
-  reload instead of the app.
+  rows such as `status` and `grades` depend on what they show and push into the app's frame, so a
+  change to what they show reloads them instead of the app. What they show is never replaced by
+  `/clear`, so it reloads none of the status bar.
 
 `/rows` shows each row and its state. [The app](../reference/app.md#the-compositions) has the
 shipped rows and what each depends on.

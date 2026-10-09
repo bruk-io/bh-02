@@ -7,7 +7,7 @@ the person is asked first is the `approval` rule's to answer and the loop's to a
 process depends on its runner alone and a new ui keeps the namespace. It reads `confined` from
 that rule (`Rule`) only to decide what the model is told and whether the startup files run
 unasked: one place decides what runs unasked. The python row starts and stops it, and on
-`/release` stops it itself (`stopped`), so nothing else ever ends it. Every failure the kernel knows of (a
+`/release` stops it itself (`stopped`), so nothing else ever ends it. Every failure the process knows of (a
 worker that died, an answer too long or garbled to read, a worker that won't start again)
 comes back as the input's text, never as an exception. Interrupting an input (cancelling `run`) sends SIGINT
 through the jail, which the worker turns into `KeyboardInterrupt` in the input, and waits for the
@@ -30,7 +30,7 @@ project's, and if that fails the note says why the host did not; it is still the
 the model's to edit, which is what the model is told. (The jail also keeps an input from
 writing in the person's config directory, so a session run from the home directory can't
 choose what a later one reads there: brig's `trusted`.) A startup file that ends the worker is
-passed over by the workers after it, until `/restart kernel`, and the input it cut short says
+passed over by the workers after it, until `/restart python`, and the input it cut short says
 which it was, after what the opening had to tell by then (that the worker was started again,
 and why).
 """
@@ -397,7 +397,7 @@ class Kernel:
                         "",
                         f"error: the REPL could not be started again ({error}), so this input did "
                         "not run; the next input tries again, and if it keeps failing, tell the "
-                        "person (`/restart kernel` starts the row afresh)",
+                        "person (`/restart python` starts the row afresh)",
                     )
                 self._restarted = True
             prefix, self._pending = (f"({self._pending})\n" if self._pending else ""), ""
@@ -416,7 +416,7 @@ class Kernel:
                         prefix + error.told,
                         f"the REPL's process ended as {error.name} ran, before this input{said}, so this "
                         f"input did not run; a new one starts with the next, without {error.name} "
-                        "(`/restart kernel` runs it again)",
+                        "(`/restart python` runs it again)",
                     )
                 return _Output(
                     prefix,
@@ -465,7 +465,7 @@ class Kernel:
             if startup.name in self._passed:
                 notes.append(
                     f"{startup.name} was not run: {self._passed[startup.name]} when it last ran, so what "
-                    "it defines is missing (`/restart kernel` runs it again)"
+                    "it defines is missing (`/restart python` runs it again)"
                 )
                 continue
             if startup.problem:

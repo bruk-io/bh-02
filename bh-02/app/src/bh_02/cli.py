@@ -63,7 +63,7 @@ _UPDATED_HEADER = (
 @click.option("--patch", "patches", multiple=True, type=_PATCH_TYPE, help=_PATCH_HELP)
 @click.option("--trace", default=None, type=_TRACE_TYPE, metavar="FILE", help=_TRACE_HELP)
 @click.option(
-    "--no-jail", is_flag=True, help="Run the kernel unjailed, with your own permissions; every input asks."
+    "--no-jail", is_flag=True, help="Run the model's code unjailed, with your own permissions; every input asks."
 )
 @click.option(
     "--resume",
@@ -84,7 +84,7 @@ def main(
     resume: str | None,
 ) -> None:
     """A coding agent in a terminal app. The model acts in Python, through the python tool, in a
-    persistent kernel inside a jail. Claude is reached through Claude Code on the Claude
+    persistent Python process inside a jail. Claude is reached through Claude Code on the Claude
     subscription, with the CLAUDE_CODE_OAUTH_TOKEN in local.env (`claude setup-token` makes
     one); any OpenAI-compatible model can be added to the models file. Every run is a session
     that `--resume` continues."""

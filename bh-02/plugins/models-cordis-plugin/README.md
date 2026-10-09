@@ -70,12 +70,12 @@ can't be imported, or raises, is a model that can't be used, like any other (`Un
 **The models file must be outside the project.** It is trusted whole: a factory it names runs
 in bh-02's own, unjailed process, and a `key` it names is read from local.env and sent to the
 table's `base_url`. The project is the working directory, which the jail lets the model's code
-write (the kernel's root), and the model row's `cwd` too when a layer sets one. A models file in
+write (the python row's root), and the model row's `cwd` too when a layer sets one. A models file in
 it would let the model choose both, so it is not read (`providers.refused`, `named.in_project`),
 however it got there: bh-02 run from the home directory (`~/.config` is then in the project),
 `$XDG_CONFIG_HOME` or the row's `models` in the project, or a link into it. It counts as the
 project's when the file as named, or any place reading it goes through (each directory and link
-on the way, links followed, to where it ends: `host_paths.passes`, the walk the kernel's startup
+on the way, links followed, to where it ends: `host_paths.passes`, the walk the python row's startup
 files and memory files outside the project are held to), is under the project's root as named or as
 resolved: the model could repoint a link there, or swap a directory there for one, and so choose
 what is read. Whether the file is there does not matter (the model could write one). The
@@ -215,7 +215,7 @@ that can't name Claude Code's session directory); the sections below say when ea
 
 bh-02's loop does all of the following:
 - classifies each step (`stops.classify`) and nudges;
-- runs every call as an input in the kernel, asking the person first when the kernel is unjailed;
+- runs every call through its tool (python's as an input in the Python process), asking the person first when the runner does not confine it;
 - keeps the transcript.
 
 Claude Code does none of that. It runs with no built-in tool (`tools=[]`), no settings file
@@ -339,7 +339,7 @@ hides the real file, at the first read or at any later one (each Claude Code sta
 openai request). The same list is among the jail's `secrets`, so no place searched is one a
 jailed input can read, write or create. `parse_env` (pure) reads it with one read, and the
 token goes only into the SDK options' `env` for the Claude Code child:
-- never into bh-02's `os.environ`, so the kernel and the jail can't inherit it;
+- never into bh-02's `os.environ`, so the Python process and the jail can't inherit it;
 - never on a command line.
 
 The child's env is a `ChildEnv`, whose repr names its keys only (Textual prints a crash with

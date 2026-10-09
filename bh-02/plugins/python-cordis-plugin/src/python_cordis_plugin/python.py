@@ -1,9 +1,9 @@
 """The `python(code)` tool, what the model is told about it, and how a call is put to the person.
 
 CodeAct (Wang et al., arXiv:2402.01030), done as one tool over the provider's standard tool
-calling, and it carries code; the kernel row registers it with `tools`, beside whatever tools
+calling, and it carries code; the python row registers it with `tools`, beside whatever tools
 other rows register, and adds what the model is told about it as a `system` section of its own.
-To the model the tool is a Python REPL of its own that persists (the kernel): each call is one
+To the model the tool is a Python REPL of its own that persists (the Python process): each call is one
 input to it, plain Python that reads and writes files with `open` or `pathlib` and runs programs
 with `subprocess`, and the jail decides what it may touch.
 
