@@ -1,15 +1,16 @@
 """The extensions' own process: a cordis runtime of the components the model wrote.
 
 Run by path (``python -I worker.py SOCKET``) by the `runner`, so it is confined as the
-Python process's inputs are: the model's code runs here, never in bh-02's own process. What it reaches
-of bh-02 is three keys, bound per extension, each of which only adds: `commands.register`, a
-slash command for the person; `frame.status`, a status-bar field; `system.add`, text in the
-model's own prompt. Each sends what it added to the host and returns the remover that takes
-it back, so `acquire` makes a registration last exactly as long as the component.
+Python process's inputs are: the model's code runs here, never in bh-02's own process. What it
+reaches of bh-02 is four keys, bound per extension, each of which only adds: `commands.register`,
+a slash command for the person; `frame.status`, a status-bar field; `system.add`, text in the
+model's own prompt; `tools.register`, a tool offered to the model, whose calls run here. Each
+sends what it added to the host and returns the remover that takes it back, so `acquire` makes a
+registration last exactly as long as the component.
 
 An extension is a module: its source arrives in a `load`, runs as a module of its own, and
 every component it defines is mounted as a child of one fiber per extension, the one that binds
-the three keys (isolated, so each extension's registrations carry its name). An extension may
+the four keys (isolated, so each extension's registrations carry its name). An extension may
 `bind` keys of its own for another to depend on: those are shared, as in any composition.
 
 Wire: newline-delimited JSON. The host sends ``{"op": "hello"}`` once (a readiness probe
@@ -20,11 +21,14 @@ connects and closes without a word, so the worker keeps accepting until one spea
   error that kept the module from loading at all. A name loaded again replaces what it was.
 - ``{"op": "unload", "name"}``, answered ``{"op": "unloaded", "name"}``.
 - ``{"op": "run", "call", "command", "args"}``, answered ``{"op": "ran", "call", "answer"}``.
+- ``{"op": "call", "call", "tool", "input"}`` (a call to a tool, `input` its arguments),
+  answered ``{"op": "ran", "call", "answer"}``, `answer` the text the model reads.
 
 and the worker sends, whenever an extension adds or takes back an entry,
 ``{"op": "add", "id", "extension", "kind", ...}`` (`command` with `spec`, `status` with `field`
-and `forms`, `context` with `text`) and ``{"op": "remove", "id"}``. A worker nobody says hello
-to exits once its parent is gone or after `_HELLO_S`; one whose host disconnects exits too.
+and `forms`, `context` with `text`, `tool` with `spec`) and ``{"op": "remove", "id"}``. A
+worker nobody says hello to exits once its parent is gone or after `_HELLO_S`; one whose host
+disconnects exits too.
 """
 
 import asyncio
@@ -45,9 +49,9 @@ from cordis import Component, Effects, Fiber, Inspection, Runtime, State, bind, 
 
 __all__ = ["main"]
 
-type Run = Callable[[str], Awaitable[object]]
+type Run = Callable[[Any], Awaitable[object]]  # a command's (its argument text) or a tool's (its input)
 
-_OFFERED = ("commands", "frame", "system")  # the keys an extension reaches bh-02 through
+_OFFERED = ("commands", "frame", "system", "tools")  # the keys an extension reaches bh-02 through
 _COMMAND = re.compile(r"[a-z][a-z-]*")  # a name the `commands` broker can parse back out of a line
 _MAX_TEXT = 20_000  # an answer, a field or a section: the host reads one line per message
 _HELLO_S = 60.0
@@ -58,7 +62,7 @@ _SETTLE_S = 10.0  # how long a load waits for its rows to come up before saying 
 
 class _Bridge:
     """The socket's writing end, every entry extensions added (by id, with whose it is), and
-    the commands among them."""
+    the commands and tools among them."""
 
     def __init__(self, writer: asyncio.StreamWriter) -> None:
         self._writer = writer
@@ -165,6 +169,34 @@ class _System:
         return self._bridge.add(self._extension, "context", {"text": _text(text, "a prompt section")})
 
 
+class _Tools:
+    """`tools` as an extension sees it: it can only offer the model a tool, whose calls run here."""
+
+    def __init__(self, bridge: _Bridge, extension: str) -> None:
+        self._bridge = bridge
+        self._extension = extension
+
+    def register(self, spec: Mapping[str, Any], run: Run) -> Callable[[], None]:
+        """Offer the model a tool (`spec`: `name`, `description`, and `parameters`, a JSON
+        Schema object); `run` is async, the call's arguments (a dict) in, the text the model
+        reads out (anything else is sent as JSON). Returns the remover. bh-02 checks the spec
+        when it arrives: one it refuses is in status.json's `problems`, saying why."""
+        name = spec.get("name") if isinstance(spec, Mapping) else None
+        if not isinstance(name, str):
+            raise ValueError(
+                f"a tool's spec is a dict with a `name`, `description` and `parameters`; got {spec!r}"
+            )
+        if not callable(run):
+            raise TypeError(f"the tool {name!r}: run must be an async function of the call's arguments")
+        try:
+            fields = {"spec": json.loads(json.dumps(dict(spec)))}
+        except TypeError, ValueError:
+            raise ValueError(
+                f"the tool {name!r}'s spec must be plain JSON (dicts, lists, text, numbers)"
+            ) from None
+        return self._bridge.add(self._extension, "tool", fields, run)
+
+
 @dataclass(frozen=True, slots=True)
 class _Loaded:
     """One extension: its name, and the components its module defines."""
@@ -176,11 +208,12 @@ class _Loaded:
 
 
 async def _extension(*, config: _Loaded) -> Effects:
-    """One extension's fiber: binds its own `commands`, `frame` and `system` (isolated, so each
-    is the extension's alone and tagged with its name), then mounts its components."""
+    """One extension's fiber: binds its own `commands`, `frame`, `system` and `tools` (isolated,
+    so each is the extension's alone and tagged with its name), then mounts its components."""
     yield bind("commands", _Commands(config.bridge, config.name))
     yield bind("frame", _Frame(config.bridge, config.name))
     yield bind("system", _System(config.bridge, config.name))
+    yield bind("tools", _Tools(config.bridge, config.name))
     for made in config.components:
         row: Fiber = yield use(made, id=f"{config.name}.{made.name}")
         config.rows.append(row)
@@ -271,6 +304,20 @@ class _Extensions:
             return f"failed: {type(error).__name__}: {error}"
         return "" if answer is None else (answer if isinstance(answer, str) else str(answer))[:_MAX_TEXT]
 
+    async def call(self, tool: int, input: Mapping[str, Any]) -> str:
+        """A call to a tool an extension registered: what the model reads of it, its error
+        included (the call's answer, not the reply's failure)."""
+        run = self._bridge.runs.get(tool)
+        if run is None:
+            return "error: this tool's extension has been unloaded"
+        try:
+            answer = await run(dict(input))
+        except Exception as error:
+            return f"error: {type(error).__name__}: {error}"[:_MAX_TEXT]
+        if answer is None or isinstance(answer, str):
+            return (answer or "")[:_MAX_TEXT]
+        return json.dumps(answer, ensure_ascii=False, default=str)[:_MAX_TEXT]
+
 
 async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     """Answer the host until it disconnects, then unload everything."""
@@ -293,6 +340,12 @@ async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
                 bridge.send({"op": "unloaded", "name": name})
             case "run":
                 said = await extensions.run(int(message["command"]), str(message.get("args", "")))
+                bridge.send({"op": "ran", "call": message["call"], "answer": said})
+            case "call":
+                given = message.get("input")
+                said = await extensions.call(
+                    int(message["tool"]), given if isinstance(given, Mapping) else {}
+                )
                 bridge.send({"op": "ran", "call": message["call"], "answer": said})
 
     try:

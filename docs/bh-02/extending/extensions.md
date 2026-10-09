@@ -14,12 +14,12 @@ status bar, or text in its own prompt. No layer changes and nothing restarts.
   repository you clone that ships a `.bh-02/plugins/` loads its extensions too, under the same
   rules as the model's.
 
-The model's prompt tells it how to write one: enough cordis to get it right, the three keys it
+The model's prompt tells it how to write one: enough cordis to get it right, the four keys it
 can reach, and how to try a component in an input before writing its file.
 
 ## What an extension can do
 
-An extension reaches bh-02 through three keys, each of which only adds, and each addition is
+An extension reaches bh-02 through four keys, each of which only adds, and each addition is
 taken back when the extension goes:
 
 | Key | What it adds |
@@ -27,6 +27,7 @@ taken back when the extension goes:
 | `commands.register(spec, run)` | a slash command for you. A name bh-02 already has is refused. |
 | `frame.status(field, text, *shorter)` | a status bar field, shown as `NAME:field` so it can't cover another |
 | `system.add(text)` | text in the model's own prompt, told with the next message it reads |
+| `tools.register(spec, run)` | a tool offered to the model, as `python` is. Its calls run in the extension's jail; unjailed, you are asked about each one, shown its name and arguments. `python`, or a name another row's tool has, is refused. |
 
 It can't claim a line prefix such as `!` (that takes every line you start with it, so only a row
 in a layer may), replace a row, rebind one of bh-02's keys, or reach the loader. Those don't exist

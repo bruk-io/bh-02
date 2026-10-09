@@ -259,8 +259,9 @@ loaded afresh; deleted, unloaded), so the model can evolve the harness without a
 a layer. They run in a second worker the runner starts (`extensions_cordis_plugin.worker`,
 a cordis runtime of its own, listed in `cordis-in-wiring-only`'s `shell`), never in bh-02's
 process: each load goes through the `approval` rule with its source, as an input does (jailed,
-without asking; unjailed, the person decides). An extension reaches bh-02 only through three keys bound in
-that worker, each of which only adds (`commands.register`, `frame.status`, `system.add`; never
+without asking; unjailed, the person decides). An extension reaches bh-02 only through four keys bound in
+that worker, each of which only adds (`commands.register`, `frame.status`, `system.add`,
+`tools.register`, a tool whose calls run in that worker, checked and decided as an input; never
 `commands.claim`, a line prefix, which takes every line the person starts with it); the host
 registers what arrives into the real keys and keeps the removers. Its own `system` section
 tells the model how, and `.bh-02/plugins/status.json` tells it how each load went. The model

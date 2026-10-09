@@ -20,6 +20,7 @@ import pytest
 
 import cordis
 import memory_cordis_plugin
+from agent_cordis_plugin import ToolBroker
 from bh_02.bootstrap import (
     code_directories,
     code_packages,
@@ -658,7 +659,9 @@ async def test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_in
     added = _Added()
     jail = BrigJail(BrigConfig(), _Layers(code=_code()))
     config = ExtensionsConfig(root=str(project), watch=3600)  # entering looks once
-    async with Extensions(Runner(jail), added, added, added, added, added, config) as extensions:
+    async with Extensions(
+        Runner(jail), added, added, added, ToolBroker(), added, added, config
+    ) as extensions:
         status = json.loads((plugins / "status.json").read_text())
         assert extensions.statuses["hello"].ok, status
         assert status["hello"]["state"] == "active", status

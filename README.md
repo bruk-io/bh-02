@@ -168,7 +168,7 @@ The techniques above, and where to read them in real code:
 | **Watching the program change** (`observe`) | `tui:app` | the terminal app hears every lifecycle event and shows `↻ model reloaded` as rows reload |
 | **Two consumers, two contracts** | the `runner` key | the python row needs a start (`start`, `on_release`); the grades row needs each start's grades (`report`, `on_start`); each declares its own Protocol for the same value |
 | **Stable rows around volatile ones** | bh-02's `ui`, `status` and `grades` rows | the app's row depends on nothing but its config, so it never reloads; the small status-bar rows depend on what never restarts (the grades row is told each start by the runner), so `/clear` reloads none of the screen |
-| **A program's own user adds parts while it runs** | `extensions:extensions` | the model writes cordis components into the project's `.bh-02/plugins/`; each loads in a second jailed worker, reaches bh-02 only through three keys that add (a command, a status field, prompt text), and is undone in reverse when its file changes or goes |
+| **A program's own user adds parts while it runs** | `extensions:extensions` | the model writes cordis components into the project's `.bh-02/plugins/`; each loads in a second jailed worker, reaches bh-02 only through four keys that add (a command, a status field, prompt text, a tool whose calls run in that worker), and is undone in reverse when its file changes or goes |
 | **Who owns the main thread** | `warden --tray` | the macOS menu-bar app needs the main thread, so the composition runs on a background thread and quitting the tray unwinds it through the same shutdown |
 
 ## brig: sandboxes that say what they enforce

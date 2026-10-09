@@ -87,6 +87,7 @@ def test_the_status_bar_and_the_status_file_say_how_each_one_is() -> None:
         "rows": {},
         "error": "boom",
         "commands": [],
+        "tools": [],
         "problems": [],
     }
     assert written["todo"]["state"] == "active"

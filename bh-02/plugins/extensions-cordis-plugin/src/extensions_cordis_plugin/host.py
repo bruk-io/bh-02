@@ -10,8 +10,11 @@ when the runner confines what runs in it; otherwise (`--no-jail`) the person dec
 
 What an extension adds reaches bh-02 as data over the worker's socket: a slash command, which
 this registers in `commands` and runs by asking the worker; a status-bar field, pushed into
-`frame` under the extension's own name; a section of the model's prompt, added to `system`.
-Each is kept with its remover, and taken back when the worker says so or the worker ends.
+`frame` under the extension's own name; a section of the model's prompt, added to `system`; a
+tool, whose spec this checks (`offered.offered_tool`) and registers in `tools` as running in the
+runner, each call shown by its name and arguments and run by asking the worker, so the `approval`
+rule decides each call as it does an input. Each is kept with its remover, and taken back when the
+worker says so or the worker ends.
 
 The model hears how each extension went in two places: its prompt (`section`, read per
 request) and `status.json` in the extensions directory, written as soon as a load ends, so an
@@ -52,6 +55,7 @@ from sys import executable
 from types import TracebackType
 from typing import Any, Protocol, runtime_checkable
 
+from extensions_cordis_plugin.offered import RESERVED, offered_tool, shown_tool_call
 from extensions_cordis_plugin.watch import (
     Status,
     changes,
@@ -74,6 +78,7 @@ __all__ = [
     "Rule",
     "Runner",
     "System",
+    "Tools",
     "worker_argv",
 ]
 
@@ -138,6 +143,22 @@ class System(Protocol):
 
 
 @runtime_checkable
+class Tools(Protocol):
+    """What the extensions need of the `tools` value (CONTRACTS.md: tools): a tool registered, and
+    its remover back; and the tools registered, whose names are bh-02's own, not an extension's."""
+
+    def register(
+        self,
+        spec: Mapping[str, Any],
+        run: Callable[[Mapping[str, Any]], Awaitable[Mapping[str, Any]]],
+        *,
+        runs: str = ...,
+        show: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = ...,
+    ) -> Callable[[], None]: ...
+    def specs(self) -> Sequence[Mapping[str, Any]]: ...
+
+
+@runtime_checkable
 class Rule(Protocol):
     """What the extensions need of the `approval` value (CONTRACTS.md: approval): whether the
     runner confines what runs in it (which the model is told), and whether a load runs unasked."""
@@ -167,10 +188,11 @@ class ExtensionsConfig:
 
 @dataclass(frozen=True, slots=True)
 class _Entry:
-    """Something an extension added to bh-02: whose, what (`/todo`, a field), and its remover
-    (None when bh-02 refused it)."""
+    """Something an extension added to bh-02: whose, what kind (`command`, `tool`, ...), what
+    (`/todo`, a field, a tool's name), and its remover (None when bh-02 refused it)."""
 
     extension: str
+    kind: str
     label: str
     remove: Callable[[], None] | None
 
@@ -199,11 +221,13 @@ class Extensions:
         commands: Commands,
         frame: Frame,
         system: System,
+        tools: Tools,
         approval: Rule,
         output: Confirm,
         config: ExtensionsConfig,
     ) -> None:
         self._runner = runner
+        self._tools = tools
         self._output = output
         self._commands = commands
         self._frame = frame
@@ -218,6 +242,8 @@ class Extensions:
         self._at_release: dict[str, tuple[int, int]] = {}  # the directory when `/release` stopped it
         self._leaving = False
         self._entries: dict[int, _Entry] = {}
+        self._own_tools: set[str] = set()  # the tools the extensions registered, by name
+        self._reserved: set[str] = set(RESERVED)  # every tool name a row of bh-02's own registered
         self._problems: dict[str, list[str]] = {}
         self._answers: dict[str, asyncio.Future[Mapping[str, Any]]] = {}
         self._calls: dict[int, asyncio.Future[str]] = {}
@@ -291,6 +317,7 @@ class Extensions:
     async def look(self) -> None:
         """Look at the extensions directory once: load what is new or changed, unload what is
         gone. The watcher does this every `watch` seconds."""
+        self._note_reserved()
         found = self._found()
         if self._ended:
             self._stopped(found)
@@ -426,7 +453,12 @@ class Extensions:
             rows={str(row): str(state) for row, state in rows.items()},
             error=None if error is None else str(error),
             commands=tuple(
-                e.label for e in self._entries.values() if e.extension == name and e.label.startswith("/")
+                e.label for e in self._entries.values() if e.extension == name and e.kind == "command"
+            ),
+            tools=tuple(
+                e.label
+                for e in self._entries.values()
+                if e.extension == name and e.kind == "tool" and e.remove is not None
             ),
             problems=tuple(self._problems.get(name, ())),
         )
@@ -504,14 +536,61 @@ class Extensions:
                     text = str(message["text"])
                     label = "a prompt section"
                     remove = self._system.add(f"extensions: {extension}", lambda: text)
+                case "tool":
+                    sent = message.get("spec")
+                    name = str(sent.get("name")) if isinstance(sent, Mapping) else "?"
+                    label = f"the tool {name!r}"
+                    remove = self._tool(entry, extension, sent)
+                    label = name  # registered: status.json lists it by name
                 case _:  # a line prefix among them: only a layer's row may claim one
                     raise ValueError(
-                        "an extension adds a slash command, a status field or a prompt section, "
-                        "and nothing else"
+                        "an extension adds a slash command, a status field, a prompt section or a "
+                        "tool, and nothing else"
                     )
         except Exception as error:  # bh-02 refused it: a command name another row has, say
             self._problems.setdefault(extension, []).append(f"{label} was not added: {error}")
-        self._entries[entry] = _Entry(extension, label, remove)
+        self._entries[entry] = _Entry(extension, str(kind), label, remove)
+
+    def _tool(self, entry: int, extension: str, sent: object) -> Callable[[], None]:
+        """Register a tool an extension sent, once its spec passes (`offered_tool`: a name of its
+        own, not bh-02's, a JSON Schema, a size cap), as running in the runner: the `approval`
+        rule decides each call as it does an input, and a call is shown by its name and
+        arguments. Returns its remover. Raises ValueError saying why bh-02 refused it."""
+        self._note_reserved()
+        spec = offered_tool(sent, self._reserved)
+        name = spec["name"]
+        unregister = self._tools.register(
+            spec,
+            functools.partial(self._call, entry),
+            runs="jail",
+            show=functools.partial(shown_tool_call, extension, name),
+        )
+        self._own_tools.add(name)
+
+        def remove() -> None:
+            self._own_tools.discard(name)
+            unregister()
+
+        return remove
+
+    def _note_reserved(self) -> None:
+        """Keep every tool name a row of bh-02's own has registered as bh-02's, for good: an
+        extension can't take it while that row restarts."""
+        self._reserved |= {str(spec.get("name")) for spec in self._tools.specs()} - self._own_tools
+
+    async def _call(self, entry: int, input: Mapping[str, Any]) -> dict[str, Any]:
+        """A call to a tool an extension registered (CONTRACTS.md: tools, `run`): run in the
+        worker, its answer what the model reads."""
+        call = next(self._call_ids)
+        answer: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        self._calls[call] = answer
+        try:
+            self._send({"op": "call", "call": call, "tool": entry, "input": dict(input)})
+            return {"content": await answer}
+        except _Gone as gone:
+            return {"content": f"error: {gone}"}
+        finally:
+            self._calls.pop(call, None)
 
     async def _run(self, entry: int, args: str) -> str:
         """A command an extension registered: run in the worker, its answer shown to the person."""

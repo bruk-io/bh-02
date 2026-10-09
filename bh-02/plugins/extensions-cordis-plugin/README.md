@@ -6,7 +6,7 @@ restart; what keeps that safe is where the code runs, not who reads it first.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame` and `system`; its own `system` section tells the model how; registers its worker's stop with the runner (`/release`) | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `approval` (`confined`, `unasked`), `output` (`confirm`) |
+| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame`, `system` and `tools`; its own `system` section tells the model how; registers its worker's stop with the runner (`/release`) | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `tools` (`register`, `specs`), `approval` (`confined`, `unasked`), `output` (`confirm`) |
 
 Config (`ExtensionsConfig`): `root` (the project, `.`), `path` (the extensions directory under
 it, `.bh-02/plugins`), `watch` (how often it is looked at, 0.5 s).
@@ -42,11 +42,25 @@ What an extension reaches of bh-02, each only to add to it, each returning its r
   `commands.claim`, a line prefix (`!`): a prefix takes every line the person starts with it
   (`!` runs it in their shell, unjailed), so only a row in a layer may claim one. The worker's
   `commands.claim` raises `PermissionError` saying so, and the host adds nothing an extension
-  sends but a command, a status field and a prompt section (anything else is a `problem`).
+  sends but a command, a status field, a prompt section and a tool (anything else is a `problem`).
 - `frame.status(field, text, *shorter)`: a status-bar field, pushed as `NAME:field`, so it
   can't cover another row's.
 - `system.add(text)`: text in the model's own prompt, told with the next message the model reads
   (the loop keeps the prompt a conversation began with and tells a change as a note).
+- `tools.register(spec, run)`: a tool offered to the model (`spec`: `name`, `description`,
+  `parameters`, a JSON Schema object; `run`: async, the call's arguments as a dict in, the text
+  the model reads out, anything else sent as JSON). The host does not trust what the worker
+  sends: it rebuilds the spec from those three parts (`offered.offered_tool`) and refuses, as a
+  `problem`, a name that is not lowercase letters, digits and `_` (48 at most), one of bh-02's
+  own (`python`, and every name a layer row has registered, kept even while that row restarts),
+  parameters that are no object schema, or a spec over 16 KiB. It registers the tool with
+  `runs = "jail"`, so the `approval` rule decides each call as it does an input, and `show`
+  (`offered.shown_tool_call`): unjailed, the person is asked, shown the tool's name, its
+  extension and the arguments as JSON. A call goes to the worker (`call`) and its answer, or the
+  error `run` raised, is the result; a redefined extension offers its new spec, a deleted one
+  takes the tool back, and a call after that is answered as a tool that is gone. The model is
+  told of each change as the loop tells any (`agent_cordis_plugin.toolset`), so a tool added
+  mid-conversation waits for the next one on a provider that keeps the list fixed.
 
 A component may also `bind` keys of its own, which another extension's components can depend
 on. It can't replace a row, rebind one of bh-02's keys or reach the loader: those don't exist
@@ -57,7 +71,7 @@ What the model is told (`watch.instructions`, the row's `system` section) is eno
 write one and no more, since it goes out with every request: the lifecycle rule (a component
 runs while what it needs is bound, starts again when that is replaced, and is undone in reverse
 when it leaves), the effects it uses (`acquire`, `bind`, `enter`, `background`), Protocol
-contracts, the three keys, and how to try a component in an input before writing its file
+contracts, the four keys, and how to try a component in an input before writing its file
 (`asyncio.run(cordis.testing.drive(todo(commands=fake, system=fake)))`, cordis being importable
 there). The rest it can read: cordis's README, whose path it is given when bh-02 runs from the
 workspace (an editable install), and `help(cordis.background)` and the like.
@@ -134,10 +148,11 @@ runs), registered in `sys.modules` under a name of its own while it is loaded, s
 scan finds a component by its module.
 
 Wire, newline-delimited JSON. Host to worker: `hello` once, then `load` (`name`, `path`,
-`source`), `unload` (`name`), `run` (`call`, `command`, `args`). Worker to host: `loaded`
-(`name`, `rows`, `error`), `unloaded` (`name`), `ran` (`call`, `answer`), and, whenever an
-extension adds or takes back an entry, `add` (`id`, `extension`, `kind`: `command` with
-`spec`, `status` with `field` and `forms`, `context` with `text`) and `remove` (`id`). Texts
+`source`), `unload` (`name`), `run` (`call`, `command`, `args`), `call` (`call`, `tool`,
+`input`: a call to a tool). Worker to host: `loaded` (`name`, `rows`, `error`), `unloaded`
+(`name`), `ran` (`call`, `answer`, a command's or a tool's), and, whenever an extension adds or
+takes back an entry, `add` (`id`, `extension`, `kind`: `command` with `spec`, `status` with
+`field` and `forms`, `context` with `text`, `tool` with `spec`) and `remove` (`id`). Texts
 are capped at 20,000 characters.
 
 The worker starts with the first extension there is to load. One that ends (an extension can

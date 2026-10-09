@@ -63,7 +63,9 @@ _UPDATED_HEADER = (
 @click.option("--patch", "patches", multiple=True, type=_PATCH_TYPE, help=_PATCH_HELP)
 @click.option("--trace", default=None, type=_TRACE_TYPE, metavar="FILE", help=_TRACE_HELP)
 @click.option(
-    "--no-jail", is_flag=True, help="Run the model's code unjailed, with your own permissions; every input asks."
+    "--no-jail",
+    is_flag=True,
+    help="Run the model's code unjailed, with your own permissions; every input asks.",
 )
 @click.option(
     "--resume",
