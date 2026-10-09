@@ -34,6 +34,7 @@ async def test_loop_binds_a_model_over_what_it_was_given() -> None:
             transcript=history,
             system=object(),
             approval=object(),
+            output=object(),
             notes=Hooks(),
             executor=OneAtATime(),
             config=LoopConfig(),

@@ -8,7 +8,7 @@ import pytest
 from textual.message import Message
 
 from tui_cordis_plugin import AppCrashed, Bridge, Frame, TuiInput, TuiOutput
-from tui_cordis_plugin.messages import Asked, FrameChanged, Noted, RowsUp, Shown, TurnEnded, TurnStarted
+from tui_cordis_plugin.messages import Asked, FrameChanged, Noted, Shown, TurnEnded, TurnStarted
 
 
 class Posted:
@@ -414,33 +414,20 @@ async def test_a_line_kept_during_a_command_names_no_row_reloading_meanwhile() -
     assert await bridge.line() == "hello"
 
 
-def test_a_status_field_removed_while_rows_come_up_stays_until_pushed_again_or_released() -> None:
-    """`/clear` restarts the kernel, and so the `status` row: its field is not blank for
-    the second it takes to come back. When every row is up the output says so (`RowsUp`), and
-    the app `release`s a field no row pushed again."""
+def test_a_status_field_removed_is_gone_at_once_and_the_bar_redrawn() -> None:
+    """Nothing keeps a field across a reload: each push leaves with its remover, the earlier push
+    of the same field showing again."""
     posted = Posted()
-    bridge = Bridge()
-    frame = Frame(posted, lambda: bridge.settling)
-    output = TuiOutput(posted, bridge)
-    remove_jail = frame.status("jail", "jailed")
-    remove_gone = frame.status("gone", "soon")
-    output.lifecycle(_Event("unloading", "kernel"))
-    remove_jail()
-    remove_gone()
-    assert frame.fields() == {"jail": "jailed", "gone": "soon"}  # the last text, kept
-    output.lifecycle(_Event("inactive", "kernel"))  # the old kernel is gone, the new not yet up
-    assert [m for m in posted.messages if isinstance(m, RowsUp)]
-    output.lifecycle(_Event("reload", "kernel"))
-    output.lifecycle(_Event("active", "kernel"))
-    frame.status("jail", "unjailed")  # status came back and pushed again: that shows
-    assert frame.fields() == {"jail": "unjailed", "gone": "soon"}
-    posted.messages.clear()
-    frame.release()
+    frame = Frame(posted)
+    remove_first = frame.status("jail", "jailed")
+    remove_later = frame.status("jail", "unjailed")
     assert frame.fields() == {"jail": "unjailed"}
+    posted.messages.clear()
+    remove_later()
+    assert frame.fields() == {"jail": "jailed"}
     assert [m.what for m in posted.messages if isinstance(m, FrameChanged)] == ["status"]  # redrawn
-    remove = frame.status("x", "y")
-    remove()  # removed while every row is up: gone at once
-    assert "x" not in frame.fields()
+    remove_first()
+    assert frame.fields() == {}
 
 
 def test_frame_offers_commands_read_afresh() -> None:

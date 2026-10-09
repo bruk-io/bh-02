@@ -98,4 +98,4 @@ file while the Python process runs. To add it:
 
 [The jail and approval](../how-it-works/jail-and-approval.md) explains how the jail and the
 approval rule fit together, and the brig plugin's README has every detail:
-[brig-cordis-plugin](../reference/plugins/brig.md).
+[runner-cordis-plugin](../reference/plugins/runner.md).

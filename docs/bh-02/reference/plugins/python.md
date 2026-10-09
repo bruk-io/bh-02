@@ -1,1 +1,1 @@
-{% include-markdown "../../../../bh-02/plugins/kernel-cordis-plugin/README.md" %}
+{% include-markdown "../../../../bh-02/plugins/python-cordis-plugin/README.md" %}

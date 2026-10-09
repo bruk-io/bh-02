@@ -43,7 +43,6 @@ from tui_cordis_plugin.messages import (
     Asked,
     FrameChanged,
     Noted,
-    RowsUp,
     Shown,
     TurnEnded,
     TurnStarted,
@@ -123,11 +122,6 @@ class Bridge:
         if self._announced:
             return self._announced
         return frozenset() if self._busy else self._starting - self._keyless.unwaited
-
-    @property
-    def settling(self) -> bool:
-        """Whether any row is coming (back) up, turn or no turn."""
-        return bool(self._starting)
 
     def row_changed(self, kind: str, row: str) -> frozenset[str]:
         """Hear one lifecycle event (cordis's `kind` of row `row`): which rows are coming up.
@@ -444,11 +438,8 @@ class TuiOutput:
     def lifecycle(self, event: _Lifecycle) -> None:
         """Note a change to the running composition: a row reloaded, or one that failed; and
         tell the bridge which rows are coming up, for a line typed meanwhile."""
-        settling = self._bridge.settling
         if waiting := self._bridge.row_changed(event.kind, event.fiber):
             self._post(Noted(render.waiting_line(waiting)))
-        if settling and not self._bridge.settling:
-            self._post(RowsUp())
         line = render.lifecycle_line(event.kind, event.fiber, event.error, event.fiber in self._up)
         # A row seen active, or seen going down (it was up, perhaps before the app was there to
         # hear it: the model row depends on nothing and is up first), comes back as a reload.
@@ -462,17 +453,15 @@ class Frame:
     """Implements `frame` (CONTRACTS.md): what rows push into the app's frame.
 
     Every push returns its remover, so a row `acquire`s it and its entry leaves with it. Two
-    rows pushing the same status field: the later push shows until it is removed. A status
-    field removed while rows come (back) up keeps its last text until it is pushed again or
-    the app `release`s it (once they have all been up for a moment).
+    rows pushing the same status field: the later push shows until it is removed. A row that
+    pushes a field reloads only with what it shows (the grades' row with the runner, never on
+    `/clear`), so nothing here keeps a field across a reload.
     """
 
-    def __init__(self, post: Post, settling: Callable[[], bool] = lambda: False) -> None:
+    def __init__(self, post: Post) -> None:
         self._post = post
-        self._settling = settling  # whether rows are coming (back) up (the bridge's `settling`)
         self._next = 0
         self._entries: dict[int, tuple[str, Any]] = {}  # token -> (what, value), in push order
-        self._kept: dict[str, tuple[str, ...]] = {}  # status fields removed while rows came up
 
     def status(self, field: str, text: str, *shorter: str) -> Remover:
         """Show `text` in the status bar under `field` until the remover is called.
@@ -497,7 +486,7 @@ class Frame:
 
     def forms(self) -> dict[str, tuple[str, ...]]:
         """Each status field's forms, the full text first then any shorter ones; as `fields`."""
-        shown = dict(self._kept)
+        shown: dict[str, tuple[str, ...]] = {}
         for field, forms in self._pushed("status"):
             shown[field] = forms
         return shown
@@ -506,32 +495,17 @@ class Frame:
         """Every command spec offered now, in push order (each source read afresh)."""
         return [spec for specs in self._pushed("commands") for spec in specs()]
 
-    def release(self) -> None:
-        """Drop the status fields kept while rows came up: their rows did not push them again."""
-        if self._kept:
-            self._kept.clear()
-            self._post(FrameChanged("status"))
-
     def _pushed(self, what: str) -> list[Any]:
         return [value for kind, value in self._entries.values() if kind == what]
 
     def _push(self, what: str, value: Any) -> Remover:
         token, self._next = self._next, self._next + 1
-        if what == "status":
-            self._kept.pop(value[0], None)  # pushed again: the new text replaces the kept one
         self._entries[token] = (what, value)
         self._post(FrameChanged(what))
         return functools.partial(self._remove, token)
 
     def _remove(self, token: int) -> None:
-        """Drop an entry. A status field removed while rows are coming (back) up (`jail`, as
-        `/clear` restarts the kernel and so the row showing it) keeps its last text, unless
-        another push shows that field: the row pushing it is most likely one of them, and
-        pushes it again; `release` drops what nobody pushed again."""
+        """Drop an entry."""
         if (entry := self._entries.pop(token, None)) is None:
             return
-        what, value = entry
-        if what == "status" and self._settling() and value[0] not in self.forms():
-            field, forms = value
-            self._kept[field] = forms
-        self._post(FrameChanged(what))
+        self._post(FrameChanged(entry[0]))

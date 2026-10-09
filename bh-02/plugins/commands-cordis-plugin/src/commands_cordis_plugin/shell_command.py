@@ -4,7 +4,7 @@ it printed waits for the model.
 The person typed it, so it runs as them: not in the jail, in the project (`cwd`), through their
 shell (`$SHELL -c`, else `/bin/sh -c`), in bh-02's own environment less what is the host's alone
 (`ANTHROPIC_*` and `CLAUDE*`: a Claude credential the person exported, what a launching Claude
-Code left), as `kernel:unjailed` drops them, since what it prints goes to the model. Nothing here
+Code left), as `runner:unconfined` drops them, since what it prints goes to the model. Nothing here
 reads `local.env`.
 
 The app owns the terminal, so the command gets none of it: no input, its output (stdout and

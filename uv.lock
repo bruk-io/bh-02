@@ -7,16 +7,16 @@ members = [
     "agent-cordis-plugin",
     "bh-02",
     "brig",
-    "brig-cordis-plugin",
     "chat-cordis-plugin",
     "commands-cordis-plugin",
     "cordis",
     "cordis-helpers",
     "extensions-cordis-plugin",
     "host-paths",
-    "kernel-cordis-plugin",
     "memory-cordis-plugin",
     "models-cordis-plugin",
+    "python-cordis-plugin",
+    "runner-cordis-plugin",
     "tui-cordis-plugin",
     "warden",
     "warden-cordis-plugin",
@@ -135,32 +135,32 @@ version = "0.1.0"
 source = { editable = "bh-02/app" }
 dependencies = [
     { name = "agent-cordis-plugin" },
-    { name = "brig-cordis-plugin" },
     { name = "chat-cordis-plugin" },
     { name = "click" },
     { name = "commands-cordis-plugin" },
     { name = "cordis" },
     { name = "extensions-cordis-plugin" },
     { name = "host-paths" },
-    { name = "kernel-cordis-plugin" },
     { name = "memory-cordis-plugin" },
     { name = "models-cordis-plugin" },
+    { name = "python-cordis-plugin" },
+    { name = "runner-cordis-plugin" },
     { name = "tui-cordis-plugin" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "agent-cordis-plugin", editable = "bh-02/plugins/agent-cordis-plugin" },
-    { name = "brig-cordis-plugin", editable = "bh-02/plugins/brig-cordis-plugin" },
     { name = "chat-cordis-plugin", editable = "bh-02/plugins/chat-cordis-plugin" },
     { name = "click", specifier = ">=8" },
     { name = "commands-cordis-plugin", editable = "bh-02/plugins/commands-cordis-plugin" },
     { name = "cordis", editable = "libs/cordis" },
     { name = "extensions-cordis-plugin", editable = "bh-02/plugins/extensions-cordis-plugin" },
     { name = "host-paths", editable = "libs/host-paths" },
-    { name = "kernel-cordis-plugin", editable = "bh-02/plugins/kernel-cordis-plugin" },
     { name = "memory-cordis-plugin", editable = "bh-02/plugins/memory-cordis-plugin" },
     { name = "models-cordis-plugin", editable = "bh-02/plugins/models-cordis-plugin" },
+    { name = "python-cordis-plugin", editable = "bh-02/plugins/python-cordis-plugin" },
+    { name = "runner-cordis-plugin", editable = "bh-02/plugins/runner-cordis-plugin" },
     { name = "tui-cordis-plugin", editable = "bh-02/plugins/tui-cordis-plugin" },
 ]
 
@@ -177,23 +177,6 @@ wheels = [
 name = "brig"
 version = "0.0.1"
 source = { editable = "libs/brig" }
-
-[[package]]
-name = "brig-cordis-plugin"
-version = "0.1.0"
-source = { editable = "bh-02/plugins/brig-cordis-plugin" }
-dependencies = [
-    { name = "brig" },
-    { name = "cordis" },
-    { name = "host-paths" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "brig", editable = "libs/brig" },
-    { name = "cordis", editable = "libs/cordis" },
-    { name = "host-paths", editable = "libs/host-paths" },
-]
 
 [[package]]
 name = "cffi"
@@ -540,21 +523,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d", size = 32855, upload-time = "2025-09-08T01:34:59.186Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/45/1a4ed80516f02155c51f51e8cedb3c1902296743db0bbc66608a0db2814f/jsonschema_specifications-2025.9.1-py3-none-any.whl", hash = "sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe", size = 18437, upload-time = "2025-09-08T01:34:57.871Z" },
-]
-
-[[package]]
-name = "kernel-cordis-plugin"
-version = "0.1.0"
-source = { editable = "bh-02/plugins/kernel-cordis-plugin" }
-dependencies = [
-    { name = "cordis" },
-    { name = "host-paths" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cordis", editable = "libs/cordis" },
-    { name = "host-paths", editable = "libs/host-paths" },
 ]
 
 [[package]]
@@ -1082,6 +1050,21 @@ wheels = [
 ]
 
 [[package]]
+name = "python-cordis-plugin"
+version = "0.1.0"
+source = { editable = "bh-02/plugins/python-cordis-plugin" }
+dependencies = [
+    { name = "cordis" },
+    { name = "host-paths" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cordis", editable = "libs/cordis" },
+    { name = "host-paths", editable = "libs/host-paths" },
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -1226,6 +1209,25 @@ dependencies = [
     { name = "pyobjc-framework-cocoa" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b2/e2/2e6a47951290bd1a2831dcc50aec4b25d104c0cf00e8b7868cbd29cf3bfe/rumps-0.4.0.tar.gz", hash = "sha256:17fb33c21b54b1e25db0d71d1d793dc19dc3c0b7d8c79dc6d833d0cffc8b1596", size = 39257, upload-time = "2022-10-15T05:15:10.386Z" }
+
+[[package]]
+name = "runner-cordis-plugin"
+version = "0.1.0"
+source = { editable = "bh-02/plugins/runner-cordis-plugin" }
+dependencies = [
+    { name = "brig" },
+    { name = "cordis" },
+    { name = "cordis-helpers" },
+    { name = "host-paths" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "brig", editable = "libs/brig" },
+    { name = "cordis", editable = "libs/cordis" },
+    { name = "cordis-helpers", editable = "libs/cordis-helpers" },
+    { name = "host-paths", editable = "libs/host-paths" },
+]
 
 [[package]]
 name = "six"

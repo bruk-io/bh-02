@@ -13,7 +13,7 @@ from memory_cordis_plugin.memory import Memory, MemoryConfig
 from memory_cordis_plugin.touch import Memory as Touched
 from memory_cordis_plugin.touch import Notes, OnTouch, Transcript
 
-__all__ = ["auto", "memory", "on_touch"]
+__all__ = ["auto", "files", "on_touch"]
 
 
 @runtime_checkable
@@ -43,8 +43,8 @@ class _Registrar(Protocol):
 
 
 @component(provides=("memory",))
-async def memory(*, system: _System, commands: _Registrar, layers: _Layers, config: MemoryConfig) -> Effects:
-    """Fills a `memory` row: `use = "memory:memory"`. Claude Code's memory: the CLAUDE.md files
+async def files(*, system: _System, commands: _Registrar, layers: _Layers, config: MemoryConfig) -> Effects:
+    """Fills a `memory` row: `use = "memory:files"`. Claude Code's memory: the CLAUDE.md files
     (and AGENTS.md, imports and rules) that load at launch, a section of the system prompt read
     fresh before each message the model reads; and `/memory`, which lists them, the auto memory
     index among them. It depends on `system`, `commands` and `layers`, none of which a new

@@ -3,7 +3,7 @@
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
 tools, transcript, system, approval, notes, executor). The model is offered the tools rows
 register (`tools`, a broker), through the provider's standard tool calling, and each call runs
-through the tool its name has; CodeAct's `python` is one of them, the kernel row's. The list is
+through the tool its name has; CodeAct's `python` is one of them, the python row's. The list is
 read at a conversation's first request, after the tools the loop's config `requires` have
 registered, and kept in its transcript; a later change (a tool added, removed or redefined) is
 kept there too and told to the model on the next message it reads (`toolset`), while each
@@ -53,6 +53,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from dataclasses import dataclass
 from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
@@ -66,10 +67,13 @@ __all__ = [
     "FAILED",
     "STOPPED",
     "Approval",
+    "Asked",
+    "Confirm",
     "Executor",
     "Model",
     "LoopModel",
     "Notes",
+    "Rule",
     "System",
     "Tool",
     "Tools",
@@ -132,10 +136,38 @@ class Notes(Protocol):
 
 @runtime_checkable
 class Approval(Protocol):
-    """What the loop needs of the `approval` value: whether a call may run (the person's answer
-    when it runs anywhere but a jail that confines it)."""
+    """What the loop asks of each call: whether it may run (`Asked`: unasked by the `approval`
+    rule, else the person's answer)."""
 
     async def approve(self, request: Json) -> bool: ...
+
+
+@runtime_checkable
+class Rule(Protocol):
+    """What the loop needs of the `approval` value (CONTRACTS.md: approval): whether a call runs
+    without asking the person (it runs in a runner that confines it)."""
+
+    def unasked(self, request: Json) -> bool: ...
+
+
+@runtime_checkable
+class Confirm(Protocol):
+    """What the loop needs of the `output` value: the person's yes or no about a call."""
+
+    async def confirm(self, request: Json) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class Asked:
+    """Whether a call may run: at once when the `approval` rule says it runs unasked, else the
+    person's answer through `output.confirm`. The rule is the runner plugin's, in one place; the
+    asking is the asker's."""
+
+    rule: Rule
+    output: Confirm
+
+    async def approve(self, request: Json) -> bool:
+        return self.rule.unasked(request) or await self.output.confirm(request)
 
 
 @runtime_checkable
@@ -371,7 +403,7 @@ class LoopModel:
     that never does fails the message, `Unstarted`), and kept in the transcript as a `tools`
     entry. Before each message the model reads they are read again, and a change kept as another
     `tools` entry and told on that message (`toolset.told`); a tool the conversation has that is
-    missing for less than `wait` seconds is restarting (the kernel's, on `/restart kernel`), not
+    missing for less than `wait` seconds is restarting (the python row's, on `/restart python`), not
     removed. Each request offers the list the model's `tool_changes` asks for: the one the
     conversation began with (`fixed`, the default) or the one as it reads now (`listed`). A call
     runs through the tool its name has now, waiting `wait` seconds for one that is restarting; a

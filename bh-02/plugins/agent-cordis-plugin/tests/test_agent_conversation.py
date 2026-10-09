@@ -106,11 +106,11 @@ class Loader:
     restarts recorded; `fails` makes a restart raise, as the loader's does for a row gone."""
 
     def __init__(self, path: str | None) -> None:
-        self.states = {rid: "active" for rid in ("loop", "transcript", "kernel", "chat", "model")}
+        self.states = {rid: "active" for rid in ("loop", "transcript", "python", "chat", "model")}
         self.rows: dict[str, Any] = {
             "loop": Mounted(Entry("loop", "agent:loop")),
             "transcript": Mounted(Entry("transcript", "agent:transcript", {"path": path} if path else {})),
-            "kernel": Mounted(Entry("kernel", "kernel:kernel")),
+            "python": Mounted(Entry("python", "python:tool")),
         }
         self.batches: list[tuple[str, ...]] = []
         self.fails = False
@@ -389,7 +389,7 @@ async def test_compact_writes_the_new_conversation_and_queues_the_loop_and_trans
 ) -> None:
     """A note says the model is writing the summary as the step begins. The answer is `cleared`
     (`compacted`), the note carrying the summary, what the summary cost (its usage parts as one
-    event), then `restarting` the loop and the transcript; the kernel is not restarted. The
+    event), then `restarting` the loop and the transcript; the python row is not restarted. The
     file holds the new conversation, the old one is its `.bak`, and the restart waits for the
     row's own work."""
     path = _session(tmp_path)
@@ -413,7 +413,8 @@ async def test_compact_writes_the_new_conversation_and_queues_the_loop_and_trans
         {
             "type": "note",
             "text": "the conversation was compacted; a new one begins from the model's summary of it, "
-            f"below (the kernel and its variables are kept; the old transcript is {path}.bak):\n\n{summary}",
+            "below (the Python process and its variables are kept; the old transcript is "
+            f"{path}.bak):\n\n{summary}",
         },
         {
             "type": "usage",
@@ -430,7 +431,7 @@ async def test_compact_writes_the_new_conversation_and_queues_the_loop_and_trans
     assert Path(f"{path}.bak").read_bytes() == old
     assert loader.batches == []  # queued, not run in the caller's task
     await _drain(jobs)
-    assert loader.batches == [("loop", "transcript")]  # together, and never the kernel
+    assert loader.batches == [("loop", "transcript")]  # together, and never the python row
 
 
 async def test_however_many_usage_parts_a_provider_sends_the_note_comes_right_after_cleared(
@@ -554,9 +555,9 @@ async def test_the_conversation_row_registers_clear_and_compact_and_queues_resta
     await _drain(jobs)
     assert loader.batches == [("loop", "transcript")]
     _, clear = commands.commands["clear"]
-    assert (await clear(""))[-1] == {"type": "restarting", "rows": ["loop", "transcript", "kernel"]}
+    assert (await clear(""))[-1] == {"type": "restarting", "rows": ["loop", "transcript", "python"]}
     await _drain(jobs)
-    assert loader.batches[-1] == ("loop", "transcript", "kernel")
+    assert loader.batches[-1] == ("loop", "transcript", "python")
     path.write_text("".join(json.dumps(m) + "\n" for m in CONVERSATION))
     loader.fails = True
     await run("")
@@ -582,7 +583,7 @@ async def test_clear_writes_an_empty_conversation_keeping_the_old_and_restarts_i
     tmp_path: Path,
 ) -> None:
     """/clear is /compact's rewrite with an empty conversation: the old is the `.bak` beside the
-    file, never lost, and the loop, the transcript and the kernel restart together."""
+    file, never lost, and the loop, the transcript and the python tool restart together."""
     path = _session(tmp_path)
     old = path.read_bytes()
     loader, jobs = Loader(str(path)), Jobs()
@@ -592,14 +593,14 @@ async def test_clear_writes_an_empty_conversation_keeping_the_old_and_restarts_i
         {
             "type": "note",
             "text": f"the conversation was cleared (the old one is kept as {path}.bak); starting "
-            "afresh: loop, transcript, kernel",
+            "afresh: loop, transcript, python",
         },
-        {"type": "restarting", "rows": ["loop", "transcript", "kernel"]},
+        {"type": "restarting", "rows": ["loop", "transcript", "python"]},
     ]
     assert path.read_text() == "" and Path(f"{path}.bak").read_bytes() == old
     assert loader.batches == []  # queued, not run in the command's task
     await _drain(jobs)
-    assert loader.batches == [("loop", "transcript", "kernel")]
+    assert loader.batches == [("loop", "transcript", "python")]
     path.write_text(old.decode())
     await _clear(loader)
     assert Path(f"{path}.bak.2").read_bytes() == old  # an earlier backup is never replaced
@@ -612,12 +613,12 @@ async def test_clear_with_nothing_to_keep_or_no_file_of_its_own_only_restarts(tm
     empty = tmp_path / "transcript.jsonl"
     empty.write_text("")
     loader = Loader(str(empty))
-    del loader.states["kernel"]
+    del loader.states["python"]
     said = await _clear(loader)
     assert said[1]["text"] == "the conversation was cleared; starting afresh: loop, transcript"
     assert not Path(f"{empty}.bak").exists()
     in_memory = await _clear(Loader(None))
-    assert in_memory[-1] == {"type": "restarting", "rows": ["loop", "transcript", "kernel"]}
+    assert in_memory[-1] == {"type": "restarting", "rows": ["loop", "transcript", "python"]}
     other = Loader(str(_session(tmp_path)))
     other.rows["transcript"] = Mounted(Entry("transcript", "mine:transcript", {"path": str(tmp_path / "t")}))
     await _clear(other)

@@ -17,8 +17,17 @@ from cordis import Row
 
 __all__ = ["clashes", "translated"]
 
-# Rows (and the keys they bind) that were renamed.
-_RENAMED = {"llm": "loop", "mode": "chat", "completion": "model"}
+# Rows (and the keys they bind) that were renamed: the kernel row is the python tool's, the jail
+# row the runner, which starts the python tool's process and the extensions' worker, and the jail
+# field's row, `jail_status`, the runner's grades (`grades`).
+_RENAMED = {
+    "llm": "loop",
+    "mode": "chat",
+    "completion": "model",
+    "kernel": "python",
+    "jail": "runner",
+    "jail_status": "grades",
+}
 # A row a config names for its model (`model_row`, an old `model_status`'s `row`): before the
 # completion row, the model was the `llm` row's; then the completion row's; it is the model
 # row's now, not the loop's.
@@ -41,6 +50,13 @@ _RENAMED_USES = {
     "bh_02.testing:cells_completion": "bh_02.testing:repl_model",
     "context:project": "agent:system",
     "context:on_touch": "memory:on_touch",
+    "kernel:kernel": "python:tool",
+    "kernel:unjailed": "runner:unconfined",
+    "kernel:approval": "runner:approval",
+    "kernel:release": "runner:release",
+    "brig:jail": "runner:confined",
+    "memory:memory": "memory:files",
+    "tui:jail_status": "tui:grades",
 }
 # The broker of what an input's result is told was `memory` (`agent:memory`); it is `notes` now,
 # and `memory` is Claude Code's memory, the memory plugin's row.
@@ -54,11 +70,12 @@ _TO_MEMORY = ("root", "home")
 _CONTEXT_GONE = (
     "context files are gone: memory reads CLAUDE.md, AGENTS.md and .claude/rules/ as Claude Code does"
 )
-# The one status row, which the three status-bar rows became (the session's id: from `sessions`).
+# The status row, which the session's and the model's status-bar rows became (the session's id:
+# from `sessions`); the jail field is the `grades` row's.
 _STATUS = "status"
 _STATUS_USE = "tui:status"
-_MERGED_USES = frozenset({"tui:jail_status", "tui:model"})
-_MERGED_IDS = frozenset({"jail_status", "model_status"})
+_MERGED_USES = frozenset({"tui:model"})
+_MERGED_IDS = frozenset({"model_status"})
 # How an old `model_status` config reads as the status row's. Its `default` (later the status
 # row's `default_model`, the model named when the row named none) is gone: the `models` row says
 # which model and provider the model row names, whatever it names.
@@ -69,7 +86,7 @@ _STATUS_GONE = frozenset({"default", "default_model"})
 # naming no plugin is a change to today's broker (`agent:tools`), so only that plugin drops it.
 _ONE_TOOL = (
     "the model's tools are registered with `tools` (agent:tools) by the rows that offer them, the "
-    "kernel's python among them, and unjailed each call is put to the person in the modal"
+    "python row's among them, and unjailed each call is put to the person in the modal"
 )
 _REMOVED_IDS = {
     "fs": _ONE_TOOL,
@@ -116,19 +133,21 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
     """`rows` in this bh-02's names, and one line per change saying what changed and what to do.
 
     - A renamed row takes its new id (`llm` is `loop`, `mode` is `chat`, `completion` is
-      `model`), and an operator's `clear` naming one names the new one; a `model_row` (or an old
+      `model`, `kernel` is `python`, `jail` is `runner`), and a `clear` naming one names the new
+      one; a `model_row` (or an old
       `model_status`'s `row`) naming `llm` or `completion` names `model`, the row that holds
       the model now. A renamed row whose
       new id the layer already has keeps its old id, and the change says to fold the two into
       one by hand (`clashes`): which of them wins is the person's call.
-    - `jail_status` and `model_status` (and any row using `tui:jail_status` or `tui:model`)
-      become the one `status` row: `use = "tui:status"` if any of them named a plugin, the
-      model row's config under the status row's names (`row` is `model_row`; `default`, and
-      the status row's own `default_model`, are gone: the `models` row says which model the
-      model row names). An old part's `disabled` is not carried over: the status row cannot
-      turn off one part, and turning off all of it would hide the session and the model too, so
-      the change says how to turn off the whole bar instead (a `status` row already in the
-      layer keeps its own `disabled`). A status row with nothing left to say is not written.
+    - `model_status` (and any row using `tui:model`) becomes part of the `status` row:
+      `use = "tui:status"` if it named a plugin, its config under the status row's names (`row`
+      is `model_row`; `default`, and the status row's own `default_model`, are gone: the
+      `models` row says which model the model row names). Its `disabled` is not carried over:
+      the status row cannot turn off one part, and turning off all of it would hide the session
+      too, so the change says how to turn off both instead (a `status` row already in the layer
+      keeps its own `disabled`). A status row with nothing left to say is not written. The jail
+      field's row (`jail_status`, `tui:jail_status`) is renamed, as above: it is `grades`
+      (`tui:grades`), and keeps its `disabled`.
     - A row bh-02 no longer has is dropped: the tool rows before CodeAct (any using the `tools:`,
       `fs:` or `codeact:` plugins; a `tools` row naming none is today's broker's), a session's
       `session` row, the sidebar (a change to the shipped `sidebar` row, or any row using
@@ -145,6 +164,10 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       is no built-in name as an `extra` model of its own; `ollama:completion` is an `extra`
       OpenAI-compatible model at its host's `/v1`. bh-02's fakes that bound `completion` bind
       `model` under new names (`echo_completion` is `echo_model`).
+    - The kernel plugin is two: the python tool (`kernel:kernel` is `python:tool`) and the
+      runner, which the brig plugin became (`brig:jail` is `runner:confined`, `kernel:unjailed`
+      `runner:unconfined`, `kernel:approval` `runner:approval`, `kernel:release`
+      `runner:release`). Memory's row is `memory:files`.
 
     - `/model` is the models plugin's `switch` row (`models:switch`): an operator's `layer` and
       `model_row` move to it (added after the operator, unless the layer has one, when the
@@ -432,7 +455,7 @@ def _removed(row: Row) -> str | None:
     if row.id == _SHELL_HINTS and row.use is None:
         return _NO_SHELL_HINTS
     if row.use == _STATUS_USE and {"field", "text"} & set(row.config or {}):
-        return "tui:status is now the status bar's one row (session, model, jail), not a fixed field"
+        return "tui:status is now the status bar's session and model fields, not a fixed field"
     return None
 
 
@@ -460,7 +483,7 @@ def _merged_change(row: Row) -> str:
     moved = f"; its config moves there as {_inline(config)}" if config else ""
     off = (
         f"; it was disabled, but {_STATUS!r} cannot turn off one part, so the status bar stays "
-        f"on: to turn off all of it (session, model and jail), give {_STATUS!r} `disabled = true`"
+        f"on: to turn off both its fields (session and model), give {_STATUS!r} `disabled = true`"
         if row.disabled
         else ""
     )

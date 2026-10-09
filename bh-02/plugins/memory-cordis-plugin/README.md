@@ -9,7 +9,7 @@ section to it.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `memory:memory` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `layers` (`memory`: for `/memory`) |
+| `memory:files` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `layers` (`memory`: for `/memory`) |
 | `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index | `system` (`add`), `layers` (`memory`), `transcript` (its lifetime) |
 | `memory:on_touch` | adds `OnTouch` to `notes`, and its `before_write` to `access`; no config: the memory files are `memory`'s | `memory` (`touched`), `notes` (`add`), `transcript` (`messages`), `access` (`before_write`) |
 
@@ -46,7 +46,7 @@ disagree. `""` when nothing loads.
 ## What loads on demand
 
 `touched(paths)` (the files a call opened, as its tool answered: the python tool's inputs',
-`kernel.touched()`, standing in for Claude Code's Read, Write and Edit), broadest first: for each directory between such a file and the project's
+its Python process's `touched()`, standing in for Claude Code's Read, Write and Edit), broadest first: for each directory between such a file and the project's
 root, its `CLAUDE.md` and `CLAUDE.local.md` (and its `AGENTS.md` as `instruction_files` says:
 by default where it has none of the three CLAUDE files and no CLAUDE.md is above the project),
 and the rules in its own `.claude/rules/` (one without `paths` for everything under it; one with

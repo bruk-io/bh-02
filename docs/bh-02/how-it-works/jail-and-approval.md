@@ -66,4 +66,4 @@ left the jail's process group (one started in a session of its own) keeps runnin
 the jail's rules, until it ends or you end it.
 
 The brig plugin's README has the policy, the platforms and their measured gaps in full:
-[brig-cordis-plugin](../reference/plugins/brig.md).
+[runner-cordis-plugin](../reference/plugins/runner.md).

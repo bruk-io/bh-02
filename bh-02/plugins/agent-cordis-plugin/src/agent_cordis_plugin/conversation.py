@@ -10,9 +10,9 @@ summary in plain text: whatever the model calls is never run, and a step that ca
 answers gives no summary. The summary then seeds the transcript's file (`seeded`, written whole
 by `transcript.rewrite`, the old file kept beside it), and the loop and its transcript restart:
 the new conversation holds no prompt yet, so the loop reads it afresh, folding in whatever
-changed since the old one began, and tells the date again. The kernel is left alone, since the
-summary names what its namespace holds. `/clear` is the same rewrite with an empty
-conversation, and restarts the kernel too (`clear`): nothing is lost for good, the old
+changed since the old one began, and tells the date again. The python row is left alone, since
+the summary names what its namespace holds. `/clear` is the same rewrite with an empty
+conversation, and restarts the python row too (`clear`): nothing is lost for good, the old
 conversation is the `.bak` beside the file.
 
 A command runs in the chat row's task, and Ctrl-C stops only a turn, so the model has `timeout`
@@ -59,10 +59,13 @@ type Json = Mapping[str, Any]
 
 COMPACT: Json = {
     "name": "compact",
-    "help": "a new conversation from the model's summary of this one; the kernel is kept",
+    "help": "a new conversation from the model's summary of this one; the Python process is kept",
     "usage": "[WHAT TO KEEP]",
 }
-CLEAR: Json = {"name": "clear", "help": "a new conversation and an empty kernel (the old one kept as .bak)"}
+CLEAR: Json = {
+    "name": "clear",
+    "help": "a new conversation and a new Python process (the old one kept as .bak)",
+}
 
 # The component whose file /clear and /compact write the new conversation to: a row another
 # fills may keep its file in another shape, which they must not write over.
@@ -83,8 +86,8 @@ _ASK = (
 _KEEP = "(The person asks that the summary keep, in particular: {})"
 # The new conversation's first message, before the summary (the model's own, as its answer). It
 # stays at the conversation's start for good, a resume's included, so it says only what stays
-# true: the namespace was kept when the conversation was compacted, and empties as the kernel's
-# instructions say.
+# true: the namespace was kept when the conversation was compacted, and empties as the python
+# tool's instructions say.
 _SEEDED_START = "(bh-02: this conversation carries on from an earlier one"
 _SEEDED = (
     f"{_SEEDED_START}, compacted (/compact) to the summary of it you wrote, which follows. Your "
@@ -100,7 +103,7 @@ _ASKING = (
 )
 _NOTE = (
     "the conversation was compacted; a new one begins from the model's summary of it, below "
-    "(the kernel and its variables are kept; the old transcript is {backup}):\n\n{summary}"
+    "(the Python process and its variables are kept; the old transcript is {backup}):\n\n{summary}"
 )
 _AGAIN = "so nothing changed; try /compact again"
 _CALLED = f"the model called python instead of writing a summary (nothing ran), {_AGAIN}"
@@ -175,14 +178,14 @@ class ConversationConfig:
     """`timeout`: the seconds the model has to write `/compact`'s summary (Ctrl-C stops only a
     turn, so this is the longest /compact keeps the person waiting). `loop` and `transcript`:
     the rows /compact restarts, together; the transcript row's config `path` is the file the new
-    conversation is written to. The kernel is not among them: the summary refers to its
-    namespace. `clear`: the rows /clear restarts, together (the kernel among them, so the
+    conversation is written to. The python row is not among them: the summary refers to its
+    namespace. `clear`: the rows /clear restarts, together (the python row among them, so the
     namespace empties with the conversation)."""
 
     timeout: float = 300.0
     loop: str = "loop"
     transcript: str = "transcript"
-    clear: Sequence[str] = ("loop", "transcript", "kernel")
+    clear: Sequence[str] = ("loop", "transcript", "python")
 
 
 def kept_in(row: str, mounted: object, state: str | None) -> str:

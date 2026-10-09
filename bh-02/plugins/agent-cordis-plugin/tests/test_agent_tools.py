@@ -71,14 +71,21 @@ def _text(said: str) -> Json:
 
 
 class _Approval:
-    """An `approval` that says yes to everything and keeps what it was asked."""
+    """An `approval` rule that lets nothing run unasked, and an `output` whose person says yes to
+    everything; it keeps what was asked."""
 
     def __init__(self) -> None:
         self.asked: list[Any] = []
 
-    async def approve(self, request: Any) -> bool:
+    def unasked(self, request: Any) -> bool:
+        return False
+
+    async def confirm(self, request: Any) -> bool:
         self.asked.append(request)
         return True
+
+    async def approve(self, request: Any) -> bool:  # the loop's own, as `Asked` gives it
+        return self.unasked(request) or await self.confirm(request)
 
 
 class _Nowhere:
@@ -201,15 +208,16 @@ def test_a_call_is_shown_as_its_tool_says_else_as_its_input() -> None:
 def _composition(
     steps: Sequence[Sequence[Json]], *, requires: Sequence[str], wait: float = 5.0
 ) -> tuple[Runtime, _Scripted, _Approval]:
-    """The agent's rows as a layer mounts them, with no kernel row: a model playing `steps`, and
+    """The agent's rows as a layer mounts them, with no python row: a model playing `steps`, and
     the loop over `tools`, requiring `requires`."""
     model, approval = _Scripted(*steps), _Approval()
 
-    @component(provides=("model", "system", "approval"))
+    @component(provides=("model", "system", "approval", "output"))
     async def around() -> Effects:
         yield bind("model", model)
         yield bind("system", _Nowhere())
         yield bind("approval", approval)
+        yield bind("output", approval)
 
     rt = Runtime()
     rt.mount(around, id="around")

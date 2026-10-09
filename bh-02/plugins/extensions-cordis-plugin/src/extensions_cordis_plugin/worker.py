@@ -1,7 +1,7 @@
 """The extensions' own process: a cordis runtime of the components the model wrote.
 
-Run by path (``python -I worker.py SOCKET``) by the `jail` row, so it is confined as the
-kernel's inputs are: the model's code runs here, never in bh-02's own process. What it reaches
+Run by path (``python -I worker.py SOCKET``) by the `runner`, so it is confined as the
+Python process's inputs are: the model's code runs here, never in bh-02's own process. What it reaches
 of bh-02 is three keys, bound per extension, each of which only adds: `commands.register`, a
 slash command for the person; `frame.status`, a status-bar field; `system.add`, text in the
 model's own prompt. Each sends what it added to the host and returns the remover that takes

@@ -1,12 +1,59 @@
-# brig-cordis-plugin
+# runner-cordis-plugin
 
-A `jail` from [brig](../../../libs/brig), and the only package in the workspace that imports it (the
-gate's `brig-one-adapter`).
+What runs the model's code: the `runner`, which starts each program (the Python process, the
+extensions' worker) in a jail from [brig](../../../libs/brig), or in none; the `approval` rule
+over it; and `/release`. The only package in the workspace that imports brig (the gate's
+`brig-one-adapter`).
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `brig:jail` | `jail` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux); config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (default `["local.env"]`), `env` (the names that survive the scrub) | `layers` |
+| `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (default `["local.env"]`), `env` (the names that survive the scrub) | `layers` |
+| `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` or `ANTHROPIC_*` | |
+| `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(request) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
+| `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
 
+`runner.py`'s `Runner` is the `runner` value both rows bind, over a mechanism (`BrigJail` in
+`jail.py`, `Unjailed` in `unconfined.py`): what is the same whichever starts the program.
+- `start(argv, *, cwd, endpoint) -> started`: the mechanism starts it, listening on `endpoint`,
+  and each watcher (`on_start(watch) -> remover`) is told of it after, so the status bar's jail
+  field (`tui:grades`) follows a Python process started again in place. What one start is stays
+  with it (`started.report()`, `notice()`, `reads()`, `writes()`): the Python process and the
+  extensions' worker each start from a command of their own. `report()` and `notice()` are the
+  last start's (before any, the mechanism's grades and "").
+- **Each owner stops its own program.** A row that starts something registers its stop
+  (`on_release(stop) -> remover`, `stop: async () -> str`): the python row its Python process,
+  the extensions row its worker. `release()` asks each in turn, then has the mechanism let go of
+  what it holds on the host (on Linux, the placeholders where bh-02 looks for its credential,
+  below), and joins what each said
+  (`test_release_asks_each_owner_to_stop_its_own_then_the_mechanism_and_says_what_each_said`).
+  The runner never stops a row's program itself (`test_the_runner_stops_no_program_itself`): a
+  program its owner did not stop keeps running, its jail keeps what it holds, and `/release`
+  says so (`A program this runner started still runs (its row did not stop it on /release), and
+  its jail holds what it holds: /rows shows the rows; /restart one, then /release again.`).
+- `released()` is true from `release()` until the next start, whoever starts: an owner that
+  would start only to keep something warm (the extensions' worker) waits while it is, and one
+  the person asked for (the next input's Python process, a changed extension) starts, and so
+  ends it.
+
+`/release` (`runner:release`) is `release()` as a command; with nothing to say, it answers
+`Nothing runs in the runner, and it holds nothing.`
+
+`approval.py` is the rule, written once: `is_confined(report)` (the runner enforces `fs_write`
+and `network`), and `Approval`, the `approval` value over the runner: `confined` (read from its
+`report()` each time) and `unasked(request)` (it runs in the runner, `runs` `"jail"` when the
+request says nothing, and the runner confines it). Asking is not the rule's: the loop puts each
+call the rule does not let run unasked to the person (`{"name", "input", "runs", "title",
+"lines", ...}`: a call to a tool that runs in bh-02's own process, `runs = "host"`, is put to
+the person however confined the runner), and the extensions row each extension it loads, each
+through `output.confirm`; the python row's `confined`, what the model is told, is the rule's.
+Its row depends on `runner` alone, so `/clear` (a new Python process) and a new ui leave it up,
+and the rows that depend on it. It is a capability, bound by one row: two rows' answers could
+not be combined, so it is not a broker. It runs in bh-02's own process, so only a layer
+replaces it; an extension has no way to bind or reach it. It answers about code bh-02 is about
+to hand to the runner, not about each effect a component yields (that is cordis's planned
+policy seam, not this).
+
+`runner:confined`'s mechanism, `BrigJail`, compiles a jail for each start from one policy.
 `spec_for` is the policy, as a pure function:
 
 - **writes**: the project root, a scratch directory of the jail's own (`TMPDIR`), and the
@@ -43,13 +90,13 @@ gate's `brig-one-adapter`).
   package's own directory), which would leave the project read-only: there the context plugin
   reading its shipped file once, as it starts, is what keeps a change from taking effect before
   the next start. A started program's `writes()` names the roots its inputs may write (the
-  kernel reads nothing on the host whose way passes through one);
+  python row reads nothing on the host whose way passes through one);
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
   what `layers` names as `secrets` (bh-02's `local.env`, the sessions' state);
-- **network**: none; the program's own LISTEN socket is the one way in or out. The `jail` row
-  starts two programs, each with a jail of its own compiled from this one policy: the kernel's
-  worker, and the extensions' worker (`extensions:extensions`), where the model's own plugins
-  run;
+- **network**: none; the program's own LISTEN socket is the one way in or out. The runner
+  starts two programs, each with a jail of its own compiled from this one policy: the Python
+  process (`python:tool`), and the extensions' worker (`extensions:extensions`), where the
+  model's own plugins run;
 - **env**: scrubbed to `env`.
 
 One policy, two stacks (`stack_for`):
@@ -67,7 +114,7 @@ One policy, two stacks (`stack_for`):
   directories, never the workspace, whose `local.env` stays out), and the writable roots.
   Nothing else exists in the jail, the home directory included, so an input that reads a file
   outside the project gets `No such file or directory`. What a started program can read is its
-  `reads()`, each tree once and none inside another (`told_reads`), which the kernel names to
+  `reads()`, each tree once and none inside another (`told_reads`), which the python row names to
   the model. The policy's read denies are brig's
   carve-outs inside that tree. A secret under the project (its `local.env`, and when bh-02 runs
   inside its own workspace every place the model row looks for one: `layers.secrets` names
@@ -80,44 +127,49 @@ One policy, two stacks (`stack_for`):
   reads) it is left alone, and `fs_read` names it: a file created there later is readable.
   A write deny inside another (an absent secret in a directory the
   host imports code from) is left to the outer one (`uncovered`). Without `/usr/bin/bwrap`,
-  `start` says to install `bubblewrap` or use `kernel:unjailed`.
+  `start` says to install `bubblewrap` or use `runner:unconfined`.
 
 **Placeholders (Linux).** bubblewrap holds a write-denied path that doesn't exist with an empty,
 read-only directory mounted there, and the mount point is a real directory on the host, which
-the jail makes for it: a placeholder. So while a kernel runs, `.envrc/`, `.vscode/`, `.idea/`, `.claude/`, an absent
+the jail makes for it: a placeholder. So while a jail runs, `.envrc/`, `.vscode/`, `.idea/`, `.claude/`, an absent
 `local.env/` where bh-02 looks for its credential, and in a project that is not a repository
 `.git/`, are empty directories in the project on the host. Where a denied path's parent is
 absent too (`.git/config` with no `.git`), the topmost absent one is held instead (`mountable`),
-so the host's `git init` works while the kernel runs: it fills the empty `.git/` on the host,
-while inside the jail `.git` stays an empty read-only directory until the next kernel start. What a placeholder gets in the way
+so the host's `git init` works while a jail runs: it fills the empty `.git/` on the host,
+while inside the jail `.git` stays an empty read-only directory until the next start. What a placeholder gets in the way
 of, while it is there: creating that path as a file by hand (`.envrc`, your credential in
-`local.env`: `/release` first, below). **Removing one while the kernel runs ends the jail**: the
+`local.env`: `/release` first, below). **Removing one while its jail runs ends the jail**: the
 mount is detached inside the jail (brig SPEC.md, decision-164), so the jail ends itself and the
 next input's holds the path again (below, "When the host undoes a mount"); nothing here removes
 one early, and neither should you.
 
 **Adding your credential mid-session (`/release`).** Where bh-02 looks for its credential and
 there is none, the jail holds the path with a placeholder, so you can't create `local.env` there
-while the kernel runs. `/release` (the `kernel:release` row) ends the kernel's worker and its
-jail now, and the jail's `release()` stops every other program it started that still runs: the
-extensions' worker, whose jail holds the same placeholders and a share of the jail lock, so
-while it ran nothing could be freed
-(`test_release_stops_every_program_the_jail_started_and_frees_what_they_held`,
-`test_on_linux_release_frees_the_credential_path_while_the_extensions_worker_runs`; a start
-under way is waited for and stopped too). Each jail's stop removes its placeholders (when no
-other bh-02 jail of yours runs), and `release()` sweeps what jails that are gone left, then
-says which of those paths are free, which another session's jail still holds, and that the
-extensions' worker stopped. The jail is then `released()` until its next start, which is the
-next input's kernel worker: the extensions row starts no worker while it is (a changed file
-waits too), and once it is not, loads every extension again in a new one, so they are back
-within half a second of the next input starting the kernel. Create the file then, and send
+while a jail runs. `/release` (the `runner:release` row) asks each owner to stop its own program
+(above): the python row ends the Python process and its jail, and the extensions row its
+worker and its jail, which holds the same placeholders and a share of the jail lock, so while it
+ran nothing could be freed
+(`test_release_frees_what_the_programs_held_once_each_owner_stopped_its_own`,
+`test_on_linux_release_frees_the_credential_path_while_the_extensions_worker_runs`). Each jail's
+stop removes its placeholders (when no other bh-02 jail of yours runs); then `BrigJail`'s
+`release()` waits for a start under way, sweeps what jails that are gone left, and says which of
+those paths are free (`Nothing holds PATH until something starts in the runner again: create
+your local.env there now, then send your message. ...`), which another session's jail still
+holds, and whether a program it started still runs, its owner not having stopped it
+(`test_release_never_stops_a_program_its_owner_did_not_and_says_it_still_holds`,
+`test_release_waits_for_a_start_under_way_and_says_it_still_runs`). The runner is then
+`released()` until its next start, which is the next input's Python process, or the worker of an
+extension that changed: the extensions row starts no worker while it is released and nothing
+changed, and once it is not, loads every extension again in a new one, so they are back within
+half a second of the next input starting the Python process. Create the file then, and send
 your message: the model row reads it at its next start (with no credential, every step starts
 afresh, so the next one does; a model already running keeps the one it started with until
 `/restart model`). The next
 input starts a new jail, which masks the file (`/dev/null` over it): no input reads or rewrites
 it. No input gets a window: none runs while the path is free, and an input that runs before you
-create the file starts a jail that holds it again (`/release` again). `/restart kernel` is not the step:
-it stops and starts the jail at once, holding the path again before you could create anything
+create the file starts a jail that holds it again (`/release` again), as does an extension that
+changes meanwhile. `/restart python` is not the step:
+it stops and starts the Python process and its jail at once, holding the path again before you could create anything
 (`test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input`).
 
 When they go: the jail removes the ones it made once brig has verified the worker is gone and
@@ -149,7 +201,7 @@ the group ends bubblewrap's pid namespace, and every process in it
 (`test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what_it_left`, which then
 shows the next jail's sweep removing what the killed one left). On darwin, see the gap below.
 
-On any other platform, `start` refuses and names `kernel:unjailed`. The grades are brig's own, known
+On any other platform, `start` refuses and names `runner:unconfined`. The grades are brig's own, known
 before anything starts: `fs_write`, `network` and `env` enforced, `limits` best-effort, `fs_read`
 enforced, but on Linux best-effort whenever the jail holds a secret under a writable root
 (`graded`, below). `bh-02/app/tests/test_python_repl.py`
@@ -178,8 +230,8 @@ person sees in the conversation, starts `(the REPL was started again, because so
 host replaced or removed .../.git/config (a `git config`, an editor's save), which lifts the
 jail's hold on it, so bh-02 ended the jail; the next one holds it again; what earlier inputs
 defined is gone)`. An input that was running ends with `the REPL's process ended during this
-input because ...`. The cost: the kernel's variables, at every such host change while it runs.
-`/release` first (no jail runs until the next input) costs the same and leaves no window.
+input because ...`. The cost: the Python process's variables, at every such host change while it runs.
+`/release` first (no jail runs until the next start) costs the same and leaves no window.
 
 The window, measured in `scripts/linux-jail-check`'s container (aarch64, bubblewrap 0.9), from
 the host's rename (or the start of a host `git config`) to the jail's process group being gone,
@@ -214,8 +266,8 @@ because bubblewrap nests it in a user namespace bh-02 has no capabilities in; me
 do on its own, and `best_effort` would mark the jail unconfined, so every input would ask. A host
 change ends the jail rather than lowering the grade; the window above is what remains. `fs_read`
 stays best-effort while a secret is held under a writable root (`held`), and the jail names
-those paths when the kernel comes up (the kernel's worker's `notice()`, which `tui:status`
-shows as a note). brig's
+those paths when the Python process comes up (its start's `notice()`, which `tui:grades`
+shows once as a note). brig's
 SPEC.md (section 6, bwrap) says what its own grade covers. darwin's seatbelt matches paths, not
 directory entries, and has no such gap: a host `git config` there changes nothing for the jail
 (`test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing`).
@@ -234,7 +286,7 @@ by path, wherever the directory came from.
 
 Known gaps on Linux, beyond darwin's:
 
-- Placeholders (above) are real on the host while a kernel runs, and stay until a bh-02 jail
+- Placeholders (above) are real on the host while a jail runs, and stay until a bh-02 jail
   starts or stops with no other running. One can stay for good: if bh-02 dies in the instant
   between making a placeholder and marking it (two system calls apart; on a filesystem without
   extended attributes, between making it and rewriting the record), it is an empty directory
@@ -254,13 +306,13 @@ Known gaps on Linux, beyond darwin's:
   config (aliases, credential helpers, includes) reaches the jail, and an input can read the two
   values from its environment, as it could from any commit. Chosen over a generated
   `HOME/.gitconfig` in the jail's scratch: no file, and a repository's own identity still wins
-  (the host resolved it). The model is told what the jail reads (the kernel's worker's
-  `reads()`, which the kernel's instructions name) and that the home directory is not there.
+  (the host resolved it). The model is told what the jail reads (the Python process's
+  `reads()`, which the python row's section names) and that the home directory is not there.
 
 Known gap on darwin, beyond Linux's: seatbelt has no process namespace, so the jail's processes
 are known by their process group alone. A program an input starts in a session of its own
 (`subprocess.Popen(..., start_new_session=True)`, `setsid`, a daemon that double-forks) leaves
-that group, and neither stopping the kernel (`/restart kernel`, quitting) nor bh-02 dying ends
+that group, and neither stopping the Python process (`/restart python`, `/release`, quitting) nor bh-02 dying ends
 it: it keeps running, still under seatbelt and its write denies, with write access to the
 project, until it ends or you end it
 (`test_a_killed_bh_02_s_seatbelt_jail_ends_with_it_but_not_a_program_that_left_its_group`).

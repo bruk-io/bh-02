@@ -6,7 +6,7 @@ the screen), so these start the installed script the way a person does. The mode
 from `bh_02.testing`, so no credential is needed: a `loop` fake, named by a `--patch` layer,
 replaces the whole loop; a fake model (`fake`, `slow`, `inputs`, a models file's entries naming
 a `bh_02.testing` provider) is chosen with `--model` under the shipped loop and model row, so
-`/model` switches between them as it would between Claude and an OpenAI model. The kernel runs
+`/model` switches between them as it would between Claude and an OpenAI model. The Python process runs
 unjailed so the tests don't depend on the platform. Deselect with `-m "not real_launch"`.
 """
 
@@ -616,17 +616,19 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
     app.type("/clear")
     # the note names where the old conversation is kept (the session's transcript.jsonl.bak)
     cleared = app.wait_for("the conversation was cleared (the old one is kept as", 10, after=narrowed)
-    app.wait_for("↻ status reloaded", 20, after=cleared)  # the last row /clear restarts
+    for row in ("python", "chat"):  # the rows /clear restarts, either the last up
+        app.wait_for(f"↻ {row} reloaded", 20, after=cleared)
     app.settle(1.0)
     app.type("again")  # the model's transcript was written over too: this is its first message
     app.wait_for("echo: AGAIN (message 1)", 20, after=cleared)
-    # the kernel's restart reloads status: the jail field keeps its text meanwhile
+    # /clear reloads no status-bar row: the jail field holds throughout
     bars = re.findall(r"session: [^\n]*", app.text()[narrowed:])  # every status bar drawn since
     assert bars and all("jail: unjailed" in bar for bar in bars)
     widened = len(app.text())
     app.resize(_COLS)  # drawn again
     top = app.wait_for("the conversation was cleared", 10, after=widened)  # its first block now
-    app.wait_for("↻ status reloaded", 10, after=top)  # to its last: the whole transcript
+    for row in ("python", "chat"):  # to its last: the whole transcript
+        app.wait_for(f"↻ {row} reloaded", 10, after=top)
     app.settle()
     assert "HELLO THERE" not in app.text()[cleared:]
     app.press(b"\x11")
@@ -699,14 +701,15 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     replied = app.wait_for("echo: HELLO", 20, after=waiting)
     status = app.text()[app.text().rfind("model: slow-2") :]
     assert status.startswith("model: slow-2 "), status[:80]  # active again
-    app.type("/clear")  # the loop, its transcript and the kernel restart; the model stays up
+    app.type("/clear")  # the loop, its transcript and the python row restart; the model stays up
     app.type("again")
     # the chat row reads `again` once the restart /clear queued is done (`jobs`): typed while it
     # runs, the line says it waits for the rows /clear named; typed after, the new loop says it
-    # waits for `python` (the kernel coming up). Which is timing; the new loop answers either way.
+    # waits for `python` (the Python process coming up). Which is timing; the new loop answers
+    # either way.
     again = app.wait_for("echo: AGAIN (message 1)", 20, after=replied)
     said = app.text()[replied:again]
-    assert "⧗ waiting for kernel, loop, transcript to start" in said or "waiting for `python`" in said, said
+    assert "⧗ waiting for loop, python, transcript to start" in said or "waiting for `python`" in said, said
     assert "stopped: interrupted" not in said
     app.press(b"\x11")
     assert app.exit_code() == 0
@@ -730,8 +733,8 @@ def test_a_message_typed_the_moment_after_model_waits_for_the_new_model(launch: 
     assert 0 <= starting < replied  # it was answered once the new model had started
     status = shown[shown.rfind("model: slow-2") :]
     assert status.startswith("model: slow-2 "), status[:80]  # up again
-    app.press(b"/clear\ragain\r")  # the same for /clear, which restarts the kernel too
-    waiting = app.wait_for("⧗ waiting for kernel, loop, transcript to start", 10, after=replied)
+    app.press(b"/clear\ragain\r")  # the same for /clear, which restarts the python row too
+    waiting = app.wait_for("⧗ waiting for loop, python, transcript to start", 10, after=replied)
     again = app.wait_for("echo: AGAIN", 20, after=waiting)
     assert "stopped: interrupted" not in app.text()[replied:again]
     app.press(b"\x11")

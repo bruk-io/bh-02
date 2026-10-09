@@ -51,7 +51,7 @@ terminal theme against bh-01's tokens. Each step reports and the run goes on, so
 everything that is red; the exit code is non-zero if any step failed.
 
 ```sh
-scripts/check bh-02/plugins/kernel-cordis-plugin   # the same for one member (the gates and docs still see everything)
+scripts/check bh-02/plugins/python-cordis-plugin   # the same for one member (the gates and docs still see everything)
 scripts/check --no-gates --no-docs                  # skip the slower whole-workspace steps
 ```
 

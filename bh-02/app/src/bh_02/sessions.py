@@ -133,7 +133,7 @@ def session_layer(dir: Path, *, model: str | None, no_jail: bool) -> list[Row]:
     if model is not None:
         rows = with_model(rows, model)
     if no_jail:
-        rows.append(Row("jail", "kernel:unjailed"))
+        rows.append(Row("runner", "runner:unconfined"))
     return rows
 
 

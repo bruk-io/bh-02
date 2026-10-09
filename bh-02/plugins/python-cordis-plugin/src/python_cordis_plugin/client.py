@@ -1,12 +1,13 @@
-"""The `kernel` value: the host's end of the worker's socket, the process a jail started, and
-the `python(code)` tool's call (`call`), which runs an input in it; the kernel row registers that
-with `tools`.
+"""The python tool's Python process: the host's end of the worker's socket, the process the
+runner started, and the `python(code)` tool's call (`call`), which runs an input in it; the
+python row registers that with `tools`.
 
 An input is one request and one answer: the worker runs the code and says it is done. Whether
-the person is asked first is the `approval` row's to answer and the loop's to ask, so the kernel
-depends on its jail alone and a new ui keeps the namespace. Its own `confined` (the same rule,
-`approval.is_confined`, over the same jail) decides only what the model is told and whether the
-startup files run unasked. Every failure the kernel knows of (a
+the person is asked first is the `approval` rule's to answer and the loop's to ask, so the
+process depends on its runner alone and a new ui keeps the namespace. It reads `confined` from
+that rule (`Rule`) only to decide what the model is told and whether the startup files run
+unasked: one place decides what runs unasked. The python row starts and stops it, and on
+`/release` stops it itself (`stopped`), so nothing else ever ends it. Every failure the kernel knows of (a
 worker that died, an answer too long or garbled to read, a worker that won't start again)
 comes back as the input's text, never as an exception. Interrupting an input (cancelling `run`) sends SIGINT
 through the jail, which the worker turns into `KeyboardInterrupt` in the input, and waits for the
@@ -48,10 +49,9 @@ from types import TracebackType
 from typing import Any, Protocol, runtime_checkable
 
 from host_paths import config_home, walked
-from kernel_cordis_plugin.approval import is_confined
-from kernel_cordis_plugin.python import PYTHON, instructions_for
+from python_cordis_plugin.python import PYTHON, instructions_for
 
-__all__ = ["Access", "Jail", "Jailed", "Kernel", "KernelConfig", "worker_argv"]
+__all__ = ["Access", "Jailed", "Kernel", "KernelConfig", "Rule", "Runner", "worker_argv"]
 
 _WORKER = Path(__file__).with_name("worker.py")
 # The longest line the worker sends: its output and its error are capped at 20,000 characters
@@ -64,7 +64,7 @@ _CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a startup file in the person's config dire
 @runtime_checkable
 class Jailed(Protocol):
     """A program a jail started: it can be interrupted and stopped, and says why, when the jail
-    ended it itself (`ended`: a Linux `brig:jail` whose hold on a path the host undid; "" when
+    ended it itself (`ended`: a Linux `runner:confined` whose hold on a path the host undid; "" when
     it did not), and what its start is (`report`, `notice`, `reads`, `writes`: this program's
     jail's, whatever else the jail starts)."""
 
@@ -87,12 +87,21 @@ class Access(Protocol):
 
 
 @runtime_checkable
-class Jail(Protocol):
-    """What the kernel needs of the `jail` value (CONTRACTS.md: jail)."""
+class Runner(Protocol):
+    """What the Python process needs of the `runner` value (CONTRACTS.md: runner): its start,
+    and the runner's own grades before any."""
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
-    async def release(self) -> str: ...
+
+
+@runtime_checkable
+class Rule(Protocol):
+    """What the Python process needs of the `approval` value (CONTRACTS.md: approval): whether
+    the runner confines its inputs, so none is asked about."""
+
+    @property
+    def confined(self) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,12 +269,15 @@ def _inside(paths: Sequence[str], root: str) -> tuple[str, ...]:
 
 
 class Kernel:
-    """Implements `kernel` (CONTRACTS.md): a persistent namespace, and the `python` tool's call
-    (`call(input)`, over `run(code)`) and what the model is told about it (`instructions()`). An
-    async context manager: entering starts the worker in the jail, leaving stops it."""
+    """The Python process: a persistent namespace, and the `python` tool's call (`call(input)`,
+    over `run(code)`) and what the model is told about it (`instructions()`). An async context
+    manager: entering starts the worker in the runner, leaving stops it."""
 
-    def __init__(self, jail: Jail, config: KernelConfig, access: Access | None = None) -> None:
-        self._jail = jail
+    def __init__(
+        self, runner: Runner, config: KernelConfig, access: Access | None = None, *, rule: Rule
+    ) -> None:
+        self._runner = runner
+        self._rule = rule
         self._config = config
         self._access = access  # asked before an input opens a project file, for what it asks about
         self._lock = asyncio.Lock()
@@ -286,12 +298,12 @@ class Kernel:
 
     @property
     def confined(self) -> bool:
-        """Whether the jail confines its inputs, so none is asked about (`approval`'s rule)."""
-        return is_confined(self._jail.report())
+        """Whether the runner confines its inputs, so none is asked about: the `approval` rule's."""
+        return self._rule.confined
 
     def report(self) -> Mapping[str, str]:
         """The grades of the jail the worker runs in (before any worker, the jail's own)."""
-        return self._worker.report() if self._worker is not None else self._jail.report()
+        return self._worker.report() if self._worker is not None else self._runner.report()
 
     def notice(self) -> str:
         """What the person should know about the jail the worker runs in ("" when nothing)."""
@@ -354,19 +366,19 @@ class Kernel:
         the end."""
         return self._touched
 
-    async def release(self) -> str:
-        """End the worker now, and with it its jail, then release the jail (`jail.release()`: on
-        Linux it stops the extensions' worker too, whose jail holds the same) so it lets go of
-        what it holds on the host while none runs, and say what that freed (where bh-02 looks for
-        its credential). The next input starts a new worker, told its earlier variables are gone,
-        and so ends the release. An input that is running is left to finish, and nothing ends."""
+    async def stopped(self) -> str:
+        """`/release` (the python row registers it with the runner): end the worker now, so the
+        runner can let go of what its jail holds on the host, and say so ("" when none ran). The
+        next input starts a new worker, told its earlier variables are gone. An input that is
+        running is left to finish, nothing ends, and the answer says so."""
         if self._lock.locked():
             return "An input is running: stop the reply (Ctrl-C), then /release again."
         async with self._lock:
+            had = self._process is not None
             await self._stop()
-        freed = await self._jail.release()
-        said = "The kernel is stopped; the next input starts it again, without the earlier variables."
-        return f"{said} {freed}" if freed else said
+        if not had:
+            return ""
+        return "The Python process is stopped; the next input starts it again, without the earlier variables."
 
     async def _execute(self, code: str) -> _Output:
         async with self._lock:
@@ -603,7 +615,7 @@ class Kernel:
         self._dir = tempfile.mkdtemp(prefix="bh-k-", dir="/tmp")
         endpoint = str(Path(self._dir) / "k.sock")
         root = str(Path(self._config.root).resolve())
-        self._process = self._worker = await self._jail.start(
+        self._process = self._worker = await self._runner.start(
             worker_argv(endpoint), cwd=root, endpoint=endpoint
         )
         self._reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)

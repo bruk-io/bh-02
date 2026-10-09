@@ -36,7 +36,8 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     for layer in layers():
         for row in read_layer(str(layer)):
             rows[row.id] = row if row.use else Row(row.id, rows[row.id].use, row.config)
-    assert {"loop", "ui", "chat", "kernel", "jail", "system", "tools"} <= set(rows)
+    assert {"loop", "ui", "chat", "python", "runner", "system", "tools"} <= set(rows)
+    assert not {"kernel", "jail"} & set(rows)  # the kernel plugin's rows, before the python and runner ones
     assert not {"actions", "fs", "approve", "guard"} & set(rows)  # the tool rows of before CodeAct
     assert rows["tools"].use == "agent:tools" and rows["loop"].config == {"requires": ["python"]}
     for row in rows.values():
@@ -53,11 +54,17 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     assert rows["executor"].use == "agent:executor"
     assert resolve(rows["executor"].use or "").inject == set()
     assert "executor" in resolve(rows["loop"].use or "").inject
-    assert resolve(rows["kernel"].use or "").name == "kernel"  # CodeAct, whichever model
-    # one row decides whether the model's code runs unasked, for the loop and the extensions
-    # both; it depends on the jail and the ui, never the kernel, so /clear leaves it up
-    assert rows["approval"].use == "kernel:approval"
-    assert resolve(rows["approval"].use or "").inject == {"jail", "output"}
+    assert resolve(rows["python"].use or "").name == "tool"  # CodeAct, whichever model
+    # one rule decides whether the model's code runs unasked, for the loop, the extensions and
+    # the python tool alike; it depends on the runner alone, so /clear leaves it up, and asking
+    # the person is the asker's (the loop and the extensions depend on `output` for it)
+    assert rows["approval"].use == "runner:approval"
+    assert resolve(rows["approval"].use or "").inject == {"runner"}
+    assert "output" in resolve(rows["loop"].use or "").inject
+    # the jail field is a row of its own over the runner: /clear never reloads it
+    assert rows["grades"].use == "tui:grades"
+    assert resolve(rows["grades"].use or "").inject == {"runner", "approval", "frame", "output"}
+    assert "runner" not in resolve(rows["status"].use or "").inject
     # `!COMMAND` is a layer's row, claiming its prefix in `commands`: no extension can
     assert rows["shell-command"].use == "commands:shell_command"
     assert resolve(rows["shell-command"].use or "").inject == {"commands"}
@@ -283,8 +290,8 @@ async def test_slash_commands_act_on_the_running_session(composition: Callable[.
     fragile.script("/rows", "/clear", "after", "/model", "/nope")
     await asyncio.wait_for(run([*layers(), patch]), 10)
     rows, cleared, model, unknown = fragile.NOTES
-    assert "kernel" in rows and "kernel:kernel" in rows and "active" in rows
-    assert cleared == "the conversation was cleared; starting afresh: loop, transcript, kernel"
+    assert "python" in rows and "python:tool" in rows and "active" in rows
+    assert cleared == "the conversation was cleared; starting afresh: loop, transcript, python"
     assert model.startswith("● sonnet  claude-code  sonnet\n  opus") and "/model NAME switches" in model
     assert unknown == "unknown command /nope; /help lists them"
     assert fragile.SHOWN == ["after"]  # only the message reached the model, after the restart

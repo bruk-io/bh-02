@@ -1,1 +1,1 @@
-{% include-markdown "../../../../bh-02/plugins/brig-cordis-plugin/README.md" %}
+{% include-markdown "../../../../bh-02/plugins/runner-cordis-plugin/README.md" %}

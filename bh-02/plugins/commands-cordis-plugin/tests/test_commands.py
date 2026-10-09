@@ -163,7 +163,7 @@ class Loader:
     def __init__(self) -> None:
         self.restarted: list[str] = []
         self.batches: list[tuple[str, ...]] = []
-        self.rows = {"loop": "active", "model": "active", "kernel": "active", "fs": "active"}
+        self.rows = {"loop": "active", "model": "active", "python": "active", "fs": "active"}
 
     def status(self) -> dict[str, str]:
         return dict(self.rows)
@@ -179,7 +179,7 @@ class Loader:
         return [
             Entry("loop", "agent:loop", {"max_nudges": 2}),
             Entry("model", "models:model", {"default": "haiku"}),
-            Entry("kernel", "kernel:kernel"),
+            Entry("python", "python:tool"),
         ]
 
 
@@ -194,7 +194,7 @@ async def test_the_operator_shows_explains_and_queues_restarts(tmp_path: Path) -
     queued = Jobs(told.notice)
     op = Operator(loader, queued)
     run = {spec["name"]: fn for spec, fn in op.specs}
-    assert "loop    agent:loop     active" in await run["rows"]("")
+    assert "loop    agent:loop    active" in await run["rows"]("")
     assert await run["explain"]("loop") == "loop: all about it"
     assert await run["restart"]("nope") == "no row 'nope'; /rows lists them"
     assert await run["restart"]("fs") == [
@@ -232,8 +232,8 @@ async def test_jobs_run_in_order_tell_a_failure_and_settle_once_none_is_pending(
 
 
 def test_rows_line_up() -> None:
-    table = rows_table({"loop": "active", "kernel": "failed: x"}, {"loop": "a:b", "kernel": "kernel:kernel"})
-    assert table.splitlines() == ["kernel  kernel:kernel  failed: x", "loop    a:b            active"]
+    table = rows_table({"loop": "active", "python": "failed: x"}, {"loop": "a:b", "python": "python:tool"})
+    assert table.splitlines() == ["loop    a:b          active", "python  python:tool  failed: x"]
 
 
 class _Output:
@@ -276,7 +276,7 @@ async def test_the_operator_row_registers_its_commands_and_takes_them_when_it_le
     await rt.settle()
     commands = rt.root.get("commands")
     assert [s["name"] for s in commands.specs()] == ["rows", "explain", "restart"]
-    assert "loop    agent:loop     active" in await commands.run("/rows")
+    assert "loop    agent:loop    active" in await commands.run("/rows")
     assert (await commands.run("/restart fs"))[0] == {"type": "note", "text": "restarting fs"}
     await asyncio.sleep(0.01)
     assert loader.restarted == ["fs"]  # the jobs row's own work ran it

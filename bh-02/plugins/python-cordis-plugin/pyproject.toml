@@ -1,7 +1,7 @@
 [project]
-name = "kernel-cordis-plugin"
+name = "python-cordis-plugin"
 version = "0.1.0"
-description = "A persistent Python kernel in a process of its own, started by whatever jail the composition names."
+description = "The python tool: a persistent Python process, started by the runner the composition names, and the `python(code)` tool that sends it inputs."
 requires-python = ">=3.15"
 dependencies = [
     "cordis",
@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.entry-points."cordis.plugins"]
-kernel = "kernel_cordis_plugin"
+python = "python_cordis_plugin"
 
 [tool.uv.sources]
 cordis = { workspace = true }
@@ -20,4 +20,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kernel_cordis_plugin"]
+packages = ["src/python_cordis_plugin"]

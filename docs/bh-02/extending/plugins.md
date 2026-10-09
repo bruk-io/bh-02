@@ -123,9 +123,9 @@ A plugin the shipped layer names also goes in the app's own dependencies
 (`bh-02/app/pyproject.toml`), so `uv tool install ./bh-02/app` installs it.
 
 Each shipped plugin's README is the best guide to its shape:
-[agent](../reference/plugins/agent.md), [brig](../reference/plugins/brig.md),
+[agent](../reference/plugins/agent.md), [runner](../reference/plugins/runner.md),
 [chat](../reference/plugins/chat.md), [commands](../reference/plugins/commands.md),
-[extensions](../reference/plugins/extensions.md), [kernel](../reference/plugins/kernel.md),
+[extensions](../reference/plugins/extensions.md), [python](../reference/plugins/python.md),
 [memory](../reference/plugins/memory.md), [models](../reference/plugins/models.md),
 [tui](../reference/plugins/tui.md). cordis's design doc explains components and effects:
 [cordis](../../cordis/index.md#how-authors-add).

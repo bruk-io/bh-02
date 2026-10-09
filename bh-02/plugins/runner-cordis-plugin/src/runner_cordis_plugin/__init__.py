@@ -1,6 +1,9 @@
-"""A `jail` from brig: the only package in the workspace that imports brig."""
+"""What runs the model's code: a runner (`runner`), confined by brig (the only package in the
+workspace that imports brig) or not at all; the rule for what runs unasked (`approval`); and
+`/release`, which asks each owner to stop its own program and lets go of what the runner holds."""
 
-from brig_cordis_plugin.jail import (
+from runner_cordis_plugin.approval import Approval, Graded, is_confined
+from runner_cordis_plugin.jail import (
     MARK,
     SYSTEM_READABLE,
     BrigConfig,
@@ -30,24 +33,35 @@ from brig_cordis_plugin.jail import (
     tripwired,
     uncovered,
 )
-from brig_cordis_plugin.tripwire import Tripwire, decoded, lifted, tripped_for, wires
-from brig_cordis_plugin.wiring import jail
+from runner_cordis_plugin.runner import Mechanism, Runner, Started
+from runner_cordis_plugin.tripwire import Tripwire, decoded, lifted, tripped_for, wires
+from runner_cordis_plugin.unconfined import UNENFORCED, Unjailed
+from runner_cordis_plugin.wiring import approval, confined, release, unconfined
 
 __all__ = [
     "MARK",
     "SYSTEM_READABLE",
+    "UNENFORCED",
+    "Approval",
     "BrigConfig",
     "BrigJail",
-    "Tripwire",
+    "Graded",
     "Layers",
+    "Mechanism",
+    "Runner",
+    "Started",
+    "Tripwire",
+    "Unjailed",
     "allowlisted",
+    "approval",
+    "confined",
     "decoded",
     "git_author",
     "graded",
     "held",
     "holding",
     "identity",
-    "jail",
+    "is_confined",
     "lifted",
     "made_by_the_jail",
     "mountable",
@@ -57,6 +71,7 @@ __all__ = [
     "recorded",
     "recorded_group",
     "records_dir",
+    "release",
     "released_for",
     "remove_placeholders",
     "self_modify_denied",
@@ -66,6 +81,7 @@ __all__ = [
     "told_reads",
     "tripped_for",
     "tripwired",
+    "unconfined",
     "uncovered",
     "wires",
 ]

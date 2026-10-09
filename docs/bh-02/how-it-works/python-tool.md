@@ -62,4 +62,4 @@ channel is a Unix socket that carries an input in and its output back. The `kern
 (`kernel:kernel`) is bh-02's end of it: it starts the process through the jail, sends each input,
 and starts a new process when the last one died.
 
-The kernel plugin's README has the details: [kernel-cordis-plugin](../reference/plugins/kernel.md).
+The python plugin's README has the details: [python-cordis-plugin](../reference/plugins/python.md).

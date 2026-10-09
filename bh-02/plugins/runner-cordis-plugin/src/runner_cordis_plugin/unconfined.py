@@ -1,8 +1,8 @@
-"""A `jail` that confines nothing: the worker as a plain subprocess, and a report that says so.
+"""The unconfined runner's mechanism: a program as a plain subprocess, and a report that says so.
 
-For a platform brig can't jail, or a person who chooses not to. Every axis is reported
-`unenforced`, so nothing is `confined`: an input can do anything the person running bh-02 can,
-and `approval` puts each input (and each extension to load) to the person before it runs.
+For a platform brig can't jail, or a person who chooses not to (`--no-jail`). Every axis is
+reported `unenforced`, so nothing is `confined`: an input can do anything the person running
+bh-02 can, and `approval`'s rule puts each input (and each extension to load) to the person.
 """
 
 import asyncio
@@ -85,18 +85,14 @@ class _Process:
 
 
 class Unjailed:
-    """Implements `Jail` with no confinement at all."""
+    """The unconfined runner's mechanism (`runner.Mechanism`): no confinement at all."""
 
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
 
     async def release(self) -> str:
-        """Nothing: no jail holds anything on the host, so nothing is stopped."""
+        """Nothing: no jail holds anything on the host."""
         return ""
-
-    def released(self) -> bool:
-        """Never: `release` stops nothing, so nothing waits for the next input."""
-        return False
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Process:
         log = Path(endpoint).with_name("stderr.log")
@@ -125,7 +121,7 @@ async def _until_listening(endpoint: str, process: asyncio.subprocess.Process) -
         while True:
             if process.returncode is not None:
                 log = Path(endpoint).with_name("stderr.log").read_text(errors="replace")[-2000:]
-                raise RuntimeError(f"the kernel exited before it was ready ({process.returncode}):\n{log}")
+                raise RuntimeError(f"the program exited before it was ready ({process.returncode}):\n{log}")
             with contextlib.suppress(OSError):
                 _, writer = await asyncio.open_unix_connection(endpoint)
                 writer.close()

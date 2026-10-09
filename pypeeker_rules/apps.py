@@ -284,7 +284,7 @@ register_dsl_rule(
         build=_brig_one_adapter,
         message=(
             "'{module}' imports '{imported_from}'; only one adapter package imports brig. Depend on "
-            "the `jail` key (CONTRACTS.md) instead, and let the layer file choose brig:jail"
+            "the `runner` key (CONTRACTS.md) instead, and let the layer file choose runner:confined"
         ),
     )
 )

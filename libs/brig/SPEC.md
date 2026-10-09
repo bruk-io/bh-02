@@ -781,7 +781,7 @@ be the copy decision-152 deleted the event stream for).
   do it, and the grade is not lowered for it: what it grades is whether the
   workload can get past a carve-out by itself, and it can't. Seeing it is the
   embedder's: bh-02 watches each carve-out's directory with inotify and ends the
-  jail at the first such change (its brig-cordis-plugin README, "When the host
+  jail at the first such change (its runner-cordis-plugin README, "When the host
   undoes a mount", has the window that leaves). The mount can't be put back from
   outside: the host can't enter the jail's mount namespace (`EPERM`, measured;
   bwrap nests it in a user namespace of its own).

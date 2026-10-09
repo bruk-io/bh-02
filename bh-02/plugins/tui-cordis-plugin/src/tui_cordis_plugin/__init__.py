@@ -13,14 +13,17 @@ from tui_cordis_plugin.status import (
     CommandSource,
     Confinement,
     Entries,
+    GradesField,
     ModelField,
     ModelSource,
     Running,
+    Started,
+    Starts,
     StatusConfig,
     StatusSink,
     TuiConfig,
 )
-from tui_cordis_plugin.wiring import palette, status, tui
+from tui_cordis_plugin.wiring import grades, palette, status, tui
 
 __all__ = [
     "AppCrashed",
@@ -31,9 +34,12 @@ __all__ = [
     "CommandSource",
     "Confinement",
     "Entries",
+    "GradesField",
     "ModelField",
     "ModelSource",
     "Running",
+    "Started",
+    "Starts",
     "History",
     "Replay",
     "StatusConfig",
@@ -41,6 +47,7 @@ __all__ = [
     "TuiConfig",
     "TuiInput",
     "TuiOutput",
+    "grades",
     "palette",
     "replayable",
     "running",

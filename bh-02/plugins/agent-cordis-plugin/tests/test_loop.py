@@ -16,6 +16,7 @@ from agent_cordis_plugin import (
     DECLINED,
     FAILED,
     STOPPED,
+    Asked,
     FileTranscript,
     LoopModel,
     MemoryTranscript,
@@ -104,15 +105,23 @@ def as_tool(kernel: Shouting) -> ToolBroker:
 
 
 class Confined:
-    """An `approval` over a jail that confines the kernel: every input runs, nobody is asked."""
+    """An approval over a runner that confines the Python process: every input runs, nobody is
+    asked. The loop's own (`approve`), and the `approval` rule and `output` a row binds."""
 
     async def approve(self, request: Json) -> bool:
         return True
 
+    def unasked(self, request: Json) -> bool:
+        return True
+
+    async def confirm(self, request: Json) -> bool:
+        raise AssertionError("nobody is asked about a call that runs unasked")
+
 
 class Person:
-    """An `approval` over no jail: the person answers each question in turn (no once the answers
-    run out), it keeps what it was asked, and it can be told to wait on a question for ever."""
+    """An approval over no jail: the person answers each question in turn (no once the answers
+    run out), it keeps what it was asked, and it can be told to wait on a question for ever. The
+    loop's own (`approve`), and an `output`'s `confirm`."""
 
     def __init__(self, *answers: bool, hang: bool = False) -> None:
         self.answers = list(answers)
@@ -124,6 +133,9 @@ class Person:
         if self.hang:
             await asyncio.Event().wait()
         return self.answers.pop(0) if self.answers else False
+
+    async def confirm(self, request: Json) -> bool:
+        return await self.approve(request)
 
 
 def text(s: str) -> Json:
@@ -178,9 +190,9 @@ async def test_a_tool_turn_runs_the_call_as_an_input_and_asks_again() -> None:
 
 
 async def test_each_input_is_put_to_approval_and_a_no_runs_nothing() -> None:
-    """Whether the person is asked (unjailed) or nobody is (jailed) is the approval's to decide
-    (kernel:approval); the loop asks it about every call, saying where it runs and showing it as
-    its tool's registration says, and runs only what it says yes to."""
+    """Whether the person is asked (unconfined) or nobody is (confined) is the `approval` rule's
+    to decide (runner:approval); the loop asks about every call (`Asked`), saying where it runs
+    and showing it as its tool's registration says, and runs only what it says yes to."""
     scripted = Scripted([call("c1", "python", code="x"), call("c2", "python", code="y")], [text("fine")])
     kernel, person, history = Shouting(), Person(False, True), MemoryTranscript()
     assert await _collect(LoopModel(scripted, as_tool(kernel), history, person), "go") == "fine"
@@ -196,6 +208,21 @@ async def test_each_input_is_put_to_approval_and_a_no_runs_nothing() -> None:
     ]
     assert [m["content"] for m in history.messages if m["role"] == "tool"] == [DECLINED, "Y"]
     assert kernel.ran == ["y"]  # the no reached the model as text, and the yes ran
+
+
+async def test_a_call_runs_unasked_when_the_rule_says_so_else_on_the_person_s_answer() -> None:
+    """`Asked`, what the loop row builds from the `approval` rule and the `output`: a call the rule
+    lets run unasked never reaches the person; any other is theirs to answer."""
+
+    class Rule:
+        def unasked(self, request: Json) -> bool:
+            return request.get("runs", "jail") == "jail"
+
+    person = Person(False)
+    asked = Asked(Rule(), person)
+    assert await asked.approve({"name": "python", "input": {}})
+    assert not await asked.approve({"name": "search", "input": {}, "runs": "host"})
+    assert person.asked == [{"name": "search", "input": {}, "runs": "host"}]
 
 
 async def test_a_call_that_is_not_an_input_is_never_put_to_approval() -> None:
@@ -253,6 +280,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
         yield bind("tools", as_tool(Shouting()))
         yield bind("system", Nowhere())
         yield bind("approval", Confined())
+        yield bind("output", Confined())
 
     rt = Runtime()
     rt.mount(transcript, id="transcript")

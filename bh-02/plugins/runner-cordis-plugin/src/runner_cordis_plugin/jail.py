@@ -1,4 +1,5 @@
-"""The `jail` value over brig: a Spec built from where the work is, compiled, launched, graded.
+"""The confined runner's mechanism over brig (`runner:confined`): a Spec built from where the
+work is, compiled, launched, graded.
 
 `spec_for` is the whole policy as a pure function. What an input may write: the project root
 (`write`) and a scratch directory of the jail's own. What it may not, even inside those: the
@@ -15,7 +16,7 @@ models file and startup file a later session reads on the host and trusts. What
 it may not read: brig's credential list under the home directory, `hide`
 under the project, and what the `layers` value names as `secrets` (bh-02's own `local.env`,
 wherever bh-02 runs from, and the sessions' state, where Claude Code keeps its tokens). No
-network: the kernel's own socket is the one way in or out. The worker's environment is scrubbed
+network: the program's own socket is the one way in or out. The worker's environment is scrubbed
 to a short allowlist. brig's host process, which starts the worker from outside the jail,
 keeps bh-02's own environment: brig's launcher composes `{**os.environ, **jail.env}` by its
 spec, and `jail.env` can add keys but not remove them. So a variable of the launching shell (a
@@ -55,7 +56,7 @@ On both, the jail is launched tethered to bh-02 (`_Jailed`): when bh-02 ends, ho
 brig kills the jail's process group, so a program an input left running doesn't outlive it (on
 Linux, bubblewrap's whole namespace; on darwin, what stayed in the group).
 
-Anywhere else `start` refuses and names `kernel:unjailed`.
+Anywhere else `start` refuses and names `runner:unconfined`.
 """
 
 import asyncio
@@ -89,8 +90,8 @@ from brig.core import (
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH
 from brig.run import Handle, IoPolicy, KillOutcome, SubprocessLauncher, build_compile_ctx
 from brig.stack import CompiledJail, Stack, scratch_darwin, strict_linux
-from brig_cordis_plugin.tripwire import Tripwire
 from host_paths import state_home
+from runner_cordis_plugin.tripwire import Tripwire
 
 __all__ = [
     "MARK",
@@ -336,11 +337,11 @@ def notice_for(platform: str, holds: Sequence[str]) -> str:
     return (
         f"The jail keeps inputs from reading {', '.join(holds)}. On Linux it does that with a mount "
         "on each path that is there, and, where bh-02 looks for its credential and there is none, "
-        "with an empty directory, so nothing can be created there while the kernel runs: "
-        "`/release` stops the kernel and frees it until the next input, which is when to add your "
+        "with an empty directory, so nothing can be created there while the Python process runs: "
+        "`/release` stops it and frees the path until the next input, which is when to add your "
         "credential. The host can undo a mount: when a file is created at one of these paths, or "
         "replaced (an editor saves local.env by renaming a new file over it) or removed while the "
-        "kernel runs, bh-02 ends the jail at once (a running input with it) and the next input's "
+        "Python process runs, bh-02 ends the jail at once (a running input with it) and the next input's "
         "jail holds the path again. A program an input left running can still read or rewrite it "
         "in the milliseconds that takes, so edit them after `/release`."
     )
@@ -352,27 +353,26 @@ def holding(credentials: Sequence[str], denies: Sequence[str]) -> tuple[str, ...
     return tuple(c for c in credentials if c in denies)
 
 
-def released_for(free: Sequence[str], still: Sequence[str], others: bool = False) -> str:
+def released_for(free: Sequence[str], still: Sequence[str], running: bool = False) -> str:
     """What `/release` tells the person: where bh-02 looks for its credential and nothing holds
-    now, what another session's jail still holds, and (`others`) that the release stopped a
-    program besides the kernel's worker: the extensions' worker, which starts again once the
-    next input has started the kernel."""
+    now, what another session's jail still holds, and (`running`) that a program this jail
+    started still runs (an owner that did not stop its own), whose jail holds the rest."""
     said = []
     if free:
         said.append(
-            f"Nothing holds {', '.join(free)} until the kernel starts again: create your local.env "
-            "there now, then send your message. The next kernel's jail masks it from inputs (a model "
-            "already running keeps the credential it started with: `/restart model`)."
+            f"Nothing holds {', '.join(free)} until something starts in the runner again: create "
+            "your local.env there now, then send your message. The next jail masks it from inputs (a "
+            "model already running keeps the credential it started with: `/restart model`)."
         )
     if still:
         said.append(
             f"{', '.join(still)} stays held: another bh-02 session of yours is running a jail, and "
             "none removes a placeholder while another runs. Quit that session, then /release again."
         )
-    if others:
+    if running:
         said.append(
-            "The extensions' worker stopped too, and what the extensions added with it: they load "
-            "again once the next input has started the kernel."
+            "A program this runner started still runs (its row did not stop it on /release), and "
+            "its jail holds what it holds: /rows shows the rows; /restart one, then /release again."
         )
     return " ".join(said)
 
@@ -422,8 +422,8 @@ def stack_for(platform: str) -> Stack:
         return _STACKS[platform]()
     except KeyError:
         raise RuntimeError(
-            f"brig:jail runs on darwin (seatbelt) and Linux (bubblewrap); this is {platform}. "
-            "Use `kernel:unjailed` for the jail row (or `bh-02 --no-jail`), knowing it confines nothing"
+            f"runner:confined runs on darwin (seatbelt) and Linux (bubblewrap); this is {platform}. "
+            "Use `runner:unconfined` for the runner row (or `bh-02 --no-jail`), knowing it confines nothing"
         ) from None
 
 
@@ -433,7 +433,7 @@ def self_modify_denied(allow: Sequence[str]) -> tuple[str, ...]:
     unknown = [name for name in allow if name not in SELF_MODIFY_WORKSPACE_RELATIVE]
     if unknown:
         raise ValueError(
-            f"the jail row's `allow` names {', '.join(map(repr, unknown))}, which brig does not deny "
+            f"the runner row's `allow` names {', '.join(map(repr, unknown))}, which brig does not deny "
             f"in the first place; `allow` takes only names from its self-modification list: "
             f"{', '.join(SELF_MODIFY_WORKSPACE_RELATIVE)}. To let an input write another path, "
             "use `write`"
@@ -530,10 +530,10 @@ def remove_placeholders(made: Sequence[tuple[str, str | None]]) -> None:
 @dataclass(frozen=True, slots=True)
 class _Facts:
     """What one start of the jail is, kept with that start for whoever started it (CONTRACTS.md:
-    jail): its grades (`graded`), what the person should know about it (`notice_for`), the trees
+    runner): its grades (`graded`), what the person should know about it (`notice_for`), the trees
     its program reads when that is all it reads (`told_reads`: a Linux jail's; empty on darwin)
     and the roots it may write but its scratch. A jail starts more than one program (the
-    kernel's worker, the extensions' worker), each from its own command: what one start is never
+    Python process, the extensions' worker), each from its own command: what one start is never
     replaces what another is."""
 
     report: Mapping[str, str]
@@ -719,7 +719,7 @@ def _mark_of(path: str) -> str | None:
 
 
 class BrigJail:
-    """Implements `Jail` (CONTRACTS.md: jail) with brig's preset for this platform."""
+    """The confined runner's mechanism (`runner.Mechanism`): brig's preset for this platform."""
 
     def __init__(self, config: BrigConfig, layers: Layers, *, platform: str = host_platform) -> None:
         self._config = config
@@ -733,10 +733,9 @@ class BrigJail:
         # says about, whichever program's jail held it
         self._holding: tuple[str, ...] = ()
         # every program this jail started that may still run, and the starts under way: what
-        # `release` stops (it waits for a start under way, then stops what that started)
+        # `release` waits for (a start under way) and says still runs (an owner that kept its own)
         self._live: list[_Jailed] = []
         self._starting: set[asyncio.Future[None]] = set()
-        self._released = False
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
                 self._report = self.compile(probe, str(Path(probe, "k.sock")), ".", ())[1]
@@ -746,43 +745,27 @@ class BrigJail:
         them. A started program's own are its `report()`."""
         return self._report
 
-    def released(self) -> bool:
-        """Whether `release` has stopped this jail's programs and none has started since. The
-        next start ends it, and the next input's is the kernel's worker; a program whose owner is
-        not the kernel (the extensions' worker) waits while it holds, or its jail would hold what
-        the release freed again before the person could use it. Never on darwin, whose `release`
-        stops nothing."""
-        return self._released
-
     async def release(self) -> str:
-        """For `/release`, once the kernel has stopped its own worker. On Linux: stop every
-        other program this jail started that still runs (the extensions' worker, whose jail holds
-        the same placeholders and a share of the jail lock, so while it ran nothing could be
-        freed), each stop removing what its jail made once no jail runs; sweep what jails that
-        are gone left; and say which places bh-02 looks for its credential are free now, what
-        another session's jail still holds, and that the extensions' worker stopped
-        (`released_for`). The jail is then `released` until its next start. Empty when there is
-        nothing to say, and on darwin, where seatbelt holds a path without anything on the host
-        and nothing is stopped."""
+        """For `/release`, once each owner has stopped its own program (`runner.Runner`). On
+        Linux: wait for a start under way, sweep what jails that are gone left (each stop already
+        removed what its jail made once no jail runs), and say which places bh-02 looks for its
+        credential are free now, what another session's jail still holds, and whether a program
+        of this jail's still runs (`released_for`). Empty when there is nothing to say, and on
+        darwin, where seatbelt holds a path without anything on the host."""
         if self._platform != "linux":
             return ""
-        self._released = True  # before anything waits: from here on, what asks starts nothing
-        await asyncio.gather(*self._starting)  # a start under way: stopped too, once it is up
-        running = [started for started in self._live if not started.stopped]
-        for started in self._live:
-            await started.stop()
-        self._live.clear()
+        await asyncio.gather(*self._starting)  # a start under way: its placeholders made first
+        self._live = [started for started in self._live if not started.stopped]
         await asyncio.to_thread(self._swept, records_dir(os.environ, str(Path.home())))
         return released_for(
             [p for p in self._holding if not os.path.lexists(p)],
             [p for p in self._holding if Path(p).is_dir()],
-            others=bool(running),
+            running=bool(self._live),
         )
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
         """Start `argv` in `cwd`, in a jail of its own compiled from the policy, listening on
-        `endpoint`. A start ends a release (`released`), before anything waits."""
-        self._released = False
+        `endpoint`."""
         starting: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._starting.add(starting)
         try:
@@ -798,8 +781,9 @@ class BrigJail:
         stack_for(self._platform)  # refuses on a platform brig has no preset for
         if self._platform == "linux" and not Path(DEFAULT_BWRAP_PATH).exists():
             raise RuntimeError(
-                f"brig:jail runs the kernel under bubblewrap on Linux, and there is no {DEFAULT_BWRAP_PATH}: "
-                "install the `bubblewrap` package, or use `kernel:unjailed` for the jail row "
+                "runner:confined runs programs under bubblewrap on Linux, and there is no "
+                f"{DEFAULT_BWRAP_PATH}: "
+                "install the `bubblewrap` package, or use `runner:unconfined` for the runner row "
                 "(or `bh-02 --no-jail`), knowing it confines nothing"
             )
         # Before anything looks at the filesystem: no placeholder may be removed from here on

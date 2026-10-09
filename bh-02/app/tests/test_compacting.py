@@ -1,4 +1,4 @@
-"""`/compact` booted from the shipped layers: a real loop, transcript, kernel and loader; only the
+"""`/compact` booted from the shipped layers: a real loop, transcript, python tool and loader; only the
 model is a fake, which runs scripted inputs and answers bh-02's summary request."""
 
 import asyncio

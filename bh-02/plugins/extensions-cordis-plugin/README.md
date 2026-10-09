@@ -6,7 +6,7 @@ restart; what keeps that safe is where the code runs, not who reads it first.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame` and `system`; its own `system` section tells the model how | `jail` (`start`, `released`), `commands`, `frame`, `system`, `approval` (`confined`, `approve`) |
+| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame` and `system`; its own `system` section tells the model how; registers its worker's stop with the runner (`/release`) | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `approval` (`confined`, `unasked`), `output` (`confirm`) |
 
 Config (`ExtensionsConfig`): `root` (the project, `.`), `path` (the extensions directory under
 it, `.bh-02/plugins`), `watch` (how often it is looked at, 0.5 s).
@@ -74,15 +74,16 @@ bh-02 refused). The status bar's `extensions` field shows the same to the person
 
 ## Where it runs, and who is asked
 
-Not in bh-02's process. `host.py` starts `worker.py` through the `jail` row, the same jail the
-kernel's inputs run in: with `brig:jail` an extension can write only inside the project, can't
-reach the network, and can't read `local.env` or the sessions' state. Each load is put to
-`approval` (`kernel:approval`), the row that decides for inputs too, so an extension loads
-without asking exactly when an input runs without asking; the model's plugins are as contained
-as its inputs. With `--no-jail` (`kernel:unjailed`) an extension would run with the person's own
-permissions, so `approval` puts each load to the person (`output.confirm`), the source shown
-whole (`Load the model's extension todo into bh-02, unjailed (12 lines)?`), and a no leaves it
-unloaded until the file changes. What the model is told about it follows `approval.confined`.
+Not in bh-02's process. `host.py` starts `worker.py` through the runner, which jails it as it
+does the Python process, where inputs run: with `runner:confined` an extension can write only
+inside the project, can't reach the network, and can't read `local.env` or the sessions' state.
+Each load is put to the `approval` rule (`runner:approval`), the rule the loop asks about
+inputs too, so an extension loads without asking exactly when an input runs without asking; the
+model's plugins are as contained as its inputs. With `--no-jail` (`runner:unconfined`) an
+extension would run with the person's own permissions, so the rule says no (`unasked`) and the
+row puts each load to the person itself (`output.confirm`), the source shown whole (`Load the
+model's extension todo into bh-02, unjailed (12 lines)?`), and a no leaves it unloaded until
+the file changes. What the model is told about it follows `approval.confined`.
 
 Nothing of an extension crosses into bh-02 but data over the worker's socket: a command's spec
 and, when the person runs it, its argument text out and its answer back; a field's text; a
@@ -97,7 +98,7 @@ about first.
 ## What the host reads, and writes, there
 
 The model writes the extensions directory from the jail, and `host.py` reads it on the host,
-with the person's permissions, so it follows no link there (the kernel's rule for its startup
+with the person's permissions, so it follows no link there (the python row's rule for its startup
 files: never read a file the model could write, or reach through a link it could make, and hand
 its text to the model). A link to `local.env`, or a hard link to it, would otherwise send the
 secret to the worker as an extension's source, where an extension already loaded could keep
@@ -144,24 +145,31 @@ end it: `os._exit` at import) takes every extension down; nothing loads again, a
 started, until the directory changes, so an extension that ends the worker as it loads isn't
 loaded again every `watch`.
 
-`/release` stops the worker too: on Linux the jail stops every program it started, since the
-worker's jail holds the same placeholders as the kernel's (where bh-02 looks for its
-credential, the person's to fill now). That is not an ending: while the jail is `released()`
-no worker starts, whatever changes in the directory (each extension's status says why), and
-once the next input has started the kernel, every extension there is loads again in a new
+`/release` stops the worker too, and the row does it itself: it registers its worker's stop
+with the runner (`Extensions.stopped`, `runner.on_release`), which asks each owner to stop its
+own program and stops none itself, since the worker's jail holds the same placeholders as the
+Python process's (where bh-02 looks for its credential, the person's to fill now). The stop
+takes back what the extensions added and answers `The extensions' worker is stopped, and what
+the extensions added with it: ...`. That is not an ending: while the runner is `released()` and
+nothing in the directory changed, no worker starts (each extension's status says why), and once
+the next input has started the Python process, every extension there is loads again in a new
 worker, with nothing changed (`test_after_release_stops_the_worker_every_extension_loads_again_once_the_jail_runs`).
+A change to one of them while released (the person, or the model, edited it) is asked for, so
+its worker starts at once, and that start ends the release, as the next input's would
+(`test_a_change_while_released_loads_at_once_and_ends_the_release`).
 What a command of theirs kept in memory starts afresh, as after any new worker.
 
 ## Tests
 
 - `test_extensions_watch.py` is pure: names, changes, which files may be read, what the model
   and the status bar are told.
-- `test_extensions_host.py` runs `Extensions` against a real worker under
-  `extensions_cordis_plugin.testing.PlainJail` (a plain subprocess; it confines nothing and says
-  so) and fakes for the keys, `approval` among them (confined or not): an extension loaded and
-  its command run, changed and deleted, the ways one fails to load, a command name bh-02 has,
-  the unjailed question, a worker an extension ends, one `/release` stops (`PlainJail`'s
-  `release` stops every program it started, as a Linux `brig:jail`'s does), and the links it does
+- `test_extensions_host.py` runs `Extensions` against a real worker the runner plugin's
+  `Runner` starts over `extensions_cordis_plugin.testing.PlainJail` (a mechanism that starts a
+  plain subprocess; it confines nothing and says so) and fakes for the keys, `approval` among
+  them (confined or not): an extension loaded and its command run, changed and deleted, the ways
+  one fails to load, a command name bh-02 has, the unjailed question, a worker an extension
+  ends, one `/release` stops (the row's own stop, as the runner asks it; `PlainJail`'s `release`
+  holds nothing and stops nothing), one changed while released, and the links it does
   not follow: a link to a file outside, a hard link, `.bh-02` or `.bh-02/plugins` a link, a file
   swapped for a link between being found and read (by an extension loaded just before it), and a
   link at `status.json`.

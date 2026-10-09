@@ -1,8 +1,8 @@
 # The shipped composition, a Textual app with CodeAct (the `python` tool) as its default.
 # bh-02's own loop drives Claude through Claude Code (the Claude Agent SDK, on the
 # subscription), one model step at a time; the model is offered the tools rows register (here
-# the kernel's `python(code)`), through standard tool calling, and its inputs run in a
-# persistent kernel inside a brig jail. A row's
+# the python row's `python(code)`), through standard tool calling, and its inputs run in a
+# persistent Python process the runner starts in a brig jail. A row's
 # id is its role; `use` is which plugin fills it, as `plugin:component` (a `cordis.plugins`
 # entry point) or `module:attribute`. Order carries no meaning: dependencies decide what
 # activates when.
@@ -23,7 +23,7 @@ config = { requires = ["python"] }
 
 # The tools the model is offered: a broker rows register a tool with (a standard spec and the
 # function that runs a call), offered in name order. It depends on nothing, so a tool's row
-# restarting (the kernel's, on /clear) reloads neither the loop nor any other row.
+# restarting (the python row's, on /clear) reloads neither the loop nor any other row.
 [[plugin]]
 id = "tools"
 use = "agent:tools"
@@ -79,7 +79,7 @@ use = "agent:access"
 # `memory` row and they hold for both.
 [[plugin]]
 id = "memory"
-use = "memory:memory"
+use = "memory:files"
 
 [[plugin]]
 id = "on-touch"
@@ -104,45 +104,52 @@ use = "tui:app"
 id = "chat"
 use = "chat:session"
 
-# The kernel: a persistent Python namespace, and the `python(code)` tool, which it registers with
-# `tools`, adding what the model is told about it to the system prompt. Jailed, its inputs run
-# without asking; unjailed (`kernel:unjailed` below), each is put to the person
-# first (the `approval` row). A new kernel runs its startup files first (config `startup`, by
-# default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`,
-# the only one the model may edit); unjailed, the model is told to run them as inputs instead.
+# The python tool: a persistent Python process the runner starts, and the `python(code)` tool,
+# which it registers with `tools`, adding what the model is told about it to the system prompt.
+# Confined, its inputs run without asking; unconfined (`runner:unconfined` below), each is put
+# to the person first (the `approval` rule says which). A new process runs its startup files
+# first (config `startup`, by default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the
+# project's `.bh-02/kernel.py`, the only one the model may edit); unconfined, the model is told
+# to run them as inputs instead. On /release it stops its own process.
 [[plugin]]
-id = "kernel"
-use = "kernel:kernel"
+id = "python"
+use = "python:tool"
 
-# `bh-02 --no-jail` puts `kernel:unjailed` here, which confines nothing.
+# What runs the model's code: each program (the Python process, the extensions' worker) in a
+# brig jail of its own. `bh-02 --no-jail` puts `runner:unconfined` here, which confines nothing.
 [[plugin]]
-id = "jail"
-use = "brig:jail"
+id = "runner"
+use = "runner:confined"
 
-# Whether what the model asked for may run: each call (the loop asks) and each extension to load
-# (the extensions row asks). At once when it runs in a jail that confines it (writes and network
-# enforced); else (an unconfined jail, a tool that runs in bh-02's own process) the person is asked, through the ui's approval modal, and only a yes runs it. It depends on the
-# jail and the ui, not the kernel, so `/clear` leaves it up. It runs in bh-02's own process:
-# only a layer replaces it; an extension has no way to.
+# The rule for what runs unasked: what runs in the runner, when the runner confines it (writes
+# and network enforced). Anything else (an unconfined runner, a tool that runs in bh-02's own
+# process) the loop and the extensions row put to the person, through the ui's approval modal.
+# Over the runner alone, so `/clear` leaves it up. It runs in bh-02's own process: only a layer
+# replaces it; an extension has no way to.
 [[plugin]]
 id = "approval"
-use = "kernel:approval"
+use = "runner:approval"
 
-# `/release`: stops the kernel until the next input, and with it its jail, which on Linux frees
-# what the jail holds on the host (where bh-02 looks for its credential: how to add one
-# mid-session); the jail stops the extensions' worker too, and the extensions load again once
-# the next input has started the kernel. A row of its own over `kernel` and `commands`, so the
-# kernel depends on its jail alone.
+# `/release`: asks each row that started something in the runner to stop it (the Python
+# process, the extensions' worker), then lets go of what the runner holds on the host (on
+# Linux, where bh-02 looks for its credential: how to add one mid-session). The next start
+# ends it: the next input, or a change to an extension.
 [[plugin]]
 id = "release"
-use = "kernel:release"
+use = "runner:release"
 
-# The status bar: the session's id, the model and its provider, and the kernel's jail grades
-# (usage is the app's own). A small row over `kernel`, `loader`, `models`, `sessions` and
-# `frame`, so a new kernel (/clear, a new jail) reloads this and never the app.
+# The status bar: the session's id and the model and its provider (usage is the app's own).
+# A small row over `loader`, `models`, `sessions` and `frame`, none of which /clear or /model
+# replaces, so it never reloads with them.
 [[plugin]]
 id = "status"
 use = "tui:status"
+
+# The status bar's jail field: the grades of the runner's last start, over the runner and the
+# `approval` rule, which tell it each start; and, once, what a start says you should know.
+[[plugin]]
+id = "grades"
+use = "tui:grades"
 
 # The system prompt: who the model is, where it is working (the directory and the git branch),
 # then the sections rows add, sorted by name (how to extend bh-02, then memory's). A broker,
@@ -179,10 +186,10 @@ use = "models:switch"
 # The conversation's commands: `/clear` and `/compact [WHAT TO KEEP]`, each a new conversation
 # written over the transcript row's file (its `path`; the old kept as `.bak`, then `.bak.2`,
 # ...), then the rows restarted, so the prompt is read afresh. `/clear`'s is empty, and the
-# kernel restarts too (`clear`); `/compact`'s begins from the model's summary, and the kernel
-# keeps its namespace, which the summary names. A row of its own over `model`, `tools` (the
-# specs, offered as the loop offers them), the loader, `commands` and `output`, never the loop
-# or the transcript it restarts. Ctrl-C doesn't stop a command (quitting does), so the model has
+# Python process restarts too (`clear`); `/compact`'s begins from the model's summary, and the
+# Python process keeps its namespace, which the summary names. A row of its own over `model`,
+# `tools` (the specs, offered as the loop offers them), the loader, `commands`, `output` and
+# `jobs`, never the loop or the transcript it restarts. Ctrl-C doesn't stop a command (quitting does), so the model has
 # `timeout` seconds (300) to write the summary, and a note says so as it begins.
 [[plugin]]
 id = "conversation"
@@ -204,8 +211,8 @@ id = "palette"
 use = "tui:palette"
 
 # The model's own extensions: cordis components it writes to the project's `.bh-02/plugins/`,
-# loaded while bh-02 runs into a worker the `jail` row starts, so they run as confined as its
-# inputs (jailed, they load without asking; unjailed, each is put to the person first). What they
+# loaded while bh-02 runs into a worker the runner starts, so they run as confined as its
+# inputs (confined, they load without asking; unconfined, each is put to you first). What they
 # add, slash commands, status fields and sections of the model's prompt, goes into `commands`,
 # `frame` and `system`, and leaves with them. Its own section tells the model how.
 [[plugin]]

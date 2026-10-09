@@ -29,12 +29,12 @@ from bh_02.bootstrap import (
     run,
     unreadable,
 )
-from brig_cordis_plugin import BrigConfig, BrigJail, recorded_group, self_modify_denied
 from cordis import Row
 from cordis.loader import boot
 from extensions_cordis_plugin import Extensions, ExtensionsConfig
-from kernel_cordis_plugin import Kernel, KernelConfig, worker_argv
 from models_cordis_plugin.local_env import token_file
+from python_cordis_plugin import Kernel, KernelConfig, worker_argv
+from runner_cordis_plugin import Approval, BrigConfig, BrigJail, Runner, recorded_group, self_modify_denied
 
 # darwin's jail (seatbelt) reads by denylist: everything but the secrets. Linux's (bubblewrap)
 # reads by allowlist: the system, the interpreter and the project, so a file anywhere else is
@@ -45,12 +45,14 @@ _BWRAP = "/usr/bin/bwrap"
 
 @pytest.fixture
 def _needs_a_jail() -> None:
-    """brig:jail runs on darwin (seatbelt) and on Linux with bubblewrap installed. A fixture,
+    """runner:confined runs on darwin (seatbelt) and on Linux with bubblewrap installed. A fixture,
     not `skipif`: looking for the binary at import time is an import-time side effect."""
     if sys.platform not in ("darwin", "linux"):
-        pytest.skip(f"brig:jail runs on darwin and Linux; this is {sys.platform}")
+        pytest.skip(f"runner:confined runs on darwin and Linux; this is {sys.platform}")
     if sys.platform == "linux" and not Path(_BWRAP).exists():
-        pytest.skip(f"brig:jail on Linux needs bubblewrap at {_BWRAP}; install the `bubblewrap` package")
+        pytest.skip(
+            f"runner:confined on Linux needs bubblewrap at {_BWRAP}; install the `bubblewrap` package"
+        )
 
 
 def _shown() -> str:
@@ -84,8 +86,8 @@ def _jailed_in(project: Path) -> str:
     """Layer rows that put the kernel in `project`, inside brig's jail (the fixture's layers
     default to no jail)."""
     return (
-        f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
-        '[[plugin]]\nid = "jail"\nuse = "brig:jail"\n'
+        f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
+        '[[plugin]]\nid = "runner"\nuse = "runner:confined"\n'
     )
 
 
@@ -320,7 +322,7 @@ async def test_a_jailed_kernel_starts_in_a_worktree_and_cannot_write_its_layer_i
     project.mkdir()
     (project / ".git").write_text("gitdir: /nowhere\n")
     mine = project / "mine.toml"
-    mine.write_text('[[plugin]]\nid = "jail"\nuse = "brig:jail"\n')
+    mine.write_text('[[plugin]]\nid = "runner"\nuse = "runner:confined"\n')
     patch = _inputs(
         composition,
         *_writes(project / "ok.txt", mine, project / ".git" / "hooks" / "pre-commit"),
@@ -330,7 +332,7 @@ async def test_a_jailed_kernel_starts_in_a_worktree_and_cannot_write_its_layer_i
     await run([*layers(), patch, mine], [Row("chat", config={"prompt": "go"})])
     out = _shown()
     assert "[0] WROTE" in out and "[1] DENIED" in out and "[2] DENIED" in out, out
-    assert mine.read_text().endswith('"brig:jail"\n') and (project / ".git").is_file()
+    assert mine.read_text().endswith('"runner:confined"\n') and (project / ".git").is_file()
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -431,13 +433,21 @@ class _Layers:
     memory: str = ""
 
 
+def _python(jail: BrigJail | Runner, config: KernelConfig) -> Kernel:
+    """The python tool's process over `jail`, as the python row builds it: started by a runner,
+    its inputs confined as the approval rule says of that runner."""
+    runner = jail if isinstance(jail, Runner) else Runner(jail)
+    return Kernel(runner, config, rule=Approval(runner))
+
+
 async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`/release` (the kernel's `release()`): the jail holding an absent `local.env` where the
-    model row looks ends, and with it the hold, so the person can create the file. An input run
-    before they do holds it again (that is all `/restart kernel` would have given them); after
-    they do, the next input's jail masks it: it can neither read nor rewrite it."""
+    """`/release` (the runner's `release()`, the python row's `stopped` registered with it): the
+    jail holding an absent `local.env` where the model row looks ends, and with it the hold, so
+    the person can create the file. An input run before they do holds it again (that is all
+    `/restart python` would have given them); after they do, the next input's jail masks it: it
+    can neither read nor rewrite it."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the hold is bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -454,23 +464,27 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
         "    except OSError as error:\n"
         "        print(how, type(error).__name__)\n"
     )
-    async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+    runner = Runner(jail)
+    async with _python(runner, KernelConfig(root=str(project))) as kernel:
+        runner.on_release(kernel.stopped)
         assert credential.is_dir()  # held: the person can't create it
         (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
         group = recorded_group(record.read_text())
         assert group is not None
-        said = await kernel.release()
-        assert f"Nothing holds {credential}" in said, said
-        assert not credential.exists()
+        said = await runner.release()
+        assert said.startswith("The Python process is stopped") and f"Nothing holds {credential}" in said, (
+            said
+        )
+        assert not credential.exists() and runner.released()
         with pytest.raises(ProcessLookupError):
             os.killpg(group, 0)  # the jail is gone, not only its worker
         await kernel.run("1")
-        assert credential.is_dir()  # an input came first: held again
-        await kernel.release()
-        await kernel.__aexit__(None, None, None)  # `/restart kernel`: stops the jail ...
+        assert credential.is_dir() and not runner.released()  # an input came first: held again
+        await runner.release()
+        await kernel.__aexit__(None, None, None)  # `/restart python`: stops the jail ...
         await kernel.__aenter__()  # ... and starts one at once, which holds the path again
         assert credential.is_dir()
-        await kernel.release()
+        await runner.release()
         credential.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n")  # never a real one
         out = await kernel.run(reach)
         assert "r PermissionError" in out and "w PermissionError" in out, out
@@ -479,7 +493,7 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
     assert token_file(None, [str(credential)]) == credential
 
 
-# A program that listens and waits, standing in for the extensions' worker: the `jail` row's
+# A program that listens and waits, standing in for the extensions' worker: the runner's
 # second program, run from a directory of its own.
 _LISTENS = """
 import socket, sys, time
@@ -493,7 +507,7 @@ time.sleep(60)
 async def test_on_linux_the_kernel_tells_the_model_its_own_worker_s_trees_when_another_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The `jail` row starts the kernel's worker and the extensions' worker, and a Linux jail
+    """The runner starts the Python process and the extensions' worker, and a Linux jail
     reads the directory of the program it runs. What the kernel tells the model is its own
     worker's jail: another program starting on the same jail, from another directory, leaves
     `kernel.instructions()` as it was, so the loop tells the model no change and names no tree
@@ -509,7 +523,7 @@ async def test_on_linux_the_kernel_tells_the_model_its_own_worker_s_trees_when_a
     sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
     endpoint = str(sockets / "x.sock")
     try:
-        async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+        async with _python(jail, KernelConfig(root=str(project))) as kernel:
             told = kernel.instructions()
             own = str(Path(worker_argv(endpoint)[2]).parent)  # the kernel's worker's directory
             assert own in kernel.reads() and own in told, kernel.reads()
@@ -528,13 +542,14 @@ async def test_on_linux_the_kernel_tells_the_model_its_own_worker_s_trees_when_a
 async def test_on_linux_release_frees_the_credential_path_while_the_extensions_worker_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The model has written an extension, so the `jail` row runs a second program, the
-    extensions' worker, whose jail also holds the absent `local.env` where bh-02 looks for its
-    credential (and takes the shared jail lock). `/release` stops it too, so the path is free
-    and nothing claims another session holds it; the jail stays released, so the extensions'
-    worker does not start again before the next input. (A stand-in program here: what the
-    release stops is the jail's, whatever runs in it; the real extensions' worker under a Linux
-    jail is `test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install`'s.)"""
+    """The model has written an extension, so the runner runs a second program, the extensions'
+    worker, whose jail also holds the absent `local.env` where bh-02 looks for its credential
+    (and takes the shared jail lock). On `/release` each owner stops its own program (the
+    extensions row registers its worker's stop as the python row does), so the path is free and
+    nothing claims another session holds it; the runner stays released until the next input
+    starts something. (A stand-in program here, stopped by the test as its owner; the real
+    extensions' worker under a Linux jail is
+    `test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install`'s.)"""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the hold is bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -547,23 +562,31 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
     sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
     endpoint = str(sockets / "x.sock")
     try:
-        async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+        runner = Runner(jail)
+        async with _python(runner, KernelConfig(root=str(project))) as kernel:
+            runner.on_release(kernel.stopped)
             argv = [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint]
-            extensions = await jail.start(argv, cwd=str(project), endpoint=endpoint)
+            extensions = await runner.start(argv, cwd=str(project), endpoint=endpoint)
+
+            async def stop() -> str:
+                await extensions.stop()
+                return ""
+
+            runner.on_release(stop)
             try:
                 records = sorted((tmp_path / "state" / "bh-02" / "jails").iterdir())
                 groups = [recorded_group(record.read_text()) for record in records]
                 assert len(groups) == 2 and credential.is_dir()
-                said = await kernel.release()
+                said = await runner.release()
                 assert f"Nothing holds {credential}" in said and "stays held" not in said, said
                 assert not credential.exists()
                 for group in groups:
                     assert group is not None
                     with pytest.raises(ProcessLookupError):
                         os.killpg(group, 0)  # both jails are gone, the extensions' worker's too
-                assert jail.released()
+                assert runner.released()
                 await kernel.run("1")  # the next input
-                assert not jail.released() and credential.is_dir()
+                assert not runner.released() and credential.is_dir()
             finally:
                 await extensions.stop()
     finally:
@@ -591,7 +614,8 @@ async def hello(*, commands) -> Effects:
 
 class _Added:
     """What the extensions add to bh-02, for a test: `commands` (`register`), `frame` (`status`)
-    and `system` (`add`) at once; and an `approval` that confines, as a jail's does."""
+    and `system` (`add`) at once; and an `approval` rule that confines, as a jail's does, so the
+    `output` is never asked."""
 
     confined = True
 
@@ -608,8 +632,11 @@ class _Added:
     def add(self, section: Callable[[], str]) -> Callable[[], None]:
         return lambda: None
 
-    async def approve(self, request: Mapping[str, Any]) -> bool:
+    def unasked(self, request: Mapping[str, Any]) -> bool:
         return True
+
+    async def confirm(self, request: Mapping[str, Any]) -> bool:
+        raise AssertionError("a confined load is never put to the person")
 
 
 async def test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install(
@@ -631,7 +658,7 @@ async def test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_in
     added = _Added()
     jail = BrigJail(BrigConfig(), _Layers(code=_code()))
     config = ExtensionsConfig(root=str(project), watch=3600)  # entering looks once
-    async with Extensions(jail, added, added, added, added, config) as extensions:
+    async with Extensions(Runner(jail), added, added, added, added, added, config) as extensions:
         status = json.loads((plugins / "status.json").read_text())
         assert extensions.statuses["hello"].ok, status
         assert status["hello"]["state"] == "active", status
@@ -671,7 +698,7 @@ async def test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_i
     try:
         for root in (checkout, shipped.parent.parent):  # the workspace, then the plugin's `src`
             jail = BrigJail(config, _Layers(code=_code()))
-            async with Kernel(jail, KernelConfig(root=str(root))) as kernel:
+            async with _python(jail, KernelConfig(root=str(root))) as kernel:
                 said[root] = [await kernel.run(code) for code in inputs]
     finally:
         for path in planted:
@@ -697,7 +724,7 @@ async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_hom
     project = tmp_path / "project"
     (project / ".bh-02").mkdir(parents=True)
     (project / ".bh-02" / "kernel.py").write_text("TOOLS = 2\n")
-    async with Kernel(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+    async with _python(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
         out = await kernel.run(f"import os\nprint(os.path.exists({str(person)!r}))\nshow(TOOLS)")
     assert out.startswith(
         f"({person} ran first and defined: show. .bh-02/kernel.py ran next and defined: TOOLS)\n"
@@ -747,7 +774,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
         attempt(f"os.rename({str(home / '.config')!r}, 'moved-too')"),
     ]
     jail = BrigJail(BrigConfig(), _Layers(trusted=trusted))
-    async with Kernel(jail, KernelConfig(root=str(home))) as kernel:  # session A, from home
+    async with _python(jail, KernelConfig(root=str(home))) as kernel:  # session A, from home
         said = [await kernel.run(code) for code in inputs]
     assert said[0].startswith(f"({person} ran first and defined: HELPER)\n"), said[0]
     assert [s.rsplit("\n", 1)[-1] for s in said] == ["DENIED"] * len(inputs), said
@@ -757,7 +784,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     assert not default.exists() and not (xdg / "models.toml").exists()
     project = tmp_path / "work" / "project"  # session B, in another project
     project.mkdir(parents=True)
-    async with Kernel(
+    async with _python(
         BrigJail(BrigConfig(), _Layers(trusted=trusted)), KernelConfig(root=str(project))
     ) as kernel:
         seen = await kernel.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), HELPER")
@@ -810,7 +837,7 @@ async def test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_n
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     config = project / ".git" / "config"
     jail = BrigJail(BrigConfig(), _Layers())
-    async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+    async with _python(jail, KernelConfig(root=str(project))) as kernel:
         assert "DENIED" in await kernel.run(_append_to(config))
         group = _group(tmp_path / "state")
         subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)  # by rename
@@ -850,7 +877,7 @@ async def test_an_input_can_t_put_its_own_git_config_in_place_by_moving_the_dire
         "    except OSError as error:\n"
         "        print(step, 'DENIED', type(error).__name__)\n"
     )
-    async with Kernel(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+    async with _python(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
         out = await kernel.run(swap)
     assert "write DENIED" in out, out
     assert "hooksPath" not in config.read_text() if config.exists() else True
@@ -867,7 +894,7 @@ async def test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing(tmp_path
     project.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     config = project / ".git" / "config"
-    async with Kernel(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+    async with _python(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
         assert "DENIED" in await kernel.run("x = 1\n" + _append_to(config))
         subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)
         out = await kernel.run("print(x)\n" + _append_to(config))
@@ -888,7 +915,7 @@ async def test_on_linux_an_input_running_when_the_host_renames_over_a_denied_pat
     project.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     config = project / ".git" / "config"
-    async with Kernel(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
+    async with _python(BrigJail(BrigConfig(), _Layers()), KernelConfig(root=str(project))) as kernel:
         running = asyncio.ensure_future(kernel.run("import time\ntime.sleep(5)\nprint('slept')"))
         await asyncio.sleep(1.0)
         subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)
@@ -919,7 +946,7 @@ async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_input_
     booted = await boot([mine], watch=0.05)
     try:
         jail = BrigJail(BrigConfig(), _Layers(paths=(str(mine.resolve()),)))
-        async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+        async with _python(jail, KernelConfig(root=str(project))) as kernel:
             rewrite = _append_to(mine, "w", row("planted"))
             assert "DENIED" in await kernel.run(rewrite)
             group = _group(tmp_path / "state")
@@ -981,7 +1008,7 @@ async def test_a_layer_file_in_a_directory_of_the_project_can_t_be_swapped_by_mo
     )
     try:
         jail = BrigJail(BrigConfig(), _Layers(paths=(str(mine.resolve()),)))
-        async with Kernel(jail, KernelConfig(root=str(project))) as kernel:
+        async with _python(jail, KernelConfig(root=str(project))) as kernel:
             saved = project / "conf" / "mine.toml.tmp"
             saved.write_text(row("two"))
             saved.replace(mine)  # the person's save, by rename
@@ -1167,7 +1194,7 @@ async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_
         composition,
         *inputs,
         extra=(
-            f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+            f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
             f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
             f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
         ),
@@ -1206,7 +1233,7 @@ async def test_a_write_to_a_file_with_untold_instructions_waits_until_they_are_t
         composition,
         *inputs,
         extra=(
-            f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+            f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
             f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
             f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
         ),
@@ -1241,7 +1268,7 @@ async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes
     branches = ("one", "two", "three")
     switches = [f"open('.git/HEAD', 'w').write('ref: refs/heads/{branch}\\n')" for branch in branches]
     rows = (
-        f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+        f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
         f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
@@ -1285,7 +1312,7 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     opens = "len(open('src/db/models.py').read())"
     cats = "import subprocess; subprocess.run(['cat', 'src/db/models.py'], capture_output=True).returncode"
     session = (
-        f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+        f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
         f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
@@ -1313,7 +1340,7 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     assert afresh.startswith(told) and afresh.endswith("\n[2] 6\n[3] 0\n"), afresh  # /clear: told afresh
     assert (
         f"the conversation was cleared (the old one is kept as {history}.bak); starting afresh: loop, "
-        "transcript, kernel"
+        "transcript, python"
     ) in fragile.NOTES
 
 
@@ -1337,7 +1364,7 @@ async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_
     history = tmp_path / "transcript.jsonl"
     opens = "len(open('src/db/models.py').read())"
     session = (
-        f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+        f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
         f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'

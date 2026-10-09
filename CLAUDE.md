@@ -30,7 +30,7 @@ layout. Then `uv sync --all-packages`.
 ```
 uv sync --all-packages
 scripts/check                                             # the one definition of green: format, lint, types, tests, gates
-scripts/check bh-02/plugins/kernel-cordis-plugin          # the same for one member (the gates always see everything)
+scripts/check bh-02/plugins/python-cordis-plugin          # the same for one member (the gates always see everything)
 uv run pytest -q                                          # every member
 uv run pytest libs/cordis -q                              # one member
 uv run pytest libs/cordis/tests/test_runtime.py::test_name -q

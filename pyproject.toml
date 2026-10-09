@@ -100,20 +100,20 @@ src = [
     "bh-02/app/tests",
     "bh-02/plugins/agent-cordis-plugin/src",
     "bh-02/plugins/agent-cordis-plugin/tests",
-    "bh-02/plugins/brig-cordis-plugin/src",
-    "bh-02/plugins/brig-cordis-plugin/tests",
     "bh-02/plugins/chat-cordis-plugin/src",
     "bh-02/plugins/chat-cordis-plugin/tests",
     "bh-02/plugins/commands-cordis-plugin/src",
     "bh-02/plugins/commands-cordis-plugin/tests",
     "bh-02/plugins/extensions-cordis-plugin/src",
     "bh-02/plugins/extensions-cordis-plugin/tests",
-    "bh-02/plugins/kernel-cordis-plugin/src",
-    "bh-02/plugins/kernel-cordis-plugin/tests",
     "bh-02/plugins/memory-cordis-plugin/src",
     "bh-02/plugins/memory-cordis-plugin/tests",
     "bh-02/plugins/models-cordis-plugin/src",
     "bh-02/plugins/models-cordis-plugin/tests",
+    "bh-02/plugins/python-cordis-plugin/src",
+    "bh-02/plugins/python-cordis-plugin/tests",
+    "bh-02/plugins/runner-cordis-plugin/src",
+    "bh-02/plugins/runner-cordis-plugin/tests",
     "bh-02/plugins/tui-cordis-plugin/src",
     "bh-02/plugins/tui-cordis-plugin/tests",
     "docs/hooks",
@@ -138,7 +138,7 @@ rules = [
     "under-exposed-access",        # no reaching into another module's _names
     "over-exposed-module-symbol",  # a public name only its own module uses should be _private
     "worker-stdlib-only",          # the kernel's worker runs in a jail: the standard library only
-    "brig-one-adapter",            # only brig_cordis_plugin imports brig
+    "brig-one-adapter",            # only runner_cordis_plugin imports brig
 ]
 
 [tool.pypeeker.visibility]
@@ -151,7 +151,7 @@ allowed = ["tui_cordis_plugin", "bh_02.cli", "warden.cli"]
 
 # The kernel's worker is a separate program whose stdout is the input's output.
 [tool.pypeeker.print-input]
-allowed = ["kernel_cordis_plugin.worker"]
+allowed = ["python_cordis_plugin.worker"]
 
 # An app's shell modules know cordis besides every plugin's wiring.
 [tool.pypeeker.cordis-in-wiring-only]
@@ -166,10 +166,10 @@ shell = [
 ]
 
 [tool.pypeeker.worker-stdlib-only]
-modules = ["kernel_cordis_plugin.worker"]
+modules = ["python_cordis_plugin.worker"]
 
 [tool.pypeeker.brig-one-adapter]
-adapter = "brig_cordis_plugin"
+adapter = "runner_cordis_plugin"
 
 # Importing a module must build nothing and mutate nothing. `extra-impure` adds the
 # constructions this codebase must not do at import: a counter, a resource lookup.
@@ -181,7 +181,7 @@ allow = [
     "bh_02.__main__", "warden.__main__",
     # the kernel's worker and the extensions' worker, each run by path (`python -I worker.py
     # SOCKET`) inside a jail
-    "kernel_cordis_plugin.worker", "extensions_cordis_plugin.worker",
+    "python_cordis_plugin.worker", "extensions_cordis_plugin.worker",
 ]
 
 # A function may not mutate module-level state. The extensions' worker puts each model-written
@@ -191,7 +191,7 @@ allow = [
 [tool.pypeeker.no-hidden-global-mutation]
 allow = [
     "extensions_cordis_plugin.worker:_Extensions.load", "extensions_cordis_plugin.worker:_Extensions.unload",
-    "kernel_cordis_plugin.worker:_Kernel._run",
+    "python_cordis_plugin.worker:_Kernel._run",
 ]
 
 # Purity is the default, and the exclude list is the budget: every function in the apps and
@@ -282,26 +282,26 @@ exclude = [
     # it; and `/memory`
     "memory_cordis_plugin.memory:Memory.*", "memory_cordis_plugin.memory:_resolved",
     "memory_cordis_plugin.reading:read", "memory_cordis_plugin.reading:_named",
-    "memory_cordis_plugin.wiring:memory.run",
+    "memory_cordis_plugin.wiring:files.run",
     # auto memory's index, read once a conversation from its directory through no link
     "memory_cordis_plugin.auto:AutoMemory.*",
     # the kernel: a socket to a process a jail started, the process itself, and the worker program
-    "kernel_cordis_plugin.client:Kernel.*",
-    "kernel_cordis_plugin.unjailed:_Process.*", "kernel_cordis_plugin.unjailed:Unjailed.start",
-    "kernel_cordis_plugin.unjailed:_until_listening",
-    "kernel_cordis_plugin.worker:*",
-    "brig_cordis_plugin.jail:BrigJail.*", "brig_cordis_plugin.jail:_Jailed.*",
+    "python_cordis_plugin.client:Kernel.*",
+    "runner_cordis_plugin.unconfined:_Process.*", "runner_cordis_plugin.unconfined:Unjailed.start",
+    "runner_cordis_plugin.unconfined:_until_listening",
+    "python_cordis_plugin.worker:*",
+    "runner_cordis_plugin.jail:BrigJail.*", "runner_cordis_plugin.jail:_Jailed.*",
     # the model's extensions: the directory they are written to, read every `watch` seconds, and
     # the status file the model reads; a socket to a worker a jail started, the worker program
     # itself (a cordis runtime of model-written modules), and the tests' plain-subprocess jail
     "extensions_cordis_plugin.host:Extensions.*",
     "extensions_cordis_plugin.worker:*",
     "extensions_cordis_plugin.testing:*",
-    "brig_cordis_plugin.jail:remove_placeholders",  # rmdir what a gone jail made (its stop, or the next start's sweep)
-    "brig_cordis_plugin.jail:_lives",               # whether a recorded jail's process group still runs
-    "brig_cordis_plugin.jail:_place",               # mkdir a placeholder and mark it, before bubblewrap starts
-    "brig_cordis_plugin.jail:_clear_up",            # take the jail lock alone, then remove_placeholders
-    "brig_cordis_plugin.tripwire:Tripwire.*",       # inotify on the held paths' directories; kills the jail at a lift
+    "runner_cordis_plugin.jail:remove_placeholders",  # rmdir what a gone jail made (its stop, or the next start's sweep)
+    "runner_cordis_plugin.jail:_lives",               # whether a recorded jail's process group still runs
+    "runner_cordis_plugin.jail:_place",               # mkdir a placeholder and mark it, before bubblewrap starts
+    "runner_cordis_plugin.jail:_clear_up",            # take the jail lock alone, then remove_placeholders
+    "runner_cordis_plugin.tripwire:Tripwire.*",       # inotify on the held paths' directories; kills the jail at a lift
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
     "chat_cordis_plugin.wiring:session", "models_cordis_plugin.wiring:model",
 ]

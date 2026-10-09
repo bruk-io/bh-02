@@ -2,7 +2,7 @@
 
 import ast
 
-from kernel_cordis_plugin.worker import input_traceback, split_last_expression
+from python_cordis_plugin.worker import input_traceback, split_last_expression
 
 
 def test_an_input_ending_in_an_expression_shows_it() -> None:
@@ -19,4 +19,4 @@ def test_a_failure_outside_any_input_keeps_every_frame() -> None:
         raise ValueError("boom")
     except ValueError as exc:
         shown = input_traceback(exc)
-    assert "test_worker.py" in shown and shown.endswith("ValueError: boom")
+    assert "test_python_worker.py" in shown and shown.endswith("ValueError: boom")

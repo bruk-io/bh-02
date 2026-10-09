@@ -1,17 +1,20 @@
-# kernel-cordis-plugin
+# python-cordis-plugin
 
-A persistent Python namespace in a process of its own, started by whatever jail the
-composition names, and the `python(code)` tool, which runs an input in it: the kernel row
-registers it with `tools` (`agent:tools`, a broker) and tells the model about it in the system
-prompt's `python` section. Also `approval`: the one place that decides whether what the model
-asked for runs unasked.
+The python tool: a persistent Python namespace in a process of its own (the Python process),
+started by whatever runner the composition names, and the `python(code)` tool, which runs an
+input in it: the python row registers it with `tools` (`agent:tools`, a broker), tells the model
+about it in the system prompt's `python` section, and registers the process's stop with the
+runner for `/release`. It binds no key. Whether an input runs unasked is the `approval` rule's
+(`runner:approval`, the runner plugin's), and asking the person is the loop's.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `kernel:kernel` | `kernel`: `call(input) -> {"content", "touched"}` (the `python` tool's call, registered with `tools` as `PYTHON`, shown as its code, `shown_call`), `instructions()` (the `system` section `python`), `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its worker's jail's: the worker it last started, never another program of the same jail), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file), `jail` (`start`, and of the worker it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()`, for `confined`; `release()`) |
-| `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when it runs in the jail, `runs` (the jail when it says nothing), and that confines it, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
-| `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
-| `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
+| `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `Kernel`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file) |
+
+`Kernel` (`client.py`) is the value the row enters: `call(input)`, `instructions()`, `run(code)
+-> str`, `confined` (the `approval` rule's), `report()`, `notice()` and `reads()` (its own start's:
+the process it last started, never another program the runner started), `stopped()`,
+`touched()`.
 
 `python.py` is the tool, pure: its spec (`PYTHON`), how a call is put to the person
 (`shown_call`: its code, whole) and `instructions_for(confined, startup, reads, theirs=,
@@ -24,22 +27,13 @@ one that edits with it; build up state and re-read what changed, print what matt
 programs with `subprocess.run(..., capture_output=True, text=True, timeout=...)` and treat what
 they print as data, since one not captured never reaches the input, no stdin, the person sees
 every input); and where its code runs, and under a jail that reads by allowlist (Linux) the
-trees it reads (`reads`, the kernel's `reads()`) and that nothing else, the home directory
+trees it reads (`reads`, its start's `reads()`) and that nothing else, the home directory
 included, is there. `confined` is what the model is
-told (`instructions_for`) and whether the startup files run unasked: the kernel itself never
-asks, so it depends on its jail alone and a new ui or model keeps the namespace.
-
-`approval.py` is the rule, written once: `is_confined(report)` (the jail enforces `fs_write` and
-`network`), and `Approval`, the `approval` value over a jail and an `output`. The loop asks it
-about every call (`{"name", "input", "runs", "title", "lines", ...}`: a call to a tool that
-runs in bh-02's own process, `runs = "host"`, is put to the person however confined the jail)
-and the extensions row about every extension it loads; the kernel's own `confined` is `is_confined` over the same jail. Its row,
-`kernel:approval`, depends on `jail` and `output`, not `kernel`, so `/clear` (a new kernel)
-leaves it up, and the extensions row that depends on it. It is a capability, bound by one row:
-two rows' answers could not be combined, so it is not a broker. It runs in bh-02's own process,
-so only a layer replaces it; an extension has no way to bind or reach it. It answers about code
-bh-02 is about to hand to the jail, not about each effect a component yields (that is cordis's
-planned policy seam, not this).
+told (`instructions_for`) and whether the startup files run unasked, and it is the `approval`
+rule's (`approval.confined`, read each time), so what the model is told and what the loop does
+agree. The python row itself never asks, so it depends on nothing a new ui or model replaces
+(the runner, the rule and three brokers), and they keep the namespace. The rule, and why it is
+one row's, is in the runner plugin's README.
 
 `worker.py` is the process: standard library only (the gate's `worker-stdlib-only`), run by
 path as `python -I worker.py SOCKET`, so nothing of the host crosses into a jail with it. Its
@@ -50,7 +44,7 @@ test run's summary and an error's message come last, and is saved whole to a fil
 worker's temporary directory, which the cut names). Each input is compiled as `<input N>`, its
 source registered with `linecache`, so a traceback shows each frame's line and the input it is
 in, a function defined three inputs back included. A `NameError` for a name the namespace has
-never held says the kernel is new and what empties one, since that is the usual cause after a
+never held says the REPL is new and what empties one, since that is the usual cause after a
 resume. The namespace holds only what inputs put there: an input reads and writes files and
 runs programs itself, with plain Python, and the jail decides what it may touch. Inputs run on
 the worker's main thread, so SIGINT lands as `KeyboardInterrupt` in the running input and the
@@ -73,12 +67,12 @@ plain function: a bound method cost three times as much per call (CPython looks 
 calls it at most twice, at any depth: the import system's frames are told by their globals
 (`f_globals`, `f_back`), which raise no audit event, where a frame's `f_code` raises one.
 
-`client.py`'s `Kernel` is the host end: entering starts the worker through the jail (its
+`client.py`'s `Kernel` is the host end: entering starts the worker through the runner (its
 socket in a short `/tmp` directory, since a socket path must fit in ~100 bytes), leaving stops
 it. Cancelling `run` interrupts the input and waits `grace` seconds for it to end; a worker that
 won't, or that died, is started again on the next input, which is told its variables are gone,
-and why when its jail ended it (`started.ended()`: a Linux `brig:jail` ends itself when the host
-undoes one of its mounts). A worker that died between inputs is noticed before the next input
+and why when its jail ended it (`started.ended()`: a Linux `runner:confined` jail ends itself
+when the host undoes one of its mounts). A worker that died between inputs is noticed before the next input
 is sent, so that input runs in the new one. After each input, `touched()` is the files under
 `root` it opened, which `call` answers with (what the loop gives `notes`' functions).
 
@@ -94,13 +88,13 @@ What it does not see: a program an input runs (`subprocess`), an `os.open`, a re
 or a delete, a file outside the project. It tells the model something before a file changes; the
 jail is what stops what must never happen.
 
-A new kernel's first input is also told what the startup files did (`startup`, helpers kept
+A new Python process's first input is also told what the startup files did (`startup`, helpers kept
 across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/kernel.py` (else
 `~/.config/bh-02/kernel.py`), for the helpers they want in every project, then the project's,
 `.bh-02/kernel.py`, the model's own. A name starting `$XDG_CONFIG_HOME/` is in the person's
 config directory (that variable's value, else `~/.config`, as for the models file), one
 starting `~/` in their home, any other from `root`; a single string is one file, and anything
-but a name or a list of names is the row's config error. Confined, the kernel runs each that is
+but a name or a list of names is the row's config error. Confined, the process runs each that is
 there as an input of its own and says which names it defined (each its code binds at the top,
 as the compiler reads it, so one bound again to the object it held counts, and any new or
 changed after it; on a line of their own, after whatever the file printed), or its traceback;
@@ -109,7 +103,7 @@ mark is no part of either file, as `python file.py` has it. One that ends the wo
 (`os._exit`, a crash) would end every new one: the input it cut short says which file it was,
 after what the opening had to tell by then (that the REPL was started again, and why, which is
 told nowhere else, and the files before it), and the workers after it pass that file over,
-saying so, until `/restart kernel`. Ctrl-C while one runs stops it, and the worker never runs
+saying so, until `/restart python`. Ctrl-C while one runs stops it, and the worker never runs
 the files again (a hanging file would hang every input); the next input says what was cut
 short, after what the opening had to tell by then, and one that would not stop at all (its
 worker is replaced) is passed over too. Unconfined, they would run unasked with the person's
@@ -130,14 +124,14 @@ model, and nothing needs keeping from it. Where each is read is the point:
   models file and memory files outside the project are held to: each directory and link on the
   way, as named and as resolved): the
   project, or another root the worker's jail lets an input write (its `writes()`: a `write`
-  the person added to `brig:jail`). A person's file there (bh-02 run from the home directory) or whose way
+  the person added to `runner:confined`). A person's file there (bh-02 run from the home directory) or whose way
   passes through one (a config directory linked into a dotfiles repository being worked on) is
   read as the project's is: the model could have written it, or chosen where it leads, so the
   worker reads it, at its resolved place when that is in such a root. If that fails (the jail
   can't see where it leads), the note says why bh-02 did not read it.
 - Across sessions, the walk can't know what an earlier session's jail let its inputs write, so
-  the jail itself keeps them out: `brig:jail` denies writing bh-02's config directory wherever
-  it is under a writable root (`layers.trusted`, the brig plugin's README). A session run from
+  the jail itself keeps them out: `runner:confined` denies writing bh-02's config directory wherever
+  it is under a writable root (`layers.trusted`, the runner plugin's README). A session run from
   the home directory can't make the person's file a link to a key for the next session to read.
 
 Each file runs once, at its first place in the list. Whose a file is goes by how it is named, not
@@ -146,15 +140,18 @@ directory, their home or `/` is theirs. `instructions_for` tells the model that 
 project's startup file is its to edit, and names the person's, which comes before it, as theirs.
 
 Every failure it knows of comes back as the input's text, never as an exception out of `run`: a
-worker that died, an answer it can't read (the worker is replaced), a worker the jail won't
+worker that died, an answer it can't read (the worker is replaced), a worker the runner won't
 start again (the next input tries again).
 
-`release()` (`/release`, the `kernel:release` row) ends the worker now, and the jail it ran
-in, then asks the jail to release the rest and say what that freed on the host: on Linux,
-`brig:jail` holds where bh-02 looks for its credential with an empty directory while it runs,
-stops the extensions' worker too (its jail holds the same), and this is how the person adds
-one mid-session (the brig plugin's README). The next input starts a new worker, told its
-variables are gone, and with it the jail runs again, so the extensions load again. What the
-model is told of the worker's jail (`reads()`) stays the stopped worker's until then. An input
-that is running is left alone, and the answer says to stop the reply first.
-`kernel:unjailed` holds nothing, so there it only stops the worker.
+`stopped()` is the row's part of `/release` (`runner:release`): the row registers it with the
+runner (`runner.on_release`), which asks each owner to stop its own program and never stops one
+itself. It ends the worker now, and the jail it ran in, and says so: `The Python process is
+stopped; the next input starts it again, without the earlier variables.` ("" when none ran).
+The runner then lets go of what its jails held on the host: on Linux, `runner:confined` holds
+where bh-02 looks for its credential with an empty directory while a jail runs, and this is how
+the person adds one mid-session (the runner plugin's README). The next input starts a new
+worker, told its variables are gone, and that start ends the release, so the extensions load
+again too. What the model is told of the worker's jail (`reads()`) stays the stopped worker's
+until then. An input that is running is left alone, nothing ends, and the answer says `An input
+is running: stop the reply (Ctrl-C), then /release again.` Under `runner:unconfined` nothing is
+held, so `/release` only stops the worker.

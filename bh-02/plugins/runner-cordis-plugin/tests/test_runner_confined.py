@@ -20,20 +20,22 @@ from typing import Any
 
 import pytest
 
-from brig_cordis_plugin import (
+from cordis.testing import drive
+from runner_cordis_plugin import (
     MARK,
     SYSTEM_READABLE,
     BrigConfig,
     BrigJail,
+    Runner,
     Tripwire,
     allowlisted,
+    confined,
     decoded,
     git_author,
     graded,
     held,
     holding,
     identity,
-    jail,
     lifted,
     made_by_the_jail,
     mountable,
@@ -54,7 +56,6 @@ from brig_cordis_plugin import (
     uncovered,
     wires,
 )
-from cordis.testing import drive
 
 
 @dataclass(frozen=True)
@@ -176,7 +177,7 @@ def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> 
 _CHECKOUT = "/home/me/src/bh-02"  # bh-02's own workspace, installed editable
 _CODE = (  # the directory of every package bh-02 runs code from (`layers.code`)
     f"{_CHECKOUT}/bh-02/plugins/memory-cordis-plugin/src/memory_cordis_plugin",
-    f"{_CHECKOUT}/bh-02/plugins/kernel-cordis-plugin/src/kernel_cordis_plugin",
+    f"{_CHECKOUT}/bh-02/plugins/python-cordis-plugin/src/python_cordis_plugin",
     f"{_CHECKOUT}/libs/cordis/src/cordis",
     "/opt/py/lib/python3.15/site-packages/brig",  # one installed into the interpreter
 )
@@ -268,10 +269,10 @@ def test_allow_takes_names_off_brig_s_self_modification_list_and_only_those() ->
     assert "'README.md'" in str(raised.value) and "use `write`" in str(raised.value)
 
 
-async def test_the_row_binds_a_brig_jail_over_the_layers_it_was_given() -> None:
-    effects = await drive(jail(config=BrigConfig(), layers=Layers()))
-    assert [(e.name, e.args[0]) for e in effects] == [("bind", "jail")]
-    assert isinstance(effects[0].args[1], BrigJail)
+async def test_the_row_binds_a_runner_over_a_brig_jail_over_the_layers_it_was_given() -> None:
+    effects = await drive(confined(config=BrigConfig(), layers=Layers()))
+    assert [(e.name, e.args[0]) for e in effects] == [("bind", "runner")]
+    assert isinstance(effects[0].args[1], Runner)
 
 
 def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
@@ -357,14 +358,13 @@ def test_release_says_where_the_credential_can_go_now_and_what_another_session_s
         "/w/local.env",
     )  # only what the jail mounts over
     free = released_for(["/w/local.env"], [])
-    assert free.startswith("Nothing holds /w/local.env until the kernel starts again")
+    assert free.startswith("Nothing holds /w/local.env until something starts in the runner again")
     assert "`/restart model`" in free and "stays held" not in free
     still = released_for([], ["/w/local.env"])
     assert still.startswith("/w/local.env stays held") and "/release again" in still
     assert released_for([], []) == ""
-    stopped = released_for(["/w/local.env"], [], others=True)  # the extensions' worker ran too
-    assert stopped.startswith("Nothing holds") and "extensions' worker" in stopped
-    assert "next input" in released_for([], [], others=True)
+    running = released_for([], [], running=True)  # an owner did not stop its own program
+    assert running.startswith("A program this runner started still runs") and "/restart" in running
 
 
 def test_a_linux_jail_carries_the_person_s_git_identity_and_nothing_else_of_their_config() -> None:
@@ -650,7 +650,7 @@ class _Plain:
 
 @pytest.fixture
 def _plain_launch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A Linux `brig:jail` whose program is launched plainly (`_Plain`): no bubblewrap needed,
+    """A Linux confined runner's jail whose program is launched plainly (`_Plain`): no bubblewrap needed,
     nor allowed to fail as it does where it can't make namespaces. Linux only: the tripwire is
     inotify's."""
     if sys.platform != "linux":
@@ -662,7 +662,7 @@ def _plain_launch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr("brig.run.SubprocessLauncher.launch", launch)
     # the jail refuses to start without bubblewrap installed; the package's `jail` is the row
-    monkeypatch.setattr(sys.modules["brig_cordis_plugin.jail"], "DEFAULT_BWRAP_PATH", sys.executable)
+    monkeypatch.setattr(sys.modules["runner_cordis_plugin.jail"], "DEFAULT_BWRAP_PATH", sys.executable)
 
 
 def _endpoint() -> str:
@@ -696,7 +696,7 @@ time.sleep(60)
 
 @pytest.mark.usefixtures("_plain_launch")
 async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp_path: Path) -> None:
-    """The `jail` row starts two programs, the kernel's worker and the extensions' worker, each
+    """The runner starts two programs, the Python process and the extensions' worker, each
     from a command of its own. What a start is (the trees its program reads, which name the
     program's own directory; the roots it writes; its notice and grades) is that start's: the
     second start replaces none of the first's, so the kernel never tells the model the
@@ -727,43 +727,52 @@ async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp
             await each.stop()
 
 
+def _stops(started: Any) -> Any:
+    """An owner's stop for `/release` (`Runner.on_release`): stop its own program, say nothing."""
+
+    async def stop() -> str:
+        await started.stop()
+        return ""
+
+    return stop
+
+
 @pytest.mark.usefixtures("_plain_launch")
-async def test_release_stops_every_program_the_jail_started_and_frees_what_they_held(tmp_path: Path) -> None:
-    """The `jail` row starts the kernel's worker and the extensions' worker, and both jails hold
-    the absent `local.env` where bh-02 looks for its credential (and take the shared jail lock).
-    The kernel stops its own worker for `/release`; the jail's `release` stops every program it
-    started that still runs, so the placeholder is removed and the path is free, and says so.
-    It stays released, so the extensions' worker waits, until the next start (the next input's
-    kernel worker)."""
+async def test_release_frees_what_the_programs_held_once_each_owner_stopped_its_own(tmp_path: Path) -> None:
+    """The runner starts the Python process and the extensions' worker, and both jails hold the
+    absent `local.env` where bh-02 looks for its credential (and take the shared jail lock). On
+    `/release` each owner stops its own program (`on_release`), then the jail sweeps: the
+    placeholder is removed, the path is free, and it says so. The runner stays released, so the
+    extensions' worker waits, until the next start (the next input's Python process)."""
     project = tmp_path / "project"
     project.mkdir()
     credential = project / "local.env"
-    one = BrigJail(BrigConfig(), Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    runner = Runner(
+        BrigJail(BrigConfig(), Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    )
     started = []
-    for _ in ("kernel", "extensions"):
+    for _ in ("python", "extensions"):
         endpoint = _endpoint()
         argv = [sys.executable, "-I", "-c", _LISTEN, endpoint]
-        started.append(await one.start(argv, cwd=str(project), endpoint=endpoint))
-    kernel, extensions = started
+        started.append(await runner.start(argv, cwd=str(project), endpoint=endpoint))
+        runner.on_release(_stops(started[-1]))
     try:
         records = tmp_path / "state" / "bh-02" / "jails"
         groups = [recorded_group(record.read_text()) for record in sorted(records.iterdir())]
         assert credential.is_dir() and len(groups) == 2 and None not in groups
-        await kernel.stop()  # what the kernel's `release` does first
-        assert credential.is_dir()  # the extensions' jail still holds it
-        said = await one.release()
+        said = await runner.release()
         assert said.startswith(f"Nothing holds {credential}"), said
-        assert "stays held" not in said and "extensions' worker" in said
+        assert "stays held" not in said and "still runs" not in said
         assert not credential.exists() and list(records.iterdir()) == []
         for group in groups:
             assert group is not None and await _gone(group)
-        assert one.released()
+        assert runner.released()
         endpoint = _endpoint()
-        again = await one.start(
+        again = await runner.start(
             [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(project), endpoint=endpoint
         )
         try:
-            assert not one.released() and credential.is_dir()  # the next input's jail holds it again
+            assert not runner.released() and credential.is_dir()  # the next input's jail holds it again
         finally:
             await again.stop()
     finally:
@@ -772,12 +781,36 @@ async def test_release_stops_every_program_the_jail_started_and_frees_what_they_
 
 
 @pytest.mark.usefixtures("_plain_launch")
-async def test_release_stops_a_program_whose_start_was_under_way_too(
+async def test_release_never_stops_a_program_its_owner_did_not_and_says_it_still_holds(
+    tmp_path: Path,
+) -> None:
+    """The runner stops no row's program: one whose owner registered no stop keeps running, its
+    jail keeps the path held, and `/release` says so, naming the way out."""
+    project = tmp_path / "project"
+    project.mkdir()
+    credential = project / "local.env"
+    runner = Runner(
+        BrigJail(BrigConfig(), Layers(credentials=(str(credential),), secrets=(str(credential),)))
+    )
+    endpoint = _endpoint()
+    kept = await runner.start(
+        [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(project), endpoint=endpoint
+    )
+    try:
+        said = await runner.release()
+        assert "still runs" in said and "/restart" in said, said
+        assert credential.is_dir() and kept.ended() == ""
+    finally:
+        await kept.stop()
+
+
+@pytest.mark.usefixtures("_plain_launch")
+async def test_release_waits_for_a_start_under_way_and_says_it_still_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A start under way when `release` begins (the extensions' worker loading as the person
-    types `/release`) is waited for, then stopped with the rest: nothing the release freed is
-    held again by a jail that came up during it."""
+    types `/release`) is waited for, so no placeholder of its is swept from under it; its owner
+    had nothing to stop when asked, so `/release` says a program still runs."""
     project = tmp_path / "project"
     project.mkdir()
     launched: list[_Plain] = []
@@ -788,21 +821,20 @@ async def test_release_stops_a_program_whose_start_was_under_way_too(
         return launched[-1]
 
     monkeypatch.setattr("brig.run.SubprocessLauncher.launch", slow)
-    one = BrigJail(BrigConfig(), Layers())
+    runner = Runner(BrigJail(BrigConfig(), Layers()))
     endpoint = _endpoint()
     argv = [sys.executable, "-I", "-c", _LISTEN, endpoint]
-    starting = asyncio.ensure_future(one.start(argv, cwd=str(project), endpoint=endpoint))
+    starting = asyncio.ensure_future(runner.start(argv, cwd=str(project), endpoint=endpoint))
     await asyncio.sleep(0.1)  # launching
     assert not launched and (project / ".envrc").is_dir()
-    said = await one.release()
+    said = await runner.release()
     started = await starting
     try:
-        assert "extensions' worker" in said, said
-        (plain,) = launched
-        assert await _gone(plain.pgid) and one.released()
-        assert list(project.iterdir()) == []  # its placeholders went with it
+        assert "still runs" in said, said
+        assert (project / ".envrc").is_dir()  # still its jail's
     finally:
         await started.stop()
+    assert list(project.iterdir()) == []  # its placeholders went with it
 
 
 @pytest.mark.usefixtures("_plain_launch")
@@ -841,7 +873,7 @@ async def test_an_input_creating_the_project_s_own_absent_local_env_leaves_the_j
 _CRASH = """
 import asyncio, os, sys, tempfile
 from pathlib import Path
-from brig_cordis_plugin import BrigConfig, BrigJail
+from runner_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
     paths, credentials, secrets, trusted, code, memory = (), (), (), (), (), ""
@@ -860,15 +892,15 @@ asyncio.run(main())
 """
 
 
-# A bh-02 killed while its kernel runs an input's background program, which keeps trying to write
+# A bh-02 killed while its Python process runs an input's background program, which keeps trying to write
 # under `.claude/` (Claude Code would run hooks from its settings) and says it is alive: the real
 # kernel, in the real jail. argv: the project, then "setsid" to start the program in a session
 # of its own (out of the jail's process group), else "group". It says "started" and waits to be
 # killed.
 _KILLED_WITH_A_BACKGROUND_INPUT = """
 import asyncio, sys, time
-from brig_cordis_plugin import BrigConfig, BrigJail
-from kernel_cordis_plugin import Kernel, KernelConfig
+from runner_cordis_plugin import Approval, BrigConfig, BrigJail, Runner
+from python_cordis_plugin import Kernel, KernelConfig
 
 class Layers:
     paths, credentials, secrets, trusted, code, memory = (), (), (), (), (), ""
@@ -887,7 +919,8 @@ LOOP = (
 )
 
 async def main():
-    kernel = Kernel(BrigJail(BrigConfig(), Layers()), KernelConfig(root=sys.argv[1]))
+    runner = Runner(BrigJail(BrigConfig(), Layers()))
+    kernel = Kernel(runner, KernelConfig(root=sys.argv[1]), rule=Approval(runner))
     await kernel.__aenter__()
     setsid = sys.argv[2] == "setsid"
     code = (
@@ -1034,7 +1067,7 @@ import os, sys, tempfile
 from pathlib import Path
 import asyncio
 from brig.run import SubprocessLauncher
-from brig_cordis_plugin import BrigConfig, BrigJail
+from runner_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
     paths, credentials, secrets, trusted, code, memory = (), (), (), (), (), ""
@@ -1312,7 +1345,7 @@ async def test_a_second_jail_s_carve_out_outlives_the_first_jail_in_the_same_pro
 
 def test_a_platform_brig_has_no_preset_for_is_refused_by_name() -> None:
     assert stack_for("darwin") and stack_for("linux")
-    with pytest.raises(RuntimeError, match=r"this is freebsd.*`kernel:unjailed`"):
+    with pytest.raises(RuntimeError, match=r"this is freebsd.*`runner:unconfined`"):
         stack_for("freebsd")
     assert BrigJail(BrigConfig(), Layers(), platform="freebsd").report() == {}
 

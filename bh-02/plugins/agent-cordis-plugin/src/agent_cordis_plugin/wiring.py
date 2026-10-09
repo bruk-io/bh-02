@@ -7,7 +7,7 @@ prompt and asks `notes`; and the conversation's commands, `/clear` and `/compact
 The transcript is its own row so the history outlives the loop: replace the `model` row
 and the loop reloads against the new provider while the conversation carries on. `notes` is
 its own row too, depending on nothing, so neither the loop nor a row adding to it reloads the
-other, and `tools`, so a tool's row restarting (the kernel's) reloads neither the loop nor
+other, and `tools`, so a tool's row restarting (the python row's) reloads neither the loop nor
 another tool's row. So is `executor`, so a reloaded loop keeps the call a stopped reply left
 running and waits for it. `/clear` and `/compact` are one row's (`conversation`), over the
 model, `tools`, the loader, `commands` and `output`, which depends on neither the loop nor the
@@ -33,12 +33,14 @@ from agent_cordis_plugin.conversation import (
 )
 from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.loop import (
-    Approval,
+    Asked,
+    Confirm,
     Executor,
     LoopModel,
     Model,
     Note,
     Notes,
+    Rule,
     System,
     Tools,
     Transcript,
@@ -102,25 +104,27 @@ async def loop(
     tools: Tools,
     transcript: Transcript,
     system: System,
-    approval: Approval,
+    approval: Rule,
+    output: Confirm,
     notes: Notes,
     executor: Executor,
     config: LoopConfig,
 ) -> Effects:
     """Fills the `loop` row from a raw model: `use = "agent:loop"`. The model is offered the
-    tools rows register (`tools`), read at the first request once those `requires` names have
-    registered; each call runs only on `approval`'s yes (the person's, when it runs anywhere but
-    a jail that confines it). After each call, the functions in `notes` may add a note to its
-    result. The prompt is read, and `notes` asked, on `executor`. A new ui reloads this row
-    (through `approval`), which holds nothing: the transcript, the tools (the kernel's namespace
-    among them) and the call in flight on `executor` are rows of their own."""
+    tools rows register (`tools`), read at a conversation's first request once those `requires`
+    names have registered; each call runs at once when the `approval` rule says it runs unasked
+    (in a runner that confines it), else only on the person's yes (`output.confirm`). After each
+    call, the functions in `notes` may add a note to its result. The prompt is read, and `notes`
+    asked, on `executor`. A new ui reloads this row (through `output`), which holds nothing: the
+    transcript, the tools (the Python process's namespace among them) and the call in flight on
+    `executor` are rows of their own."""
     yield bind(
         "loop",
         LoopModel(
             model,
             tools,
             transcript,
-            approval,
+            Asked(approval, output),
             config.max_nudges,
             system,
             notes,
@@ -202,10 +206,10 @@ async def conversation(
 ) -> Effects:
     """Fills a `conversation` row: `use = "agent:conversation"`. `/clear` and `/compact`, a new
     conversation each, written over the transcript row's file in one step, the old kept beside
-    it (`.bak`, `.bak.2`, ...). `/clear`'s is empty, and the loop, the transcript and the kernel
-    restart (`config.clear`); `/compact [WHAT TO KEEP]`'s begins from the model's summary (in
+    it (`.bak`, `.bak.2`, ...). `/clear`'s is empty, and the loop, the transcript and the python
+    row restart (`config.clear`); `/compact [WHAT TO KEEP]`'s begins from the model's summary (in
     `config.timeout` seconds: Ctrl-C stops only a turn; a note says so as it begins), and the
-    loop and the transcript restart, the kernel keeping its namespace.
+    loop and the transcript restart, the python row keeping its namespace.
 
     It depends on neither the loop nor the transcript, which it restarts. It finds the
     conversation's file from the transcript row as the loader mounted it (`loader.rows`), and
