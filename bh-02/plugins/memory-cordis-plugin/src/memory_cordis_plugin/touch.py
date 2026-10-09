@@ -144,7 +144,12 @@ class OnTouch:
 
     What the conversation was told before this began (a resumed session's, or this one's before
     the row reloaded) is in its `transcript`, the notes the loop kept on each `tool` entry: read
-    at the first input that opens a file, and each text checked against them until it is told."""
+    at the first input that opens a file, and each text checked against them until it is told.
+
+    It also answers `access` before a write (`before_write`): a file covered by what this
+    conversation has not been told is not written until it has been, so the instructions arrive
+    before the file changes, as Claude Code's do (its Edit and Write refuse a file not Read
+    first). The refused file is among what the call touched, so they follow as its note."""
 
     def __init__(self, memory: Memory, transcript: Transcript) -> None:
         self._memory = memory
@@ -153,7 +158,8 @@ class OnTouch:
         # the model, so it is not told after that
         self._opened: set[str] = set()
         # (file, what was said), told this conversation (whole, or as much as a note holds) or
-        # before this began. Called on the loop's `executor`, one call at a time, so it takes no lock.
+        # before this began. Called one call at a time, before a write while an input runs and as a
+        # note on the loop's `executor` after it, never both at once, so it takes no lock.
         self._told: set[tuple[str, str]] = set()
         # what the inputs before this began were told (`_before`): None until the first input
         # that opens a file reads it
@@ -163,11 +169,33 @@ class OnTouch:
         touched = input.get("touched") or ()
         if not touched:
             return ""
+        self._opened.update(str(t) for t in touched)
+        new = self._unseen([str(t) for t in touched])
+        note, told = _cut([text for _, text in new])
+        self._told.update(new[:told])
+        return note
+
+    def before_write(self, path: str) -> str | None:
+        """An `access` function (CONTRACTS.md: access): why `path` may not be written yet, while
+        what loads on demand for it holds a text this conversation has not been told; None once it
+        has been, and for a memory file itself (its own text is what the model is changing)."""
+        files = [file for file, _ in self._unseen([path]) if file != path]
+        if not files:
+            return None
+        return (
+            f"instructions that apply to it ({', '.join(dict.fromkeys(files))}) have not been told in "
+            "this conversation; they come with this input's result, and nothing was written to it: "
+            "read them, then write it again"
+        )
+
+    def _unseen(self, paths: Sequence[str]) -> list[tuple[str, str]]:
+        """What loads on demand for `paths` that this conversation has not been told, as (file,
+        text): none the model opened itself, and none the transcript says was told before this
+        began (read once, at the first call that asks), which are marked told here."""
         if self._before is None:
             self._before = _before(self._transcript.messages)
         notes, texts = self._before
-        self._opened.update(str(t) for t in touched)
-        said = self._memory.touched([str(t) for t in touched])
+        said = self._memory.touched(list(paths))
         unseen = [
             item for item in dict.fromkeys(said) if item not in self._told and item[0] not in self._opened
         ]
@@ -176,7 +204,4 @@ class OnTouch:
             for item in unseen
             if any(_holds(note, item[1]) for note in notes) or _told_in(texts, item[1])
         )
-        new = [item for item in unseen if item not in self._told]
-        note, told = _cut([text for _, text in new])
-        self._told.update(new[:told])
-        return note
+        return [item for item in unseen if item not in self._told]

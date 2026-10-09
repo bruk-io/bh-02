@@ -8,7 +8,7 @@ asked for runs unasked.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `kernel:kernel` | `kernel`: `call(input) -> {"content", "touched"}` (the `python` tool's call, registered with `tools` as `PYTHON`, shown as its code, `shown_call`), `instructions()` (the `system` section `python`), `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its worker's jail's: the worker it last started, never another program of the same jail), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `tools` (`register`: `python`), `system` (`add`: `python`), `jail` (`start`, and of the worker it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()`, for `confined`; `release()`) |
+| `kernel:kernel` | `kernel`: `call(input) -> {"content", "touched"}` (the `python` tool's call, registered with `tools` as `PYTHON`, shown as its code, `shown_call`), `instructions()` (the `system` section `python`), `run(code) -> str`, `confined`, `report()`, `notice()` and `reads()` (its worker's jail's: the worker it last started, never another program of the same jail), `release()`, `touched()`; config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new kernel runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file), `jail` (`start`, and of the worker it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()`, for `confined`; `release()`) |
 | `kernel:approval` | `approval`: `confined` (whether the jail confines what runs in it), `approve(request) -> bool` (async: yes at once when it runs in the jail, `runs` (the jail when it says nothing), and that confines it, else the person's answer through `output.confirm`, no with nobody to ask) | `jail` (`report`), `output` (`confirm`) |
 | `kernel:release` | (nothing: registers `/release`) | `kernel` (`release`), `commands` (`register`) |
 | `kernel:unjailed` | `jail`: the worker as a plain subprocess, every axis reported `unenforced` | |
@@ -81,6 +81,18 @@ and why when its jail ended it (`started.ended()`: a Linux `brig:jail` ends itse
 undoes one of its mounts). A worker that died between inputs is noticed before the next input
 is sent, so that input runs in the new one. After each input, `touched()` is the files under
 `root` it opened, which `call` answers with (what the loop gives `notes`' functions).
+
+Before the input's own Python opens one of those files, the same audit hook can ask bh-02 about
+it (`access`, `agent:access`): each input's `exec` names the kinds some row asks about
+(`"ask": ["write"]`, say), and for an open of that kind the worker sends `{"op": "ask", "id",
+"kind", "path"}` and waits for `{"op": "answer", "id", "refuse"}`, once per file and kind an
+input (any thread may ask; the answer goes to the one waiting). A `refuse` that is text raises a
+PermissionError at the open, so the file is never opened, and the traceback ends at the input's
+own line (the worker's frames are left out); the `done` carries every refusal (`refused`), which
+ends the input's text in brackets, so the model hears of it even when the code caught the error.
+What it does not see: a program an input runs (`subprocess`), an `os.open`, a rename, a replace
+or a delete, a file outside the project. It tells the model something before a file changes; the
+jail is what stops what must never happen.
 
 A new kernel's first input is also told what the startup files did (`startup`, helpers kept
 across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/kernel.py` (else

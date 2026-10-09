@@ -60,16 +60,28 @@ async def memory(*, system: _System, commands: _Registrar, layers: _Layers, conf
     yield acquire(commands.register, SPEC, run)
 
 
+@runtime_checkable
+class _Access(Protocol):
+    """What the on-touch row needs of the `access` value (CONTRACTS.md: access): a function asked
+    before a file is written, and its remover back."""
+
+    def before_write(self, fn: Callable[[str], str | None]) -> Callable[[], None]: ...
+
+
 @component
-async def on_touch(*, memory: Touched, notes: Notes, transcript: Transcript) -> Effects:
+async def on_touch(*, memory: Touched, notes: Notes, transcript: Transcript, access: _Access) -> Effects:
     """Fills an `on-touch` row: `use = "memory:on_touch"`. After each input, what loads on demand
     for the files it opened (a subdirectory's CLAUDE.md, a rule whose `paths` match) goes to the
-    model with its result, each once a conversation (`OnTouch`). It depends on `transcript` for
+    model with its result, each once a conversation (`OnTouch`). Before a write (`access`), a file
+    covered by what it has not told yet is refused until it has been, so those instructions arrive
+    before the file changes. It depends on `transcript` for
     its lifetime and what it says: a new conversation (`/clear`) starts a new row, which tells
     each again, and a resumed one is not told again what its transcript says it was told. A row
     of its own, not the memory row, so a new conversation never takes the memory section out of
     the prompt and puts it back."""
-    yield acquire(notes.add, OnTouch(memory, transcript))
+    told = OnTouch(memory, transcript)
+    yield acquire(notes.add, told)
+    yield acquire(access.before_write, told.before_write)
 
 
 @component

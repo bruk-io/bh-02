@@ -55,6 +55,28 @@ covers, that file arrives whole as a note, as Claude Code's do when its own tool
 for one result are capped at 20,000 characters; a file that didn't fit comes with a later input
 that opens a file it covers.
 
+## Asked before a file is written
+
+A note arrives after the call, so an input that reads a file and writes it in one go would write
+it before seeing the instructions for it. So bh-02 can also be asked *before* a file is opened
+(`access`, `agent:access`, another broker): a tool asks, and a row may refuse. Memory's on-touch
+row refuses the first write to a file whose on-demand instructions this conversation hasn't been
+told: the input gets a `PermissionError` at that line, the file is untouched, and the
+instructions arrive with the result, so the model's next write goes ahead. That's Claude Code's
+rule that Edit and Write need a Read first, in bh-02's terms.
+
+What it doesn't do:
+
+- **It only hears what the tool reports.** The `python` tool asks from inside its Python process,
+  so it hears Python's own `open()` and `pathlib` of a project file. A program the input runs
+  (`sed -i`, `git apply`, a formatter), `os.open`, a rename, a replace or a delete isn't asked
+  about. Another tool asks only if its author made it. The jail is what enforces; this is a way
+  to say something first.
+- **The model hears nothing until the call ends.** A refusal stops one open; the input may be half
+  done. If its code caught the error, the refusal is still told at the end of the result.
+- **Reads aren't refused** by anything bh-02 ships; a row of yours can ask about them, at the cost
+  of a question for each file an input reads.
+
 Only rows in a layer add to `notes`, since its functions run in bh-02's own process.
 
 ## Off the app's event loop

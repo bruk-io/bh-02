@@ -6,11 +6,16 @@ holds only what inputs put there: an input is plain Python, and the jail decides
 
 Wire: newline-delimited JSON. The host sends ``{"op": "hello"}`` once (a readiness probe
 connects and closes without a word, so the worker keeps accepting until one speaks), then
-``{"op": "exec", "code"}`` per input, and the worker ends every input with
-``{"op": "done", "output", "error", "touched"}``: `touched` the files under the directory the
-worker started in (the project root) that the input's own code opened with `open()` or
-`pathlib`, read or written, each once by its absolute path (an audit hook, `_Kernel.heard`: what
-Python opens, not what a program it runs does, nor an `os.open`). A worker nobody says hello to
+``{"op": "exec", "code", "ask"}`` per input, and the worker ends every input with
+``{"op": "done", "output", "error", "touched", "refused"}``: `touched` the files under the
+directory the worker started in (the project root) that the input's own code opened with
+`open()` or `pathlib`, read or written, each once by its absolute path (an audit hook,
+`_Kernel.heard`: what Python opens, not what a program it runs does, nor an `os.open`). `ask`
+names the kinds (`read`, `write`) the host wants to be asked about: before the input's own code
+opens such a file to one of them, the worker sends ``{"op": "ask", "id", "kind", "path"}`` and
+waits for ``{"op": "answer", "id", "refuse"}``, once per file and kind per input; a `refuse` that
+is text stops the open with a PermissionError carrying it, and `refused` is every such refusal,
+so the model is told of it even when the input's code caught the error. A worker nobody says hello to
 (its host was killed while starting it) exits once its parent is gone, or after `_HELLO_S` (a
 second argument overrides it), rather than wait in `accept` for ever; one whose host disconnects
 exits too, even mid-input.
@@ -22,6 +27,7 @@ running, SIGINT is ignored.
 
 import ast
 import contextlib
+import errno
 import io
 import json
 import linecache
@@ -46,6 +52,7 @@ _INPUT = "<input"  # how every input's file name starts: the third input is `<in
 # the project's files one input's `touched` names at most: a walk of a big tree stays one line
 _TOUCHED = 1_000
 _HELLO_S = 60.0  # the host says hello within milliseconds of the worker listening
+_READ, _WRITE = "read", "write"  # the kinds of opening the host may ask to be asked about
 _LOOK_S = 0.5  # how often a worker waiting for its hello checks that its parent is still there
 
 
@@ -63,32 +70,61 @@ def split_last_expression(code: str, name: str = "<input>") -> tuple[ast.Module,
 def input_traceback(exc: BaseException) -> str:
     """Format a failed input's exception from its first input frame (`<input 3>`) on: the worker's
     own frames (the `exec` that ran the input) say nothing about the input. Keep every frame if
-    none is an input's."""
+    none is an input's. Nor do the worker's frames below the input's say anything: an open the
+    host refused is raised from the audit hook (`_Kernel._asked`), so the traceback ends at the
+    input's own line, as a PermissionError from the file system would."""
     tb = exc.__traceback__
     while tb is not None and not tb.tb_frame.f_code.co_filename.startswith(_INPUT):
         tb = tb.tb_next
-    return "".join(traceback.format_exception(type(exc), exc, tb or exc.__traceback__)).rstrip()
+    shown = traceback.TracebackException(type(exc), exc, tb or exc.__traceback__)
+    if any(frame.filename != __file__ for frame in shown.stack):
+        shown.stack = traceback.StackSummary.from_list([f for f in shown.stack if f.filename != __file__])
+    return "".join(shown.format()).rstrip()
 
 
 class _Channel:
-    """The socket: a reader thread feeding a queue. Only the main thread's input loop writes."""
+    """The socket: a reader thread feeding a queue, and the answers to the worker's questions
+    (`ask`) to the thread waiting for each. Any thread may write: an input's own threads ask too."""
 
     def __init__(self, conn: socket.socket, file: io.TextIOWrapper) -> None:
         self._conn = conn
         self._file = file  # the one reader of this connection: a second would lose what the first buffered
         self.inbox: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        self._sending = threading.Lock()  # one message on the socket at a time, whole
+        self._asked = 0  # the last question's number
+        self._waiting: dict[
+            int, queue.Queue[dict[str, Any]]
+        ] = {}  # a question's number: where its answer goes
         threading.Thread(target=self._read, name="kernel-reader", daemon=True).start()
 
     def _read(self) -> None:
         for line in self._file:
             if line.strip():
-                self.inbox.put(json.loads(line))
+                message = json.loads(line)
+                waiting = self._waiting.get(message.get("id")) if message.get("op") == "answer" else None
+                (waiting or self.inbox).put(message)
         # The host is gone. An input may be spinning on the main thread and never look at the
         # inbox again, so the worker ends here rather than outliving the program that ran it.
         os._exit(0)
 
     def send(self, message: Mapping[str, Any]) -> None:
-        self._conn.sendall((json.dumps(message) + "\n").encode("utf-8"))
+        line = (json.dumps(message) + "\n").encode("utf-8")
+        with self._sending:
+            self._conn.sendall(line)
+
+    def ask(self, question: Mapping[str, Any]) -> dict[str, Any]:
+        """Send `question` and wait for the host's answer to it. The wait is the open's, on the
+        thread that opens: SIGINT still interrupts it on the main thread."""
+        with self._sending:
+            self._asked += 1
+            number = self._asked
+        answer: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
+        self._waiting[number] = answer
+        try:
+            self.send({**question, "id": number})
+            return answer.get()
+        finally:
+            self._waiting.pop(number, None)
 
 
 class _Kernel:
@@ -107,12 +143,17 @@ class _Kernel:
         # The globals the import system's own code runs with: the frozen importlib modules'.
         self._importlib = (vars(modules["_frozen_importlib"]), vars(modules["_frozen_importlib_external"]))
         self._touched: dict[str, None] = {}  # the project's files the running input opened, in order
+        self._asking: frozenset[str] = frozenset()  # the kinds of opening the host asks about now
+        self._answered: dict[tuple[str, str], str | None] = {}  # this input's answers, by (kind, path)
+        self._refused: list[str] = []  # what this input was refused, as the model is told it
 
     def heard(self, args: tuple[Any, ...]) -> None:
         """An `open` audit event's arguments (`path, mode, flags`): a file the input's own code
         opened with `open`, `io.open` or `pathlib`, read or written. Kept when it is under the
         root, and not opened by the import system (a module imported is not a file worked on),
-        until `_TOUCHED` are kept; a file outside the project never counts towards that.
+        until `_TOUCHED` are kept; a file outside the project never counts towards that. And,
+        when the host asks about the kind of opening (`_asking`: read, write, both for `+`),
+        asked about first (`_asked`), which may stop it.
 
         Only an event whose mode is a string, which is an `open()` of a file. `os.open` raises
         it with mode None and without its `dir_fd`: `shutil.rmtree`, `os.fwalk` and a
@@ -122,23 +163,46 @@ class _Kernel:
         `Path.touch`, which is one. Nor is a file opened by number, a directory listed, or a
         file opened while the input's own code is not running (`_own`): a failed input's
         traceback reads the source file of each of its frames."""
-        if (
-            not self._hearing
-            or len(args) < 2
-            or not isinstance(args[1], str)
-            or len(self._touched) >= _TOUCHED
-        ):
+        if not self._hearing or len(args) < 2 or not isinstance(args[1], str):
             return
         name = args[0]
         if not isinstance(name, str | bytes | os.PathLike):
             return
         path = os.path.abspath(os.fsdecode(name))
-        if path.startswith(self._under) and path not in self._touched and not _importing(*self._importlib):
+        if not path.startswith(self._under):
+            return
+        kinds = [kind for kind in _kinds(args[1]) if kind in self._asking]
+        if not kinds and (path in self._touched or len(self._touched) >= _TOUCHED):
+            return  # nothing to keep and nothing to ask: no walk of the stack (`_importing`)
+        if _importing(*self._importlib):
+            return
+        if path not in self._touched and len(self._touched) < _TOUCHED:
             self._touched[path] = None
+        for kind in kinds:
+            self._asked(kind, path)
+
+    def _asked(self, kind: str, path: str) -> None:
+        """Ask the host whether the input may open `path` to `kind`, once an input: a refusal is
+        kept, told with the input's result (`refused`), and raised here as a PermissionError, so
+        the open never happens."""
+        if (kind, path) not in self._answered:
+            answer = self._channel.ask({"op": "ask", "kind": kind, "path": path}).get("refuse")
+            refused = str(answer) if answer else None
+            self._answered[(kind, path)] = refused
+            if refused:
+                self._refused.append(f"bh-02 refused to let this input {kind} {path}: {refused}")
+        if (refused := self._answered[(kind, path)]) is not None:
+            raise PermissionError(
+                errno.EACCES, f"bh-02 refused to let this input {kind} this file: {refused}", path
+            )
 
     def serve(self) -> None:
         while (message := self._channel.inbox.get()) is not None:
             if message.get("op") == "exec":
+                asked = message.get("ask")
+                self._asking = (
+                    frozenset(str(kind) for kind in asked) if isinstance(asked, list) else frozenset()
+                )
                 self._channel.send(self._run(str(message.get("code", ""))))
 
     def _run(self, code: str) -> dict[str, Any]:
@@ -150,7 +214,7 @@ class _Kernel:
         # dropped as stale), kept for later inputs: a function defined here and failing there
         # shows its own line, and which input it came from.
         linecache.cache[name] = (len(code), None, code.splitlines(keepends=True), name)
-        self._touched = {}
+        self._touched, self._answered, self._refused = {}, {}, []
         self.running = True
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
@@ -181,6 +245,7 @@ class _Kernel:
             "output": output,
             "error": error and self._capped(error, "-error"),
             "touched": list(self._touched),
+            "refused": list(self._refused),
         }
 
     def _own(self, body: ast.Module, last: ast.Expression | None, name: str) -> str | None:
@@ -225,6 +290,14 @@ def _hook(heard: Callable[[tuple[Any, ...]], None]) -> Callable[[str, tuple[Any,
             heard(args)
 
     return hook
+
+
+def _kinds(mode: str) -> tuple[str, ...]:
+    """What opening a file in `mode` (an `open()` mode string) does to it: reads it (`r`, or `+`),
+    writes it (`w`, `a`, `x`, or `+`), or both."""
+    reads = "r" in mode or "+" in mode
+    writes = any(letter in mode for letter in "wax+")
+    return (*((_READ,) if reads else ()), *((_WRITE,) if writes else ()))
 
 
 def _importing(bootstrap: dict[str, Any], external: dict[str, Any]) -> bool:

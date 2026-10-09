@@ -4,7 +4,7 @@ a call may run, by where it runs and the jail's confinement, or the person's yes
 which stops the kernel until the next input."""
 
 from kernel_cordis_plugin.approval import Approval, is_confined
-from kernel_cordis_plugin.client import Jail, Jailed, Kernel, KernelConfig, worker_argv
+from kernel_cordis_plugin.client import Access, Jail, Jailed, Kernel, KernelConfig, worker_argv
 from kernel_cordis_plugin.python import PYTHON, instructions_for, shown_call
 from kernel_cordis_plugin.unjailed import UNENFORCED, Unjailed
 from kernel_cordis_plugin.wiring import approval, kernel, release, unjailed
@@ -12,6 +12,7 @@ from kernel_cordis_plugin.wiring import approval, kernel, release, unjailed
 __all__ = [
     "PYTHON",
     "UNENFORCED",
+    "Access",
     "Approval",
     "Jail",
     "Jailed",

@@ -7,7 +7,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from cordis import Effects, acquire, bind, component, enter
 from kernel_cordis_plugin.approval import Approval, Asks, Graded
-from kernel_cordis_plugin.client import Jail, Kernel, KernelConfig
+from kernel_cordis_plugin.client import Access, Jail, Kernel, KernelConfig
 from kernel_cordis_plugin.python import PYTHON, shown_call
 from kernel_cordis_plugin.unjailed import Unjailed
 
@@ -54,17 +54,21 @@ class _Sections(Protocol):
 
 
 @component(provides=("kernel",))
-async def kernel(*, jail: Jail, tools: _Tools, system: _Sections, config: KernelConfig) -> Effects:
+async def kernel(
+    *, jail: Jail, tools: _Tools, system: _Sections, access: Access, config: KernelConfig
+) -> Effects:
     """Fills a `kernel` row: `use = "kernel:kernel"`. The kernel registers the `python(code)`
     tool with `tools` (each call runs in the jail; the loop asks `approval` about it first, shown
     as its code), and adds what the model is told about it, its REPL and its jail, as the `system`
-    section `python`, read each time the prompt is.
+    section `python`, read each time the prompt is. Before an input's own Python opens a file in
+    the project, the worker asks `access` about it, when a row is asking about that kind of
+    opening (read, write), and a refusal stops the open.
 
-    Depends on the jail and the two brokers, which never reload, so swapping the model or the
+    Depends on the jail and the three brokers, which never reload, so swapping the model or the
     ui keeps the namespace, and so does a reload of the loop; swapping the jail starts a new
     process, which is the honest thing for a new jail to mean. A restart (`/clear`) registers
     the same tool again, so the loop reloads with nothing."""
-    started = yield enter(Kernel(jail, config))
+    started = yield enter(Kernel(jail, config, access))
     yield bind("kernel", started)
     yield acquire(tools.register, PYTHON, started.call, show=shown_call)
     yield acquire(system.add, "python", started.instructions)

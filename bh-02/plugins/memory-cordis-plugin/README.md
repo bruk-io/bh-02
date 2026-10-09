@@ -11,7 +11,7 @@ section to it.
 |---|---|---|
 | `memory:memory` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `layers` (`memory`: for `/memory`) |
 | `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index | `system` (`add`), `layers` (`memory`), `transcript` (its lifetime) |
-| `memory:on_touch` | adds `OnTouch` to `notes`; no config: the memory files are `memory`'s | `memory` (`touched`), `notes` (`add`), `transcript` (`messages`) |
+| `memory:on_touch` | adds `OnTouch` to `notes`, and its `before_write` to `access`; no config: the memory files are `memory`'s | `memory` (`touched`), `notes` (`add`), `transcript` (`messages`), `access` (`before_write`) |
 
 ## What loads at launch
 
@@ -53,6 +53,17 @@ and the rules in its own `.claude/rules/` (one without `paths` for everything un
 them, matched from that directory); then each of your rules and the project's whose `paths`
 match. A pattern is from the project's root (`src/api/**/*.ts`), with no `/` at any depth
 (`*.tsx`), each `{a,b}` group one of its alternatives.
+
+**Before a write, too.** The row also answers `access` (`agent:access`) before a file is written
+(`OnTouch.before_write`): the first write to a file whose on-demand instructions this
+conversation has not been told is refused, naming them, and they follow as that call's note (the
+refused file is among what it touched), so the next write goes ahead. That is Claude Code's
+read-before-edit, in bh-02's terms: the instructions arrive before the file changes. It sees only
+what the tool asks about (the python tool: Python's own `open()` of a project file, not a program
+an input runs, nor `os.open`, a rename or a delete), and a refusal stops one open mid-input: the
+input runs on, or ends at the PermissionError, so it may be half done, and the model hears of the
+refusal with the result even when the code caught it. A memory file itself is never refused (its
+own text is what the model is changing), and no read is.
 
 `memory:on_touch` tells each with that input's result as `From <file>, ...:` and the text, once a
 conversation (again when its text changes), at most 20,000 characters with one result (a file

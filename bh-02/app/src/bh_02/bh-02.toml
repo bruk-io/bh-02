@@ -61,6 +61,16 @@ use = "agent:executor"
 id = "notes"
 use = "agent:notes"
 
+# What is asked before a file is read or written: a broker of functions rows add, each given the
+# file's path and answering None to let it go ahead or why it may not. The python tool asks
+# before an input's own Python opens a project file (only for the kinds some row asks about);
+# memory's on-touch row refuses the first write to a file whose on-demand instructions this
+# conversation has not been told, and they follow with the input's result. It sees only what a
+# tool reports (python: Python's own `open`, not a program an input runs).
+[[plugin]]
+id = "access"
+use = "agent:access"
+
 # Memory, as Claude Code has it: the managed policy's CLAUDE.md, yours (~/.claude/CLAUDE.md and
 # ~/.claude/rules/), the CLAUDE.md files from the filesystem's root down to the project's (and
 # AGENTS.md where there is none), the files they import and the project's rules, a section of the
