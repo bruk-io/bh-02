@@ -1,7 +1,8 @@
-"""A harness-owned agent loop: a `model` plus the kernel's one tool, `python`, provided as a `loop`.
+"""A harness-owned agent loop: a `model` plus the tools rows register (`tools`, a broker), provided
+as a `loop`.
 
 Also the transcript row, so the history outlives the loop; `system`, the system prompt rows add
-sections to; `notes`, what the model is told with an input's result; `executor`, where the loop
+sections to; `notes`, what the model is told with a call's result; `executor`, where the loop
 reads the prompt and asks `notes`, one call at a time across the loop's reloads; and `/compact`,
 which begins a new conversation from the model's summary of it."""
 
@@ -25,15 +26,21 @@ from agent_cordis_plugin.loop import (
     LoopModel,
     Model,
     Notes,
-    Python,
     System,
+    Tool,
+    Tools,
     Transcript,
+    Unstarted,
+    called,
+    malformed,
     noted,
     refusal,
+    shown,
 )
 from agent_cordis_plugin.prompt import changes, edits, latest
 from agent_cordis_plugin.stops import classify
 from agent_cordis_plugin.system import SystemConfig, SystemPrompt, branch_of, describe
+from agent_cordis_plugin.tools import HOST, JAIL, ToolBroker
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript, rewrite
 from agent_cordis_plugin.wiring import (
     LoopConfig,
@@ -43,12 +50,15 @@ from agent_cordis_plugin.wiring import (
     loop,
     notes,
     system,
+    tools,
     transcript,
 )
 
 __all__ = [
     "DECLINED",
     "FAILED",
+    "HOST",
+    "JAIL",
     "STOPPED",
     "Approval",
     "CompactConfig",
@@ -60,15 +70,19 @@ __all__ = [
     "Notes",
     "MemoryTranscript",
     "OneAtATime",
-    "Python",
     "System",
     "SystemConfig",
     "SystemPrompt",
+    "Tool",
+    "ToolBroker",
+    "Tools",
     "Transcript",
     "TranscriptConfig",
     "Unchanged",
+    "Unstarted",
     "asked",
     "branch_of",
+    "called",
     "changes",
     "classify",
     "compact",
@@ -79,13 +93,16 @@ __all__ = [
     "kept_in",
     "latest",
     "loop",
+    "malformed",
     "notes",
     "refusal",
     "noted",
     "rewrite",
     "seeded",
+    "shown",
     "summarise",
     "system",
+    "tools",
     "transcript",
     "unrestarted",
 ]

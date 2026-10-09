@@ -65,9 +65,13 @@ _MERGED_IDS = frozenset({"jail_status", "model_status"})
 _STATUS_KEYS = {"row": "model_row"}
 _STATUS_GONE = frozenset({"default", "default_model"})
 # Rows an earlier bh-02 had and this one does not, by id or by the plugin they named, and why.
-_ONE_TOOL = "python is the one tool (the kernel's), and unjailed each input is approved in the modal"
+# The tool rows of before CodeAct: `tools` was one of them, by the `tools:` plugin; a `tools` row
+# naming no plugin is a change to today's broker (`agent:tools`), so only that plugin drops it.
+_ONE_TOOL = (
+    "the model's tools are registered with `tools` (agent:tools) by the rows that offer them, the "
+    "kernel's python among them, and unjailed each call is put to the person in the modal"
+)
 _REMOVED_IDS = {
-    "tools": _ONE_TOOL,
     "fs": _ONE_TOOL,
     "approve": _ONE_TOOL,
     "actions": _ONE_TOOL,
@@ -104,7 +108,8 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       turn off one part, and turning off all of it would hide the session and the model too, so
       the change says how to turn off the whole bar instead (a `status` row already in the
       layer keeps its own `disabled`). A status row with nothing left to say is not written.
-    - A row bh-02 no longer has is dropped: the tool rows before the one tool, a session's
+    - A row bh-02 no longer has is dropped: the tool rows before CodeAct (any using the `tools:`,
+      `fs:` or `codeact:` plugins; a `tools` row naming none is today's broker's), a session's
       `session` row, the sidebar (a change to the shipped `sidebar` row, or any row using
       `tui:sessions`), the shell hints (a change to the shipped `shell-hints` row, or any row
       using `kernel:shell_hints`), and a fixed field (`tui:status` with a `field` or `text`,

@@ -97,7 +97,7 @@ which a switch replaces.
 `openai/` serves any `/chat/completions` endpoint: OpenAI, OpenRouter, Groq, Together, Mistral,
 xAI, DeepSeek, Gemini's compatibility endpoint, vLLM, LM Studio, Ollama (`/v1`). Over httpx2
 (the one HTTP client, already in the workspace through mcp):
-- each step is one streamed POST (`stream: true`, `stream_options.include_usage`), the one tool
+- each step is one streamed POST (`stream: true`, `stream_options.include_usage`), each tool
   offered as a function; `wire.py` (pure) builds it and folds the server-sent events. A server
   that refuses `stream_options` (a 400/422 naming it, as one that forbids fields it doesn't
   know answers) is asked again without it, then and for every later step: usage is optional;
@@ -159,12 +159,12 @@ or CLAUDE.md (`setting_sources=[]`), and no connector (`strict_mcp_config`,
 note of the provider's own: Claude Code names the declared tool `mcp__bh__python`, so the note
 says that is bh-02's `python`. It does not compact (`DISABLE_AUTO_COMPACT`).
 
-**The tool is only declared.** The loop's one tool, `python`, reaches Claude Code as an
-in-process MCP server (`declared.py`, the MCP library's low-level `Server`), so the model calls
-`mcp__bh__python` through standard tool calling. Claude Code calls the server, and the call
-*parks* there. The server runs nothing: the loop runs the call, and the next request brings the
-result, which the parked call returns. `can_use_tool` denies anything but the declared tool
-(`mcp__bh__python`) without asking. That is a second wall: nothing else is offered anyway.
+**The tools are only declared.** The loop's tools (the shipped composition's: `python`) reach
+Claude Code as an in-process MCP server (`declared.py`, the MCP library's low-level `Server`),
+so the model calls `mcp__bh__python` through standard tool calling. Claude Code calls the
+server, and the call *parks* there. The server runs nothing: the loop runs the call, and the
+next request brings the result, which the parked call returns. `can_use_tool` denies anything
+but a declared tool (`mcp__bh__<name>`) without asking. That is a second wall: nothing else is offered anyway.
 
 ### One step per `complete`
 

@@ -132,6 +132,23 @@ def test_an_approval_names_the_input_and_shows_its_code_whole() -> None:
     assert render.approval_lines(asked) == ["x = 1"]
 
 
+def test_an_approval_shows_a_call_as_its_tool_shows_it() -> None:
+    """A tool's call carries how it is put to the person (`title`, `lines`, `language`), not
+    necessarily any code: the modal shows those lines, highlighted in that language."""
+    shown = {
+        "name": "search",
+        "input": {"query": "x"},
+        "runs": "host",
+        "title": "Call search with this input?",
+        "lines": ["{", '  "query": "x"', "}"],
+        "language": "json",
+    }
+    assert render.approval_title(shown) == "Call search with this input (3 lines)?"
+    assert render.approval_lines(shown) == ["{", '  "query": "x"', "}"]
+    assert render.approval_language(shown) == "json"
+    assert render.approval_language({"input": {"code": "1"}}) == "python"
+
+
 def test_the_jail_in_a_status_bar() -> None:
     graded = {"fs_write": "enforced", "network": "enforced", "fs_read": "best_effort", "limits": "unenforced"}
     assert render.jail_forms(True, graded) == (

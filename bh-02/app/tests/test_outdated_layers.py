@@ -80,8 +80,9 @@ def test_an_old_layer_reads_in_today_s_names_and_says_what_changed() -> None:
         "but 'status' cannot turn off one part, so the status bar stays on: to turn off all of "
         "it (session, model and jail), give 'status' `disabled = true`",
         "row 'mode' is now 'chat'; rename its id",
-        "row 'actions' was removed: python is the one tool (the kernel's), and unjailed each input "
-        "is approved in the modal; delete it",
+        "row 'actions' was removed: the model's tools are registered with `tools` (agent:tools) by "
+        "the rows that offer them, the kernel's python among them, and unjailed each call is put to "
+        "the person in the modal; delete it",
         "row 'operator': its config names a renamed row; make it "
         'config = { clear = ["loop", "transcript", "kernel"] }',
     ]
@@ -96,13 +97,16 @@ def test_the_rows_bh_02_no_longer_has_are_dropped_with_why() -> None:
             Row("mine", "fs:tools"),
             Row("approve", "tui:approver"),
             Row("kernel", "kernel:kernel"),
+            Row("tools", "tools:registry"),  # the old tools plugin, whatever the row's id
+            Row("tools", disabled=True),  # a change to today's broker, agent:tools: kept
         ]
     )
-    assert rows == [Row("kernel", "kernel:kernel")]
+    assert rows == [Row("kernel", "kernel:kernel"), Row("tools", disabled=True)]
     assert changes[0] == "row 'session' was removed: the status row shows the session's id itself; delete it"
     assert changes[1].startswith("row 'greeting' was removed: tui:status is now the status bar's one row")
-    assert changes[2].startswith("row 'mine' was removed: fs:tools is gone: python is the one tool")
-    assert changes[3].startswith("row 'approve' was removed: python is the one tool")
+    assert changes[2].startswith("row 'mine' was removed: fs:tools is gone: the model's tools are registered")
+    assert changes[3].startswith("row 'approve' was removed: the model's tools are registered with `tools`")
+    assert changes[4].startswith("row 'tools' was removed: tools:registry is gone")
 
 
 _NO_SIDEBAR = "bh-02 has no sidebar now (`bh-02 sessions` lists this directory's sessions)"
@@ -355,7 +359,8 @@ def test_a_patch_naming_old_rows_is_refused_with_each_row_and_what_to_change(sta
     assert f"  {patch}: row 'llm' is now 'loop'; rename its id" in lines
     assert f"  {patch}: row 'mode' is now 'chat'; rename its id" in lines
     assert any(
-        line.startswith(f"  {patch}: row 'actions' was removed: python is the one tool") for line in lines
+        line.startswith(f"  {patch}: row 'actions' was removed: the model's tools are registered")
+        for line in lines
     )
     hint = f"run `bh-02 update-layer {patch}` to rewrite it (the original is kept beside it as .bak)"
     assert lines[-1] == f"{hint}, then run again"

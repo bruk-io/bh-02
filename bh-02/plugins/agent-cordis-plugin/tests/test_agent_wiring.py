@@ -8,6 +8,7 @@ from agent_cordis_plugin import (
     LoopModel,
     MemoryTranscript,
     OneAtATime,
+    ToolBroker,
     TranscriptConfig,
     executor,
     loop,
@@ -25,11 +26,11 @@ async def test_transcript_binds_an_empty_history() -> None:
 
 
 async def test_loop_binds_a_model_over_what_it_was_given() -> None:
-    model, kernel, history = object(), object(), MemoryTranscript()
+    model, history = object(), MemoryTranscript()
     effects = await drive(
         loop(
             model=model,
-            kernel=kernel,
+            tools=ToolBroker(),
             transcript=history,
             system=object(),
             approval=object(),

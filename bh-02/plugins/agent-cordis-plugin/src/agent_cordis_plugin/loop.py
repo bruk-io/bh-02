@@ -1,11 +1,14 @@
-"""The loop: a turn is one model step plus the inputs it asked for, until it asks for none.
+"""The loop: a turn is one model step plus the calls it asked for, until it asks for none.
 
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
-kernel, transcript, system, approval, notes, executor). The model has one tool, the kernel's
-`python(code)`, offered through the provider's standard tool calling; every call runs as an
-input in the kernel. Each input is put to `approval` first and runs only on its yes (at once
-when the jail confines the kernel; otherwise the person's answer): one place for every model
-provider, and the loop knows whether a stopped call ever reached the kernel.
+tools, transcript, system, approval, notes, executor). The model is offered the tools rows
+register (`tools`, a broker), through the provider's standard tool calling, and each call runs
+through the tool its name has; CodeAct's `python` is one of them, the kernel row's. The list is
+read once, at the loop's first request, after the tools its config `requires` have registered,
+and offered as it was for the loop's life, so a model server's cache of the conversation's start
+stays good. Each call is put to `approval` first and runs only on its yes (at once when it runs
+in a jail that confines it; otherwise the person's answer): one place for every model provider,
+and the loop knows whether a stopped call ever reached its tool.
 
 Every request begins with the system prompt the conversation began with, kept in its transcript,
 so a model server's cache of the conversation stays good. When the prompt reads differently (an
@@ -15,10 +18,11 @@ what changed (`prompt.changes`) on the next message it reads. The date is not in
 the loop tells it with the person's message, the first of a conversation and the first of each
 new day (`(Today's date: ...)`), so the prompt reads the same from one day to the next.
 
-After each input it runs, the loop asks `notes`, the functions rows have added there, what to
-tell the model with that input's result (`noted`): each is given the input's code, its
-result and the project files it opened (`kernel.touched()`), and may add a note, never change
-the result. A path-scoped rule arrives that way when the model first works on a file it covers.
+After each call it runs, the loop asks `notes`, the functions rows have added there, what to
+tell the model with that call's result (`noted`): each is given the tool's name, the call's
+input, its result and the files it opened (what the tool answered with), and may add a note,
+never change the result. A path-scoped rule arrives that way when the model first works on a
+file it covers.
 The model reads the notes after the result; the `tool` entry also keeps them as a list
 (`notes`), so a row reading a resumed transcript for what it told finds each note whole, not
 somewhere in a text the result and the other notes share.
@@ -34,7 +38,17 @@ reply leaves at most one in flight, however often the loop reloads between them.
 
 import asyncio
 import datetime
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Iterator, Mapping, Sequence
+import json
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
@@ -51,12 +65,17 @@ __all__ = [
     "Model",
     "LoopModel",
     "Notes",
-    "Python",
     "System",
+    "Tool",
+    "Tools",
     "Transcript",
-    "refusal",
+    "Unstarted",
+    "called",
+    "malformed",
     "noted",
+    "refusal",
     "request_for",
+    "shown",
 ]
 
 type Json = Mapping[str, Any]
@@ -70,16 +89,28 @@ class Model(Protocol):
 
 
 @runtime_checkable
-class Python(Protocol):
-    """What the loop needs of the `kernel` value: the one tool's spec, what to tell the model
-    about it (`instructions()`, called on `executor` with the prompt), and an input run as the
-    model reads it."""
+class Tool(Protocol):
+    """What the loop needs of one registered tool (CONTRACTS.md: tools): its spec, the function
+    that runs a call, where a call runs, and how one is put to the person (None: the loop's way)."""
 
     @property
     def spec(self) -> Json: ...
-    def instructions(self) -> str: ...
-    async def run(self, code: str) -> str: ...
-    def touched(self) -> tuple[str, ...]: ...
+    @property
+    def run(self) -> Callable[[Json], Awaitable[Json]]: ...
+    @property
+    def runs(self) -> str: ...
+    @property
+    def show(self) -> Callable[[Json], Json] | None: ...
+
+
+@runtime_checkable
+class Tools(Protocol):
+    """What the loop needs of the `tools` value: the specs to offer (in name order), the tool a
+    call names, and a wait for the ones it requires."""
+
+    def specs(self) -> Sequence[Json]: ...
+    def get(self, name: str) -> Tool | None: ...
+    async def ready(self, names: Iterable[str], timeout: float) -> tuple[str, ...]: ...
 
 
 type Note = Callable[[Json], str]
@@ -87,17 +118,17 @@ type Note = Callable[[Json], str]
 
 @runtime_checkable
 class Notes(Protocol):
-    """What the loop needs of the `notes` value: the functions that may add a note to an
-    input's result, each called as `fn({"code", "result", "touched"}) -> str`, on `executor`:
-    one input's at a time, and never beside a reading of the prompt."""
+    """What the loop needs of the `notes` value: the functions that may add a note to a call's
+    result, each called as `fn({"name", "input", "result", "touched"}) -> str`, on `executor`:
+    one call's at a time, and never beside a reading of the prompt."""
 
     def __iter__(self) -> Iterator[Note]: ...
 
 
 @runtime_checkable
 class Approval(Protocol):
-    """What the loop needs of the `approval` value: whether an input may run (the person's
-    answer when the jail does not confine it)."""
+    """What the loop needs of the `approval` value: whether a call may run (the person's answer
+    when it runs anywhere but a jail that confines it)."""
 
     async def approve(self, request: Json) -> bool: ...
 
@@ -131,8 +162,8 @@ class Transcript(Protocol):
 _INTERRUPTED = "interrupted: the person stopped this call before it finished; it may have partly run"
 # A call the stop came before: at the person's approval, or queued behind the one stopped.
 _NOT_RUN = "not run: the person stopped the turn before this call started, so none of it ran"
-# What an input the person said no to answers the model with.
-DECLINED = "denied: the person said no to this input, so it did not run; ask them what they want instead"
+# What a call the person said no to answers the model with.
+DECLINED = "denied: the person said no to this call, so it did not run; ask them what they want instead"
 # What a turn that never finished ends with in the transcript, after what it said so far: the
 # person stopped it, or the model failed (a 429, a dropped connection).
 STOPPED = "[the person stopped this reply here]"
@@ -144,6 +175,26 @@ _SHOWN = 120  # how much of that line the person is shown
 # What the model is told of the date, before the person's message: the first of a conversation,
 # and the first of each new day.
 _DATED = "(Today's date: {}.)"
+# What the person is shown while the loop waits for the tools it requires, at its first request.
+_WAITING = "waiting for {} to start before the model is asked"
+
+
+class Unstarted(Exception):
+    """A tool the loop requires never registered: a recoverable `loop` failure (CONTRACTS.md:
+    loop), its `kind` `tools_missing`."""
+
+    def __init__(self, missing: Sequence[str], waited: float) -> None:
+        self.kind = "tools_missing"
+        self.message = (
+            f"{_listed(missing)} did not start within {waited:g} seconds, so the model was not asked: "
+            "/rows shows the row that offers it and why it is not up (`/restart ROW` tries it again), "
+            "and the next message waits for it again"
+        )
+        super().__init__(self.message)
+
+
+def _listed(names: Sequence[str]) -> str:
+    return ", ".join(f"`{name}`" for name in names)
 
 
 def _today() -> str:
@@ -176,8 +227,8 @@ def _answer(call: Json, content: str, notes: Sequence[str]) -> dict[str, Any]:
 
 
 def noted(functions: Iterable[Note], input: Json) -> list[str]:
-    """What the functions in `notes` say about one input (`code`, `result`, `touched`), sorted, so
-    the order rows added them in means nothing. A function that fails or returns something
+    """What the functions in `notes` say about one call (`name`, `input`, `result`, `touched`),
+    sorted, so the order rows added them in means nothing. A function that fails or returns something
     other than text says so in one line, and the rest still say theirs."""
     notes: list[str] = []
     for fn in functions:
@@ -189,7 +240,7 @@ def noted(functions: Iterable[Note], input: Json) -> list[str]:
             named = getattr(fn, "__qualname__", type(fn).__qualname__)
             said = (
                 f"(bh-02 could not make a note with {getattr(fn, '__module__', '?')}:{named}: {error}. "
-                "The input's result is whole; tell the person this function in `notes` failed.)"
+                "The call's result is whole; tell the person this function in `notes` failed.)"
             )
         if said.strip():
             notes.append(said.strip())
@@ -206,15 +257,86 @@ def request_for(messages: Sequence[Json]) -> list[Json]:
     return [*head, *(m for m in messages if m.get("role") != "system")]
 
 
-def refusal(call: Json, spec: Json) -> str | None:
-    """Why a call can't run as an input (a name other than the one tool's, or no `code` string),
-    as text the model reads instead of a result; None when it can run."""
-    name = str(spec["name"])
-    if call["name"] != name:
-        return f"error: there is no tool named {call['name']!r}; your one tool is {name}(code)"
-    if not isinstance(call["input"].get("code"), str):
-        return f"error: {name} takes `code`, the Python to run, as a string"
+def refusal(call: Json, offered: Sequence[str]) -> str | None:
+    """Why a call can't run (its name is none of the tools `offered`), as text the model reads
+    instead of a result; None when it can. A tool checks its own input."""
+    if call["name"] in offered:
+        return None
+    yours = f"your tools are {', '.join(offered)}" if offered else "you have no tools"
+    return f"error: there is no tool named {call['name']!r}; {yours}"
+
+
+# JSON Schema's simple types, as Python checks them (a bool is not a number here, as in JSON)
+_TYPES: Mapping[str, Callable[[object], bool]] = {
+    "string": lambda v: isinstance(v, str),
+    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "number": lambda v: isinstance(v, int | float) and not isinstance(v, bool),
+    "boolean": lambda v: isinstance(v, bool),
+    "array": lambda v: isinstance(v, list),
+    "object": lambda v: isinstance(v, Mapping),
+}
+_NAMED = {"string": "a string", "integer": "an integer", "number": "a number", "boolean": "a boolean"}
+_NAMED |= {"array": "an array", "object": "an object"}
+
+
+def _json_type(value: object) -> str:
+    """What JSON calls the type of `value`, with its article (`an integer`, `null`)."""
+    if value is None:
+        return "null"
+    return next((said for kind, said in _NAMED.items() if _TYPES[kind](value)), f"a {type(value).__name__}")
+
+
+def malformed(spec: Json, input: object) -> str | None:
+    """Why a call's input does not fit the tool's spec, as text the model reads instead of a
+    result (so a malformed call is never put to the person): not an object, a `required`
+    property missing, or a property not of the simple type its schema names. None when it fits;
+    the tool checks the rest."""
+    name = spec.get("name")
+    if not isinstance(input, Mapping):
+        return f"error: {name} takes an object of named arguments, not {_json_type(input)}"
+    schema = spec.get("parameters") or {}
+    properties = schema.get("properties") or {}
+    for key in schema.get("required") or ():
+        if key not in input:
+            return f"error: {name} needs `{key}`"
+    for key, value in input.items():
+        expected = (properties.get(key) or {}).get("type")
+        if isinstance(expected, str) and expected in _TYPES and not _TYPES[expected](value):
+            return f"error: {name} takes `{key}` as {_NAMED[expected]}, not {_json_type(value)}"
     return None
+
+
+def shown(tool: Tool, name: str, input: Json) -> dict[str, Any]:
+    """How a call is put to the person (`approval`): the tool's own `show(input)` (`title`,
+    `lines`, `language`), else the loop's way, the tool's name and its input as JSON. A `show`
+    that fails, or answers with something other than a mapping, leaves the loop's way."""
+    title = {"title": f"Call {name} with this input?"}
+    try:
+        own = tool.show(input) if tool.show is not None else None
+    except Exception:  # a tool's own way of showing a call failing must not cost the person the question
+        own = None
+    if isinstance(own, Mapping):
+        return title | dict(own)
+    lines = json.dumps(input, indent=2, ensure_ascii=False, default=str).splitlines()
+    return title | {"lines": lines, "language": "json"}
+
+
+async def called(tool: Tool, name: str, input: Json) -> tuple[str, tuple[str, ...]]:
+    """One call run through `tool`: what the model reads, and the files it opened. A tool that
+    fails, or answers with something other than `{"content": str, ...}`, answers with an error
+    the model reads, so one tool's fault is never the reply's."""
+    try:
+        ran = await tool.run(input)
+    except Exception as error:
+        return f"error: the {name} tool failed ({type(error).__name__}: {error}); tell the person", ()
+    content = ran.get("content") if isinstance(ran, Mapping) else None
+    if not isinstance(content, str):
+        return (
+            f"error: the {name} tool answered with something other than its result as text; tell the person",
+            (),
+        )
+    touched = ran.get("touched") or ()
+    return content, tuple(str(path) for path in touched) if isinstance(touched, list | tuple) else ()
 
 
 class LoopModel:
@@ -226,7 +348,15 @@ class LoopModel:
     in one reply, then shown as the reason the reply stopped. The
     provider's assistant message rides on its transcript entry as `provider`, for the
     model to replay as it was received. An `act` turn's calls run one at a time, each only on
-    `approval.approve({"name", "input"})`'s yes; a no is that call's answer, `DECLINED`.
+    `approval.approve({"name", "input", "runs", "title", "lines", ...})`'s yes (`shown`); a no
+    is that call's answer, `DECLINED`.
+
+    The tools are read at the loop's first request (`tools.specs()`, in name order), once the
+    ones `requires` names have registered (waiting up to `wait` seconds, and saying so; one that
+    never does fails the message, `Unstarted`), and offered as they were for the loop's life. A
+    call runs through the tool its name has now, waiting `wait` seconds for one that is
+    restarting (the kernel's, on `/restart kernel`); a name it was not offered answers with an
+    error (`refusal`).
 
     A reply the person stops (the reply closed, or its task cancelled) while a turn streams
     still leaves the transcript whole: what the turn said so far, then `STOPPED`, as the
@@ -234,10 +364,10 @@ class LoopModel:
     with `FAILED`. Otherwise the next request would carry that message unanswered, and the
     model would answer it too, doing the stopped work again before the next one.
 
-    The system prompt (`system.text()`, then the kernel's instructions) is read before each
-    message the model reads, on `executor`, but sent as the conversation began with it: a
-    `system` entry in the transcript, the first one, kept whole. A later reading that differs
-    from the last told is kept as another `system` entry, the edits from that one
+    The system prompt (`system.text()`, the sections rows add, the python tool's among them) is
+    read before each message the model reads, on `executor`, but sent as the conversation began
+    with it: a `system` entry in the transcript, the first one, kept whole. A later reading that
+    differs from the last told is kept as another `system` entry, the edits from that one
     (`prompt.edits`), and told on that message (`prompt.changes`), so the conversation's start
     never changes under a model server's cache and the transcript holds the prompt once, not
     once per change. The date is told on the person's message instead, when the transcript has
@@ -251,7 +381,7 @@ class LoopModel:
     def __init__(
         self,
         model: Model,
-        kernel: Python,
+        tools: Tools,
         transcript: Transcript,
         approval: Approval,
         max_nudges: int = 2,
@@ -259,24 +389,30 @@ class LoopModel:
         notes: Notes | None = None,
         today: Callable[[], str] = _today,
         executor: Executor | None = None,
+        *,
+        requires: Sequence[str] = (),
+        wait: float = 30.0,
     ) -> None:
         self._model = model
-        self._kernel = kernel
+        self._tools = tools
         self._transcript = transcript
         self._approval = approval
         self._max_nudges = max_nudges
         self._system = system
         self._notes = notes
         self._today = today
+        self._requires = tuple(requires)
+        self._wait = wait
         # what the model was last told (`prompt.latest`), and of how many `system` entries: the
         # transcript keeps a change as edits, so this saves applying them all for every message
         self._last: tuple[int, str | None] = (0, None)
         self._executor: Executor = executor if executor is not None else OneAtATime()
+        # the tools offered, read at the first request and kept for this loop's life
+        self._offered: tuple[Json, ...] | None = None
 
     def _prompt(self) -> str:
         """The system prompt as it reads now. Run on `executor` (`_told`)."""
-        parts = [self._system.text() if self._system else "", self._kernel.instructions()]
-        return "\n\n".join(part for part in parts if part.strip())
+        return self._system.text() if self._system else ""
 
     async def _told(self) -> str:
         """Bring what the transcript says the model was told up to date, before a message it is
@@ -302,29 +438,67 @@ class LoopModel:
         self._last = (len(kept) + 1, now)
         return changes(last, now) if last is not None else ""
 
+    async def _offer(self) -> None:
+        """Read the tools to offer, once: after every one `requires` names has registered, or
+        raise `Unstarted` naming those that did not within `wait` seconds."""
+        if self._offered is not None:
+            return
+        if missing := await self._tools.ready(self._requires, self._wait):
+            raise Unstarted(missing, self._wait)
+        self._offered = tuple(self._tools.specs())
+
+    async def _callable(self, call: Json, offered: Sequence[str]) -> Tool | str:
+        """The tool `call` names, as registered now, or why the call can't run (text the model
+        reads instead of a result): a name it was not offered (`refusal`), a tool that is not
+        registered now (its row restarting) and did not come back within `wait` seconds, or an
+        input that does not fit its spec (`malformed`)."""
+        if (refused := refusal(call, offered)) is not None:
+            return refused
+        name = str(call["name"])
+        if self._tools.get(name) is None:
+            await self._tools.ready((name,), self._wait)
+        tool = self._tools.get(name)
+        if tool is None:
+            return (
+                f"error: the {name} tool is not running now (its row did not come back within "
+                f"{self._wait:g} seconds), so this call did not run; tell the person"
+            )
+        return malformed(tool.spec, call["input"]) or tool
+
+    def _unanswered(self, message: str, dated: str | None, why: str) -> None:
+        """Keep the person's message, answered with `why`: the reply ended before the model was asked."""
+        self._transcript.append(_asked(message, dated, ""))
+        self._transcript.append({"role": "assistant", "content": why})
+
     async def reply(self, message: str) -> AsyncIterator[Json]:
         """Run turns until one is answered, yielding what happens (CONTRACTS.md: event)."""
         today = self._today()
         dated = today if _undated(self._transcript.messages, today) else None
+        if self._offered is None and (waiting := [n for n in self._requires if self._tools.get(n) is None]):
+            yield {"type": "note", "text": _WAITING.format(_listed(waiting))}
         try:
+            await self._offer()
             note = await self._told()
         except asyncio.CancelledError:
-            # stopped while the prompt was read: the message is kept all the same, answered as
-            # one stopped in its first model step is
-            self._transcript.append(_asked(message, dated, ""))
-            self._transcript.append({"role": "assistant", "content": STOPPED})
+            # stopped while the tools or the prompt were read: the message is kept all the same,
+            # answered as one stopped in its first model step is
+            self._unanswered(message, dated, STOPPED)
+            raise
+        except Unstarted:  # a tool it requires never came: as a model step that failed
+            self._unanswered(message, dated, FAILED)
             raise
         self._transcript.append(_asked(message, dated, note))
         if note:
             yield {"type": "note", "text": _TOLD}
+        offered = [str(spec["name"]) for spec in self._offered or ()]
         nudges = 0
         while True:
             turn = _Turn()
-            chunks = self._model.complete(request_for(self._transcript.messages), [self._kernel.spec])
+            chunks = self._model.complete(request_for(self._transcript.messages), list(self._offered or ()))
             try:
                 async for chunk in chunks:
-                    if (shown := turn.take(chunk)) is not None:
-                        yield shown
+                    if (seen := turn.take(chunk)) is not None:
+                        yield seen
             except BaseException as error:
                 # stopped or failed: the turn gets an answer, so the message it was answering is
                 # not asked again with the next one
@@ -339,22 +513,25 @@ class LoopModel:
             stop = classify(turn.finish, turn.text, turn.calls)
             self._transcript.append(turn.entry(stop))
             if stop == ACT:
-                answered, running = 0, False  # running: the unanswered call reached the kernel
+                answered, running = 0, False  # running: the unanswered call reached its tool
                 result: str | None = None  # the unanswered call's answer, once it has one
                 notes: list[str] = []  # and what `notes` said with it
                 try:
                     for call in turn.calls:
-                        result = refusal(call, self._kernel.spec)
-                        request = {"name": call["name"], "input": call["input"]}
-                        if result is None and not await self._approval.approve(request):
-                            result = DECLINED
+                        name, input = str(call["name"]), call["input"]
                         notes = []
-                        if result is None:
+                        tool = await self._callable(call, offered)
+                        if isinstance(tool, str):  # why it can't run
+                            result = tool
+                        elif not await self._approval.approve(
+                            {"name": name, "input": input, "runs": tool.runs, **shown(tool, name, input)}
+                        ):
+                            result = DECLINED
+                        else:
                             running = True
-                            code = call["input"]["code"]
-                            result = await self._kernel.run(code)
+                            result, touched = await called(tool, name, input)
                             running = False
-                            ran = {"code": code, "result": result, "touched": self._kernel.touched()}
+                            ran = {"name": name, "input": input, "result": result, "touched": touched}
                             # off the event loop too (an on-touch section reads rule files), over
                             # the functions `notes` holds now. A stop meanwhile waits for them: each
                             # has marked what it told as told, so the answer must carry it
@@ -383,8 +560,8 @@ class LoopModel:
                             yield {"type": "note", "text": _TOLD}
                 finally:
                     # Interrupted part-way: every call the transcript holds still gets an answer,
-                    # or the next request would carry a call no result follows. Only the one in
-                    # the kernel when the stop came may have partly run; one stopped after it had
+                    # or the next request would carry a call no result follows. Only the one with
+                    # its tool when the stop came may have partly run; one stopped after it had
                     # its answer (while its notes were made or the prompt read) gets that answer,
                     # with its notes.
                     for n, call in enumerate(turn.calls[answered:]):

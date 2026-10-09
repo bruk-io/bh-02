@@ -415,7 +415,7 @@ def test_an_unjailed_input_runs_on_a_yes_and_not_at_all_on_a_no(launch: Launch, 
     asked = app.wait_for("Run this python code (1 line)?", 10, after=answered)
     app.wait_for("y  allow     n / Esc  decline", 10, after=asked)
     app.answer(b"n")
-    app.wait_for("the input said: denied: the person said no to this input", 10, after=asked)
+    app.wait_for("the input said: denied: the person said no to this call", 10, after=asked)
     work = tmp_path / "work"
     assert (work / "y.txt").read_text() == "yes" and not (work / "n.txt").exists()
     app.press(b"\x11")

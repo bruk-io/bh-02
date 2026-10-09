@@ -45,8 +45,8 @@ disagree. `""` when nothing loads.
 
 ## What loads on demand
 
-`touched(paths)` (the files an input opened, `kernel.touched()`, standing in for Claude Code's
-Read, Write and Edit), broadest first: for each directory between such a file and the project's
+`touched(paths)` (the files a call opened, as its tool answered: the python tool's inputs',
+`kernel.touched()`, standing in for Claude Code's Read, Write and Edit), broadest first: for each directory between such a file and the project's
 root, its `CLAUDE.md` and `CLAUDE.local.md` (and its `AGENTS.md` as `instruction_files` says:
 by default where it has none of the three CLAUDE files and no CLAUDE.md is above the project),
 and the rules in its own `.claude/rules/` (one without `paths` for everything under it; one with

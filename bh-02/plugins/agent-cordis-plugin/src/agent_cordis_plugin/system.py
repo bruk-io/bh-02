@@ -1,8 +1,9 @@
 """The `system` value: the system prompt the loop sends, read fresh each time.
 
-Organised as Claude Code's is: who the model is and what bh-02 is first (bh-02's own), then
-where it is working (the directory and the git branch), then the sections rows add: the
-memory row's instructions (CLAUDE.md and the rest), how to extend bh-02, an extension's own.
+Organised as Claude Code's is: who the model is and what bh-02 is first (bh-02's own, naming no
+tool: the tools are the rows' that register them), then where it is working (the directory and
+the git branch), then the sections rows add: the memory row's instructions (CLAUDE.md and the
+rest), how to extend bh-02, an extension's own, what a tool's row tells of it (`python`).
 `describe` is the whole prompt as a function of what was found; `SystemPrompt.text` finds it
 every time it is asked. The date is not in it: the prompt would read differently every
 midnight, so the loop tells the date with the person's message instead.
@@ -35,8 +36,8 @@ _INTRO = (
 _HARNESS = (
     "bh-02 is a cordis composition: every part of it is a row, named in a layer file, that can be "
     "added, replaced or removed while it runs. You (the model row), the loop that sends you the "
-    "conversation and runs your code, your REPL and the jail it runs in, and the terminal "
-    "app are each one. The person reshapes it with slash commands (/rows, /model NAME, /clear), "
+    "conversation and runs your tool calls, each tool and where it runs, and the terminal app "
+    "are each one. The person reshapes it with slash commands (/rows, /model NAME, /clear), "
     "which never reach you, and with layer files of their own."
 )
 _HEAD_LIMIT = 4096  # a `.git/HEAD` names a branch or a commit: no more is read

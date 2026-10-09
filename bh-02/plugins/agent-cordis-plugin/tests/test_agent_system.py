@@ -31,6 +31,14 @@ def test_the_prompt_says_the_model_is_in_bh_02_and_names_no_other_harness() -> N
     assert "bh-02 is a cordis composition" in text  # what it is made of, and that it changes live
 
 
+def test_the_prompt_names_no_tool_the_rows_that_register_tools_tell_of_them() -> None:
+    """The tools are the rows' that register them (`tools`), so bh-02's own part of the prompt
+    names none: the python tool's row says what the model should know of it in a section."""
+    told = describe("/src/app", "main")
+    assert "python" not in told.lower() and "REPL" not in told and "your code" not in told
+    assert "runs your tool calls, each tool and where it runs" in told
+
+
 def test_sections_are_told_by_name_whatever_order_rows_added_them(tmp_path: Path) -> None:
     """A broker's entries must commute: a row that adds its section again (memory:auto on every
     /clear) keeps its place, so the prompt does not read as changed. Two of one name go by their

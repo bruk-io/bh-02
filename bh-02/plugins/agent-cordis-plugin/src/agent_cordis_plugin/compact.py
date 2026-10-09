@@ -3,7 +3,7 @@
 A long conversation makes every request longer: a local model processes more prompt before its
 first token, and any model nears its context window. `/compact` asks the model for a summary
 and begins a new conversation from it. The request is the loop's own (`request_for`: the prompt
-the conversation began with, then the conversation, the kernel's one tool offered as with every
+the conversation began with, then the conversation, the registered tools offered as with every
 step), so a model server reuses its work on the conversation, followed by bh-02 asking for the
 summary in plain text: whatever the model calls is never run, and a step that calls rather than
 answers gives no summary. The summary then seeds the transcript's file (`seeded`, written whole
@@ -125,11 +125,11 @@ class Unchanged(Exception):
 
 @runtime_checkable
 class Offered(Protocol):
-    """What /compact needs of the `kernel` value: the one tool's spec, offered with the summary
-    request as the loop offers it with every step, so the request reads as the loop's would."""
+    """What /compact needs of the `tools` value: the specs the loop offers (in name order),
+    offered with the summary request as with every step, so the request reads as the loop's
+    would."""
 
-    @property
-    def spec(self) -> Json: ...
+    def specs(self) -> Sequence[Json]: ...
 
 
 @runtime_checkable
@@ -337,7 +337,7 @@ async def compact_conversation(
     args: str,
     *,
     model: Model,
-    kernel: Offered,
+    tools: Offered,
     loader: Rows,
     output: Shown,
     config: CompactConfig,
@@ -367,7 +367,7 @@ async def compact_conversation(
         return nothing
     await output.show(_once({"type": "note", "text": _ASKING.format(timeout=config.timeout)}))
     try:
-        summary, usage = await summarise(model, asked(messages, args), [kernel.spec], config.timeout)
+        summary, usage = await summarise(model, asked(messages, args), list(tools.specs()), config.timeout)
     except Unchanged as why:
         return _unchanged(str(why), why.usage)
     if worker.done():  # the row restarted meanwhile: nothing would run the restart

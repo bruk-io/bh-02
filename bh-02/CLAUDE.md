@@ -47,25 +47,33 @@ by name and shape, in `CONTRACTS.md`:
   person's config and state directories are (`host_paths.config_home`, `state_home`) and every
   place reading a file goes through (`walked`, `passes`) decide whether the host trusts the
   models file, the person's startup file and a memory file outside the project; a copy per
-  plugin that drifted would be a hole. A key would not do: the kernel depends on its jail alone
-  and `system` on nothing, so reading one would add reloads, and the walk is code, not a value.
+  plugin that drifted would be a hole. A key would not do: the kernel depends on its jail and two
+  brokers that never reload, and `system` on nothing, so reading one would add reloads, and the
+  walk is code, not a value.
 - A plugin's tests use fakes from a package's own `testing` module (`chat_cordis_plugin.testing`, `bh_02.testing`), never another package's tests.
 
-**The model has one tool, and it carries code.** The kernel is the tool: `kernel:kernel` binds
-`kernel`, a persistent Python namespace whose `spec` is `python(code)`, and `agent:loop` offers
-that one spec through the provider's standard tool calling and runs every call as an input to it
-(`kernel.run`). To the model the kernel is a Python REPL of its own that persists: the namespace
-holds what its inputs put there, and nothing an input does reaches back into bh-02 but the
-extensions it writes (below); an input reads and writes files with `open`/`pathlib` and runs
+**The model is offered the tools rows register, and CodeAct's carries code.** `tools`
+(`agent:tools`) is a broker: a row registers a tool (a standard spec, an async function that
+runs a call and answers `{"content", "touched"}`, where a call runs, `runs`, and how one is put
+to the person, `show`), and `agent:loop` offers every registered spec, in name order, through
+the provider's standard tool calling, and runs each call through the tool its name has. The
+loop reads the list once, at its first request, after the tools its config `requires` have
+registered (the shipped layer: `["python"]`), and offers that list for its life, so a model
+server's cache of the conversation's start holds. The shipped tool is `python(code)`:
+`kernel:kernel` binds `kernel`, a persistent Python namespace, registers `python` (its call,
+`kernel.call`, runs the code as an input) and adds what the model is told about it as the
+`system` section `python`. To the model the kernel is a Python REPL of its own that persists:
+the namespace holds what its inputs put there, and nothing an input does reaches back into
+bh-02 but the extensions it writes (below); an input reads and writes files with `open`/`pathlib` and runs
 programs with `subprocess`, and the jail decides what it may touch.
 Replacing a binding reloads every dependent (cordis's rule, and why history lives in
 `transcript`, a row of its own).
 
 **The broker pattern is the paper's (section 6.2).** `commands` (slash commands, and line
 prefixes a layer's row claims: `!`), `frame`
-(the app's frame), `system` (its sections) and `notes` (what the model is told with an input's
-result) are brokers: one row binds the key, contributors depend on it and `acquire` a
-registration whose return value is its remover, so adding or retiring a command reloads
+(the app's frame), `system` (its sections), `tools` (the model's tools) and `notes` (what the
+model is told with a call's result) are brokers: one row binds the key, contributors depend on
+it and `acquire` a registration whose return value is its remover, so adding or retiring a command reloads
 nothing. Keep registrations commutative: each takes its own entry, never an ordered chain.
 
 ## The running harness
@@ -112,17 +120,17 @@ is read from its root through no link (`O_NOFOLLOW` on every part, then a regula
 name, read from what that opened), a link there only to another memory file
 (`memory_cordis_plugin.read`); a file of yours whose way passes through the project is not read;
 nothing named like a secret is; and a file in the project, which the model can write, imports
-nothing outside it (Claude Code asks; bh-02 says it did not). The loop follows it with `kernel.instructions()`: that `python` is the
-CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
+nothing outside it (Claude Code asks; bh-02 says it did not). The kernel row's section follows
+(`python`, `kernel.instructions()`): that `python` is the CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for this run of bh-02,
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
 plain Python, not IPython), and under a Linux jail what its code can read (`kernel.reads()`:
 the system, the interpreter, bh-02's own code, the project; no home directory). After each
-input, the loop asks `notes` (`agent:notes`, a broker) what to tell the model with its result: each function rows
-add there gets the input's code, its
-result and `kernel.touched()` (the project files Python in the input opened, heard by an audit
-hook in the worker; a shell command's own reads are not heard) and may add a note, never change
-the result. `memory:on_touch` gives memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
+call, the loop asks `notes` (`agent:notes`, a broker) what to tell the model with its result:
+each function rows add there gets the tool's name, the call's input, its result and the files
+it opened, as its tool answered (the python tool's: what Python in the input opened, heard by an
+audit hook in the worker, `kernel.touched()`; a shell command's own reads are not heard) and may
+add a note, never change the result. `memory:on_touch` gives memory's on-demand files, so a subdirectory's CLAUDE.md, or a rule whose
 `paths` match, arrives whole with the first input that opens a file it covers (Claude Code's
 on-demand loading; one that input's 20,000-character note cut short, or left out, arrives with
 the next that opens a file it covers; one the model opened itself is not told after); it has no
@@ -190,13 +198,15 @@ what only a real launch does.
 back; `worker-stdlib-only`) started by the `jail` row (`brig:jail`, or `kernel:unjailed`).
 Approval is one rule in one row, `kernel:approval` (key `approval`, a capability, not a broker):
 confined (the jail enforces writes and network), the model's code runs without asking;
-unconfined (`--no-jail`), it is put to the person through `output.confirm` (the approval modal,
-showing the code) and runs only on a yes. `agent:loop` asks it about every input and
-`extensions:extensions` about every load; neither keeps a copy of the rule, and the kernel's own
+unconfined (`--no-jail`), or a call to a tool that runs in bh-02's own process (`runs =
+"host"`), it is put to the person through `output.confirm` (the approval modal, showing the call
+as its tool shows it: python's code) and runs only on a yes. `agent:loop` asks it about every
+call and `extensions:extensions` about every load; neither keeps a copy of the rule, and the kernel's own
 `confined` (what the model is told) reads the same function, `kernel_cordis_plugin.is_confined`.
 It depends on `jail` and `output`, not `kernel`, so `/clear` leaves it up; only a layer replaces
-it (it runs in bh-02's process; an extension can't reach it). The kernel depends on its jail
-alone, so a new ui or model keeps the namespace. A new kernel runs its startup files first when
+it (it runs in bh-02's process; an extension can't reach it). The kernel depends on its jail and
+the two brokers it registers with (`tools`, `system`), which never reload, so a new ui or model
+keeps the namespace. A new kernel runs its startup files first when
 confined (`startup`): the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
 `~/.config/bh-02/kernel.py`), which the host reads and sends in, since a Linux jail has no home
 in it, then the project's `.bh-02/kernel.py`, which only the worker reads, in the jail (never
@@ -275,10 +285,10 @@ the subscription token (the second, which only Haiku answered):
 Claude Code is kept to carrying steps:
 - It runs no built-in tool, loads no settings, CLAUDE.md or claude.ai connector, and does not
   compact.
-- bh-02's one tool, `python`, is only *declared* to it, through an in-process MCP server, and
-  never runs there. A call parks until the loop's next request brings its result, paired by the
-  tool_use id Claude Code puts in the MCP request's `_meta`. Anything but `mcp__bh__python` is
-  denied without asking.
+- bh-02's tools (the shipped composition's: `python`) are only *declared* to it, through an
+  in-process MCP server, and never run there. A call parks until the loop's next request brings
+  its result, paired by the tool_use id Claude Code puts in the MCP request's `_meta`. Anything
+  but a declared tool (`mcp__bh__<name>`) is denied without asking.
 - A step that ends any way but asking for tools or answering is interrupted at once, so Claude
   Code's own recoveries (it continued a truncated step three times, measured) never run instead
   of the loop's nudges.

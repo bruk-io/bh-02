@@ -1,9 +1,10 @@
-"""The `notes` function of memory: what loads on demand for the files an input opened
-(`memory.touched`), told with that input's result. Claude Code's on-demand loading, where a
+"""The `notes` function of memory: what loads on demand for the files a call opened
+(`memory.touched`), told with that call's result. Claude Code's on-demand loading, where a
 path-scoped rule or a subdirectory's CLAUDE.md arrives when the model first works on a file it
-covers, with the files an input opened (`kernel.touched()`) standing in for Claude Code's Read,
-Write and Edit. A memory file the model opened itself is in the conversation already, so it is
-not told after that, as Claude Code does not load one its own tools read.
+covers, with the files a call opened (its tool's `touched`: the python tool's inputs, heard in
+its REPL) standing in for Claude Code's Read, Write and Edit. A memory file the model opened
+itself is in the conversation already, so it is not told after that, as Claude Code does not
+load one its own tools read.
 
 The memory files are the `memory` value's (`Memory.touched`), so the memory row's `root`, `home`,
 `instruction_files` and `excludes` reach the prompt and this alike. What this keeps is what it
@@ -134,12 +135,12 @@ def _cut(texts: Sequence[str]) -> tuple[str, int]:
 
 
 class OnTouch:
-    """A `notes` function over what `memory` loads on demand: given an input (`touched`, ...),
-    what loads for the files it opened that this conversation has not been told (a file whose
-    text changed since is told again, one the model opened itself never); '' for nothing. At most
-    `_MAX_CHARS` of it (`_cut`): a text told only in part, cut by that or left out, is not told
-    yet, so the next input that opens a file it covers tells it whole; one longer than that by
-    itself is told once, cut.
+    """A `notes` function over what `memory` loads on demand: given a call (`name`, `input`,
+    `result`, `touched`), what loads for the files it opened that this conversation has not been
+    told (a file whose text changed since is told again, one the model opened itself never); ''
+    for nothing. At most `_MAX_CHARS` of it (`_cut`): a text told only in part, cut by that or
+    left out, is not told yet, so the next call that opens a file it covers tells it whole; one
+    longer than that by itself is told once, cut.
 
     What the conversation was told before this began (a resumed session's, or this one's before
     the row reloaded) is in its `transcript`, the notes the loop kept on each `tool` entry: read

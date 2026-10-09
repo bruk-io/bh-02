@@ -25,6 +25,7 @@ from kernel_cordis_plugin import (
     instructions_for,
     kernel,
     release,
+    shown_call,
     worker_argv,
 )
 
@@ -474,7 +475,8 @@ def test_the_model_is_told_where_else_its_jail_lets_its_code_write() -> None:
 
 def test_the_model_is_told_its_tool_is_a_repl_of_its_own_that_persists_and_how_to_use_it() -> None:
     told = instructions_for(True)
-    assert told.startswith("Your one tool is `python`: a Python REPL of your own")
+    assert told.startswith("The `python` tool is a Python REPL of your own")
+    assert "your one tool" not in told.lower() and "no shell tool" not in told  # other rows may add tools
     assert "Your own Python REPL, which persists" in PYTHON["description"]
     # how long it lasts, and what empties it
     assert "persists for this run of bh-02" in told and "across a /model switch" in told
@@ -774,10 +776,21 @@ async def test_the_namespace_persists_and_the_last_expression_is_shown() -> None
         assert await k.run("print('hello')\nx + 22") == "hello\n42"
 
 
-async def test_the_kernel_is_the_one_tool_and_its_namespace_holds_only_what_inputs_put_there() -> None:
+async def test_a_call_runs_its_code_and_the_namespace_holds_only_what_inputs_put_there() -> None:
+    """The `python` tool's call (CONTRACTS.md: tools): `code` run as an input, answered with what
+    the model reads and the files it opened; one with no `code` string runs nothing."""
     async with Kernel(Unjailed(), KernelConfig()) as k:
-        assert k.spec == PYTHON and k.spec["name"] == "python"
+        assert PYTHON["name"] == "python" and PYTHON["parameters"]["required"] == ["code"]
         assert "Path(p).read_text()" in k.instructions() and "unjailed" in k.instructions()
+        assert await k.call({"code": "1 + 1"}) == {"content": "2", "touched": []}
+        assert await k.call({"source": "1"}) == {
+            "content": "error: python takes `code`, the Python to run, as a string"
+        }
+        assert shown_call({"code": "\nx = 1\ny = 2\n"}) == {
+            "title": "Run this python code?",
+            "lines": ["x = 1", "y = 2"],
+            "language": "python",
+        }
         names = await k.run("sorted(n for n in globals() if not n.startswith('__'))")
         assert names == "[]"  # no functions of the host's: an input is plain Python
 
@@ -940,20 +953,47 @@ async def test_a_worker_its_jail_ended_between_inputs_is_started_again_for_the_n
         assert again.endswith("False")
 
 
-async def test_the_row_starts_the_worker_and_leaving_stops_it() -> None:
-    @component
-    async def jail() -> Effects:
+class _Brokers:
+    """The `tools` and `system` values as the kernel row needs them: what it registered, by name."""
+
+    def __init__(self) -> None:
+        self.tools: dict[str, tuple[Mapping[str, Any], Any, dict[str, Any]]] = {}
+        self.sections: dict[str, Any] = {}
+
+    def register(self, spec: Mapping[str, Any], run: Any, **how: Any) -> Any:
+        self.tools[str(spec["name"])] = (spec, run, how)
+        return lambda: self.tools.pop(str(spec["name"]), None)
+
+    def add(self, name: str, section: Any) -> Any:
+        self.sections[name] = section
+        return lambda: self.sections.pop(name, None)
+
+
+async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it() -> None:
+    """The kernel row registers `python` with `tools` (its call, shown as its code, run in the
+    jail) and what the model is told about it as the `system` section `python`; both leave with
+    the row, and so does the worker."""
+    brokers = _Brokers()
+
+    @component(provides=("jail", "tools", "system"))
+    async def around() -> Effects:
         yield bind("jail", Unjailed())
+        yield bind("tools", brokers)
+        yield bind("system", brokers)
 
     rt = Runtime()
-    rt.mount(jail, id="jail")
+    rt.mount(around, id="around")
     row = rt.mount(kernel, id="kernel")
     await rt.settle()
     k = rt.root.get("kernel")
-    pid = int(await k.run("import os; os.getpid()"))
+    spec, run, how = brokers.tools["python"]
+    assert spec is PYTHON and run == k.call and how == {"show": shown_call}
+    assert brokers.sections["python"]() == k.instructions()
+    pid = int((await run({"code": "import os; os.getpid()"}))["content"])
     assert not k.confined and k.report() == UNENFORCED
     await row.retire()
     await rt.settle()
+    assert brokers.tools == {} and brokers.sections == {}
     await asyncio.sleep(0.1)
     try:
         os.kill(pid, 0)

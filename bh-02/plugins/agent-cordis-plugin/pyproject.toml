@@ -1,7 +1,7 @@
 [project]
 name = "agent-cordis-plugin"
 version = "0.1.0"
-description = "A loop that consumes a model and the kernel's one tool, python, and provides the loop; the transcript row; the memory broker."
+description = "A loop that consumes a model and the tools rows register, and provides the loop; the transcript, tools, system, notes and executor rows; /compact."
 requires-python = ">=3.15"
 dependencies = [
     "cordis",

@@ -1,5 +1,6 @@
-"""The rows: the kernel, bound under `kernel`; `/release` over it; whether the model's code may
-run, under `approval`; and a jail that confines nothing, under `jail`."""
+"""The rows: the kernel, bound under `kernel`, which registers the `python` tool with `tools` and
+what the model is told about it with `system`; `/release` over it; whether a call may run, under
+`approval`; and a jail that confines nothing, under `jail`."""
 
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
@@ -7,6 +8,7 @@ from typing import Any, Protocol, runtime_checkable
 from cordis import Effects, acquire, bind, component, enter
 from kernel_cordis_plugin.approval import Approval, Asks, Graded
 from kernel_cordis_plugin.client import Jail, Kernel, KernelConfig
+from kernel_cordis_plugin.python import PYTHON, shown_call
 from kernel_cordis_plugin.unjailed import Unjailed
 
 __all__ = ["approval", "kernel", "release", "unjailed"]
@@ -28,16 +30,44 @@ class _Registrar(Protocol):
     ) -> Callable[[], None]: ...
 
 
-@component(provides=("kernel",))
-async def kernel(*, jail: Jail, config: KernelConfig) -> Effects:
-    """Fills a `kernel` row: `use = "kernel:kernel"`. The kernel is also the model's one tool,
-    `python(code)`; the loop asks `approval` about each input before it runs.
+@runtime_checkable
+class _Tools(Protocol):
+    """What the kernel row needs of the `tools` value (CONTRACTS.md: tools): a tool registered,
+    and its remover back."""
 
-    Depends on the jail and nothing else, so swapping the model or the ui keeps the
-    namespace; swapping the jail starts a new process, which is the honest thing for a new jail
-    to mean."""
+    def register(
+        self,
+        spec: Mapping[str, Any],
+        run: Callable[[Mapping[str, Any]], Awaitable[Mapping[str, Any]]],
+        *,
+        runs: str = ...,
+        show: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = ...,
+    ) -> Callable[[], None]: ...
+
+
+@runtime_checkable
+class _Sections(Protocol):
+    """What the kernel row needs of the `system` value (CONTRACTS.md: system): a named section
+    added, and its remover back."""
+
+    def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]: ...
+
+
+@component(provides=("kernel",))
+async def kernel(*, jail: Jail, tools: _Tools, system: _Sections, config: KernelConfig) -> Effects:
+    """Fills a `kernel` row: `use = "kernel:kernel"`. The kernel registers the `python(code)`
+    tool with `tools` (each call runs in the jail; the loop asks `approval` about it first, shown
+    as its code), and adds what the model is told about it, its REPL and its jail, as the `system`
+    section `python`, read each time the prompt is.
+
+    Depends on the jail and the two brokers, which never reload, so swapping the model or the
+    ui keeps the namespace, and so does a reload of the loop; swapping the jail starts a new
+    process, which is the honest thing for a new jail to mean. A restart (`/clear`) registers
+    the same tool again, so the loop reloads with nothing."""
     started = yield enter(Kernel(jail, config))
     yield bind("kernel", started)
+    yield acquire(tools.register, PYTHON, started.call, show=shown_call)
+    yield acquire(system.add, "python", started.instructions)
 
 
 @component(provides=("approval",))
