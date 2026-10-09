@@ -107,7 +107,8 @@ def main(
         newest = sessions.listed(sessions.state_root(), str(Path.cwd()))[:1]
         newest_id = newest[0].id if newest else None
         how = sessions.resume_command(session.stack, None if session.id == newest_id else session.id)
-        click.echo(click.style(f"session {session.id}  ({how} to continue it)", dim=True), err=True)
+        with contextlib.suppress(OSError):  # the terminal has gone (its window closed): nobody to tell
+            click.echo(click.style(f"session {session.id}  ({how} to continue it)", dim=True), err=True)
     sys.exit(code)
 
 

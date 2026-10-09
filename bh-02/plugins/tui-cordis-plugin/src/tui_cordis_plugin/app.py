@@ -398,11 +398,15 @@ async def _until_ended(app: BhApp, headless: bool) -> None:
 
 def _terminal_gone(fd: int) -> bool:
     """Whether the terminal on `fd` has hung up: it reads as ready with nothing waiting in it,
-    which is a pty's end of file (a key waiting shows as bytes to read)."""
+    which is a pty's end of file (a key waiting shows as bytes to read). On Linux, asking how
+    much is waiting fails (EIO) once the terminal's other end has closed: that is hung up too."""
     ready, _, _ = select.select([fd], [], [], 0)
     if not ready:
         return False
-    waiting = struct.unpack("i", fcntl.ioctl(fd, termios.FIONREAD, b"\0\0\0\0"))[0]
+    try:
+        waiting = struct.unpack("i", fcntl.ioctl(fd, termios.FIONREAD, b"\0\0\0\0"))[0]
+    except OSError:
+        return True
     return bool(waiting == 0)
 
 
