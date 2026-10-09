@@ -3,14 +3,15 @@
 # requires-python = ">=3.14"
 # dependencies = ["click"]
 # ///
-"""The one definition of green: format, lint, types, tests, the architecture gates, and
-bh-02's theme against bh-01's tokens (when bh-01 is checked out beside this repository).
+"""The one definition of green: format, lint, types, tests, the architecture gates, the
+documentation site's strict build, and bh-02's theme against bh-01's tokens (when bh-01 is
+checked out beside this repository).
 
 `scripts/check` checks the whole workspace. `scripts/check bh-02/plugins/kernel-cordis-plugin`
-checks one member: ruff and pytest on that directory, mypy on its src/, and the gates (which
-always see the whole workspace, since what they check spans packages). Each step reports and
-the run goes on, so one pass shows everything that is red; the exit code is non-zero if any
-step failed.
+checks one member: ruff and pytest on that directory, mypy on its src/, and the gates and the
+docs (which always see the whole workspace: what the gates check spans packages, and the site
+includes every member's README). Each step reports and the run goes on, so one pass shows
+everything that is red; the exit code is non-zero if any step failed.
 """
 
 import subprocess
@@ -33,7 +34,8 @@ def step(name: str, *argv: str) -> bool:
 @click.command()
 @click.argument("member", required=False, type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--gates/--no-gates", default=True, help="Run the architecture gates (the whole workspace).")
-def main(member: Path | None, gates: bool) -> None:
+@click.option("--docs/--no-docs", default=True, help="Build the documentation site, failing on any warning.")
+def main(member: Path | None, gates: bool, docs: bool) -> None:
     """Check the workspace, or one MEMBER directory."""
     where = [str(member)] if member else ["."]
     types = [str(member / "src")] if member and (member / "src").is_dir() else []
@@ -45,6 +47,8 @@ def main(member: Path | None, gates: bool) -> None:
     ]
     if gates:
         results.append(step("gates", str(ROOT / "scripts" / "arch-check"), "--no-fix"))
+    if docs:
+        results.append(step("docs", "uv", "run", "--quiet", "mkdocs", "build", "--strict"))
     results.append(tokens())
     sys.exit(0 if all(results) else 1)
 

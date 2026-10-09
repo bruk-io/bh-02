@@ -1,7 +1,7 @@
 """The loop: a turn is one model step plus the inputs it asked for, until it asks for none.
 
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
-kernel, transcript, system, approval, memory, executor). The model has one tool, the kernel's
+kernel, transcript, system, approval, notes, executor). The model has one tool, the kernel's
 `python(code)`, offered through the provider's standard tool calling; every call runs as an
 input in the kernel. Each input is put to `approval` first and runs only on its yes (at once
 when the jail confines the kernel; otherwise the person's answer): one place for every model
@@ -15,13 +15,13 @@ what changed (`prompt.changes`) on the next message it reads. The date is not in
 the loop tells it with the person's message, the first of a conversation and the first of each
 new day (`(Today's date: ...)`), so the prompt reads the same from one day to the next.
 
-After each input it runs, the loop asks `memory`, the functions rows have added there, what to
-tell the model with that input's result (`remembered`): each is given the input's code, its
+After each input it runs, the loop asks `notes`, the functions rows have added there, what to
+tell the model with that input's result (`noted`): each is given the input's code, its
 result and the project files it opened (`kernel.touched()`), and may add a note, never change
 the result. A path-scoped rule arrives that way when the model first works on a file it covers.
 
 Reading the prompt (every section function, which may read many files and search the project)
-and asking `memory` (which may read rule files) both run on `executor` (`executor.OneAtATime`),
+and asking `notes` (which may read rule files) both run on `executor` (`executor.OneAtATime`),
 never on the event loop, which the TUI shares: a slow section freezes nothing. One runs at a
 time, a reading a stopped reply left running included: the next waits for it rather than
 starting beside it. `executor` is a row of its own that depends on nothing, so a loop reloaded
@@ -47,12 +47,12 @@ __all__ = [
     "Executor",
     "Model",
     "LoopModel",
-    "Memory",
+    "Notes",
     "Python",
     "System",
     "Transcript",
     "refusal",
-    "remembered",
+    "noted",
     "request_for",
 ]
 
@@ -79,16 +79,16 @@ class Python(Protocol):
     def touched(self) -> tuple[str, ...]: ...
 
 
-type Remember = Callable[[Json], str]
+type Note = Callable[[Json], str]
 
 
 @runtime_checkable
-class Memory(Protocol):
-    """What the loop needs of the `memory` value: the functions that may add a note to an
+class Notes(Protocol):
+    """What the loop needs of the `notes` value: the functions that may add a note to an
     input's result, each called as `fn({"code", "result", "touched"}) -> str`, on `executor`:
     one input's at a time, and never beside a reading of the prompt."""
 
-    def __iter__(self) -> Iterator[Remember]: ...
+    def __iter__(self) -> Iterator[Note]: ...
 
 
 @runtime_checkable
@@ -136,7 +136,7 @@ STOPPED = "[the person stopped this reply here]"
 FAILED = "[this reply failed here; the person saw the error]"
 # What the person is shown when the model is told its instructions changed.
 _TOLD = "told the model its instructions changed since the conversation began"
-_REMEMBERED = "told the model with this result: "  # then a memory note's first line
+_NOTED = "told the model with this result: "  # then the first line of a note
 _SHOWN = 120  # how much of that line the person is shown
 # What the model is told of the date, before the person's message: the first of a conversation,
 # and the first of each new day.
@@ -164,12 +164,12 @@ def _asked(message: str, today: str | None, note: str) -> dict[str, Any]:
     return {"role": "user", "content": "\n\n".join(told)} | ({"today": today} if today else {})
 
 
-def remembered(memory: Iterable[Remember], input: Json) -> list[str]:
-    """What `memory`'s functions say about one input (`code`, `result`, `touched`), sorted, so
+def noted(functions: Iterable[Note], input: Json) -> list[str]:
+    """What the functions in `notes` say about one input (`code`, `result`, `touched`), sorted, so
     the order rows added them in means nothing. A function that fails or returns something
     other than text says so in one line, and the rest still say theirs."""
     notes: list[str] = []
-    for fn in memory:
+    for fn in functions:
         try:
             said = fn(input)
             if not isinstance(said, str):
@@ -178,7 +178,7 @@ def remembered(memory: Iterable[Remember], input: Json) -> list[str]:
             named = getattr(fn, "__qualname__", type(fn).__qualname__)
             said = (
                 f"(bh-02 could not make a note with {getattr(fn, '__module__', '?')}:{named}: {error}. "
-                "The input's result is whole; tell the person this function in `memory` failed.)"
+                "The input's result is whole; tell the person this function in `notes` failed.)"
             )
         if said.strip():
             notes.append(said.strip())
@@ -233,7 +233,7 @@ class LoopModel:
     told none yet or another day's (`today`, the clock; a test gives its own): first on that
     message, then any change to the instructions, then the message.
 
-    The prompt is read, and `memory` asked, on `executor` (the `executor` row's, which a reloaded
+    The prompt is read, and `notes` asked, on `executor` (the `executor` row's, which a reloaded
     loop shares with the last one); a loop built without one (a test, direct use) makes its own.
     """
 
@@ -245,7 +245,7 @@ class LoopModel:
         approval: Approval,
         max_nudges: int = 2,
         system: System | None = None,
-        memory: Memory | None = None,
+        notes: Notes | None = None,
         today: Callable[[], str] = _today,
         executor: Executor | None = None,
     ) -> None:
@@ -255,7 +255,7 @@ class LoopModel:
         self._approval = approval
         self._max_nudges = max_nudges
         self._system = system
-        self._memory = memory
+        self._notes = notes
         self._today = today
         # what the model was last told (`prompt.latest`), and of how many `system` entries: the
         # transcript keeps a change as edits, so this saves applying them all for every message
@@ -330,7 +330,7 @@ class LoopModel:
             if stop == ACT:
                 answered, running = 0, False  # running: the unanswered call reached the kernel
                 result: str | None = None  # the unanswered call's answer, once it has one
-                notes: list[str] = []  # and what `memory` said with it
+                notes: list[str] = []  # and what `notes` said with it
                 try:
                     for call in turn.calls:
                         result = refusal(call, self._kernel.spec)
@@ -345,10 +345,10 @@ class LoopModel:
                             running = False
                             ran = {"code": code, "result": result, "touched": self._kernel.touched()}
                             # off the event loop too (an on-touch section reads rule files), over
-                            # the functions `memory` holds now. A stop meanwhile waits for them: each
+                            # the functions `notes` holds now. A stop meanwhile waits for them: each
                             # has marked what it told as told, so the answer must carry it
                             asked = asyncio.ensure_future(
-                                self._executor.run(partial(remembered, tuple(self._memory or ()), ran))
+                                self._executor.run(partial(noted, tuple(self._notes or ()), ran))
                             )
                             try:
                                 notes = await asyncio.shield(asked)
@@ -367,7 +367,7 @@ class LoopModel:
                         }
                         for said in notes:
                             first = said.splitlines()[0]
-                            yield {"type": "note", "text": _REMEMBERED + first[:_SHOWN]}
+                            yield {"type": "note", "text": _NOTED + first[:_SHOWN]}
                         if note:
                             yield {"type": "note", "text": _TOLD}
                 finally:

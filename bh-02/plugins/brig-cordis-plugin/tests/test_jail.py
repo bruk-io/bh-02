@@ -63,6 +63,37 @@ class Layers:
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
+    memory: str = ""
+
+
+def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> None:
+    """Outside the project, so the model can keep notes across sessions that are never
+    committed; no self-modification deny is made there, since only the memory row reads it."""
+    spec = spec_for(
+        root="/w/app",
+        endpoint="/tmp/k/k.sock",
+        scratch="/tmp/j/tmp",
+        home="/Users/me",
+        config=BrigConfig(),
+        layers=(),
+        host=(),
+        memory="/Users/me/.local/state/bh-02/projects/-w-app/memory",
+    )
+    assert spec.fs.write_allows == (
+        "/Users/me/.local/state/bh-02/projects/-w-app/memory",
+        "/tmp/j/tmp",
+        "/w/app",
+    )
+    assert not any(d.startswith("/Users/me/.local/state") for d in spec.fs.write_denies)
+    assert spec_for(
+        root="/w/app",
+        endpoint="/tmp/k/k.sock",
+        scratch="/tmp/j/tmp",
+        home="/h",
+        config=BrigConfig(),
+        layers=(),
+        host=(),
+    ).fs.write_allows == ("/tmp/j/tmp", "/w/app")
 
 
 def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
@@ -716,7 +747,7 @@ from pathlib import Path
 from brig_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
-    paths, credentials, secrets, trusted = (), (), (), ()
+    paths, credentials, secrets, trusted, memory = (), (), (), (), ""
 
 async def main():
     sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
@@ -743,7 +774,7 @@ from brig_cordis_plugin import BrigConfig, BrigJail
 from kernel_cordis_plugin import Kernel, KernelConfig
 
 class Layers:
-    paths, credentials, secrets, trusted = (), (), (), ()
+    paths, credentials, secrets, trusted, memory = (), (), (), (), ""
 
 LOOP = (
     "import os, sys, time\\n"
@@ -909,7 +940,7 @@ from brig.run import SubprocessLauncher
 from brig_cordis_plugin import BrigConfig, BrigJail
 
 class Layers:
-    paths, credentials, secrets, trusted = (), (), (), ()
+    paths, credentials, secrets, trusted, memory = (), (), (), (), ""
 
 def crash(self, *args, **kwargs):
     os._exit(9)
@@ -944,6 +975,54 @@ async def test_a_placeholder_is_made_and_marked_before_bubblewrap_starts(
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
     await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
     assert list(project.iterdir()) == [] and not record.exists()
+
+
+# Listens; once the jail has seen it listen, writes "note" to argv[2] and to argv[3] (as an input
+# keeping auto memory would, and one reaching for another project's), says so in argv[4], waits.
+_LISTEN_THEN_NOTE = """
+import socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+for path in sys.argv[2:4]:
+    try:
+        open(path, "w").write("note")
+    except OSError:
+        pass
+open(sys.argv[4], "w").write("done")
+time.sleep(60)
+"""
+
+
+async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_nothing_beside_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The project's auto memory directory (`layers.memory`) is a root an input may write, in the
+    real jail: the model keeps its notes there with plain Python. Another project's, beside it,
+    is not even there to read; and the model is told it may write the directory (`writes()`)."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "records"))
+    project, projects = tmp_path / "project", tmp_path / "state" / "bh-02" / "projects"
+    memory, beside = projects / "-project" / "memory", projects / "-other" / "memory"
+    for directory in (project, memory, beside):
+        directory.mkdir(parents=True)
+    one = BrigJail(BrigConfig(), Layers(memory=str(memory)))
+    endpoint = _endpoint()
+    notes = (str(memory / "MEMORY.md"), str(beside / "MEMORY.md"))
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_NOTE, endpoint, *notes, str(project / "done")]
+    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+    try:
+        for _ in range(200):
+            if (project / "done").exists():
+                break
+            await asyncio.sleep(0.05)
+        assert (project / "done").exists()
+        assert (memory / "MEMORY.md").read_text() == "note"
+        assert not (beside / "MEMORY.md").exists()
+        assert str(memory.resolve()) in started.writes() and str(memory.resolve()) in started.reads()
+    finally:
+        await started.stop()
 
 
 async def test_a_jail_that_fails_to_launch_leaves_nothing_on_the_host(

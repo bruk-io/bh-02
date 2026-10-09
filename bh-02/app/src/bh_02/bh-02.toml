@@ -30,8 +30,8 @@ use = "models:catalog"
 id = "transcript"
 use = "agent:transcript"
 
-# Where the loop reads the prompt (a section function may read many files and search the
-# project) and asks `memory`: off the event loop the app shares, one call at a time. Nothing
+# Where the loop reads the prompt (a section function may read many files) and asks `notes`:
+# off the event loop the app shares, one call at a time. Nothing
 # stops a reading part-way, so one a stopped reply left running is waited for before the next
 # begins. A row of its own that depends on nothing, so /clear and /model, which reload the loop,
 # keep it: Ctrl-C after Ctrl-C leaves one reading running, however often the loop reloads.
@@ -41,24 +41,36 @@ use = "agent:executor"
 
 # What the model is told with an input's result: a broker of functions rows add, each given the
 # input's code, its result and the project files it opened (`kernel.touched()`), the loop
-# calling each after every input. The shell hints (an input that ran `cat` or `sed` is told how
-# Python does that here) and the context files' on-touch sections (a subdirectory's AGENTS.md or
-# CLAUDE.md, a rule for some files, given when an input first opens a file they cover) add to
-# it, each depending on `transcript`, so a new conversation (/clear) is told afresh and a resumed
-# one is not told again what its transcript holds. The on-touch row asks `system` what the
-# context files say, so it has no config: set `root`, `home` or `files` on the `system` row and
-# they hold for both.
+# calling each after every input. Memory's on-demand files (a subdirectory's CLAUDE.md, a rule
+# for some files, given when an input first opens a file they cover) add to it, depending on
+# `transcript`, so a new conversation (/clear) is told afresh and a resumed one is not told
+# again what its transcript holds.
+[[plugin]]
+id = "notes"
+use = "agent:notes"
+
+# Memory, as Claude Code has it: the managed policy's CLAUDE.md, yours (~/.claude/CLAUDE.md and
+# ~/.claude/rules/), the CLAUDE.md files from the filesystem's root down to the project's (and
+# AGENTS.md where there is none), the files they import and the project's rules, a section of the
+# system prompt; `/memory` lists them. The on-touch row asks it what loads for the files an input
+# opened, so it has no config: set `root`, `home`, `instruction_files` or `excludes` on the
+# `memory` row and they hold for both.
 [[plugin]]
 id = "memory"
-use = "agent:memory"
-
-[[plugin]]
-id = "shell-hints"
-use = "kernel:shell_hints"
+use = "memory:memory"
 
 [[plugin]]
 id = "on-touch"
-use = "context:on_touch"
+use = "memory:on_touch"
+
+# Auto memory: the notes the model keeps for itself across conversations, in the project's own
+# directory outside the repository ($XDG_STATE_HOME/bh-02/projects/<project>/memory, which the
+# jail lets an input write), and the MEMORY.md index, read at the start of each conversation. A
+# row of its own over `transcript`, so a new conversation reads the index afresh; set
+# `disabled = true` on it to turn auto memory off.
+[[plugin]]
+id = "memory-auto"
+use = "memory:auto"
 
 # The app: binds `input`, `output` and `frame` (where rows push status). It depends on its
 # config alone, so no reload elsewhere restarts it.
@@ -109,9 +121,12 @@ use = "kernel:release"
 id = "status"
 use = "tui:status"
 
+# The system prompt: who the model is, where it is working (the directory and the git branch),
+# then the sections rows add (memory's, how to extend bh-02). A broker, depending on its config
+# alone.
 [[plugin]]
 id = "system"
-use = "context:project"
+use = "agent:system"
 
 # Slash commands: a broker rows register commands into (and a layer's rows claim line prefixes
 # in), and the operator's own (/rows, /explain, /restart, /clear, /model), which act through the

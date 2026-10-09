@@ -1,14 +1,14 @@
 """The `executor` value: where the loop runs what may block, off the event loop, one call at a time.
 
 `agent:loop` reads the prompt (every section function, which may read many files and search the
-project) and asks `memory` (whose functions may read rule files) here, never on the event loop,
+project) and asks `notes` (whose functions may read rule files) here, never on the event loop,
 which the TUI shares: a slow section freezes nothing. Nothing stops such a call part-way, so a
 reply stopped meanwhile leaves it running to its end, unused; the next call waits for it rather
 than starting beside it, so however often a reply is stopped, one runs at a time.
 
 The value is a row of its own (`agent:executor`) that depends on nothing, so a loop that reloads
 (`/clear`, `/model`) keeps it, and with it the call in flight: the `system` value's caches, and
-what a `memory` function keeps, outlive the loop too and take no lock. Only a new `executor`
+what a `notes` function keeps, outlive the loop too and take no lock. Only a new `executor`
 (its row restarted, or replaced by a layer) starts a call beside one the last one left running.
 
 Each call runs in a daemon thread of its own, not the default executor (`asyncio.to_thread`'s),

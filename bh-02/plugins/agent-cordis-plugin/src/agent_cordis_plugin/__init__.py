@@ -1,9 +1,9 @@
 """A harness-owned agent loop: a `model` plus the kernel's one tool, `python`, provided as a `loop`.
 
-Also the transcript row, so the history outlives the loop; `memory`, what the model is told with
-an input's result; `executor`, where the loop reads the prompt and asks `memory`, one call at a
-time across the loop's reloads; and `/compact`, which begins a new conversation from the model's
-summary of it."""
+Also the transcript row, so the history outlives the loop; `system`, the system prompt rows add
+sections to; `notes`, what the model is told with an input's result; `executor`, where the loop
+reads the prompt and asks `notes`, one call at a time across the loop's reloads; and `/compact`,
+which begins a new conversation from the model's summary of it."""
 
 from agent_cordis_plugin.compact import (
     CompactConfig,
@@ -23,16 +23,17 @@ from agent_cordis_plugin.loop import (
     Approval,
     Executor,
     LoopModel,
-    Memory,
     Model,
+    Notes,
     Python,
     System,
     Transcript,
+    noted,
     refusal,
-    remembered,
 )
 from agent_cordis_plugin.prompt import changes, edits, latest
 from agent_cordis_plugin.stops import classify
+from agent_cordis_plugin.system import SystemConfig, SystemPrompt, branch_of, describe
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript, rewrite
 from agent_cordis_plugin.wiring import (
     LoopConfig,
@@ -40,7 +41,8 @@ from agent_cordis_plugin.wiring import (
     compact,
     executor,
     loop,
-    memory,
+    notes,
+    system,
     transcript,
 )
 
@@ -55,30 +57,35 @@ __all__ = [
     "FileTranscript",
     "LoopConfig",
     "LoopModel",
-    "Memory",
+    "Notes",
     "MemoryTranscript",
     "OneAtATime",
     "Python",
     "System",
+    "SystemConfig",
+    "SystemPrompt",
     "Transcript",
     "TranscriptConfig",
     "Unchanged",
     "asked",
+    "branch_of",
     "changes",
     "classify",
     "compact",
     "compact_conversation",
+    "describe",
     "edits",
     "executor",
     "kept_in",
     "latest",
     "loop",
-    "memory",
+    "notes",
     "refusal",
-    "remembered",
+    "noted",
     "rewrite",
     "seeded",
     "summarise",
+    "system",
     "transcript",
     "unrestarted",
 ]

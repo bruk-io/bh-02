@@ -33,12 +33,27 @@ _BUILT_IN = frozenset({"sonnet", "opus", "haiku"})  # models:model's own names f
 _KEPT = ("state", "env_file", "cwd")  # what the claude-code row took that the model row still does
 # Ollama's defaults, as its row had them.
 _OLLAMA_HOST, _OLLAMA_MODEL = "http://localhost:11434", "llama3.2"
-# bh-02's fake models that bound `completion`, now bound under `model`.
+# bh-02's fake models that bound `completion`, now bound under `model`; and the project context's
+# rows, now the system prompt's (agent's) and memory's.
 _RENAMED_USES = {
     "bh_02.testing:echo_completion": "bh_02.testing:echo_model",
     "bh_02.testing:slow_completion": "bh_02.testing:slow_model",
     "bh_02.testing:cells_completion": "bh_02.testing:repl_model",
+    "context:project": "agent:system",
+    "context:on_touch": "memory:on_touch",
 }
+# The broker of what an input's result is told was `memory` (`agent:memory`); it is `notes` now,
+# and `memory` is Claude Code's memory, the memory plugin's row.
+_OLD_NOTES_USE, _NOTES, _NOTES_USE = "agent:memory", "notes", "agent:notes"
+# The project context's row (`system`) read the context files; the system prompt takes only its
+# `root`, and memory (CLAUDE.md, where Claude Code reads it) takes its `root` and `home`. Context
+# files are gone: memory reads Claude Code's files, from Claude Code's places.
+_SYSTEM, _MEMORY_ROW = "system", "memory"
+_OLD_SYSTEM_USES = (None, "context:project")
+_TO_MEMORY = ("root", "home")
+_CONTEXT_GONE = (
+    "context files are gone: memory reads CLAUDE.md, AGENTS.md and .claude/rules/ as Claude Code does"
+)
 # The one status row, which the three status-bar rows became (the session's id: from `sessions`).
 _STATUS = "status"
 _STATUS_USE = "tui:status"
@@ -65,6 +80,11 @@ _REMOVED_USES = ("tools:", "fs:", "codeact:", "tui:approver", "bh_02.bootstrap:l
 # only a change to the shipped row (no `use`) or a row using `tui:sessions` is dropped.
 _NO_SIDEBAR = "bh-02 has no sidebar now (`bh-02 sessions` lists this directory's sessions)"
 _SIDEBAR, _SIDEBAR_USE = "sidebar", "tui:sessions"
+# The shell hints: the shipped `shell-hints` row, filled by `kernel:shell_hints`, which told an
+# input that ran `cat` or `sed` through a shell how Python does it. As with the sidebar, a row of
+# that id naming a plugin of the person's own still runs.
+_NO_SHELL_HINTS = "bh-02 no longer tells the model how Python does what an input ran through a shell"
+_SHELL_HINTS, _SHELL_HINTS_USE = "shell-hints", "kernel:shell_hints"
 
 
 def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
@@ -86,7 +106,14 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       layer keeps its own `disabled`). A status row with nothing left to say is not written.
     - A row bh-02 no longer has is dropped: the tool rows before the one tool, a session's
       `session` row, the sidebar (a change to the shipped `sidebar` row, or any row using
-      `tui:sessions`), and a fixed field (`tui:status` with a `field` or `text`, whatever its id).
+      `tui:sessions`), the shell hints (a change to the shipped `shell-hints` row, or any row
+      using `kernel:shell_hints`), and a fixed field (`tui:status` with a `field` or `text`,
+      whatever its id).
+    - The project context's rows are the system prompt's and memory's (`context:project` is
+      `agent:system`, `context:on_touch` is `memory:on_touch`), and a `system` row's config of
+      more than `root` is split (`_split_system`): its `root` and `home` go to a `memory` row
+      too, its `files` and `max_chars` are gone. The broker `agent:memory` is `agent:notes`,
+      under the id `notes`.
     - The model row's providers are `models:model`'s now (`_model_row`): `claude-code:completion`
       (or a model row naming no plugin, which was it) names its model as `default`, an id that
       is no built-in name as an `extra` model of its own; `ollama:completion` is an `extra`
@@ -100,7 +127,19 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
     merged: list[Row] = []
     at = None  # where the status row goes: where the first of its parts was
     taken = {row.id for row in rows}
+    memory_taken = any(row.id == _MEMORY_ROW and row.use != _OLD_NOTES_USE for row in rows)
     for row in rows:
+        if row.use == _OLD_NOTES_USE:
+            changes.append(
+                f"row {row.id!r} (agent:memory) is now {_NOTES!r}, using agent:notes; "
+                f'make it id = "{_NOTES}" and use = "{_NOTES_USE}"'
+            )
+            row = Row(_NOTES if row.id == _MEMORY_ROW else row.id, _NOTES_USE, row.config, row.disabled)
+        if row.id == _SYSTEM and row.use in _OLD_SYSTEM_USES and set(row.config or {}) - {"root"}:
+            system, memory, said = _split_system(row, memory_taken)
+            changes += said
+            out += [system, *memory]
+            continue
         if (why := _removed(row)) is not None:
             changes.append(f"row {row.id!r} was removed: {why}; delete it")
             continue
@@ -149,6 +188,34 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
                 kept.append(part)
             out[at:at] = kept
     return out, changes
+
+
+def _split_system(row: Row, memory_taken: bool) -> tuple[Row, list[Row], list[str]]:
+    """The project context's `system` row as two: the system prompt's, with its `root`, and the
+    memory row's, with its `root` and `home` (unless the layer has a memory row already, which the
+    change says to set by hand); and what changed. Its `files` and `max_chars` are gone."""
+    config = dict(row.config or {})
+    use = "agent:system" if row.use is not None else None
+    system = Row(row.id, use, {"root": config["root"]} if "root" in config else None, row.disabled)
+    moved = {key: config[key] for key in _TO_MEMORY if key in config}
+    gone = sorted(set(config) - {"root", *_TO_MEMORY})
+    changes = [
+        f"row {row.id!r} is the system prompt now, which takes only `root`; "
+        f"make it {_inline(system.config or {})}"
+    ]
+    memory: list[Row] = []
+    if moved and memory_taken:
+        changes.append(
+            f"row {row.id!r}: set {_inline(moved)} on the {_MEMORY_ROW!r} row by hand: memory reads them now"
+        )
+    elif moved:
+        memory.append(Row(_MEMORY_ROW, None, moved))
+        changes.append(f"add a {_MEMORY_ROW!r} row with config {_inline(moved)}: memory reads them now")
+    if gone:
+        changes.append(
+            f"row {row.id!r}: {', '.join(gone)} {'is' if len(gone) == 1 else 'are'} gone ({_CONTEXT_GONE})"
+        )
+    return system, memory, changes
 
 
 def _model_row(row: Row) -> tuple[Row, str] | None:
@@ -215,6 +282,10 @@ def _removed(row: Row) -> str | None:
         return f"{row.use} is gone: {_NO_SIDEBAR}"
     if row.id == _SIDEBAR and row.use is None:
         return _NO_SIDEBAR
+    if row.use == _SHELL_HINTS_USE:
+        return f"{row.use} is gone: {_NO_SHELL_HINTS}"
+    if row.id == _SHELL_HINTS and row.use is None:
+        return _NO_SHELL_HINTS
     if row.use == _STATUS_USE and {"field", "text"} & set(row.config or {}):
         return "tui:status is now the status bar's one row (session, model, jail), not a fixed field"
     return None

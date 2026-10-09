@@ -1,0 +1,118 @@
+{#-
+  The page: a bh-01 app frame built from bh-01's own components (docs/theme/vendor/bh-01).
+  <bh-app-shell> lays it out: an activity bar of the top-level sections, a sidebar panel
+  holding each section's pages as a <bh-tree> (one shown at a time), the page in a <main>
+  landmark, and a status bar with the build's branch and commit, Search and the theme toggle.
+  The command palette searches MkDocs' own search index. assets/bh-docs.js wires it up.
+-#}
+{%- set icons = {"Home": "home", "bh-02": "terminal", "cordis": "blocks", "brig": "lock", "warden": "pulse", "Contributing": "pencil"} -%}
+{%- macro view_id(item) -%}{{ item.title | lower | replace(" ", "-") }}{%- endmacro -%}
+{%- macro section_of(item) -%}{%- if item.parent -%}{{ section_of(item.parent) }}{%- else -%}{{ item.title }}{%- endif -%}{%- endmacro -%}
+{%- macro tree_items(items, depth, prefix, nested) -%}
+  {%- for item in items -%}
+    {%- if item.children -%}
+      <bh-tree-item value="group:{{ prefix }}{{ loop.index }}" label="{{ item.title | e }}" indent="{{ depth }}"{% if item.active %} expanded{% endif %}{% if nested %} slot="children"{% endif %}>
+        {{- tree_items(item.children, depth + 1, prefix ~ loop.index ~ ".", true) -}}
+      </bh-tree-item>
+    {%- elif item.is_page -%}
+      <bh-tree-item value="{{ item.url | url }}" label="{{ item.title | e }}" indent="{{ depth }}"{% if nested %} slot="children"{% endif %}></bh-tree-item>
+    {%- endif -%}
+  {%- endfor -%}
+{%- endmacro -%}
+{%- set current = nav.items | selectattr("active") | first -%}
+{%- macro view_label(item) -%}{{ "Contents" if item.is_page else item.title }}{%- endmacro -%}
+{%- set pages = namespace(items=[]) -%}
+{%- for item in nav.pages -%}
+  {%- set _ = pages.items.append({"url": item.url, "title": item.title, "section": section_of(item) | trim}) -%}
+{%- endfor -%}
+<!doctype html>
+<html lang="{{ config.theme.locale.language }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {%- if config.site_description %}
+  <meta name="description" content="{{ config.site_description | e }}">
+  {%- endif %}
+  <title>{% if page.title and not page.is_homepage %}{{ page.title | striptags | e }} - {% endif %}{{ config.site_name | e }}</title>
+  <script>
+    // Before the first paint: the reader's own choice of theme, else the system's. Storage can be
+    // missing or refuse (a private window, blocked site data); the system's choice stands then.
+    (function () {
+      var chosen = null;
+      try { chosen = localStorage.getItem("bh-docs-theme"); } catch (e) {}
+      var dark = chosen ? chosen === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ 'vendor/bh-01/tokens/index.css' | url }}">
+  <link rel="stylesheet" href="{{ 'vendor/bh-01/themes/default.css' | url }}">
+  <link rel="stylesheet" href="{{ 'assets/bh-docs.css' | url }}">
+  <noscript><style>bh-app-shell:not(:defined) { visibility: visible; }</style></noscript>
+  <script type="module" src="{{ 'assets/bh-docs.js' | url }}"></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <bh-app-shell>
+    <bh-activity-bar slot="activity" role="group" aria-label="Sections">
+      {%- for item in nav.items %}
+      <bh-activity-item item-id="{{ view_id(item) }}" label="{{ item.title | e }}"{% if item.active %} data-current{% endif %}>
+        <bh-icon name="{{ icons.get(item.title, 'menu') }}"></bh-icon>
+      </bh-activity-item>
+      {%- endfor %}
+    </bh-activity-bar>
+
+    <bh-sidebar-panel slot="sidebar" role="navigation" aria-label="{{ view_label(current) | e }}">
+      <bh-panel-header slot="header" label="{{ view_label(current) | e }}"></bh-panel-header>
+      {%- for item in nav.items %}
+      <bh-tree data-view="{{ view_id(item) }}" data-label="{{ view_label(item) | e }}" selected="{{ page.url | url }}"{% if not item.active %} hidden{% endif %}>
+        {%- if item.is_page %}
+        <bh-tree-item value="{{ item.url | url }}" label="{{ item.title | e }}"></bh-tree-item>
+        {{ tree_items(nav.items | rejectattr("is_homepage") | list, 0, "all.", false) }}
+        {%- else %}
+        {{ tree_items(item.children, 0, view_id(item) ~ ".", false) }}
+        {%- endif %}
+      </bh-tree>
+      {%- endfor %}
+    </bh-sidebar-panel>
+
+    <main id="content" class="page-content" tabindex="-1">
+      {{ page.content }}
+      {%- if page.previous_page or page.next_page %}
+      <nav class="pager" aria-label="Previous and next pages">
+        {%- if page.previous_page %}
+        <bh-nav-item class="pager-previous" href="{{ page.previous_page.url | url }}">
+          <bh-icon slot="prefix" name="chevron-left" size="sm"></bh-icon>{{ page.previous_page.title | e }}
+        </bh-nav-item>
+        {%- endif %}
+        {%- if page.next_page %}
+        <bh-nav-item class="pager-next" href="{{ page.next_page.url | url }}">
+          {{ page.next_page.title | e }}<bh-icon slot="suffix" name="chevron-right" size="sm"></bh-icon>
+        </bh-nav-item>
+        {%- endif %}
+      </nav>
+      {%- endif %}
+    </main>
+
+    <bh-status-bar slot="status">
+      {%- if config.extra.git and config.extra.git.commit %}
+      <span class="build" title="The branch and commit this site was built from">
+        <bh-icon name="branch" size="sm"></bh-icon>
+        <span class="build-ref">{{ config.extra.git.branch | e }}</span>
+        <span aria-hidden="true">&middot;</span>
+        <span>{{ config.extra.git.commit | e }}</span>
+      </span>
+      {%- endif %}
+      <button type="button" slot="end" class="status-action" data-action="search" aria-keyshortcuts="Control+K">
+        <kbd>Ctrl+K</kbd><span>Search</span>
+      </button>
+      <button type="button" slot="end" class="status-action theme-toggle" data-action="theme" role="switch" aria-checked="false" aria-label="Dark theme">
+        <span data-theme-name="light">Light</span><span aria-hidden="true">/</span><span data-theme-name="dark">Dark</span>
+      </button>
+    </bh-status-bar>
+  </bh-app-shell>
+
+  <bh-command-palette placeholder="Search the docs..."></bh-command-palette>
+
+  <script type="application/json" id="site-pages">{{ {"base": base_url, "index": "search/search_index.json", "pages": pages.items} | tojson }}</script>
+</body>
+</html>

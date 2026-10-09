@@ -11,7 +11,7 @@ from agent_cordis_plugin import (
     TranscriptConfig,
     executor,
     loop,
-    memory,
+    notes,
     transcript,
 )
 from cordis.testing import drive
@@ -33,7 +33,7 @@ async def test_loop_binds_a_model_over_what_it_was_given() -> None:
             transcript=history,
             system=object(),
             approval=object(),
-            memory=Hooks(),
+            notes=Hooks(),
             executor=OneAtATime(),
             config=LoopConfig(),
         )  # type: ignore[arg-type]
@@ -43,8 +43,8 @@ async def test_loop_binds_a_model_over_what_it_was_given() -> None:
 
 
 async def test_memory_binds_an_empty_broker() -> None:
-    effects = await drive(memory())
-    assert [(e.name, e.args[0]) for e in effects] == [("bind", "memory")]
+    effects = await drive(notes())
+    assert [(e.name, e.args[0]) for e in effects] == [("bind", "notes")]
     assert isinstance(effects[0].args[1], Hooks) and list(effects[0].args[1]) == []
 
 

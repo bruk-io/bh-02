@@ -122,6 +122,23 @@ def test_the_sidebar_is_dropped_with_why_but_a_sidebar_row_of_your_own_stays() -
     assert translated(own) == (own, [])
 
 
+_NO_SHELL_HINTS = "bh-02 no longer tells the model how Python does what an input ran through a shell"
+
+
+def test_the_shell_hints_are_dropped_with_why_but_a_row_of_your_own_by_that_id_stays() -> None:
+    """The shipped `shell-hints` row (`kernel:shell_hints`) is gone: a change to it, or any row
+    using `kernel:shell_hints`, is dropped. A row called `shell-hints` that names a plugin of the
+    person's own is theirs, and still runs."""
+    rows, changes = translated([Row("shell-hints", disabled=True), Row("hints", "kernel:shell_hints")])
+    assert rows == []
+    assert changes == [
+        f"row 'shell-hints' was removed: {_NO_SHELL_HINTS}; delete it",
+        f"row 'hints' was removed: kernel:shell_hints is gone: {_NO_SHELL_HINTS}; delete it",
+    ]
+    own = [Row("shell-hints", "mine:hints")]
+    assert translated(own) == (own, [])
+
+
 def test_a_patch_naming_the_sidebar_is_refused_and_update_layer_drops_it(state: Path) -> None:
     patch = state / "quiet.toml"
     patch.write_text('[[plugin]]\nid = "sidebar"\ndisabled = true\n')  # how the sidebar was turned off
@@ -209,6 +226,28 @@ def test_bh_02_s_fakes_that_bound_completion_bind_model_under_new_names() -> Non
         "row 'model': bh_02.testing:echo_completion is now bh_02.testing:echo_model; make it "
         'use = "bh_02.testing:echo_model"'
     )
+
+
+def test_the_project_context_s_rows_are_the_system_prompt_s_and_memory_s() -> None:
+    """`context:project` is `agent:system` and `context:on_touch` is `memory:on_touch`; a `system`
+    row's `root` and `home` go to a `memory` row too, its `files` are gone; and the broker
+    `agent:memory` is `agent:notes`, under the id `notes`."""
+    rows, changes = translated(
+        [
+            Row("system", "context:project", {"root": "/p", "home": "/h", "files": ["x.toml"]}),
+            Row("on-touch", "context:on_touch"),
+            Row("memory", "agent:memory"),
+        ]
+    )
+    assert rows == [
+        Row("system", "agent:system", {"root": "/p"}),
+        Row("memory", None, {"root": "/p", "home": "/h"}),
+        Row("on-touch", "memory:on_touch"),
+        Row("notes", "agent:notes"),
+    ]
+    assert any("files is gone (context files are gone" in change for change in changes)
+    assert translated(rows) == (rows, [])  # once
+    assert translated([Row("system", config={"root": "/p"})]) == ([Row("system", config={"root": "/p"})], [])
 
 
 def test_the_status_row_s_default_model_is_gone() -> None:

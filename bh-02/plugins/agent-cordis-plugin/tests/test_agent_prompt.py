@@ -62,7 +62,7 @@ def test_latest_is_what_the_model_was_last_told_whether_kept_whole_or_as_edits()
 
 def test_a_long_run_of_blank_lines_costs_edits_little() -> None:
     """The loop works out `edits` on the event loop the TUI shares, each time the prompt changes.
-    A run of blank lines in a context file splits into as many empty paragraphs, and matching
+    A run of blank lines in a CLAUDE.md splits into as many empty paragraphs, and matching
     each with each costs time with the square of their number (10,000 of them took 11 seconds),
     so a blank paragraph never anchors a match: it is kept or dropped with those around it."""
     before = "head" + "\n\n" * 10_000 + "tail"

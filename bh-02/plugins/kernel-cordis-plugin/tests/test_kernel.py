@@ -459,6 +459,19 @@ async def test_the_kernel_tells_the_model_where_the_person_s_startup_file_is(tmp
     assert f"{said} {person}, which comes before it" in told
 
 
+def test_the_model_is_told_where_else_its_jail_lets_its_code_write() -> None:
+    """A directory outside the project the jail lets an input write (the project's auto memory, a
+    `write` the person added) is named with the project; the kernel says what its own start may
+    write and knows nothing of what the directory is for."""
+    assert "it can write only inside the project directory, cannot" in instructions_for(True)
+    memory = "/home/me/.local/state/bh-02/projects/-src-app/memory"
+    told = instructions_for(True, elsewhere=(memory,))
+    assert f"it can write only inside the project directory and {memory}, cannot reach" in told
+    assert memory not in instructions_for(
+        False, elsewhere=(memory,)
+    )  # unjailed: it writes what the person can
+
+
 def test_the_model_is_told_its_tool_is_a_repl_of_its_own_that_persists_and_how_to_use_it() -> None:
     told = instructions_for(True)
     assert told.startswith("Your one tool is `python`: a Python REPL of your own")
@@ -488,7 +501,7 @@ async def test_a_program_s_own_output_reaches_an_input_only_when_captured(tmp_pa
 
 
 async def test_touched_is_the_project_s_files_the_last_input_opened(tmp_path: Path) -> None:
-    """What `memory` is given: files read or written, not a directory listed, a module imported
+    """What `notes` is given: files read or written, not a directory listed, a module imported
     or a file a program read; and nothing outside the project."""
     (tmp_path / "src" / "db").mkdir(parents=True)
     (tmp_path / "src" / "db" / "models.py").write_text("X = 1\n")

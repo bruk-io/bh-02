@@ -1,0 +1,121 @@
+# The documentation site: `uv run mkdocs serve` to preview, `uv run mkdocs build --strict` to
+# build into site/ (scripts/check runs the build). The existing READMEs, the glossary and the
+# contracts stay the source: the pages under docs/ include them. The theme is bh-01's own
+# components (docs/theme/, its vendored build in docs/theme/vendor/bh-01/); docs/hooks/bh_docs.py
+# puts the branch and commit in the status bar and points included links at the right place.
+site_name: bh-02
+site_description: >-
+  Programs made of parts that can be added, replaced and removed while they run: cordis, and
+  two programs built with it, bh-02 (a coding agent) and warden (a process supervisor).
+repo_url: https://github.com/bruk-io/bh-02
+edit_uri: ""
+copyright: AGPL-3.0-or-later
+
+docs_dir: docs
+# docs/ also holds the theme and the hook, which are not pages
+exclude_docs: |
+  /theme/
+  /hooks/
+
+theme:
+  name: null
+  custom_dir: docs/theme
+  locale: en
+  # the search plugin writes search/search_index.json and nothing else: the command palette
+  # (Ctrl+K) reads the index itself
+  search_index_only: true
+
+hooks:
+  - docs/hooks/bh_docs.py
+
+plugins:
+  - search
+  - include-markdown:
+      # a link in an included file is rewritten relative to the page that includes it; the
+      # hook then sends it to that file's own page, or to GitHub
+      rewrite_relative_urls: true
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [libs/cordis/src]
+          options:
+            show_root_heading: false
+            show_root_toc_entry: false
+            show_source: false
+            show_bases: true
+            heading_level: 2
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: false
+            show_symbol_type_heading: true
+            show_if_no_docstring: false
+            filters: ["!^_"]
+
+markdown_extensions:
+  - toc:
+      permalink: "#"
+      permalink_title: Link to this section
+  - tables
+  - admonition
+  - attr_list
+  - pymdownx.highlight:
+      use_pygments: true
+  - pymdownx.superfences
+  # GitHub's ~~strikethrough~~, which brig's SPEC.md uses; no ~subscript~
+  - pymdownx.tilde:
+      subscript: false
+
+nav:
+  - Home: index.md
+  - bh-02:
+      - Get started: bh-02/get-started.md
+      - Using it:
+          - Sessions: bh-02/using/sessions.md
+          - Commands: bh-02/using/commands.md
+          - Models: bh-02/using/models.md
+          - Memory: bh-02/using/memory.md
+          - The jail: bh-02/using/jail.md
+          - Layers: bh-02/using/layers.md
+      - How it works:
+          - Rows and layers: bh-02/how-it-works/rows-and-layers.md
+          - The loop: bh-02/how-it-works/loop.md
+          - The python tool: bh-02/how-it-works/python-tool.md
+          - The prompt and notes: bh-02/how-it-works/prompt-and-notes.md
+          - The jail and approval: bh-02/how-it-works/jail-and-approval.md
+      - Extending it:
+          - Writing a plugin: bh-02/extending/plugins.md
+          - The model's extensions: bh-02/extending/extensions.md
+      - Reference:
+          - Glossary: bh-02/reference/glossary.md
+          - Contracts: bh-02/reference/contracts.md
+          - The app: bh-02/reference/app.md
+          - Command line: bh-02/reference/command-line.md
+          - Plugins:
+              - agent-cordis-plugin: bh-02/reference/plugins/agent.md
+              - brig-cordis-plugin: bh-02/reference/plugins/brig.md
+              - chat-cordis-plugin: bh-02/reference/plugins/chat.md
+              - commands-cordis-plugin: bh-02/reference/plugins/commands.md
+              - extensions-cordis-plugin: bh-02/reference/plugins/extensions.md
+              - kernel-cordis-plugin: bh-02/reference/plugins/kernel.md
+              - memory-cordis-plugin: bh-02/reference/plugins/memory.md
+              - models-cordis-plugin: bh-02/reference/plugins/models.md
+              - tui-cordis-plugin: bh-02/reference/plugins/tui.md
+  - cordis:
+      - Design: cordis/index.md
+      - cordis-helpers: cordis/helpers.md
+      - API reference:
+          - cordis: cordis/api/cordis.md
+          - cordis.loader: cordis/api/loader.md
+          - cordis.composition: cordis/api/composition.md
+          - cordis.testing: cordis/api/testing.md
+  - brig:
+      - Overview: brig/index.md
+      - Specification: brig/spec.md
+  - warden:
+      - Overview: warden/index.md
+      - Contracts: warden/contracts.md
+  - Contributing:
+      - Working on the code: contributing/index.md
+      - Building these docs: contributing/docs.md

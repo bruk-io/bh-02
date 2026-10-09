@@ -1,14 +1,15 @@
 # agent-cordis-plugin
 
-A harness-owned agent loop, the transcript it reads, `memory`, what it tells the model with
-an input's result, `executor`, where it reads the prompt and asks `memory`, and `/compact`,
-which begins a new conversation from the model's summary.
+A harness-owned agent loop, the transcript it reads, `system`, the system prompt it sends,
+`notes`, what it tells the model with an input's result, `executor`, where it reads the prompt
+and asks `notes`, and `/compact`, which begins a new conversation from the model's summary.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `memory` (iterated), `executor` (`run`) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2) | `model` (`complete`), `kernel` (`spec`, `instructions`, `run`, `touched`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `notes` (iterated), `executor` (`run`) |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
-| `agent:memory` | `memory`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
+| `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch, then the sections rows add); a broker, `add(section)`; config: `root` (default `.`) | |
+| `agent:notes` | `notes`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
 | `agent:compact` | registers `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300), `loop` and `transcript` (the rows it restarts) | `model` (`complete`), `kernel` (`spec`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
 
@@ -26,14 +27,14 @@ result, the rest (the one at the approval question included) with `not run: ...`
 the kernel are rows of their own, so the history and the namespace outlive the loop: replace
 `model` (or the ui) and the loop reloads while the conversation carries on.
 
-After each input that ran, the loop calls every function in `memory` with
+After each input that ran, the loop calls every function in `notes` with
 `{"code", "result", "touched"}` (`touched`: `kernel.touched()`, the project files the input
-opened) and puts what they return after the result (`remembered`, sorted, so the order rows
+opened) and puts what they return after the result (`noted`, sorted, so the order rows
 added them in means nothing; one that fails says so in one line). The person sees the input's
-own output as the result, and a `note` for each memory note, by its first line. `memory` is a
+own output as the result, and a `note` for each of those notes, by its first line. `notes` is a
 row of its own, depending on nothing, so neither the loop nor a row adding to it reloads the
-other; the rows that add to it (`kernel:shell_hints`, `context:on_touch`) depend on
-`transcript`, so `/clear` starts them afresh and they tell a new conversation again; they read
+other; a row that adds to it (`memory:on_touch`) depends on
+`transcript`, so `/clear` starts it afresh and it tells a new conversation again; it reads
 its `messages` too, so a resumed one is not told again a note a `tool` entry holds (CONTRACTS.md:
 transcript).
 
@@ -81,26 +82,26 @@ the same day, and `/clear` (an empty transcript) does. A message that also tells
 instructions has the date first, then the change, then the person's words. The clock is
 `LoopModel`'s `today` (the real date in the `agent:loop` row; a test gives its own). And a new
 session begins with the same prompt as one the day before in the same project (unless the
-branch, a context file or an extension changed it), so a local model server that keeps its
+branch, a CLAUDE.md or an extension changed it), so a local model server that keeps its
 prompt cache across conversations can reuse it. The providers send
 `content` alone, so `today` never reaches a model.
 
-Reading the prompt (`system.text()`, whose context-file sections may read many files and search
-the project, and `kernel.instructions()`) and asking `memory` (the on-touch functions read rule
+Reading the prompt (`system.text()`, whose sections may read many files (memory's reads every
+CLAUDE.md), and `kernel.instructions()`) and asking `notes` (memory's on-touch function reads rule
 files) run on `executor` (`executor.OneAtATime`, in a thread), not on the event loop, which
 cordis and the TUI share, so a slow section function never freezes the app. The transcript is
 changed only once each is done, so a reply stopped meanwhile leaves it whole (stopped while the
 person's message was being dated and the prompt read, the message is kept and answered as
 stopped, as one stopped in its first model step is). What runs there must not need the event
-loop: a section function, `kernel.instructions()` and a `memory` function each read and return
+loop: a section function, `kernel.instructions()` and a `notes` function each read and return
 text.
 
 One runs at a time, and nothing stops one part-way: a stop ends the reply's wait (but for the
-`memory` call, which a stop waits for, so its notes are told), and the reading finishes in its
+`notes` call, which a stop waits for, so its notes are told), and the reading finishes in its
 thread, unused: what it returned or raised goes nowhere, logged by no one. `executor` keeps the
 call in flight, and the next waits for it before it begins, so stopping reply after reply while
 a slow prompt is read leaves one reading running, not one per stop. `executor` is a row of its
-own (`agent:executor`) that depends on nothing, like `memory`: `/model` and `/clear` reload the
+own (`agent:executor`) that depends on nothing, like `notes`: `/model` and `/clear` reload the
 loop, a new `LoopModel`, but not `system`, whose caches take no lock, nor `executor`, so the new
 loop's first reading waits for the one the last loop left running too, and the context plugin's
 caches are used by one thread at a time. Only a new `executor` (its row restarted, or replaced

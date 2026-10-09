@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import os
+import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from importlib import resources
@@ -22,6 +23,8 @@ __all__ = [
     "Recoverable",
     "config_directories",
     "credential_files",
+    "memory_directory",
+    "project_of",
     "unreadable",
     "layers",
     "read_layers",
@@ -66,14 +69,16 @@ class _LayerFiles:
     (`credentials`), what no input may read (`secrets`): every one of `credentials`, the
     `local.env` beside and above the project, and the sessions' state (Claude Code's own config
     and tokens), and bh-02's configuration directories (`trusted`), whose files the host reads
-    and trusts. The jail keeps an input from rewriting the first and from reading the secrets,
-    from writing or creating any secret under a root it may write, and from writing in a
-    configuration directory under one."""
+    and trusts; and the project's auto memory directory (`memory`), which the model writes and
+    the memory rows read. The jail keeps an input from rewriting the first and from reading the
+    secrets, from writing or creating any secret under a root it may write, and from writing in
+    a configuration directory under one; and lets it write the memory directory."""
 
     paths: tuple[str, ...] = ()
     credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
+    memory: str = ""
 
 
 # The file bh-02's credentials live in (CLAUDE_CODE_OAUTH_TOKEN, and any key a model names),
@@ -105,8 +110,8 @@ def config_directories(environ: Mapping[str, str], home: Path) -> tuple[str, ...
     """bh-02's configuration directories of the person's (the `layers` value's `trusted`): this
     run's (`$XDG_CONFIG_HOME/bh-02`, else `~/.config/bh-02`) and the default one, which a run
     without the variable reads, each as named and as it resolves (a link into a dotfiles
-    repository). The host reads what is there and trusts it (the models file, the person's
-    context file and their startup file, whose text it hands to the model's REPL), so no jailed
+    repository). The host reads what is there and trusts it (the models file, and the person's
+    startup file, whose text it hands to the model's REPL), so no jailed
     input may write there: a session run from the home directory would otherwise choose what
     every later one reads."""
     default = home / ".config"
@@ -115,6 +120,36 @@ def config_directories(environ: Mapping[str, str], home: Path) -> tuple[str, ...
         for base in (environ.get("XDG_CONFIG_HOME") or default, default)
     )
     return tuple(dict.fromkeys(str(path) for each in named for path in (each, each.resolve())))
+
+
+def project_of(cwd: Path) -> Path:
+    """The project auto memory belongs to, as Claude Code finds it: the git repository `cwd` is
+    in (a worktree's main repository, so every worktree shares one), else `cwd` itself. Read from
+    `.git` with no subprocess: a directory is a repository's own, a file a worktree's
+    (`gitdir: ...`, whose `commondir` names the main repository's `.git`)."""
+    for here in (cwd, *cwd.parents):
+        git = here / ".git"
+        if git.is_dir():
+            return here
+        if git.is_file():
+            try:
+                line = git.read_text(errors="replace")[:4096].splitlines()[0]
+                gitdir = (here / line.removeprefix("gitdir:").strip()).resolve()
+                common = (gitdir / (gitdir / "commondir").read_text().strip()).resolve()
+            except OSError, IndexError:
+                return here
+            return common.parent if common.name == ".git" else here
+    return cwd
+
+
+def memory_directory(project: Path, environ: Mapping[str, str], home: Path) -> str:
+    """Where the project's auto memory is kept (the `layers` value's `memory`):
+    `$XDG_STATE_HOME/bh-02/projects/<project>/memory`, else under `~/.local/state`, as Claude
+    Code keeps it under `~/.claude/projects/<project>/memory`: machine-local, never in the
+    repository. `<project>` is the project's absolute path, every character but a letter or a
+    digit a `-` (`/home/me/app` is `-home-me-app`), as Claude Code names it."""
+    state = Path(environ.get("XDG_STATE_HOME") or home / ".local" / "state")
+    return str(state / "bh-02" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(project)) / "memory")
 
 
 @component(provides=("layers",))
@@ -183,6 +218,7 @@ async def run(
     credentials: Iterable[str] = (),
     secrets: Iterable[str] = (),
     trusted: Iterable[str] = (),
+    memory: str = "",
 ) -> None:
     """Boot, wait for the chat row's own work to end (CONTRACTS.md: `done`), then unwind.
 
@@ -192,8 +228,10 @@ async def run(
     files' paths, `credentials`, where the model rows look for the credential file (none: a
     composition booted without them finds no credential unless its model row names an
     `env_file`), `secrets`, where the credential file may be and the sessions' state
-    (CONTRACTS.md: layers; the jail denies an input both), and `trusted`, bh-02's configuration
-    directories (`config_directories`; the jail denies an input writing there), `sessions`, which binds this
+    (CONTRACTS.md: layers; the jail denies an input both), `trusted`, bh-02's configuration
+    directories (`config_directories`; the jail denies an input writing there), and `memory`,
+    the project's auto memory directory (`memory_directory`; the jail lets an input write it,
+    and none when empty), `sessions`, which binds this
     directory's sessions and the running one (`sessions`; the default lists none), and
     `harness`, whose only job is to declare bh-02's dependency on `done`, so a chat row that
     never binds it is an ordinary "waiting on" stall and a `done` of the wrong shape is an
@@ -225,6 +263,7 @@ async def run(
         "credentials": list(credentials),
         "secrets": list(secrets),
         "trusted": list(trusted),
+        "memory": memory,
     }
     booted: Booted = await boot(
         paths,

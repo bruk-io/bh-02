@@ -47,7 +47,7 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     assert rows["model"].use == "models:model" and rows["models"].use == "models:catalog"
     assert "completion" not in rows
     assert rows["transcript"].use == "agent:transcript"
-    # the loop reads the prompt and asks `memory` on `executor`, a row that depends on nothing,
+    # the loop reads the prompt and asks `notes` on `executor`, a row that depends on nothing,
     # so /clear and /model, which reload the loop, keep the call a stopped reply left running
     assert rows["executor"].use == "agent:executor"
     assert resolve(rows["executor"].use or "").inject == set()

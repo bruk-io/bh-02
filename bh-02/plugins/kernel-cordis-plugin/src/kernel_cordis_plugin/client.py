@@ -12,7 +12,7 @@ through the jail, which the worker turns into `KeyboardInterrupt` in the input, 
 input to say it ended: the namespace survives. A worker that dies is started again on the next
 input, and that input is told its earlier variables are gone, and why, when the jail ended it.
 After each input, `touched()` is the project's files it opened, read or written (the worker's
-audit hook): what a `memory` function is given to say what applies to them.
+audit hook): what a `notes` function is given to say what applies to them.
 
 A new kernel runs its startup files before its first input (`KernelConfig.startup`), when its
 inputs are confined: the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
@@ -89,7 +89,7 @@ class KernelConfig:
     to say it ended before the worker is stopped and started again; `startup` the files a new
     kernel runs, in order, before its first input, when its inputs are confined: helpers kept
     across sessions. The person's own first (`$XDG_CONFIG_HOME/` is their config directory: that
-    variable's value, else `~/.config`, as for the context file; `~/` is their home), then the
+    variable's value, else `~/.config`, as for the models file; `~/` is their home), then the
     project's (a relative name is from `root`), the one the model may write. A single string is
     one file."""
 
@@ -210,7 +210,7 @@ def _startup_input(path: str, source: str | None = None) -> str:
 
 def _located(name: str, root: Path, home: Path, environ: Mapping[str, str]) -> Path:
     """Where the startup file `name` is: one starting `$XDG_CONFIG_HOME/` in the person's config
-    directory (that variable's value, else `home`'s `.config`, as the context file is), one
+    directory (that variable's value, else `home`'s `.config`, as the models file is), one
     starting `~/` in `home`, and any other from the project's `root` (an absolute one is itself)."""
     if name.startswith(_CONFIG_HOME):
         config = Path(environ.get("XDG_CONFIG_HOME") or home / ".config")
@@ -319,13 +319,18 @@ class Kernel:
 
     def instructions(self) -> str:
         """What the model is told about the tool and where its code runs, read per request: the
-        project's startup files are the model's to edit, the person's are theirs."""
-        placed = _placed(self._config.startup, Path(self._config.root).resolve(), Path.home(), os.environ)
+        project's startup files are the model's to edit, the person's are theirs; and where its
+        worker's jail lets it write besides the project (its `writes()`: the auto memory
+        directory, a `write` the person added)."""
+        root = Path(self._config.root).resolve()
+        placed = _placed(self._config.startup, root, Path.home(), os.environ)
+        writes = self._worker.writes() if self._worker is not None else ()
         return instructions_for(
             self.confined,
             tuple(s.name for s in placed if s.project),
             self.reads(),
             theirs=tuple(s.name for s in placed if not s.project),
+            elsewhere=tuple(w for w in writes if not Path(w).is_relative_to(root)),
         )
 
     async def __aenter__(self) -> Kernel:
