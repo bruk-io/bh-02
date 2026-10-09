@@ -21,7 +21,7 @@ class _System(Protocol):
     """What the memory row needs of the `system` value (CONTRACTS.md: system): a section added
     to the prompt, and its remover back."""
 
-    def add(self, section: Callable[[], str]) -> Callable[[], None]: ...
+    def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]: ...
 
 
 @runtime_checkable
@@ -51,7 +51,7 @@ async def memory(*, system: _System, commands: _Registrar, layers: _Layers, conf
     conversation reloads."""
     found = Memory(config, layers.memory)
     yield bind("memory", found)
-    yield acquire(system.add, found.text)
+    yield acquire(system.add, "memory", found.text)
 
     async def run(args: str) -> str:
         root, home = found.places()
@@ -86,4 +86,4 @@ async def auto(*, system: _System, layers: _Layers, transcript: Transcript) -> E
         directory = Path(layers.memory)
         home = Path.home()
         named = f"~/{directory.relative_to(home)}" if directory.is_relative_to(home) else str(directory)
-        yield acquire(system.add, AutoMemory(directory, named))
+        yield acquire(system.add, "memory: auto", AutoMemory(directory, named))

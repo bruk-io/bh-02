@@ -7,8 +7,11 @@ memory row's instructions (CLAUDE.md and the rest), how to extend bh-02, an exte
 every time it is asked. The date is not in it: the prompt would read differently every
 midnight, so the loop tells the date with the person's message instead.
 
-It is a broker (paper 6.2): a row with something to tell the model `acquire`s a section
+It is a broker (paper 6.2): a row with something to tell the model `acquire`s a named section
 (`add`), read with the rest each time, and its remover takes it out again when the row leaves.
+Sections are told sorted by name (two of one name by their text), never in the order rows added
+them: a row that adds its section again after a restart (`memory:auto` on every `/clear`) keeps
+its place, so the prompt does not read as changed.
 
 `agent:loop` calls `text()` on its `executor`, in a thread off the event loop, one call at a
 time; so a section function runs there too and must not need the event loop.
@@ -70,12 +73,13 @@ class SystemPrompt:
 
     def __init__(self, config: SystemConfig) -> None:
         self._config = config
-        self._sections: Hooks[Callable[[], str]] = Hooks()
+        self._sections: Hooks[tuple[str, Callable[[], str]]] = Hooks()
 
-    def add(self, section: Callable[[], str]) -> Callable[[], None]:
-        """Add `section` to the prompt, read each time the prompt is; returns its remover. A row
-        `acquire`s one, so it leaves the prompt with the row."""
-        return self._sections.add(section)
+    def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]:
+        """Add `section` to the prompt under `name`, read each time the prompt is; returns its
+        remover. A row `acquire`s one, so it leaves the prompt with the row. Where it goes is by
+        `name`, not by when it was added."""
+        return self._sections.add((name, section))
 
     def text(self) -> str:
         root = Path(self._config.root).resolve()
@@ -85,7 +89,8 @@ class SystemPrompt:
             branch = None
         # the sections rows have added now: a snapshot, as the event loop may add or remove one
         # while this runs in the loop's worker thread
-        return describe(str(root), branch, [section() for section in self._sections])
+        read = sorted((name, section()) for name, section in self._sections)
+        return describe(str(root), branch, [text for _, text in read])
 
 
 def _head(root: Path) -> str:

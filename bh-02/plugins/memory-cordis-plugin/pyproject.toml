@@ -5,6 +5,7 @@ description = "Claude Code's memory in bh-02: CLAUDE.md and AGENTS.md files, imp
 requires-python = ">=3.15"
 dependencies = [
     "cordis",
+    "host-paths",
 ]
 
 [project.entry-points."cordis.plugins"]
@@ -12,6 +13,7 @@ memory = "memory_cordis_plugin"
 
 [tool.uv.sources]
 cordis = { workspace = true }
+host-paths = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

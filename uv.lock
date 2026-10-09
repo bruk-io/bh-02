@@ -13,6 +13,7 @@ members = [
     "cordis",
     "cordis-helpers",
     "extensions-cordis-plugin",
+    "host-paths",
     "kernel-cordis-plugin",
     "memory-cordis-plugin",
     "models-cordis-plugin",
@@ -138,6 +139,7 @@ dependencies = [
     { name = "commands-cordis-plugin" },
     { name = "cordis" },
     { name = "extensions-cordis-plugin" },
+    { name = "host-paths" },
     { name = "kernel-cordis-plugin" },
     { name = "memory-cordis-plugin" },
     { name = "models-cordis-plugin" },
@@ -153,6 +155,7 @@ requires-dist = [
     { name = "commands-cordis-plugin", editable = "bh-02/plugins/commands-cordis-plugin" },
     { name = "cordis", editable = "libs/cordis" },
     { name = "extensions-cordis-plugin", editable = "bh-02/plugins/extensions-cordis-plugin" },
+    { name = "host-paths", editable = "libs/host-paths" },
     { name = "kernel-cordis-plugin", editable = "bh-02/plugins/kernel-cordis-plugin" },
     { name = "memory-cordis-plugin", editable = "bh-02/plugins/memory-cordis-plugin" },
     { name = "models-cordis-plugin", editable = "bh-02/plugins/models-cordis-plugin" },
@@ -180,12 +183,14 @@ source = { editable = "bh-02/plugins/brig-cordis-plugin" }
 dependencies = [
     { name = "brig" },
     { name = "cordis" },
+    { name = "host-paths" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "brig", editable = "libs/brig" },
     { name = "cordis", editable = "libs/cordis" },
+    { name = "host-paths", editable = "libs/host-paths" },
 ]
 
 [[package]]
@@ -391,6 +396,11 @@ wheels = [
 ]
 
 [[package]]
+name = "host-paths"
+version = "0.1.0"
+source = { editable = "libs/host-paths" }
+
+[[package]]
 name = "httpcore2"
 version = "2.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -534,10 +544,14 @@ version = "0.1.0"
 source = { editable = "bh-02/plugins/kernel-cordis-plugin" }
 dependencies = [
     { name = "cordis" },
+    { name = "host-paths" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cordis", editable = "libs/cordis" }]
+requires-dist = [
+    { name = "cordis", editable = "libs/cordis" },
+    { name = "host-paths", editable = "libs/host-paths" },
+]
 
 [[package]]
 name = "librt"
@@ -721,10 +735,14 @@ version = "0.1.0"
 source = { editable = "bh-02/plugins/memory-cordis-plugin" }
 dependencies = [
     { name = "cordis" },
+    { name = "host-paths" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cordis", editable = "libs/cordis" }]
+requires-dist = [
+    { name = "cordis", editable = "libs/cordis" },
+    { name = "host-paths", editable = "libs/host-paths" },
+]
 
 [[package]]
 name = "mergedeep"
@@ -843,6 +861,7 @@ source = { editable = "bh-02/plugins/models-cordis-plugin" }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "cordis" },
+    { name = "host-paths" },
     { name = "httpx2" },
     { name = "mcp" },
 ]
@@ -851,6 +870,7 @@ dependencies = [
 requires-dist = [
     { name = "claude-agent-sdk", specifier = "==0.2.158" },
     { name = "cordis", editable = "libs/cordis" },
+    { name = "host-paths", editable = "libs/host-paths" },
     { name = "httpx2", specifier = ">=2.13,<3" },
     { name = "mcp", specifier = ">=2.2,<3" },
 ]

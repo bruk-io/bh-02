@@ -280,7 +280,7 @@ exclude = [
     # one outside the project), the project's root resolved to tell what is in it; and `/memory`
     "memory_cordis_plugin.memory:Memory.*", "memory_cordis_plugin.memory:_resolved",
     "memory_cordis_plugin.reading:read", "memory_cordis_plugin.reading:_opened",
-    "memory_cordis_plugin.reading:_named", "memory_cordis_plugin.reading:roots",
+    "memory_cordis_plugin.reading:_named",
     "memory_cordis_plugin.wiring:memory.run",
     # auto memory's index, read once a conversation from its directory through no link
     "memory_cordis_plugin.auto:AutoMemory.*",

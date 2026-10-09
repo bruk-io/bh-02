@@ -383,8 +383,19 @@ def test_rows_line_up() -> None:
     assert table.splitlines() == ["kernel  kernel:kernel  failed: x", "loop    a:b            active"]
 
 
-async def test_the_operator_row_registers_its_commands_and_takes_them_when_it_leaves() -> None:
-    loader = Loader()
+class _Output:
+    """An `output` value that keeps the notices it is given."""
+
+    def __init__(self) -> None:
+        self.notices: list[str] = []
+
+    async def notice(self, message: str) -> None:
+        self.notices.append(message)
+
+
+def _operator_on(rt: Runtime, loader: object) -> _Output:
+    """Mount the operator and fakes of the rows it depends on; the output fake back."""
+    told = _Output()
 
     @component
     async def fake_loader() -> Effects:
@@ -394,10 +405,21 @@ async def test_the_operator_row_registers_its_commands_and_takes_them_when_it_le
     async def fake_models() -> Effects:
         yield bind("models", Models())
 
-    rt = Runtime()
+    @component
+    async def fake_output() -> Effects:
+        yield bind("output", told)
+
     rt.mount(registry, id="commands")
     rt.mount(fake_loader, id="loader")
     rt.mount(fake_models, id="models")
+    rt.mount(fake_output, id="output")
+    return told
+
+
+async def test_the_operator_row_registers_its_commands_and_takes_them_when_it_leaves() -> None:
+    loader = Loader()
+    rt = Runtime()
+    told = _operator_on(rt, loader)
     row = rt.mount(operator, id="operator")
     await rt.settle()
     commands = rt.root.get("commands")
@@ -405,7 +427,29 @@ async def test_the_operator_row_registers_its_commands_and_takes_them_when_it_le
     assert await commands.run("/restart fs") == "restarting fs"
     await asyncio.sleep(0.01)
     assert loader.restarted == ["fs"]  # the row's own background work ran it
+    assert told.notices == []  # a restart that worked tells nothing more
     await row.retire()
     await rt.settle()
     assert commands.specs() == []
+    await rt.shutdown()
+
+
+class _Failing(Loader):
+    async def restart(self, *rids: str) -> None:
+        raise RuntimeError(f"{rids[0]} would not start")
+
+
+async def test_a_restart_that_fails_after_the_command_answered_is_told_to_the_person() -> None:
+    """/clear and /restart answer, then their restart runs as the row's own background work: one
+    that fails must reach the person, not vanish, since /clear has emptied the conversation's
+    file by then and the old loop may still be writing to it."""
+    rt = Runtime()
+    told = _operator_on(rt, _Failing())
+    rt.mount(operator, id="operator")
+    await rt.settle()
+    assert await rt.root.get("commands").run("/restart fs") == "restarting fs"
+    await asyncio.sleep(0.01)
+    (notice,) = told.notices
+    assert notice.startswith("a command's restart failed (RuntimeError: fs would not start)")
+    assert "/restart ROW tries again" in notice
     await rt.shutdown()

@@ -1,4 +1,4 @@
-"""Why a model step stopped, and what the loop does about it: pure, after ../harness/ARCHITECTURE.MD.
+"""Why a model step stopped, and what the loop does about it: pure.
 
 "No tool call" is three different things, and only one of them is done:
 

@@ -4,8 +4,11 @@
 (`write`) and a scratch directory of the jail's own. What it may not, even inside those: the
 composition's layer files (an input rewriting one would reshape the program running it, outside
 the jail), every path the host imports code from (`sys.path` entries and the interpreter's
-prefix), brig's own self-modification list (`.git/hooks`, `.git/config`, shell rc files,
-CLAUDE.md, ...), any secret below under a writable root (it may not replace what it can't
+prefix), the directory of every package bh-02 runs code from (`code`: bh-02's own, cordis's,
+brig's and each plugin's, as installed; under a writable root when bh-02 works on its own
+checkout, an editable install), whose modules bh-02 imports in its own process, brig's own
+self-modification list (`.git/hooks`, `.git/config`, shell rc
+files, CLAUDE.md, ...), any secret below under a writable root (it may not replace what it can't
 read), and bh-02's configuration directories under one (`trusted`: the person's
 `$XDG_CONFIG_HOME/bh-02` and `~/.config/bh-02`, when bh-02 runs from the home directory), whose
 models file and startup file a later session reads on the host and trusts. What
@@ -26,8 +29,10 @@ One policy, two platforms; only the stack and the read model differ:
   everything but the secrets.
 - Linux: brig's `strict_linux()` (bubblewrap). Reads by allowlist, so `allowlisted` turns the
   policy into one: what is readable is the system tree (`/usr`, `/etc`, ...), the interpreter
-  (`sys.base_prefix`, `sys.prefix`), the directories the command names, and what the policy
-  lets an input write. Everything else does not exist in the jail, the home directory included.
+  (`sys.base_prefix`, `sys.prefix`), the directories the command names, bh-02's own code
+  (`code`, read-only: the extensions' worker imports cordis, with an editable install from the
+  workspace), and what the policy lets an input write. Everything else does not exist in the
+  jail, the home directory included.
   The secrets stay `read_denies`, now brig's carve-outs: one inside that tree (a `local.env` at
   the project root) is masked if it exists, and one that does not exist yet is not, which
   brig's `fs_read` grade says (`best_effort`, naming it); an absent one where bh-02 looks for
@@ -85,6 +90,7 @@ from brig.mech.bwrap import DEFAULT_BWRAP_PATH
 from brig.run import Handle, IoPolicy, KillOutcome, SubprocessLauncher, build_compile_ctx
 from brig.stack import CompiledJail, Stack, scratch_darwin, strict_linux
 from brig_cordis_plugin.tripwire import Tripwire
+from host_paths import state_home
 
 __all__ = [
     "MARK",
@@ -132,8 +138,9 @@ class Layers(Protocol):
     """What the jail needs of the `layers` value (CONTRACTS.md: layers): the composition's files,
     which an input may not write; where bh-02 looks for its credential, where an input may
     create nothing; the secrets, which it may not read; bh-02's configuration directories
-    (`trusted`), whose files the host reads and trusts, which it may not write; and the project's
-    auto memory directory (`memory`), which it may write ('' for none)."""
+    (`trusted`), whose files the host reads and trusts, which it may not write; the directories
+    bh-02 runs its own code from (`code`), which every jail reads and no input writes; and the
+    project's auto memory directory (`memory`), which it may write ('' for none)."""
 
     @property
     def paths(self) -> tuple[str, ...]: ...
@@ -143,6 +150,8 @@ class Layers(Protocol):
     def secrets(self) -> tuple[str, ...]: ...
     @property
     def trusted(self) -> tuple[str, ...]: ...
+    @property
+    def code(self) -> tuple[str, ...]: ...
     @property
     def memory(self) -> str: ...
 
@@ -175,15 +184,17 @@ def spec_for(
     host: Sequence[str],
     secrets: Sequence[str] = (),
     trusted: Sequence[str] = (),
+    code: Sequence[str] = (),
     memory: str = "",
 ) -> Spec:
     """The jail's Spec. `host` is every path the host process loads code from; any under a
     writable root is denied, as are the layer files and brig's self-modification list.
     `secrets` (absolute) may not be read, wherever they are. `trusted` (absolute directories:
-    bh-02's configuration, whose files the host reads and trusts) may not be written where
-    they are under a writable root. `memory` (absolute: the project's auto memory directory, ''
-    for none) may be written, as a root of its own outside the project: no self-modification
-    list applies there, since nothing reads it but the memory row, through no link."""
+    bh-02's configuration, whose files the host reads and trusts) and `code` (absolute: the
+    directory of every package bh-02 runs code from) may not be written where they are under a
+    writable root. `memory` (absolute: the project's auto memory directory, '' for none) may be
+    written, as a root of its own outside the project: no self-modification list applies there,
+    since nothing reads it but the memory row, through no link."""
     roots = [str(Path(root, w).resolve()) for w in config.write]
     writable = [*roots, scratch, *([str(Path(memory).resolve())] if memory else [])]
     # A host import path *inside* a writable root is denied. One that *is* a root (the project
@@ -202,6 +213,13 @@ def spec_for(
     # startup file with a link to one the jail hides, say. Only strictly under one: a root that is
     # the directory or inside it (bh-02 run in its own config) would be left read-only.
     configured = [t for t in trusted if any(t.startswith(r + "/") for r in roots)]
+    # bh-02's own code under a writable root (bh-02 working on its own checkout, an editable
+    # install; or run from a home the checkout is in): an input there could write a module bh-02
+    # imports later (a plugin a layer names, a module a reload imports), so it would choose code
+    # bh-02 runs in its own process. By package, whatever `host` holds: a package an import
+    # hook finds is on no `sys.path`, and a `src` that is the project itself is not denied there.
+    # Only strictly under a root, as `trusted`: one the project is would leave it read-only.
+    running = [c for c in code if any(c.startswith(r + "/") for r in roots)]
     denies = [
         *layers,
         *under,
@@ -209,6 +227,7 @@ def spec_for(
         *(str(Path(root, d).resolve()) for d in config.deny),
         *kept,
         *configured,
+        *running,
     ]
     return Spec(
         fs=FsPolicy(
@@ -249,15 +268,22 @@ def allowlisted(spec: Spec, readable: Sequence[str], hold: Collection[str] = ())
 
 
 def readable_roots(
-    *, argv: Sequence[str], interpreter: Sequence[str], system: Sequence[str]
+    *,
+    argv: Sequence[str],
+    interpreter: Sequence[str],
+    system: Sequence[str],
+    code: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """What a Linux jail reads besides what it may write: the system tree, the interpreter's
     trees (the standard library under `sys.base_prefix`, the environment under `sys.prefix`),
-    and the directory of every absolute path the command names (the worker program's own). Not
-    the host's whole `sys.path`: under pytest or `python -m` it holds the workspace root, and
-    with it the workspace's `local.env`, for nothing a stdlib-only worker needs."""
+    the directory of every absolute path the command names (the worker program's own), and
+    bh-02's own code (`code`: the directory of each package it runs, which the extensions'
+    worker imports cordis from; with an editable install, the workspace's `src/cordis`, which
+    the interpreter's trees don't hold). Not the host's whole `sys.path`: under pytest or
+    `python -m` it holds the workspace root, and with it the workspace's `local.env`, for
+    nothing a worker needs."""
     named = [str(Path(arg).parent) for arg in argv if arg.startswith("/")]
-    return tuple(dict.fromkeys([*system, *interpreter, *named]))
+    return tuple(dict.fromkeys([*system, *interpreter, *named, *code]))
 
 
 def uncovered(denies: Sequence[str]) -> tuple[str, ...]:
@@ -352,12 +378,14 @@ def released_for(free: Sequence[str], still: Sequence[str], others: bool = False
 
 
 def told_reads(trees: Sequence[str], own: Sequence[str]) -> tuple[str, ...]:
-    """The trees a jail reads, as the model is told them: each once, the jail's own directories
-    (its scratch and the kernel's socket, named anew at every start) as `$TMPDIR` alone, so the
-    prompt is the same from one kernel to the next (the claude-code provider starts Claude Code
-    again when it changes)."""
+    """The trees a jail reads, as the model is told them: each once, none that another of them
+    holds (bh-02's own code, or the interpreter's environment, inside the project), the jail's
+    own directories (its scratch and the kernel's socket, named anew at every start) as `$TMPDIR`
+    alone, so the prompt is the same from one kernel to the next (the claude-code provider starts
+    Claude Code again when it changes)."""
     kept = [t for t in trees if not any(t == o or t.startswith(o + "/") for o in own)]
-    return (*dict.fromkeys(kept), "$TMPDIR")
+    outer = [t for t in kept if not any(t.startswith(o + "/") for o in kept)]
+    return (*dict.fromkeys(outer), "$TMPDIR")
 
 
 def git_author(name: str, email: str) -> tuple[tuple[str, str], ...]:
@@ -428,9 +456,9 @@ def mountable(denies: Sequence[str], instead: Mapping[str, str]) -> tuple[str, .
 
 def records_dir(environ: Mapping[str, str], home: str) -> str:
     """Where a Linux jail records the placeholders it made, one file per jail: bh-02's state
-    directory (`$XDG_STATE_HOME/bh-02`, else `~/.local/state/bh-02`), outside every jail."""
-    state = environ.get("XDG_STATE_HOME") or str(Path(home, ".local", "state"))
-    return str(Path(state, "bh-02", "jails"))
+    directory (`$XDG_STATE_HOME/bh-02`, else `~/.local/state/bh-02`; `host_paths.state_home`),
+    outside every jail."""
+    return str(state_home(environ, Path(home)) / "bh-02" / "jails")
 
 
 def identity(found: os.stat_result) -> str:
@@ -578,8 +606,9 @@ class _Jailed:
 
     def reads(self) -> tuple[str, ...]:
         """The trees this start's program can read, when that is all it can read (`told_reads`):
-        a Linux jail's allowlist (the system, the interpreter, the program's own directory) and
-        the roots it may write. Empty on darwin, whose jail reads everything but the secrets."""
+        a Linux jail's allowlist (the system, the interpreter, the program's own directory,
+        bh-02's own code) and the roots it may write. Empty on darwin, whose jail reads
+        everything but the secrets."""
         return self._facts.reads
 
     def writes(self) -> tuple[str, ...]:
@@ -875,10 +904,13 @@ class BrigJail:
             host=host,
             secrets=self._layers.secrets,
             trusted=self._layers.trusted,
+            code=self._layers.code,
             memory=self._layers.memory,
         )
         if self._platform == "linux":
-            readable = readable_roots(argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE)
+            readable = readable_roots(
+                argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE, code=self._layers.code
+            )
             links = [link for arg in argv if arg.startswith("/") for link in self._linked_dirs(arg)]
             hold = [c for c in self._layers.credentials if not Path(c).exists()]
             spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()], hold)

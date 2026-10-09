@@ -60,7 +60,10 @@ the cap cut is told whole with a later input that opens a file it covers). A mem
 model opened itself is in the conversation already and is not told after that, as Claude Code
 does not load one its own tools read. It depends on `transcript`, so a new conversation
 (`/clear`, `/compact`) is told afresh, and a resumed one is not told again what its transcript's
-`tool` entries hold.
+`tool` entries hold: the notes the loop keeps on each (`notes`), where a text of this row's ends
+where the note does, where it was cut short, or where the next text begins (`From FILE,
+instructions ...` or `From FILE, a rule for ...`). An entry from before the loop kept them is
+searched instead.
 
 ## What bh-02 does differently, and why
 
@@ -73,7 +76,8 @@ does not load one its own tools read. It depends on `transcript`, so a new conve
   its root through no link (`O_NOFOLLOW` on every part) and read only when it is a regular file
   with one name; a link there is read only when it leads to another memory file (a CLAUDE.md
   linking to the AGENTS.md beside it, read once). A file of yours whose way passes through the
-  project (`~/.claude/CLAUDE.md` a link into a dotfiles repository bh-02 runs in) is not read,
+  project (`~/.claude/CLAUDE.md` a link into a dotfiles repository bh-02 runs in;
+  `host_paths.passes`, as the models file is walked) is not read,
   and nothing named like a secret (`local.env`, `.env`) ever is.
 - **`/memory` lists, it doesn't open.** bh-02's app owns the terminal, so `/memory` names each
   file, marked by how it loads (✓ at launch, … on demand, · not there, ✗ excluded or not read),

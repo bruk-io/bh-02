@@ -99,11 +99,12 @@ def test_it_asks_the_memory_value_and_tells_each_once() -> None:
     assert told({"code": "1"}) == "" and len(found.asked) == 2  # nothing opened: nothing asked
 
 
-def test_a_resumed_conversation_is_not_told_again_what_its_transcript_was_told() -> None:
+def test_a_resumed_conversation_from_before_the_loop_kept_notes_is_searched_for_what_it_told() -> None:
     """A resumed session (or the row reloaded) starts a new `OnTouch`, but the transcript holds
-    what the model was told: a text a `tool` entry holds whole, after a blank line, is told
-    already. One the person quoted, one an entry starts with (an input printed it), one cut short
-    and one that changed since were not, so each is told. The transcript is read once, at the
+    what the model was told. An entry from before the loop kept `notes` holds it only in its
+    text: a text it holds whole, after a blank line, is told already. One the person quoted, one
+    an entry starts with (an input printed it), one cut short and one that changed since were
+    not, so each is told. The transcript is read once, at the
     first input that opens a file; an empty one (after /clear) tells each afresh."""
     rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand.\n\nNever by script."
     guide = "From src/db/CLAUDE.md, instructions for work under src/db/:\n\nUse the session."
@@ -142,6 +143,54 @@ def test_a_text_cut_back_since_a_resumed_conversation_was_told_it_is_told_again(
     assert OnTouch(_Said(*said), transcript)({"touched": ("/p/src/db/x.py",)}) == rule
 
 
+_RULE = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
+_GUIDE = "From src/db/CLAUDE.md, instructions for work under src/db/:"
+
+
+def test_a_resumed_conversation_reads_what_was_told_from_the_notes_kept_on_each_entry() -> None:
+    """The loop keeps the notes it told with a result on its entry (`notes`), so another row's
+    note sorting after this row's is not taken for more of a text, and a text the result printed
+    is not one told."""
+    guide, other = f"{_GUIDE}\n\nUse the session.", "Zebra: another row's note."
+    printed = "From p.md, instructions for work under p/:\n\nP."
+    transcript = _Kept(
+        {
+            "role": "tool",
+            "content": f"6\n\n{guide}\n\n{_RULE}\n\n{other}",
+            "call_id": "c0",
+            "notes": [f"{guide}\n\n{_RULE}", other],
+        },
+        {"role": "tool", "content": f"7\n\n{printed}", "call_id": "c1", "notes": []},
+    )
+    said = [("/p/CLAUDE.md", guide), ("/p/rule.md", _RULE), ("/p/p.md", printed)]
+    assert OnTouch(_Said(*said), transcript)({"touched": ("/p/src/db/x.py",)}) == printed
+
+
+def test_a_file_cut_back_after_a_paragraph_in_brackets_is_told_again_after_a_resume() -> None:
+    """A file cut back since its text was told is still whole at the start of the old text, the
+    paragraphs now gone after it, however they begin: told again. In one note, a text ends where
+    the note ends, where it was cut short, or where the next text begins, after a blank line, as
+    memory writes them (`From FILE, instructions ...` or `From FILE, a rule for ...`). A file a
+    text imports is part of that text, not the next one."""
+    trimmed = f"{_GUIDE}\n\nUse the session."
+    near = "From .claude/rules/near.md, a rule for near/**:\n\nN."
+    cut = "From cut/CLAUDE.md, instructions for work under cut/:\n\nC."
+    notes = (
+        f"{trimmed}\n\n(Never by script.)",
+        f"{_RULE}\n\nFrom the repository's root, run them with `make migrate`.",
+        f"{near}\n\n{cut}\n... [40 more chars of memory]",
+        f"{trimmed}\n\nFrom docs/db.md, imported by src/db/CLAUDE.md:\n\nOld.",
+    )
+    transcript = _Kept(
+        *(
+            {"role": "tool", "content": f"{n}\n\n{note}", "call_id": f"c{n}", "notes": [note]}
+            for n, note in enumerate(notes)
+        )
+    )
+    said = [("/p/CLAUDE.md", trimmed), ("/p/rule.md", _RULE), ("/p/near.md", near), ("/p/cut.md", cut)]
+    assert OnTouch(_Said(*said), transcript)({"touched": ("/p/src/db/x.py",)}) == f"{trimmed}\n\n{_RULE}"
+
+
 async def test_the_on_touch_row_adds_its_function_to_notes(tmp_path: Path) -> None:
     notes: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
     found = Memory(MemoryConfig(root=str(tmp_path), home=str(tmp_path)))
@@ -154,7 +203,7 @@ class _Prompt:
     def __init__(self) -> None:
         self.sections: list[Callable[[], str]] = []
 
-    def add(self, section: Callable[[], str]) -> Callable[[], None]:
+    def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]:
         self.sections.append(section)
         return lambda: self.sections.remove(section)
 
@@ -183,7 +232,7 @@ async def test_the_memory_row_binds_memory_adds_its_section_and_offers_slash_mem
         ("acquire", commands.register),
     ]
     found = effects[0].args[1]
-    assert isinstance(found, Memory) and effects[1].args[1] == found.text
+    assert isinstance(found, Memory) and effects[1].args[1:] == ("memory", found.text)
     assert "Contents of CLAUDE.md (project instructions" in found.text()
     run = effects[2].args[2]
     assert "  ✓ CLAUDE.md: project instructions, checked into the codebase" in await run("")

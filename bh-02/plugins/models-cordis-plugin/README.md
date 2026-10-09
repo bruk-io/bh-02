@@ -74,7 +74,8 @@ it would let the model choose both, so it is not read (`providers.refused`, `nam
 however it got there: bh-02 run from the home directory (`~/.config` is then in the project),
 `$XDG_CONFIG_HOME` or the row's `models` in the project, or a link into it. It counts as the
 project's when the file as named, or any place reading it goes through (each directory and link
-on the way, links followed, to where it ends), is under the project's root as named or as
+on the way, links followed, to where it ends: `host_paths.passes`, the walk the kernel's startup
+files and memory files outside the project are held to), is under the project's root as named or as
 resolved: the model could repoint a link there, or swap a directory there for one, and so choose
 what is read. Whether the file is there does not matter (the model could write one). The
 built-ins and the row's `extra` still work; the reason is said where the models file's problems

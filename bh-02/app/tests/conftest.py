@@ -26,7 +26,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from cordis import Effects, background, bind, component, use
+from cordis import Effects, acquire, background, bind, component, use
 
 
 class Slow(Exception):
@@ -261,7 +261,7 @@ class Held:
             self.running -= 1
         return "held"
 
-    def add(self, section: Any) -> Any:
+    def add(self, name: str, section: Any) -> Any:
         return lambda: None
 
     def touched(self, paths: Any) -> list[Any]:
@@ -290,9 +290,9 @@ async def echo_model() -> Effects:
 
 @component
 async def layers_seen(*, layers: Any, config: Mapping[str, Any]) -> Effects:
-    """Writes the `layers` value's `credentials`, `secrets` and `trusted` to `config["out"]` as
-    JSON: what the model rows search and what the jail keeps an input from, as the composition
-    was booted."""
+    """Writes the `layers` value's `credentials`, `secrets`, `trusted` and `code` to
+    `config["out"]` as JSON: what the model rows search and what the jail keeps an input from, as
+    the composition was booted."""
     import json
     from pathlib import Path
 
@@ -300,6 +300,7 @@ async def layers_seen(*, layers: Any, config: Mapping[str, Any]) -> Effects:
         "credentials": list(layers.credentials),
         "secrets": list(layers.secrets),
         "trusted": list(layers.trusted),
+        "code": list(layers.code),
     }
     Path(config["out"]).write_text(json.dumps(seen))
     return
@@ -409,6 +410,17 @@ class OneInput:
 @component(provides=("model",))
 async def one_input_model() -> Effects:
     yield bind("model", OneInput())
+
+
+def zebra(input: Mapping[str, Any]) -> str:
+    """A `memory` function's note that sorts after the context files' (`From ...`)."""
+    return "Zebra: another row's note." if input.get("touched") else ""
+
+
+@component
+async def another_note(*, notes: Any) -> Effects:
+    """A layer's own row adding to `notes`: `zebra`'s note with each input that opened a file."""
+    yield acquire(notes.add, zebra)
 
 
 # What the compacting model was sent: each request's messages and the names of the tools offered.

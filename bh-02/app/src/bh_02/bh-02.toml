@@ -1,9 +1,10 @@
-# The shipped composition: bh-02 is a CodeAct harness in a Textual app. bh-02's own loop drives
-# Claude through Claude Code (the Claude Agent SDK, on the subscription), one model step at a
-# time; the model has one tool, `python(code)`, through standard tool calling, and its inputs run
-# in a persistent kernel inside a brig jail. A row's id is its role; `use`
-# is which plugin fills it, as `plugin:component` (a `cordis.plugins` entry point) or
-# `module:attribute`. Order carries no meaning: dependencies decide what activates when.
+# The shipped composition, a Textual app with CodeAct (the `python` tool) as its default.
+# bh-02's own loop drives Claude through Claude Code (the Claude Agent SDK, on the
+# subscription), one model step at a time; the model has one tool, `python(code)`, through
+# standard tool calling, and its inputs run in a persistent kernel inside a brig jail. A row's
+# id is its role; `use` is which plugin fills it, as `plugin:component` (a `cordis.plugins`
+# entry point) or `module:attribute`. Order carries no meaning: dependencies decide what
+# activates when.
 # A session's own layer and `bh-02 --patch mine.toml` are layers over this one.
 
 # The model: bh-02's own loop (`agent:loop`: steps classified, each call run as an input in the
@@ -122,8 +123,8 @@ id = "status"
 use = "tui:status"
 
 # The system prompt: who the model is, where it is working (the directory and the git branch),
-# then the sections rows add (memory's, how to extend bh-02). A broker, depending on its config
-# alone.
+# then the sections rows add, sorted by name (how to extend bh-02, then memory's). A broker,
+# depending on its config alone.
 [[plugin]]
 id = "system"
 use = "agent:system"

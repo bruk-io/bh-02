@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from commands_cordis_plugin.operations import Loader, Models, Operator, OperatorConfig
+from commands_cordis_plugin.operations import Loader, Models, Operator, OperatorConfig, unfinished
 from commands_cordis_plugin.registry import Commands, CommandSpec, Run
 from commands_cordis_plugin.shell_command import ShellCommandConfig, run_line
 from cordis import Effects, Row, acquire, background, bind, component
@@ -31,6 +31,13 @@ class _Claimant(Protocol):
     """What a row that takes the lines starting with a prefix needs of the `commands` value."""
 
     def claim(self, prefix: str, spec: CommandSpec, run: Run) -> Callable[[], None]: ...
+
+
+@runtime_checkable
+class _Notices(Protocol):
+    """What the operator needs of the `output` value: a line told to the person."""
+
+    async def notice(self, message: str) -> None: ...
 
 
 @component(provides=("commands",))
@@ -57,14 +64,14 @@ async def shell_command(*, commands: _Claimant, config: ShellCommandConfig) -> E
 
 @component
 async def operator(
-    *, commands: _Registrar, loader: Loader, models: Models, config: OperatorConfig
+    *, commands: _Registrar, loader: Loader, models: Models, output: _Notices, config: OperatorConfig
 ) -> Effects:
     """Fills an `operator` row: `use = "commands:operator"`. /rows, /explain, /restart, /clear
     and /model, over the loader that mounted it and the `models` there are. Its restarts are its
-    own background work. It depends on `models`, not `model`, so a switch never reloads it."""
+    own background work, run after the command has answered, so one that fails is told to the
+    person (`output.notice`). It depends on `models`, not `model`, so a switch never reloads it."""
     jobs: asyncio.Queue[Job] = asyncio.Queue()
-    failures: list[str] = []
-    yield background(perform(jobs, failures.append))
+    yield background(perform(jobs, lambda why: output.notice(unfinished(why))))
     files = [str(path) for path in loader.config.layers] if isinstance(loader, _Mounting) else []
     for spec, run in Operator(
         loader, models, config, jobs, set_model, lambda layer, rid: shadowing(files, layer, rid)

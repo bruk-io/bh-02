@@ -3,9 +3,10 @@ id: TASK-0054
 title: >-
   Let the extensions worker import cordis under a Linux jail with an editable
   install
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-07 14:43'
+updated_date: '2026-10-09 03:05'
 labels:
   - extensions
   - brig
@@ -24,7 +25,13 @@ Under a Linux brig:jail (reads by allowlist: the system, the interpreter, the pr
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Under a Linux jail with an editable install, an extension loads (the jail's read allowlist names the source directories the worker imports from, or the worker is given what it needs another way)
-- [ ] #2 Those directories are readable only, never writable, by an input
-- [ ] #3 A test boots the real extensions worker under bubblewrap with an editable install and loads an extension
+- [x] #1 Under a Linux jail with an editable install, an extension loads (the jail's read allowlist names the source directories the worker imports from, or the worker is given what it needs another way)
+- [x] #2 Those directories are readable only, never writable, by an input
+- [x] #3 A test boots the real extensions worker under bubblewrap with an editable install and loads an extension
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Ported from 4a5a364 in 6f0dcab. A Linux jail's read allowlist names layers.code, read-only, so the extensions worker imports cordis from an editable install's src directories. Tests: the real extensions worker under bubblewrap with an editable install loads an extension, and a Linux jail reads bh-02's own code and writes none of it.
+<!-- SECTION:FINAL_SUMMARY:END -->

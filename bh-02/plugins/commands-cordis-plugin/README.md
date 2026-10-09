@@ -6,7 +6,7 @@ Slash commands and line prefixes, as a broker (paper 6.2), on `cordis-helpers`' 
 | Row | Binds / registers | Consumes |
 |---|---|---|
 | `commands:registry` | `commands`: `register(spec, run) -> remover`, `claim(prefix, spec, run) -> remover`, `specs()`, `claims(line)`, `run(line)`, `take_for_model()`; `/help` is its own | |
-| `commands:operator` | registers `/rows`, `/explain ROW`, `/restart ROW`, `/clear`, `/model [NAME]`; config: `layer`, `model_row` (`model`), `clear`, `forget` | `commands`, `loader`, `models` |
+| `commands:operator` | registers `/rows`, `/explain ROW`, `/restart ROW`, `/clear`, `/model [NAME]`; a restart one of them queued that fails is told to the person; config: `layer`, `model_row` (`model`), `clear`, `forget` | `commands`, `loader`, `models`, `output` (`notice`) |
 | `commands:shell_command` | claims `!`: `!COMMAND` runs in the person's shell; config: `prefix` (`!`), `cwd` (`.`, the project), `timeout` (120 s), `shell` (empty: `$SHELL`, else `/bin/sh`) | `commands` (`claim`) |
 
 A row offers commands by `acquire(commands.register, spec, run)`, so a row that leaves takes

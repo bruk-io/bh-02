@@ -26,8 +26,8 @@ not an import error.
 ## How the family stays apart
 
 No package imports another (`plugin-layering`; the units are every package under a gated `src/`,
-the libraries `cordis` and `cordis_helpers` are what all may import). Agreement is by name and
-shape, in `CONTRACTS.md`:
+the libraries `cordis`, `cordis_helpers` and `host_paths` are what all may import). Agreement is
+by name and shape, in `CONTRACTS.md`:
 
 - **A consumer declares what it needs** as a `runtime_checkable` Protocol of its own, on the
   parameter: `session(*, loop: Loop, ...)` keys on `"loop"` and cordis checks the bound value
@@ -43,6 +43,12 @@ shape, in `CONTRACTS.md`:
   `python.py`) is a plain library that must not import cordis
   (`cordis-in-wiring-only`); `wiring.py` is the components, which `bind` a value or `acquire` a
   registration.
+- **What every package must compute alike is a library function, not a key.** Where the
+  person's config and state directories are (`host_paths.config_home`, `state_home`) and every
+  place reading a file goes through (`walked`, `passes`) decide whether the host trusts the
+  models file, the person's startup file and a memory file outside the project; a copy per
+  plugin that drifted would be a hole. A key would not do: the kernel depends on its jail alone
+  and `system` on nothing, so reading one would add reloads, and the walk is code, not a value.
 - A plugin's tests use fakes from a package's own `testing` module (`chat_cordis_plugin.testing`, `bh_02.testing`), never another package's tests.
 
 **The model has one tool, and it carries code.** The kernel is the tool: `kernel:kernel` binds
@@ -64,7 +70,8 @@ nothing. Keep registrations commutative: each takes its own entry, never an orde
 
 ## The running harness
 
-The shell's base layer is the whole harness (CodeAct always); each later file (the session's own
+The shell's base layer is the whole shipped composition (CodeAct, the `python` tool, is its
+default, not a requirement); each later file (the session's own
 `session.toml`, `--patch`) is a patch over it. The loader watches every layer file: editing one,
 by hand or by `/model`, reshapes the running composition (a jailed input can't write one: the
 jail denies them, and on Linux a save by rename ends the jail so the next input's holds the new
@@ -90,8 +97,9 @@ of the person's next message (`take_for_model`), so `loop.reply` is still given 
 nothing reaches a turn. `system`
 (`agent:system`) is organised as Claude Code's is: who the model is (the model in bh-02) and
 what bh-02 is made of, the working directory and branch, then the sections rows
-add (`system.add`): memory's, then the extensions row's (how to extend bh-02 and the part of
-cordis that takes). Memory (`memory:memory`) is Claude Code's, as its docs describe it: the
+add (`system.add(name, section)`), sorted by name so the order rows add them in means nothing:
+the extensions row's (how to extend bh-02 and the part of cordis that takes, then each
+extension's own), then memory's. Memory (`memory:memory`) is Claude Code's, as its docs describe it: the
 managed policy's CLAUDE.md, yours (`~/.claude/CLAUDE.md` and `~/.claude/rules/`), each
 directory's `CLAUDE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md` from the filesystem's root
 down to the project's, the project's `.claude/rules/` without `paths`, AGENTS.md where there is
@@ -109,8 +117,8 @@ CodeAct tool bh-02 ships, a Python REPL of the model's own that persists for thi
 and how to use it (work in Python, not through a shell, with an example input; build up state;
 capture a program's output, which otherwise never reaches the model; give it a timeout; it is
 plain Python, not IPython), and under a Linux jail what its code can read (`kernel.reads()`:
-the system, the interpreter, the project; no home directory). After each input, the loop asks
-`notes` (`agent:notes`, a broker) what to tell the model with its result: each function rows
+the system, the interpreter, bh-02's own code, the project; no home directory). After each
+input, the loop asks `notes` (`agent:notes`, a broker) what to tell the model with its result: each function rows
 add there gets the input's code, its
 result and `kernel.touched()` (the project files Python in the input opened, heard by an audit
 hook in the worker; a shell command's own reads are not heard) and may add a note, never change
@@ -120,8 +128,9 @@ on-demand loading; one that input's 20,000-character note cut short, or left out
 the next that opens a file it covers; one the model opened itself is not told after); it has no
 config of its own and asks the `memory` value (`memory.touched(paths)`). It depends on `transcript`, so `/clear` and `/compact`
 start it afresh, and reads its `messages` once, at the first input that opens a file, so a
-resumed session is not told again a note its
-transcript's `tool` entries hold; only layer rows add to `notes`, since its functions
+resumed session is not told again a note its transcript's `tool` entries hold: the loop keeps
+the notes it told on each as a list (`notes`) beside the text the model reads, and an entry from
+before it did is searched instead; only layer rows add to `notes`, since its functions
 run in bh-02's process. The loop reads the prompt before each message the model reads but sends
 the one the conversation began with (the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
 switched, CLAUDE.md edited) is told as a note on that message (`prompt.changes`), because a
@@ -158,7 +167,7 @@ finding the row's file from the row as the loader mounted it (`loader.rows`); it
 summary, the step's usage as one event, then `restarting`, and a restart that fails is told
 through `output.notice`.
 The ui `observe`s lifecycle events (cordis's seventh effect) to show rows reloading.
-`agent:loop` classifies each turn (`stops.classify`, after ../harness/ARCHITECTURE.MD) and replays
+`agent:loop` classifies each model step (`stops.classify`) and replays
 a provider's message as it came.
 
 **The TUI.** `tui:app` runs a Textual app on cordis's own event loop and binds `input`, `output`
@@ -202,9 +211,12 @@ says which, after what the opening had to tell by then (that the REPL was starte
 why: told nowhere else). `instructions()` tells
 the model only the project's is its to edit. Only `brig_cordis_plugin` imports brig
 (`brig-one-adapter`). darwin is jailed by seatbelt (reads by denylist), Linux by bubblewrap
-(reads by allowlist: the system, the interpreter, the project; the policy, `spec_for`, is the
-same). The Linux jail's tests skip on darwin; `scripts/linux-jail-check` runs them in a
-container with bubblewrap.
+(reads by allowlist: the system, the interpreter, bh-02's own code, the project; the policy,
+`spec_for`, is the same). bh-02's own code is `layers.code`, the directory of every package it
+runs (`bh_02.bootstrap.code_directories`): with an editable install those are the workspace's
+`src/<package>` directories, outside the interpreter's trees, and the extensions' worker
+imports cordis from one, so a Linux jail reads them, read-only. The Linux jail's tests skip on
+darwin; `scripts/linux-jail-check` runs them in a container with bubblewrap.
 
 **The model's own plugins.** `extensions:extensions` loads the cordis components the model
 writes to `.bh-02/plugins/NAME.py` while bh-02 runs (looked at every half second; changed,
@@ -318,9 +330,22 @@ The kernel never gets it:
   startup file that is a link to a key the jail hides. On Linux the directory is held like any
   write deny there (a mount the host can undo, the directories above it pinned). Not when bh-02
   runs in that directory or below it: denying it would leave the project read-only.
+- `brig:jail` denies writing bh-02's own code where it is under a root an input may write
+  (bh-02 working on its own checkout, an editable install, or run from a home the checkout is
+  in): `layers.code`, the directory of every package bh-02 runs (`bh_02`, cordis,
+  cordis_helpers, brig, host_paths and each installed plugin's), each as named and as it resolves, found by
+  name from installed metadata (`bh_02.bootstrap.code_directories`; `importlib.util.find_spec`
+  imports nothing). bh-02 imports their modules in its own process (a plugin a layer names
+  later, say): an input that wrote one, or a module beside one, would choose code bh-02 runs.
+  By package, whatever the host's `sys.path` holds (a package an
+  import hook finds is on none, and a `src` that is the project is not denied as a host import
+  path), held on Linux like any write deny there. Not one the project is (bh-02 run in a
+  package's own directory), which would leave the project read-only; then the context plugin's
+  own rule holds: it reads its shipped file once, before any of the model's code runs, so what
+  an input wrote waits for the next start, as an edit to any module does.
 - An approved `--no-jail` input runs with the person's permissions and could open `local.env`
-  itself, or rewrite bh-02's config directory; only its environment is scrubbed, and every
-  input is put to the person, its code shown, before it runs.
+  itself, or rewrite bh-02's config directory or its own code; only its environment is
+  scrubbed, and every input is put to the person, its code shown, before it runs.
 
 Without a token the row still binds, and each step answers with an `authentication_failed` error
 naming the variable, `local.env` and `claude setup-token`.

@@ -9,6 +9,7 @@ on them. This page is how to find your way round it, set it up, and know when a 
 |---|---|
 | `libs/cordis/` | the composition framework: components, effects, keys, fibers, rows, layers, the loader |
 | `libs/cordis-helpers/` | small patterns on cordis with no domain in them: a broker's registry, a set of hooks, a row's own queue of work |
+| `libs/host-paths/` | where the person's directories are, and every place reading a file goes through, for every package that trusts a file by where it is; standard library only |
 | `libs/brig/` | a sandbox library that knows nothing of cordis or any app |
 | `bh-02/app/` | the `bh-02` command (package `bh_02`): the shell that reads the layers and boots them |
 | `bh-02/plugins/` | bh-02's plugins, one workspace member each, imported as `<name>_cordis_plugin` |
