@@ -60,7 +60,10 @@ the cap cut is told whole with a later input that opens a file it covers). A mem
 model opened itself is in the conversation already and is not told after that, as Claude Code
 does not load one its own tools read. It depends on `transcript`, so a new conversation
 (`/clear`, `/compact`) is told afresh, and a resumed one is not told again what its transcript's
-`tool` entries hold.
+`tool` entries hold: the notes the loop keeps on each (`notes`), where a text of this row's ends
+where the note does, where it was cut short, or where the next text begins (`From FILE,
+instructions ...` or `From FILE, a rule for ...`). An entry from before the loop kept them is
+searched instead.
 
 ## What bh-02 does differently, and why
 

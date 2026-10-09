@@ -1272,3 +1272,51 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     assert again.startswith(told) and again.endswith("\n[2] 6\n[3] 0\n"), again  # resumed: none again
     assert afresh.startswith(told) and afresh.endswith("\n[2] 6\n[3] 0\n"), afresh  # /clear: told afresh
     assert "the conversation was cleared; starting afresh: loop, transcript, kernel" in fragile.NOTES
+
+
+async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_on_their_entries(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The shipped loop, transcript, `notes` and memory rows, and a layer's own row adding to
+    `notes` whose note sorts after memory's, booted twice over one transcript file: a session,
+    then its resume. The loop keeps the notes it told with a result on its entry (`notes`), the
+    result and the notes still the text the model reads. The resume reads them there, not in the
+    text: the rule for src/db, which the other row's note followed, is not told again; the
+    CLAUDE.md, cut back since after a paragraph in brackets, is."""
+    project, home = tmp_path / "project", tmp_path / "home"
+    (project / "src" / "db").mkdir(parents=True)
+    (project / ".claude" / "rules").mkdir(parents=True)
+    home.mkdir()
+    (project / "src" / "db" / "models.py").write_text("X = 1\n")
+    guidance = project / "src" / "db" / "CLAUDE.md"
+    guidance.write_text("Use the session.\n\n(Never by script.)")
+    (project / ".claude" / "rules" / "db.md").write_text("---\npaths: src/db/**\n---\nMigrations by hand.")
+    history = tmp_path / "transcript.jsonl"
+    opens = "len(open('src/db/models.py').read())"
+    session = (
+        f'[[plugin]]\nid = "kernel"\nconfig = {{ root = "{project}" }}\n'
+        f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
+        f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+        '[[plugin]]\nid = "another-note"\nuse = "fragile:another_note"\n'
+    )
+    guide = "From src/db/CLAUDE.md, instructions for work under src/db/:"
+    rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
+    other, trimmed = "Zebra: another row's note.", f"{guide}\n\nUse the session."
+    _answers(True)
+    await run([*layers(), _inputs(composition, opens, extra=session)], [Row("chat", config={"prompt": "go"})])
+
+    guidance.write_text("Use the session.")  # cut back while no session runs
+    _answers(True)  # the resume runs the second input only: the first has its result
+    await run(
+        [*layers(), _inputs(composition, opens, opens, extra=session)], [Row("chat", config={"prompt": "go"})]
+    )
+    out = _shown()
+    assert out.endswith(f"\n[1] 6\n\n{trimmed}\n\n{other}\n"), out
+    first, resumed = [
+        entry for line in history.read_text().splitlines() if (entry := json.loads(line))["role"] == "tool"
+    ]
+    assert first["notes"] == [f"{guide}\n\nUse the session.\n\n(Never by script.)\n\n{rule}", other]
+    assert resumed["notes"] == [trimmed, other]
+    for entry in (first, resumed):
+        assert entry["content"] == "\n\n".join(["6", *entry["notes"]])  # what the model reads, as before

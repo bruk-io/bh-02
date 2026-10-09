@@ -26,7 +26,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from cordis import Effects, background, bind, component, use
+from cordis import Effects, acquire, background, bind, component, use
 
 
 class Slow(Exception):
@@ -410,6 +410,17 @@ class OneInput:
 @component(provides=("model",))
 async def one_input_model() -> Effects:
     yield bind("model", OneInput())
+
+
+def zebra(input: Mapping[str, Any]) -> str:
+    """A `memory` function's note that sorts after the context files' (`From ...`)."""
+    return "Zebra: another row's note." if input.get("touched") else ""
+
+
+@component
+async def another_note(*, notes: Any) -> Effects:
+    """A layer's own row adding to `notes`: `zebra`'s note with each input that opened a file."""
+    yield acquire(notes.add, zebra)
 
 
 # What the compacting model was sent: each request's messages and the names of the tools offered.

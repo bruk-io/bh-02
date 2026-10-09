@@ -8,7 +8,7 @@ not told after that, as Claude Code does not load one its own tools read.
 The memory files are the `memory` value's (`Memory.touched`), so the memory row's `root`, `home`,
 `instruction_files` and `excludes` reach the prompt and this alike. What this keeps is what it
 told this conversation; what the conversation was told before it began (a resumed session's) is
-in the `transcript`'s `tool` entries, with the results.
+in the `transcript`'s `tool` entries, each the notes told with a result (`notes`).
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -18,10 +18,17 @@ from typing import Any, Protocol, runtime_checkable
 __all__ = ["Memory", "Notes", "OnTouch", "Transcript"]
 
 _MAX_CHARS = 20_000  # what one input's result is told at most, as the prompt's sections by default
-# What may follow a text told whole in a `tool` entry, where its note ends (the entry's end aside):
-# the mark of a note cut short (`OnTouch`'s), or another note: bh-02's begin with "(" (a shell
-# hint, a function that failed, a change in the instructions), memory's with "From ".
-_ENDS = ("\n... [", "\n\n(", "\n\nFrom ")
+_CUT = "\n... ["  # the mark of a note cut short (`_cut`'s)
+# How a text begins in a note of this row's, so where the one before it ends: a first line `From
+# FILE, instructions ...` or `From FILE, a rule for ...` (`Memory.touched`). A file a text imports
+# follows within that text (`From FILE, imported by ...`, `(bh-02 did not import ...)`), so it
+# begins nothing: a text whose imports changed since reads as changed, and is told again.
+_FROM, _HEADS = "From ", (", instructions ", ", a rule for ")
+# What may follow a text told whole in a `tool` entry from before the loop kept `notes`, where its
+# note ends (the entry's end aside): the mark of a note cut short, or another note: bh-02's begin
+# with "(" (a shell hint, a function that failed, a change in the instructions), memory's with
+# "From ".
+_ENDS = (_CUT, "\n\n(", "\n\nFrom ")
 
 
 @runtime_checkable
@@ -45,24 +52,63 @@ class Memory(Protocol):
 class Transcript(Protocol):
     """What the on-touch row needs of the `transcript` value (CONTRACTS.md: transcript): the
     conversation so far, whose `tool` entries carry each input's result and the notes told with
-    it."""
+    it (`notes`)."""
 
     @property
     def messages(self) -> Sequence[Mapping[str, Any]]: ...
 
 
-def _results(messages: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
-    """What each input in `messages` (a transcript's) was answered with: its result, then the
-    notes told with it, each after a blank line (the loop's `tool` entries)."""
-    return tuple(str(m.get("content") or "") for m in messages if m.get("role") == "tool")
+def _before(messages: Iterable[Mapping[str, Any]]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """What the inputs in `messages` (a transcript's) were told: the notes the loop kept on each
+    `tool` entry (`notes`), and the text of each entry from before it kept them (the input's
+    result, then the notes told with it, each after a blank line), which is searched instead."""
+    notes: list[str] = []
+    texts: list[str] = []
+    for m in messages:
+        if m.get("role") != "tool":
+            continue
+        kept = m.get("notes")
+        if isinstance(kept, list | tuple):
+            notes += [note for note in kept if isinstance(note, str)]
+        else:
+            texts.append(str(m.get("content") or ""))
+    return tuple(notes), tuple(texts)
+
+
+def _holds(note: str, text: str) -> bool:
+    """Whether `note`, a note told with a result, tells `text` whole: as one of the texts this
+    row's notes join with a blank line (`_cut`), at the note's start or after a blank line, and
+    ending where the note does, where it was cut short, or where the next text begins (`_begins`):
+    not followed by more of itself (a file cut back since: the paragraphs now gone follow it)."""
+    at = note.find(text)
+    while at != -1:
+        end = at + len(text)
+        if (at == 0 or note[at - 2 : at] == "\n\n") and (
+            end == len(note)
+            or note.startswith(_CUT, end)
+            or (note.startswith("\n\n", end) and _begins(note, end + 2))
+        ):
+            return True
+        at = note.find(text, at + 1)
+    return False
+
+
+def _begins(note: str, at: int) -> bool:
+    """Whether a text of this row's begins at `at` in `note`: `From FILE, ...` with one of
+    `_HEADS` in its first line."""
+    if not note.startswith(_FROM, at):
+        return False
+    ends = note.find("\n", at)
+    line = note[at:] if ends == -1 else note[at:ends]
+    return any(head in line for head in _HEADS)
 
 
 def _told_in(results: Sequence[str], text: str) -> bool:
-    """Whether `text` was told in `results` (`_results`): its exact text, after a blank line,
-    where a note ends (the entry's end, or `_ENDS`). Not at an entry's start, nor cut short (a note
-    over `_MAX_CHARS`), nor followed by more of itself (a file cut back since: the paragraphs now
-    gone follow it). Where the result ends is not marked, so a text an input printed after a blank
-    line counts too."""
+    """Whether `text` was told in `results`, the text of `tool` entries from before the loop kept
+    `notes` (`_before`): its exact text, after a blank line, where a note ends (the entry's end, or
+    `_ENDS`). Not at an entry's start, nor cut short (a note over `_MAX_CHARS`), nor followed by
+    more of itself (a file cut back since: the paragraphs now gone follow it). Where the result
+    ends is not marked, so a text an input printed after a blank line counts too."""
     note = f"\n\n{text}"
     for result in results:
         at = result.find(note)
@@ -96,8 +142,8 @@ class OnTouch:
     itself is told once, cut.
 
     What the conversation was told before this began (a resumed session's, or this one's before
-    the row reloaded) is in its `transcript`: read at the first input that opens a file, and
-    each text checked against it until it is told."""
+    the row reloaded) is in its `transcript`, the notes the loop kept on each `tool` entry: read
+    at the first input that opens a file, and each text checked against them until it is told."""
 
     def __init__(self, memory: Memory, transcript: Transcript) -> None:
         self._memory = memory
@@ -108,23 +154,27 @@ class OnTouch:
         # (file, what was said), told this conversation (whole, or as much as a note holds) or
         # before this began. Called on the loop's `executor`, one call at a time, so it takes no lock.
         self._told: set[tuple[str, str]] = set()
-        # what the inputs before this began were answered with: None until the first input that
-        # opens a file reads them
-        self._before: tuple[str, ...] | None = None
+        # what the inputs before this began were told (`_before`): None until the first input
+        # that opens a file reads it
+        self._before: tuple[tuple[str, ...], tuple[str, ...]] | None = None
 
     def __call__(self, input: Mapping[str, Any]) -> str:
         touched = input.get("touched") or ()
         if not touched:
             return ""
         if self._before is None:
-            self._before = _results(self._transcript.messages)
-        before = self._before
+            self._before = _before(self._transcript.messages)
+        notes, texts = self._before
         self._opened.update(str(t) for t in touched)
         said = self._memory.touched([str(t) for t in touched])
         unseen = [
             item for item in dict.fromkeys(said) if item not in self._told and item[0] not in self._opened
         ]
-        self._told.update(item for item in unseen if _told_in(before, item[1]))
+        self._told.update(
+            item
+            for item in unseen
+            if any(_holds(note, item[1]) for note in notes) or _told_in(texts, item[1])
+        )
         new = [item for item in unseen if item not in self._told]
         note, told = _cut([text for _, text in new])
         self._told.update(new[:told])

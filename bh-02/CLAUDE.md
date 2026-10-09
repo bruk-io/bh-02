@@ -122,8 +122,9 @@ on-demand loading; one that input's 20,000-character note cut short, or left out
 the next that opens a file it covers; one the model opened itself is not told after); it has no
 config of its own and asks the `memory` value (`memory.touched(paths)`). It depends on `transcript`, so `/clear` and `/compact`
 start it afresh, and reads its `messages` once, at the first input that opens a file, so a
-resumed session is not told again a note its
-transcript's `tool` entries hold; only layer rows add to `notes`, since its functions
+resumed session is not told again a note its transcript's `tool` entries hold: the loop keeps
+the notes it told on each as a list (`notes`) beside the text the model reads, and an entry from
+before it did is searched instead; only layer rows add to `notes`, since its functions
 run in bh-02's process. The loop reads the prompt before each message the model reads but sends
 the one the conversation began with (the transcript's first `system` entry): a prompt that changes (an extension loaded, a branch
 switched, CLAUDE.md edited) is told as a note on that message (`prompt.changes`), because a

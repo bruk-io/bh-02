@@ -327,9 +327,10 @@ read or wrote, not what a shell command did). `memory:on_touch` adds memory's on
 `paths` match, arrives whole with the result of the first input that opens a file it covers, as
 Claude Code's do when its Read, Write or Edit touches one. It asks the `memory` value
 (`touched`), so the memory row's config (`root`, `home`, `instruction_files`, `excludes`) holds
-for the prompt and for this. It
-depends on `transcript`, so after `/clear` or `/compact` it tells the new conversation again, and reads what it
-holds, so a resumed session (`--resume`) is not told again a note told with an earlier result.
+for the prompt and for this. It depends on `transcript`, so after `/clear` or `/compact` it tells
+the new conversation again, and reads the notes the loop keeps with each result (`notes` on the
+result's entry), so a resumed session (`--resume`) is not told again a note told with an earlier
+result.
 
 The kernel is a worker process started by the `jail` row. `brig:jail` confines it: writes
 only inside the project (and never to the layer files, the host's import paths, bh-02's own

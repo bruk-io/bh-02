@@ -57,10 +57,10 @@ _PROGRAM = re.compile(r"\b(?:subprocess\.(?:run|call|check_call|Popen)|os\.syste
 _CAPTURED = re.compile(r"capture_output\s*=\s*True|stdout\s*=|check_output\(")
 _EXCEPTION = re.compile(r"^(\w+(?:\.\w+)*(?:Error|Exception|Exit|Interrupt|Expired)):", re.M)
 _WRITES = re.compile(r"write_text\(|open\([^)]*['\"][wa]")
-# What `notes` added after a result: the shell hint, in a transcript from before bh-02 dropped it
-# (once on the line after the result, later after a blank line; the notes are sorted, so any
-# on-touch note follows it), and memory's on-touch notes (a transcript from before the memory
-# plugin says `guidance for work under`).
+# What `notes` added after a result, in an entry from before the loop kept its notes as `notes`:
+# the shell hint, in a transcript from before bh-02 dropped it (once on the line after the result,
+# later after a blank line; the notes are sorted, so any on-touch note follows it), and memory's
+# on-touch notes (a transcript from before the memory plugin says `guidance for work under`).
 _NOTE = re.compile(r"\n\n?\(this input ran .+ through a shell\..*\Z", re.S)
 _TOUCHED = re.compile(r"\n\nFrom \S+, (?:guidance for work under|instructions for work under|a rule for) .*\Z", re.S)
 _CHANGED = "(bh-02: your instructions have changed since this conversation began."  # the loop's note
@@ -228,7 +228,7 @@ def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
         elif role == "tool":
             call = calls.get(str(message.get("call_id")), {})
             code = str((call.get("input") or {}).get("code") or "")
-            yield from _one_input(session, code, content)
+            yield from _one_input(session, code, _result(message))
         if role == "assistant":
             for call in message.get("tool_calls") or ():
                 code = str((call.get("input") or {}).get("code") or "")
@@ -251,12 +251,23 @@ def _shell_shaped(code: str) -> bool:
     )
 
 
+def _result(message: Message) -> str:
+    """What a `tool` entry's input gave, without what bh-02 told with it: the notes the loop kept on
+    the entry (`notes`), which its text has after the result, and any change in the instructions
+    after them. An entry from before the loop kept them has its notes only in its text, cut from it
+    by what they begin with (`_NOTE`, `_TOUCHED`)."""
+    told = str(message.get("content") or "").split(f"\n\n{_CHANGED}", 1)[0]
+    notes = message.get("notes")
+    if isinstance(notes, list):
+        return told.removesuffix("".join(f"\n\n{note}" for note in notes))
+    return _TOUCHED.sub("", _NOTE.sub("", told))
+
+
 def _one_input(session: str, code: str, result: str) -> Iterator[Finding]:
     if _shell_shaped(code):
         yield Finding("shell_shaped", session, _short(code))
     if found := _shelled(code):
         yield Finding("shell_for_files", session, f"{', '.join(c for c, _ in found)}: {_short(code, 100)}")
-    result = _TOUCHED.sub("", _NOTE.sub("", result.split(f"\n\n{_CHANGED}", 1)[0]))
     if result.startswith("error: there is no tool named"):
         yield Finding("no_such_tool", session, _short(result))
         return
