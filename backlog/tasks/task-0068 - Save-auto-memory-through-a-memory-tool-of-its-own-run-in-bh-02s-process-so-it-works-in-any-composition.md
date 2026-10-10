@@ -28,7 +28,7 @@ Decided with the owner (2026-10-10): the tool runs in bh-02's process, not in th
 ## Open questions
 - [ ] The approval case's shape: a `runs` value of its own, or the request naming the one directory the call writes beneath, which `approval.unasked` checks against `host.auto_memory`.
 - [ ] What happens to a hand-written MEMORY.md already there: regenerate over it, or keep its lines that point at no topic file.
-- [ ] With the python tool present: point saves at `memory` in the prompt only, or also check the memory files an input wrote (a `notes` function; python's `touched` covers only the project root, so it would look at the directory).
+- [ ] With the python tool present: point saves at `memory` in the prompt only, or also check the memory files an input wrote (an `asides` function; python's `touched` covers only the project root, so it would look at the directory).
 - [x] Fold in the prompt gaps found against Claude Code's (check for an existing memory first, a **Why:** and **How to apply:** body, absolute dates, verify a memory against the code before acting on it), or leave them to a task of their own. Answered by the owner (2026-10-10): a task of their own, TASK-0069.
 <!-- SECTION:DESCRIPTION:END -->
 
