@@ -151,7 +151,7 @@ class Memory:
     def touched(self, paths: Sequence[str]) -> list[tuple[str, str]]:
         """What loads on demand for `paths` (absolute: the files an input opened), each (file,
         text), broadest first: a subdirectory's instructions and rules, and the rules whose
-        `paths` match. Called in the loop's worker thread (through the on-touch row's `notes`
+        `paths` match. Called in the loop's worker thread (through the on-touch row's `asides`
         function), so it must not need the event loop."""
         root, home = self.places()
         found = roots(root)

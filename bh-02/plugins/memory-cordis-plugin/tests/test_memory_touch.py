@@ -61,7 +61,7 @@ def test_a_memory_file_the_model_opened_itself_is_not_told_after(tmp_path: Path)
 
 
 def test_a_text_the_cap_cut_is_told_whole_with_a_later_input_that_opens_its_files(tmp_path: Path) -> None:
-    """Two 12,000-character files, and one input that opens a file under each: the note holds the
+    """Two 12,000-character files, and one input that opens a file under each: the aside holds the
     first whole and is cut in the second, so the second is not told yet, and a later input that
     opens a file under it is told it whole. One longer than the cap by itself is told once, cut."""
     told, root = _project(tmp_path)
@@ -99,9 +99,9 @@ def test_it_asks_the_memory_value_and_tells_each_once() -> None:
     assert told({"code": "1"}) == "" and len(found.asked) == 2  # nothing opened: nothing asked
 
 
-def test_a_resumed_conversation_from_before_the_loop_kept_notes_is_searched_for_what_it_told() -> None:
+def test_a_resumed_conversation_from_before_the_loop_kept_asides_is_searched_for_what_it_told() -> None:
     """A resumed session (or the row reloaded) starts a new `OnTouch`, but the transcript holds
-    what the model was told. An entry from before the loop kept `notes` holds it only in its
+    what the model was told. An entry from before the loop kept `asides` holds it only in its
     text: a text it holds whole, after a blank line, is told already. One the person quoted, one
     an entry starts with (an input printed it), one cut short and one that changed since were
     not, so each is told. The transcript is read once, at the
@@ -128,9 +128,9 @@ def test_a_resumed_conversation_from_before_the_loop_kept_notes_is_searched_for_
 
 def test_a_text_cut_back_since_a_resumed_conversation_was_told_it_is_told_again() -> None:
     """A rule cut back to its first paragraphs since the conversation was told it is still whole
-    in the old note, but with the paragraph now gone after it: told again. A text counts as told
-    only where its note ends: at the entry's end, at the mark of a note cut short, or where
-    another note begins (bh-02's begin with `(`, memory's with `From `)."""
+    in the old aside, but with the paragraph now gone after it: told again. A text counts as told
+    only where its aside ends: at the entry's end, at the mark of an aside cut short, or where
+    another aside begins (bh-02's begin with `(`, memory's with `From `)."""
     rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
     guide = "From src/db/CLAUDE.md, instructions for work under src/db/:\n\nUse the session."
     near, changed = "From near.md:\n\nN.", "(bh-02: your instructions have changed ...)"
@@ -147,20 +147,20 @@ _RULE = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
 _GUIDE = "From src/db/CLAUDE.md, instructions for work under src/db/:"
 
 
-def test_a_resumed_conversation_reads_what_was_told_from_the_notes_kept_on_each_entry() -> None:
-    """The loop keeps the notes it told with a result on its entry (`notes`), so another row's
-    note sorting after this row's is not taken for more of a text, and a text the result printed
+def test_a_resumed_conversation_reads_what_was_told_from_the_asides_kept_on_each_entry() -> None:
+    """The loop keeps the asides it told with a result on its entry (`asides`), so another row's
+    aside sorting after this row's is not taken for more of a text, and a text the result printed
     is not one told."""
-    guide, other = f"{_GUIDE}\n\nUse the session.", "Zebra: another row's note."
+    guide, other = f"{_GUIDE}\n\nUse the session.", "Zebra: another row's aside."
     printed = "From p.md, instructions for work under p/:\n\nP."
     transcript = _Kept(
         {
             "role": "tool",
             "content": f"6\n\n{guide}\n\n{_RULE}\n\n{other}",
             "call_id": "c0",
-            "notes": [f"{guide}\n\n{_RULE}", other],
+            "asides": [f"{guide}\n\n{_RULE}", other],
         },
-        {"role": "tool", "content": f"7\n\n{printed}", "call_id": "c1", "notes": []},
+        {"role": "tool", "content": f"7\n\n{printed}", "call_id": "c1", "asides": []},
     )
     said = [("/p/CLAUDE.md", guide), ("/p/rule.md", _RULE), ("/p/p.md", printed)]
     assert OnTouch(_Said(*said), transcript)({"touched": ("/p/src/db/x.py",)}) == printed
@@ -168,14 +168,14 @@ def test_a_resumed_conversation_reads_what_was_told_from_the_notes_kept_on_each_
 
 def test_a_file_cut_back_after_a_paragraph_in_brackets_is_told_again_after_a_resume() -> None:
     """A file cut back since its text was told is still whole at the start of the old text, the
-    paragraphs now gone after it, however they begin: told again. In one note, a text ends where
-    the note ends, where it was cut short, or where the next text begins, after a blank line, as
+    paragraphs now gone after it, however they begin: told again. In one aside, a text ends where
+    the aside ends, where it was cut short, or where the next text begins, after a blank line, as
     memory writes them (`From FILE, instructions ...` or `From FILE, a rule for ...`). A file a
     text imports is part of that text, not the next one."""
     trimmed = f"{_GUIDE}\n\nUse the session."
     near = "From .claude/rules/near.md, a rule for near/**:\n\nN."
     cut = "From cut/CLAUDE.md, instructions for work under cut/:\n\nC."
-    notes = (
+    asides = (
         f"{trimmed}\n\n(Never by script.)",
         f"{_RULE}\n\nFrom the repository's root, run them with `make migrate`.",
         f"{near}\n\n{cut}\n... [40 more chars of memory]",
@@ -183,8 +183,8 @@ def test_a_file_cut_back_after_a_paragraph_in_brackets_is_told_again_after_a_res
     )
     transcript = _Kept(
         *(
-            {"role": "tool", "content": f"{n}\n\n{note}", "call_id": f"c{n}", "notes": [note]}
-            for n, note in enumerate(notes)
+            {"role": "tool", "content": f"{n}\n\n{aside}", "call_id": f"c{n}", "asides": [aside]}
+            for n, aside in enumerate(asides)
         )
     )
     said = [("/p/CLAUDE.md", trimmed), ("/p/rule.md", _RULE), ("/p/near.md", near), ("/p/cut.md", cut)]
@@ -201,13 +201,13 @@ class _Access:
         return self.writes.add(fn)
 
 
-async def test_the_on_touch_row_adds_its_function_to_notes_and_asks_before_a_write(tmp_path: Path) -> None:
-    notes: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
+async def test_the_on_touch_row_adds_its_function_to_asides_and_asks_before_a_write(tmp_path: Path) -> None:
+    asides: Hooks[Callable[[Mapping[str, Any]], str]] = Hooks()
     access = _Access()
     found = Memory(MemoryConfig(root=str(tmp_path), home=str(tmp_path)))
-    effects = await drive(on_touch(memory=found, notes=notes, transcript=_Kept(), access=access))
+    effects = await drive(on_touch(memory=found, asides=asides, transcript=_Kept(), access=access))
     assert [e.name for e in effects] == ["acquire", "acquire"]
-    assert effects[0].args[0] == notes.add and isinstance(told := effects[0].args[1], OnTouch)
+    assert effects[0].args[0] == asides.add and isinstance(told := effects[0].args[1], OnTouch)
     assert effects[1].args == (access.before_write, told.before_write)
 
 
@@ -216,7 +216,7 @@ def test_the_first_write_to_a_file_with_untold_instructions_is_refused_until_the
 ) -> None:
     """Before a write, a file covered by what loads on demand that this conversation has not been
     told is refused, naming those files; the refused file is among what the call touched, so they
-    follow as its note, and the next write goes ahead. A memory file itself, and a file with none,
+    follow as its aside, and the next write goes ahead. A memory file itself, and a file with none,
     are never refused."""
     told, root = _project(tmp_path)
     guide = _write(root / "src/db/CLAUDE.md", "Use the session.")
@@ -229,7 +229,7 @@ def test_the_first_write_to_a_file_with_untold_instructions_is_refused_until_the
         "read them, then write it again"
     )
     assert told.before_write(models) == refused  # asking does not tell them
-    assert "Use the session." in told({"touched": (models,)})  # the refused call's note
+    assert "Use the session." in told({"touched": (models,)})  # the refused call's aside
     assert told.before_write(models) is None
     assert told.before_write(str(root / "README.md")) is None  # nothing applies to it
     assert told.before_write(str(guide)) is None  # the memory file itself: its text is what changes

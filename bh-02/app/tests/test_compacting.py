@@ -17,7 +17,7 @@ async def test_compact_begins_a_new_conversation_from_the_summary_and_the_kernel
     sends it, the one tool offered) and writes the new conversation over the transcript's file,
     the old kept as `.bak`; the loop and the transcript restart, and the next input still reads
     `x`, since the kernel was not restarted. The next request begins with the prompt as it reads
-    now, then bh-02's note and the summary, and holds nothing of the old conversation."""
+    now, then bh-02's message and the summary, and holds nothing of the old conversation."""
     history = tmp_path / "transcript.jsonl"
     patch = composition(
         '[[plugin]]\nid = "model"\nuse = "fragile:compacting_model"\n'

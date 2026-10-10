@@ -33,14 +33,14 @@ It can't claim a line prefix such as `!` (that takes every line you start with i
 in a layer may), replace a row, rebind one of bh-02's keys, or reach the loader. Those don't exist
 where it runs. Its components may bind keys of their own for its other components to use.
 
-A small one, which adds a command that keeps a list:
+A small one, `.bh-02/plugins/keep.py`, which adds a command that keeps a list:
 
 ```python
 from cordis import Effects, acquire, component
 
 
 @component
-async def notes(*, commands) -> Effects:
+async def keep(*, commands) -> Effects:
     kept: list[str] = []
 
     async def run(args: str) -> str:
@@ -66,7 +66,7 @@ one of them changes.
 
 ## How it went
 
-- The status bar's `ext:` field lists the extensions and how each is, such as `ext: notes ✓` for the example above.
+- The status bar's `ext:` field lists the extensions and how each is, such as `ext: keep ✓` for the example above.
 - `.bh-02/plugins/status.json` is what the model reads: each extension's state (`active`,
   `partly up`, `failed`, `loading`), each component's, any error, its commands, and anything bh-02
   refused.

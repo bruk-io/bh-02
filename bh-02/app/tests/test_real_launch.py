@@ -647,7 +647,7 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
 def test_compact_carries_on_from_a_summary_and_a_resume_draws_from_it(launch: Launch, tmp_path: Path) -> None:
     """`/compact` answers `cleared`, a note carrying the model's summary, then `restarting`: the
     old turns leave the screen, the loop and its transcript restart, and the next message is the
-    new conversation's second (bh-02's note before the summary was its first). The old transcript
+    new conversation's second (bh-02's message before the summary was its first). The old transcript
     is kept beside the new one, and a resume draws from the note on. The fake's summary is its
     echo of bh-02's request for one."""
     app = launch("fake")

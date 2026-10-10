@@ -84,7 +84,7 @@ nav:
           - Rows and layers: bh-02/how-it-works/rows-and-layers.md
           - The loop: bh-02/how-it-works/loop.md
           - The python tool: bh-02/how-it-works/python-tool.md
-          - The prompt and notes: bh-02/how-it-works/prompt-and-notes.md
+          - The prompt and asides: bh-02/how-it-works/prompt-and-asides.md
           - The jail and approval: bh-02/how-it-works/jail-and-approval.md
       - Extending it:
           - Writing a plugin: bh-02/extending/plugins.md

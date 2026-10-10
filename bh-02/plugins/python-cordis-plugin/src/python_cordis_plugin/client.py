@@ -14,14 +14,14 @@ through the jail, which the worker turns into `KeyboardInterrupt` in the input, 
 input to say it ended: the namespace survives. A worker that dies is started again on the next
 input, and that input is told its earlier variables are gone, and why, when the jail ended it.
 After each input, `touched()` is the project's files it opened, read or written (the worker's
-audit hook): what a `notes` function is given to say what applies to them.
+audit hook): what an `asides` function is given to say what applies to them.
 
 bh-02's other tools are functions in the namespace (`tools.NAME(...)`): each input carries their
 specs, read from `tools` as it is sent, and the worker rebuilds `tools` from them; a call one
 makes comes back here and goes to `tools.call`, which runs it as the model's own calls run
-(the loop serves it: asked about, noted). The namespace is a view of the registry, never where a
-tool is registered. What changed in it since the model was last told is told before the input's
-own output (`_offered`).
+(the loop serves it: asked about, its asides told). The namespace is a view of the registry,
+never where a tool is registered. What changed in it since the model was last told is told
+before the input's own output (`_offered`).
 
 A new Python process runs its startup files before its first input (`KernelConfig.startup`), when its
 inputs are confined: the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
@@ -33,7 +33,7 @@ but only when reading it goes nowhere an input may write (`host_paths.walked`, t
 models file and memory files outside the project are held to: no directory or link on the way
 is in the project, or in another root the worker's jail lets an input write, its `writes()`).
 One that is there, or whose way passes through there, the worker reads, as it does the
-project's, and if that fails the note says why the host did not; it is still the person's, not
+project's, and if that fails the aside says why the host did not; it is still the person's, not
 the model's to edit, which is what the model is told. (The jail also keeps an input from
 writing in the person's config directory, so a session run from the home directory can't
 choose what a later one reads there: brig's `trusted`.) A startup file that ends the worker is
@@ -202,10 +202,10 @@ class _Output:
         return "\n".join(parts) or "(no output)"
 
 
-def _told(notes: Sequence[str]) -> str:
-    """What an input is told before its own output: `notes`, in one parenthesis on a line of its
+def _told(asides: Sequence[str]) -> str:
+    """What an input is told before its own output: `asides`, in one parenthesis on a line of its
     own; "" for none."""
-    return f"({'. '.join(notes)})\n" if notes else ""
+    return f"({'. '.join(asides)})\n" if asides else ""
 
 
 def _startup_input(path: str, source: str | None = None) -> str:
@@ -467,7 +467,7 @@ class Kernel:
         tell by then goes with that (`_StartupEnded.told`, `_pending`): the reason taken from
         `_why` is told nowhere else."""
         why, self._why = (f", because {self._why}" if self._why else ""), ""
-        notes = (
+        asides = (
             [f"the REPL was started again{why}; what earlier inputs defined is gone"]
             if self._restarted
             else []
@@ -477,24 +477,24 @@ class Kernel:
             ready = await asyncio.to_thread(self._ready, confined)
         except Exception as error:  # the input still runs, and says why its helpers are missing
             ready = []
-            notes.append(f"the startup files could not be looked at ({error}), so none ran")
+            asides.append(f"the startup files could not be looked at ({error}), so none ran")
         if ready and not confined:
             one = len(ready) == 1
             runs = "; ".join(f"exec(open({r.path!r}).read())" for r in ready)
-            notes.append(
+            asides.append(
                 f"{' and '.join(r.name for r in ready)} {'was' if one else 'were'} not run: inputs here "
                 f"are put to the person, so run {'it' if one else 'them'} as an input of your own if you "
                 f"want {'it' if one else 'them'}: {runs}"
             )
         for index, startup in enumerate(ready if confined else ()):
             if startup.name in self._passed:
-                notes.append(
+                asides.append(
                     f"{startup.name} was not run: {self._passed[startup.name]} when it last ran, so what "
                     "it defines is missing (`/restart python` runs it again)"
                 )
                 continue
             if startup.problem:
-                notes.append(
+                asides.append(
                     f"{startup.name} could not be read ({startup.problem}), so what it defines is missing"
                 )
                 continue
@@ -502,14 +502,14 @@ class Kernel:
                 ran = await self._exchange(_startup_input(startup.path, startup.source))
             except ConnectionError:
                 self._passed[startup.name] = "it ended the REPL's process"
-                raise _StartupEnded(startup.name, _told(notes)) from None
+                raise _StartupEnded(startup.name, _told(asides)) from None
             except asyncio.CancelledError:
                 if self._writer is None:  # it would not stop: the next worker would only run it again
                     self._passed[startup.name] = "it would not stop at Ctrl-C"
                 else:  # the worker carries on, without the files again: its next input is told
                     self._pending = ". ".join(
                         [
-                            *notes,
+                            *asides,
                             f"{startup.name} was stopped as it ran, so what it defines may be missing, "
                             "and no startup file after it ran",
                         ]
@@ -518,13 +518,13 @@ class Kernel:
             when = "first" if index == 0 else "next"
             if ran.error:
                 left = f" ({startup.why})" if startup.why else ""
-                notes.append(
+                asides.append(
                     f"{startup.name} ran {when} and failed{left}, so what it defines is missing:\n{ran.error}"
                 )
             else:
                 lines = ran.output.strip().splitlines()
-                notes.append(f"{startup.name} ran {when} and defined: {lines[-1] if lines else 'nothing'}")
-        return _told(notes)
+                asides.append(f"{startup.name} ran {when} and defined: {lines[-1] if lines else 'nothing'}")
+        return _told(asides)
 
     def _ready(self, read: bool) -> list[_Ready]:
         """The startup files that are there, in order, each once (at its first place), and how

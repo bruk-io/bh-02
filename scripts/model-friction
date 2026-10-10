@@ -12,9 +12,9 @@ come up most are where the prompt, the kernel or the loop should change next.
     scripts/model-friction --examples 5    # more examples per signal
     scripts/model-friction --json          # the findings, for another tool
 
-The signals match the texts bh-02 itself writes (the loop's refusals and nudges, the kernel's
-notes), so a change to one of those texts is a change here too. It is the standard library
-alone.
+The signals match the texts bh-02 itself writes (the loop's refusals and nudges, the asides
+told with a result), so a change to one of those texts is a change here too. It is the
+standard library alone.
 """
 
 import argparse
@@ -57,13 +57,14 @@ _PROGRAM = re.compile(r"\b(?:subprocess\.(?:run|call|check_call|Popen)|os\.syste
 _CAPTURED = re.compile(r"capture_output\s*=\s*True|stdout\s*=|check_output\(")
 _EXCEPTION = re.compile(r"^(\w+(?:\.\w+)*(?:Error|Exception|Exit|Interrupt|Expired)):", re.M)
 _WRITES = re.compile(r"write_text\(|open\([^)]*['\"][wa]")
-# What `notes` added after a result, in an entry from before the loop kept its notes as `notes`:
-# the shell hint, in a transcript from before bh-02 dropped it (once on the line after the result,
-# later after a blank line; the notes are sorted, so any on-touch note follows it), and memory's
-# on-touch notes (a transcript from before the memory plugin says `guidance for work under`).
-_NOTE = re.compile(r"\n\n?\(this input ran .+ through a shell\..*\Z", re.S)
+# What `asides` added after a result, in an entry from before the loop kept its asides as
+# `asides`: the shell hint, in a transcript from before bh-02 dropped it (once on the line after the
+# result, later after a blank line; the asides are sorted, so any on-touch aside follows it), and
+# memory's on-touch asides (a transcript from before the memory plugin says `guidance for work
+# under`).
+_SHELL_HINT = re.compile(r"\n\n?\(this input ran .+ through a shell\..*\Z", re.S)
 _TOUCHED = re.compile(r"\n\nFrom \S+, (?:guidance for work under|instructions for work under|a rule for) .*\Z", re.S)
-_CHANGED = "(bh-02: your instructions have changed since this conversation began."  # the loop's note
+_CHANGED = "(bh-02: your instructions have changed since this conversation began."  # the loop's aside
 # What makes an input more than a shell command and a print: logic of its own.
 _COMPOSING = (ast.comprehension, ast.Compare, ast.BoolOp, ast.IfExp, ast.Lambda)
 
@@ -252,15 +253,15 @@ def _shell_shaped(code: str) -> bool:
 
 
 def _result(message: Message) -> str:
-    """What a `tool` entry's input gave, without what bh-02 told with it: the notes the loop kept on
-    the entry (`notes`), which its text has after the result, and any change in the instructions
-    after them. An entry from before the loop kept them has its notes only in its text, cut from it
-    by what they begin with (`_NOTE`, `_TOUCHED`)."""
+    """What a `tool` entry's input gave, without what bh-02 told with it: the asides the loop kept
+    on the entry (`asides`), which its text has after the result, and any change in the
+    instructions after them. An entry from before the loop kept them has its asides only in its
+    text, cut from it by what they begin with (`_SHELL_HINT`, `_TOUCHED`)."""
     told = str(message.get("content") or "").split(f"\n\n{_CHANGED}", 1)[0]
-    notes = message.get("notes")
-    if isinstance(notes, list):
-        return told.removesuffix("".join(f"\n\n{note}" for note in notes))
-    return _TOUCHED.sub("", _NOTE.sub("", told))
+    asides = message.get("asides")
+    if isinstance(asides, list):
+        return told.removesuffix("".join(f"\n\n{aside}" for aside in asides))
+    return _TOUCHED.sub("", _SHELL_HINT.sub("", told))
 
 
 def _one_input(session: str, code: str, result: str) -> Iterator[Finding]:

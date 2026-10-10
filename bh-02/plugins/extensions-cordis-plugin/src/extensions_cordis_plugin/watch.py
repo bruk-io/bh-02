@@ -191,7 +191,7 @@ def instructions(
         "you read out. Its calls run in the extension's jail, not in your REPL, and it lasts as "
         "the file does, across sessions, unlike a function in your REPL. You are told when one "
         "is added, changed or removed; whether a tool added mid-conversation can be called "
-        "before the next conversation (/clear, /compact) is your model's, and the note says. "
+        "before the next conversation (/clear, /compact) is your model's, and the aside says. "
         "One bh-02 refuses is in status.json's `problems`, saying why.",
         "Whatever an extension added leaves with it, through `acquire` or not.",
         "",
@@ -206,7 +206,7 @@ def instructions(
     ]
     if statuses:
         # Names only: how each one is goes in status.json, so a load ending, or failing, does not
-        # change this prompt: each change is a note the loop sends the model with its next message.
+        # change this prompt: each change is an aside the loop sends the model with its next message.
         lines += [
             "",
             f"Extensions here: {', '.join(sorted(statuses))}. How each one is, is in {where}/status.json.",
@@ -217,7 +217,7 @@ def instructions(
 
 
 def status_forms(statuses: Mapping[str, Status]) -> tuple[str, ...]:
-    """The status bar's extensions field, fullest form first (`ext: todo ✓ notes ✗`), then the
+    """The status bar's extensions field, fullest form first (`ext: todo ✓ keep ✗`), then the
     count (`ext: 2, 1 ✗`); nothing when there are none."""
     if not statuses:
         return ()

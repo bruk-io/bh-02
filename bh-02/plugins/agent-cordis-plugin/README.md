@@ -1,17 +1,17 @@
 # agent-cordis-plugin
 
 A harness-owned agent loop, the transcript it reads, `tools`, the tools it offers the model,
-`system`, the system prompt it sends, `notes`, what it tells the model with a call's result,
+`system`, the system prompt it sends, `asides`, what it tells the model beside a call's result,
 `access`, what is asked before a file is read or written, `executor`, where it reads the prompt
-and asks `notes`, and `/compact`, which begins a new conversation from the model's summary.
+and asks `asides`, and `/compact`, which begins a new conversation from the model's summary.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`, `serve`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `notes` (iterated), `executor` (`run`) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`, `serve`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `asides` (iterated), `executor` (`run`) |
 | `agent:tools` | `tools`: a `ToolBroker`, the tools rows `acquire` with `register(spec, run, *, runs, show)`, offered in name order | |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
 | `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch (its `.git/HEAD`, read from the root through no link), then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
-| `agent:notes` | `notes`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
+| `agent:asides` | `asides`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 | `agent:access` | `access`: an `Access`, the functions rows `acquire` with `before_read(fn)` and `before_write(fn)`, which a tool asks before it opens a file (`refusal(kind, path)`) | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
 | `agent:conversation` | registers `/clear` and `/compact [WHAT TO KEEP]`, each restart queued in `jobs`; config: `timeout` (seconds, 300: /compact's summary), `loop` and `transcript` (the rows /compact restarts), `clear` (the rows /clear restarts: `loop`, `transcript`, `python`) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`), `jobs` (`put`) |
@@ -50,30 +50,31 @@ keeps no copy of it. A call to a name it did not offer (`refusal`), or one whose
 fit the spec (`malformed`: a `required` property missing, one not of its schema's simple type),
 is answered with text saying so, runs nothing, and is put to nobody. A turn stopped part-way
 still answers every call: the one with its tool when the stop came with `interrupted: ... it may
-have partly run`, one that had its result (the stop came while its notes were made or the prompt
+have partly run`, one that had its result (the stop came while its asides were made or the prompt
 read) with that result, the rest (the one at the approval question included) with `not run:
 ...`. A call a tool's own call makes (an input's `tools.NAME(...)`) runs the same way: the loop
 row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.call`), so it is put
 to the rule and the person as the model's own would be, run through the tool its name has now,
-and given to `notes`, whose notes go with the result of the call that made it (`_nested`); it
+and given to `asides`, whose asides go with the result of the call that made it (`_nested`); it
 answers `{"content", "failed"}`, `failed` when it did not run (no such tool, its input malformed,
 a no) or the tool failed. The transcript and the tools are rows of their own, so the history and
 the namespace outlive the loop: replace `model` (or the ui) and the loop reloads while the conversation
 carries on.
 
-After each call that ran, the loop calls every function in `notes` with
+After each call that ran, the loop calls every function in `asides` with
 `{"name", "input", "result", "touched"}` (`touched`: the files the call opened, as its tool
-answered; the python tool's are its Python process's `touched()`) and puts what they return after the result
-(`noted`, sorted, so the order rows added them in means nothing; one that fails says so in one line). The `tool` entry keeps them as
-a list too (`notes`, `[]` for none and for a call that never ran), beside the text the model
-reads (the result, then each note, then any change in the instructions, each after a blank
-line), so what was told is read back whole, never searched for in a text the result and the
-other notes share. The person sees the call's own result, and a `note` for each
-of those notes, by its first line. `notes` is a row of its own, depending on nothing, so neither
-the loop nor a row adding to it reloads the other; a row that adds to it (`memory:on_touch`)
-depends on `transcript`, so `/clear` starts it afresh and it tells a new conversation again; it
-reads its `messages` too, so a resumed one is not told again a note a `tool` entry's `notes`
-hold (an entry from before the loop kept them is searched; CONTRACTS.md: transcript).
+answered; the python tool's are its Python process's `touched()`) and puts what they return
+after the result as asides (`asides_for`, sorted, so the order rows added them in means nothing;
+one that fails says so in one line). The `tool` entry keeps them as a list too (`asides`, `[]`
+for none and for a call that never ran), beside the text the model reads (the result, then each
+aside, then any change in the instructions, each after a blank line), so what was told is read
+back whole, never searched for in a text the result and the other asides share. The person sees
+the call's own result, and a `note` for each of those asides, by its first line. `asides` is a
+row of its own, depending on nothing, so neither the loop nor a row adding to it reloads the
+other; a row that adds to it (`memory:on_touch`) depends on `transcript`, so `/clear` starts it
+afresh and it tells a new conversation again; it reads its `messages` too, so a resumed one is
+not told again an aside a `tool` entry's `asides` hold (an entry without them, from before the
+loop kept them or from when it called them `notes`, is searched; CONTRACTS.md: transcript).
 
 Each model step is classified by `stops.classify` (pure; the table is in its docstring): only
 `act` runs calls, only `answered` ends the reply, and a
@@ -89,11 +90,12 @@ entry as `provider`, for the model to replay unchanged.
 
 Every request begins with the system prompt the conversation began with (`system.text()`, the
 python tool's section among the rest), kept in the transcript as its first `{"role": "system"}` entry
-([why](../../../docs/bh-02/how-it-works/prompt-and-notes.md#why-the-prompt-stays-fixed-for-a-conversation)). The loop still reads
+([why](../../../docs/bh-02/how-it-works/prompt-and-asides.md#why-the-prompt-stays-fixed-for-a-conversation)). The loop still reads
 the prompt before each message the model reads (the person's message, an input's result, a
 nudge); when it reads differently from what the model was last told, what changed
 (`prompt.changes`, pure: each part, a paragraph, that is new or reads differently, whole, and
-the first line of each that is gone) goes with that message, while the person sees a `note`.
+the first line of each that is gone) goes with that message as an aside, while the person sees a
+`note`.
 
 The new reading is kept as another `system` entry, but not whole: as the edits that turn the
 last reading into it (`prompt.edits`, pure: for each run of paragraphs that reads differently,
@@ -121,20 +123,20 @@ instructions has the date first, then the change, then the person's words. The c
 `content` alone, so `today` never reaches a model.
 
 Reading the prompt (`system.text()`, whose sections may read many files: memory's reads every
-CLAUDE.md, the python tool's asks its jail what it reads) and asking `notes` (memory's on-touch function reads rule
+CLAUDE.md, the python tool's asks its jail what it reads) and asking `asides` (memory's on-touch function reads rule
 files) run on `executor` (`executor.OneAtATime`, in a thread), not on the event loop, which
 cordis and the TUI share, so a slow section function never freezes the app. The transcript is
 changed only once each is done, so a reply stopped meanwhile leaves it whole (stopped while the
 person's message was being dated and the prompt read, the message is kept and answered as
 stopped, as one stopped in its first model step is). What runs there must not need the event
-loop: a section function and a `notes` function each read and return text.
+loop: a section function and an `asides` function each read and return text.
 
 One runs at a time, and nothing stops one part-way: a stop ends the reply's wait (but for the
-`notes` call, which a stop waits for, so its notes are told), and the reading finishes in its
+`asides` call, which a stop waits for, so its asides are told), and the reading finishes in its
 thread, unused: what it returned or raised goes nowhere, logged by no one. `executor` keeps the
 call in flight, and the next waits for it before it begins, so stopping reply after reply while
 a slow prompt is read leaves one reading running, not one per stop. `executor` is a row of its
-own (`agent:executor`) that depends on nothing, like `notes`: `/model` and `/clear` reload the
+own (`agent:executor`) that depends on nothing, like `asides`: `/model` and `/clear` reload the
 loop, a new `LoopModel`, but not `system`, whose caches take no lock, nor `executor`, so the new
 loop's first reading waits for the one the last loop left running too, and `system`'s sections'
 caches are used by one thread at a time. Only a new `executor` (its row restarted, or replaced
@@ -161,15 +163,15 @@ Ctrl-C stops only a turn, so the step has `timeout` seconds, and a note says so 
 it has one); past them it is closed (its provider stops) and nothing changes. The person
 leaving cancels the command (`chat:converse` races it against `input.closed()`): the step is
 closed and nothing has been written. The summary then begins the new conversation (`seeded`:
-bh-02's note that the conversation carries on from an earlier one, as the person's message,
-then the summary as the model's answer, so the roles alternate; the note stays at the
+bh-02's message that the conversation carries on from an earlier one, as the person's,
+then the summary as the model's answer, so the roles alternate; the message stays at the
 conversation's start, a resume's too, so it says the namespace was kept at the compaction and
 empties as the python tool's instructions say), written over the transcript row's file in one step
 (`transcript.rewrite`: written whole beside it, then renamed over it, the old file kept under
 the first of `.bak`, `.bak.2`, ... not taken, so no compaction's backup replaces another's),
 and the loop and the transcript restart, together. The new conversation holds no `system`
 entry and no date, so the loop reads the prompt afresh for its first message (folding in
-whatever changed since the old one began, with no note of a change) and tells the date. The
+whatever changed since the old one began, with no aside of a change) and tells the date. The
 python row is not restarted: the summary names what its Python process's namespace holds. The answer is `cleared`
 (`compacted`: what `commands` holds for the model's next message, `!`'s output, is kept, since
 the summary was written from what the model read, which never held it), a note carrying the

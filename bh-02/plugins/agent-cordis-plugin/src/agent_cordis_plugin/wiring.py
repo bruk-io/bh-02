@@ -1,11 +1,11 @@
 """The rows: the loop, which consumes a model and provides the `loop` value; the transcript;
 `tools`, the broker of the tools the model is offered; `system`, the system prompt rows add
-sections to; `notes`, the broker of what the model is told with a call's result; `access`, the
-broker of what is asked before a file is read or written; `executor`, where the loop reads the
-prompt and asks `notes`; and the conversation's commands, `/clear` and `/compact`.
+sections to; `asides`, the broker of what the model is told beside a call's result; `access`,
+the broker of what is asked before a file is read or written; `executor`, where the loop reads
+the prompt and asks `asides`; and the conversation's commands, `/clear` and `/compact`.
 
 The transcript is its own row so the history outlives the loop: replace the `model` row
-and the loop reloads against the new provider while the conversation carries on. `notes` is
+and the loop reloads against the new provider while the conversation carries on. `asides` is
 its own row too, depending on nothing, so neither the loop nor a row adding to it reloads the
 other, and `tools`, so a tool's row restarting (the python row's) reloads neither the loop nor
 another tool's row. So is `executor`, so a reloaded loop keeps the call a stopped reply left
@@ -33,13 +33,13 @@ from agent_cordis_plugin.conversation import (
 )
 from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.loop import (
+    Aside,
+    Asides,
     Asked,
     Confirm,
     Executor,
     LoopModel,
     Model,
-    Note,
-    Notes,
     Rule,
     System,
     Tools,
@@ -55,10 +55,10 @@ __all__ = [
     "LoopConfig",
     "TranscriptConfig",
     "access",
+    "asides",
     "conversation",
     "executor",
     "loop",
-    "notes",
     "system",
     "tools",
     "transcript",
@@ -106,7 +106,7 @@ async def loop(
     system: System,
     approval: Rule,
     output: Confirm,
-    notes: Notes,
+    asides: Asides,
     executor: Executor,
     config: LoopConfig,
 ) -> Effects:
@@ -114,9 +114,9 @@ async def loop(
     tools rows register (`tools`), read at a conversation's first request once those `requires`
     names have registered; each call runs at once when the `approval` rule says it runs unasked
     (in a runner that confines it), else only on the person's yes (`output.confirm`). After each
-    call, the functions in `notes` may add a note to its result. A call an input makes from the
+    call, the functions in `asides` may add an aside to its result. A call an input makes from the
     Python process (`tools.NAME(...)`) runs the same way, served through `tools.serve`. The
-    prompt is read, and `notes` asked, on `executor`. A new ui reloads this row (through
+    prompt is read, and `asides` asked, on `executor`. A new ui reloads this row (through
     `output`), which holds nothing: the transcript, the tools (the Python process's namespace
     among them) and the call in flight on `executor` are rows of their own."""
     looped = LoopModel(
@@ -126,7 +126,7 @@ async def loop(
         Asked(approval, output),
         config.max_nudges,
         system,
-        notes,
+        asides,
         executor=executor,
         requires=config.requires,
         wait=config.wait,
@@ -154,14 +154,14 @@ async def system(*, config: SystemConfig) -> Effects:
     yield bind("system", SystemPrompt(config))
 
 
-@component(provides=("notes",))
-async def notes() -> Effects:
-    """Fills a `notes` row: `use = "agent:notes"`. A broker (CONTRACTS.md: notes): a row
-    with something to tell the model about a call `acquire`s `notes.add(fn)`, and the loop
-    calls each `fn({"name", "input", "result", "touched"}) -> str` after every call it runs, on
-    `executor`. Each adds a note or says nothing ('' ); none changes the result, so they compose
-    in any order."""
-    yield bind("notes", Hooks[Note]())
+@component(provides=("asides",))
+async def asides() -> Effects:
+    """Fills an `asides` row: `use = "agent:asides"`. A broker (CONTRACTS.md: asides): a row
+    with something to tell the model beside a call's result `acquire`s `asides.add(fn)`, and the
+    loop calls each `fn({"name", "input", "result", "touched"}) -> str` after every call it runs,
+    on `executor`. Each adds an aside or says nothing ('' ); none changes the result, so they
+    compose in any order."""
+    yield bind("asides", Hooks[Aside]())
 
 
 @component(provides=("access",))
@@ -177,7 +177,7 @@ async def access() -> Effects:
 @component(provides=("executor",))
 async def executor() -> Effects:
     """Fills an `executor` row: `use = "agent:executor"`. Where the loop reads the prompt and
-    asks `notes` (CONTRACTS.md: executor): off the event loop, in a daemon thread, one call at
+    asks `asides` (CONTRACTS.md: executor): off the event loop, in a daemon thread, one call at
     a time, a call a stopped reply left running waited for before the next begins. It depends
     on nothing, so a loop reloaded by `/clear` or `/model` keeps it, and waits for that call
     rather than starting beside it."""

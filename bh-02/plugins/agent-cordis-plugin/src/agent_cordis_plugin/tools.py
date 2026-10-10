@@ -18,7 +18,7 @@ start of what a model server caches. A name is one tool; a second registration o
 
 A tool can also be called from inside another tool's call: an input calls `tools.NAME(...)` in
 the Python process. Such a call goes the way the model's own does, put to `approval` and followed
-by what `notes` say, so the loop serves it (`serve`, the loop row's) and the broker passes it on
+by what `asides` say, so the loop serves it (`serve`, the loop row's) and the broker passes it on
 (`call`); with no loop serving, it fails, saying so.
 """
 

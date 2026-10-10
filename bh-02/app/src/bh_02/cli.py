@@ -4,7 +4,7 @@ While the app runs it owns the terminal, so this module says nothing then: lifec
 (`--trace FILE`) go to a file, and a layer file that could not be reloaded is kept and printed
 once the app has exited and the terminal is restored. Besides the app it is the only module
 that touches the terminal, and only for what has no `output` to go through: option parsing,
-a fatal error, and those notes after the run.
+a fatal error, and those reports after the run.
 """
 
 import asyncio
@@ -257,12 +257,12 @@ def _run(
     with contextlib.ExitStack() as stack:
         traced = stack.enter_context(trace.open("a")) if trace is not None else None
         listen = _writer(traced, "") if traced is not None else None
-        noted = _writer(traced, "report: ") if traced is not None else None
+        reported = _writer(traced, "report: ") if traced is not None else None
 
         def report(line: str) -> None:
             reports.append(line)
-            if noted is not None:
-                noted(line)
+            if reported is not None:
+                reported(line)
 
         code, started = _launch(layers, listen, report, listing)
     for line in reports:

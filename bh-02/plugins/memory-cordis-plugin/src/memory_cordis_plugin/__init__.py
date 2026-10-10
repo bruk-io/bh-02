@@ -1,7 +1,7 @@
 """Claude Code's memory in bh-02: the CLAUDE.md and AGENTS.md files, the files they import and the
 rules, found where Claude Code finds them, told as a section of the system prompt; the ones for
-a subdirectory or some files told with the result of the first input that opens a file they
-cover; auto memory, the notes the model keeps for itself; and `/memory`, which lists them."""
+a subdirectory or some files told beside the result of the first input that opens a file they
+cover; auto memory, the memories the model keeps for itself; and `/memory`, which lists them."""
 
 from memory_cordis_plugin.auto import INDEX, AutoMemory, auto_section, indexed
 from memory_cordis_plugin.listing import SPEC, listing
@@ -18,7 +18,7 @@ from memory_cordis_plugin.memory import (
 )
 from memory_cordis_plugin.reading import LIMIT, read, secret, under
 from memory_cordis_plugin.rules import Rule, frontmatter, matches, rule
-from memory_cordis_plugin.touch import Notes, OnTouch, Transcript
+from memory_cordis_plugin.touch import Asides, OnTouch, Transcript
 from memory_cordis_plugin.wiring import auto, files, on_touch
 
 __all__ = [
@@ -26,11 +26,11 @@ __all__ = [
     "INSTRUCTION_FILES",
     "LIMIT",
     "SPEC",
+    "Asides",
     "AutoMemory",
     "Entry",
     "Memory",
     "MemoryConfig",
-    "Notes",
     "OnTouch",
     "Rule",
     "Source",

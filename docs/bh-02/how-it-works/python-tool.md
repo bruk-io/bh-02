@@ -28,8 +28,8 @@ model sees the line that failed, even in a function it defined inputs ago.
 Every other tool bh-02 offers the model (a layer row's, an extension's) is also a function in the
 namespace: `tools.NAME(arg=...)`. A call goes back to bh-02 and runs as the model's own call to
 that tool would: put to the approval rule (and so to you, when it is unjailed or runs in bh-02's
-own process), run by the tool, then given to `notes`, whose notes reach the model with the result
-of the input that made the call. It returns the tool's result as text, and raises `tools.Error`
+own process), run by the tool, then given to `asides`, whose asides reach the model with the
+result of the input that made the call. It returns the tool's result as text, and raises `tools.Error`
 when the call did not run or failed. `help(tools.NAME)` shows what one takes. Each input is
 sent the tools as they are, and the first input that sees a change says so before its output, so
 a tool added mid-conversation can be called from code at once, even where the model's own list
@@ -43,7 +43,7 @@ A function the model defines in an input and a registered tool differ in what ho
 | Where it lives | the Python process's namespace | `tools`, the registry a row (or an extension) registers into |
 | How long | until the process ends (`/clear`, a restart, a resume) | as long as its row: an extension's lasts as long as its file, across sessions |
 | Who can call it | later inputs | the model directly, and inputs as `tools.NAME(...)` |
-| Asked about, noted | no: the input that calls it was | each call, as any tool call |
+| Asked about, told asides | no: the input that calls it was | each call, as any tool call |
 | Where it runs | in the Python process | where its row says: an extension's in the extensions process, a layer row's in bh-02 |
 
 A helper worth keeping between sessions goes in the project's startup file; a capability the
@@ -77,7 +77,7 @@ it. So whatever your file holds, the model can read. The project's file is read 
 ## What an input touched
 
 The Python process hears each file an input's own code opens under the project, with an audit
-hook. The tool answers each call with that list (its `touched()`), and the loop hands it to the rows that add notes,
+hook. The tool answers each call with that list (its `touched()`), and the loop hands it to the rows that add asides,
 which is how a subdirectory's `CLAUDE.md` arrives when the model first opens a file there. Files a
 program the input runs opens are not heard, since that happens in another process.
 

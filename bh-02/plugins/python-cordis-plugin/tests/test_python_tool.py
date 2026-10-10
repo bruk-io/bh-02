@@ -384,7 +384,7 @@ async def test_a_person_s_file_whose_way_leads_through_any_root_an_input_writes_
     """Not only the project: any root the jail lets an input write (`jail.writes()`, a `write`
     the person added) is where the model could have made the file a link to one the jail hides.
     The host reads nothing whose way passes through one, and when the jail then can't read it
-    either, the note says why bh-02 did not."""
+    either, the aside says why bh-02 did not."""
     project = tmp_path / "project"
     project.mkdir()
     dotfiles = tmp_path / "dotfiles"  # outside the project, but a root an input may write
@@ -514,7 +514,7 @@ async def test_a_program_s_own_output_reaches_an_input_only_when_captured(tmp_pa
 
 
 async def test_touched_is_the_project_s_files_the_last_input_opened(tmp_path: Path) -> None:
-    """What `notes` is given: files read or written, not a directory listed, a module imported
+    """What `asides` is given: files read or written, not a directory listed, a module imported
     or a file a program read; and nothing outside the project."""
     (tmp_path / "src" / "db").mkdir(parents=True)
     (tmp_path / "src" / "db" / "models.py").write_text("X = 1\n")

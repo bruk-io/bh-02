@@ -96,9 +96,9 @@ async def test_an_answer_is_one_query_and_claude_code_is_started_locked_down(tmp
     (fake,) = h.fakes
     assert fake.asked == ["hi"] and fake.interrupts == 0
     options = fake.options
-    note, system = options.system_prompt.split("\n\n")
-    assert system == "You are a test."  # the request's, after a note naming the tools as Claude Code does
-    assert note == "bh-02's tools reach you under these names: `python` as `mcp__bh__python`."
+    named, system = options.system_prompt.split("\n\n")
+    assert system == "You are a test."  # the request's, after a line naming the tools as Claude Code does
+    assert named == "bh-02's tools reach you under these names: `python` as `mcp__bh__python`."
     assert options.tools == [] and options.setting_sources == [] and options.strict_mcp_config
     assert options.include_partial_messages and options.model == "sonnet"
     assert str(options.cli_path).endswith("claude-code-detached")

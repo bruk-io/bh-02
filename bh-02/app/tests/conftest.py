@@ -64,7 +64,7 @@ FIELDS: dict[str, str] = {}
 
 
 class Pushed:
-    """A `frame` (CONTRACTS.md) that notes the status fields rows push, in FIELDS, and keeps
+    """A `frame` (CONTRACTS.md) that records the status fields rows push, in FIELDS, and keeps
     them after their rows leave (so a test can read them once the run is over)."""
 
     def status(self, field: str, text: str, *shorter: str) -> Any:
@@ -428,14 +428,14 @@ async def one_input_model() -> Effects:
 
 
 def zebra(input: Mapping[str, Any]) -> str:
-    """A `memory` function's note that sorts after the context files' (`From ...`)."""
-    return "Zebra: another row's note." if input.get("touched") else ""
+    """An `asides` function's aside that sorts after memory's (`From ...`)."""
+    return "Zebra: another row's aside." if input.get("touched") else ""
 
 
 @component
-async def another_note(*, notes: Any) -> Effects:
-    """A layer's own row adding to `notes`: `zebra`'s note with each input that opened a file."""
-    yield acquire(notes.add, zebra)
+async def another_aside(*, asides: Any) -> Effects:
+    """A layer's own row adding to `asides`: `zebra`'s aside with each input that opened a file."""
+    yield acquire(asides.add, zebra)
 
 
 # What the compacting model was sent: each request's messages and the names of the tools offered.

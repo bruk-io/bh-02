@@ -61,7 +61,7 @@ policy seam, not this).
 
 - **writes**: the project root, a scratch directory of the jail's own (`TMPDIR`), and the
   project's auto memory directory (`host.auto_memory`, outside the project: the model keeps its
-  notes there across sessions, and only the memory rows read it, through no link), except
+  memories there across sessions, and only the memory rows read it, through no link), except
   the composition's layer files (`host.paths`), every path the host imports code from that sits
   under a writable root (`sys.path` entries, the interpreter's prefix), brig's
   self-modification list (`.git/hooks`, `.git/config`, `.claude`, shell rc files, editor

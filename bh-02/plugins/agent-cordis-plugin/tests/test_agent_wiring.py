@@ -10,9 +10,9 @@ from agent_cordis_plugin import (
     OneAtATime,
     ToolBroker,
     TranscriptConfig,
+    asides,
     executor,
     loop,
-    notes,
     transcript,
 )
 from cordis.testing import drive
@@ -35,7 +35,7 @@ async def test_loop_binds_a_model_over_what_it_was_given() -> None:
             system=object(),
             approval=object(),
             output=object(),
-            notes=Hooks(),
+            asides=Hooks(),
             executor=OneAtATime(),
             config=LoopConfig(),
         )  # type: ignore[arg-type]
@@ -46,9 +46,9 @@ async def test_loop_binds_a_model_over_what_it_was_given() -> None:
     assert effects[1].args[1] == looped.nested  # serves the calls an input makes (`tools.serve`)
 
 
-async def test_memory_binds_an_empty_broker() -> None:
-    effects = await drive(notes())
-    assert [(e.name, e.args[0]) for e in effects] == [("bind", "notes")]
+async def test_asides_binds_an_empty_broker() -> None:
+    effects = await drive(asides())
+    assert [(e.name, e.args[0]) for e in effects] == [("bind", "asides")]
     assert isinstance(effects[0].args[1], Hooks) and list(effects[0].args[1]) == []
 
 

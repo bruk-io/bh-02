@@ -22,13 +22,13 @@ from agent_cordis_plugin import (
     MemoryTranscript,
     OneAtATime,
     ToolBroker,
+    asides,
     changes,
     classify,
     executor,
     latest,
     loop,
     malformed,
-    notes,
     refusal,
     transcript,
 )
@@ -185,7 +185,7 @@ async def test_a_tool_turn_runs_the_call_as_an_input_and_asks_again() -> None:
         == "let me QUIET it is"
     )
     assert [m["role"] for m in history.messages] == ["tools", "user", "assistant", "tool", "assistant"]
-    assert history.messages[3] == {"role": "tool", "content": "QUIET", "call_id": "c1", "notes": []}
+    assert history.messages[3] == {"role": "tool", "content": "QUIET", "call_id": "c1", "asides": []}
     assert scripted.requests[1][0][-1]["content"] == "QUIET"  # the result went back to the model
 
 
@@ -284,7 +284,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
 
     rt = Runtime()
     rt.mount(transcript, id="transcript")
-    rt.mount(notes, id="notes")
+    rt.mount(asides, id="asides")
     executor_fiber = rt.mount(executor, id="executor")
     rt.mount(loop, id="loop")
     kernel_fiber = rt.mount(kernel_and_system, id="kernel")
@@ -401,7 +401,7 @@ async def test_an_interrupted_call_still_gets_an_answer_in_the_transcript() -> N
     assert [m["call_id"] for m in tools] == ["c1", "c2"]  # both calls answered
     assert tools[0]["content"].startswith("interrupted")  # c1 was in the kernel: it may have partly run
     assert tools[1]["content"].startswith("not run")  # c2 never started
-    assert [m["notes"] for m in tools] == [[], []]
+    assert [m["asides"] for m in tools] == [[], []]
 
 
 async def test_a_turn_stopped_at_the_approval_question_says_the_input_never_ran() -> None:
@@ -778,8 +778,8 @@ def test_only_a_python_call_with_code_is_a_input() -> None:
     )
 
 
-async def test_memory_s_notes_ride_on_the_input_s_result_and_the_person_sees_each_named() -> None:
-    """Each function is given the input's code, result and touched files; its note goes to the
+async def test_memory_s_asides_ride_on_the_input_s_result_and_the_person_sees_each_named() -> None:
+    """Each function is given the input's code, result and touched files; its aside goes to the
     model after the result, sorted with the others; one that fails says so and the rest still
     say theirs; an input that never ran asks none of them."""
     given: list[Json] = []
@@ -794,32 +794,34 @@ async def test_memory_s_notes_ride_on_the_input_s_result_and_the_person_sees_eac
     def broken(input: Json) -> str:
         raise RuntimeError("no rules file")
 
-    notes: Hooks[Callable[[Json], str]] = Hooks()
+    asides: Hooks[Callable[[Json], str]] = Hooks()
     for fn in (rules, quiet, broken):
-        notes.add(fn)
+        asides.add(fn)
     history = MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "nope", code="b")], [text("done")])
     events = [
         e
-        async for e in LoopModel(scripted, as_tool(Shouting()), history, Confined(), notes=notes).reply("go")
+        async for e in LoopModel(scripted, as_tool(Shouting()), history, Confined(), asides=asides).reply(
+            "go"
+        )
     ]
     assert given == [
         {"name": "python", "input": {"code": "a"}, "result": "A", "touched": ("/p/a.py",)}
     ]  # c2 never ran
     told = [m["content"] for m in history.messages if m["role"] == "tool"]
-    assert told[0].startswith("A\n\n(bh-02 could not make a note with ")
+    assert told[0].startswith("A\n\n(bh-02 could not make an aside with ")
     assert "broken: no rules file. The call's result is whole; tell the person" in told[0]
     assert told[0].endswith("failed.)\n\nZebra rule: for /p/a.py.\nWhole rule text.")
     assert told[1].startswith("error: there is no tool named 'nope'") and "Zebra" not in told[1]
     results = [e for e in events if e["type"] == "tool_result"]
     assert results[0]["content"] == "A"  # the person sees the input's own output
-    notes = [e["text"] for e in events if e["type"] == "note"]
-    assert "told the model with this result: Zebra rule: for /p/a.py." in notes
+    shown = [e["text"] for e in events if e["type"] == "note"]
+    assert "told the model with this result: Zebra rule: for /p/a.py." in shown
 
 
-async def test_the_notes_told_with_a_result_are_kept_on_its_entry_beside_what_the_model_reads() -> None:
-    """The model reads the result, then the notes, sorted, each after a blank line, then any change
-    in its instructions; the entry also keeps the notes alone, as a list (`notes`), so a row reading
+async def test_the_asides_told_with_a_result_are_kept_on_its_entry_beside_what_the_model_reads() -> None:
+    """The model reads the result, then the asides, sorted, each after a blank line, then any change
+    in its instructions; the entry also keeps the asides alone, as a list (`asides`), so a row reading
     a resumed transcript finds what it told without searching the text. Every `tool` entry the loop
     writes has one, `[]` for an input told nothing or never run: an entry without it was written
     before the loop kept them."""
@@ -831,7 +833,7 @@ async def test_the_notes_told_with_a_result_are_kept_on_its_entry_beside_what_th
             return await super().run(code)
 
     functions: Hooks[Callable[[Json], str]] = Hooks()
-    for said in ("Zebra: another row's note.", "From a.md, a rule for *.py:\n\nOne.\n\n(Two.)", ""):
+    for said in ("Zebra: another row's aside.", "From a.md, a rule for *.py:\n\nOne.\n\n(Two.)", ""):
         functions.add(lambda input, said=said: said)
     history = MemoryTranscript()
     scripted = Scripted(
@@ -839,15 +841,15 @@ async def test_the_notes_told_with_a_result_are_kept_on_its_entry_beside_what_th
         [text("done")],
     )
     loop = LoopModel(
-        scripted, as_tool(Extending()), history, Person(True, False), system=where, notes=functions
+        scripted, as_tool(Extending()), history, Person(True, False), system=where, asides=functions
     )
     await _collect(loop, "go")
     tools = [m for m in history.messages if m["role"] == "tool"]
-    notes = ["From a.md, a rule for *.py:\n\nOne.\n\n(Two.)", "Zebra: another row's note."]
-    told = "\n\n".join(["A", *notes, changes("in /a", "in /b")])
-    assert tools[0] == {"role": "tool", "content": told, "call_id": "c1", "notes": notes}
+    asides = ["From a.md, a rule for *.py:\n\nOne.\n\n(Two.)", "Zebra: another row's aside."]
+    told = "\n\n".join(["A", *asides, changes("in /a", "in /b")])
+    assert tools[0] == {"role": "tool", "content": told, "call_id": "c1", "asides": asides}
     assert scripted.requests[1][0][-3] == tools[0]  # the model is sent the entry, which it reads as content
-    assert [m["notes"] for m in tools[1:]] == [[], []]  # a call that can't run, and one declined
+    assert [m["asides"] for m in tools[1:]] == [[], []]  # a call that can't run, and one declined
     assert [m["content"] for m in tools[1:]] == [refusal(call("c2", "nope", code="b"), ["python"]), DECLINED]
 
 
@@ -874,7 +876,7 @@ class _Ticker:
 
 async def test_the_prompt_and_memory_are_read_off_the_event_loop_which_keeps_running() -> None:
     """The TUI runs on cordis's event loop: a section function that walks a big tree, or a
-    notes function that reads rule files, must not freeze it. Each runs in a worker thread,
+    asides function that reads rule files, must not freeze it. Each runs in a worker thread,
     and the event loop goes on ticking while it does."""
     during: list[int] = []  # ticks counted while each slow call ran
     threads: list[int] = []
@@ -896,19 +898,19 @@ async def test_the_prompt_and_memory_are_read_off_the_event_loop_which_keeps_run
             slowly(ticker)
             return "a rule"
 
-        notes: Hooks[Callable[[Json], str]] = Hooks()
-        notes.add(rules)
+        asides: Hooks[Callable[[Json], str]] = Hooks()
+        asides.add(rules)
         scripted = Scripted([call("c1", "python", code="a")], [text("done")])
         loop = LoopModel(
-            scripted, as_tool(Shouting()), MemoryTranscript(), Confined(), system=Slow(), notes=notes
+            scripted, as_tool(Shouting()), MemoryTranscript(), Confined(), system=Slow(), asides=asides
         )
         assert await _collect(loop, "go") == "done"
-    assert len(during) == 3  # the prompt with the message, notes, the prompt with the result
+    assert len(during) == 3  # the prompt with the message, asides, the prompt with the result
     assert all(ticks >= 10 for ticks in during), during  # ~30 each when the loop runs free; 0 blocked
     assert threading.get_ident() not in threads
 
 
-async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_them() -> None:
+async def test_a_reply_stopped_while_an_input_s_asides_are_made_answers_it_with_them() -> None:
     started = threading.Event()
 
     def slow(input: Json) -> str:
@@ -916,12 +918,12 @@ async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_t
         time.sleep(0.2)
         return "a rule"
 
-    notes: Hooks[Callable[[Json], str]] = Hooks()
-    notes.add(slow)
+    asides: Hooks[Callable[[Json], str]] = Hooks()
+    asides.add(slow)
     kernel, history = Shouting(), MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "python", code="b")])
     task = asyncio.create_task(
-        _collect(LoopModel(scripted, as_tool(kernel), history, Confined(), notes=notes), "go")
+        _collect(LoopModel(scripted, as_tool(kernel), history, Confined(), asides=asides), "go")
     )
     while not started.is_set():
         await asyncio.sleep(0.01)
@@ -929,9 +931,9 @@ async def test_a_reply_stopped_while_an_input_s_notes_are_made_answers_it_with_t
     await asyncio.gather(task, return_exceptions=True)
     tools = [m for m in history.messages if m["role"] == "tool"]
     assert [m["call_id"] for m in tools] == ["c1", "c2"]
-    assert tools[0]["content"] == "A\n\na rule"  # it ran to the end: its result and its note
-    assert tools[0]["notes"] == ["a rule"]
-    assert tools[1]["content"].startswith("not run") and tools[1]["notes"] == []
+    assert tools[0]["content"] == "A\n\na rule"  # it ran to the end: its result and its aside
+    assert tools[0]["asides"] == ["a rule"]
+    assert tools[1]["content"].startswith("not run") and tools[1]["asides"] == []
     assert kernel.ran == ["a"]
 
 
@@ -1016,9 +1018,9 @@ async def test_on_a_new_day_with_new_instructions_the_date_comes_first_then_what
     ]
 
 
-async def test_a_reply_stopped_after_an_input_s_notes_were_made_still_tells_them() -> None:
-    """A notes function marks what it told as told, so a stop while the prompt is read after
-    the input must not lose its note: the call is answered with its result and the note."""
+async def test_a_reply_stopped_after_an_input_s_asides_were_made_still_tells_them() -> None:
+    """An asides function marks what it told as told, so a stop while the prompt is read after
+    the input must not lose its aside: the call is answered with its result and the aside."""
     reading = threading.Event()
 
     class SlowSecond:
@@ -1031,8 +1033,8 @@ async def test_a_reply_stopped_after_an_input_s_notes_were_made_still_tells_them
                 time.sleep(0.2)
             return "in /a"
 
-    notes: Hooks[Callable[[Json], str]] = Hooks()
-    notes.add(lambda input: "a rule, told once")
+    asides: Hooks[Callable[[Json], str]] = Hooks()
+    asides.add(lambda input: "a rule, told once")
     history = MemoryTranscript()
     loop = LoopModel(
         Scripted([call("c1", "python", code="a")]),
@@ -1040,7 +1042,7 @@ async def test_a_reply_stopped_after_an_input_s_notes_were_made_still_tells_them
         history,
         Confined(),
         system=SlowSecond(),
-        notes=notes,
+        asides=asides,
     )
     task = asyncio.create_task(_collect(loop, "go"))
     while not reading.is_set():

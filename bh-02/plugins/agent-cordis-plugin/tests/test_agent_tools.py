@@ -15,10 +15,10 @@ from agent_cordis_plugin import (
     MemoryTranscript,
     ToolBroker,
     Unstarted,
+    asides,
     called,
     executor,
     loop,
-    notes,
     shown,
     tools,
     transcript,
@@ -225,7 +225,7 @@ def _composition(
     rt = Runtime()
     rt.mount(around, id="around")
     rt.mount(transcript, id="transcript")
-    rt.mount(notes, id="notes")
+    rt.mount(asides, id="asides")
     rt.mount(executor, id="executor")
     rt.mount(tools, id="tools")
     rt.mount(loop, id="loop", config=LoopConfig(requires=requires, wait=wait))
@@ -447,9 +447,11 @@ async def test_a_call_a_tool_makes_with_no_loop_serving_fails_saying_so() -> Non
     }
 
 
-async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_notes_told_with_the_call_it_came_from() -> None:
+async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_asides_told_with_the_call_it_came_from() -> (
+    None
+):
     """An input's `tools.echo(...)` (here a tool `outer` whose run calls `echo` through the
-    broker): put to `approval` and asked of `notes` as the model's own call is, its notes told
+    broker): put to `approval` and asked of `asides` as the model's own call is, its asides told
     with the call it was made from; a declined, unknown or malformed one is why it did not run."""
     broker, approval, history = ToolBroker(), _Approval(), MemoryTranscript()
     answers: list[Any] = []
@@ -464,10 +466,10 @@ async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_notes_told_with_th
     broker.register(_spec("outer"), outer)
 
     def said(call: Any) -> str:
-        return f"noted {call['name']}: {call['result']}" if call["touched"] else ""
+        return f"aside of {call['name']}: {call['result']}" if call["touched"] else ""
 
     model = _Scripted([_call("c1", "outer")], [_text("done")])
-    looped = LoopModel(model, broker, history, approval, notes=[said])
+    looped = LoopModel(model, broker, history, approval, asides=[said])
     broker.serve(looped.nested)
     await _said(looped, "go")
     assert answers == [
@@ -477,7 +479,7 @@ async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_notes_told_with_th
     ]
     assert [request["name"] for request in approval.asked] == ["outer", "echo"]  # each put to approval
     (answer,) = [m for m in history.messages if m["role"] == "tool"]
-    assert answer["notes"] == ["noted echo: echo: inside"]  # told with the call it came from
-    assert answer["content"] == "outer done\n\nnoted echo: echo: inside"
+    assert answer["asides"] == ["aside of echo: echo: inside"]  # told with the call it came from
+    assert answer["content"] == "outer done\n\naside of echo: echo: inside"
     refused = LoopModel(_Scripted(), broker, MemoryTranscript(), _Approval(answer=False))
     assert await refused.nested("echo", {"text": "hi"}) == {"content": DECLINED, "failed": True}

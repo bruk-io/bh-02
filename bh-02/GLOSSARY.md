@@ -34,7 +34,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **bh-02**: the coding harness: a terminal app where a model works by writing Python.
 - **harness**: a program around a model that runs its loop and its tools and decides what it may do; bh-02 is one, built on cordis.
 - **harness** (the project): a separate project of the repository's owner whose `ARCHITECTURE.MD` gave bh-02 CodeAct and its step table: "harness's rule", never read a truncated or silent step as the answer (`stops.classify`).
-- **DeepSeek Harness**: the agent harness built on the paper cordis realises (cordis's README); its notes on tool registries, tool changes and model-written plugins informed bh-02's designs.
+- **DeepSeek Harness**: the agent harness built on the paper cordis realises (cordis's README); its account of tool registries, tool changes and model-written plugins informed bh-02's designs.
 - **the harness's** (a line): bh-02's rather than the model's: a slash command, or a line with a prefix a row claimed, as `commands` decides (`claims`).
 - **harness** (row): the shell's pinned row before it was `shell` (`bh_02.bootstrap:harness`); `update-layer` renames it.
 - **harness** (in brig's docs and tests): the program that starts the jails, such as bh-02; in brig's tests, the test run itself (`harness_pid`).
@@ -57,6 +57,8 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **chat** (row): `chat:converse`: reads your messages, shows the replies, runs the lines `commands` claims (slash commands, `!`), and binds `done`, which ends when you leave.
 - **turn**: one reply to one message, however many model steps and inputs it takes.
 - **event**: one thing that happened in a turn, a dict with a `type` (`text`, `thinking`, `tool_call`, `tool_result`, `usage`, `stop`, `note`, `cleared`, `restarting`) that the ui draws; [`CONTRACTS.md`](CONTRACTS.md) has each shape.
+- **note**: a line shown to you, never to the model: in the app, the `note` event (a command's answer, a row reloading, or what the loop told the model as an aside, by its first line); from the command line, a line it prints starting `note:`. In bh-02 a note means only this.
+- **aside**: text bh-02 tells the model beside what it reads, never a message of its own: with a call's result, what rows add to `asides` (memory that loads on demand) and the python tool's own before an input's output (what its startup files did); with the next message the model reads, a change in its instructions or its tools. The transcript keeps each, so a resumed conversation knows what it was told ([The prompt and asides](../docs/bh-02/how-it-works/prompt-and-asides.md)).
 - **chunk**: an event from one model step.
 - **`for_model`**: what a command's answer leaves for the model (`!COMMAND`'s output), which `commands` holds, never shown, until your next message.
 - **CodeAct**: how the model works in bh-02: it acts by writing Python, which the `python` tool carries to the Python process, and only what an input prints enters its context ([The python tool](../docs/bh-02/how-it-works/python-tool.md)).
@@ -64,7 +66,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **call**: one use of a tool, answered with its result.
 - **tools** (row and key): `agent:tools`, the broker tools register with; the loop offers what is registered.
 - **tool list**: the tools a conversation is offered: the ones it began with, read at its first request and kept in its transcript ([The loop](../docs/bh-02/how-it-works/loop.md)).
-- **tool change**: a tool added, removed or redefined mid-conversation, told to the model as a note on its next message; an added one is offered from the next conversation.
+- **tool change**: a tool added, removed or redefined mid-conversation, told to the model as an aside on its next message; an added one is offered from the next conversation.
 - **python** (the tool): `python(code)`, the tool bh-02 ships: each call runs its code as an input in the Python process, and what the input printed is the result.
 - **tools** (in an input): the namespace's view of bh-02's other tools, each a function, `tools.NAME(arg=...)`, whose call runs as the model's own would.
 - **input**: one `python` call: the code the model sent the Python process and what it printed (not a cell: there is no notebook; not the `input` key, below).
@@ -99,15 +101,16 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **operator** (row): `commands:operator`: the commands that act on the running program through the loader.
 - **jobs** (row and key): `commands:jobs`: the restarts commands ask for (`/clear`, `/compact`, `/model NAME`, `/restart`), run one at a time after the command answers.
 - **switch** (row): `models:switch`: `/model`, which lists the models and switches by name in the session's layer.
-- **system** (row and key): `agent:system`: the system prompt, a broker of the sections rows add ([The prompt and notes](../docs/bh-02/how-it-works/prompt-and-notes.md)).
+- **system** (row and key): `agent:system`: the system prompt, a broker of the sections rows add ([The prompt and asides](../docs/bh-02/how-it-works/prompt-and-asides.md)).
 - **memory** (row and key): `memory:files`: Claude Code's memory files, read as Claude Code reads them, as a section of the system prompt; `/memory` lists them ([Memory](../docs/bh-02/using/memory.md)).
-- **auto memory** (row `memory-auto`): `memory:auto`: notes the model keeps for itself across conversations, as Claude Code's auto memory, outside the repository ([Memory](../docs/bh-02/using/memory.md#auto-memory)).
+- **auto memory** (row `memory-auto`): `memory:auto`: memories the model keeps for itself across conversations (a `MEMORY.md` index and a file per memory), as Claude Code's auto memory, outside the repository ([Memory](../docs/bh-02/using/memory.md#auto-memory)).
 - **conversation** (row): `agent:conversation`: `/clear` and `/compact`, each a new conversation written over the transcript's file ([agent-cordis-plugin](plugins/agent-cordis-plugin/README.md)).
-- **notes** (row and key): `agent:notes`: a broker of functions rows add, each of which may add a note to a call's result.
+- **asides** (row and key): `agent:asides`: a broker of functions rows add, each of which may add an aside to a call's result.
+- **notes** (row): the asides broker before it was `asides` (`agent:notes`); `update-layer` renames it.
 - **access** (row and key): `agent:access`: a broker of functions rows add that a tool asks before it opens a file, each answering go ahead or why not.
-- **executor** (row and key): `agent:executor`: where the loop reads the prompt and asks `notes`, in a thread off the app's event loop, one call at a time.
+- **executor** (row and key): `agent:executor`: where the loop reads the prompt and asks `asides`, in a thread off the app's event loop, one call at a time.
 - **touched**: the files a call opened, as its tool answers (an input's: what its own Python code opened, `touched()`).
-- **on-touch** (row): `memory:on_touch`: memory that loads on demand (a subdirectory's CLAUDE.md, a rule whose `paths` match), told whole with the first input in a conversation that opens a file it covers.
+- **on-touch** (row): `memory:on_touch`: memory that loads on demand (a subdirectory's CLAUDE.md, a rule whose `paths` match), told whole as an aside to the first input in a conversation that opens a file it covers.
 - **extension**: a plugin the model writes itself, `.bh-02/plugins/NAME.py` in the project, which bh-02 loads while it runs ([The model's extensions](../docs/bh-02/extending/extensions.md)).
 - **extensions** (row): `extensions:extensions`, which loads the extensions into the extensions process.
 - **run**: one launch of bh-02, from start to leaving; the Python process and its namespace last one run.

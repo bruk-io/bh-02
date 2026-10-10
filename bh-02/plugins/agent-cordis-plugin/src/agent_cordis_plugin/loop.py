@@ -1,14 +1,14 @@
 """The loop: a turn is one model step plus the calls it asked for, until it asks for none.
 
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
-tools, transcript, system, approval, notes, executor). The model is offered the tools rows
+tools, transcript, system, approval, asides, executor). The model is offered the tools rows
 register (`tools`, a broker), through the provider's standard tool calling, and each call runs
 through the tool its name has; CodeAct's `python` is one of them, the python row's. The list is
 read at a conversation's first request, after the tools the loop's config `requires` have
 registered, and kept in its transcript; a later change (a tool added, removed or redefined) is
-kept there too and told to the model on the next message it reads (`toolset`), while each
-request offers the list as the provider chooses (`tool_changes`: by default the one the
-conversation began with, so a model server's cache of the conversation's start stays good).
+kept there too and told to the model as an aside on the next message it reads (`toolset`),
+while each request offers the list as the provider chooses (`tool_changes`: by default the one
+the conversation began with, so a model server's cache of the conversation's start stays good).
 Each call is put to `approval` first and runs only on its yes (at once when it runs in a jail
 that confines it; otherwise the person's answer): one place for every model provider, and the
 loop knows whether a stopped call ever reached its tool.
@@ -17,21 +17,22 @@ Every request begins with the system prompt the conversation began with, kept in
 so a model server's cache of the conversation stays good. When the prompt reads differently (an
 extension loaded, the branch switched, CLAUDE.md edited), the new reading is kept after it, as
 the edits from the one before (`prompt.edits`), not another whole copy, and the model is told
-what changed (`prompt.changes`) on the next message it reads. The date is not in the prompt:
-the loop tells it with the person's message, the first of a conversation and the first of each
-new day (`(Today's date: ...)`), so the prompt reads the same from one day to the next.
+what changed (`prompt.changes`) as an aside on the next message it reads. The date is not in
+the prompt: the loop tells it with the person's message, the first of a conversation and the
+first of each new day (`(Today's date: ...)`), so the prompt reads the same from one day to the
+next.
 
-After each call it runs, the loop asks `notes`, the functions rows have added there, what to
-tell the model with that call's result (`noted`): each is given the tool's name, the call's
-input, its result and the files it opened (what the tool answered with), and may add a note,
-never change the result. A path-scoped rule arrives that way when the model first works on a
-file it covers.
-The model reads the notes after the result; the `tool` entry also keeps them as a list
-(`notes`), so a row reading a resumed transcript for what it told finds each note whole, not
-somewhere in a text the result and the other notes share.
+After each call it runs, the loop asks `asides`, the functions rows have added there, what to
+tell the model beside that call's result (`asides_for`): each is given the tool's name, the
+call's input, its result and the files it opened (what the tool answered with), and may add an
+aside, never change the result. A path-scoped rule arrives that way when the model first works
+on a file it covers.
+The model reads the asides after the result; the `tool` entry also keeps them as a list
+(`asides`), so a row reading a resumed transcript for what it told finds each aside whole, not
+somewhere in a text the result and the other asides share.
 
 Reading the prompt (every section function, which may read many files and search the project)
-and asking `notes` (which may read rule files) both run on `executor` (`executor.OneAtATime`),
+and asking `asides` (which may read rule files) both run on `executor` (`executor.OneAtATime`),
 never on the event loop, which the TUI shares: a slow section freezes nothing. One runs at a
 time, a reading a stopped reply left running included: the next waits for it rather than
 starting beside it. `executor` is a row of its own that depends on nothing, so a loop reloaded
@@ -72,7 +73,7 @@ __all__ = [
     "Executor",
     "Model",
     "LoopModel",
-    "Notes",
+    "Asides",
     "Rule",
     "System",
     "Tool",
@@ -81,7 +82,7 @@ __all__ = [
     "Unstarted",
     "called",
     "malformed",
-    "noted",
+    "asides_for",
     "refusal",
     "request_for",
     "shown",
@@ -124,16 +125,16 @@ class Tools(Protocol):
     def serve(self, call: Callable[[str, Json], Awaitable[Json]]) -> Callable[[], None]: ...
 
 
-type Note = Callable[[Json], str]
+type Aside = Callable[[Json], str]
 
 
 @runtime_checkable
-class Notes(Protocol):
-    """What the loop needs of the `notes` value: the functions that may add a note to a call's
-    result, each called as `fn({"name", "input", "result", "touched"}) -> str`, on `executor`:
+class Asides(Protocol):
+    """What the loop needs of the `asides` value: the functions that may add an aside to a
+    call's result, each called as `fn({"name", "input", "result", "touched"}) -> str`, on `executor`:
     one call's at a time, and never beside a reading of the prompt."""
 
-    def __iter__(self) -> Iterator[Note]: ...
+    def __iter__(self) -> Iterator[Aside]: ...
 
 
 @runtime_checkable
@@ -207,10 +208,11 @@ DECLINED = "denied: the person said no to this call, so it did not run; ask them
 # person stopped it, or the model failed (a 429, a dropped connection).
 STOPPED = "[the person stopped this reply here]"
 FAILED = "[this reply failed here; the person saw the error]"
-# What the person is shown when the model is told its instructions, or its tools, changed.
+# What the person is shown when the model is told, as an aside, that its instructions, or its
+# tools, changed.
 _TOLD = "told the model its instructions changed since the conversation began"
 _TOOLS_TOLD = "told the model its tools changed since the conversation began"
-_NOTED = "told the model with this result: "  # then the first line of a note
+_ASIDE = "told the model with this result: "  # then the first line of an aside
 _SHOWN = 120  # how much of that line the person is shown
 # What the model is told of the date, before the person's message: the first of a conversation,
 # and the first of each new day.
@@ -250,27 +252,27 @@ def _undated(messages: Sequence[Json], today: str) -> bool:
     return told != today
 
 
-def _asked(message: str, today: str | None, note: str) -> dict[str, Any]:
+def _asked(message: str, today: str | None, aside: str) -> dict[str, Any]:
     """The person's message as the transcript keeps it: the date first when it is told
-    (`today`), then what changed in the model's instructions (`note`), then the message. The date
+    (`today`), then what changed in the model's instructions (`aside`), then the message. The date
     rides on the entry as `today` too, which is how a later message finds the last one told."""
-    told = [*([_DATED.format(today)] if today else []), *([note] if note else []), message]
+    told = [*([_DATED.format(today)] if today else []), *([aside] if aside else []), message]
     return {"role": "user", "content": "\n\n".join(told)} | ({"today": today} if today else {})
 
 
-def _answer(call: Json, content: str, notes: Sequence[str]) -> dict[str, Any]:
+def _answer(call: Json, content: str, asides: Sequence[str]) -> dict[str, Any]:
     """The transcript entry answering `call`: `content`, what the model reads (the input's result,
-    then its notes and any change in the instructions, each after a blank line), and the `notes`
-    alone (`notes`, `[]` for none), so what was told is read back without searching the text.
+    then its asides and any change in the instructions, each after a blank line), and the asides
+    alone (`asides`, `[]` for none), so what was told is read back without searching the text.
     The loop's own, as `today` is: a provider sends `content`."""
-    return {"role": "tool", "content": content, "call_id": call["id"], "notes": list(notes)}
+    return {"role": "tool", "content": content, "call_id": call["id"], "asides": list(asides)}
 
 
-def noted(functions: Iterable[Note], input: Json) -> list[str]:
-    """What the functions in `notes` say about one call (`name`, `input`, `result`, `touched`),
+def asides_for(functions: Iterable[Aside], input: Json) -> list[str]:
+    """What the functions in `asides` say about one call (`name`, `input`, `result`, `touched`),
     sorted, so the order rows added them in means nothing. A function that fails or returns something
     other than text says so in one line, and the rest still say theirs."""
-    notes: list[str] = []
+    asides: list[str] = []
     for fn in functions:
         try:
             said = fn(input)
@@ -279,18 +281,18 @@ def noted(functions: Iterable[Note], input: Json) -> list[str]:
         except Exception as error:  # one row's function failing must not cost the input its result
             named = getattr(fn, "__qualname__", type(fn).__qualname__)
             said = (
-                f"(bh-02 could not make a note with {getattr(fn, '__module__', '?')}:{named}: {error}. "
-                "The call's result is whole; tell the person this function in `notes` failed.)"
+                f"(bh-02 could not make an aside with {getattr(fn, '__module__', '?')}:{named}: {error}. "
+                "The call's result is whole; tell the person this function in `asides` failed.)"
             )
         if said.strip():
-            notes.append(said.strip())
-    return sorted(notes)
+            asides.append(said.strip())
+    return sorted(asides)
 
 
 def request_for(messages: Sequence[Json]) -> list[Json]:
     """The messages for one request over a transcript's `messages`: the prompt the conversation
     began with (its first `system` entry), then the conversation. The prompts kept after the
-    first were told as notes, so they stay out: a model is sent one `system` message, whole, and
+    first were told as asides, so they stay out: a model is sent one `system` message, whole, and
     never sees the loop's edits. The `tools` entries, the lists the conversation was offered,
     stay out too: they are the request's tools, not its messages."""
     first = next((m for m in messages if m.get("role") == "system"), None)
@@ -428,7 +430,7 @@ class LoopModel:
     told none yet or another day's (`today`, the clock; a test gives its own): first on that
     message, then any change to the instructions, then the message.
 
-    The prompt is read, and `notes` asked, on `executor` (the `executor` row's, which a reloaded
+    The prompt is read, and `asides` asked, on `executor` (the `executor` row's, which a reloaded
     loop shares with the last one); a loop built without one (a test, direct use) makes its own.
     """
 
@@ -440,7 +442,7 @@ class LoopModel:
         approval: Approval,
         max_nudges: int = 2,
         system: System | None = None,
-        notes: Notes | None = None,
+        asides: Asides | None = None,
         today: Callable[[], str] = _today,
         executor: Executor | None = None,
         *,
@@ -454,7 +456,7 @@ class LoopModel:
         self._approval = approval
         self._max_nudges = max_nudges
         self._system = system
-        self._notes = notes
+        self._asides = asides
         self._today = today
         self._requires = tuple(requires)
         self._wait = wait
@@ -465,15 +467,15 @@ class LoopModel:
         self._clock = clock
         self._ready = False  # whether the tools `requires` names have registered, once
         self._missing: dict[str, float] = {}  # a tool the conversation has, missing since when
-        self._nested: list[str] = []  # what `notes` said of the calls the running call made (`nested`)
+        self._nested: list[str] = []  # what `asides` said of the calls the running call made (`nested`)
 
     def _prompt(self) -> str:
         """The system prompt as it reads now. Run on `executor` (`_told`)."""
         return self._system.text() if self._system else ""
 
     async def _told(self) -> tuple[str, list[str]]:
-        """What the model is told with the next message it reads, and what the person is shown
-        of it: what changed in its instructions (`_prompt_told`), then in its tools
+        """The aside the model is told with the next message it reads, and what the person is
+        shown of it: what changed in its instructions (`_prompt_told`), then in its tools
         (`_tools_told`); ('', []) when nothing did."""
         prompt = await self._prompt_told()
         tools = self._tools_told()
@@ -578,7 +580,7 @@ class LoopModel:
     async def nested(self, name: str, input: Json) -> Json:
         """A call a tool's own call makes (an input's `tools.NAME(...)`, CONTRACTS.md: tools,
         `serve`), run as the model's are: through the tool its name has now, if its input fits,
-        once `approval` says yes, then asked of `notes`, whose notes are told with the call it
+        once `approval` says yes, then asked of `asides`, whose asides are told with the call it
         was made from. Answers `{"content", "failed"}`: what the caller reads, and whether that
         is why it did not run or failed rather than its result."""
         tool = self._tools.get(name)
@@ -592,7 +594,7 @@ class LoopModel:
             return {"content": DECLINED, "failed": True}
         result, touched, failed = await called(tool, name, input)
         ran = {"name": name, "input": input, "result": result, "touched": touched}
-        self._nested += await self._executor.run(partial(noted, tuple(self._notes or ()), ran))
+        self._nested += await self._executor.run(partial(asides_for, tuple(self._asides or ()), ran))
         return {"content": result, "failed": failed}
 
     def _unanswered(self, message: str, dated: str | None, why: str) -> None:
@@ -608,7 +610,7 @@ class LoopModel:
             yield {"type": "note", "text": _WAITING.format(_listed(waiting))}
         try:
             await self._offer()
-            note, shown_told = await self._told()
+            aside, shown_told = await self._told()
         except asyncio.CancelledError:
             # stopped while the tools or the prompt were read: the message is kept all the same,
             # answered as one stopped in its first model step is
@@ -617,7 +619,7 @@ class LoopModel:
         except Unstarted:  # a tool it requires never came: as a model step that failed
             self._unanswered(message, dated, FAILED)
             raise
-        self._transcript.append(_asked(message, dated, note))
+        self._transcript.append(_asked(message, dated, aside))
         for text in shown_told:
             yield {"type": "note", "text": text}
         nudges = 0
@@ -646,11 +648,11 @@ class LoopModel:
             if stop == ACT:
                 answered, running = 0, False  # running: the unanswered call reached its tool
                 result: str | None = None  # the unanswered call's answer, once it has one
-                notes: list[str] = []  # and what `notes` said with it
+                asides: list[str] = []  # and what `asides` said with it
                 try:
                     for call in turn.calls:
                         name, input = str(call["name"]), call["input"]
-                        notes = []
+                        asides = []
                         tool = await self._callable(call, offered)
                         if isinstance(tool, str):  # why it can't run
                             result = tool
@@ -664,21 +666,21 @@ class LoopModel:
                             running = False
                             ran = {"name": name, "input": input, "result": result, "touched": touched}
                             # off the event loop too (an on-touch section reads rule files), over
-                            # the functions `notes` holds now. A stop meanwhile waits for them: each
+                            # the functions `asides` holds now. A stop meanwhile waits for them: each
                             # has marked what it told as told, so the answer must carry it
                             asked = asyncio.ensure_future(
-                                self._executor.run(partial(noted, tuple(self._notes or ()), ran))
+                                self._executor.run(partial(asides_for, tuple(self._asides or ()), ran))
                             )
                             try:
-                                notes = await asyncio.shield(asked)
+                                asides = await asyncio.shield(asked)
                             except asyncio.CancelledError:
-                                notes = await asked
+                                asides = await asked
                                 raise
-                            # what the calls it made said too: each marked its note as told
-                            notes, self._nested = sorted([*notes, *self._nested]), []
-                        note, shown_told = await self._told()
-                        said = "\n\n".join([result, *notes, *([note] if note else [])])
-                        self._transcript.append(_answer(call, said, notes))
+                            # what the calls it made said too: each marked its aside as told
+                            asides, self._nested = sorted([*asides, *self._nested]), []
+                        aside, shown_told = await self._told()
+                        said = "\n\n".join([result, *asides, *([aside] if aside else [])])
+                        self._transcript.append(_answer(call, said, asides))
                         answered, answer, result = answered + 1, result, None
                         yield {
                             "type": "tool_result",
@@ -686,21 +688,21 @@ class LoopModel:
                             "content": answer,
                             "is_error": False,
                         }
-                        for each in notes:
+                        for each in asides:
                             first = each.splitlines()[0]
-                            yield {"type": "note", "text": _NOTED + first[:_SHOWN]}
+                            yield {"type": "note", "text": _ASIDE + first[:_SHOWN]}
                         for text in shown_told:
                             yield {"type": "note", "text": text}
                 finally:
                     # Interrupted part-way: every call the transcript holds still gets an answer,
                     # or the next request would carry a call no result follows. Only the one with
                     # its tool when the stop came may have partly run; one stopped after it had
-                    # its answer (while its notes were made or the prompt read) gets that answer,
-                    # with its notes.
+                    # its answer (while its asides were made or the prompt read) gets that answer,
+                    # with its asides.
                     for n, call in enumerate(turn.calls[answered:]):
                         said, kept = _NOT_RUN, []
                         if n == 0 and result is not None:
-                            said, kept = "\n\n".join([result, *notes]), notes
+                            said, kept = "\n\n".join([result, *asides]), asides
                         elif n == 0 and running:
                             said = _INTERRUPTED
                         self._transcript.append(_answer(call, said, kept))
@@ -709,8 +711,8 @@ class LoopModel:
             if stop in (ANSWERED, REFUSED) or nudges >= self._max_nudges:
                 return
             nudges += 1
-            note, shown_told = await self._told()
-            said = f"{FEEDBACK[stop]}\n\n{note}" if note else FEEDBACK[stop]
+            aside, shown_told = await self._told()
+            said = f"{FEEDBACK[stop]}\n\n{aside}" if aside else FEEDBACK[stop]
             self._transcript.append({"role": "user", "content": said, "feedback": stop})
             for text in shown_told:
                 yield {"type": "note", "text": text}

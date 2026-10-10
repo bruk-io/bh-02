@@ -69,7 +69,7 @@ class Host:
 
 
 def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> None:
-    """Outside the project, so the model can keep notes across sessions that are never
+    """Outside the project, so the model can keep memories across sessions that are never
     committed; no self-modification deny is made there, since only the memory row reads it."""
     spec = spec_for(
         root="/w/app",
@@ -1103,9 +1103,9 @@ async def test_a_placeholder_is_made_and_marked_before_bubblewrap_starts(
     assert list(project.iterdir()) == [] and not record.exists()
 
 
-# Listens; once the jail has seen it listen, writes "note" to argv[2] and to argv[3] (as an input
+# Listens; once the jail has seen it listen, writes "a memory" to argv[2] and to argv[3] (as an input
 # keeping auto memory would, and one reaching for another project's), says so in argv[4], waits.
-_LISTEN_THEN_NOTE = """
+_LISTEN_THEN_REMEMBER = """
 import socket, sys, time
 server = socket.socket(socket.AF_UNIX)
 server.bind(sys.argv[1])
@@ -1113,7 +1113,7 @@ server.listen(4)
 server.accept()
 for path in sys.argv[2:4]:
     try:
-        open(path, "w").write("note")
+        open(path, "w").write("a memory")
     except OSError:
         pass
 open(sys.argv[4], "w").write("done")
@@ -1125,7 +1125,7 @@ async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_no
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The project's auto memory directory (`host.auto_memory`) is a root an input may write, in the
-    real jail: the model keeps its notes there with plain Python. Another project's, beside it,
+    real jail: the model keeps its memories there with plain Python. Another project's, beside it,
     is not even there to read; and the model is told it may write the directory (`writes()`)."""
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "records"))
@@ -1135,8 +1135,8 @@ async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_no
         directory.mkdir(parents=True)
     one = BrigJail(BrigConfig(), Host(auto_memory=str(memory)))
     endpoint = _endpoint()
-    notes = (str(memory / "MEMORY.md"), str(beside / "MEMORY.md"))
-    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_NOTE, endpoint, *notes, str(project / "done")]
+    memories = (str(memory / "MEMORY.md"), str(beside / "MEMORY.md"))
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_REMEMBER, endpoint, *memories, str(project / "done")]
     started = await one.start(argv, cwd=str(project), endpoint=endpoint)
     try:
         for _ in range(200):
@@ -1144,7 +1144,7 @@ async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_no
                 break
             await asyncio.sleep(0.05)
         assert (project / "done").exists()
-        assert (memory / "MEMORY.md").read_text() == "note"
+        assert (memory / "MEMORY.md").read_text() == "a memory"
         assert not (beside / "MEMORY.md").exists()
         assert str(memory.resolve()) in started.writes() and str(memory.resolve()) in started.reads()
     finally:

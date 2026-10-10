@@ -12,7 +12,7 @@ values under **keys**, registers entries in other rows' registries, starts backg
 keyword-only parameters are the keys it needs.
 
 For example, the `loop` row is filled by `agent:loop`. It needs `model`, `tools`, `transcript`,
-`system`, `approval`, `output`, `notes` and `executor`, and binds `loop`. The `chat` row
+`system`, `approval`, `output`, `asides` and `executor`, and binds `loop`. The `chat` row
 (`chat:converse`) needs `loop`, and reads your messages and shows the replies.
 
 A consumer states what it needs of a key as a Protocol of its own, and cordis checks the bound
@@ -53,8 +53,8 @@ alone:
 - **`executor`** depends on nothing, so `/clear` and `/model`, which reload the loop, keep it.
   Nothing stops a reading of the prompt part-way, so however often the loop reloads, Ctrl-C
   after Ctrl-C leaves at most one reading running, and the next waits for it.
-- **`notes`**, **`access`** and **`system`** are brokers that depend on nothing (`system` on its
-  config alone). The row that adds to `notes` and `access`, memory's on-touch row, depends on
+- **`asides`**, **`access`** and **`system`** are brokers that depend on nothing (`system` on its
+  config alone). The row that adds to `asides` and `access`, memory's on-touch row, depends on
   `transcript`, so a new conversation (`/clear`) is told afresh and a resumed one is not told
   again what its transcript holds. It has no config of its own: it asks the `memory` row, whose
   `root`, `home`, `instruction_files` and `excludes` hold for both.
@@ -80,7 +80,7 @@ Each row's own README has its config: [The app](../reference/app.md#the-plugins)
 
 Some keys hold a collection that many rows add to: the slash commands (`commands`), the app's
 status bar and palette (`frame`), the sections of the system prompt (`system`), the model's tools
-(`tools`), what the model is told after each call (`notes`) and what is asked before a file is
+(`tools`), what the model is told beside each call's result (`asides`) and what is asked before a file is
 opened (`access`). One row binds the collection. Each contributor registers an entry with
 `acquire`, which keeps the remover the registration returns and calls it when the contributor's
 row goes. So adding or retiring a command reloads nothing else. This is the paper's service

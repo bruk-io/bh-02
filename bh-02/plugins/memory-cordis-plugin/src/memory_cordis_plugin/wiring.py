@@ -1,6 +1,6 @@
 """The rows: memory, bound under `memory`, which adds what loads at launch to the system prompt
 (`system.add`) and offers `/memory`; what loads on demand for the files an input opened, added
-to `notes`; and auto memory, a section of the system prompt for each conversation."""
+to `asides`; and auto memory, a section of the system prompt for each conversation."""
 
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
@@ -10,8 +10,8 @@ from cordis import Effects, acquire, bind, component
 from memory_cordis_plugin.auto import AutoMemory
 from memory_cordis_plugin.listing import SPEC, listing
 from memory_cordis_plugin.memory import Memory, MemoryConfig
+from memory_cordis_plugin.touch import Asides, OnTouch, Transcript
 from memory_cordis_plugin.touch import Memory as Touched
-from memory_cordis_plugin.touch import Notes, OnTouch, Transcript
 
 __all__ = ["auto", "files", "on_touch"]
 
@@ -69,10 +69,10 @@ class _Access(Protocol):
 
 
 @component
-async def on_touch(*, memory: Touched, notes: Notes, transcript: Transcript, access: _Access) -> Effects:
+async def on_touch(*, memory: Touched, asides: Asides, transcript: Transcript, access: _Access) -> Effects:
     """Fills an `on-touch` row: `use = "memory:on_touch"`. After each input, what loads on demand
     for the files it opened (a subdirectory's CLAUDE.md, a rule whose `paths` match) goes to the
-    model with its result, each once a conversation (`OnTouch`). Before a write (`access`), a file
+    model as an aside to its result, each once a conversation (`OnTouch`). Before a write (`access`), a file
     covered by what it has not told yet is refused until it has been, so those instructions arrive
     before the file changes. It depends on `transcript` for
     its lifetime and what it says: a new conversation (`/clear`) starts a new row, which tells
@@ -80,14 +80,14 @@ async def on_touch(*, memory: Touched, notes: Notes, transcript: Transcript, acc
     of its own, not the memory row, so a new conversation never takes the memory section out of
     the prompt and puts it back."""
     told = OnTouch(memory, transcript)
-    yield acquire(notes.add, told)
+    yield acquire(asides.add, told)
     yield acquire(access.before_write, told.before_write)
 
 
 @component
 async def auto(*, system: _System, host: _Host, transcript: Transcript) -> Effects:
     """Fills a `memory-auto` row: `use = "memory:auto"`. Claude Code's auto memory: how the model
-    keeps notes of its own across conversations, in the project's auto memory directory
+    keeps memories of its own across conversations, in the project's auto memory directory
     (`host.auto_memory`, which the jail lets an input write), and its MEMORY.md index, a section of
     the system prompt read at a conversation's first reading of the prompt and kept for the rest
     of it (`AutoMemory`). It depends on `transcript` for that lifetime: a new conversation

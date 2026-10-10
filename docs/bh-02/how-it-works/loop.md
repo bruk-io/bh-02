@@ -14,8 +14,8 @@ A turn is the reply to one message. It takes one model step or more:
 2. The model answers, or asks for calls to its tools.
 3. The loop asks the `approval` rule whether each call may run unasked (and you, when it says
    no), runs it through the tool its name has (a `python` call is an **input** to the Python
-   process), and adds the tool's answer to the transcript as the call's result, with any notes
-   rows add ([The prompt and notes](prompt-and-notes.md)).
+   process), and adds the tool's answer to the transcript as the call's result, with any asides
+   rows add ([The prompt and asides](prompt-and-asides.md)).
 4. Back to 1, until the model answers without asking for a call.
 
 A call to a tool the loop did not offer, or one whose input doesn't fit the tool's spec (a
@@ -29,7 +29,7 @@ The loop reads the list of tools at a conversation's first request, after the on
 after `/clear`, when the Python process is starting again, says it waits), and keeps it in the
 transcript. It offers that same list, in name order, for the rest of the conversation, since the
 list is the start of what a model server caches
-([why](prompt-and-notes.md#why-the-prompt-stays-fixed-for-a-conversation)).
+([why](prompt-and-asides.md#why-the-prompt-stays-fixed-for-a-conversation)).
 
 When the tools change partway through (an extension registers one, a layer edit adds a row),
 the loop keeps the change in the transcript and tells the model on the next message it reads,

@@ -222,7 +222,7 @@ class Keyless:
 
 def keyless_after(keyless: Keyless, kind: str, row: str) -> Keyless:
     """What is known of which rows bind a key after one lifecycle event of `row`: a `reload`
-    starts watching its setup, a `bind` notes a key, and `active` settles it: keyless if it
+    starts watching its setup, a `bind` records a key, and `active` settles it: keyless if it
     bound nothing on the way up. A row whose setup was not heard from its `reload` on (it came
     up before the ui listened) is not taken for keyless."""
     rows, keyed, rising, bound = keyless.rows, keyless.keyed, keyless.rising, keyless.bound

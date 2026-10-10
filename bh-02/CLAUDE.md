@@ -38,7 +38,7 @@ No package imports another (`plugin-layering`: the units are every package under
 - **Two halves per plugin**: the value (`loop.py`, `client.py`, `jail.py`, `named.py`,
   `python.py`) is a plain library that doesn't import cordis (`cordis-in-wiring-only`);
   `wiring.py` is the components, which `bind` a value or `acquire` a registration.
-- **Brokers stay commutative** (`commands`, `frame`, `system`, `tools`, `notes`, `access`, the
+- **Brokers stay commutative** (`commands`, `frame`, `system`, `tools`, `asides`, `access`, the
   paper's section 6.2): one row binds the key; each contributor `acquire`s an entry of its own,
   which leaves with it, never a place in an ordered chain.
 - **What every package must compute alike is a library function, not a key**: in `host_paths`,
@@ -66,15 +66,15 @@ What to keep when changing it; the detail is where each line points.
   default, not a requirement), and tells the model of itself in a `system` section, never in its
   spec's description.
 - **What a conversation began with is sent unchanged**, the prompt and the tool list: a change is
-  told as a note, the date on the person's message
-  ([why](../docs/bh-02/how-it-works/prompt-and-notes.md#why-the-prompt-stays-fixed-for-a-conversation)).
-- **Nothing blocks the event loop the TUI shares**: the prompt is read and `notes` asked on
+  told as an aside, the date on the person's message
+  ([why](../docs/bh-02/how-it-works/prompt-and-asides.md#why-the-prompt-stays-fixed-for-a-conversation)).
+- **Nothing blocks the event loop the TUI shares**: the prompt is read and `asides` asked on
   `executor`, one call at a time, and must not need the event loop (agent plugin's README).
 - **Approval is one rule in one row** (`runner:approval`): its askers put what it doesn't let run
   to the person themselves and keep no copy of it; only a layer replaces it (runner plugin).
 - **No command restarts rows in the chat row's task**: it queues them in `jobs`, and the chat row
   reads its next line only once `jobs.settled()`.
-- **Only a layer's rows act in bh-02's process**: only they add to `notes` or claim a line prefix
+- **Only a layer's rows act in bh-02's process**: only they add to `asides` or claim a line prefix
   (`!` runs in the person's shell). An extension gets four keys that only add, never one that
   replaces or reaches the composition (the loader, `runner`, `model`) (extensions plugin).
 - **Never read on the host a file the model can write, or follow a link it could make, and hand

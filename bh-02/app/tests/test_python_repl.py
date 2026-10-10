@@ -1202,7 +1202,7 @@ async def test_the_harness_owned_loop_offers_only_python_and_runs_the_input(
 async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_once(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
-    """The shipped `notes` and memory rows, booted: the first input that opens a file under src/db
+    """The shipped `asides` and memory rows, booted: the first input that opens a file under src/db
     gets its CLAUDE.md and the rule for it with its result; a later one does not, nor does one
     that reads it through a shell (a shell command's reads are not heard). The on-touch row asks
     the `memory` row, so the project and the home are set there, as a layer would."""
@@ -1320,10 +1320,10 @@ async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes
     assert [kept[0]["content"]] == fragile.SYSTEM  # the resumed run's last request began as the first did
 
 
-async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_them_afresh(
+async def test_a_resumed_conversation_is_told_its_asides_once_and_clear_tells_them_afresh(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
-    """The shipped `notes` and memory rows over a session's transcript file. The first run's input that
+    """The shipped `asides` and memory rows over a session's transcript file. The first run's input that
     opens src/db/models.py is told the guidance and the rule for src/db, and its input that reads
     the file through a shell is told nothing (a shell command's reads are not heard); a resumed
     run (the same file, read back: `--resume`) whose inputs do both again is told none of them;
@@ -1372,14 +1372,14 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     ) in fragile.NOTES
 
 
-async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_on_their_entries(
+async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_asides_on_their_entries(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
-    """The shipped loop, transcript, `notes` and memory rows, and a layer's own row adding to
-    `notes` whose note sorts after memory's, booted twice over one transcript file: a session,
-    then its resume. The loop keeps the notes it told with a result on its entry (`notes`), the
-    result and the notes still the text the model reads. The resume reads them there, not in the
-    text: the rule for src/db, which the other row's note followed, is not told again; the
+    """The shipped loop, transcript, `asides` and memory rows, and a layer's own row adding to
+    `asides` whose aside sorts after memory's, booted twice over one transcript file: a session,
+    then its resume. The loop keeps the asides it told with a result on its entry (`asides`), the
+    result and the asides still the text the model reads. The resume reads them there, not in the
+    text: the rule for src/db, which the other row's aside followed, is not told again; the
     CLAUDE.md, cut back since after a paragraph in brackets, is."""
     project, home = tmp_path / "project", tmp_path / "home"
     (project / "src" / "db").mkdir(parents=True)
@@ -1396,11 +1396,11 @@ async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
         f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
-        '[[plugin]]\nid = "another-note"\nuse = "fragile:another_note"\n'
+        '[[plugin]]\nid = "another-aside"\nuse = "fragile:another_aside"\n'
     )
     guide = "From src/db/CLAUDE.md, instructions for work under src/db/:"
     rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
-    other, trimmed = "Zebra: another row's note.", f"{guide}\n\nUse the session."
+    other, trimmed = "Zebra: another row's aside.", f"{guide}\n\nUse the session."
     _answers(True)
     await run([*layers(), _inputs(composition, opens, extra=session)], [Row("chat", config={"prompt": "go"})])
 
@@ -1414,7 +1414,7 @@ async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_
     first, resumed = [
         entry for line in history.read_text().splitlines() if (entry := json.loads(line))["role"] == "tool"
     ]
-    assert first["notes"] == [f"{guide}\n\nUse the session.\n\n(Never by script.)\n\n{rule}", other]
-    assert resumed["notes"] == [trimmed, other]
+    assert first["asides"] == [f"{guide}\n\nUse the session.\n\n(Never by script.)\n\n{rule}", other]
+    assert resumed["asides"] == [trimmed, other]
     for entry in (first, resumed):
-        assert entry["content"] == "\n\n".join(["6", *entry["notes"]])  # what the model reads, as before
+        assert entry["content"] == "\n\n".join(["6", *entry["asides"]])  # what the model reads, as before

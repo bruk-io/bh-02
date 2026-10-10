@@ -26,15 +26,15 @@ use = "models:catalog"
 id = "transcript"
 use = "agent:transcript"
 
-# Where the loop reads the prompt and asks `notes`, off the event loop; it depends on nothing.
+# Where the loop reads the prompt and asks `asides`, off the event loop; it depends on nothing.
 [[plugin]]
 id = "executor"
 use = "agent:executor"
 
-# The broker of what the model is told with a call's result; only rows in a layer add to it.
+# The broker of what the model is told beside a call's result; only rows in a layer add to it.
 [[plugin]]
-id = "notes"
-use = "agent:notes"
+id = "asides"
+use = "agent:asides"
 
 # The broker asked before a tool opens a file; the on-touch row refuses a first write.
 [[plugin]]
@@ -46,12 +46,12 @@ use = "agent:access"
 id = "memory"
 use = "memory:files"
 
-# Memory that loads on demand, told with the first input that opens a file it covers.
+# Memory that loads on demand, told as an aside to the first input that opens a file it covers.
 [[plugin]]
 id = "on-touch"
 use = "memory:on_touch"
 
-# Auto memory, the notes the model keeps for itself; `disabled = true` turns it off.
+# Auto memory, the memories the model keeps for itself; `disabled = true` turns it off.
 [[plugin]]
 id = "memory-auto"
 use = "memory:auto"

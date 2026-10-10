@@ -39,11 +39,11 @@ type Json = Mapping[str, Any]
 _DATED = re.compile(r"\(Today's date: [0-9-]+\.\)\n\n")
 
 
-_CHANGED = "(End of what changed.)\n\n"  # how the loop's note on changed instructions ends
+_CHANGED = "(End of what changed.)\n\n"  # how the loop's aside on changed instructions ends
 
 
 def _said(message: Json) -> str:
-    """A message's text, without what the loop may put first: the date, and a note that the
+    """A message's text, without what the loop may put first: the date, and an aside that the
     model's instructions changed."""
     content = str(message.get("content") or "")
     content = content[dated.end() :] if (dated := _DATED.match(content)) else content

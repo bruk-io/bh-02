@@ -1,8 +1,9 @@
-# The prompt and notes
+# The prompt and asides
 
 What the model reads each step is its context: the system prompt, then the transcript. This page
-covers the prompt, why it stays fixed for a conversation, and the notes the loop adds to an
-input's result.
+covers the prompt, why it stays fixed for a conversation, and the asides: text bh-02 tells the
+model beside what it reads, a call's result or your message. (A note is something else: a line
+shown to you, never to the model.)
 
 ## What the system prompt says
 
@@ -30,20 +31,20 @@ last request, and a request begins with the tool list and the system prompt. If 
 partway through, the whole conversation would be new to it: a local model would spend minutes on
 prompt processing before the first new token (it looks frozen), a hosted one would bill it
 uncached, and Claude Code would have to restart on its session and lose its cache. So what a
-conversation began with is sent unchanged for its life, and a change is told as a note on the
+conversation began with is sent unchanged for its life, and a change is told as an aside on the
 next message instead, which comes after the cached start.
 
 **The prompt.** The loop sends the prompt the conversation began with, every time. It is kept as the
 transcript's first entry. Before each message the model reads, the loop reads the prompt again; when
 something has changed (an extension loaded, the branch switched, a `CLAUDE.md` edited), it tells the
-model what changed as a note on that message, and you see the note too. The transcript keeps each
+model what changed as an aside on that message, and you see a note saying so. The transcript keeps each
 change as the edits from the reading before it, not as a whole new copy, so it holds the prompt once
 however often it changes, and the loop applies them in turn to know what it last told.
 
 **The tool list.** The loop reads the list of tools at a conversation's first request and keeps it
 in the transcript too. Before each message the model reads, it reads the list again: a tool added,
-removed or redefined since is kept as another entry and told on that message (by name, the start of
-its description and its input's names), and you see "told the model its tools changed since the
+removed or redefined since is kept as another entry and told as an aside on that message (by name,
+the start of its description and its input's names), and you see "told the model its tools changed since the
 conversation began". Which list a request offers is the model's provider's to say (`tool_changes`):
 `fixed`, the list the conversation began with, for its life, or `listed`, the list as the transcript
 last recorded it. Both shipped providers say `fixed`, since a changed list would cost each of them
@@ -66,22 +67,24 @@ A resumed session reads the prompt it began with, its edits and its tool lists f
 transcript, so it sends the same requests it would have. `/clear` and `/compact` begin a new
 conversation, and with it a fresh reading of the prompt and the tools.
 
-## Notes after a call
+## Asides after a call
 
-After each call, the loop asks `notes` (`agent:notes`, another broker) what to tell the model with
-its result. Each function a row has added there gets the tool's name, the call's input, its result
-and the files it opened, as its tool answered (for a `python` input, what its own Python code
-opened, its `touched()`). It may add a note; it can't change the result.
+After each call, the loop asks `asides` (`agent:asides`, another broker) what to tell the model
+beside its result. Each function a row has added there gets the tool's name, the call's input, its
+result and the files it opened, as its tool answered (for a `python` input, what its own Python code
+opened, its `touched()`). It may add an aside; it can't change the result. The model reads the
+asides after the result, and the transcript keeps them on the call's entry too (`asides`), so a
+resumed session knows what it was told.
 
 The shipped one is memory's on-demand loading (`memory:on_touch`): the first time an input in a
 conversation opens a file that a subdirectory's `CLAUDE.md`, or a rule with matching `paths`,
-covers, that file arrives whole as a note, as Claude Code's do when its own tools touch one. Its notes
-for one result are capped at 20,000 characters; a file that didn't fit comes with a later input
-that opens a file it covers.
+covers, that file arrives whole as an aside, as Claude Code's do when its own tools touch one. Its
+asides for one result are capped at 20,000 characters; a file that didn't fit comes with a later
+input that opens a file it covers.
 
 ## Asked before a file is written
 
-A note arrives after the call, so an input that reads a file and writes it in one go would write
+An aside arrives after the call, so an input that reads a file and writes it in one go would write
 it before seeing the instructions for it. So bh-02 can also be asked *before* a file is opened
 (`access`, `agent:access`, another broker): a tool asks, and a row may refuse. Memory's on-touch
 row refuses the first write to a file whose on-demand instructions this conversation hasn't been
@@ -101,13 +104,13 @@ What it doesn't do:
 - **Reads aren't refused** by anything bh-02 ships; a row of yours can ask about them, at the cost
   of a question for each file an input reads.
 
-Only rows in a layer add to `notes`, since its functions run in bh-02's own process.
+Only rows in a layer add to `asides`, since its functions run in bh-02's own process.
 
 ## Off the app's event loop
 
-Reading the prompt can mean reading many files, and so can a note. Both run on the `executor` row,
-in a thread, never on the event loop the app shares, so a slow section never freezes the app; a
-section or a note must not need the event loop. One reading runs at a time, and nothing stops one
+Reading the prompt can mean reading many files, and so can making an aside. Both run on the
+`executor` row, in a thread, never on the event loop the app shares, so a slow section never
+freezes the app; a section or an asides function must not need the event loop. One reading runs at a time, and nothing stops one
 part-way: if you stop a reply while one runs, the next waits for it rather than starting another
 beside it. `executor` depends on nothing, so `/clear` and `/model`, which reload the loop, keep it
 and the reading in flight: stopping reply after reply leaves at most one running. Its thread is a

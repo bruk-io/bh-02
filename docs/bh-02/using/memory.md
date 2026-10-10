@@ -2,7 +2,7 @@
 
 bh-02 tells the model what your instruction files say, the way Claude Code does: the same
 `CLAUDE.md`, `AGENTS.md` and rules files, found in the same places. It also gives the model a
-place of its own to keep notes across conversations: auto memory.
+place of its own to keep memories across conversations: auto memory.
 
 ## Instruction files
 
@@ -40,7 +40,7 @@ The on-demand files follow the same settings.
 
 ## Auto memory
 
-Auto memory is the model's own notes, kept across conversations as Claude Code keeps them: a
+Auto memory is the model's own memories, kept across conversations as Claude Code keeps them: a
 `MEMORY.md` index and a file per memory. The model writes them with the tools it has, as it
 writes any file.
 
@@ -49,9 +49,9 @@ They live outside the repository, in a directory of the project's own:
 set. `<project>` is the git repository's root, so the worktrees of one repository share it. The
 jail lets the model's code write there.
 
-At the start of each conversation the model is told how to keep these notes, then the index's
-first 200 lines (or 25KB). It is read once a conversation, so notes the model writes during one
-are not told back to it.
+At the start of each conversation the model is told how to keep these memories, then the index's
+first 200 lines (or 25KB). It is read once a conversation, so memories the model writes during
+one are not told back to it.
 
 To turn auto memory off, disable its row in a layer of your own:
 
