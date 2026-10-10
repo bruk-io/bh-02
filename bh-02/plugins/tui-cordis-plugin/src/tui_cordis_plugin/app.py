@@ -34,7 +34,6 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.timer import Timer
 
 from tui_cordis_plugin import frame, render, theme
 from tui_cordis_plugin.frame import PaletteEntry
@@ -43,7 +42,6 @@ from tui_cordis_plugin.messages import (
     Asked,
     FrameChanged,
     Noted,
-    RowsUp,
     Shown,
     TurnEnded,
     TurnStarted,
@@ -75,10 +73,6 @@ _WITHDRAW_GRACE = 0.5
 # How long a Ctrl-C held for the line being handled may go unheard before the app says a
 # command is running: a turn that is starting hears it within a tick.
 _UNHEARD_GRACE = 0.3
-# How long every row must stay up before a status field kept while they came up goes: a
-# restart's old fiber ends a moment before its new one starts (`/clear`'s kernel), and the
-# row showing the field (`status`) comes up after what it depends on.
-_RELEASE_GRACE = 1.0
 # How often the terminal is checked for having gone away, and how many checks in a row must
 # say so: a key arriving between one check's two reads looks like a hangup once, never twice.
 _HANGUP_EVERY = 0.5
@@ -113,11 +107,10 @@ class BhApp(App[None]):
             self.register_theme(each)
         self.theme = theme.NAME
         self.bridge = Bridge()
-        self.frame = Frame(self.post_message, lambda: self.bridge.settling)
+        self.frame = Frame(self.post_message)
         self.ready = asyncio.Event()
         self._asking: tuple[ApprovalScreen, asyncio.Future[bool]] | None = None
         self._queued: deque[_Question] = deque()
-        self._releasing: Timer | None = None  # the grace before kept status fields go
         self._replying = 0  # replies streaming now (started, not yet ended)
         self._typed: list[str] = []  # lines typed while one streams, drawn once it ends
         self._hangups = 0  # checks in a row that found the terminal gone
@@ -150,7 +143,6 @@ class BhApp(App[None]):
             self.exit()
 
     def on_unmount(self) -> None:
-        self.frame.release()  # nothing is coming back to an app that has ended
         if self.history is not None:
             self.history.close()
 
@@ -259,18 +251,6 @@ class BhApp(App[None]):
         palette reads them each time it opens)."""
         if message.what == "status":
             self.query_one(StatusBar).show_fields(self.frame.forms())
-
-    def on_rows_up(self, message: RowsUp) -> None:
-        """Rows that came back up: drop the status fields kept meanwhile, once they have all
-        stayed up for a moment (`_RELEASE_GRACE`) since the last time they came up."""
-        if self._releasing is not None:
-            self._releasing.stop()
-        self._releasing = self.set_timer(_RELEASE_GRACE, self._release_kept)
-
-    def _release_kept(self) -> None:
-        self._releasing = None
-        if not self.bridge.settling:
-            self.frame.release()
 
     def on_asked(self, message: Asked) -> None:
         """Queue a question; the answer resolves the asker's future. An asker that stops
@@ -418,11 +398,15 @@ async def _until_ended(app: BhApp, headless: bool) -> None:
 
 def _terminal_gone(fd: int) -> bool:
     """Whether the terminal on `fd` has hung up: it reads as ready with nothing waiting in it,
-    which is a pty's end of file (a key waiting shows as bytes to read)."""
+    which is a pty's end of file (a key waiting shows as bytes to read). On Linux, asking how
+    much is waiting fails (EIO) once the terminal's other end has closed: that is hung up too."""
     ready, _, _ = select.select([fd], [], [], 0)
     if not ready:
         return False
-    waiting = struct.unpack("i", fcntl.ioctl(fd, termios.FIONREAD, b"\0\0\0\0"))[0]
+    try:
+        waiting = struct.unpack("i", fcntl.ioctl(fd, termios.FIONREAD, b"\0\0\0\0"))[0]
+    except OSError:
+        return True
     return bool(waiting == 0)
 
 

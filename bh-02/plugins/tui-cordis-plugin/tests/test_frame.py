@@ -122,22 +122,6 @@ def test_no_line_waits_on_a_row_heard_coming_up_binding_no_key() -> None:
     assert "status" not in changed.unwaited  # a row that now binds a key is waited on
 
 
-def test_a_held_row_is_held_through_its_restart_until_it_is_up() -> None:
-    """A row announced as restarting is expected, begins at its unloading, is expected again
-    at the `inactive` inside a restart (its new fiber comes next), and is let go once it is up
-    or down for good; an event of a row not held changes nothing."""
-    held = frame.Held(expected=frozenset({"loop", "kernel"}))
-    held = frame.held_after(held, "unloading", "loop")
-    assert held == frame.Held(frozenset({"kernel"}), frozenset({"loop"}))
-    held = frame.held_after(held, "inactive", "loop")
-    assert held == frame.Held(frozenset({"kernel", "loop"}))  # not let go: the new one comes
-    for kind in ("reload", "active"):
-        held = frame.held_after(held, kind, "loop")
-    assert held == frame.Held(frozenset({"kernel"})) and held.rows == {"kernel"}
-    assert frame.held_after(held, "reload", "status") == held  # not held: not taken on
-    assert frame.held_after(held, "failed", "kernel").rows == frozenset()
-
-
 def test_the_palette_offers_every_command_then_help_and_exit_once_each() -> None:
     specs = [
         {"name": "rows", "help": "the rows", "usage": ""},

@@ -14,7 +14,7 @@ never stops the app, `bh-02 sessions` or `--resume`. A session whose layer still
 Claude Agent SDK stack bh-02 no longer has is `retired`: it lists, but can't be resumed.
 
 `session_layer`, `with_model`, `retired` and `resume_command` (and the private helpers) are
-pure; the rest reads or writes the state directory. `Listing` is the `sessions` value
+pure; the rest reads or writes the state directory. `Listing` is the `session` value
 (CONTRACTS.md) the shell binds for the status bar.
 """
 
@@ -108,7 +108,7 @@ class Broken:
 
 def session_layer(dir: Path, *, model: str | None, no_jail: bool) -> list[Row]:
     """The session's layer: where its history goes, what this run chose, and what the
-    operator's /model and /clear act on.
+    switch row's /model acts on.
 
     bh-02's own loop runs over the `model` row, which names its model (`default`, which
     `--model` and /model set): the conversation is the `transcript` row's, kept in the
@@ -116,26 +116,24 @@ def session_layer(dir: Path, *, model: str | None, no_jail: bool) -> list[Row]:
     also told where the claude-code provider keeps its state, the session's `claude/`
     directory (Claude Code's config and session, which a resume continues, and the CLI's
     stderr), whichever model runs first: /model can switch to Claude at any time. (The status
-    bar's session id is the `status` row's, read from the `sessions` value, not written here.)
+    bar's session id is the `status` row's, read from the `session` value, not written here.)
     The `ui` row is told where to keep what it shows, which it draws again on a resume from
-    the last /clear on (the ui hears `cleared` and keeps its own file; /clear empties only the
-    model's history).
+    the last /clear on (the ui hears `cleared` and keeps its own file; /clear writes over only
+    the model's history, the conversation row finding it from the transcript row's `path`).
     """
     ui = {"history": str(dir / _EVENTS)}
     history = dir / TRANSCRIPT
     rows = [
         Row("ui", config=ui),
         Row("transcript", config={"path": str(history)}),
-        # /model edits this very file; /clear empties the model's history before starting afresh
-        Row(
-            "operator", config={"layer": str(dir / _LAYER), "model_row": _MODEL_ROW, "forget": [str(history)]}
-        ),
+        # /model edits this very file
+        Row("switch", config={"layer": str(dir / _LAYER), "model_row": _MODEL_ROW}),
     ]
     rows.append(Row(_MODEL_ROW, config={"state": str(dir / _CLAUDE_STATE)}))
     if model is not None:
         rows = with_model(rows, model)
     if no_jail:
-        rows.append(Row("jail", "kernel:unjailed"))
+        rows.append(Row("runner", "runner:unconfined"))
     return rows
 
 
@@ -364,7 +362,7 @@ def resume_command(stack: str, session_id: str | None = None) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Listing:
-    """The `sessions` value (CONTRACTS.md): the running session, which the status bar shows.
+    """The `session` value (CONTRACTS.md): the running session, which the status bar shows.
 
     `current` is its id, empty when the composition runs without a session (as tests boot
     one); `resumed`: it was continued (`--resume`), which the status bar marks. `root` is the

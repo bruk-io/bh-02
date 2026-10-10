@@ -14,12 +14,12 @@ status bar, or text in its own prompt. No layer changes and nothing restarts.
   repository you clone that ships a `.bh-02/plugins/` loads its extensions too, under the same
   rules as the model's.
 
-The model's prompt tells it how to write one: enough cordis to get it right, the three keys it
+The model's prompt tells it how to write one: enough cordis to get it right, the four keys it
 can reach, and how to try a component in an input before writing its file.
 
 ## What an extension can do
 
-An extension reaches bh-02 through three keys, each of which only adds, and each addition is
+An extension reaches bh-02 through four keys, each of which only adds, and each addition is
 taken back when the extension goes:
 
 | Key | What it adds |
@@ -27,6 +27,7 @@ taken back when the extension goes:
 | `commands.register(spec, run)` | a slash command for you. A name bh-02 already has is refused. |
 | `frame.status(field, text, *shorter)` | a status bar field, shown as `NAME:field` so it can't cover another |
 | `system.add(text)` | text in the model's own prompt, told with the next message it reads |
+| `tools.register(spec, run)` | a tool offered to the model, as `python` is. Its calls run in the extension's jail; unjailed, you are asked about each one, shown its name and arguments. `python`, or a name another row's tool has, is refused. |
 
 It can't claim a line prefix such as `!` (that takes every line you start with it, so only a row
 in a layer may), replace a row, rebind one of bh-02's keys, or reach the loader. Those don't exist
@@ -53,14 +54,15 @@ async def notes(*, commands) -> Effects:
 
 ## Where it runs
 
-Not in bh-02's process. The `jail` row starts a second process for extensions, in the same jail
-as the model's inputs. Each load is put to `approval`, as an input is: jailed, it loads without
-asking; with `--no-jail`, you are asked first, with the extension's source shown, and a no leaves
-it unloaded until the file changes. What crosses back to bh-02 is data only: a command's spec, its
-arguments and its answer, a field's text, a section's text.
+Not in bh-02's process. The runner starts a second process for extensions, jailed as the
+model's inputs are. Each load is put to the `approval` rule, as an input is: jailed, it loads
+without asking; with `--no-jail`, you are asked first, with the extension's source shown, and a
+no leaves it unloaded until the file changes. What crosses back to bh-02 is data only: a
+command's spec, its arguments and its answer, a field's text, a section's text.
 
-`/release` stops the extensions' process along with the Python process. Every extension loads
-again once the next input has started the Python process.
+`/release` stops the extensions' process along with the Python process: each row stops its own.
+Every extension loads again once the next input has started the Python process, or at once when
+one of them changes.
 
 ## How it went
 

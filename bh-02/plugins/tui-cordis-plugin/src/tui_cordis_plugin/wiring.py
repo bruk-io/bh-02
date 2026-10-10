@@ -1,7 +1,10 @@
 """The rows: the app as `input`, `output` and `frame` (`output.confirm` asks in a modal); and
-the rows that push into the app's frame: the status bar's fields and the palette's commands."""
+the rows that push into the app's frame: the status bar's fields (the session and the model,
+and the runner's grades) and the palette's commands."""
 
-from cordis import Effects, acquire, bind, component, enter, observe
+import asyncio
+
+from cordis import Effects, acquire, background, bind, component, enter, observe
 from tui_cordis_plugin import frame, render
 from tui_cordis_plugin.app import BhApp, running
 from tui_cordis_plugin.history import History, Replay, replayable
@@ -11,21 +14,23 @@ from tui_cordis_plugin.status import (
     CommandSource,
     Confinement,
     Entries,
+    GradesField,
     ModelField,
     ModelSource,
     Notes,
     Running,
+    Starts,
     StatusConfig,
     StatusSink,
     TuiConfig,
 )
 
-__all__ = ["palette", "status", "tui"]
+__all__ = ["grades", "palette", "status", "ui"]
 
 
-@component(name="app", provides=("input", "output", "frame"))
-async def tui(*, config: TuiConfig) -> Effects:
-    """Fills a `ui` row: `use = "tui:app"`. Depends on nothing but its config, so no reload
+@component(provides=("input", "output", "frame"))
+async def ui(*, config: TuiConfig) -> Effects:
+    """Fills a `ui` row: `use = "tui:ui"`. Depends on nothing but its config, so no reload
     elsewhere ever restarts the app (and loses the transcript). Runs the app on cordis's loop
     for as long as the row is up, and notes the composition changing (a reload, a failure).
     With `history` configured, the app draws that file again (its last `replay` entries) and
@@ -50,36 +55,46 @@ async def tui(*, config: TuiConfig) -> Effects:
 @component
 async def status(
     *,
-    kernel: Confinement,
     loader: Entries,
     models: ModelSource,
-    sessions: Running,
+    session: Running,
     frame: StatusSink,
-    output: Notes,
     config: StatusConfig,
 ) -> Effects:
-    """The status bar's fields that rows report (`use = "tui:status"`): the running session's
-    id (with its short form for a narrow bar), the model, and the kernel's jail grades. Usage
-    is the output's own field, not this row's.
+    """The status bar's session and model fields (`use = "tui:status"`): the running session's
+    id (with its short form for a narrow bar), and the model. Usage is the output's own field,
+    the runner's grades the `grades` row's.
 
-    A small row of its own, so a new kernel (a `/clear`, a new jail) reloads this and never the
-    app; while it comes back up the bar keeps the fields' last text. The model field hears the
-    composition change, so a `/model` (which reloads the model row, not this one) shows the new
-    model, `starting…` until it is up: it asks `models` (which never reloads) which model and
-    provider the model row names, never `model` itself, which a switch replaces.
-
-    What the kernel's jail says the person should know (`kernel.notice()`: on Linux, the paths
-    it holds with a mount the host can undo) is shown once as a note in the conversation, each
-    time a kernel comes up: at the start of a session, and after a `/clear` or a new jail."""
-    if notice := kernel.notice():
-        await output.show(render.noted(notice))
-    if sessions.current:
-        shown = render.session_forms(sessions.current, resumed=sessions.resumed)
+    It depends on nothing a restart replaces, so it never reloads with `/clear` or `/model`. The
+    model field hears the composition change, so a `/model` (which reloads the model row, not
+    this one) shows the new model, `starting…` until it is up: it asks `models` (which never
+    reloads) which model and provider the model row names, never `model` itself, which a switch
+    replaces."""
+    if session.current:
+        shown = render.session_forms(session.current, resumed=session.resumed)
         yield acquire(frame.status, "session", *shown)
-    yield acquire(frame.status, "jail", *render.jail_forms(kernel.confined, kernel.report()))
     field = ModelField(frame.status, loader, config.model_row, models.current)
     yield acquire(field.show)
     yield observe(field.lifecycle)
+
+
+@component
+async def grades(*, runner: Starts, approval: Confinement, frame: StatusSink, output: Notes) -> Effects:
+    """The status bar's `jail` field (`use = "tui:grades"`): the grades of the runner's last
+    start, and whether the `approval` rule counts them as confined. A row of its own over the
+    runner, which tells it each start: it never reloads with `/clear`, and follows a Python
+    process started again in place. What a start says the person should know (on Linux, the
+    paths its jail holds with a mount the host can undo) is shown once as a note."""
+    notes: asyncio.Queue[str] = asyncio.Queue()
+
+    async def tell() -> None:
+        while True:
+            await output.show(render.noted(await notes.get()))
+
+    yield background(tell())
+    field = GradesField(frame.status, approval, runner.report(), notes.put_nowait)
+    yield acquire(field.show)
+    yield acquire(runner.on_start, field.started)
 
 
 @component

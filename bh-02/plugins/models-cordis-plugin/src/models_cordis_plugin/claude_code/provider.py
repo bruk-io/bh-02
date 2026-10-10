@@ -1,10 +1,11 @@
 """Claude Code, through the Claude Agent SDK, as a `model`: one model step per call.
 
-bh-02's own `agent:loop` runs the loop (CONTRACTS.md: model): it classifies each step,
-nudges, runs every call as an input in the kernel (which asks the person when unjailed) and keeps the
-transcript. Claude Code is the subscription's sanctioned way to the model, and nothing else: it
-runs no built-in tool, loads no settings, CLAUDE.md or connector, and the tools it knows are only
-declared to it (`declared.py`). Each call to `complete` streams exactly one model step:
+bh-02's own `agent:loop` runs the loop (CONTRACTS.md: model): it classifies each step, nudges,
+runs every call through its tool (python's as an input in the Python process; asking the person
+when unjailed) and keeps the transcript. Claude Code is the subscription's sanctioned way to the
+model, and nothing else: it runs no built-in tool, loads no settings, CLAUDE.md or connector,
+and the tools it knows are only declared to it (`declared.py`). Each call to `complete` streams
+exactly one model step:
 
 - a new user line starts a query (`Send`);
 - a step that asks for tools ends at its `message_stop` with the query left open: Claude Code
@@ -25,7 +26,7 @@ declared to it (`declared.py`). Each call to `complete` streams exactly one mode
   can't be shown without saying that part twice, so it fails as a restarted stream does;
 - a stream that stalls or drops before it is done, Claude Code may close where it is (the open
   block, then `message_stop` with no `message_delta`, so no stop reason) and stream again
-  from the start (CLI 2.1.282: before any text or call began, and on a dropped connection
+  from the start (measured: before any text or call began, and on a dropped connection
   before any block was complete): the close is not the step's end, and the stream that
   follows is the step; its thinking shown so far stays shown, but once text or a call was
   shown it fails as a restarted stream does (a call the close cut off, its arguments
@@ -114,7 +115,7 @@ _DRAIN_S: Final = 15.0  # how long an interrupted query gets to reach its result
 _FINAL: Final = frozenset({"end_turn", "stop_sequence"})
 _CLOSED: Final = "closed: bh-02 ended this conversation's Claude Code process before this call ran"
 # What an alias resolves to, for a rebuilt session written before this process has seen the
-# model answer (measured, CLI 2.1.280); the model's own answer replaces it once there is one.
+# model answer (measured); the model's own answer replaces it once there is one.
 _ALIASES: Final[Mapping[str, str]] = {
     "sonnet": "claude-sonnet-5",
     "opus": "claude-opus-5-5",
@@ -159,7 +160,7 @@ class ClaudeCodeConfig:
     conversation's Claude Code state lives in (its `CLAUDE_CONFIG_DIR`, the saved session, the
     CLI's stderr); a session's layer points it into the session's directory, and without one a
     temporary directory is used and removed. `env_file`: where the credential is; when unset,
-    the first `local.env` of `searched` that is a file (the `layers` value's `credentials`:
+    the first `local.env` of `searched` that is a file (the `host` value's `credentials`:
     above bh-02's install and its environment, nearest first). `cwd`: the project Claude Code
     is told it works in (bh-02's working directory when unset)."""
 
@@ -302,7 +303,16 @@ class ClaudeCodeModel:
 
     An async context manager: leaving it answers any parked call, interrupts what runs, and ends
     the process. `open` builds the session from its options (the SDK's client; a test's fake).
+
+    `tool_changes` is `fixed` (CONTRACTS.md: model): a conversation is offered the tools it began
+    with for its life, and a change is told as a note. Claude Code sends the tool list before
+    everything else in a request, so a changed list would cost the whole conversation's cache,
+    and the in-process MCP server has no way to tell Claude Code its tools changed (the Agent
+    SDK drops a server's `notifications/tools/list_changed`): the models README has what Claude
+    Code would do with one.
     """
+
+    tool_changes: Final = "fixed"
 
     def __init__(self, config: ClaudeCodeConfig, open: Opener | None = None) -> None:
         self._config = config

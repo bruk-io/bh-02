@@ -4,14 +4,16 @@ as a `loop`.
 Also the transcript row, so the history outlives the loop; `system`, the system prompt rows add
 sections to; `notes`, what the model is told with a call's result; `access`, what is asked
 before a file is read or written; `executor`, where the loop
-reads the prompt and asks `notes`, one call at a time across the loop's reloads; and `/compact`,
-which begins a new conversation from the model's summary of it."""
+reads the prompt and asks `notes`, one call at a time across the loop's reloads; and the
+conversation row's `/clear` and `/compact`, which begin a new conversation, empty or from the
+model's summary of this one."""
 
 from agent_cordis_plugin.access import READ, WRITE, Access
-from agent_cordis_plugin.compact import (
-    CompactConfig,
+from agent_cordis_plugin.conversation import (
+    ConversationConfig,
     Unchanged,
     asked,
+    clear_conversation,
     compact_conversation,
     kept_in,
     seeded,
@@ -24,6 +26,7 @@ from agent_cordis_plugin.loop import (
     FAILED,
     STOPPED,
     Approval,
+    Asked,
     Executor,
     LoopModel,
     Model,
@@ -48,7 +51,7 @@ from agent_cordis_plugin.wiring import (
     LoopConfig,
     TranscriptConfig,
     access,
-    compact,
+    conversation,
     executor,
     loop,
     notes,
@@ -67,7 +70,8 @@ __all__ = [
     "WRITE",
     "Access",
     "Approval",
-    "CompactConfig",
+    "Asked",
+    "ConversationConfig",
     "Executor",
     "Model",
     "FileTranscript",
@@ -92,8 +96,9 @@ __all__ = [
     "called",
     "changes",
     "classify",
-    "compact",
+    "clear_conversation",
     "compact_conversation",
+    "conversation",
     "describe",
     "edits",
     "executor",

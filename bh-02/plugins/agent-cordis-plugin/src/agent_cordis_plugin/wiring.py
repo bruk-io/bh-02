@@ -2,41 +2,45 @@
 `tools`, the broker of the tools the model is offered; `system`, the system prompt rows add
 sections to; `notes`, the broker of what the model is told with a call's result; `access`, the
 broker of what is asked before a file is read or written; `executor`, where the loop reads the
-prompt and asks `notes`; and `/compact`.
+prompt and asks `notes`; and the conversation's commands, `/clear` and `/compact`.
 
 The transcript is its own row so the history outlives the loop: replace the `model` row
 and the loop reloads against the new provider while the conversation carries on. `notes` is
 its own row too, depending on nothing, so neither the loop nor a row adding to it reloads the
-other, and `tools`, so a tool's row restarting (the kernel's) reloads neither the loop nor
+other, and `tools`, so a tool's row restarting (the python row's) reloads neither the loop nor
 another tool's row. So is `executor`, so a reloaded loop keeps the call a stopped reply left
-running and waits for it. `/compact` is a row of its own over the model, `tools`, the loader,
-`commands` and `output`, and depends on neither the loop nor the transcript, which it restarts.
+running and waits for it. `/clear` and `/compact` are one row's (`conversation`), over the
+model, `tools`, the loader, `commands` and `output`, which depends on neither the loop nor the
+transcript, which they restart.
 """
 
-import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
 from agent_cordis_plugin.access import Access
-from agent_cordis_plugin.compact import (
-    SPEC,
-    CompactConfig,
+from agent_cordis_plugin.conversation import (
+    CLEAR,
+    COMPACT,
+    ConversationConfig,
     Offered,
+    Queue,
     Rows,
     Shown,
+    clear_conversation,
     compact_conversation,
-    unrestarted,
 )
 from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.loop import (
-    Approval,
+    Asked,
+    Confirm,
     Executor,
     LoopModel,
     Model,
     Note,
     Notes,
+    Rule,
     System,
     Tools,
     Transcript,
@@ -44,14 +48,14 @@ from agent_cordis_plugin.loop import (
 from agent_cordis_plugin.system import SystemConfig, SystemPrompt
 from agent_cordis_plugin.tools import ToolBroker
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
-from cordis import Effects, acquire, background, bind, component
-from cordis_helpers import Hooks, Job, perform
+from cordis import Effects, acquire, bind, component
+from cordis_helpers import Hooks
 
 __all__ = [
     "LoopConfig",
     "TranscriptConfig",
     "access",
-    "compact",
+    "conversation",
     "executor",
     "loop",
     "notes",
@@ -100,33 +104,35 @@ async def loop(
     tools: Tools,
     transcript: Transcript,
     system: System,
-    approval: Approval,
+    approval: Rule,
+    output: Confirm,
     notes: Notes,
     executor: Executor,
     config: LoopConfig,
 ) -> Effects:
     """Fills the `loop` row from a raw model: `use = "agent:loop"`. The model is offered the
-    tools rows register (`tools`), read at the first request once those `requires` names have
-    registered; each call runs only on `approval`'s yes (the person's, when it runs anywhere but
-    a jail that confines it). After each call, the functions in `notes` may add a note to its
-    result. The prompt is read, and `notes` asked, on `executor`. A new ui reloads this row
-    (through `approval`), which holds nothing: the transcript, the tools (the kernel's namespace
+    tools rows register (`tools`), read at a conversation's first request once those `requires`
+    names have registered; each call runs at once when the `approval` rule says it runs unasked
+    (in a runner that confines it), else only on the person's yes (`output.confirm`). After each
+    call, the functions in `notes` may add a note to its result. A call an input makes from the
+    Python process (`tools.NAME(...)`) runs the same way, served through `tools.serve`. The
+    prompt is read, and `notes` asked, on `executor`. A new ui reloads this row (through
+    `output`), which holds nothing: the transcript, the tools (the Python process's namespace
     among them) and the call in flight on `executor` are rows of their own."""
-    yield bind(
-        "loop",
-        LoopModel(
-            model,
-            tools,
-            transcript,
-            approval,
-            config.max_nudges,
-            system,
-            notes,
-            executor=executor,
-            requires=config.requires,
-            wait=config.wait,
-        ),
+    looped = LoopModel(
+        model,
+        tools,
+        transcript,
+        Asked(approval, output),
+        config.max_nudges,
+        system,
+        notes,
+        executor=executor,
+        requires=config.requires,
+        wait=config.wait,
     )
+    yield bind("loop", looped)
+    yield acquire(tools.serve, looped.nested)  # an input's `tools.NAME(...)` runs as the model's calls do
 
 
 @component(provides=("tools",))
@@ -188,30 +194,31 @@ class _Registrar(Protocol):
 
 
 @component
-async def compact(
-    *, model: Model, tools: Offered, loader: Rows, commands: _Registrar, output: Shown, config: CompactConfig
+async def conversation(
+    *,
+    model: Model,
+    tools: Offered,
+    loader: Rows,
+    commands: _Registrar,
+    output: Shown,
+    jobs: Queue,
+    config: ConversationConfig,
 ) -> Effects:
-    """Fills a `compact` row: `use = "agent:compact"`. `/compact [WHAT TO KEEP]` asks the model
-    for a summary of the conversation (in `config.timeout` seconds: Ctrl-C stops only a turn;
-    a note says so as it begins), writes the new conversation it begins over the transcript
-    row's file (the old kept beside it), and restarts the loop and the transcript; the kernel
-    keeps its namespace.
+    """Fills a `conversation` row: `use = "agent:conversation"`. `/clear` and `/compact`, a new
+    conversation each, written over the transcript row's file in one step, the old kept beside
+    it (`.bak`, `.bak.2`, ...). `/clear`'s is empty, and the loop, the transcript and the python
+    row restart (`config.clear`); `/compact [WHAT TO KEEP]`'s begins from the model's summary (in
+    `config.timeout` seconds: Ctrl-C stops only a turn; a note says so as it begins), and the
+    loop and the transcript restart, the python row keeping its namespace.
 
-    It depends on neither the loop nor the transcript: the restart would reload this row too,
-    cancelling its own work half-way. It finds the conversation's file from the transcript row
-    as the loader mounted it (`loader.rows`), and its restart is its own background work,
-    never run in the chat row's task, which the restart reloads. A restart that fails is told
-    to the person (`output.notice`): the new conversation is written by then."""
-    jobs: asyncio.Queue[Job] = asyncio.Queue()
-    worker = yield background(perform(jobs, lambda why: output.notice(unrestarted(config, why))))
-    run = partial(
-        compact_conversation,
-        model=model,
-        tools=tools,
-        loader=loader,
-        output=output,
-        config=config,
-        jobs=jobs,
-        worker=worker,
+    It depends on neither the loop nor the transcript, which it restarts. It finds the
+    conversation's file from the transcript row as the loader mounted it (`loader.rows`), and
+    queues each restart in `jobs`, never running it in the chat row's task, which it reloads; a
+    restart that fails is told to the person there: the new conversation is written by then."""
+    compacting = partial(
+        compact_conversation, model=model, tools=tools, loader=loader, output=output, config=config, jobs=jobs
     )
-    yield acquire(commands.register, SPEC, run)
+    yield acquire(
+        commands.register, CLEAR, partial(clear_conversation, loader=loader, config=config, jobs=jobs)
+    )
+    yield acquire(commands.register, COMPACT, compacting)

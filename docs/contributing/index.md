@@ -51,7 +51,7 @@ terminal theme against bh-01's tokens. Each step reports and the run goes on, so
 everything that is red; the exit code is non-zero if any step failed.
 
 ```sh
-scripts/check bh-02/plugins/kernel-cordis-plugin   # the same for one member (the gates and docs still see everything)
+scripts/check bh-02/plugins/python-cordis-plugin   # the same for one member (the gates and docs still see everything)
 scripts/check --no-gates --no-docs                  # skip the slower whole-workspace steps
 ```
 
@@ -91,6 +91,6 @@ When a gate fails, its message says which rule and why; fix the code rather than
 - **Tests import packages by name** and use fakes from a package's own `testing` module, never
   another package's tests. Give a test file a name no other member uses (`test_tui_render.py`, not
   `test_render.py`).
-- **The Claude credential stays in `local.env`.** Never print, log or commit it, never copy it into
-  a test or a command line, and never set `ANTHROPIC_API_KEY`. A test that needs it reads
+- **The Claude credential stays in `local.env`**, under
+  [its rules](../bh-02/reference/plugins/models.md#the-credential). A test that needs it reads
   `local.env` and skips when it is absent.

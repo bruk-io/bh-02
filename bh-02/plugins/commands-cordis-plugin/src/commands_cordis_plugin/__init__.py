@@ -1,14 +1,9 @@
-"""Slash commands: a broker rows register commands into (and claim line prefixes in), commands
-over the composition, and `!`, a shell command the person runs."""
+"""Slash commands: a broker rows register commands into (and claim line prefixes in), `jobs`
+(the restarts commands queue, which the chat row waits on), commands over the composition, and
+`!`, a shell command the person runs."""
 
-from commands_cordis_plugin.operations import (
-    Loader,
-    Models,
-    Operator,
-    OperatorConfig,
-    model_list,
-    rows_table,
-)
+from commands_cordis_plugin.jobs import Jobs
+from commands_cordis_plugin.operations import Loader, Operator, Queue, rows_table
 from commands_cordis_plugin.registry import Choice, Commands, CommandSpec, Run, parse
 from commands_cordis_plugin.shell_command import (
     Ran,
@@ -18,29 +13,27 @@ from commands_cordis_plugin.shell_command import (
     run_command,
     run_line,
 )
-from commands_cordis_plugin.wiring import operator, registry, set_model, shadowing, shell_command
+from commands_cordis_plugin.wiring import jobs, operator, registry, shell_command
 
 __all__ = [
     "Choice",
     "CommandSpec",
     "Commands",
+    "Jobs",
     "Loader",
-    "Models",
     "Operator",
-    "OperatorConfig",
+    "Queue",
     "Ran",
     "Run",
     "ShellCommandConfig",
     "answer",
     "environment",
-    "model_list",
+    "jobs",
     "operator",
     "parse",
     "registry",
     "rows_table",
     "run_command",
     "run_line",
-    "set_model",
-    "shadowing",
     "shell_command",
 ]

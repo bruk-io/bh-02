@@ -12,7 +12,7 @@ A call whose arguments did not decode (or never began) when its block ended is h
 everything after it, until the step's stop reason arrives (`message_delta`): only then is it a
 call the step made, shown with its `error` for the loop to classify. Claude Code closes a
 stream it will retry the same way, the open block then `message_stop`, but with no stop
-reason (CLI 2.1.282); what is held then was never said, and is never shown. A call that
+reason (measured); what is held then was never said, and is never shown. A call that
 decoded is shown at its block's end, not held: a JSON object cut off part-way never decodes,
 so one that does was streamed whole.
 
@@ -155,7 +155,7 @@ class Step:
         (`id`, `model`, `content`, `stop_reason`, `usage`), and end it; return the chunks its
         blocks carry. Its blocks replace any that streamed before the stream was given up on.
         Claude Code does this when a stream fails before a block completes: it asks again
-        without streaming, and hands the answer over as one message (CLI 2.1.282)."""
+        without streaming, and hands the answer over as one message (measured)."""
         self.id = str(message.get("id") or "")
         self.model = str(message.get("model") or self.model)
         self._blocks, self._json, self._bad, self._held = {}, {}, set(), []

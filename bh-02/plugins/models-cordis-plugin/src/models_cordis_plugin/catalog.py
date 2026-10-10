@@ -30,7 +30,7 @@ class Entries(Protocol):
 
 class Catalog:
     """The `models` value over one loader and the model row's id (module docstring); `searched`
-    is where `local.env` is looked for (the `layers` value's `credentials`)."""
+    is where `local.env` is looked for (the `host` value's `credentials`)."""
 
     def __init__(self, loader: Entries, row: str = "model", searched: Sequence[str] = ()) -> None:
         self._loader = loader

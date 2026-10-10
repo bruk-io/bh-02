@@ -29,15 +29,13 @@ from cordis.loader import read_layer
 
 def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_row() -> None:
     rows = session_layer(Path("/s/1"), model="haiku", no_jail=True)
-    forget = ["/s/1/transcript.jsonl"]  # the ui keeps its own history across a /clear
-    operator = {"layer": "/s/1/session.toml", "model_row": "model", "forget": forget}
     assert rows == [
         Row("ui", config={"history": "/s/1/events.jsonl"}),  # what the ui showed, drawn again on a resume
         Row("transcript", config={"path": "/s/1/transcript.jsonl"}),  # what the model is sent again
-        Row("operator", config=operator),
+        Row("switch", config={"layer": "/s/1/session.toml", "model_row": "model"}),  # /model edits it
         # Claude Code's own state (its session, which a resume continues) in the session's directory
         Row("model", config={"state": "/s/1/claude", "default": "haiku"}),
-        Row("jail", "kernel:unjailed"),
+        Row("runner", "runner:unconfined"),
     ]
     assert session_layer(Path("/s/2"), model=None, no_jail=False)[-1] == Row(
         "model", config={"state": "/s/2/claude"}
@@ -101,15 +99,15 @@ def test_a_claude_code_session_moves_to_the_model_row_and_a_second_update_change
 ) -> None:
     session = _old_session(tmp_path, "/work/a", "claude", [])
     rows, state = _base(session.dir), str(session.dir / "claude")
-    operator = next(r for r in rows if r.id == "operator")
-    old_operator = Row("operator", config={**(operator.config or {}), "model_row": "completion"})
-    old = [*(r for r in rows if r.id != "operator"), old_operator]
+    switch = next(r for r in rows if r.id == "switch")
+    old = [*rows, Row("operator", config={"model_row": "completion"})]  # /model was the operator's
     session.layer.write_text(
         format_layer([*old, Row("completion", config={"state": state, "model": "haiku"})])
     )
     update(session)
     now = read_layer(session.layer)
-    assert next(r for r in now if r.id == "operator") == operator  # /model edits the model row now
+    assert next(r for r in now if r.id == "switch") == switch  # /model edits the model row now
+    assert next(r for r in now if r.id == "operator") == Row("operator")
     assert next(r for r in now if r.id == "model") == Row(
         "model", config={"state": state, "default": "haiku"}
     )
@@ -197,7 +195,7 @@ def test_a_session_from_before_the_one_tool_resumes(composition: Callable[..., P
 
 def test_a_session_started_earlier_drops_its_session_row(tmp_path: Path) -> None:
     """Sessions wrote a `session` row (`tui:status`, a fixed field holding their id); the status
-    row now shows the id itself, from the `sessions` value, so a resume drops the row."""
+    row now shows the id itself, from the `session` value, so a resume drops the row."""
     session = create(tmp_path, "/work/a", model=None, no_jail=False)
     rows = read_layer(session.layer)
     old = Row("session", "tui:status", {"field": "session", "text": session.id, "shorter": ["x"]})
@@ -231,15 +229,20 @@ def test_a_session_layer_in_old_row_names_is_brought_up_to_date(tmp_path: Path) 
     ]
     session.layer.write_text(format_layer(old))
     update(session)
-    # jail_status was off; the status row it became part of is not (that would also hide the
-    # session and the model), and with nothing else to say it is not written at all
-    assert read_layer(session.layer) == [*rows, Row("loop", config={"max_nudges": 5})]
+    # the status row has nothing else to say, so it is not written at all; jail_status, the
+    # jail's field, is the grades row now, and stays off
+    assert read_layer(session.layer) == [
+        *rows,
+        Row("loop", config={"max_nudges": 5}),
+        Row("grades", disabled=True),
+    ]
 
 
 def test_a_resumed_session_keeps_its_status_bar_when_one_old_part_was_off(tmp_path: Path) -> None:
-    """An old model_status with its own config and a disabled jail_status: the status row
+    """An old model_status, off, with its own config, and a disabled jail_status: the status row
     carries the config (but the default model, which the models row answers now) and stays
-    on, so the resumed bar still shows session and model."""
+    on, so the resumed bar still shows session and model; the jail's field (the grades row now)
+    stays off."""
     session = create(tmp_path, "/work/a", model=None, no_jail=False)
     rows = read_layer(session.layer)
     old = [
@@ -249,7 +252,11 @@ def test_a_resumed_session_keeps_its_status_bar_when_one_old_part_was_off(tmp_pa
     ]
     session.layer.write_text(format_layer(old))
     update(session)
-    assert read_layer(session.layer) == [*rows, Row("status", config={"model_row": "model"})]
+    assert read_layer(session.layer) == [
+        *rows,
+        Row("status", config={"model_row": "model"}),
+        Row("grades", disabled=True),
+    ]
 
 
 def test_a_status_row_s_own_disabled_is_kept(tmp_path: Path) -> None:
@@ -259,7 +266,7 @@ def test_a_status_row_s_own_disabled_is_kept(tmp_path: Path) -> None:
         format_layer([*rows, Row("status", disabled=True), Row("jail_status", disabled=True)])
     )
     update(session)
-    assert read_layer(session.layer) == [*rows, Row("status", disabled=True)]
+    assert read_layer(session.layer) == [*rows, Row("status", disabled=True), Row("grades", disabled=True)]
 
 
 def test_a_session_in_old_row_names_resumes(composition: Callable[..., Path], state: Path) -> None:
@@ -283,9 +290,9 @@ def test_a_session_in_old_row_names_resumes(composition: Callable[..., Path], st
 
 
 def test_choosing_a_model_keeps_the_row_s_other_config() -> None:
-    rows = [Row("model", config={"state": "/s"}), Row("jail", "kernel:unjailed")]
+    rows = [Row("model", config={"state": "/s"}), Row("runner", "runner:unconfined")]
     assert with_model(rows, "opus") == [
-        Row("jail", "kernel:unjailed"),
+        Row("runner", "runner:unconfined"),
         Row("model", config={"state": "/s", "default": "opus"}),
     ]
 

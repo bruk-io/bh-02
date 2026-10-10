@@ -16,6 +16,7 @@ __all__ = [
     "Commands",
     "Event",
     "Input",
+    "Jobs",
     "Loop",
     "Output",
     "Recoverable",
@@ -60,6 +61,14 @@ class Commands(Protocol):
     def take_for_model(self) -> Sequence[str]: ...
 
 
+@runtime_checkable
+class Jobs(Protocol):
+    """What the session needs of the `jobs` value: to wait until no restart a command queued is
+    pending, so the next line reaches the rows as they are after it."""
+
+    async def settled(self) -> None: ...
+
+
 def _answered(answer: str | Sequence[Event]) -> list[Event]:
     """A command's answer as the events to show: text is one note; events are shown as they are."""
     return [{"type": "note", "text": answer}] if isinstance(answer, str) else list(answer)
@@ -79,7 +88,9 @@ class Recoverable(Protocol):
     message: str
 
 
-async def converse(loop: Loop, input: Input, output: Output, commands: Commands | None = None) -> None:
+async def converse(
+    loop: Loop, input: Input, output: Output, commands: Commands | None = None, jobs: Jobs | None = None
+) -> None:
     """Read a message, show the streamed reply, repeat until there is no more input.
 
     A line `commands` claims (a `/command`, or one starting with a claimed prefix, `!`) goes to
@@ -90,11 +101,20 @@ async def converse(loop: Loop, input: Input, output: Output, commands: Commands 
     taken and put in front of the person's next message (`_told`), so the model reads it with
     that and never during a turn. The loop's contract is unchanged: it is given one message.
 
+    Before each read it waits until no restart a command queued is pending (`jobs.settled`): a
+    restart of the loop (`/clear`, `/compact`, `/model NAME`, `/restart loop`) reloads this row,
+    which is then waiting, not holding a line, so a line typed meanwhile stays with the input
+    and the new row reads it and sends it to the new loop, never the old one.
+
     A recoverable failure is shown and the chat carries on; anything else leaves, and the
     bootstrap re-raises it. Returning is how the program ends: nothing is left running, so
     the runtime is idle.
     """
-    while (message := await input.read()) is not None:
+    while True:
+        if jobs is not None:
+            await jobs.settled()
+        if (message := await input.read()) is None:
+            return
         if not message.strip():
             continue
         if commands is not None and commands.claims(message):

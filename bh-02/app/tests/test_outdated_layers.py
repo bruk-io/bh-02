@@ -66,25 +66,25 @@ def test_an_old_layer_reads_in_today_s_names_and_says_what_changed() -> None:
     rows, changes = translated(parse_layer(_OLD))
     assert rows == [
         Row("loop", "bh_02.testing:echo"),
-        # the two status-bar rows, one row: the model's config under its new names, and on,
-        # though jail_status was off (turning all of it off would hide the session and model)
-        Row("status", None, {"model_row": "model"}),
+        Row("status", None, {"model_row": "model"}),  # the model's config under its new names
+        Row("grades", disabled=True),  # the jail's field, still off
         Row("chat", config={"greeting": "hi"}),
-        Row("operator", config={"clear": ["loop", "transcript", "kernel"]}),
+        Row("operator"),
+        Row("conversation", config={"clear": ["loop", "transcript", "python"]}),  # /clear is its now
     ]
     assert changes == [
         "row 'llm' is now 'loop'; rename its id",
         "row 'model_status' is now part of 'status', the status bar's one row; its config moves "
         'there as config = { model_row = "model" }',
-        "row 'jail_status' is now part of 'status', the status bar's one row; it was disabled, "
-        "but 'status' cannot turn off one part, so the status bar stays on: to turn off all of "
-        "it (session, model and jail), give 'status' `disabled = true`",
+        "row 'jail_status' is now 'grades'; rename its id",
         "row 'mode' is now 'chat'; rename its id",
         "row 'actions' was removed: the model's tools are registered with `tools` (agent:tools) by "
-        "the rows that offer them, the kernel's python among them, and unjailed each call is put to "
+        "the rows that offer them, the python row's among them, and unjailed each call is put to "
         "the person in the modal; delete it",
         "row 'operator': its config names a renamed row; make it "
-        'config = { clear = ["loop", "transcript", "kernel"] }',
+        'config = { clear = ["loop", "transcript", "python"] }',
+        "row 'operator': /clear is the conversation row's now (agent:conversation): add a "
+        '\'conversation\' row with config = { clear = ["loop", "transcript", "python"] }; delete its config',
     ]
     assert translated(rows) == (rows, [])  # once is enough
 
@@ -96,14 +96,16 @@ def test_the_rows_bh_02_no_longer_has_are_dropped_with_why() -> None:
             Row("greeting", "tui:status", {"field": "hello", "text": "hi"}),
             Row("mine", "fs:tools"),
             Row("approve", "tui:approver"),
-            Row("kernel", "kernel:kernel"),
+            Row("python", "python:tool"),
             Row("tools", "tools:registry"),  # the old tools plugin, whatever the row's id
             Row("tools", disabled=True),  # a change to today's broker, agent:tools: kept
         ]
     )
-    assert rows == [Row("kernel", "kernel:kernel"), Row("tools", disabled=True)]
+    assert rows == [Row("python", "python:tool"), Row("tools", disabled=True)]
     assert changes[0] == "row 'session' was removed: the status row shows the session's id itself; delete it"
-    assert changes[1].startswith("row 'greeting' was removed: tui:status is now the status bar's one row")
+    assert changes[1].startswith(
+        "row 'greeting' was removed: tui:status is now the status bar's session and model"
+    )
     assert changes[2].startswith("row 'mine' was removed: fs:tools is gone: the model's tools are registered")
     assert changes[3].startswith("row 'approve' was removed: the model's tools are registered with `tools`")
     assert changes[4].startswith("row 'tools' was removed: tools:registry is gone")
@@ -165,8 +167,8 @@ def test_an_old_fixed_field_is_dropped_even_under_the_status_row_s_id() -> None:
     rows, changes = translated([Row("status", "tui:status", {"field": "x", "text": "y"})])
     assert rows == []
     assert changes == [
-        "row 'status' was removed: tui:status is now the status bar's one row (session, model, "
-        "jail), not a fixed field; delete it"
+        "row 'status' was removed: tui:status is now the status bar's session and model fields, "
+        "not a fixed field; delete it"
     ]
 
 
@@ -178,9 +180,17 @@ def test_an_old_model_row_named_llm_or_completion_is_the_model_row_not_the_loop(
     rows, _ = translated([Row("model_status", config={key: "llm", "default": "x"})])
     assert rows == [Row("status", None, {"model_row": "model"})]
     rows, _ = translated([Row("operator", config={"model_row": "llm", "clear": ["llm"]})])
-    assert rows == [Row("operator", config={"model_row": "model", "clear": ["loop"]})]
+    assert rows == [
+        Row("operator"),
+        Row("conversation", config={"clear": ["loop"]}),
+        Row("switch", config={"model_row": "model"}),
+    ]
     rows, _ = translated([Row("operator", config={"model_row": "completion", "clear": ["completion"]})])
-    assert rows == [Row("operator", config={"model_row": "model", "clear": ["model"]})]
+    assert rows == [
+        Row("operator"),
+        Row("conversation", config={"clear": ["model"]}),
+        Row("switch", config={"model_row": "model"}),
+    ]
 
 
 def test_claude_code_s_row_is_the_model_row_naming_its_model_by_name() -> None:
@@ -364,7 +374,7 @@ def test_a_patch_naming_old_rows_is_refused_with_each_row_and_what_to_change(sta
     )
     hint = f"run `bh-02 update-layer {patch}` to rewrite it (the original is kept beside it as .bak)"
     assert lines[-1] == f"{hint}, then run again"
-    assert len(lines) == 8  # the heading, a line per row, the hint
+    assert len(lines) == 9  # the heading, a line per change, the hint
     assert "Traceback" not in result.output
     assert "no sessions" in CliRunner().invoke(main, ["sessions"]).stderr  # none left behind
     assert patch.read_text() == _OLD  # refused, not rewritten behind the person's back
@@ -485,3 +495,167 @@ def test_update_layer_refuses_a_file_it_can_t_read_and_writes_nothing(
     assert result.stderr.startswith(f"error: {patch}: ") and why in result.stderr
     assert "Traceback" not in result.output
     assert patch.read_text() == text and not (state / "broken.toml.bak").exists()
+
+
+def test_model_moves_from_the_operator_to_the_switch_row() -> None:
+    """`/model` is the models plugin's `switch` row: a session's operator config hands it the
+    layer and model row it read, and translating again changes nothing more."""
+    session = [Row("operator", config={"layer": "/s/session.toml", "model_row": "model", "forget": ["/s/t"]})]
+    rows, changes = translated(session)
+    assert rows == [Row("operator"), Row("switch", config={"layer": "/s/session.toml", "model_row": "model"})]
+    assert changes == [
+        "row 'operator': /model is the models plugin's now (models:switch): make it config = "
+        '{ forget = ["/s/t"] }, and add a \'switch\' row with config = { layer = "/s/session.toml", '
+        'model_row = "model" }',
+        "row 'operator': `forget` is gone: /clear writes an empty conversation over the transcript "
+        "row's file, keeping the old as .bak; delete its config",
+    ]
+    assert translated(rows) == (rows, [])
+
+
+def test_a_layer_that_fills_the_operator_gets_the_switch_row() -> None:
+    own = [Row("operator", "commands:operator")]
+    rows, changes = translated(own)
+    assert rows == [
+        Row("operator", "commands:operator"),
+        Row("jobs", "commands:jobs"),
+        Row("conversation", "agent:conversation"),
+        Row("switch", "models:switch"),
+    ]
+    assert changes == [
+        "/model is the models plugin's now (models:switch): add a 'switch' row with use = \"models:switch\"",
+        "/clear is the conversation row's now (agent:conversation): add a 'conversation' row with "
+        'use = "agent:conversation"',
+        "the chat row waits on `jobs` now, where commands queue the restarts they ask for: add a "
+        "'jobs' row with use = \"commands:jobs\"",
+    ]
+    assert translated(rows) == (rows, [])
+    assert translated([Row("operator", disabled=False)]) == (
+        [Row("operator", disabled=False)],
+        [],
+    )  # a change to the shipped operator: the shipped layer has the switch row
+    taken = [Row("switch", config={"layer": "/x"}), Row("operator", config={"model_row": "model"})]
+    rows, changes = translated(taken)
+    assert rows == [Row("switch", config={"layer": "/x"}), Row("operator")]
+    assert changes == [
+        "row 'operator': /model is the models plugin's now (models:switch), which reads config = "
+        "{ model_row = \"model\" }: delete its config, and set it on the 'switch' row by hand"
+    ]
+
+
+def test_compact_is_the_conversation_row_and_an_operator_s_forget_is_gone() -> None:
+    """/clear and /compact are one row's: the `compact` row is renamed to it, keeping its
+    config, and an operator's `forget` (the files /clear emptied) is gone, since /clear writes
+    over the transcript row's file, keeping the old."""
+    rows, changes = translated([Row("compact", "agent:compact", {"timeout": 60})])
+    assert rows == [Row("conversation", "agent:conversation", {"timeout": 60})]
+    assert changes == [
+        "row 'compact': /compact is the conversation row's now, with /clear; make it "
+        'id = "conversation", use = "agent:conversation"'
+    ]
+    assert translated([Row("compact", config={"timeout": 60})])[0] == [
+        Row("conversation", config={"timeout": 60})
+    ]
+    both = [
+        Row("operator", "commands:operator", {"clear": ["loop"], "forget": ["/x"]}),
+        Row("compact", "agent:compact"),
+    ]
+    rows, changes = translated(both)
+    assert rows == [
+        Row("operator", "commands:operator"),
+        Row("jobs", "commands:jobs"),
+        Row("switch", "models:switch"),
+        Row("conversation", "agent:conversation"),
+    ]
+    assert changes[-2] == (
+        "row 'operator': `forget` is gone: /clear writes an empty conversation over the transcript "
+        "row's file, keeping the old as .bak; /clear is the conversation row's now "
+        '(agent:conversation), which reads config = { clear = ["loop"] }: set it on the '
+        "'conversation' row by hand; delete its config"
+    )
+    assert translated(rows) == (rows, [])
+
+
+def test_a_layer_that_fills_the_chat_row_gets_the_jobs_row() -> None:
+    rows, changes = translated([Row("chat", "chat:converse"), Row("loop", "agent:loop")])
+    assert rows == [Row("chat", "chat:converse"), Row("jobs", "commands:jobs"), Row("loop", "agent:loop")]
+    assert changes == [
+        "the chat row waits on `jobs` now, where commands queue the restarts they ask for: add a "
+        "'jobs' row with use = \"commands:jobs\""
+    ]
+    assert translated(rows) == (rows, [])
+    assert translated([Row("chat", config={"prompt": "hi"})])[1] == []  # a change to the shipped row
+
+
+def test_the_kernel_and_brig_plugins_rows_read_as_the_python_and_runner_plugins() -> None:
+    """The kernel plugin is two now: the python tool and the runner, which the brig plugin
+    became. A layer naming the old rows, their plugins or `kernel` in a `clear` reads in today's
+    names, each change said; memory's own row is `memory:files`."""
+    rows, changes = translated(
+        [
+            Row("kernel", "kernel:kernel", {"root": "/p"}),
+            Row("jail", "brig:jail", {"write": ["/w"]}),
+            Row("approval", "kernel:approval"),
+            Row("release", "kernel:release"),
+            Row("memory", "memory:memory"),
+            Row("conversation", config={"clear": ["loop", "transcript", "kernel"]}),
+        ]
+    )
+    assert rows == [
+        Row("python", "python:tool", {"root": "/p"}),
+        Row("runner", "runner:confined", {"write": ["/w"]}),
+        Row("approval", "runner:approval"),
+        Row("release", "runner:release"),
+        Row("memory", "memory:files"),
+        Row("conversation", config={"clear": ["loop", "transcript", "python"]}),
+    ]
+    assert changes == [
+        "row 'kernel' is now 'python'; rename its id",
+        "row 'python': kernel:kernel is now python:tool; make it use = \"python:tool\"",
+        "row 'jail' is now 'runner'; rename its id",
+        "row 'runner': brig:jail is now runner:confined; make it use = \"runner:confined\"",
+        "row 'approval': kernel:approval is now runner:approval; make it use = \"runner:approval\"",
+        "row 'release': kernel:release is now runner:release; make it use = \"runner:release\"",
+        "row 'memory': memory:memory is now memory:files; make it use = \"memory:files\"",
+        "row 'conversation': its config names a renamed row; make it "
+        'config = { clear = ["loop", "transcript", "python"] }',
+    ]
+    assert translated(rows) == (rows, [])
+    unconfined = [Row("jail", "kernel:unjailed")]  # a --no-jail session's layer
+    assert translated(unconfined)[0] == [Row("runner", "runner:unconfined")]
+
+
+def test_the_chat_row_the_ui_and_the_shell_s_own_rows_read_in_their_new_names() -> None:
+    """`chat:session` named the chat row after something else (a session is a directory a run
+    resumes); the ui had three names; the shell's rows `harness`, `layers` and `sessions` are
+    `shell`, `host` (what the host is, not only its layer files) and `session` (the one
+    running). The old status field under the id `session` is still dropped."""
+    rows, changes = translated(
+        [
+            Row("chat", "chat:session"),
+            Row("ui", "tui:app", {"headless": True}),
+            Row("layers", "bh_02.bootstrap:layer_files"),
+            Row("harness", disabled=False),
+            Row("sessions", "bh_02.bootstrap:session_list"),
+        ]
+    )
+    assert rows == [
+        Row("chat", "chat:converse"),
+        Row("jobs", "commands:jobs"),  # the chat row waits on it
+        Row("ui", "tui:ui", {"headless": True}),
+        Row("host", "bh_02.bootstrap:host"),
+        Row("shell", disabled=False),
+        Row("session", "bh_02.bootstrap:session"),
+    ]
+    assert changes[:2] == [
+        "row 'chat': chat:session is now chat:converse; make it use = \"chat:converse\"",
+        "row 'ui': tui:app is now tui:ui; make it use = \"tui:ui\"",
+    ]
+    assert "row 'layers' is now 'host'; rename its id" in changes
+    assert "row 'sessions' is now 'session'; rename its id" in changes
+    assert translated(rows) == (rows, [])
+    field = [Row("session", "tui:status", {"field": "session", "text": "1"})]
+    assert translated(field) == (
+        [],
+        ["row 'session' was removed: the status row shows the session's id itself; delete it"],
+    )

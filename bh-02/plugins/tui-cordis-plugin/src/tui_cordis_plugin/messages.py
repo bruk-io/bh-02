@@ -11,7 +11,7 @@ from typing import Any
 
 from textual.message import Message
 
-__all__ = ["Asked", "FrameChanged", "Noted", "RowsUp", "Shown", "TurnEnded", "TurnStarted", "Withdrawn"]
+__all__ = ["Asked", "FrameChanged", "Noted", "Shown", "TurnEnded", "TurnStarted", "Withdrawn"]
 
 
 class Shown(Message):
@@ -58,11 +58,6 @@ class FrameChanged(Message):
     def __init__(self, what: str) -> None:
         super().__init__()
         self.what = what
-
-
-class RowsUp(Message):
-    """Every row that was coming (back) up is up, or down for good: a status field kept on
-    screen meanwhile can go, unless rows start coming up again first."""
 
 
 class Withdrawn(Message):

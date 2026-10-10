@@ -8,7 +8,7 @@ import pytest
 from textual.pilot import Pilot
 
 from tui_cordis_plugin import AppCrashed, BhApp, running, theme
-from tui_cordis_plugin.messages import Asked, Noted, RowsUp, Shown, TurnEnded
+from tui_cordis_plugin.messages import Asked, Noted, Shown, TurnEnded
 from tui_cordis_plugin.widgets import ApprovalScreen, Composer, StatusBar, Transcript
 
 _SIZE = (120, 36)
@@ -231,8 +231,8 @@ async def test_a_message_typed_while_the_model_comes_back_up_says_it_waits_and_i
 
 
 async def test_a_message_waiting_on_restarted_rows_does_not_name_a_status_bar_row() -> None:
-    """`/clear` restarts the kernel, and `status` (which binds no key, only pushes a
-    status field) reloads after it: a line typed then waits for the rows the chat depends on
+    """`/clear` restarts the python row, and a status-bar row (which binds no key, only pushes a
+    status field) that reloads after it: a line typed then waits for the rows the chat depends on
     and does not name `status`, whose reload no message waits for."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
@@ -252,43 +252,18 @@ async def test_a_message_waiting_on_restarted_rows_does_not_name_a_status_bar_ro
         assert await asyncio.wait_for(app.bridge.line(), 1) == "hello"
 
 
-async def test_a_kept_status_field_goes_once_every_row_has_stayed_up_a_moment() -> None:
+async def test_a_removed_status_field_goes_at_once_whatever_is_coming_up() -> None:
+    """A row that pushes a field reloads only with what it shows (the grades' row with the
+    runner, never on `/clear`), so the frame keeps nothing across a reload: a field removed while
+    rows come up goes at once."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         remove = app.frame.status("jail", "jailed")
-        app.bridge.row_changed("unloading", "kernel")
+        await pilot.pause()
+        assert "jail: jailed" in str(app.query_one(StatusBar).content)
+        app.bridge.row_changed("unloading", "python")
         remove()
         await pilot.pause()
-        assert "jail: jailed" in str(app.query_one(StatusBar).content)  # kept while it comes up
-        app.bridge.row_changed("inactive", "kernel")
-        app.post_message(RowsUp())
-        app.bridge.row_changed("reload", "kernel")  # coming up again before the grace ends
-        await pilot.pause(1.2)
-        assert "jail: jailed" in str(app.query_one(StatusBar).content)
-        app.bridge.row_changed("active", "kernel")
-        app.post_message(RowsUp())
-        await pilot.pause(1.2)
-        assert "jail" not in str(app.query_one(StatusBar).content)  # nobody pushed it again
-
-
-async def test_the_grace_before_a_kept_field_goes_runs_from_the_last_time_rows_came_up() -> None:
-    """Rows settle, start again at once and settle again later: the field stays a full grace
-    after the second settle, not just what is left of the first one's."""
-    app = BhApp()
-    async with app.run_test(size=_SIZE) as pilot:
-        remove = app.frame.status("jail", "jailed")
-        app.bridge.row_changed("unloading", "kernel")
-        remove()
-        app.bridge.row_changed("inactive", "kernel")
-        app.post_message(RowsUp())  # settled at t=0
-        await pilot.pause(0.1)
-        app.bridge.row_changed("reload", "kernel")
-        await pilot.pause(0.6)
-        app.bridge.row_changed("active", "kernel")
-        app.post_message(RowsUp())  # settled again at t≈0.7
-        await pilot.pause(0.6)  # t≈1.3: the first grace is over, the second is not
-        assert "jail: jailed" in str(app.query_one(StatusBar).content)
-        await pilot.pause(0.7)
         assert "jail" not in str(app.query_one(StatusBar).content)
 
 

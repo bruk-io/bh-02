@@ -7,7 +7,7 @@ from typing import Any
 
 from cordis.testing import drive
 from cordis_helpers import Hooks
-from memory_cordis_plugin import Memory, MemoryConfig, OnTouch, Transcript, memory, on_touch
+from memory_cordis_plugin import Memory, MemoryConfig, OnTouch, Transcript, files, on_touch
 
 
 class _Kept:
@@ -254,14 +254,14 @@ class _Commands:
 
 
 class _NoAuto:
-    memory = ""
+    auto_memory = ""
 
 
 async def test_the_memory_row_binds_memory_adds_its_section_and_offers_slash_memory(tmp_path: Path) -> None:
     _write(tmp_path / "CLAUDE.md", "Project.")
     prompt, commands = _Prompt(), _Commands()
     config = MemoryConfig(root=str(tmp_path), home=str(tmp_path / "home"), managed=str(tmp_path / "none"))
-    effects = await drive(memory(system=prompt, commands=commands, layers=_NoAuto(), config=config))
+    effects = await drive(files(system=prompt, commands=commands, host=_NoAuto(), config=config))
     assert [(e.name, e.args[0]) for e in effects] == [
         ("bind", "memory"),
         ("acquire", prompt.add),

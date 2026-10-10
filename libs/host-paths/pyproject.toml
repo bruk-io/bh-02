@@ -33,6 +33,8 @@ include = ["host_paths.*"]
 exclude = [
     # each reads the filesystem (links, and where a path resolves): that is what it is for
     "host_paths.paths:walked", "host_paths.paths:roots", "host_paths.paths:passes",
+    # the one opener of a file beneath a root through no link: opening and reading it is the point
+    "host_paths.beneath:directory_beneath", "host_paths.beneath:read_beneath", "host_paths.beneath:_stopped",
 ]
 
 [tool.pypeeker.over-exposed-module-symbol]

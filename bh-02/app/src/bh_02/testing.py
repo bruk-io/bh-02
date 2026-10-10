@@ -172,7 +172,7 @@ def repl_provider(table: Mapping[str, Any]) -> _Repl:
 @component(provides=("model",))
 async def repl_model(*, config: Mapping[str, Any] | None = None) -> Effects:
     """A model whose every message is a python input, under the shipped loop: `id = "model"`,
-    `use = "bh_02.testing:repl_model"`. Exercises the loop, the kernel, the jail and
+    `use = "bh_02.testing:repl_model"`. Exercises the loop, the Python process, the jail and
     (unconfined, `--no-jail`) the approval modal on the real screen."""
     yield bind("model", _Repl())
 

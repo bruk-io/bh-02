@@ -96,13 +96,13 @@ nav:
           - Command line: bh-02/reference/command-line.md
           - Plugins:
               - agent-cordis-plugin: bh-02/reference/plugins/agent.md
-              - brig-cordis-plugin: bh-02/reference/plugins/brig.md
               - chat-cordis-plugin: bh-02/reference/plugins/chat.md
               - commands-cordis-plugin: bh-02/reference/plugins/commands.md
               - extensions-cordis-plugin: bh-02/reference/plugins/extensions.md
-              - kernel-cordis-plugin: bh-02/reference/plugins/kernel.md
               - memory-cordis-plugin: bh-02/reference/plugins/memory.md
               - models-cordis-plugin: bh-02/reference/plugins/models.md
+              - python-cordis-plugin: bh-02/reference/plugins/python.md
+              - runner-cordis-plugin: bh-02/reference/plugins/runner.md
               - tui-cordis-plugin: bh-02/reference/plugins/tui.md
   - cordis:
       - Design: cordis/index.md

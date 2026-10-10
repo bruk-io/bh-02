@@ -19,7 +19,7 @@ from memory_cordis_plugin.memory import (
 from memory_cordis_plugin.reading import LIMIT, read, secret, under
 from memory_cordis_plugin.rules import Rule, frontmatter, matches, rule
 from memory_cordis_plugin.touch import Notes, OnTouch, Transcript
-from memory_cordis_plugin.wiring import auto, memory, on_touch
+from memory_cordis_plugin.wiring import auto, files, on_touch
 
 __all__ = [
     "INDEX",
@@ -44,7 +44,7 @@ __all__ = [
     "label",
     "listing",
     "matches",
-    "memory",
+    "files",
     "on_touch",
     "read",
     "rule",

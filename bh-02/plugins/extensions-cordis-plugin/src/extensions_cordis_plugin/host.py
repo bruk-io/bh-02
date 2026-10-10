@@ -2,29 +2,36 @@
 
 The model writes a module of cordis components into the project's extensions directory
 (`.bh-02/plugins/NAME.py`); this notices (it looks every `watch` seconds), and loads it into a
-worker the `jail` row starts (`worker.py`), so the model's code runs as confined as its inputs
+worker the `runner` starts (`worker.py`), so the model's code runs as confined as its inputs
 do, never in bh-02's own process. A changed file is loaded afresh, a deleted one unloaded.
-Each load is put to `approval` first, with the source, exactly as an input is: at once when the
-jail confines what runs in it; otherwise (`--no-jail`) the person decides.
+Each load is put to the `approval` rule first, with the source, exactly as an input is: at once
+when the runner confines what runs in it; otherwise (`--no-jail`) the person decides
+(`output.confirm`).
 
 What an extension adds reaches bh-02 as data over the worker's socket: a slash command, which
 this registers in `commands` and runs by asking the worker; a status-bar field, pushed into
-`frame` under the extension's own name; a section of the model's prompt, added to `system`.
-Each is kept with its remover, and taken back when the worker says so or the worker ends.
+`frame` under the extension's own name; a section of the model's prompt, added to `system`; a
+tool, whose spec this checks (`offered.offered_tool`) and registers in `tools` as running in the
+runner, each call shown by its name and arguments and run by asking the worker, so the `approval`
+rule decides each call as it does an input. Each is kept with its remover, and taken back when the
+worker says so or the worker ends.
 
 The model hears how each extension went in two places: its prompt (`section`, read per
 request) and `status.json` in the extensions directory, written as soon as a load ends, so an
 input can read it at once. The worker starts with the first extension there is to load; one that
 ends (an extension may end it) takes every extension down with it, and they are loaded again,
-in a new worker, at the next change in the directory. One `/release` stopped (the jail stops
-every program it started, so the paths their jails hold are free) is not one that failed: while
-the jail is `released` no worker starts, whatever changes, and once the next input has started
-the kernel every extension there is loads again, in a new worker, with nothing changed.
+in a new worker, at the next change in the directory. One `/release` stopped is not one that
+failed: the row registers this worker's stop with the runner (`stopped`, its `on_release`), so
+the paths its jail holds are free, and while the runner is `released` no worker starts until
+something does: the next input's Python process, when every extension there is loads again, in a
+new worker, with nothing changed; or a change to one of them, whose worker's start ends the
+release.
 
 The model writes the extensions directory from the jail, and this reads it on the host, so it
-follows no link there (`_opened`, `_read`): the directory is opened from the project's root one
-name at a time, with `O_NOFOLLOW`, and a file is read only if the descriptor it was opened as says
-it is a regular file with one name (`watch.refusal`). A link, or a hard link, could otherwise hand
+follows no link there (`_opened`, `_read`, through `host_paths`): the directory is opened from
+the project's root one name at a time, with `O_NOFOLLOW`, and a file is read only if the
+descriptor it was opened as says it is a regular file with one name (`watch.refusal`), of at
+most 256 KiB. A link, or a hard link, could otherwise hand
 the model a file the jail hides (`local.env`), as an extension's source, or as the line of its
 SyntaxError in status.json. status.json is written through the same descriptor, as a new file
 renamed over the old, so a link there leads no write elsewhere either.
@@ -32,7 +39,6 @@ renamed over the old, so a link there leads no write elsewhere either.
 
 import asyncio
 import contextlib
-import errno
 import functools
 import importlib.util
 import itertools
@@ -49,6 +55,7 @@ from sys import executable
 from types import TracebackType
 from typing import Any, Protocol, runtime_checkable
 
+from extensions_cordis_plugin.offered import RESERVED, offered_tool, shown_tool_call
 from extensions_cordis_plugin.watch import (
     Status,
     changes,
@@ -58,16 +65,20 @@ from extensions_cordis_plugin.watch import (
     refusal,
     status_file,
     status_forms,
+    too_large,
 )
+from host_paths import Link, Linked, NotOneFile, TooLarge, directory_beneath, read_beneath
 
 __all__ = [
-    "Approval",
     "Commands",
+    "Confirm",
     "Extensions",
     "ExtensionsConfig",
     "Frame",
-    "Jail",
+    "Rule",
+    "Runner",
     "System",
+    "Tools",
     "worker_argv",
 ]
 
@@ -77,19 +88,15 @@ _ANSWER_S = 30.0  # a load's answer: the worker waits up to 10 s for an extensio
 _STATUS = "status.json"
 _FIELD = "extensions"
 _ENDED = (
-    "the extensions' worker ended (an extension may have ended it, or the jail did); change a "
+    "the extensions process ended (an extension may have ended it, or the jail did); change a "
     "file in the extensions directory to load them all again"
 )
-# How the extensions directory is opened beneath the root, a name at a time, and an extension in
-# it: following no link, and never waiting on a FIFO the model left in a file's place.
-_ROOT = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
-_DIRECTORY = _ROOT | os.O_NOFOLLOW | os.O_NONBLOCK
-_FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+_SOURCE_LIMIT = 256 * 1024  # an extension larger than this is not read (the worker's line holds it)
 _NEW = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC  # status.json's next
 
 _RELEASED = (
-    "/release stopped the extensions' worker; every extension loads again, in a new one, once the "
-    "next input has started the kernel"
+    "/release stopped the extensions process; every extension loads again, in a new one, once "
+    "something starts in the runner again (the next input) or one of them changes"
 )
 
 
@@ -101,10 +108,10 @@ class _Jailed(Protocol):
 
 
 @runtime_checkable
-class Jail(Protocol):
-    """What the extensions need of the `jail` value (CONTRACTS.md: jail): their worker started,
-    and whether `/release` has stopped the jail's programs until the next input (`released`),
-    when it must not start again."""
+class Runner(Protocol):
+    """What the extensions need of the `runner` value (CONTRACTS.md: runner): their worker
+    started, and whether `/release` has stopped what runs until the next start (`released`),
+    when it waits rather than start again only to come back."""
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed: ...
     def released(self) -> bool: ...
@@ -136,13 +143,37 @@ class System(Protocol):
 
 
 @runtime_checkable
-class Approval(Protocol):
-    """What the extensions need of the `approval` value: whether the jail confines what runs in
-    it (which the model is told), and whether an extension may load."""
+class Tools(Protocol):
+    """What the extensions need of the `tools` value (CONTRACTS.md: tools): a tool registered, and
+    its remover back; and the tools registered, whose names are bh-02's own, not an extension's."""
+
+    def register(
+        self,
+        spec: Mapping[str, Any],
+        run: Callable[[Mapping[str, Any]], Awaitable[Mapping[str, Any]]],
+        *,
+        runs: str = ...,
+        show: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = ...,
+    ) -> Callable[[], None]: ...
+    def specs(self) -> Sequence[Mapping[str, Any]]: ...
+
+
+@runtime_checkable
+class Rule(Protocol):
+    """What the extensions need of the `approval` value (CONTRACTS.md: approval): whether the
+    runner confines what runs in it (which the model is told), and whether a load runs unasked."""
 
     @property
     def confined(self) -> bool: ...
-    async def approve(self, request: Mapping[str, Any]) -> bool: ...
+    def unasked(self, request: Mapping[str, Any]) -> bool: ...
+
+
+@runtime_checkable
+class Confirm(Protocol):
+    """What the extensions need of the `output` value: the person's yes or no about a load the
+    rule does not let run unasked."""
+
+    async def confirm(self, request: Mapping[str, Any]) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,10 +188,11 @@ class ExtensionsConfig:
 
 @dataclass(frozen=True, slots=True)
 class _Entry:
-    """Something an extension added to bh-02: whose, what (`/todo`, a field), and its remover
-    (None when bh-02 refused it)."""
+    """Something an extension added to bh-02: whose, what kind (`command`, `tool`, ...), what
+    (`/todo`, a field, a tool's name), and its remover (None when bh-02 refused it)."""
 
     extension: str
+    kind: str
     label: str
     remove: Callable[[], None] | None
 
@@ -185,14 +217,18 @@ class Extensions:
 
     def __init__(
         self,
-        jail: Jail,
+        runner: Runner,
         commands: Commands,
         frame: Frame,
         system: System,
-        approval: Approval,
+        tools: Tools,
+        approval: Rule,
+        output: Confirm,
         config: ExtensionsConfig,
     ) -> None:
-        self._jail = jail
+        self._runner = runner
+        self._tools = tools
+        self._output = output
         self._commands = commands
         self._frame = frame
         self._system = system
@@ -202,9 +238,12 @@ class Extensions:
         self._seen: dict[str, tuple[int, int]] = {}  # each file as last loaded: (mtime_ns, size)
         self._halted: dict[str, tuple[int, int]] | None = None  # the directory when the worker ended
         self._ended = False  # the worker ended (or `/release` kept one from starting) since the last look
-        self._waiting = False  # `/release` stopped the worker: all load again once the jail runs again
+        self._waiting = False  # `/release` stopped the worker: all load again once the runner starts again
+        self._at_release: dict[str, tuple[int, int]] = {}  # the directory when `/release` stopped it
         self._leaving = False
         self._entries: dict[int, _Entry] = {}
+        self._own_tools: set[str] = set()  # the tools the extensions registered, by name
+        self._reserved: set[str] = set(RESERVED)  # every tool name a row of bh-02's own registered
         self._problems: dict[str, list[str]] = {}
         self._answers: dict[str, asyncio.Future[Mapping[str, Any]]] = {}
         self._calls: dict[int, asyncio.Future[str]] = {}
@@ -237,7 +276,7 @@ class Extensions:
         of its prompt (`system.add`), read per request. The loop reads the prompt in a worker
         thread while this row's watcher changes `_statuses` on the event loop, so it reads a copy
         (`statuses`, taken in one step) and nothing that needs the event loop (`confined` reads
-        the jail's report, a value)."""
+        the runner's report, a value)."""
         return instructions(
             self._config.path, self._approval.confined, self.statuses, self._reference, self._refused
         )
@@ -259,18 +298,36 @@ class Extensions:
             self._field()
             self._field = None
 
+    async def stopped(self) -> str:
+        """`/release`: stop the worker, and take back what the extensions added with it, so the
+        runner can let go of what its jail holds on the host; every extension loads again, in a
+        new worker, once something starts in the runner or one of them changes (`look`)."""
+        if self._process is None and self._writer is None:
+            return ""
+        await self._stop()
+        found = self._found()
+        self._ended, self._waiting, self._at_release = False, True, dict(found)
+        self._statuses = {name: Status(error=_RELEASED) for name in found}
+        self._publish()
+        return (
+            "The extensions process is stopped, and what the extensions added with it: they load "
+            "again once something starts in the runner (the next input) or one of them changes."
+        )
+
     async def look(self) -> None:
         """Look at the extensions directory once: load what is new or changed, unload what is
         gone. The watcher does this every `watch` seconds."""
+        self._note_reserved()
         found = self._found()
         if self._ended:
             self._stopped(found)
             return
         resumed = self._waiting
         if self._waiting:
-            if self._jail.released():
-                return  # until the next input has started the kernel, no worker starts
-            self._waiting, self._seen, self._statuses = False, {}, {}  # a new worker: all load again
+            if self._runner.released() and found == self._at_release:
+                return  # until something starts in the runner, or the model changes one of them
+            # a new worker, whose start ends the release if nothing else's has: all load again
+            self._waiting, self._seen, self._statuses = False, {}, {}
         if self._halted is not None:
             if found == self._halted:
                 return  # the worker ended: nothing loads again until something changes
@@ -290,12 +347,13 @@ class Extensions:
 
     def _stopped(self, found: Mapping[str, tuple[int, int]]) -> None:
         """The worker ended, or none could start: say so for every extension there is. When the
-        jail is `released` (`/release` stopped its programs), every one loads again once it runs
-        again (`look`); otherwise nothing loads until the directory differs from `found`, so an
-        extension that ends the worker as it loads is not loaded again and again."""
+        runner is `released` (`/release` stopped what runs in it), every one loads again once
+        something starts in it (`look`); otherwise nothing loads until the directory differs
+        from `found`, so an extension that ends the worker as it loads is not loaded again and
+        again."""
         self._ended = False
-        if self._jail.released():
-            self._waiting = True
+        if self._runner.released():
+            self._waiting, self._at_release = True, dict(found)
             self._statuses = {name: Status(error=_RELEASED) for name in found}
         else:
             self._halted = dict(found)
@@ -332,29 +390,19 @@ class Extensions:
     @contextlib.contextmanager
     def _opened(self) -> Iterator[int]:
         """The extensions directory, opened from the project's root (the person's, so a link to
-        it is theirs to follow) one name at a time, following no link: the descriptor it is
-        listed, read and written through. Raises `_Refused` when a name on the way (`.bh-02`, the
-        directory itself) is a link, and OSError when there is no such directory."""
-        at = os.open(Path(self._config.root).resolve(), _ROOT)
+        it is theirs to follow) one name at a time, following no link
+        (`host_paths.directory_beneath`): the descriptor it is listed, read and written through.
+        Raises `_Refused` when a name on the way (`.bh-02`, the directory itself) is a link, and
+        OSError when there is no such directory."""
         try:
-            way = Path()
-            for name in Path(self._config.path).parts:
-                way /= name
-                try:
-                    below = os.open(name, _DIRECTORY, dir_fd=at)
-                except OSError:  # a link is ENOTDIR here, or ELOOP: which it was, for the model
-                    if stat.S_ISLNK(os.stat(name, dir_fd=at, follow_symlinks=False).st_mode):
-                        raise _Refused(linked(self._config.path, str(way))) from None
-                    raise
-                os.close(at)
-                at = below
-            yield at
-        finally:
-            os.close(at)
+            with directory_beneath(Path(self._config.root).resolve(), Path(self._config.path).parts) as at:
+                yield at
+        except Linked as way:
+            raise _Refused(linked(self._config.path, str(way.part))) from None
 
     def _read(self, name: str) -> str:
         """The extension `name`'s source, read from the descriptor it was opened as, beneath the
-        root and following no link (`_opened`, then the file with `O_NOFOLLOW`), and only when
+        root and following no link (`_opened`, then `host_paths.read_beneath`), and only when
         that descriptor says it may be (`refusal`): so a file swapped for a link after it was
         found, or as it is opened, is not read. Raises `_Refused` with why it is not read, or
         OSError, or UnicodeDecodeError."""
@@ -362,16 +410,14 @@ class Extensions:
         shown = str(Path(self._config.path) / file)
         with self._opened() as directory:
             try:
-                descriptor = os.open(file, _FILE, dir_fd=directory)
-            except OSError as error:
-                if error.errno == errno.ELOOP:  # O_NOFOLLOW's answer for a link
-                    raise _Refused(refusal(shown, stat.S_IFLNK, 1)) from None
-                raise
-            with open(descriptor, "rb") as opened:
-                found = os.fstat(opened.fileno())
-                if (why := refusal(shown, found.st_mode, found.st_nlink)) is not None:
-                    raise _Refused(why)
-                return opened.read().decode("utf-8")
+                found = read_beneath(directory, [file], cap=_SOURCE_LIMIT)
+            except NotOneFile as error:
+                raise _Refused(refusal(shown, error.mode, error.names) or str(error)) from None
+            except TooLarge:
+                raise _Refused(too_large(shown, _SOURCE_LIMIT)) from None
+        if isinstance(found, Link):
+            raise _Refused(refusal(shown, stat.S_IFLNK, 1))
+        return found.decode("utf-8")
 
     # -- one extension ---------------------------------------------------------------------
 
@@ -399,7 +445,7 @@ class Extensions:
             answer = await self._ask(name, {"op": "load", "name": name, "path": str(path), "source": source})
         except _Gone as gone:
             self._statuses[name] = Status(error=str(gone))
-            self._ended = self._ended or self._jail.released()  # `/release`: all wait for the jail
+            self._ended = self._ended or self._runner.released()  # `/release`: all wait for a start
             return
         error = answer.get("error")
         rows = answer.get("rows") or {}
@@ -407,21 +453,26 @@ class Extensions:
             rows={str(row): str(state) for row, state in rows.items()},
             error=None if error is None else str(error),
             commands=tuple(
-                e.label for e in self._entries.values() if e.extension == name and e.label.startswith("/")
+                e.label for e in self._entries.values() if e.extension == name and e.kind == "command"
+            ),
+            tools=tuple(
+                e.label
+                for e in self._entries.values()
+                if e.extension == name and e.kind == "tool" and e.remove is not None
             ),
             problems=tuple(self._problems.get(name, ())),
         )
 
     async def _approved(self, name: str, source: str) -> bool:
-        """Whether an extension may load (`approval`): at once when the jail confines it;
-        unjailed, the model's code would run with the person's permissions, so they are asked."""
-        return await self._approval.approve(
-            {
-                "name": "extension",
-                "title": f"Load the model's extension {name} into bh-02, unjailed?",
-                "input": {"code": source},
-            }
-        )
+        """Whether an extension may load: at once when the `approval` rule says it runs unasked
+        (the runner confines it); else the model's code would run with the person's permissions,
+        so they are asked (`output.confirm`)."""
+        request = {
+            "name": "extension",
+            "title": f"Load the model's extension {name} into bh-02, unjailed?",
+            "input": {"code": source},
+        }
+        return self._approval.unasked(request) or await self._output.confirm(request)
 
     async def _unload(self, name: str) -> None:
         self._statuses.pop(name, None)
@@ -485,14 +536,61 @@ class Extensions:
                     text = str(message["text"])
                     label = "a prompt section"
                     remove = self._system.add(f"extensions: {extension}", lambda: text)
+                case "tool":
+                    sent = message.get("spec")
+                    name = str(sent.get("name")) if isinstance(sent, Mapping) else "?"
+                    label = f"the tool {name!r}"
+                    remove = self._tool(entry, extension, sent)
+                    label = name  # registered: status.json lists it by name
                 case _:  # a line prefix among them: only a layer's row may claim one
                     raise ValueError(
-                        "an extension adds a slash command, a status field or a prompt section, "
-                        "and nothing else"
+                        "an extension adds a slash command, a status field, a prompt section or a "
+                        "tool, and nothing else"
                     )
         except Exception as error:  # bh-02 refused it: a command name another row has, say
             self._problems.setdefault(extension, []).append(f"{label} was not added: {error}")
-        self._entries[entry] = _Entry(extension, label, remove)
+        self._entries[entry] = _Entry(extension, str(kind), label, remove)
+
+    def _tool(self, entry: int, extension: str, sent: object) -> Callable[[], None]:
+        """Register a tool an extension sent, once its spec passes (`offered_tool`: a name of its
+        own, not bh-02's, a JSON Schema, a size cap), as running in the runner: the `approval`
+        rule decides each call as it does an input, and a call is shown by its name and
+        arguments. Returns its remover. Raises ValueError saying why bh-02 refused it."""
+        self._note_reserved()
+        spec = offered_tool(sent, self._reserved)
+        name = spec["name"]
+        unregister = self._tools.register(
+            spec,
+            functools.partial(self._call, entry),
+            runs="jail",
+            show=functools.partial(shown_tool_call, extension, name),
+        )
+        self._own_tools.add(name)
+
+        def remove() -> None:
+            self._own_tools.discard(name)
+            unregister()
+
+        return remove
+
+    def _note_reserved(self) -> None:
+        """Keep every tool name a row of bh-02's own has registered as bh-02's, for good: an
+        extension can't take it while that row restarts."""
+        self._reserved |= {str(spec.get("name")) for spec in self._tools.specs()} - self._own_tools
+
+    async def _call(self, entry: int, input: Mapping[str, Any]) -> dict[str, Any]:
+        """A call to a tool an extension registered (CONTRACTS.md: tools, `run`): run in the
+        worker, its answer what the model reads."""
+        call = next(self._call_ids)
+        answer: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        self._calls[call] = answer
+        try:
+            self._send({"op": "call", "call": call, "tool": entry, "input": dict(input)})
+            return {"content": await answer}
+        except _Gone as gone:
+            return {"content": f"error: {gone}"}
+        finally:
+            self._calls.pop(call, None)
 
     async def _run(self, entry: int, args: str) -> str:
         """A command an extension registered: run in the worker, its answer shown to the person."""
@@ -517,7 +615,7 @@ class Extensions:
             async with asyncio.timeout(_ANSWER_S):
                 return await answer
         except TimeoutError:
-            raise _Gone(f"the extensions' worker did not answer within {_ANSWER_S:.0f} s") from None
+            raise _Gone(f"the extensions process did not answer within {_ANSWER_S:.0f} s") from None
         finally:
             self._answers.pop(name, None)
 
@@ -527,21 +625,18 @@ class Extensions:
         self._writer.write((json.dumps(message) + "\n").encode("utf-8"))
 
     async def _start(self) -> None:
-        """Start the worker in the jail, unless it is running, or `/release` has stopped the
-        jail's programs until the next input (`jail.released()`, asked with nothing awaited
-        between it and the start, which would end the release)."""
+        """Start the worker in the runner, unless it is running. A start ends a release
+        (`look` starts one while released only for a change the person or the model made)."""
         if self._writer is not None:
             return
         if self._process is not None:  # what is left of a worker that ended: its jail's teardown
             await self._stop()
-        if self._jail.released():
-            raise _Gone(_RELEASED)
         # A Unix socket path must fit in about 100 bytes, so it lives in a short directory of its own.
         self._socket_dir = tempfile.mkdtemp(prefix="bh-x-", dir="/tmp")
         endpoint = str(Path(self._socket_dir) / "x.sock")
         root = str(Path(self._config.root).resolve())
         try:
-            self._process = await self._jail.start(worker_argv(endpoint), cwd=root, endpoint=endpoint)
+            self._process = await self._runner.start(worker_argv(endpoint), cwd=root, endpoint=endpoint)
             reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)
         except Exception as error:
             await self._stop()

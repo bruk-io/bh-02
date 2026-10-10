@@ -1,9 +1,9 @@
 # tui-cordis-plugin
 
 bh-02's ui: a Textual app bound as `input`, `output` (whose `confirm` asks about the model's code in a
-modal) and `frame` by `tui:app`, and small rows that push into the app's frame: the status
-bar's fields (`tui:status`: the session's id, the model, the jail's grades) and the palette's
-commands (`tui:palette`). The screen is the conversation (the transcript over the composer),
+modal) and `frame` by `tui:ui`, and small rows that push into the app's frame: the status
+bar's fields (`tui:status`: the session's id and the model; `tui:grades`: the jail's grades)
+and the palette's commands (`tui:palette`). The screen is the conversation (the transcript over the composer),
 the whole width, and the status bar along the bottom. Imports nothing from any other plugin;
 the shapes are in `../../CONTRACTS.md`.
 
@@ -13,12 +13,18 @@ the shapes are in `../../CONTRACTS.md`.
   `Content`, pure: markdown-ish prose, highlighted code, coloured diffs), `history.py` (the
   session's history file, and `replayable`, the pure choice of what to draw again),
   `frame.py` (the usage and model fields and the palette's entries, pure), `status.py` (what
-  the frame's rows need, and `ModelField`), `theme.py` (the themes the app registers),
+  the frame's rows need, `ModelField` and `GradesField`), `theme.py` (the themes the app registers),
   `bh01_theme.py` (every colour: generated, never edited), `tokens.py` (bh-01's token CSS to
   that module's source, pure), `widgets/` (one module per widget: `Transcript`, `Composer`,
   `StatusBar`, `ApprovalScreen`, and the palette's `CommandsProvider`).
-- **`wiring.py`**: the rows. `tui:app` depends on its config alone, so no reload elsewhere
+- **`wiring.py`**: the rows. `tui:ui` depends on its config alone, so no reload elsewhere
   restarts the app and loses the transcript.
+
+**The app owns the terminal.** A child process that inherits fd 2 paints over it, so every
+child's stderr goes to a file (the Python process's and brig's do) or is captured (`!COMMAND`'s,
+the commands plugin's), `--trace` takes a file, and anything the shell must say waits until the
+app has exited. The gate's `terminal-io` and `print-input` keep every other module off the
+terminal.
 
 The input, output and frame never touch a widget: cordis's coroutines run outside the app's task, so they post a
 message and the app draws it. Whatever ends the app (Ctrl-Q, `/exit`, `/quit`, a crash) ends
@@ -46,20 +52,39 @@ after the push is offered with no reload; choosing one sends `/name` through the
 typed, or puts `/name ` in the composer when it takes arguments; a spec's `choices` (read each
 time it opens too) are entries of their own that run at once (`/model haiku`, one per model).
 `/help` and `/exit` are the ui's own entries. `tui:status` shows the running session's id (from
-the `sessions` value, `(resumed)` after it on a resume) and the kernel's jail grades (and, as a note in the conversation each time a kernel comes up, what its jail says the person should know: `kernel.notice()`), and asks
+the `session` value, `(resumed)` after it on a resume), and asks
 the `models` value which model the model row names now and on which provider (`models.current()`;
 `config.model_row`, `model`, names the row whose lifecycle it follows): `sonnet (claude-code)`
 (narrow: `sonnet`). It observes lifecycle events to show it again at each of that row's events:
-`sonnet (claude-code, starting…)` (narrow: `sonnet…`) from the row's unloading until it is active again, so a
+`sonnet (claude-code, starting…)` (narrow: `sonnet…`) from the row's unloading (or `reload`) until it is active again, so a
 `/model` or `/clear` shows the new model at once and that it is still starting (the Claude
-CLI takes seconds); its first push reads the row's state from the loader's `status()`. The
+CLI takes seconds); its first push reads the row's state from the loader's `status()`. It
+depends on the loader, `models`, `session`, `frame` and its config, none of which `/clear` or
+`/model` replaces, so it never reloads with them. `tui:grades` is the jail field (`GradesField`),
+a row of its own over the `runner`, the `approval` rule, `frame` and `output`: the grades of the
+runner's last start (before any, the runner's own), `jailed` or `unjailed` as the rule's
+`confined` says (`render.jail_forms`). The runner tells it each start (`on_start`), so it follows
+a Python process started again in place, never showing a start gone by, and none of it reloads
+with `/clear`; what a start says the person should know (`started.notice()`: on Linux, the paths
+its jail holds with a mount the host can undo) is shown once as a note in the conversation
+(`output.show`), each time it reads differently from the last told. Each field's row reloads
+only with what it shows, so the frame keeps nothing across a reload: a field removed is gone at
+once, and a row that comes back pushes it again. Two rows pushing one field: the later push
+shows until it is removed. A row pushes over what does not restart (the status row over `models`
+and `session`, the grades row over `runner`, told each start), so `/clear` blanks none of them. The
 output's lifecycle tells the bridge which rows are coming up, so a line typed while nobody
-reads says `⧗ waiting for loop to start; ...` and is read once it is up. A command's
-`restarting` event (`/model`, `/clear`) makes the bridge hold every line, even from the chat
-row still reading, until the rows it names are active again, so a line typed right after the
-command waits for the new model and says so. The `usage` field is the output's own: the session's running totals of usage
-events (each event is one turn's usage, so they sum), starting from what the session's history
-already holds, so a resumed session's field counts its earlier runs too.
+reads says `⧗ waiting for loop to start; ...` and is read once it is up. It names only rows that
+bind a key, which is all the chat row depends on: a status-bar row reloading with them is not
+waited on. A restarted row's old fiber ends `inactive` before its new one's `reload`; a line kept
+in that moment says it waits at the `reload`. The chat row reads
+again only once a restart a command queued is done (`jobs`), so a line typed right after
+`/model` or `/clear` stays in the bridge for the new chat row; the command's `restarting` event
+names the rows, which such a line says it waits for. The bridge holds nothing back itself. The `usage` field is the output's own: the session's running totals of usage
+events (each event is one step's usage, so they sum), starting from what the session's history
+already holds, so a resumed session's field counts its earlier runs too. `/clear` resets none of
+it: `cleared` starts a new conversation, not a new session, and what the session spent stays
+spent. Once a step has ended with its usage still `partial` (stopped before the provider counted
+its output), the output and cost totals are lower bounds and end in `+`.
 
 `running` puts the loop's task factory back once the app is up (Textual makes it eager at
 start, and the event loop is cordis's too). The theme is registered in `App.__init__` and every
@@ -91,9 +116,10 @@ and the last `replay`, so it never grows without bound; a trim that fails leaves
 whole, removes its temporary file and says so in the transcript. `/clear` reaches the ui as a
 `cleared` event: the transcript drops every block and the note that follows is all it shows,
 with any line typed after `/clear` that is still waiting to be read (it is drawn again);
-the file records `cleared` like any event, and a replay starts after the last one, while the
-usage before it still counts (the session's totals). A session made before `cleared` existed
-also empties the file underneath the app; the next write then puts a `carried` entry first for
+the file records `cleared` like any event, and a replay starts after the last one (`/compact`'s
+too, so a resume shows the conversation from the note carrying the summary), while the
+usage before it still counts (the session's totals). An older bh-02 emptied the file underneath
+the app (the operator's `forget`, gone now); the next write then puts a `carried` entry first for
 what was forgotten, so the usage a resume adds up is the usage shown live. The file is the ui's own; the row still
 depends on its config alone.
 
@@ -110,7 +136,7 @@ selected. Every stylesheet is parsed against each theme in a test, as a real lau
 
 The status bar shows its fields in a fixed order (session, model, jail, usage,
 then any other). Each field is pushed with its shorter forms (`frame.status(field, text,
-*shorter)`: the status row's short form of the session id, `frame.usage_forms`, `render.jail_forms`), so the bar
+*shorter)`: the status row's short form of the session id, `frame.usage_forms`, the grades row's `render.jail_forms`), so the bar
 never parses text back. When they don't fit it gives up room a step at a time: narrower
 separators, the session as its id's last part (`↻` marks a resumed one: `b1c2 ↻`; `--resume`
 takes it), usage in short (`12k/678 $0.12`), the jail's axes by their initials (`jailed w✓ n✓

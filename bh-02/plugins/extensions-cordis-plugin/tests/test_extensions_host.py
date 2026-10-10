@@ -1,4 +1,5 @@
-"""The extensions row's value against a real worker (a plain subprocess under `PlainJail`) and
+"""The extensions row's value against a real worker (a plain subprocess, a runner over
+`PlainJail`) and
 fakes for what it adds to: the model writes a file, bh-02 loads it, and everything it added
 leaves with it."""
 
@@ -16,9 +17,11 @@ from typing import Any
 
 import pytest
 
+from agent_cordis_plugin import ToolBroker
 from cordis.testing import drive
 from extensions_cordis_plugin import Extensions, ExtensionsConfig, extensions, worker_argv
 from extensions_cordis_plugin.testing import PlainJail
+from runner_cordis_plugin import Runner
 
 type Remover = Callable[[], None]
 
@@ -88,25 +91,32 @@ class _System:
 
 @dataclass
 class _Approval:
-    """An `approval` that keeps every request: confined, each goes ahead with nobody asked;
-    unconfined, each gets the person's `answer`."""
+    """An `approval` rule that keeps every request: confined, each goes ahead with nobody asked;
+    unconfined, each is put to the person (`confirm`, the `output`'s), who answers `answer`."""
 
     confined: bool = True
     answer: bool = True
     requests: list[Mapping[str, Any]] = field(default_factory=list)
+    asked: list[Mapping[str, Any]] = field(default_factory=list)
 
-    async def approve(self, request: Mapping[str, Any]) -> bool:
+    def unasked(self, request: Mapping[str, Any]) -> bool:
         self.requests.append(request)
-        return self.confined or self.answer
+        return self.confined
+
+    async def confirm(self, request: Mapping[str, Any]) -> bool:
+        self.asked.append(request)
+        return self.answer
 
 
 @dataclass
 class _Harness:
     root: Path
+    runner: Runner
     jail: PlainJail
     commands: _Commands
     frame: _Frame
     system: _System
+    tools: ToolBroker
     approval: _Approval
     extensions: Extensions
 
@@ -124,7 +134,9 @@ class _Harness:
 
 
 @contextlib.asynccontextmanager
-async def _running(root: Path, *, confined: bool = True, answer: bool = True) -> AsyncIterator[_Harness]:
+async def _running(
+    root: Path, *, confined: bool = True, answer: bool = True, tools: ToolBroker | None = None
+) -> AsyncIterator[_Harness]:
     jail, commands, frame, system, approval = (
         PlainJail(),
         _Commands(),
@@ -132,9 +144,12 @@ async def _running(root: Path, *, confined: bool = True, answer: bool = True) ->
         _System(),
         _Approval(confined, answer),
     )
+    broker = tools if tools is not None else ToolBroker()
+    runner = Runner(jail)
     config = ExtensionsConfig(root=str(root), watch=3600)  # the test looks itself
-    async with Extensions(jail, commands, frame, system, approval, config) as running:
-        yield _Harness(root, jail, commands, frame, system, approval, running)
+    async with Extensions(runner, commands, frame, system, broker, approval, approval, config) as running:
+        runner.on_release(running.stopped)  # as the row does
+        yield _Harness(root, runner, jail, commands, frame, system, broker, approval, running)
 
 
 async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_bh_02(tmp_path: Path) -> None:
@@ -157,6 +172,7 @@ async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_
             "rows": {"todo.todo": "active"},
             "error": None,
             "commands": ["/todo"],
+            "tools": [],
             "problems": [],
         }
     # leaving takes back everything the extensions added, and stops the worker
@@ -277,8 +293,8 @@ async def test_an_extension_can_t_claim_a_line_prefix_however_it_asks(tmp_path: 
         assert "PermissionError: an extension can't claim a line prefix ('!')" in refused
         assert "register a slash command instead" in refused
         assert h.status()["forged"]["problems"] == [
-            "prefix was not added: an extension adds a slash command, a status field or a "
-            "prompt section, and nothing else"
+            "prefix was not added: an extension adds a slash command, a status field, a prompt "
+            "section or a tool, and nothing else"
         ]
 
 
@@ -310,7 +326,7 @@ async def test_an_extension_that_ends_the_worker_is_not_loaded_again_until_somet
         await h.extensions.look()
         assert h.commands.runs == {}  # the worker took every extension down with it
         status = h.status()
-        assert "worker ended" in status["exits"]["error"] and "worker ended" in status["todo"]["error"]
+        assert "process ended" in status["exits"]["error"] and "process ended" in status["todo"]["error"]
         for _ in range(3):
             await h.extensions.look()
         assert len(h.jail.started) == 1  # no worker started again for an unchanged directory
@@ -350,6 +366,7 @@ async def test_an_extension_that_is_a_link_is_not_read_and_status_json_says_why(
             "lead to a file the jail hides): write the extension itself at .bh-02/plugins/leak.py, "
             "not a link to it",
             "commands": [],
+            "tools": [],
             "problems": [],
         }
         assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
@@ -437,34 +454,46 @@ async def test_a_file_swapped_for_a_link_after_it_was_found_is_not_read(tmp_path
         assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
 
 
+async def test_a_large_extension_loads_and_one_over_the_cap_is_not_read(tmp_path: Path) -> None:
+    """The source goes to the worker as one line: 200 KiB of it (escaped, more) is held whole, and
+    one over 256 KiB is not read, status.json saying why, rather than ending the worker."""
+    padding = "\n".join(f"# {'é' * 60}" for _ in range(1700))  # ~200 KiB, twice that escaped
+    async with _running(tmp_path) as h:
+        h.write("todo", _TODO + padding)
+        h.write("huge", _TODO.replace('"todo", "help"', '"huge", "help"') + padding * 2)
+        await h.extensions.look()
+        assert h.extensions.statuses["todo"].ok and "todo" in h.commands.runs
+        assert h.status()["huge"]["error"] == (
+            ".bh-02/plugins/huge.py is larger than 256 KiB, so bh-02 did not read it: split it into "
+            "extensions of their own"
+        )
+        assert len(h.jail.started) == 1 and h.jail.started[0].process.returncode is None
+
+
 async def test_after_release_stops_the_worker_every_extension_loads_again_once_the_jail_runs(
     tmp_path: Path,
 ) -> None:
-    """`/release` stops every program the jail started, the extensions' worker too, so what its
-    jail held on the host is free. Nothing of the extensions starts again while the jail is
-    released (not even for a changed file), or its jail would hold those paths again before the
-    person could use them. Once the next input has started the kernel's worker, the jail runs
-    again, and every extension loads again in a new worker, without anything changing."""
+    """`/release` asks the extensions row to stop its own worker (`stopped`), so what its jail
+    held on the host is free. Nothing of the extensions starts again while the runner is
+    released and nothing changed, or its jail would hold those paths again before the person
+    could use them. Once the next input has started the Python process, the runner runs again,
+    and every extension loads again in a new worker, without anything changing."""
     async with _running(tmp_path) as h:
         h.write("todo", _TODO)
         await h.extensions.look()
         assert await h.commands.runs["todo"]("milk") == "milk"
-        await h.jail.release()
-        for _ in range(250):  # the worker's end reaches the host as its socket closing
-            if "todo" not in h.commands.runs:
-                break
-            await asyncio.sleep(0.02)
-        await h.extensions.look()
+        said = await h.runner.release()
+        assert said.startswith("The extensions process is stopped"), said
+        assert h.jail.started[0].process.returncode is not None
         assert "todo" not in h.commands.runs and "todo:count" not in h.frame.fields()
         assert "/release" in h.status()["todo"]["error"], h.status()
-        h.write("todo", _TODO + "\n")
         await h.extensions.look()
-        assert len(h.jail.started) == 1  # released: no worker starts, whatever changed
+        assert len(h.jail.started) == 1  # released: no worker starts while nothing changed
         sockets = tempfile.mkdtemp(prefix="bh-x-", dir="/tmp")  # a socket path must be short
-        kernel = await h.jail.start(
+        kernel = await h.runner.start(
             worker_argv(f"{sockets}/k.sock"), cwd=sockets, endpoint=f"{sockets}/k.sock"
         )
-        try:  # the next input started the kernel's worker (a stand-in): the jail runs again
+        try:  # the next input started the Python process (a stand-in): the runner runs again
             await h.extensions.look()
             assert len(h.jail.started) == 3 and h.extensions.statuses["todo"].ok
             assert await h.commands.runs["todo"]("eggs") == "eggs"  # a new worker: a new list
@@ -473,18 +502,131 @@ async def test_after_release_stops_the_worker_every_extension_loads_again_once_t
             shutil.rmtree(sockets, ignore_errors=True)
 
 
+async def test_a_change_while_released_loads_at_once_and_ends_the_release(tmp_path: Path) -> None:
+    """The person edits an extension after `/release`: they asked for it, so its worker starts,
+    and that start ends the release, as the next input's would."""
+    async with _running(tmp_path) as h:
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        await h.runner.release()
+        assert h.runner.released()
+        h.write("todo", _TODO + "\n")
+        await h.extensions.look()
+        assert len(h.jail.started) == 2 and h.extensions.statuses["todo"].ok
+        assert not h.runner.released()
+
+
 async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -> None:
     effects = await drive(
         extensions(
-            jail=PlainJail(),
+            runner=Runner(PlainJail()),
             commands=_Commands(),
             frame=_Frame(),
             system=_System(),
+            tools=ToolBroker(),
             approval=_Approval(),
+            output=_Approval(),
             config=ExtensionsConfig(),
         ),
-        [SimpleNamespace(section=lambda: "told")],  # what entering would have given back
+        [SimpleNamespace(section=lambda: "told", stopped=None)],  # what entering would have given back
     )
-    assert [effect.name for effect in effects] == ["enter", "acquire"]
-    assert isinstance(effects[0].args[0], Extensions) and effects[1].args[1] == "extensions"
-    assert effects[1].args[2]() == "told"
+    assert [effect.name for effect in effects] == ["enter", "acquire", "acquire"]
+    assert isinstance(effects[0].args[0], Extensions)
+    assert effects[1].args[1] is None  # its worker's stop, for /release (`runner.on_release`)
+    assert effects[2].args[1] == "extensions" and effects[2].args[2]() == "told"
+
+
+_LOUD = """
+from cordis import Effects, acquire, component
+
+@component
+async def loud(*, tools) -> Effects:
+    async def shout(input):
+        if input.get("text") == "boom":
+            raise ValueError("too loud")
+        return input["text"].upper()
+
+    spec = {
+        "name": "shout",
+        "description": "Say the text louder.",
+        "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+    }
+    yield acquire(tools.register, spec, shout)
+"""
+
+
+async def test_an_extension_s_tool_runs_in_the_worker_and_leaves_with_its_file(tmp_path: Path) -> None:
+    """The model writes an extension that registers a tool: bh-02 offers it to the model as
+    running in the runner, shows a call by its name and arguments, runs each call in the worker
+    (its error the call's answer), offers the new definition when the file changes, and takes it
+    back when the file goes, so a later call finds no such tool."""
+    async with _running(tmp_path) as h:
+        h.write("loud", _LOUD)
+        await h.extensions.look()
+        assert h.extensions.statuses["loud"].ok, h.status()
+        assert h.status()["loud"]["tools"] == ["shout"]
+        (spec,) = h.tools.specs()
+        assert spec["name"] == "shout" and spec["parameters"]["required"] == ["text"]
+        tool = h.tools.get("shout")
+        assert tool is not None and tool.runs == "jail"  # the `approval` rule decides, as for an input
+        assert tool.show is not None and tool.show({"text": "hi"}) == {
+            "title": "Run shout, a tool of the extension loud, with these arguments?",
+            "lines": ["{", '  "text": "hi"', "}"],
+            "language": "json",
+        }
+        assert await tool.run({"text": "hi"}) == {"content": "HI"}
+        assert await tool.run({"text": "boom"}) == {"content": "error: ValueError: too loud"}
+        h.write("loud", _LOUD.replace("upper()", "lower()").replace("louder", "quieter"))
+        await h.extensions.look()
+        redefined = h.tools.get("shout")
+        assert redefined is not None and redefined.spec["description"] == "Say the text quieter."
+        assert await redefined.run({"text": "HI"}) == {"content": "hi"}
+        (h.root / ".bh-02" / "plugins" / "loud.py").unlink()
+        await h.extensions.look()
+        assert h.tools.get("shout") is None and h.tools.specs() == []
+        assert await tool.run({"text": "hi"}) == {"content": "error: this tool's extension has been unloaded"}
+
+
+async def test_a_tool_bh_02_cannot_offer_is_refused_with_why_and_bh_02_s_own_names_are_kept(
+    tmp_path: Path,
+) -> None:
+    """The host checks every spec the worker sends: `python`, or a name a layer row's tool has,
+    stays bh-02's even while that row restarts; a spec that is no JSON Schema object is refused;
+    either way status.json says why and nothing is offered."""
+    broker = ToolBroker()
+
+    async def search(input: Mapping[str, Any]) -> Mapping[str, Any]:
+        return {"content": ""}
+
+    remove = broker.register({"name": "search", "description": "a layer row's", "parameters": {}}, search)
+    async with _running(tmp_path, tools=broker) as h:
+        remove()  # its row restarting: the name is still bh-02's
+        h.write("taken", _LOUD.replace('"shout"', '"python"'))
+        h.write("again", _LOUD.replace('"shout"', '"search"'))
+        h.write(
+            "shapeless", _LOUD.replace('{"type": "object", "properties"', '{"type": "array", "properties"')
+        )
+        await h.extensions.look()
+        status = h.status()
+        assert status["taken"]["problems"] == [
+            "the tool 'python' was not added: 'python' is one of bh-02's own tools: give yours another name"
+        ]
+        assert status["again"]["problems"][0].startswith("the tool 'search' was not added: 'search' is one")
+        assert "is a JSON Schema object" in status["shapeless"]["problems"][0]
+        assert all(status[name]["tools"] == [] for name in ("taken", "again", "shapeless"))
+        assert h.tools.specs() == []
+
+
+async def test_unjailed_a_call_to_an_extension_s_tool_is_put_to_the_person_as_an_input_is(
+    tmp_path: Path,
+) -> None:
+    """The host registers the tool as running in the runner, so the loop puts each call to the
+    `approval` rule: unconfined, the person is asked, shown the call by its name and arguments."""
+    async with _running(tmp_path, confined=False, answer=True) as h:
+        h.write("loud", _LOUD)
+        await h.extensions.look()  # the load is asked about, and the person says yes
+        tool = h.tools.get("shout")
+        assert tool is not None and tool.show is not None
+        request = {"name": "shout", "input": {"text": "hi"}, "runs": tool.runs, **tool.show({"text": "hi"})}
+        assert not h.approval.unasked(request)  # unconfined: the loop asks the person, so shown
+        assert request["title"] == "Run shout, a tool of the extension loud, with these arguments?"

@@ -1,15 +1,15 @@
 # The python tool
 
 The tool bh-02 ships is `python(code)`, and it carries code. This is CodeAct: the model acts by
-writing Python, and only what that Python prints reaches the model. The kernel row registers it
+writing Python, and only what that Python prints reaches the model. The python row registers it
 with `tools`, beside whatever tools other rows register, and tells the model about it in a
 section of the system prompt. To the model the tool is a
 Python REPL of its own that persists for the run.
 
 ## What an input can do
 
-Each call is an input to one Python process, the one the jail started. It is plain Python, not
-IPython, and nothing of bh-02's is in its namespace. An input:
+Each call is an input to one Python process, the one the runner started. It is plain Python, not
+IPython, and nothing of bh-02's is in its namespace but `tools` (below). An input:
 
 - reads and edits files with `open` or `pathlib`;
 - runs programs (`git`, a test runner, `python`) with `subprocess`, in the project directory;
@@ -23,10 +23,37 @@ and error is capped at 20,000 characters: a longer one keeps its first 6,000 and
 and the whole is saved to a file the cut names. A traceback names each line as `<input N>`, so the
 model sees the line that failed, even in a function it defined inputs ago.
 
+## bh-02's other tools, from an input
+
+Every other tool bh-02 offers the model (a layer row's, an extension's) is also a function in the
+namespace: `tools.NAME(arg=...)`. A call goes back to bh-02 and runs as the model's own call to
+that tool would: put to the approval rule (and so to you, when it is unjailed or runs in bh-02's
+own process), run by the tool, then given to `notes`, whose notes reach the model with the result
+of the input that made the call. It returns the tool's result as text, and raises `tools.Error`
+when the call did not run or failed. `help(tools.NAME)` shows what one takes. Each input is
+sent the tools as they are, and the first input that sees a change says so before its output, so
+a tool added mid-conversation can be called from code at once, even where the model's own list
+of tools stays as the conversation began (TASK-0057's `fixed` providers). The namespace is a
+view of the registry, never where a tool is registered.
+
+A function the model defines in an input and a registered tool differ in what holds them:
+
+| | A function defined in an input | A registered tool |
+|---|---|---|
+| Where it lives | the Python process's namespace | `tools`, the registry a row (or an extension) registers into |
+| How long | until the process ends (`/clear`, a restart, a resume) | as long as its row: an extension's lasts as long as its file, across sessions |
+| Who can call it | later inputs | the model directly, and inputs as `tools.NAME(...)` |
+| Asked about, noted | no: the input that calls it was | each call, as any tool call |
+| Where it runs | in the Python process | where its row says: an extension's in the extensions process, a layer row's in bh-02 |
+
+A helper worth keeping between sessions goes in the project's startup file; a capability the
+model should have as a tool, or that should run outside the Python process, is an extension's
+tool.
+
 ## How long the namespace lasts
 
 The namespace lasts the run. A `/model` switch and `/compact` keep it. A new Python process starts
-empty: at launch and on a resume, after `/clear`, `/release` or `/restart kernel`, and when the
+empty: at launch and on a resume, after `/clear`, `/release` or `/restart python`, and when the
 last one died or its jail ended. The first input in a new one is told its variables are gone, and
 why when it knows. The transcript is the record; the namespace is a cache.
 
@@ -50,7 +77,7 @@ it. So whatever your file holds, the model can read. The project's file is read 
 ## What an input touched
 
 The Python process hears each file an input's own code opens under the project, with an audit
-hook. The tool answers each call with that list (`kernel.touched()`), and the loop hands it to the rows that add notes,
+hook. The tool answers each call with that list (its `touched()`), and the loop hands it to the rows that add notes,
 which is how a subdirectory's `CLAUDE.md` arrives when the model first opens a file there. Files a
 program the input runs opens are not heard, since that happens in another process.
 
@@ -58,8 +85,9 @@ program the input runs opens are not heard, since that happens in another proces
 
 The Python process is `worker.py`, run as `python -I worker.py SOCKET` inside the jail. It uses
 the standard library only, so nothing of bh-02's own crosses into the jail with it. Its one
-channel is a Unix socket that carries an input in and its output back. The `kernel` row
-(`kernel:kernel`) is bh-02's end of it: it starts the process through the jail, sends each input,
-and starts a new process when the last one died.
+channel is a Unix socket that carries an input in and its output back. The `python` row
+(`python:tool`) is bh-02's end of it: it starts the process through the runner, sends each input,
+starts a new process when the last one died, and stops its own process on `/release`. It binds
+no key: it reaches the loop through `tools` and the model through `system`.
 
-The kernel plugin's README has the details: [kernel-cordis-plugin](../reference/plugins/kernel.md).
+The python plugin's README has the details: [python-cordis-plugin](../reference/plugins/python.md).

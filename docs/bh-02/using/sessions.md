@@ -24,8 +24,15 @@ bh-02 sessions
 ```
 
 This lists the sessions started in the current directory, newest first, one line each: the id,
-when it started, and the model it started on, then `patched:` and the names of any `--patch`
-files it started with. A record that can't be read is skipped and named on stderr.
+when it started, and the model it started on (its stack; an earlier bh-02's session says `claude`
+or `ollama`), then `patched:` and the names of any `--patch` files it started with
+(`patched: echo.toml`). That label is what the session started on, not always the model that
+answered: `/model` switches, a patch can replace the `loop` row, and a resume with other patches
+keeps the label it started with.
+
+A session whose `meta.json` can't be read (not JSON, a key missing, a value of the wrong type) is
+skipped, never fatal: `bh-02 sessions` names it on stderr, and `--resume` passes over it (and
+says what is wrong if you name it).
 
 The status bar shows the running session's id. When the bar is narrow it shows the id's last
 part, such as `07f8`, and `--resume` takes that too.
@@ -53,7 +60,10 @@ What a resume brings back, and what it doesn't:
 - **Refused**: `--no-jail`. A resumed session keeps the jail it started with.
 
 A session's layer from an earlier bh-02, with rows that have since been renamed, is brought up to
-date when you resume it.
+date when you resume it ([Layers](layers.md#layers-from-an-earlier-bh-02)). A session started on
+Anthropic's Messages API (`anthropic:completion`) resumes on Claude Code, from its transcript. A
+session started on the first Claude Agent SDK stack, where Claude Code ran its own loop, can't be
+resumed: `--resume` says so in one line; start a new one.
 
 ## A new conversation in the same session
 
@@ -62,13 +72,13 @@ Two commands start the conversation over without leaving the session:
 - `/clear` starts a new conversation and an empty Python process. The screen clears to one note.
   The usage totals in the status bar are the session's, so they stay.
 - `/compact [WHAT TO KEEP]` asks the model to summarise the conversation and carries on in a new
-  one that starts from the summary. The Python process keeps its namespace. The old transcript is
-  kept beside the new one as `transcript.jsonl.bak` (a later one as `.bak.2`, and so on).
+  one that starts from the summary. The Python process keeps its namespace.
 
-[Commands](commands.md) has both in full.
+Either way the old transcript is kept beside the new one, so a cleared conversation isn't lost
+([Commands](commands.md#compact)).
 
 ## Runs that don't start
 
 A run that stops before the app comes up (a layer file that can't be read, say) leaves no
-session behind. A resumed session that can't start is kept, so you can fix the cause and resume
-it again.
+session behind, and so does a new run whose composition never starts (`could not start`). A
+resumed session that can't start is kept, so you can fix the cause and resume it again.

@@ -1,5 +1,5 @@
-# The Linux jail on a real Linux kernel: brig's bwrap tests and bh-02's jailed kernel
-# (`brig:jail` over `strict_linux()`), run by scripts/linux-jail-check, the same script a
+# The Linux jail on a real Linux kernel: brig's bwrap tests and bh-02's jailed Python
+# process (`runner:confined` over `strict_linux()`), run by scripts/linux-jail-check, the same script a
 # darwin laptop runs. The script builds the container (Ubuntu 24.04, bubblewrap, uv, Python
 # 3.15), streams in what git tracks, and runs the suite as an unprivileged user; its docstring
 # says why each `docker run` option is there.

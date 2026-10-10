@@ -13,7 +13,7 @@ from memory_cordis_plugin.memory import Memory, MemoryConfig
 from memory_cordis_plugin.touch import Memory as Touched
 from memory_cordis_plugin.touch import Notes, OnTouch, Transcript
 
-__all__ = ["auto", "memory", "on_touch"]
+__all__ = ["auto", "files", "on_touch"]
 
 
 @runtime_checkable
@@ -25,12 +25,12 @@ class _System(Protocol):
 
 
 @runtime_checkable
-class _Layers(Protocol):
-    """What the memory rows need of the `layers` value (CONTRACTS.md: layers): the project's auto
+class _Host(Protocol):
+    """What the memory rows need of the `host` value (CONTRACTS.md: host): the project's auto
     memory directory, which the jail lets an input write ('' for none)."""
 
     @property
-    def memory(self) -> str: ...
+    def auto_memory(self) -> str: ...
 
 
 @runtime_checkable
@@ -43,13 +43,13 @@ class _Registrar(Protocol):
 
 
 @component(provides=("memory",))
-async def memory(*, system: _System, commands: _Registrar, layers: _Layers, config: MemoryConfig) -> Effects:
-    """Fills a `memory` row: `use = "memory:memory"`. Claude Code's memory: the CLAUDE.md files
+async def files(*, system: _System, commands: _Registrar, host: _Host, config: MemoryConfig) -> Effects:
+    """Fills a `memory` row: `use = "memory:files"`. Claude Code's memory: the CLAUDE.md files
     (and AGENTS.md, imports and rules) that load at launch, a section of the system prompt read
     fresh before each message the model reads; and `/memory`, which lists them, the auto memory
-    index among them. It depends on `system`, `commands` and `layers`, none of which a new
+    index among them. It depends on `system`, `commands` and `host`, none of which a new
     conversation reloads."""
-    found = Memory(config, layers.memory)
+    found = Memory(config, host.auto_memory)
     yield bind("memory", found)
     yield acquire(system.add, "memory", found.text)
 
@@ -85,17 +85,17 @@ async def on_touch(*, memory: Touched, notes: Notes, transcript: Transcript, acc
 
 
 @component
-async def auto(*, system: _System, layers: _Layers, transcript: Transcript) -> Effects:
+async def auto(*, system: _System, host: _Host, transcript: Transcript) -> Effects:
     """Fills a `memory-auto` row: `use = "memory:auto"`. Claude Code's auto memory: how the model
     keeps notes of its own across conversations, in the project's auto memory directory
-    (`layers.memory`, which the jail lets an input write), and its MEMORY.md index, a section of
+    (`host.auto_memory`, which the jail lets an input write), and its MEMORY.md index, a section of
     the system prompt read at a conversation's first reading of the prompt and kept for the rest
     of it (`AutoMemory`). It depends on `transcript` for that lifetime: a new conversation
     (`/clear`, `/compact`) starts a new row, which reads the index afresh. Disabling the row turns
     auto memory off; with no directory it adds nothing."""
     del transcript  # its lifetime is this row's; nothing of it is read
-    if layers.memory:
-        directory = Path(layers.memory)
+    if host.auto_memory:
+        directory = Path(host.auto_memory)
         home = Path.home()
         named = f"~/{directory.relative_to(home)}" if directory.is_relative_to(home) else str(directory)
         yield acquire(system.add, "memory: auto", AutoMemory(directory, named))

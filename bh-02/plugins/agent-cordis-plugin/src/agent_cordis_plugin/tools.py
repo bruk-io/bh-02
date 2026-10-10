@@ -5,16 +5,21 @@ function that runs a call: given the call's input, it returns what the model rea
 (`{"content": str, "touched": [path, ...]}`, the files the call opened). A row with a tool to
 offer `acquire`s `tools.register(spec, run)`, so the tool leaves with the row; the loop offers
 every registered spec and runs each call through the tool its name has. CodeAct's `python` is one
-registration (the kernel row's), not something the loop knows of.
+registration (the python row's), not something the loop knows of.
 
-A registration also says where its calls run (`runs`: "jail", in the jail row's jail, which
+A registration also says where its calls run (`runs`: "jail", in the runner's jail, which
 `approval` decides about by whether it confines; "host", bh-02's own process, which it always puts
 to the person) and how a call is put to the person (`show(input) -> {"title", "lines",
 "language"}`; without one, the tool's name and its input as JSON).
 
 The specs are given in name order (`specs`), never in the order rows registered them: a row that
-registers again after a restart (the kernel's, on `/clear`) gives the same list, which is the
+registers again after a restart (the python row's, on `/clear`) gives the same list, which is the
 start of what a model server caches. A name is one tool; a second registration of it raises.
+
+A tool can also be called from inside another tool's call: an input calls `tools.NAME(...)` in
+the Python process. Such a call goes the way the model's own does, put to `approval` and followed
+by what `notes` say, so the loop serves it (`serve`, the loop row's) and the broker passes it on
+(`call`); with no loop serving, it fails, saying so.
 """
 
 import asyncio
@@ -29,7 +34,7 @@ __all__ = ["HOST", "JAIL", "ToolBroker"]
 
 type Json = Mapping[str, Any]
 
-JAIL = "jail"  # a call runs in the jail row's jail: asked about only when the jail does not confine
+JAIL = "jail"  # a call runs in the runner's jail: asked about only when the runner does not confine
 HOST = "host"  # a call runs in bh-02's own process: always put to the person
 _WHERE = (JAIL, HOST)
 
@@ -45,11 +50,15 @@ class _Tool:
     show: Callable[[Json], Json] | None = None
 
 
+type Call = Callable[[str, Json], Awaitable[Json]]
+
+
 class ToolBroker:
     """Implements `tools` (CONTRACTS.md: tools)."""
 
     def __init__(self) -> None:
         self._tools: Registry[_Tool] = Registry("tool")
+        self._serving: Registry[Call] = Registry("loop serving calls")
         # set when a tool comes or goes, then replaced: what `ready` waits on
         self._changed = asyncio.Event()
 
@@ -70,7 +79,7 @@ class ToolBroker:
             )
         if runs not in _WHERE:
             raise ValueError(
-                f"the tool {name!r} says its calls run in {runs!r}; say {JAIL!r} (in the jail row's "
+                f"the tool {name!r} says its calls run in {runs!r}; say {JAIL!r} (in the runner's "
                 f"jail) or {HOST!r} (in bh-02's own process, every call put to the person)"
             )
         remove = self._tools.register(name, _Tool(spec, run, runs, show))
@@ -103,6 +112,20 @@ class ToolBroker:
             with contextlib.suppress(TimeoutError):  # then `left` is spent: the loop says what is missing
                 await asyncio.wait_for(self._changed.wait(), left)
         return ()
+
+    def serve(self, call: Call) -> Callable[[], None]:
+        """Have `call(name, input)` run each call a tool's own call makes (`call`), the way the
+        model's calls run: the loop row's, one at a time (a second raises). Returns its remover."""
+        return self._serving.register("loop", call)
+
+    async def call(self, name: str, input: Json) -> Json:
+        """Run the tool `name` with `input` as the loop runs a call (the `serve`d function),
+        answering `{"content": str, "failed": bool}`: what the caller reads, and whether it is
+        the call's result or why it did not run or failed."""
+        serving = self._serving.get("loop")
+        if serving is None:
+            return {"content": f"error: no conversation is running to call {name} in", "failed": True}
+        return await serving(name, input)
 
     def _now_changed(self) -> None:
         self._changed.set()

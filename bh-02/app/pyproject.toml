@@ -12,8 +12,8 @@ dependencies = [
     "tui-cordis-plugin",
     "agent-cordis-plugin",
     "chat-cordis-plugin",
-    "kernel-cordis-plugin",
-    "brig-cordis-plugin",
+    "python-cordis-plugin",
+    "runner-cordis-plugin",
     "memory-cordis-plugin",
     "commands-cordis-plugin",
     "extensions-cordis-plugin",
@@ -29,8 +29,8 @@ models-cordis-plugin = { workspace = true }
 tui-cordis-plugin = { workspace = true }
 agent-cordis-plugin = { workspace = true }
 chat-cordis-plugin = { workspace = true }
-kernel-cordis-plugin = { workspace = true }
-brig-cordis-plugin = { workspace = true }
+python-cordis-plugin = { workspace = true }
+runner-cordis-plugin = { workspace = true }
 memory-cordis-plugin = { workspace = true }
 commands-cordis-plugin = { workspace = true }
 extensions-cordis-plugin = { workspace = true }

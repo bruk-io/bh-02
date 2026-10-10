@@ -17,8 +17,22 @@ from cordis import Row
 
 __all__ = ["clashes", "translated"]
 
-# Rows (and the keys they bind) that were renamed.
-_RENAMED = {"llm": "loop", "mode": "chat", "completion": "model"}
+# Rows (and the keys they bind) that were renamed: the kernel row is the python tool's, the jail
+# row the runner, which starts the python tool's process and the extensions process, and the jail
+# field's row, `jail_status`, the runner's grades (`grades`). The shell's own rows: `harness` is
+# `shell`, `layers` (what the host is, not only its layer files) is `host`, and `sessions` (the
+# one running) is `session`.
+_RENAMED = {
+    "llm": "loop",
+    "mode": "chat",
+    "completion": "model",
+    "kernel": "python",
+    "jail": "runner",
+    "jail_status": "grades",
+    "harness": "shell",
+    "layers": "host",
+    "sessions": "session",
+}
 # A row a config names for its model (`model_row`, an old `model_status`'s `row`): before the
 # completion row, the model was the `llm` row's; then the completion row's; it is the model
 # row's now, not the loop's.
@@ -41,6 +55,18 @@ _RENAMED_USES = {
     "bh_02.testing:cells_completion": "bh_02.testing:repl_model",
     "context:project": "agent:system",
     "context:on_touch": "memory:on_touch",
+    "kernel:kernel": "python:tool",
+    "kernel:unjailed": "runner:unconfined",
+    "kernel:approval": "runner:approval",
+    "kernel:release": "runner:release",
+    "brig:jail": "runner:confined",
+    "memory:memory": "memory:files",
+    "tui:jail_status": "tui:grades",
+    "chat:session": "chat:converse",
+    "tui:app": "tui:ui",
+    "bh_02.bootstrap:harness": "bh_02.bootstrap:shell",
+    "bh_02.bootstrap:layer_files": "bh_02.bootstrap:host",
+    "bh_02.bootstrap:session_list": "bh_02.bootstrap:session",
 }
 # The broker of what an input's result is told was `memory` (`agent:memory`); it is `notes` now,
 # and `memory` is Claude Code's memory, the memory plugin's row.
@@ -54,11 +80,12 @@ _TO_MEMORY = ("root", "home")
 _CONTEXT_GONE = (
     "context files are gone: memory reads CLAUDE.md, AGENTS.md and .claude/rules/ as Claude Code does"
 )
-# The one status row, which the three status-bar rows became (the session's id: from `sessions`).
+# The status row, which the session's and the model's status-bar rows became (the session's id:
+# from `sessions`); the jail field is the `grades` row's.
 _STATUS = "status"
 _STATUS_USE = "tui:status"
-_MERGED_USES = frozenset({"tui:jail_status", "tui:model"})
-_MERGED_IDS = frozenset({"jail_status", "model_status"})
+_MERGED_USES = frozenset({"tui:model"})
+_MERGED_IDS = frozenset({"model_status"})
 # How an old `model_status` config reads as the status row's. Its `default` (later the status
 # row's `default_model`, the model named when the row named none) is gone: the `models` row says
 # which model and provider the model row names, whatever it names.
@@ -69,15 +96,17 @@ _STATUS_GONE = frozenset({"default", "default_model"})
 # naming no plugin is a change to today's broker (`agent:tools`), so only that plugin drops it.
 _ONE_TOOL = (
     "the model's tools are registered with `tools` (agent:tools) by the rows that offer them, the "
-    "kernel's python among them, and unjailed each call is put to the person in the modal"
+    "python row's among them, and unjailed each call is put to the person in the modal"
 )
 _REMOVED_IDS = {
     "fs": _ONE_TOOL,
     "approve": _ONE_TOOL,
     "actions": _ONE_TOOL,
     "guard": _ONE_TOOL,
-    "session": "the status row shows the session's id itself",
 }
+# The status-bar field an earlier session layer had for the session's id (`tui:status` under the
+# id `session`, which is the running session's row now).
+_SESSION_FIELD = "the status row shows the session's id itself"
 _REMOVED_USES = ("tools:", "fs:", "codeact:", "tui:approver", "bh_02.bootstrap:layer_guard")
 # The sidebar: the shipped `sidebar` row, filled by `tui:sessions`, which listed this
 # directory's sessions. A `sidebar` row that names a plugin of the person's own still runs, so
@@ -89,25 +118,49 @@ _SIDEBAR, _SIDEBAR_USE = "sidebar", "tui:sessions"
 # that id naming a plugin of the person's own still runs.
 _NO_SHELL_HINTS = "bh-02 no longer tells the model how Python does what an input ran through a shell"
 _SHELL_HINTS, _SHELL_HINTS_USE = "shell-hints", "kernel:shell_hints"
+# `/model` was the operator's (`commands:operator`, whose config's `layer` and `model_row` it
+# read); it is the models plugin's `switch` row now (`models:switch`), beside the catalog.
+_OPERATOR, _OPERATOR_USE = "operator", "commands:operator"
+_SWITCH, _SWITCH_USE = "switch", "models:switch"
+_TO_SWITCH = ("layer", "model_row")
+_SWITCHED = "/model is the models plugin's now (models:switch)"
+# `/clear` was the operator's too (its config's `clear`, the rows it restarted, and `forget`, the
+# files it emptied first), and `/compact` the `compact` row's (`agent:compact`): both are the
+# agent plugin's `conversation` row's now (`agent:conversation`), which finds the transcript's
+# file from the transcript row and keeps the old conversation as `.bak`.
+_CONVERSATION, _CONVERSATION_USE = "conversation", "agent:conversation"
+# The restarts commands ask for run in the `jobs` row (`commands:jobs`), which the chat row waits
+# on before it reads a line: a layer that fills the chat row or the operator itself needs it.
+_JOBS, _JOBS_USE = "jobs", "commands:jobs"
+_CHAT_USE = "chat:converse"
+_COMPACT, _COMPACT_USE = "compact", "agent:compact"
+_CLEARED = "/clear is the conversation row's now (agent:conversation)"
+_FORGOTTEN = (
+    "`forget` is gone: /clear writes an empty conversation over the transcript row's file, keeping "
+    "the old as .bak"
+)
 
 
 def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
     """`rows` in this bh-02's names, and one line per change saying what changed and what to do.
 
     - A renamed row takes its new id (`llm` is `loop`, `mode` is `chat`, `completion` is
-      `model`), and an operator's `clear` naming one names the new one; a `model_row` (or an old
+      `model`, `kernel` is `python`, `jail` is `runner`, `harness` is `shell`, `layers` is `host`,
+      `sessions` is `session`), and a `clear` naming one names the new
+      one; a `model_row` (or an old
       `model_status`'s `row`) naming `llm` or `completion` names `model`, the row that holds
       the model now. A renamed row whose
       new id the layer already has keeps its old id, and the change says to fold the two into
       one by hand (`clashes`): which of them wins is the person's call.
-    - `jail_status` and `model_status` (and any row using `tui:jail_status` or `tui:model`)
-      become the one `status` row: `use = "tui:status"` if any of them named a plugin, the
-      model row's config under the status row's names (`row` is `model_row`; `default`, and
-      the status row's own `default_model`, are gone: the `models` row says which model the
-      model row names). An old part's `disabled` is not carried over: the status row cannot
-      turn off one part, and turning off all of it would hide the session and the model too, so
-      the change says how to turn off the whole bar instead (a `status` row already in the
-      layer keeps its own `disabled`). A status row with nothing left to say is not written.
+    - `model_status` (and any row using `tui:model`) becomes part of the `status` row:
+      `use = "tui:status"` if it named a plugin, its config under the status row's names (`row`
+      is `model_row`; `default`, and the status row's own `default_model`, are gone: the
+      `models` row says which model the model row names). Its `disabled` is not carried over:
+      the status row cannot turn off one part, and turning off all of it would hide the session
+      too, so the change says how to turn off both instead (a `status` row already in the layer
+      keeps its own `disabled`). A status row with nothing left to say is not written. The jail
+      field's row (`jail_status`, `tui:jail_status`) is renamed, as above: it is `grades`
+      (`tui:grades`), and keeps its `disabled`.
     - A row bh-02 no longer has is dropped: the tool rows before CodeAct (any using the `tools:`,
       `fs:` or `codeact:` plugins; a `tools` row naming none is today's broker's), a session's
       `session` row, the sidebar (a change to the shipped `sidebar` row, or any row using
@@ -124,6 +177,25 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
       is no built-in name as an `extra` model of its own; `ollama:completion` is an `extra`
       OpenAI-compatible model at its host's `/v1`. bh-02's fakes that bound `completion` bind
       `model` under new names (`echo_completion` is `echo_model`).
+    - The kernel plugin is two: the python tool (`kernel:kernel` is `python:tool`) and the
+      runner, which the brig plugin became (`brig:jail` is `runner:confined`, `kernel:unjailed`
+      `runner:unconfined`, `kernel:approval` `runner:approval`, `kernel:release`
+      `runner:release`). Memory's row is `memory:files`.
+    - The chat row is `chat:converse` (was `chat:session`, which named it after something
+      else), the ui's `tui:ui` (was `tui:app`), and the shell's own rows `shell`, `host` and
+      `session` (were `harness`, `layers` and `sessions`, each `bh_02.bootstrap:` the same).
+
+    - `/model` is the models plugin's `switch` row (`models:switch`): an operator's `layer` and
+      `model_row` move to it (added after the operator, unless the layer has one, when the
+      change says to set them there by hand), and a layer that fills the operator itself
+      (`use = "commands:operator"`) and has no `switch` row gets one.
+    - `/clear` and `/compact` are the agent plugin's `conversation` row (`agent:conversation`):
+      the `compact` row (or any using `agent:compact`) is renamed to it, an operator's `clear`
+      moves to it (added after the operator, as for the switch row), its `forget` is gone, and a
+      layer that fills the operator itself and has neither gets one.
+    - A layer that fills the chat row or the operator itself (`chat:converse`,
+      `commands:operator`) and has no `jobs` row gets one (`commands:jobs`): the restarts commands
+      ask for run there, and the chat row waits on it.
 
     Nothing changed is `(list(rows), [])`, so translating twice changes nothing more.
     """
@@ -192,6 +264,113 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
                     part = Row(part.id, part.use, config, part.disabled)
                 kept.append(part)
             out[at:at] = kept
+    out, said = _switched(out)
+    out, cleared = _conversation(out)
+    out, jobbed = _jobs(out)
+    return out, changes + said + cleared + jobbed
+
+
+def _jobs(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
+    """`rows` with a `jobs` row when the layer fills the chat row or the operator itself and has
+    none, and what changed."""
+    if any(row.id == _JOBS for row in rows):
+        return list(rows), []
+    at = next((n for n, row in enumerate(rows) if row.use in (_CHAT_USE, _OPERATOR_USE)), None)
+    if at is None:
+        return list(rows), []
+    return [*rows[: at + 1], Row(_JOBS, _JOBS_USE), *rows[at + 1 :]], [
+        f"the chat row waits on `jobs` now, where commands queue the restarts they ask for: add a "
+        f'{_JOBS!r} row with use = "{_JOBS_USE}"'
+    ]
+
+
+def _conversation(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
+    """`rows` with `/clear` and `/compact` as the agent plugin's `conversation` row, and what
+    changed: the `compact` row renamed to it, an operator's `clear` moved to it and its `forget`
+    dropped, and a layer that fills the operator itself given one."""
+    changes: list[str] = []
+    renamed: list[Row] = []
+    for row in rows:
+        if row.id == _COMPACT and row.use in (None, _COMPACT_USE) or row.use == _COMPACT_USE:
+            use = _CONVERSATION_USE if row.use is not None else None
+            rid = _CONVERSATION if row.id == _COMPACT else row.id
+            said = ", ".join(
+                [
+                    *([f'id = "{rid}"'] if rid != row.id else []),
+                    *([f"use = {json.dumps(use)}"] if use else []),
+                ]
+            )
+            changes.append(
+                f"row {row.id!r}: /compact is the conversation row's now, with /clear; make it {said}"
+            )
+            row = Row(rid, use, row.config, row.disabled)
+        renamed.append(row)
+    has_conversation = any(row.id == _CONVERSATION for row in renamed)
+    out: list[Row] = []
+    for row in renamed:
+        out.append(row)
+        if row.id != _OPERATOR and row.use != _OPERATOR_USE:
+            continue
+        config = dict(row.config or {})
+        moved = {"clear": config.pop("clear")} if "clear" in config else {}
+        forgot = config.pop("forget", None) is not None
+        adds = not has_conversation and (bool(moved) or row.use == _OPERATOR_USE)
+        use = _CONVERSATION_USE if row.use is not None else None
+        added = ", ".join(
+            [*([f"use = {json.dumps(use)}"] if use else []), *([_inline(moved)] if moved else [])]
+        )
+        told = [_FORGOTTEN] if forgot else []
+        if moved and not adds:
+            told.append(
+                f"{_CLEARED}, which reads {_inline(moved)}: set it on the {_CONVERSATION!r} row by hand"
+            )
+        elif adds:
+            told.append(f"{_CLEARED}: add a {_CONVERSATION!r} row with {added}")
+        if moved or forgot:
+            out[-1] = Row(row.id, row.use, config or None, row.disabled)
+            keep = f"make it {_inline(config)}" if config else "delete its config"
+            changes.append(f"row {row.id!r}: {'; '.join(told)}; {keep}")
+        elif adds:
+            changes.append(told[0])
+        if adds:
+            out.append(Row(_CONVERSATION, use, moved or None))
+            has_conversation = True
+    return out, changes
+
+
+def _switched(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
+    """`rows` with `/model` as the models plugin's `switch` row, and what changed: an operator's
+    `layer` and `model_row` move to it, and a layer that fills the operator itself gets one."""
+    has_switch = any(row.id == _SWITCH for row in rows)
+    out: list[Row] = []
+    changes: list[str] = []
+    for row in rows:
+        out.append(row)
+        if row.id != _OPERATOR and row.use != _OPERATOR_USE:
+            continue
+        config = dict(row.config or {})
+        moved = {key: config.pop(key) for key in _TO_SWITCH if key in config}
+        if moved:
+            out[-1] = Row(row.id, row.use, config or None, row.disabled)
+            keep = f"make it {_inline(config)}" if config else "delete its config"
+            if has_switch:
+                changes.append(
+                    f"row {row.id!r}: {_SWITCHED}, which reads {_inline(moved)}: {keep}, and set it on "
+                    f"the {_SWITCH!r} row by hand"
+                )
+                continue
+        elif has_switch or row.use != _OPERATOR_USE:
+            continue
+        use = _SWITCH_USE if row.use is not None else None
+        out.append(Row(_SWITCH, use, moved or None))
+        has_switch = True
+        added = ", ".join(
+            [*([f"use = {json.dumps(use)}"] if use else []), *([_inline(moved)] if moved else [])]
+        )
+        if moved:
+            changes.append(f"row {row.id!r}: {_SWITCHED}: {keep}, and add a {_SWITCH!r} row with {added}")
+        else:
+            changes.append(f"{_SWITCHED}: add a {_SWITCH!r} row with {added}")
     return out, changes
 
 
@@ -281,6 +460,8 @@ def _removed(row: Row) -> str | None:
     """Why bh-02 no longer has `row`, or None when it still does."""
     if row.id in _REMOVED_IDS:
         return _REMOVED_IDS[row.id]
+    if row.id == "session" and row.use == _STATUS_USE:
+        return _SESSION_FIELD
     if row.use is not None and row.use.startswith(_REMOVED_USES):
         return f"{row.use} is gone: {_ONE_TOOL}"
     if row.use == _SIDEBAR_USE:
@@ -292,7 +473,7 @@ def _removed(row: Row) -> str | None:
     if row.id == _SHELL_HINTS and row.use is None:
         return _NO_SHELL_HINTS
     if row.use == _STATUS_USE and {"field", "text"} & set(row.config or {}):
-        return "tui:status is now the status bar's one row (session, model, jail), not a fixed field"
+        return "tui:status is now the status bar's session and model fields, not a fixed field"
     return None
 
 
@@ -320,7 +501,7 @@ def _merged_change(row: Row) -> str:
     moved = f"; its config moves there as {_inline(config)}" if config else ""
     off = (
         f"; it was disabled, but {_STATUS!r} cannot turn off one part, so the status bar stays "
-        f"on: to turn off all of it (session, model and jail), give {_STATUS!r} `disabled = true`"
+        f"on: to turn off both its fields (session and model), give {_STATUS!r} `disabled = true`"
         if row.disabled
         else ""
     )

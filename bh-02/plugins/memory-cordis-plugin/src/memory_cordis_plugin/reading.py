@@ -2,12 +2,12 @@
 
 The model can write the project (from the jail), and bh-02 reads its CLAUDE.md files in its own
 process, outside the jail, then tells the model what they say. So a file in the project is
-walked to from the project's root through no link (`O_NOFOLLOW` on every part) and read from
+walked to from the project's root through no link (`host_paths.read_beneath`) and read from
 what that opened, only when it is a regular file with one name; a link there is read as its
 target, the same way, only when that is another of the memory files found (a CLAUDE.md linking
 to the AGENTS.md beside it). A file outside the project (yours, the managed policy's, one in a
 directory above the project) is read as it is named, unless its way passes through the project
-(`host_paths.passes`, the walk the models file and the kernel's startup files are held to): a
+(`host_paths.passes`, the walk the models file and the python row's startup files are held to): a
 link of yours into the project, whose end the model could repoint, is not followed. None named
 like a secret (`local.env`, `.env`, `*.env`) is read, and none larger than Claude Code reads
 (4 MiB).
@@ -19,7 +19,7 @@ import stat
 from collections.abc import Sequence
 from pathlib import Path, PurePath
 
-from host_paths import MOST_LINKS, passes, roots
+from host_paths import MOST_LINKS, Link, Linked, NotOneFile, TooLarge, passes, read_beneath, roots
 
 __all__ = ["LIMIT", "read", "secret", "under"]
 
@@ -87,45 +87,31 @@ def _named(path: Path) -> str:
 
 
 def _opened(root: Path, parts: Sequence[str]) -> tuple[str, str | None]:
-    """The file `parts` names under the directory `root`, walked to through no link: its text and
-    None, or, when its last part is a link, '' and what that link points to. Raises OSError when a
-    directory on the way is a link or not a directory, or the file is not a regular file with one
-    name (a hard link; a pipe, opened without waiting for a writer), or is larger than `LIMIT`."""
+    """The file `parts` names under the directory `root`, walked to through no link
+    (`host_paths.read_beneath`): its text and None, or, when its last part is a link, '' and what
+    that link points to. Raises OSError when a directory on the way is a link or not a directory,
+    or the file is not a regular file with one name (a hard link; a pipe, opened without waiting
+    for a writer), or is larger than `LIMIT`."""
     if not parts:
         raise IsADirectoryError(f"{root} is the project's root, not a file, so bh-02 did not read it")
-    here = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    full = root.joinpath(*parts)
     try:
-        for depth, part in enumerate(parts[:-1], start=1):
-            try:
-                below = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=here)
-            except OSError as error:
-                raise OSError(
-                    f"{root.joinpath(*parts)} is reached through {root.joinpath(*parts[:depth])}, "
-                    f"which is a link or not a directory ({error.strerror}), so bh-02 did not read it"
-                ) from None
-            os.close(here)
-            here = below
-        try:
-            opened = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=here)
-        except OSError as error:
-            try:
-                return "", os.readlink(parts[-1], dir_fd=here)
-            except OSError:  # not a link: gone, or can't be opened
-                raise error from None
-    finally:
-        os.close(here)
-    with os.fdopen(opened, "rb") as file:
-        found = os.fstat(file.fileno())
-        if not stat.S_ISREG(found.st_mode) or found.st_nlink != 1:
-            raise OSError(
-                f"{root.joinpath(*parts)} is not a regular file with one name (it has another name, "
-                "or is a pipe, a device, ...), so bh-02 did not read it"
-            )
-        if found.st_size > LIMIT:
-            raise OSError(
-                f"{root.joinpath(*parts)} is larger than 4 MiB, so bh-02 skipped it, as Claude Code does"
-            )
-        return file.read().decode("utf-8", errors="replace"), None
+        found = read_beneath(root, parts, cap=LIMIT)
+    except Linked as linked:
+        raise OSError(
+            f"{full} is reached through {root / linked.part}, which is a link, so bh-02 did not read it"
+        ) from None
+    except NotADirectoryError as error:
+        raise OSError(
+            f"{full} is reached through {error.filename}, which is not a directory, so bh-02 did not read it"
+        ) from None
+    except NotOneFile as error:
+        raise OSError(f"{error}, so bh-02 did not read it") from None
+    except TooLarge:
+        raise OSError(f"{full} is larger than 4 MiB, so bh-02 skipped it, as Claude Code does") from None
+    if isinstance(found, Link):
+        return "", found.target
+    return found.decode("utf-8", errors="replace"), None
 
 
 def _rooted(path: Path, found: Sequence[Path]) -> Path:

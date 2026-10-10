@@ -12,7 +12,9 @@ reach the model: slash commands, and `!` followed by a shell command.
 | `Ctrl+P` | opens the command palette |
 | `Ctrl+Q` | leaves bh-02 (so do `/exit` and `/quit`) |
 
-A line you send while a reply runs waits for the reply to end.
+A line you send while a reply runs waits for the reply to end. One you send while a command's
+restart runs (`/clear`, `/compact`, `/model NAME`, `/restart`) waits for the restart, and reaches
+the new loop.
 
 ## Slash commands
 
@@ -24,11 +26,11 @@ A line is a command when it starts with `/name` followed by a space or nothing. 
 | Command | What it does |
 |---|---|
 | `/help` | lists the commands |
-| `/clear` | starts a new conversation and an empty Python process. The screen clears to one note; the session's usage totals stay. |
+| `/clear` | starts a new conversation and an empty Python process, the old conversation kept as `transcript.jsonl.bak`. The screen clears to one note; the session's usage totals stay. |
 | `/compact [WHAT TO KEEP]` | asks the model to summarise the conversation, then carries on in a new one that starts from the summary. The Python process keeps its namespace. |
 | `/model [NAME]` | lists the models, or switches to `NAME` for this session ([Models](models.md)) |
 | `/memory` | lists the memory files the model is told and how each loads ([Memory](memory.md)) |
-| `/release` | stops the Python process until the next input ([The jail](jail.md)) |
+| `/release` | stops what runs in the jail (the Python process, the extensions' process) until the next input ([The jail](jail.md)) |
 | `/rows` | shows the running composition: each row, the component that fills it, and its state |
 | `/explain ROW` | says what cordis knows about a row |
 | `/restart ROW` | starts a row afresh; the rows that depend on it reload |
@@ -39,18 +41,15 @@ The model's own extensions can add commands to this list while bh-02 runs
 
 ### `/compact`
 
-Use `/compact` when a conversation has grown long. The model has 300 seconds to write the summary
-(the `compact` row's `timeout`), and a note says so as it starts. `Ctrl+C` doesn't stop it, since
-it is a command, not a reply; leaving bh-02 does, and then nothing changes. Add what you want kept
-after the command: `/compact the failing test and its fix`.
-
-The old conversation is kept beside the new one as `transcript.jsonl.bak` in the session's
-directory, and a later compaction's as `.bak.2`, and so on.
+Use `/compact` when a conversation has grown long, and add what you want kept after the command:
+`/compact the failing test and its fix`. The screen keeps only the note carrying the summary. How
+long the model has to write it, what stops it, and where the old conversation is kept (for `/clear`
+too): [the conversation row](../reference/plugins/agent.md).
 
 ### `/restart` and `/rows`
 
 `/rows` shows every row of the running program. `/restart ROW` gives one row a fresh start: for
-example `/restart kernel` starts a new Python process, which runs your startup files again when it is jailed. `/clear`
+example `/restart python` starts a new Python process, which runs your startup files again when it is jailed. `/clear`
 is a restart too, of the conversation's rows. [Rows and layers](../how-it-works/rows-and-layers.md)
 explains what a row is.
 
@@ -71,8 +70,9 @@ reads that output with your next message, never in the middle of a reply. A `/mo
 `/compact` in between keeps it for the model; `/clear` drops it.
 
 bh-02's app owns the terminal, so the command gets none: it has no input, and a program that
-needs the terminal (a password prompt, an editor) fails. `Ctrl+C` doesn't stop it. It is stopped
-after 120 seconds (the `shell-command` row's `timeout`), or when you leave bh-02.
+needs the terminal (a password prompt, an editor) fails. `Ctrl+C` doesn't stop it, and says so if
+you press it while one runs. It is stopped after 120 seconds (the `shell-command` row's
+`timeout`), or when you leave bh-02.
 
 ## The command palette
 

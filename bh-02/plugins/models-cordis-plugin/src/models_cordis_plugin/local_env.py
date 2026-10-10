@@ -4,11 +4,11 @@ OpenAI-compatible model names (`key = "OPENROUTER_API_KEY"`).
 
 The providers read it themselves, one line at a time when a step needs it, and hand the value
 only to what uses it (the Claude Code child's `env`, one HTTP request's `Authorization`
-header): never into bh-02's own `os.environ`, so no other child (the kernel, the jail) can
+header): never into bh-02's own `os.environ`, so no other child (the Python process, the jail) can
 inherit it. `parse_env` is pure; `token_file` only looks for the file.
 
 Where the file is looked for is not this package's to decide: the shell names the places, nearest
-first, as the `layers` value's `credentials` (CONTRACTS.md: layers), and names every one of them
+first, as the `host` value's `credentials` (CONTRACTS.md: host), and names every one of them
 to the jail as a secret too. So a place the model row searches is always one no jailed input may
 read, write or create, whatever directory bh-02 runs in.
 """
@@ -42,7 +42,7 @@ def parse_env(text: str) -> dict[str, str]:
 
 @runtime_checkable
 class Credentials(Protocol):
-    """What the model rows need of the `layers` value (CONTRACTS.md: layers): where bh-02's
+    """What the model rows need of the `host` value (CONTRACTS.md: host): where bh-02's
     `local.env` is looked for, nearest first."""
 
     @property
@@ -51,7 +51,7 @@ class Credentials(Protocol):
 
 def token_file(explicit: str | None, searched: Sequence[str]) -> Path | None:
     """The credential file to read: `explicit` (the row's `env_file`) when given, else the
-    first of `searched` (the `layers` value's `credentials`) that is a regular file. Anything
+    first of `searched` (the `host` value's `credentials`) that is a regular file. Anything
     else there is passed over: on Linux the jail holds an absent one with an empty directory
     for as long as it runs, and that must never hide the real file further up."""
     if explicit is not None:

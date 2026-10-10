@@ -75,7 +75,7 @@ DEFAULT = (
     " libs/brig/tests/integration/test_bwrap_network.py"
     " libs/brig/tests/e2e/test_strict_linux_journey.py"
     " libs/brig/tests/integration/test_tether.py"
-    " bh-02/plugins/brig-cordis-plugin"
+    " bh-02/plugins/runner-cordis-plugin"
     " bh-02/app/tests/test_python_repl.py"
 )
 

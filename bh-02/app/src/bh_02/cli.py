@@ -63,7 +63,9 @@ _UPDATED_HEADER = (
 @click.option("--patch", "patches", multiple=True, type=_PATCH_TYPE, help=_PATCH_HELP)
 @click.option("--trace", default=None, type=_TRACE_TYPE, metavar="FILE", help=_TRACE_HELP)
 @click.option(
-    "--no-jail", is_flag=True, help="Run the kernel unjailed, with your own permissions; every input asks."
+    "--no-jail",
+    is_flag=True,
+    help="Run the model's code unjailed, with your own permissions; every input asks.",
 )
 @click.option(
     "--resume",
@@ -84,7 +86,7 @@ def main(
     resume: str | None,
 ) -> None:
     """A coding agent in a terminal app. The model acts in Python, through the python tool, in a
-    persistent kernel inside a jail. Claude is reached through Claude Code on the Claude
+    persistent Python process inside a jail. Claude is reached through Claude Code on the Claude
     subscription, with the CLAUDE_CODE_OAUTH_TOKEN in local.env (`claude setup-token` makes
     one); any OpenAI-compatible model can be added to the models file. Every run is a session
     that `--resume` continues."""
@@ -107,7 +109,8 @@ def main(
         newest = sessions.listed(sessions.state_root(), str(Path.cwd()))[:1]
         newest_id = newest[0].id if newest else None
         how = sessions.resume_command(session.stack, None if session.id == newest_id else session.id)
-        click.echo(click.style(f"session {session.id}  ({how} to continue it)", dim=True), err=True)
+        with contextlib.suppress(OSError):  # the terminal has gone (its window closed): nobody to tell
+            click.echo(click.style(f"session {session.id}  ({how} to continue it)", dim=True), err=True)
     sys.exit(code)
 
 
@@ -283,7 +286,7 @@ def _launch(
     # `XDG_STATE_HOME`, is not known here. And bh-02's configuration (this run's and the default
     # one), whose files the host reads and trusts: no jailed input may write there. And where
     # bh-02 runs its own code from, every package a layer may name as installed: every jail reads
-    # it (the extensions' worker imports cordis), and no jailed input may write it. And the
+    # it (the extensions process imports cordis), and no jailed input may write it. And the
     # project's auto memory directory, made here so the jail can let an input write it.
     credentials = credential_search()
     states = [listing.root, str(sessions.default_state_root())] if listing.root else []
@@ -299,12 +302,12 @@ def _launch(
                 layers,
                 trace=trace,
                 report=report,
-                sessions=listing,
+                session=listing,
                 credentials=credentials,
                 secrets=secrets,
                 trusted=trusted,
                 code=code,
-                memory=memory,
+                auto_memory=memory,
             )
         )
     except CompositionError as error:
@@ -323,7 +326,7 @@ def _launch(
 def credential_search() -> tuple[str, ...]:
     """Where the model rows look for bh-02's `local.env`, nearest first: above bh-02's own
     install and above its environment, so the workspace's own is found from any working
-    directory. The one list: the model rows read the first that is a file (the `layers`
+    directory. The one list: the model rows read the first that is a file (the `host`
     value's `credentials`), and every one is a secret the jail keeps an input from reading,
     writing or creating. Not the project's own `local.env`: a project's may hold anything."""
     return credential_files([Path(__file__).resolve(), Path(sys.prefix).resolve()])

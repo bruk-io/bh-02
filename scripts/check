@@ -7,7 +7,7 @@
 documentation site's strict build, and bh-02's theme against bh-01's tokens (when bh-01 is
 checked out beside this repository).
 
-`scripts/check` checks the whole workspace. `scripts/check bh-02/plugins/kernel-cordis-plugin`
+`scripts/check` checks the whole workspace. `scripts/check bh-02/plugins/python-cordis-plugin`
 checks one member: ruff and pytest on that directory, mypy on its src/, and the gates and the
 docs (which always see the whole workspace: what the gates check spans packages, and the site
 includes every member's README). Each step reports and the run goes on, so one pass shows

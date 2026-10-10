@@ -9,8 +9,8 @@ section to it.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `memory:memory` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `layers` (`memory`: for `/memory`) |
-| `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index | `system` (`add`), `layers` (`memory`), `transcript` (its lifetime) |
+| `memory:files` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `host` (`auto_memory`: for `/memory`) |
+| `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index | `system` (`add`), `host` (`auto_memory`), `transcript` (its lifetime) |
 | `memory:on_touch` | adds `OnTouch` to `notes`, and its `before_write` to `access`; no config: the memory files are `memory`'s | `memory` (`touched`), `notes` (`add`), `transcript` (`messages`), `access` (`before_write`) |
 
 ## What loads at launch
@@ -46,7 +46,7 @@ disagree. `""` when nothing loads.
 ## What loads on demand
 
 `touched(paths)` (the files a call opened, as its tool answered: the python tool's inputs',
-`kernel.touched()`, standing in for Claude Code's Read, Write and Edit), broadest first: for each directory between such a file and the project's
+its Python process's `touched()`, standing in for Claude Code's Read, Write and Edit), broadest first: for each directory between such a file and the project's
 root, its `CLAUDE.md` and `CLAUDE.local.md` (and its `AGENTS.md` as `instruction_files` says:
 by default where it has none of the three CLAUDE files and no CLAUDE.md is above the project),
 and the rules in its own `.claude/rules/` (one without `paths` for everything under it; one with
@@ -73,8 +73,13 @@ does not load one its own tools read. It depends on `transcript`, so a new conve
 (`/clear`, `/compact`) is told afresh, and a resumed one is not told again what its transcript's
 `tool` entries hold: the notes the loop keeps on each (`notes`), where a text of this row's ends
 where the note does, where it was cut short, or where the next text begins (`From FILE,
-instructions ...` or `From FILE, a rule for ...`). An entry from before the loop kept them is
-searched instead.
+instructions ...` or `From FILE, a rule for ...`; a file a text imports is part of it, so a text
+whose imports changed reads as changed, and is told again). Every note there was told before the
+row began (a resumed session's, or before a reload), wherever it sorted among the others and
+whatever the result printed. It reads them once, at the first input that opens a file. An entry from before the loop kept them
+is searched instead: a text told whole after a blank line, up to the entry's end or the next
+note, though not one the entry starts with; where the result ends is not marked there, so a
+text an input printed that way counts too.
 
 ## What bh-02 does differently, and why
 
@@ -84,8 +89,8 @@ searched instead.
   it says in the prompt that it did not import that file, and why. Your own files
   (`~/.claude/CLAUDE.md`, a directory above the project) may import from anywhere.
 - **No link the model could have made is followed.** A file in the project is walked to from
-  its root through no link (`O_NOFOLLOW` on every part) and read only when it is a regular file
-  with one name; a link there is read only when it leads to another memory file (a CLAUDE.md
+  its root through no link (`O_NOFOLLOW` on every part, `host_paths.read_beneath`) and read
+  only when it is a regular file with one name; a link there is read only when it leads to another memory file (a CLAUDE.md
   linking to the AGENTS.md beside it, read once). A file of yours whose way passes through the
   project (`~/.claude/CLAUDE.md` a link into a dotfiles repository bh-02 runs in;
   `host_paths.passes`, as the models file is walked) is not read,
@@ -106,7 +111,7 @@ conversations. Each project has a directory of its own outside the repository,
 `<project>` is the git repository's root (a worktree's main repository, so its worktrees share
 one), named as Claude Code names it (every character but a letter or a digit a `-`). The
 command line works it out (`bh_02.bootstrap.memory_directory`), makes it, and hands it to the
-`layers` value, whose `memory` the jail lets an input write. On Linux it is the one directory
+`host` value, whose `auto_memory` the jail lets an input write. On Linux it is the one directory
 outside the project the jail lets an input read, so another project's memory is not there.
 
 The model is told how to keep it (`auto_section`): what is worth a memory and what is not, its

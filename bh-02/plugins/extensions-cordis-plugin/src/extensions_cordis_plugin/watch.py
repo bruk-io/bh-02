@@ -20,6 +20,7 @@ __all__ = [
     "refusal",
     "status_file",
     "status_forms",
+    "too_large",
 ]
 
 _NAME = re.compile(r"[a-z][a-z0-9_]*")
@@ -44,13 +45,15 @@ _EXAMPLE = """    from cordis import Effects, acquire, component
 class Status:
     """One extension, as last heard of. `rows`: each component's state (`active`, `waiting on:
     KEY`, `failed: ...`); `error`: why the module did not load at all (or why it was not loaded:
-    declined, the worker would not start); `commands`: the slash commands it registered;
-    `problems`: registrations bh-02 refused (a command name already taken)."""
+    declined, the worker would not start); `commands`: the slash commands it registered; `tools`:
+    the tools it registered; `problems`: registrations bh-02 refused (a command name already
+    taken, a tool spec it could not offer)."""
 
     loading: bool = False
     rows: Mapping[str, str] = field(default_factory=dict)
     error: str | None = None
     commands: tuple[str, ...] = ()
+    tools: tuple[str, ...] = ()
     problems: tuple[str, ...] = ()
 
     @property
@@ -99,7 +102,17 @@ def refusal(file: str, mode: int, names: int) -> str | None:
             f"{file} has {names} names (a hard link), and bh-02 does not read one there (another "
             f"name could be a file the jail hides): write the extension at {file} as a file of its own"
         )
+    if names < 1:
+        return f"{file} was removed as bh-02 opened it: it loads when it is written again"
     return None
+
+
+def too_large(file: str, limit: int) -> str:
+    """Why bh-02 does not read the extension `file`: it is larger than `limit` bytes."""
+    return (
+        f"{file} is larger than {limit // 1024} KiB, so bh-02 did not read it: split it into "
+        "extensions of their own"
+    )
 
 
 def linked(where: str, way: str) -> str:
@@ -129,10 +142,11 @@ def instructions(
         "Extensions run in a jail of their own, as your `python` REPL (below) does: the project "
         "is their working "
         "directory and the only place they can write, and they cannot reach the network or "
-        "read credentials. Nobody is asked first."
+        "read credentials. Nobody is asked first, to load one or to run a call to its tool."
         if confined
         else "bh-02 is running unjailed, so an extension would run with the person's own "
-        "permissions: each is shown to the person, who decides whether it loads."
+        "permissions: each is shown to the person, who decides whether it loads, and so is each "
+        "call to a tool one registers, by its name and arguments."
     )
     more = f"cordis's design in full is {reference}; " if reference else ""
     lines = [
@@ -170,6 +184,15 @@ def instructions(
         "- `frame.status(field, text)`: text in the status bar. The latest push of a field shows: "
         "to change it from background work, push the new text, then call the old remover.",
         "- `system.add(text)`: text added to this prompt for your later turns.",
+        "- `tools.register(spec, run)`: a tool offered to you, as `python` is. `spec` has `name` "
+        "(lowercase letters, digits and _; not one of bh-02's own tools), `description` (what it "
+        'does and when to call it) and `parameters` (a JSON Schema object: `type` "object", '
+        "`properties`, `required`); `run` is async, the call's arguments as a dict in, the text "
+        "you read out. Its calls run in the extension's jail, not in your REPL, and it lasts as "
+        "the file does, across sessions, unlike a function in your REPL. You are told when one "
+        "is added, changed or removed; whether a tool added mid-conversation can be called "
+        "before the next conversation (/clear, /compact) is your model's, and the note says. "
+        "One bh-02 refuses is in status.json's `problems`, saying why.",
         "Whatever an extension added leaves with it, through `acquire` or not.",
         "",
         "Try a component in your REPL before you write its file: cordis is importable there "
@@ -211,6 +234,7 @@ def status_file(statuses: Mapping[str, Status]) -> dict[str, Any]:
             "rows": dict(s.rows),
             "error": s.error,
             "commands": list(s.commands),
+            "tools": list(s.tools),
             "problems": list(s.problems),
         }
         for name, s in sorted(statuses.items())

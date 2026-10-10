@@ -10,7 +10,7 @@ import pytest
 
 # The kernel with no jail, for tests that are not about the jail: brig runs on darwin and on
 # Linux with bubblewrap, and a test of a model or a chat row should not depend on the platform.
-UNJAILED = '[[plugin]]\nid = "jail"\nuse = "kernel:unjailed"\n'
+UNJAILED = '[[plugin]]\nid = "runner"\nuse = "runner:unconfined"\n'
 
 # bh-02 has no one-shot chat row, but many of its tests want one: the reply to one prompt (the
 # `chat` override's config), recorded rather than drawn, with a failure left to reach `done`.
@@ -161,6 +161,21 @@ def answers(*these: bool) -> None:
     ASKED.clear()
 
 
+@component
+async def echo_tool(*, tools: Any) -> Effects:
+    """A layer row's tool, run in bh-02's own process: `echo(text)`."""
+
+    async def run(input: Mapping[str, Any]) -> Mapping[str, Any]:
+        return {"content": "echo: " + str(input["text"]), "touched": []}
+
+    spec = {
+        "name": "echo",
+        "description": "Echo the text.",
+        "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+    }
+    yield acquire(tools.register, spec, run, runs="host")
+
+
 class Record(Drop):
     async def show(self, chunks: AsyncIterator[Mapping[str, Any]]) -> None:
         async for chunk in chunks:
@@ -289,18 +304,18 @@ async def echo_model() -> Effects:
 
 
 @component
-async def layers_seen(*, layers: Any, config: Mapping[str, Any]) -> Effects:
-    """Writes the `layers` value's `credentials`, `secrets`, `trusted` and `code` to
+async def host_seen(*, host: Any, config: Mapping[str, Any]) -> Effects:
+    """Writes the `host` value's `credentials`, `secrets`, `trusted` and `code` to
     `config["out"]` as JSON: what the model rows search and what the jail keeps an input from, as
     the composition was booted."""
     import json
     from pathlib import Path
 
     seen = {
-        "credentials": list(layers.credentials),
-        "secrets": list(layers.secrets),
-        "trusted": list(layers.trusted),
-        "code": list(layers.code),
+        "credentials": list(host.credentials),
+        "secrets": list(host.secrets),
+        "trusted": list(host.trusted),
+        "code": list(host.code),
     }
     Path(config["out"]).write_text(json.dumps(seen))
     return
@@ -320,7 +335,7 @@ async def held_model() -> Effects:
 @component(provides=("done",))
 async def bad_done_mode() -> Effects:
     """Binds `done` to something that is not awaitable: a contract violation for bh-02's
-    own `harness` row (bh_02.bootstrap:_ChatDone), not a shape any chat row should produce."""
+    own `shell` row (bh_02.bootstrap:_ChatDone), not a shape any chat row should produce."""
     yield bind("done", 42)
 
 

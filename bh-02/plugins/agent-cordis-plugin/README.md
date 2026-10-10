@@ -7,44 +7,63 @@ and asks `notes`, and `/compact`, which begins a new conversation from the model
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`), `tools` (`specs`, `get`, `ready`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`approve`), `notes` (iterated), `executor` (`run`) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`, `serve`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `notes` (iterated), `executor` (`run`) |
 | `agent:tools` | `tools`: a `ToolBroker`, the tools rows `acquire` with `register(spec, run, *, runs, show)`, offered in name order | |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
-| `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch, then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
+| `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch (its `.git/HEAD`, read from the root through no link), then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
 | `agent:notes` | `notes`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 | `agent:access` | `access`: an `Access`, the functions rows `acquire` with `before_read(fn)` and `before_write(fn)`, which a tool asks before it opens a file (`refusal(kind, path)`) | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
-| `agent:compact` | registers `/compact [WHAT TO KEEP]`; config: `timeout` (seconds, 300), `loop` and `transcript` (the rows it restarts) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`, `notice`) |
+| `agent:conversation` | registers `/clear` and `/compact [WHAT TO KEEP]`, each restart queued in `jobs`; config: `timeout` (seconds, 300: /compact's summary), `loop` and `transcript` (the rows /compact restarts), `clear` (the rows /clear restarts: `loop`, `transcript`, `python`) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`), `jobs` (`put`) |
 
-A turn is one model step plus the calls it asked for, until it asks for none. The model is
+A turn is the reply to one message: a model step, the calls it asked for, and again, until a
+step asks for none. The model is
 offered the tools rows register with `tools` (`agent:tools`, a broker; CodeAct's `python(code)`
-is the kernel row's registration, and the loop knows of no tool by name), through the
-provider's standard tool calling. The loop reads the list once, at its first request
+is the python row's registration, and the loop knows of no tool by name), through the
+provider's standard tool calling. The loop reads the list at a conversation's first request
 (`tools.specs()`, in name order, so a row registering again after a restart changes nothing),
 after the tools its config `requires` have registered: a message typed while one has not (right
-after `/clear`, which restarts the kernel with the loop) shows a `note` that it waits, `wait`
+after `/clear`, which restarts the python row with the loop) shows a `note` that it waits, `wait`
 seconds at most, and one that never registers fails the message (`Unstarted`, `kind`
-`tools_missing`, the message kept and answered `FAILED`). It offers that list for its life,
-since the list is the start of what a model server caches. Each call runs through the tool its
+`tools_missing`, the message kept and answered `FAILED`). It keeps that list in the transcript
+as a `tools` entry, since the list is the start of what a model server caches (`toolset.py`).
+Before each message the model reads it reads the list again; a tool added, removed or redefined
+since is kept as another `tools` entry (`changed`) and told on that message, as a changed prompt
+is (`told`: each tool by name, the start of its description and its input's names), and the
+person sees `told the model its tools changed since the conversation began`. A tool the
+conversation has that is missing for less than `wait` seconds is taken for restarting, not
+removed. What each request offers is the model's to choose (`tool_changes`): `fixed`, the
+default and both shipped providers', offers the list the conversation began with for its life
+(an added tool comes with the next conversation, `/clear` or `/compact`, and a call naming it
+now says so; a call to a removed one answers that it was removed); `listed` offers the list as
+the transcript last recorded it. A resumed session reads the lists from its transcript, so it
+sends the same requests. Each call runs through the tool its
 name has now (`called`: a tool that raises, or answers with something other than `{"content":
 str, ...}`, answers with an error the model reads), one restarting waited for `wait` seconds,
-and only on `approval`'s yes (`approval.approve({"name", "input", "runs", "title", "lines",
-...})`, `shown`: the tool's own `show(input)`, else its input as JSON; at once when it runs in a
-jail that confines it, else the person's answer in the approval modal). A no is its answer
-(`DECLINED`), so approval is one place for any model provider and any tool, and the loop keeps
-no copy of the rule. A call to a name it did not offer (`refusal`), or one whose input doesn't
+and only once it may (`Asked`): at once when the `approval` rule says it runs unasked
+(`approval.unasked({"name", "input", "runs", "title", "lines", ...})`, `shown`: the tool's own
+`show(input)`, else its input as JSON; it runs in a runner that confines it), else on the
+person's yes, which the loop asks itself (`output.confirm`, the approval modal). A no is its
+answer (`DECLINED`: `denied: ...`), so approval is one rule for any model provider and any tool,
+and the loop
+keeps no copy of it. A call to a name it did not offer (`refusal`), or one whose input doesn't
 fit the spec (`malformed`: a `required` property missing, one not of its schema's simple type),
 is answered with text saying so, runs nothing, and is put to nobody. A turn stopped part-way
 still answers every call: the one with its tool when the stop came with `interrupted: ... it may
 have partly run`, one that had its result (the stop came while its notes were made or the prompt
 read) with that result, the rest (the one at the approval question included) with `not run:
-...`. The transcript and the tools are rows of their own, so the history and the namespace
-outlive the loop: replace `model` (or the ui) and the loop reloads while the conversation
+...`. A call a tool's own call makes (an input's `tools.NAME(...)`) runs the same way: the loop
+row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.call`), so it is put
+to the rule and the person as the model's own would be, run through the tool its name has now,
+and given to `notes`, whose notes go with the result of the call that made it (`_nested`); it
+answers `{"content", "failed"}`, `failed` when it did not run (no such tool, its input malformed,
+a no) or the tool failed. The transcript and the tools are rows of their own, so the history and
+the namespace outlive the loop: replace `model` (or the ui) and the loop reloads while the conversation
 carries on.
 
 After each call that ran, the loop calls every function in `notes` with
 `{"name", "input", "result", "touched"}` (`touched`: the files the call opened, as its tool
-answered; the python tool's are `kernel.touched()`) and puts what they return after the result
+answered; the python tool's are its Python process's `touched()`) and puts what they return after the result
 (`noted`, sorted, so the order rows added them in means nothing; one that fails says so in one line). The `tool` entry keeps them as
 a list too (`notes`, `[]` for none and for a call that never ran), beside the text the model
 reads (the result, then each note, then any change in the instructions, each after a blank
@@ -58,17 +77,19 @@ hold (an entry from before the loop kept them is searched; CONTRACTS.md: transcr
 
 Each model step is classified by `stops.classify` (pure; the table is in its docstring): only
 `act` runs calls, only `answered` ends the reply, and a
-truncated, silent or undecodable turn is fed back with harness's own wording up to
-`max_nudges` times per reply. A turn that did not act keeps no calls on its transcript
-entry, so nothing is left for a result to answer. A provider's assistant message rides on its
+truncated, silent or undecodable step is fed back with harness's own wording up to
+`max_nudges` times per reply. A step that did not act keeps no calls on its transcript
+entry, so nothing is left for a result to answer. A reply the person stops while a step streams
+(Ctrl-C closes it) still answers its message in the transcript: what the step said so far, then
+`[the person stopped this reply here]` (`STOPPED`), so the next request does not ask the stopped
+message again; a model step that raises (a 429, a dropped connection) is answered the same way,
+with `[this reply failed here; the person saw the error]` (`FAILED`). A provider's assistant
+message rides on its
 entry as `provider`, for the model to replay unchanged.
 
 Every request begins with the system prompt the conversation began with (`system.text()`, the
-python tool's section among the rest), kept in the transcript as its first `{"role": "system"}` entry. A
-model server reuses its work on a conversation only up to the first token that differs from
-the last request, so a prompt sent fresh each time would make the whole conversation new to it
-whenever the prompt changed: minutes of prompt processing with a local model before the first
-new token, a restart of Claude Code and the loss of its cache with Claude. The loop still reads
+python tool's section among the rest), kept in the transcript as its first `{"role": "system"}` entry
+([why](../../../docs/bh-02/how-it-works/prompt-and-notes.md#why-the-prompt-stays-fixed-for-a-conversation)). The loop still reads
 the prompt before each message the model reads (the person's message, an input's result, a
 nudge); when it reads differently from what the model was last told, what changed
 (`prompt.changes`, pure: each part, a paragraph, that is new or reads differently, whole, and
@@ -90,18 +111,13 @@ new model, a new ui), or one over a resumed session, carries on from what the tr
 the model was told; `/clear` empties it, so the next conversation begins with the prompt as it
 reads then.
 
-The date is not in the prompt, which would then read differently every midnight: the model would
-be told its instructions changed, and the transcript would keep another change, each day.
-The loop tells it with the person's message instead (`reply`), when the transcript has told no
+The date is not in the prompt, which would then read differently every midnight. The loop tells it with the person's message instead (`reply`), when the transcript has told no
 date yet or the last one it told is another day's: the entry's content starts
 `(Today's date: 2026-10-07.)` and the entry carries the date as `"today"`, which is how the loop
 finds the last one told. So a resumed session (the transcript is a file) does not tell it again
 the same day, and `/clear` (an empty transcript) does. A message that also tells a change in the
 instructions has the date first, then the change, then the person's words. The clock is
-`LoopModel`'s `today` (the real date in the `agent:loop` row; a test gives its own). And a new
-session begins with the same prompt as one the day before in the same project (unless the
-branch, a CLAUDE.md or an extension changed it), so a local model server that keeps its
-prompt cache across conversations can reuse it. The providers send
+`LoopModel`'s `today` (the real date in the `agent:loop` row; a test gives its own). The providers send
 `content` alone, so `today` never reaches a model.
 
 Reading the prompt (`system.text()`, whose sections may read many files: memory's reads every
@@ -129,7 +145,7 @@ interpreter at exit, so a reading left running would hold bh-02 open until it fi
 daemon's is left to the end of the process, and its answer to an event loop that has closed
 goes nowhere.
 
-`/compact` (`agent:compact`, `compact.py`) is for a conversation grown long: a local model
+`/compact` (`agent:conversation`, `conversation.py`) is for a conversation grown long: a local model
 processes more prompt before each first token, and any model nears its context window. It asks
 the model for a summary in one step: the request is the loop's own (`loop.request_for`: the
 prompt the conversation began with, then the conversation) with the registered tools offered
@@ -143,18 +159,18 @@ summary, nothing said since, is not compacted again. A command runs in the chat 
 Ctrl-C stops only a turn, so the step has `timeout` seconds, and a note says so as it begins
 (the row shows it itself, `output.show`, since the chat row shows a command's answer only once
 it has one); past them it is closed (its provider stops) and nothing changes. The person
-leaving cancels the command (`chat:session` races it against `input.closed()`): the step is
+leaving cancels the command (`chat:converse` races it against `input.closed()`): the step is
 closed and nothing has been written. The summary then begins the new conversation (`seeded`:
 bh-02's note that the conversation carries on from an earlier one, as the person's message,
 then the summary as the model's answer, so the roles alternate; the note stays at the
 conversation's start, a resume's too, so it says the namespace was kept at the compaction and
-empties as the kernel's instructions say), written over the transcript row's file in one step
+empties as the python tool's instructions say), written over the transcript row's file in one step
 (`transcript.rewrite`: written whole beside it, then renamed over it, the old file kept under
 the first of `.bak`, `.bak.2`, ... not taken, so no compaction's backup replaces another's),
 and the loop and the transcript restart, together. The new conversation holds no `system`
 entry and no date, so the loop reads the prompt afresh for its first message (folding in
 whatever changed since the old one began, with no note of a change) and tells the date. The
-kernel is not restarted: the summary names what its namespace holds. The answer is `cleared`
+python row is not restarted: the summary names what its Python process's namespace holds. The answer is `cleared`
 (`compacted`: what `commands` holds for the model's next message, `!`'s output, is kept, since
 the summary was written from what the model read, which never held it), a note carrying the
 summary, the step's usage as one event (counted in the session's totals), then `restarting`
@@ -162,15 +178,24 @@ the two rows, so the ui drops the old conversation and a resume's replay starts 
 The restart is queued before the chat row shows the answer, and stops the chat row: the note
 comes second whatever the provider sent, as `/clear`'s does, so it is shown before then.
 
-The compact row depends on `model`, `tools` (only its `specs`), the loader, `commands` and
-`output`, and on neither `loop` nor `transcript`: a restart of them reloads what depends on them,
+`/clear` (the same row) is that rewrite with an empty conversation: written over the
+transcript row's file in one step, the old kept as `.bak` (`.bak.2`, ...), so a cleared
+conversation is never lost, and the rows in `clear` restart together (the loop, the transcript
+and the python row, so the namespace empties with the conversation). A transcript with nothing in
+it yet, one kept in memory, or a row another component fills is not written: its restart is the
+new conversation. The answer is `cleared` (not `compacted`, so what `commands` holds for the
+model is dropped), a note saying so and where the old conversation is kept, then
+`restarting`.
+
+The conversation row depends on `model`, `tools` (only its `specs`), the loader, `commands`,
+`output` and `jobs`, and on neither `loop` nor `transcript`: a restart of them reloads what depends on them,
 which would cancel the row's own work half-way. It finds the conversation's file from the
 transcript row as the loader mounted it (`loader.rows`: a running `agent:transcript` row's
 `path`, whatever the layer files say now), so it needs a session's transcript (one kept in
 memory, or a row another component fills, can't begin again from a summary, and /compact says
-so). The restart is queued for the row's own `background` (cordis-helpers' `perform`), never
-run in the chat row's task, which it reloads: the operator's `/clear` does the same. A restart
-that fails is told to the person (`output.notice`), since the new conversation is written by
-then; a row restarted while the model wrote the summary writes nothing, since its queue went
-with it. It is a row of its own rather than one of the operator's commands, so the operator
-keeps not depending on the model (a `/model` switch never reloads it).
+so). Both commands' restarts are queued in `jobs` (CONTRACTS.md: jobs), never run in the chat
+row's task, which they reload; the chat row reads its next line once they are done. A restart
+that fails is told to the person (the jobs row's `output.notice`), since the new conversation
+is written by then. Both are one row's, beside the transcript they rewrite, rather than the operator's:
+the operator keeps not depending on the model, and nothing outside the row (once the
+operator's `forget`) has to be kept in step with the transcript row's file.

@@ -3,12 +3,15 @@
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
 tools, transcript, system, approval, notes, executor). The model is offered the tools rows
 register (`tools`, a broker), through the provider's standard tool calling, and each call runs
-through the tool its name has; CodeAct's `python` is one of them, the kernel row's. The list is
-read once, at the loop's first request, after the tools its config `requires` have registered,
-and offered as it was for the loop's life, so a model server's cache of the conversation's start
-stays good. Each call is put to `approval` first and runs only on its yes (at once when it runs
-in a jail that confines it; otherwise the person's answer): one place for every model provider,
-and the loop knows whether a stopped call ever reached its tool.
+through the tool its name has; CodeAct's `python` is one of them, the python row's. The list is
+read at a conversation's first request, after the tools the loop's config `requires` have
+registered, and kept in its transcript; a later change (a tool added, removed or redefined) is
+kept there too and told to the model on the next message it reads (`toolset`), while each
+request offers the list as the provider chooses (`tool_changes`: by default the one the
+conversation began with, so a model server's cache of the conversation's start stays good).
+Each call is put to `approval` first and runs only on its yes (at once when it runs in a jail
+that confines it; otherwise the person's answer): one place for every model provider, and the
+loop knows whether a stopped call ever reached its tool.
 
 Every request begins with the system prompt the conversation began with, kept in its transcript,
 so a model server's cache of the conversation stays good. When the prompt reads differently (an
@@ -39,6 +42,7 @@ reply leaves at most one in flight, however often the loop reloads between them.
 import asyncio
 import datetime
 import json
+import time
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
@@ -49,22 +53,27 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from dataclasses import dataclass
 from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
 from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.prompt import changes, edits, latest
 from agent_cordis_plugin.stops import ACT, ANSWERED, FEEDBACK, REFUSED, classify
+from agent_cordis_plugin.toolset import FIXED, LISTED, begun, changed, listed, removed, told
 
 __all__ = [
     "DECLINED",
     "FAILED",
     "STOPPED",
     "Approval",
+    "Asked",
+    "Confirm",
     "Executor",
     "Model",
     "LoopModel",
     "Notes",
+    "Rule",
     "System",
     "Tool",
     "Tools",
@@ -106,11 +115,13 @@ class Tool(Protocol):
 @runtime_checkable
 class Tools(Protocol):
     """What the loop needs of the `tools` value: the specs to offer (in name order), the tool a
-    call names, and a wait for the ones it requires."""
+    call names, a wait for the ones it requires, and the seam through which it runs the calls a
+    tool's own call makes (`serve`, CONTRACTS.md: tools)."""
 
     def specs(self) -> Sequence[Json]: ...
     def get(self, name: str) -> Tool | None: ...
     async def ready(self, names: Iterable[str], timeout: float) -> tuple[str, ...]: ...
+    def serve(self, call: Callable[[str, Json], Awaitable[Json]]) -> Callable[[], None]: ...
 
 
 type Note = Callable[[Json], str]
@@ -127,10 +138,38 @@ class Notes(Protocol):
 
 @runtime_checkable
 class Approval(Protocol):
-    """What the loop needs of the `approval` value: whether a call may run (the person's answer
-    when it runs anywhere but a jail that confines it)."""
+    """What the loop asks of each call: whether it may run (`Asked`: unasked by the `approval`
+    rule, else the person's answer)."""
 
     async def approve(self, request: Json) -> bool: ...
+
+
+@runtime_checkable
+class Rule(Protocol):
+    """What the loop needs of the `approval` value (CONTRACTS.md: approval): whether a call runs
+    without asking the person (it runs in a runner that confines it)."""
+
+    def unasked(self, request: Json) -> bool: ...
+
+
+@runtime_checkable
+class Confirm(Protocol):
+    """What the loop needs of the `output` value: the person's yes or no about a call."""
+
+    async def confirm(self, request: Json) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class Asked:
+    """Whether a call may run: at once when the `approval` rule says it runs unasked, else the
+    person's answer through `output.confirm`. The rule is the runner plugin's, in one place; the
+    asking is the asker's."""
+
+    rule: Rule
+    output: Confirm
+
+    async def approve(self, request: Json) -> bool:
+        return self.rule.unasked(request) or await self.output.confirm(request)
 
 
 @runtime_checkable
@@ -168,8 +207,9 @@ DECLINED = "denied: the person said no to this call, so it did not run; ask them
 # person stopped it, or the model failed (a 429, a dropped connection).
 STOPPED = "[the person stopped this reply here]"
 FAILED = "[this reply failed here; the person saw the error]"
-# What the person is shown when the model is told its instructions changed.
+# What the person is shown when the model is told its instructions, or its tools, changed.
 _TOLD = "told the model its instructions changed since the conversation began"
+_TOOLS_TOLD = "told the model its tools changed since the conversation began"
 _NOTED = "told the model with this result: "  # then the first line of a note
 _SHOWN = 120  # how much of that line the person is shown
 # What the model is told of the date, before the person's message: the first of a conversation,
@@ -251,19 +291,28 @@ def request_for(messages: Sequence[Json]) -> list[Json]:
     """The messages for one request over a transcript's `messages`: the prompt the conversation
     began with (its first `system` entry), then the conversation. The prompts kept after the
     first were told as notes, so they stay out: a model is sent one `system` message, whole, and
-    never sees the loop's edits."""
+    never sees the loop's edits. The `tools` entries, the lists the conversation was offered,
+    stay out too: they are the request's tools, not its messages."""
     first = next((m for m in messages if m.get("role") == "system"), None)
     head: list[Json] = [{"role": "system", "content": first["content"]}] if first else []
-    return [*head, *(m for m in messages if m.get("role") != "system")]
+    return [*head, *(m for m in messages if m.get("role") not in ("system", "tools"))]
 
 
-def refusal(call: Json, offered: Sequence[str]) -> str | None:
+def refusal(call: Json, offered: Sequence[str], later: Iterable[str] = ()) -> str | None:
     """Why a call can't run (its name is none of the tools `offered`), as text the model reads
-    instead of a result; None when it can. A tool checks its own input."""
-    if call["name"] in offered:
+    instead of a result; None when it can. `later`: the tools registered after the conversation
+    began, which a provider that keeps the list it began with does not offer. A tool checks its
+    own input."""
+    name = call["name"]
+    if name in offered:
         return None
+    if name in set(later):
+        return (
+            f"error: {name!r} was added after this conversation began, so it is not among the "
+            "tools offered in it; it is offered from the next conversation (/clear or /compact)"
+        )
     yours = f"your tools are {', '.join(offered)}" if offered else "you have no tools"
-    return f"error: there is no tool named {call['name']!r}; {yours}"
+    return f"error: there is no tool named {name!r}; {yours}"
 
 
 # JSON Schema's simple types, as Python checks them (a bool is not a number here, as in JSON)
@@ -321,22 +370,23 @@ def shown(tool: Tool, name: str, input: Json) -> dict[str, Any]:
     return title | {"lines": lines, "language": "json"}
 
 
-async def called(tool: Tool, name: str, input: Json) -> tuple[str, tuple[str, ...]]:
-    """One call run through `tool`: what the model reads, and the files it opened. A tool that
-    fails, or answers with something other than `{"content": str, ...}`, answers with an error
-    the model reads, so one tool's fault is never the reply's."""
+async def called(tool: Tool, name: str, input: Json) -> tuple[str, tuple[str, ...], bool]:
+    """One call run through `tool`: what the model reads, the files it opened, and whether the
+    tool failed. A tool that fails, or answers with something other than `{"content": str,
+    ...}`, answers with an error the model reads, so one tool's fault is never the reply's."""
     try:
         ran = await tool.run(input)
     except Exception as error:
-        return f"error: the {name} tool failed ({type(error).__name__}: {error}); tell the person", ()
+        return f"error: the {name} tool failed ({type(error).__name__}: {error}); tell the person", (), True
     content = ran.get("content") if isinstance(ran, Mapping) else None
     if not isinstance(content, str):
         return (
             f"error: the {name} tool answered with something other than its result as text; tell the person",
             (),
+            True,
         )
     touched = ran.get("touched") or ()
-    return content, tuple(str(path) for path in touched) if isinstance(touched, list | tuple) else ()
+    return content, tuple(str(path) for path in touched) if isinstance(touched, list | tuple) else (), False
 
 
 class LoopModel:
@@ -351,12 +401,16 @@ class LoopModel:
     `approval.approve({"name", "input", "runs", "title", "lines", ...})`'s yes (`shown`); a no
     is that call's answer, `DECLINED`.
 
-    The tools are read at the loop's first request (`tools.specs()`, in name order), once the
-    ones `requires` names have registered (waiting up to `wait` seconds, and saying so; one that
-    never does fails the message, `Unstarted`), and offered as they were for the loop's life. A
-    call runs through the tool its name has now, waiting `wait` seconds for one that is
-    restarting (the kernel's, on `/restart kernel`); a name it was not offered answers with an
-    error (`refusal`).
+    The tools are read at a conversation's first request (`tools.specs()`, in name order), once
+    the ones `requires` names have registered (waiting up to `wait` seconds, and saying so; one
+    that never does fails the message, `Unstarted`), and kept in the transcript as a `tools`
+    entry. Before each message the model reads they are read again, and a change kept as another
+    `tools` entry and told on that message (`toolset.told`); a tool the conversation has that is
+    missing for less than `wait` seconds is restarting (the python row's, on `/restart python`), not
+    removed. Each request offers the list the model's `tool_changes` asks for: the one the
+    conversation began with (`fixed`, the default) or the one as it reads now (`listed`). A call
+    runs through the tool its name has now, waiting `wait` seconds for one that is restarting; a
+    name it was not offered, or one removed since, answers with an error (`refusal`).
 
     A reply the person stops (the reply closed, or its task cancelled) while a turn streams
     still leaves the transcript whole: what the turn said so far, then `STOPPED`, as the
@@ -392,6 +446,7 @@ class LoopModel:
         *,
         requires: Sequence[str] = (),
         wait: float = 30.0,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._model = model
         self._tools = tools
@@ -407,14 +462,61 @@ class LoopModel:
         # transcript keeps a change as edits, so this saves applying them all for every message
         self._last: tuple[int, str | None] = (0, None)
         self._executor: Executor = executor if executor is not None else OneAtATime()
-        # the tools offered, read at the first request and kept for this loop's life
-        self._offered: tuple[Json, ...] | None = None
+        self._clock = clock
+        self._ready = False  # whether the tools `requires` names have registered, once
+        self._missing: dict[str, float] = {}  # a tool the conversation has, missing since when
+        self._nested: list[str] = []  # what `notes` said of the calls the running call made (`nested`)
 
     def _prompt(self) -> str:
         """The system prompt as it reads now. Run on `executor` (`_told`)."""
         return self._system.text() if self._system else ""
 
-    async def _told(self) -> str:
+    async def _told(self) -> tuple[str, list[str]]:
+        """What the model is told with the next message it reads, and what the person is shown
+        of it: what changed in its instructions (`_prompt_told`), then in its tools
+        (`_tools_told`); ('', []) when nothing did."""
+        prompt = await self._prompt_told()
+        tools = self._tools_told()
+        shown = [*([_TOLD] if prompt else []), *([_TOOLS_TOLD] if tools else [])]
+        return "\n\n".join(part for part in (prompt, tools) if part), shown
+
+    def _mode(self) -> str:
+        """How the model wants its tools offered (CONTRACTS.md: model, `tool_changes`)."""
+        mode = getattr(self._model, "tool_changes", FIXED)
+        return mode if mode in (FIXED, LISTED) else FIXED
+
+    def _tools_told(self) -> str:
+        """Keep a change in the tools since the transcript last recorded them as a `tools` entry,
+        and return what the model is told of it ('' when nothing changed, or the transcript
+        records no list yet: `_offer` keeps the one the conversation begins with)."""
+        before = listed(self._transcript.messages)
+        if before is None:
+            return ""
+        change = changed(before, self._present(before))
+        if change is None:
+            return ""
+        self._transcript.append(change)
+        return told(change, self._mode())
+
+    def _present(self, before: Sequence[Json]) -> list[Json]:
+        """The tools registered now, in name order, with each of `before` that is missing for
+        less than `wait` seconds kept as it was: its row is restarting, not gone."""
+        now = {str(spec["name"]): spec for spec in self._tools.specs()}
+        at = self._clock()
+        self._missing = {name: since for name, since in self._missing.items() if name not in now}
+        for spec in before:
+            name = str(spec["name"])
+            if name not in now and at - self._missing.setdefault(name, at) < self._wait:
+                now[name] = spec
+        return [now[name] for name in sorted(now)]
+
+    def _offered(self) -> list[Json]:
+        """The tools a request offers: the list the conversation began with (`fixed`), or the
+        list as the transcript last recorded it (`listed`)."""
+        messages = self._transcript.messages
+        return (listed(messages) if self._mode() == LISTED else begun(messages)) or []
+
+    async def _prompt_told(self) -> str:
         """Bring what the transcript says the model was told up to date, before a message it is
         about to read: the first prompt is kept whole as the conversation's start, a later one
         that reads differently from the last told as the edits from it (`prompt.edits`), and
@@ -439,22 +541,30 @@ class LoopModel:
         return changes(last, now) if last is not None else ""
 
     async def _offer(self) -> None:
-        """Read the tools to offer, once: after every one `requires` names has registered, or
-        raise `Unstarted` naming those that did not within `wait` seconds."""
-        if self._offered is not None:
-            return
-        if missing := await self._tools.ready(self._requires, self._wait):
-            raise Unstarted(missing, self._wait)
-        self._offered = tuple(self._tools.specs())
+        """Keep the tools a conversation begins with, at its first request: once every one
+        `requires` names has registered (once a loop), or raise `Unstarted` naming those that did
+        not within `wait` seconds. A conversation that already has its list keeps it."""
+        if not self._ready:
+            if missing := await self._tools.ready(self._requires, self._wait):
+                raise Unstarted(missing, self._wait)
+            self._ready = True
+        if begun(self._transcript.messages) is None:
+            self._transcript.append({"role": "tools", "tools": [dict(spec) for spec in self._tools.specs()]})
 
     async def _callable(self, call: Json, offered: Sequence[str]) -> Tool | str:
         """The tool `call` names, as registered now, or why the call can't run (text the model
         reads instead of a result): a name it was not offered (`refusal`), a tool that is not
         registered now (its row restarting) and did not come back within `wait` seconds, or an
         input that does not fit its spec (`malformed`)."""
-        if (refused := refusal(call, offered)) is not None:
+        messages = self._transcript.messages
+        later = {str(spec["name"]) for spec in listed(messages) or ()} - set(offered)
+        if (refused := refusal(call, offered, later)) is not None:
             return refused
         name = str(call["name"])
+        if name in removed(messages):
+            return (
+                f"error: the {name} tool was removed since this conversation began, so this call did not run"
+            )
         if self._tools.get(name) is None:
             await self._tools.ready((name,), self._wait)
         tool = self._tools.get(name)
@@ -465,6 +575,26 @@ class LoopModel:
             )
         return malformed(tool.spec, call["input"]) or tool
 
+    async def nested(self, name: str, input: Json) -> Json:
+        """A call a tool's own call makes (an input's `tools.NAME(...)`, CONTRACTS.md: tools,
+        `serve`), run as the model's are: through the tool its name has now, if its input fits,
+        once `approval` says yes, then asked of `notes`, whose notes are told with the call it
+        was made from. Answers `{"content", "failed"}`: what the caller reads, and whether that
+        is why it did not run or failed rather than its result."""
+        tool = self._tools.get(name)
+        if tool is None:
+            return {"content": f"error: there is no {name} tool now", "failed": True}
+        if (why := malformed(tool.spec, input)) is not None:
+            return {"content": why, "failed": True}
+        if not await self._approval.approve(
+            {"name": name, "input": input, "runs": tool.runs, **shown(tool, name, input)}
+        ):
+            return {"content": DECLINED, "failed": True}
+        result, touched, failed = await called(tool, name, input)
+        ran = {"name": name, "input": input, "result": result, "touched": touched}
+        self._nested += await self._executor.run(partial(noted, tuple(self._notes or ()), ran))
+        return {"content": result, "failed": failed}
+
     def _unanswered(self, message: str, dated: str | None, why: str) -> None:
         """Keep the person's message, answered with `why`: the reply ended before the model was asked."""
         self._transcript.append(_asked(message, dated, ""))
@@ -474,11 +604,11 @@ class LoopModel:
         """Run turns until one is answered, yielding what happens (CONTRACTS.md: event)."""
         today = self._today()
         dated = today if _undated(self._transcript.messages, today) else None
-        if self._offered is None and (waiting := [n for n in self._requires if self._tools.get(n) is None]):
+        if not self._ready and (waiting := [n for n in self._requires if self._tools.get(n) is None]):
             yield {"type": "note", "text": _WAITING.format(_listed(waiting))}
         try:
             await self._offer()
-            note = await self._told()
+            note, shown_told = await self._told()
         except asyncio.CancelledError:
             # stopped while the tools or the prompt were read: the message is kept all the same,
             # answered as one stopped in its first model step is
@@ -488,13 +618,14 @@ class LoopModel:
             self._unanswered(message, dated, FAILED)
             raise
         self._transcript.append(_asked(message, dated, note))
-        if note:
-            yield {"type": "note", "text": _TOLD}
-        offered = [str(spec["name"]) for spec in self._offered or ()]
+        for text in shown_told:
+            yield {"type": "note", "text": text}
         nudges = 0
         while True:
             turn = _Turn()
-            chunks = self._model.complete(request_for(self._transcript.messages), list(self._offered or ()))
+            tools = self._offered()
+            offered = [str(spec["name"]) for spec in tools]
+            chunks = self._model.complete(request_for(self._transcript.messages), tools)
             try:
                 async for chunk in chunks:
                     if (seen := turn.take(chunk)) is not None:
@@ -528,8 +659,8 @@ class LoopModel:
                         ):
                             result = DECLINED
                         else:
-                            running = True
-                            result, touched = await called(tool, name, input)
+                            running, self._nested = True, []
+                            result, touched, _ = await called(tool, name, input)
                             running = False
                             ran = {"name": name, "input": input, "result": result, "touched": touched}
                             # off the event loop too (an on-touch section reads rule files), over
@@ -543,9 +674,11 @@ class LoopModel:
                             except asyncio.CancelledError:
                                 notes = await asked
                                 raise
-                        note = await self._told()
-                        told = "\n\n".join([result, *notes, *([note] if note else [])])
-                        self._transcript.append(_answer(call, told, notes))
+                            # what the calls it made said too: each marked its note as told
+                            notes, self._nested = sorted([*notes, *self._nested]), []
+                        note, shown_told = await self._told()
+                        said = "\n\n".join([result, *notes, *([note] if note else [])])
+                        self._transcript.append(_answer(call, said, notes))
                         answered, answer, result = answered + 1, result, None
                         yield {
                             "type": "tool_result",
@@ -553,11 +686,11 @@ class LoopModel:
                             "content": answer,
                             "is_error": False,
                         }
-                        for said in notes:
-                            first = said.splitlines()[0]
+                        for each in notes:
+                            first = each.splitlines()[0]
                             yield {"type": "note", "text": _NOTED + first[:_SHOWN]}
-                        if note:
-                            yield {"type": "note", "text": _TOLD}
+                        for text in shown_told:
+                            yield {"type": "note", "text": text}
                 finally:
                     # Interrupted part-way: every call the transcript holds still gets an answer,
                     # or the next request would carry a call no result follows. Only the one with
@@ -576,11 +709,11 @@ class LoopModel:
             if stop in (ANSWERED, REFUSED) or nudges >= self._max_nudges:
                 return
             nudges += 1
-            note = await self._told()
+            note, shown_told = await self._told()
             said = f"{FEEDBACK[stop]}\n\n{note}" if note else FEEDBACK[stop]
             self._transcript.append({"role": "user", "content": said, "feedback": stop})
-            if note:
-                yield {"type": "note", "text": _TOLD}
+            for text in shown_told:
+                yield {"type": "note", "text": text}
 
 
 class _Turn:

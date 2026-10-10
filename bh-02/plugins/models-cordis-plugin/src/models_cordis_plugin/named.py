@@ -150,7 +150,7 @@ def in_project(path: Path, root: Path) -> str | None:
     """Why the models file `path` is not read, said so the person can fix it: it is in the project
     `root`, which the model's code can write. It is the project's when, as named or anywhere reading
     it goes (each directory and link on the way, links followed, to where it ends:
-    `host_paths.passes`, as memory files outside the project and the kernel's startup files are
+    `host_paths.passes`, as memory files outside the project and the python row's startup files are
     walked), it is under the root as named or as resolved; a link the model could repoint, or a
     directory it could swap for one, would choose what is read. None when it is outside. Whether
     the file is there does not matter: the model could write one."""

@@ -1,22 +1,19 @@
-"""The rows: the commands broker under `commands`; the operator's commands registered into it;
-and `!`, a shell command, the prefix claimed in it."""
+"""The rows: the commands broker under `commands`; `jobs`, where commands queue the restarts
+they ask for; the operator's commands registered into the broker; and `!`, a shell command,
+the prefix claimed in it."""
 
-import asyncio
 import functools
-from collections.abc import Callable, Sequence
-from pathlib import Path
+from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
-from commands_cordis_plugin.operations import Loader, Models, Operator, OperatorConfig, unfinished
+from commands_cordis_plugin.jobs import Jobs
+from commands_cordis_plugin.operations import Loader, Operator, Queue
 from commands_cordis_plugin.registry import Commands, CommandSpec, Run
 from commands_cordis_plugin.shell_command import ShellCommandConfig, run_line
-from cordis import Effects, Row, acquire, background, bind, component
-from cordis.composition import format_layer
-from cordis.loader import Loader as _Mounting
-from cordis.loader import read_layer
-from cordis_helpers import Job, perform
+from cordis import Effects, acquire, background, bind, component
+from cordis_helpers import perform
 
-__all__ = ["operator", "registry", "set_model", "shadowing", "shell_command"]
+__all__ = ["jobs", "operator", "registry", "shell_command"]
 
 
 @runtime_checkable
@@ -35,9 +32,20 @@ class _Claimant(Protocol):
 
 @runtime_checkable
 class _Notices(Protocol):
-    """What the operator needs of the `output` value: a line told to the person."""
+    """What the jobs row needs of the `output` value: a line told to the person."""
 
     async def notice(self, message: str) -> None: ...
+
+
+@component(provides=("jobs",))
+async def jobs(*, output: _Notices) -> Effects:
+    """Fills a `jobs` row: `use = "commands:jobs"`. The restarts commands queue (`put`), run one
+    at a time in this row's own work, a failure told to the person (`output.notice`); and
+    whether any is pending (`settled`), which the chat row waits on before it reads a line. It
+    depends on `output` alone, which never reloads, so no restart it runs reloads it."""
+    value = Jobs(output.notice)
+    yield background(perform(value.queue, lambda why: output.notice(why)))
+    yield bind("jobs", value)
 
 
 @component(provides=("commands",))
@@ -63,44 +71,11 @@ async def shell_command(*, commands: _Claimant, config: ShellCommandConfig) -> E
 
 
 @component
-async def operator(
-    *, commands: _Registrar, loader: Loader, models: Models, output: _Notices, config: OperatorConfig
-) -> Effects:
-    """Fills an `operator` row: `use = "commands:operator"`. /rows, /explain, /restart, /clear
-    and /model, over the loader that mounted it and the `models` there are. Its restarts are its
-    own background work, run after the command has answered, so one that fails is told to the
-    person (`output.notice`). It depends on `models`, not `model`, so a switch never reloads it."""
-    jobs: asyncio.Queue[Job] = asyncio.Queue()
-    yield background(perform(jobs, lambda why: output.notice(unfinished(why))))
-    files = [str(path) for path in loader.config.layers] if isinstance(loader, _Mounting) else []
-    for spec, run in Operator(
-        loader, models, config, jobs, set_model, lambda layer, rid: shadowing(files, layer, rid)
-    ).specs:
+async def operator(*, commands: _Registrar, loader: Loader, jobs: Queue) -> Effects:
+    """Fills an `operator` row: `use = "commands:operator"`. /rows, /explain and /restart, over
+    the loader that mounted it. A restart is queued in `jobs`, run after the command has
+    answered, and one that fails is told to the person there. It depends on neither `model` nor
+    `models`, so a composition without them keeps these commands, and a switch never reloads
+    it."""
+    for spec, run in Operator(loader, jobs).specs:
         yield acquire(commands.register, spec, run)
-
-
-def set_model(layer: str, rid: str, model: str) -> None:
-    """Name `model` as row `rid`'s `default` in the layer file `layer`, keeping the rest of its
-    config (the model row's `default` is the model's name)."""
-    rows = read_layer(layer)
-    current = next((r for r in rows if r.id == rid), Row(rid))
-    kept = [r for r in rows if r.id != rid]
-    chosen = Row(rid, current.use, {**(current.config or {}), "default": model}, current.disabled)
-    Path(layer).write_text(format_layer([*kept, chosen], "This session's own layer; /model edits it."))
-
-
-def shadowing(files: Sequence[str], layer: str, rid: str) -> str | None:
-    """The first of the layer `files` composed after `layer` that sets row `rid`'s config, which
-    replaces the config `layer` gives it whole (a `--patch` naming the model row, over the
-    session's layer that /model edits); None when none does. A file that can't be read is
-    skipped: the loader reports it."""
-    mine = Path(layer).resolve()
-    at = next((n for n, path in enumerate(files) if Path(path).resolve() == mine), None)
-    for path in files[at + 1 :] if at is not None else []:
-        try:
-            rows = read_layer(path)
-        except OSError, ValueError:
-            continue
-        if any(row.id == rid and row.config is not None for row in rows):
-            return path
-    return None

@@ -10,12 +10,12 @@ step; an answered step ends the query with a `ResultMessage` (its `result`: what
 said); `interrupt()` ends the running query with one at once. A tool the permission callback
 denies is answered by the fake itself, as Claude Code does. A step can
 also fall back to a non-streamed request part-way, as Claude Code does when a stream fails
-before a block completes (CLI 2.1.282): its events stop, and the whole message comes as one
+before a block completes (measured): its events stop, and the whole message comes as one
 `AssistantMessage` of a new id, stop reason and usage set, with no stream events. Or it can
 retry its stream, as Claude Code does when one stalls, or its connection drops (even part-way
 through text or a tool call's arguments): it closes the open block and the message itself (a
 `content_block_stop`, a `message_stop`, no `message_delta`), then streams the whole step again
-(CLI 2.1.282).
+(measured).
 """
 
 import asyncio

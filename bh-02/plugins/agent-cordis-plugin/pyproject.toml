@@ -6,6 +6,7 @@ requires-python = ">=3.15"
 dependencies = [
     "cordis",
     "cordis-helpers",
+    "host-paths",
 ]
 
 [project.entry-points."cordis.plugins"]
@@ -14,6 +15,7 @@ agent = "agent_cordis_plugin"
 [tool.uv.sources]
 cordis = { workspace = true }
 cordis-helpers = { workspace = true }
+host-paths = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

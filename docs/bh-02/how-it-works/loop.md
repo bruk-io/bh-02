@@ -12,24 +12,32 @@ A turn is the reply to one message. It takes one model step or more:
    the tools rows have registered with `tools` (`agent:tools`, a broker), through the provider's
    standard tool calling. In the shipped composition that is one tool, `python`.
 2. The model answers, or asks for calls to its tools.
-3. The loop asks `approval` whether each call may run, runs it through the tool its name has (a
-   `python` call is an **input** to the Python process), and adds the tool's answer to the
-   transcript as the call's result, with any notes rows add
-   ([The prompt and notes](prompt-and-notes.md)).
+3. The loop asks the `approval` rule whether each call may run unasked (and you, when it says
+   no), runs it through the tool its name has (a `python` call is an **input** to the Python
+   process), and adds the tool's answer to the transcript as the call's result, with any notes
+   rows add ([The prompt and notes](prompt-and-notes.md)).
 4. Back to 1, until the model answers without asking for a call.
 
 A call to a tool the loop did not offer, or one whose input doesn't fit the tool's spec (a
-`python` call without `code`), is answered with text saying so, and nothing runs. A call
-`approval` turns down is answered with that.
+`python` call without `code`), is answered with text saying so, and nothing runs. A call you
+turn down is answered with that.
 
 ## The tools
 
-The loop reads the list of tools once, at a conversation's first request, after the ones its
+The loop reads the list of tools at a conversation's first request, after the ones its
 `requires` names have registered (the shipped layer requires `python`; a message typed right
-after `/clear`, when the kernel is starting again, says it waits). It offers that same list,
-in name order, for the rest of the conversation: the list is the start of what a model server
-caches, so a list that changed would cost the cache. A tool's row tells the model about its tool
-in a section of the system prompt, never in the tool's description.
+after `/clear`, when the Python process is starting again, says it waits), and keeps it in the
+transcript. It offers that same list, in name order, for the rest of the conversation, since the
+list is the start of what a model server caches
+([why](prompt-and-notes.md#why-the-prompt-stays-fixed-for-a-conversation)).
+
+When the tools change partway through (an extension registers one, a layer edit adds a row),
+the loop keeps the change in the transcript and tells the model on the next message it reads,
+the way it tells a changed system prompt, and you see "told the model its tools changed since
+the conversation began". The list offered stays as it was: an added tool is offered from the
+next conversation (`/clear` or `/compact`), and a call to a removed one doesn't run. A resumed
+session sends the same requests it would have. A tool's row tells the model about its tool in a
+section of the system prompt, never in the tool's description.
 
 The transcript is a row of its own (`agent:transcript`), written to the session's
 `transcript.jsonl`. So a `/model` switch, which reloads the loop, keeps the conversation.
@@ -47,7 +55,8 @@ a reply (2 by default). So a cut-off step is never taken for the answer.
 interrupts Claude Code, the `openai` provider closes its stream. Every call the model asked for is
 still answered in the transcript: the one running as interrupted (it may have partly run), the
 rest as not run. The stopped reply stays in the transcript with what it said and that it was
-stopped, so your next message doesn't redo it.
+stopped, so your next message doesn't redo it. A step that fails (a 429, a dropped connection)
+is kept the same way, with what it said and that it failed.
 
 ## The model row and its providers
 

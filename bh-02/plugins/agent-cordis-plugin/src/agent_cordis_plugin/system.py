@@ -18,13 +18,12 @@ its place, so the prompt does not read as changed.
 time; so a section function runs there too and must not need the event loop.
 """
 
-import os
-import stat
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from cordis_helpers import Hooks
+from host_paths import Link, read_beneath
 
 __all__ = ["SystemConfig", "SystemPrompt", "branch_of", "describe"]
 
@@ -95,20 +94,10 @@ class SystemPrompt:
 
 
 def _head(root: Path) -> str:
-    """The project's `.git/HEAD`, walked to from its root through no link (`O_NOFOLLOW` on
-    each part) and read only when it is a regular file with one name: the model can write it,
-    and a link there could lead to a file it may not read. Raises OSError when it is not."""
-    here = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        git = os.open(".git", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=here)
-    finally:
-        os.close(here)
-    try:
-        opened = os.open("HEAD", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=git)
-    finally:
-        os.close(git)
-    with os.fdopen(opened, "rb") as file:
-        found = os.fstat(file.fileno())
-        if not stat.S_ISREG(found.st_mode) or found.st_nlink != 1:
-            raise OSError(f"{root / '.git' / 'HEAD'} is not a regular file with one name")
-        return file.read(_HEAD_LIMIT).decode("utf-8", errors="replace")
+    """The project's `.git/HEAD`, walked to from its root through no link and read only when it
+    is a regular file with one name (`host_paths.read_beneath`): the model can write it, and a
+    link there could lead to a file it may not read. Raises OSError when it is not."""
+    found = read_beneath(root, (".git", "HEAD"), cap=_HEAD_LIMIT)
+    if isinstance(found, Link):
+        raise OSError(f"{root / '.git' / 'HEAD'} is a link")
+    return found.decode("utf-8", errors="replace")

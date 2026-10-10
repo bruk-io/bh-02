@@ -122,7 +122,7 @@ workload, not the host: a carve-out is a mount on a host directory entry, so a
 file the host renames over a denied path (`git config` rewrites `.git/config`
 that way) or a held directory the host removes is writable inside the jail
 until a new one starts (`SPEC.md` §6, bwrap's grades). Ending the jail when
-that happens is the embedder's to do (bh-02's brig-cordis-plugin does).
+that happens is the embedder's to do (bh-02's runner-cordis-plugin does).
 
 Three things about it are worth knowing before you compose it, and all three
 are refusals rather than surprises:

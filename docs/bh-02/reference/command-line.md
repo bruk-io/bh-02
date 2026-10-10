@@ -9,11 +9,11 @@ layer files up to date. Each block below is the command's own `--help`.
 Usage: bh-02 [OPTIONS] [COMMAND] [ARGS]...
 
   A coding agent in a terminal app. The model acts in Python, through the
-  python tool, in a persistent kernel inside a jail. Claude is reached through
-  Claude Code on the Claude subscription, with the CLAUDE_CODE_OAUTH_TOKEN in
-  local.env (`claude setup-token` makes one); any OpenAI-compatible model can
-  be added to the models file. Every run is a session that `--resume`
-  continues.
+  python tool, in a persistent Python process inside a jail. Claude is reached
+  through Claude Code on the Claude subscription, with the
+  CLAUDE_CODE_OAUTH_TOKEN in local.env (`claude setup-token` makes one); any
+  OpenAI-compatible model can be added to the models file. Every run is a
+  session that `--resume` continues.
 
 Options:
   --model TEXT   The model to start on, by name: sonnet (the default), opus,
@@ -23,8 +23,8 @@ Options:
                  Repeatable.
   --trace FILE   Append every row's lifecycle event to FILE (the app owns the
                  terminal).
-  --no-jail      Run the kernel unjailed, with your own permissions; every
-                 input asks.
+  --no-jail      Run the model's code unjailed, with your own permissions;
+                 every input asks.
   --resume [ID]  Continue this directory's newest session, or the one named:
                  its id, the start of it, or its last part (the status bar's
                  short id; `bh-02 sessions` lists them).
@@ -41,6 +41,10 @@ Commands:
 - `--resume` with `--model` carries the session on with that model.
 
 When you leave, bh-02 prints the session's id and the command that continues it, on stderr.
+
+The app owns the terminal while it runs, so nothing else writes there: `--trace` appends to a
+file, a layer file that could not be reloaded is reported after the app exits, and the Python
+process's and brig's children write their stderr to files.
 
 ## `bh-02 sessions`
 
