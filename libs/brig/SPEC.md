@@ -1349,6 +1349,29 @@ is a question of where records live, not of how they are read. (Ruled
 makes it writable: decision-173, §5. Nor does a channel endpoint placed
 directly in it, on bwrap: that layout is refused, decision-174, §5.)
 
+*Amended 2026-10-11 (implementing task: TASK-0079.14).* **Teardown is total: a
+registration brig cannot read is an item, not a stop.** `kill_jail` used to read
+the registration directory with a function that raised on a file it could not
+parse, so one such file ended the call after the workload group and left every
+exec sibling and every helper running. No jail can write its `jail_dir` any more
+(decision-173, decision-174), so a registration is the launcher's own and the
+unreadable one is what tampering on the host or a broken disk leaves; teardown
+still must not stop on it. A registration file that is not valid UTF-8 JSON, is
+not an object, lacks `pid`, `pgid` or `start_time`, or holds the wrong type for
+one, becomes its own `exec_sibling` item: `FAILED`, its identity the file's
+path, its detail naming the file and what was wrong with it, saying nothing it
+names was signalled, and telling the reader to inspect it (and end any process
+of the jail it names, by hand). Nothing a file like that names is ever
+signalled. Every other sibling, the workload group and the helpers are torn down
+as before, and the unreadable items follow the readable ones in the report. A
+file that vanishes between the listing and the read was deregistered meanwhile
+and is skipped. Registrations are written whole and renamed into place, so a
+crash mid-write leaves a `.partial` file teardown never lists, not a truncated
+registration; only tampering or a disk fault yields an unreadable one. The
+residual decision-172 states (a stamp present, a pid naming nothing) is closed
+by where records live now: such a registration is genuine, its leader reaped,
+and teardown ends its group. (Ruled 2026-10-11, decision-175.)
+
 The handle is the fix for two documented failure classes in prior art: kill
 paths that lose a container's identity when a relay pid dies (identity lives
 in the serialized handle, not in a live process's argv), and single-pid

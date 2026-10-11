@@ -321,8 +321,8 @@ def _run_ladder(
     )
 
 
-def _live_exec_siblings(handle: Any) -> list[tuple[int, int, str]]:
-    """`(pid, pgid)` for every exec sibling `handle` has registered
+def _live_exec_siblings(handle: Any) -> _execs.Scan:
+    """The registrations of every exec sibling `handle` has registered
     (SPEC.md §9: "`exec` records the sibling ... somewhere the handle can
     read back in a later process") and whose exit status has not yet been
     observed -- read from `brig/run/_execs.py`'s registration directory
@@ -336,8 +336,27 @@ def _live_exec_siblings(handle: Any) -> list[tuple[int, int, str]]:
     docstring used to name as open: a pid the OS handed to something else
     between one sibling's deregistration and this scan is signalled by
     nothing, because `_run_ladder` compares the stamp before it signals.
+
+    A file that is not a registration comes back in `Scan.unreadable`, not as
+    an exception: `kill_jail` reports it and tears down everything else
+    (decision-175).
     """
-    return _execs.live(handle.jail_dir)
+    return _execs.scan(handle.jail_dir)
+
+
+def _unreadable_item(unreadable: _execs.Unreadable) -> KillItem:
+    """The `FAILED` item for a registration file brig cannot read. Nothing it
+    names is known, so nothing is signalled; the detail says where to look."""
+    return KillItem(
+        kind="exec_sibling",
+        identity=unreadable.path,
+        outcome=KillOutcome.FAILED,
+        detail=(
+            f"registration file {unreadable.path} {unreadable.reason}; nothing it names was "
+            "signalled. Inspect it: if it names a process of this jail, end that process "
+            "yourself, and remove the file"
+        ),
+    )
 
 
 def kill_jail(handle: Any, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
@@ -345,7 +364,10 @@ def kill_jail(handle: Any, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
     every still-live exec sibling it registered (task-027), then every
     `JAIL_LIFETIME` helper -- through the same ladder (`_run_ladder`),
     workload first. The returned `KillReport` is the record: nothing is
-    written anywhere (decision-152)."""
+    written anywhere (decision-152).
+
+    Total: a registration that cannot be read is its own `FAILED` item and
+    stops nothing else (decision-175)."""
     items: list[KillItem] = []
 
     outcome, detail = _run_ladder(handle.pgid, handle.pid, handle.start_time, grace)
@@ -353,11 +375,20 @@ def kill_jail(handle: Any, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
         KillItem(kind="workload_group", identity=str(handle.pgid), outcome=outcome, detail=detail)
     )
 
-    for pid, pgid, stamp in _live_exec_siblings(handle):
-        outcome, detail = _run_ladder(pgid, pid, stamp, grace)
-        items.append(
-            KillItem(kind="exec_sibling", identity=str(pgid), outcome=outcome, detail=detail)
+    siblings = _live_exec_siblings(handle)
+    for registration in siblings.registrations:
+        outcome, detail = _run_ladder(
+            registration.pgid, registration.pid, registration.start_time, grace
         )
+        items.append(
+            KillItem(
+                kind="exec_sibling",
+                identity=str(registration.pgid),
+                outcome=outcome,
+                detail=detail,
+            )
+        )
+    items.extend(_unreadable_item(unreadable) for unreadable in siblings.unreadable)
 
     # `Step.helpers` with JAIL_LIFETIME (SPEC.md §6). Each ran with
     # `start_new_session=True`, so its pid is its own pgid and the same

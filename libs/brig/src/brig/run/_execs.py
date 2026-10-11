@@ -39,6 +39,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+from dataclasses import dataclass
 from typing import Final
 
 #: Subdirectory of `jail_dir` holding one file per registered sibling.
@@ -86,50 +87,103 @@ def deregister(jail_dir: str, pid: int) -> None:
         os.remove(os.path.join(execs_dir(jail_dir), f"{pid}{_SUFFIX}"))
 
 
-def live(jail_dir: str) -> list[tuple[int, int, str]]:
-    """`(pid, pgid, start_time)` for every still-registered sibling, ordered by
-    registration time (the file's own mtime, with the pid as a tiebreaker
-    so the order is total rather than arbitrary).
+@dataclass(frozen=True, slots=True)
+class Registration:
+    """One readable registration: the sibling's pid, its group, and its stamp."""
 
-    An empty list for a jail that has no `execs` directory at all -- a jail
+    pid: int
+    pgid: int
+    start_time: str
+
+
+@dataclass(frozen=True, slots=True)
+class Unreadable:
+    """A file in the registration directory that is not a registration.
+
+    `reason` says what was wrong with it, for whoever has to inspect it."""
+
+    path: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class Scan:
+    """What the registration directory holds: the readable registrations in
+    registration order, and every file that could not be read."""
+
+    registrations: tuple[Registration, ...]
+    unreadable: tuple[Unreadable, ...]
+
+
+def _parse(text: str) -> Registration | str:
+    """The registration `text` holds, or the reason it is not one."""
+    try:
+        record = json.loads(text)
+    except ValueError as error:
+        return f"not JSON ({error})"
+    if type(record) is not dict:
+        return f"expected a JSON object, got {type(record).__name__}"
+    missing = [key for key in ("pid", "pgid", "start_time") if key not in record]
+    if missing:
+        return f"missing key(s) {', '.join(missing)}"
+    pid, pgid, start_time = record["pid"], record["pgid"], record["start_time"]
+    if type(pid) is not int or type(pgid) is not int:
+        return f"'pid'/'pgid' must both be int, got {pid!r}/{pgid!r}"
+    if type(start_time) is not str:
+        return f"'start_time' must be a str, got {start_time!r}"
+    return Registration(pid, pgid, start_time)
+
+
+def scan(jail_dir: str) -> Scan:
+    """Read every registration under `jail_dir`, never raising on one that is
+    unreadable: it is returned in `Scan.unreadable` for the caller to report.
+
+    Registrations are in registration order (the file's own mtime, with the
+    pid as a tiebreaker so the order is total rather than arbitrary).
+    Unreadable ones are in name order.
+
+    An empty scan for a jail that has no `execs` directory at all -- a jail
     that never exec'd is not an error, and neither is a rehydrated handle
     pointed at a jail directory that has since been swept.
+
+    A file that vanishes between the listing and the read was deregistered by
+    a `wait()` that returned meanwhile; gone is what teardown looks for, so it
+    is skipped. Any OTHER failure to read a file is an `Unreadable`: skipping
+    it silently would be the quiet half-teardown SPEC.md section 9 forbids,
+    and raising would stop the teardown of everything else.
     """
     directory = execs_dir(jail_dir)
     try:
-        names = os.listdir(directory)
+        names = sorted(os.listdir(directory))
     except OSError:
-        return []
+        return Scan((), ())
 
-    found: list[tuple[float, int, int, str]] = []
+    found: list[tuple[float, Registration]] = []
+    unreadable: list[Unreadable] = []
     for name in names:
-        if not name.endswith(_SUFFIX) or name.endswith(".partial"):
+        if not name.endswith(_SUFFIX):
             continue
         path = os.path.join(directory, name)
         try:
             mtime = os.stat(path).st_mtime
             with open(path, encoding="utf-8") as handle:
-                record = json.load(handle)
+                text = handle.read()
         except FileNotFoundError:
-            # Deregistered between the listing and the read -- a sibling
-            # whose `wait()` returned while this scan was running. Gone is
-            # exactly what this function is looking for, so it is skipped
-            # rather than raised. Every OTHER failure IS raised (below):
-            # a registration this process cannot read is a registration it
-            # cannot tear down, and skipping that silently would be the
-            # quiet half-teardown SPEC.md section 9 exists to forbid.
             continue
-        pid = record["pid"]
-        pgid = record["pgid"]
-        start_time = record["start_time"]
-        if type(pid) is not int or type(pgid) is not int:
-            raise ValueError(
-                f"exec registration {path!r}: 'pid'/'pgid' must both be int, got {pid!r}/{pgid!r}"
-            )
-        if type(start_time) is not str:
-            raise ValueError(
-                f"exec registration {path!r}: 'start_time' must be a str, got {start_time!r}"
-            )
-        found.append((mtime, pid, pgid, start_time))
-    found.sort()
-    return [(pid, pgid, stamp) for _mtime, pid, pgid, stamp in found]
+        except (OSError, UnicodeDecodeError) as error:
+            unreadable.append(Unreadable(path, f"cannot be read ({error})"))
+            continue
+        parsed = _parse(text)
+        if isinstance(parsed, str):
+            unreadable.append(Unreadable(path, parsed))
+        else:
+            found.append((mtime, parsed))
+    found.sort(key=lambda entry: (entry[0], entry[1].pid))
+    return Scan(tuple(registration for _mtime, registration in found), tuple(unreadable))
+
+
+def live(jail_dir: str) -> list[tuple[int, int, str]]:
+    """`(pid, pgid, start_time)` for every readable registration, in
+    registration order. Files `scan` calls unreadable are left out; only
+    tests call this, and teardown reads `scan` so it can report them."""
+    return [(r.pid, r.pgid, r.start_time) for r in scan(jail_dir).registrations]
