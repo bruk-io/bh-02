@@ -122,7 +122,7 @@ _WAIT_SECONDS = 30
 #: uppercase -- and setting only one silently leaves the other tool
 #: unrouted.
 #:
-#: **`NO_PROXY` is deliberately NOT set, not even for loopback.** The
+#: **`NO_PROXY` is deliberately EMPTY, not even loopback exempt.** The
 #: obvious default -- exempting `localhost,127.0.0.1,::1` so a jail's own
 #: channels are not dialled through their own egress filter -- turns out to
 #: buy nothing and cost the policy: SPEC.md §10's channels are UNIX sockets,
@@ -130,8 +130,11 @@ _WAIT_SECONDS = 30
 #: protect; while a loopback exemption means anything the workload can
 #: reach on this host over TCP is outside the allow list entirely. An empty
 #: `NO_PROXY` is the stricter and the simpler reading, so it is the one
-#: taken; a spec that genuinely needs loopback egress names it in
+#: taken. It is set EMPTY (`_NO_PROXY_VARS`), not left unset: the launcher
+#: passes the launching environment through, and an unset variable lets an
+#: inherited exemption (TASK-0076) reach the workload; a spec that genuinely needs loopback egress names it in
 #: `allowed_domains` like any other destination.
+_NO_PROXY_VARS = ("NO_PROXY", "no_proxy")
 _PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
 
 
@@ -252,7 +255,7 @@ class ConnectProxy:
         )
         return Step(
             wrap=_render_wrap(port_path),
-            env={},
+            env=dict.fromkeys(_NO_PROXY_VARS, ""),
             staged=(),
             helpers=(
                 Helper(

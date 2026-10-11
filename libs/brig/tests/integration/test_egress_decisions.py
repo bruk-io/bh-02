@@ -94,6 +94,15 @@ class _Origin:
             self._sock.close()
 
 
+@pytest.fixture(autouse=True)
+def _launching_environment_exempts_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TASK-0076: the launching environment holds a NO_PROXY naming loopback, as
+    many hosts' do. The jail must not inherit it: a workload that did would
+    reach the origin directly, outside the egress filter."""
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "localhost,127.0.0.1,::1,169.254.0.0/16")
+
+
 @pytest.fixture
 def origin():  # type: ignore[no-untyped-def]
     server = _Origin()

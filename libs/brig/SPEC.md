@@ -552,6 +552,13 @@ mechanism that declares a long-running process with the wrong lifetime gets
 a named failure, never the silent wedge that shape produced before it was
 bounded. (Ruled 2026-08-29, decision-134.)
 
+*Amended 2026-10-11 (implementing task: TASK-0076).* "Set to nothing" means
+SET, empty: the launcher passes the launching environment through, so a mechanism
+that leaves `NO_PROXY` unset lets an inherited one (a host exempting loopback or
+a cloud metadata range) reach the workload and put those destinations outside
+the allow list. `connect_proxy`'s step therefore carries `NO_PROXY=` and
+`no_proxy=`, both empty, which the launcher overlays on whatever it inherited.
+
 **The egress filter is a standalone process, outside the layer DAG.**
 `connect_proxy` is the only mechanism whose enforcement is a process rather
 than a kernel configuration, and that process runs trusted-side, outside the
