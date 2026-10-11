@@ -443,9 +443,10 @@ class SubprocessLauncher:
         # certainly still the process this launch just created. Every
         # liveness and kill decision compares it against the pid's current
         # occupant, so a recycled pid reads as gone rather than as this
-        # jail. `_identity.UNKNOWN` when the read lost the race with a
-        # workload that had already ended, which degrades to the pid-only
-        # behaviour that preceded it -- never to a wrong answer.
+        # jail. `_identity.UNKNOWN` when the host can't read it (`/proc` or
+        # `ps` unavailable or failing); teardown then signals nothing for
+        # this record and reports it FAILED while its group runs
+        # (decision-172).
         start_time = _identity.start_stamp(pid)
         # task-075: same darwin getpgid-zombie race as `exec_.py` -- a fast
         # workload command that exits before this read would crash

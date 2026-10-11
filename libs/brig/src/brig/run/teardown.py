@@ -287,7 +287,8 @@ def _run_ladder(
         return (
             KillOutcome.FAILED,
             f"no start time was recorded for pid {leader_pid}, so nothing shows process group "
-            f"{pgid} is this jail's; nothing was signalled",
+            f"{pgid} is this jail's; nothing was signalled. List its members (`ps -eo pid,pgid,args`) "
+            f"and, if they are this jail's, end them yourself (`kill -KILL -- -{pgid}`)",
         )
 
     if _identity.recycled(leader_pid, leader_stamp):

@@ -1,11 +1,11 @@
 ---
 id: TASK-0078
 title: Never signal a process group named by a record brig can't verify
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-10 21:58'
-updated_date: '2026-10-11 19:21'
+updated_date: '2026-10-11 19:29'
 labels:
   - brig
   - runner
@@ -64,4 +64,6 @@ Before the fix (root, uv run pytest on the new file): test_kill_signals_no_group
 - uv run ruff format --check / ruff check --no-fix libs/brig: 0; uv run mypy: no issues in 170 files; scripts/arch-check --no-fix: exit 0.
 - tini -s -- scripts/check (root): exit 1, 3 failed / 2165 passed: the two root-only brig tests, and test_auto_memory_dir::test_the_project_is_the_git_repository... caused by an empty /tmp/.git placeholder my cwd=/tmp probe left (removed; the test then passes, 2 passed).
 - scripts/linux-jail-check (with proxy env): 145 passed, 2 skipped, exit 0.
+
+Review (2026-10-11, a reviewer who did not do the work): CLOSE. AC1: an UNKNOWN stamp returns before recycled, signals and reaps nothing, for the workload, exec siblings and helpers alike. AC2: with the guard disabled in a scratch copy the decoy test fails ('a member of the decoy group is gone', the forged item ENDED), the jail's own workload group still ENDED; with the fix, 2 passed. AC3: Linux in a real bwrap jail; macOS by the rendered Seatbelt profile only, carried forward in plain words to TASK-0079.13. Can a genuine launch record UNKNOWN? Traced every producer (launcher.py workload and helpers, exec_.py siblings): each reads the stamp before its Popen is waited; on Linux an unreaped zombie's /proc stat stays readable, so UNKNOWN needs a broken host (/proc or ps unavailable), and is then reported FAILED, which bh-02 treats as not gone (keeps its placeholders). The trade against decision-155's pid-only fallback is right. tini -s libs/brig as root: 2 failed (TASK-0079.11's pair), 787 passed; ruff, mypy, arch-check exit 0. Taken by the orchestrator at close: the FAILED detail now says what to do (list the group's members, end them if they are the jail's); four comments and a test docstring that still said UNKNOWN 'lost the race' and 'degrades to pid-only' now say when it arises and that teardown signals nothing (decision-172). TASK-0079.13 and TASK-0079.14 set to high priority.
 <!-- SECTION:NOTES:END -->

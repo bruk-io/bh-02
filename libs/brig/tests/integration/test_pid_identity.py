@@ -129,8 +129,8 @@ def test_a_start_stamp_is_stable_for_one_process_and_absent_for_a_dead_one() -> 
 
 
 def test_an_unknown_stamp_degrades_to_a_pid_check_rather_than_a_false_mismatch() -> None:
-    """`UNKNOWN` is what a launch records when the read lost its race with a
-    workload that had already exited. It must degrade to the pid-only
+    """`UNKNOWN` is what a launch records when the host couldn't read the
+    start time. `alive()` must degrade to the pid-only
     behaviour that preceded decision-155 -- never to "gone", which would
     report a live jail as dead, and never to "recycled", which would read an
     unrecorded stamp as a mismatch. (Teardown does not ask `recycled` for an

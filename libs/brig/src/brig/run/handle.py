@@ -288,8 +288,8 @@ class Handle:
     pid: int
     pgid: int
     #: When the process at `pid` started, as `brig/run/_identity.py` reads
-    #: it (decision-155). `_identity.UNKNOWN` when the read lost its race
-    #: with a workload that had already exited.
+    #: it (decision-155). `_identity.UNKNOWN` when the host couldn't read
+    #: it; teardown signals nothing for such a record (decision-172).
     start_time: str
     argv: tuple[str, ...]
     cwd: str

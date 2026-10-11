@@ -61,8 +61,8 @@ def register(jail_dir: str, pid: int, pgid: int, start_time: str) -> str:
 
     `start_time` is `brig/run/_identity.start_stamp`'s reading for `pid`,
     recorded so teardown can tell this sibling from whatever the OS hands
-    that number to next (`_identity.UNKNOWN` where the read lost its race
-    with a sibling that had already exited).
+    that number to next (`_identity.UNKNOWN` where the host couldn't read
+    it; teardown signals nothing for such a registration, decision-172).
     """
     directory = execs_dir(jail_dir)
     os.makedirs(directory, exist_ok=True)
