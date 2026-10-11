@@ -61,6 +61,12 @@ has a feature the parent does not:**
     (allow network-bind)                    [ONLY when at least one LISTEN channel]
     (deny network* (with no-log))
 
+The jail_dir seal (decision-173) is emitted only when a write ROOT reaches
+the jail_dir. bwrap also seals when a channel's directory sits above it,
+because there a channel is a directory bound writable; here a channel's
+grant is a `literal` for its socket alone, so it can never open the
+jail_dir.
+
 "Spec order" needs no separate sort here: `FsPolicy.__post_init__` already
 normalizes `write_allows`/`write_denies`/`read_denies` to a sorted tuple,
 and `Spec.__post_init__` already sorts `channels` by name -- this render
@@ -273,7 +279,7 @@ def render_sbpl(
         jail_dir: The jail directory, already realpath'd by the caller
               (see `CompileCtx`'s own docstring for the invariant). This
               render only LEXICALLY guards it (see module docstring); it
-              never resolves it and never proves resolution It is
+              never resolves it and never proves resolution. It is
               sealed against any write root at or above it, but for its
               scratch `tmp/` (decision-173).
 

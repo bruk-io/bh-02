@@ -121,6 +121,7 @@ DEFAULT = (
     " libs/brig/tests/unit/test_bwrap_compile.py"
     " libs/brig/tests/unit/test_stack_strict_linux_preset.py"
     " libs/brig/tests/integration/test_bwrap_fs.py"
+    " libs/brig/tests/integration/test_bwrap_jail_dir_sealed.py"
     " libs/brig/tests/integration/test_bwrap_network.py"
     " libs/brig/tests/e2e/test_strict_linux_journey.py"
     " libs/brig/tests/integration/test_tether.py"
