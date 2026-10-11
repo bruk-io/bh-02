@@ -163,8 +163,9 @@ def _probe(handle: Handle, battery: Battery) -> ProbeReport:
 def _workspace_control_battery(workspace: str) -> Battery:
     """A single-probe, `CONTROL`-shaped battery: write a marker into
     `workspace` and read it back. IDENTICAL across AC #1 and its control
-    (AC #2) -- only `workspace`'s own permission bits differ between the
-    two callers."""
+    (AC #2) -- only `workspace` differs between the two callers: AC #1 plants a
+    directory at `probe.txt` so the write fails (EISDIR, which root obeys
+    too), AC #2 leaves it free."""
     argv = (
         "/bin/sh",
         "-c",
@@ -508,8 +509,8 @@ def test_handle_probe_is_a_bound_method_returning_the_battery_report(run_id: str
 @pytest.mark.integration
 def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
     """AC #7: the case a rule written in the wrong order gets backwards. A
-    battery carrying BOTH a failing `CONTROL` (writes into a `chmod 0o500`
-    workspace) AND a contradicting `DENIAL` probe (`/usr/bin/true`, always
+    battery carrying BOTH a failing `CONTROL` (its write fails: a
+    directory sits where the marker file goes) AND a contradicting `DENIAL` probe (`/usr/bin/true`, always
     `FAIL`, against a handle forced to grade the axis `ENFORCED`) -- if
     `run_battery` checked contradictions before the control, this would
     read `BatteryVerdict.CONTRADICTED`; the correct order reads
@@ -526,7 +527,11 @@ def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
             name="failing-workspace-control",
             shape=ProbeShape.CONTROL,
             axis=Axis.FS_WRITE,
-            argv=("/bin/sh", "-c", f"echo t050ok > {workspace}/probe.txt"),
+            argv=(
+                "/bin/sh",
+                "-c",
+                f"echo t050ok > {workspace}/probe.txt && cat {workspace}/probe.txt",
+            ),
             expect=Expectation(token="t050ok"),
         )
         denial = Probe(
@@ -558,5 +563,4 @@ def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
         finally:
             _teardown_group(handle)
     finally:
-        os.chmod(workspace, stat.S_IRWXU)
         shutil.rmtree(workspace)

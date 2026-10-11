@@ -323,9 +323,12 @@ def test_a_path_outside_read_allows_is_absent_rather_than_denied() -> None:
 def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() -> None:
     """decision-164, observed. A credential FILE and a state DIRECTORY sit
     inside the writable workspace, named in `read_denies`: the file reads
-    EACCES (the null device, bound `nodev`), the directory can be neither
-    listed, read beneath, written into, nor chmod'ed back open (an empty
-    mode-0000 read-only tmpfs), and a sibling file in the same workspace
+    EACCES (the null device, bound `nodev`), the directory hides
+    everything beneath it (an empty mode-0000 read-only tmpfs: no entry is
+    listed, the key beneath cannot be read, nothing is written into it, it
+    cannot be chmod'ed back open; the mode is observed as 0 by `stat`, and
+    where the user is unprivileged the listing is also refused, which root's
+    CAP_DAC_OVERRIDE overrides), and a sibling file in the same workspace
     reads in the same run -- the control that makes the refusals the
     carve-outs' doing. The host's files are untouched."""
     jail_dir = _new_jail_dir()
@@ -356,7 +359,7 @@ def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() 
         spec=spec,
         script=(
             f"cat {secret}; ls {state}; cat {state}/deep/key; echo x > {state}/new; "
-            f"chmod 755 {state}; cat {workspace}/notes.txt && echo CONTROL"
+            f"chmod 755 {state}; stat -c MODE%a {state}; cat {workspace}/notes.txt && echo CONTROL"
         ),
         label="read-carve-out",
     )
@@ -369,6 +372,7 @@ def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() 
     # lists the tmpfs, which is empty. The property is the same for both:
     # nothing under `state` is listed or readable.
     assert "deep" not in stdout, stdout  # the listing shows no entry beneath it
+    assert "MODE0\n" in stdout, stdout  # mode 0000, seen by root and user alike
     assert any(
         f"cat: {state}/deep/key: {reason}" in stderr
         for reason in ("Permission denied", "No such file or directory")
