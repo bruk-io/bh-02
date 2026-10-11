@@ -326,7 +326,20 @@ def _pid_liveness(pid: int) -> tuple[bool | None, str]:
         return None, f"permission denied ({exc})"
     except OSError as exc:
         return None, f"os error ({exc})"
+    if _ps_state(pid).startswith("Z"):
+        return False, "exited, unreaped (zombie)"
     return True, "alive"
+
+
+def _ps_state(pid: int) -> str:
+    """`/bin/ps`'s state letters for `pid`, `""` when it has no row. A
+    zombie (`Z`) has exited: where PID 1 does not reap (this container's
+    `process_api`, Docker without `--init`) it stays in the table for good,
+    and the sweeps count it as gone, as `teardown_group` already does."""
+    proc = subprocess.run(
+        ["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+    )
+    return proc.stdout.strip()
 
 
 def _pgid_liveness(pgid: int) -> tuple[bool | None, str]:
@@ -343,10 +356,20 @@ def _pgid_liveness(pgid: int) -> tuple[bool | None, str]:
     except ProcessLookupError:
         return False, "no such process group"
     except PermissionError as exc:
+        if _only_zombies_in(pgid):
+            return False, "only exited, unreaped members (zombies)"
         return None, f"permission denied ({exc})"
     except OSError as exc:
         return None, f"os error ({exc})"
+    if _only_zombies_in(pgid):
+        return False, "only exited, unreaped members (zombies)"
     return True, "alive"
+
+
+def _only_zombies_in(pgid: int) -> bool:
+    """True when every `/bin/ps` row in `pgid` is a zombie (and so a group
+    whose `killpg(pgid, 0)` still succeeds has, in fact, ended)."""
+    return all(row[3].startswith("Z") for row in _ps_rows() if row[2] == pgid)
 
 
 def _sweep_registry(
@@ -522,6 +545,8 @@ def _sweep_for_leaks(run_id: str, seen_pgids: set[int], harness_pid: int) -> Non
     grandchildren = _harness_grandchild_pids(harness_pid)
     labeled: list[tuple[int, int, int, str, str, list[str]]] = []
     for pid, ppid, pgid, stat, command in _ps_rows():
+        if stat.startswith("Z"):
+            continue  # exited; a PID 1 that does not reap leaves it for good
         arms: list[str] = []
         if run_id in command:
             arms.append("token")

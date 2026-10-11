@@ -418,10 +418,11 @@ class Handle:
         pid-only check could not give and the reason SPEC.md section 9 used
         to carry a paragraph admitting it.
 
-        Two limits remain, stated rather than left silent. A zombie (exited,
-        not yet reaped by its real parent) still reads `True`: it is the same
-        process with the same start time, and this method sees existence, not
-        reap state. And a handle whose `start_time` is `_identity.UNKNOWN` --
+        A zombie (exited, not yet reaped by its real parent) reads **gone**
+        (decision-171): it has ended, and where PID 1 does not reap it would
+        otherwise read as running for good.
+
+        One limit remains, stated rather than left silent. A handle whose `start_time` is `_identity.UNKNOWN` --
         the launch lost its race with a workload that exited within
         microseconds -- degrades to the pid-only check, because there is
         nothing recorded to compare against."""

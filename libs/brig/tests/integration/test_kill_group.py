@@ -31,11 +31,14 @@ on every green run, which is exactly backwards.
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import itertools
 import os
 import signal
 import subprocess
+import sys
 import time
+from collections.abc import Iterator
 
 import pytest
 
@@ -95,6 +98,24 @@ def _compiled_jail() -> CompiledJail:
         mechanism_names=(),
         matrix_version=1,
     )
+
+
+def _gone_or_zombie(pid: int) -> bool:
+    """Whether `pid` is gone, or has only exited and waits for a parent that
+    does not reap (state `Z`). `os.kill(pid, 0)` succeeds on a zombie, so it
+    cannot tell the two apart; where PID 1 does not reap (this container's
+    `process_api`, Docker without `--init`), a killed jail's orphans stay
+    zombies for good, and that is a jail that ended (decision-171)."""
+    state = _ps_state(pid)
+    return not state or state.startswith("Z")
+
+
+def _ps_state(pid: int) -> str:
+    """The `/bin/ps` state of `pid`, `""` when it has no row."""
+    proc = subprocess.run(
+        ["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+    )
+    return proc.stdout.strip()
 
 
 def _launch(argv: list[str], *, jail_id: str = "jail-under-test") -> Handle:
@@ -185,9 +206,7 @@ def test_kill_leaves_no_process_from_the_tree_alive(run_id: str) -> None:
 
     # AC #3: every pid found in the pre-assertion, not just the leader.
     for pid in (leader_pid, child_pid):
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
-        assert not _ps_has_row_for(pid), f"pid {pid} still has a /bin/ps -p row after kill()"
+        assert _gone_or_zombie(pid), f"pid {pid} is still running after kill()"
 
     # AC #6: per-item KillReport, the enum member asserted directly.
     assert len(report.items) >= 1
@@ -276,8 +295,7 @@ def test_kill_escalates_to_sigkill_when_the_leader_ignores_sigterm(run_id: str) 
     report = teardown_mod.kill_jail(handle, grace=0.3)
 
     for pid in (leader_pid, child_pid):
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+        assert _gone_or_zombie(pid), f"pid {pid} is still running after kill()"
     assert report.items[0].outcome is KillOutcome.ENDED
 
 
@@ -307,6 +325,67 @@ def test_control_kill_ends_a_cooperative_group_without_needing_escalation(run_id
     assert elapsed < 1.0, (
         f"cooperative group took {elapsed:.3f}s -- looks like it needed escalation"
     )
+
+
+# ---------------------------------------------------------------------------
+# TASK-0077 / decision-171 -- a zombie in the group is gone.
+# ---------------------------------------------------------------------------
+
+_PR_SET_CHILD_SUBREAPER = 36
+
+
+@pytest.fixture
+def non_reaping_init() -> Iterator[None]:
+    """Make THIS process the init of every orphan beneath it, and never reap
+    them: the shape of a container whose PID 1 does not reap (this
+    container's `process_api`, Docker without `--init`), reproduced under
+    any real PID 1, tini included. `PR_SET_CHILD_SUBREAPER` sends a dead
+    parent's children to the nearest subreaper ancestor, which here is the
+    test process, and the test process never waits for them. The zombies it
+    ends up holding are reaped at teardown, so none outlives the test."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        pytest.skip("PR_SET_CHILD_SUBREAPER is unavailable here")
+    try:
+        yield
+    finally:
+        libc.prctl(_PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0)
+        for pid, ppid, _pgid in _ps_rows():
+            if ppid == os.getpid() and _ps_state(pid).startswith("Z"):
+                with contextlib.suppress(ChildProcessError):
+                    os.waitpid(pid, os.WNOHANG)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="PR_SET_CHILD_SUBREAPER is Linux")
+@pytest.mark.integration
+def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
+    run_id: str, non_reaping_init: None
+) -> None:
+    """The jail's leader runs a child that exits at once and is never waited
+    for, so a zombie sits in the jail's group. `kill()` ends the leader, the
+    zombie is orphaned to a PID 1 that does not reap, and it stays in the
+    table for good. The report must still say `ENDED`: the zombie has exited.
+    Before decision-171 the `/bin/ps` scan counted it and the item was
+    `FAILED`."""
+    body = f"{sys.executable} -c 'import subprocess, time; subprocess.Popen([\"true\"]); time.sleep(100)'"
+    handle = _launch(workload_argv(run_id, body))
+    deadline = time.monotonic() + 10
+    zombies: list[int] = []
+    while time.monotonic() < deadline and not zombies:
+        zombies = [
+            pid
+            for pid, _ppid, pgid in _ps_rows()
+            if pgid == handle.pgid and _ps_state(pid).startswith("Z")
+        ]
+        time.sleep(0.05)
+    assert zombies, "CONTROL failed: no zombie was planted in the jail's group"
+
+    report = handle.kill()
+
+    still_there = [pid for pid in zombies if _ps_state(pid).startswith("Z")]
+    assert still_there == zombies, "CONTROL failed: the zombie was reaped, so PID 1 reaps here"
+    assert report.items[0].outcome is KillOutcome.ENDED, report.items[0].detail
+    assert not handle.alive()
 
 
 # ---------------------------------------------------------------------------

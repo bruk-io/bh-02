@@ -147,15 +147,16 @@ def _group_members(pgid: int) -> list[int]:
     reimplemented here so this file observes from OUTSIDE the module under
     test, not through it."""
     proc = subprocess.run(
-        ["/bin/ps", "-Ao", "pid=,pgid="], capture_output=True, text=True, check=True
+        ["/bin/ps", "-Ao", "pid=,pgid=,stat="], capture_output=True, text=True, check=True
     )
     members: list[int] = []
     for line in proc.stdout.splitlines():
         parts = line.split()
-        if len(parts) != 2:
+        if len(parts) != 3:
             continue
-        pid_s, pgid_s = parts
-        if int(pgid_s) == pgid:
+        pid_s, pgid_s, state = parts
+        # A zombie has exited; where PID 1 does not reap it stays (decision-171).
+        if int(pgid_s) == pgid and not state.startswith("Z"):
             members.append(int(pid_s))
     return members
 

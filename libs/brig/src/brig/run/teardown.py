@@ -60,8 +60,9 @@ teardown in its log writes the returned `KillReport` there.
 
 **Group-membership check**: not `os.killpg(pgid, 0)` (which reports "at
 least one member exists", not "which"), but a fresh `/bin/ps -Ao pid=,pgid=`
-scan (alias-proof per decision-026) filtered to the target `pgid` -- the
-same technique `tests/integration/test_launcher.py`'s `_children_of`
+scan (alias-proof per decision-026) filtered to the target `pgid`, zombies
+left out (decision-171: a zombie has ended, and where PID 1 does not reap it
+would stay in the table forever) -- the same technique `tests/integration/test_launcher.py`'s `_children_of`
 already uses. This module never signals a single pid on its own: the
 leader is reaped (`os.waitpid`, `WNOHANG`) purely so a zombie the trusted
 process is the real parent of does not make the group look perpetually
@@ -149,28 +150,38 @@ class KillReport:
     items: tuple[KillItem, ...]
 
 
+def _live_group_members(ps_output: str, pgid: int) -> list[int]:
+    """The pids in group `pgid` that are not zombies, from the text of
+    `/bin/ps -Ao pid=,pgid=,stat=`. A zombie (state `Z` on Linux and darwin)
+    has exited: nothing of it runs, and only its parent's `wait` -- or PID 1's,
+    once reparented -- removes the row. Where PID 1 does not reap, a killed
+    child stays in the table for good, so counting it would read a dead jail as
+    surviving (TASK-0077, decision-171). Rows that do not parse are skipped."""
+    members: list[int] = []
+    for line in ps_output.splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        pid_s, pgid_s, state = parts
+        if int(pgid_s) == pgid and not state.startswith("Z"):
+            members.append(int(pid_s))
+    return members
+
+
 def _group_member_pids(pgid: int) -> list[int]:
-    """Every pid currently in process group `pgid`, per a fresh `/bin/ps`
-    scan of the whole process table (`/bin/ps -Ao pid=,pgid=`, alias-proof
-    per decision-026 -- never a bare `ps`). This is the module's sole
-    source of truth for "is the group still there": a signal call
-    succeeding proves only that the signal was deliverable, never that
-    anything ended (SPEC.md §9's verification rung)."""
+    """Every live (non-zombie) pid currently in process group `pgid`, per a
+    fresh `/bin/ps` scan of the whole process table (`/bin/ps -Ao
+    pid=,pgid=,stat=`, alias-proof per decision-026 -- never a bare `ps`).
+    This is the module's sole source of truth for "is the group still there":
+    a signal call succeeding proves only that the signal was deliverable,
+    never that anything ended (SPEC.md §9's verification rung)."""
     proc = subprocess.run(
-        ["/bin/ps", "-Ao", "pid=,pgid="],
+        ["/bin/ps", "-Ao", "pid=,pgid=,stat="],
         capture_output=True,
         text=True,
         check=True,
     )
-    members: list[int] = []
-    for line in proc.stdout.splitlines():
-        parts = line.split()
-        if len(parts) != 2:
-            continue
-        pid_s, pgid_s = parts
-        if int(pgid_s) == pgid:
-            members.append(int(pid_s))
-    return members
+    return _live_group_members(proc.stdout, pgid)
 
 
 def _reap_leader(leader_pid: int) -> None:

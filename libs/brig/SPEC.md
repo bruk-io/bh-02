@@ -1130,6 +1130,20 @@ implementation and not a description of it:
 
 (Implementing task: this phase.)
 
+*Amended 2026-10-11 (implementing task: TASK-0077).* **A zombie is gone.** A
+process that has exited and awaits only its parent's `wait` (state `Z`, on Linux
+and darwin alike) runs nothing, but it stays in the process table, and
+`os.kill(pid, 0)` still succeeds on it. Where PID 1 does not reap (a container
+without an init, Docker without `--init`), a killed jail's orphans stay zombies
+for good, so a verification that counted them would read a dead jail as
+surviving, and `kill()` would report `FAILED` for a jail that ended. Both
+observations therefore skip zombies: the group-membership scan that verifies the
+ladder's last rung (`/bin/ps -Ao pid=,pgid=,stat=`, rows whose state starts with
+`Z` left out), and `alive()` (`identity_holds`, which reads the leader's state
+from `/proc/<pid>/stat` on Linux and `/bin/ps -o stat=` elsewhere). An
+unreadable state is not evidence of death: it reads as not a zombie.
+(Ruled 2026-10-11, decision-171.)
+
 **`exec` — a sibling process inside the same confinement** (the
 `docker exec -it` experience, for every stack). Semantics:
 

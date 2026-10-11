@@ -3,17 +3,18 @@ id: TASK-0077
 title: >-
   Count a zombie as gone in teardown and liveness, so a jail ends cleanly where
   PID 1 doesn't reap
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-10 21:58'
-updated_date: '2026-10-11 15:30'
+updated_date: '2026-10-11 18:22'
 labels:
   - brig
   - size-2
 dependencies: []
+parent_task_id: TASK-0079
 priority: medium
 type: bug
-parent_task_id: TASK-0079
 ---
 
 ## Description
@@ -24,13 +25,21 @@ Teardown decides a process group is gone by listing its members with `/bin/ps` (
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Teardown and liveness count a zombie member as gone (process state Z on Linux and darwin)
-- [ ] #2 A test plants a zombie in a jail's group under a PID 1 that doesn't reap, and the kill reports the jail ended; it fails before the fix
-- [ ] #3 brig's kill, teardown and probe tests pass in a container whose PID 1 doesn't reap
+- [x] #1 Teardown and liveness count a zombie member as gone (process state Z on Linux and darwin)
+- [x] #2 A test plants a zombie in a jail's group under a PID 1 that doesn't reap, and the kill reports the jail ended; it fails before the fix
+- [x] #3 brig's kill, teardown and probe tests pass in a container whose PID 1 doesn't reap
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1) Spec first: SPEC.md section 9 decision-171 paragraph. 2) teardown membership scan reads stat and skips Z (pure _live_group_members); _identity.is_zombie (/proc on Linux, ps stat elsewhere) used by identity_holds so Handle.alive() counts a zombie as gone. 3) Test: subreaper fixture makes the test process a PID 1 that never reaps; plant a zombie in the jail group, kill() must report ENDED; seen failing with src stashed. 4) Make the suite's own observers (conftest sweeps, kill_group, teardown_exec) count Z as gone. 5) Run brig as root bare, as tester under tini, scripts/check, arch-check.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Sized size-2 (2026-10-11): process state differs between Linux and darwin, and the test needs a PID 1 that doesn't reap.
+
+Changed: SPEC.md section 9 (decision-171, implementing task TASK-0077); brig/run/teardown.py (pure _live_group_members; scan is ps -Ao pid=,pgid=,stat=, Z rows dropped); brig/run/_identity.py (is_zombie: /proc/<pid>/stat on Linux, ps -o stat= elsewhere; identity_holds returns False for a zombie, so Handle.alive() does); handle.py docstring; tests: new unit test_teardown_zombies.py, new integration test_kill_counts_a_zombie_the_init_never_reaps_as_gone (non_reaping_init fixture: PR_SET_CHILD_SUBREAPER makes the test process an init that never reaps, so it reproduces PID 1 not reaping under any real PID 1), suite observers (conftest registry and ps sweeps, test_kill_group, test_teardown_exec) count Z as gone. Evidence: planted check seen FAILING with the src change stashed (test_kill_counts_a_zombie... failed, as did the 2 kill_group tests) and passing after. Baseline root-without-tini integration run of kill_group/teardown_exec: 4 zombie failures; after the fix: none. Full uv run pytest libs/brig as root without tini: 783 passed, 2 failed (test_bwrap_fs read_carve_out, test_probe_runner failed_control: both the root-only DAC class, TASK-0079.11; the probe_runner failure is NOT zombie related). As tester under tini: libs/brig 785 passed, 24 skipped. scripts/arch-check --no-fix exit 0; mypy clean. scripts/check as root exit 1 with 6 failures: those 2 plus 4 bh-02 tests of the zombie class outside brig (runner-cordis-plugin test_runner_confined x2, app test_python_repl x2), which pass under tini as tester; follow-up task created for them. Not run: scripts/linux-jail-check.
 <!-- SECTION:NOTES:END -->

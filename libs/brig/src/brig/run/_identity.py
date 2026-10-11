@@ -107,6 +107,44 @@ def start_stamp(pid: int) -> str:
     return stamp if stamp is not None else UNKNOWN
 
 
+def _linux_state(pid: int) -> str | None:
+    """Field 3 of `/proc/<pid>/stat`, the one-letter process state, or `None`
+    when the row cannot be read. Parsed after the LAST `)`, like the stamp."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return None
+    fields = text[text.rfind(")") + 1 :].split()
+    return fields[0] if fields else None
+
+
+def _ps_state(pid: int) -> str | None:
+    """`/bin/ps -o stat= -p <pid>`, or `None` when there is no such row."""
+    try:
+        done = subprocess.run(
+            ["/bin/ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    line = done.stdout.strip()
+    return line if done.returncode == 0 and line else None
+
+
+def is_zombie(pid: int) -> bool:
+    """True when `pid` has exited and only awaits its parent's `wait` (state
+    `Z`, on Linux and darwin alike). Such a process is gone for every purpose
+    here -- nothing of it runs -- though `os.kill(pid, 0)` still succeeds on
+    it, and where PID 1 does not reap it stays that way for good
+    (decision-171). `False` when there is no such process or its state cannot
+    be read: an unreadable state is not evidence of death."""
+    state = _linux_state(pid) if sys.platform.startswith("linux") else _ps_state(pid)
+    return state is not None and state.startswith("Z")
+
+
 def pid_exists(pid: int) -> bool:
     """Whether `pid` names any process at all -- the cheap half.
 
@@ -130,11 +168,14 @@ def identity_holds(pid: int, stamp: str) -> bool:
     handed to a different process -- which is the whole point: **a recycled
     pid reads as gone**, never as the original still running.
 
+    A zombie reads as gone too (decision-171): it has exited, and may stay in
+    the table indefinitely where PID 1 does not reap.
+
     With `stamp == UNKNOWN` this degrades, deliberately and visibly, to a
     pid-existence check: nothing was recorded to compare against, and
     inventing a mismatch would report a live workload as gone.
     """
-    if not pid_exists(pid):
+    if not pid_exists(pid) or is_zombie(pid):
         return False
     if stamp == UNKNOWN:
         return True
