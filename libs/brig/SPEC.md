@@ -1219,6 +1219,14 @@ the process table cannot be read (`/bin/ps` missing or failing) it reads alive,
 so a sweep keeps what it cannot prove dead. The scan is injectable
 (`read_table=`) so that failure is testable. (Ruled 2026-10-11, decision-176.)
 
+*Amended 2026-10-11 after review (decision-176, TASK-0079.19).* "Cannot be
+read" includes a row that does not parse. Any non-blank row of the scan that is
+not exactly an integer pid, an integer pgid and a non-empty state (a header, a
+missing or an extra column) makes the table unreadable, because skipping it
+could read a live group as gone. `group_alive` reads that as alive; teardown's
+verification rung lets it reach the per-item boundary, so the item is `FAILED`
+(the group's end cannot be confirmed), never `ENDED`. Blank lines are skipped.
+
 **`exec` — a sibling process inside the same confinement** (the
 `docker exec -it` experience, for every stack). Semantics:
 

@@ -93,6 +93,7 @@ __all__ = (  # noqa: RUF022
     "SubprocessLauncher",
     "build_compile_ctx",
     "decisions_path",
+    "group_alive",
     "kill_jail",
     "read_egress_decisions",
     "stamp",

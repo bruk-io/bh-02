@@ -155,21 +155,43 @@ class KillReport:
     items: tuple[KillItem, ...]
 
 
+class UnreadableProcessTable(ValueError):
+    """The text of `ps -Ao pid=,pgid=,stat=` has a row that is not exactly
+    pid, pgid and state: a table brig cannot read is no evidence a group is
+    gone."""
+
+
 def _live_group_members(ps_output: str, pgid: int) -> list[int]:
     """The pids in group `pgid` that are not zombies, from the text of
     `/bin/ps -Ao pid=,pgid=,stat=`. A zombie (state `Z` on Linux and darwin)
     has exited: nothing of it runs, and only its parent's `wait` -- or PID 1's,
     once reparented -- removes the row. Where PID 1 does not reap, a killed
     child stays in the table for good, so counting it would read a dead jail as
-    surviving (TASK-0077, decision-171). Rows that do not parse are skipped."""
+    surviving (TASK-0077, decision-171). Blank lines are skipped.
+
+    Raises:
+        UnreadableProcessTable: a non-blank row is not exactly an integer pid,
+            an integer pgid and a non-empty state (a header, a missing or an
+            extra column). Skipping it could read a live group as gone.
+    """
     members: list[int] = []
     for line in ps_output.splitlines():
         parts = line.split()
-        if len(parts) != 3:
+        if not parts:
             continue
+        if len(parts) != 3:
+            raise UnreadableProcessTable(
+                f"process table row {line!r} is not 'pid pgid stat'; the table cannot be read"
+            )
         pid_s, pgid_s, state = parts
-        if int(pgid_s) == pgid and not state.startswith("Z"):
-            members.append(int(pid_s))
+        try:
+            pid, row_pgid = int(pid_s), int(pgid_s)
+        except ValueError:
+            raise UnreadableProcessTable(
+                f"process table row {line!r} has a non-integer pid or pgid; the table cannot be read"
+            ) from None
+        if row_pgid == pgid and not state.startswith("Z"):
+            members.append(pid)
     return members
 
 
@@ -206,8 +228,8 @@ def group_alive(pgid: int, *, read_table: Callable[[], str] = _read_process_tabl
     A group with at least one member not in state `Z` reads alive. A group
     with no rows, or only zombies, reads gone (a zombie has exited; where PID 1
     does not reap it stays for good, which `os.killpg(pgid, 0)` cannot see).
-    When the process table cannot be read (`/bin/ps` missing or failing) the
-    answer is alive: a caller that sweeps what is dead keeps what it cannot
+    When the process table cannot be read (`/bin/ps` missing or failing, or a
+    row that is not `pid pgid stat`) the answer is alive: a caller that sweeps what is dead keeps what it cannot
     prove dead. `read_table` is the seam for that failure; it returns the text
     of `ps -Ao pid=,pgid=,stat=` and raises `OSError` or
     `subprocess.CalledProcessError` as the default does."""
@@ -215,7 +237,10 @@ def group_alive(pgid: int, *, read_table: Callable[[], str] = _read_process_tabl
         table = read_table()
     except OSError, subprocess.CalledProcessError:
         return True
-    return bool(_live_group_members(table, pgid))
+    try:
+        return bool(_live_group_members(table, pgid))
+    except UnreadableProcessTable:
+        return True
 
 
 def _reap_leader(leader_pid: int) -> None:
