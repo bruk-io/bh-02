@@ -1106,6 +1106,7 @@ async def test_the_sweep_removes_what_a_jail_left_whose_group_is_only_zombies(
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and len(_group_states(leader.pid)) < 2:
         time.sleep(0.05)
+    assert len(_group_states(leader.pid)) >= 2, "CONTROL failed: the child never started"
     os.killpg(leader.pid, signal.SIGKILL)
     while time.monotonic() < deadline and any(
         not state.startswith("Z") for state in _group_states(leader.pid).values()

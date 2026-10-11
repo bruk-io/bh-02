@@ -102,6 +102,7 @@ __all__ = [
     "allowlisted",
     "git_author",
     "graded",
+    "group_alive",
     "held",
     "holding",
     "identity",
@@ -111,7 +112,6 @@ __all__ = [
     "readable_roots",
     "record_text",
     "recorded",
-    "group_alive",
     "recorded_group",
     "records_dir",
     "released_for",
@@ -969,8 +969,11 @@ class BrigJail:
 
     def _sweep(self, lock: int, records: str) -> None:
         """Take `lock` exclusively if it can be, and then remove what every record left in
-        `records` names, but those whose jail still runs (`_hold`; `group_alive` counts a zombie as gone and a
-        process table it can't read as running, so only what is proved dead is removed)."""
+        `records` names, but those whose jail still runs (`_hold`). A jail is its process group,
+        not its pid: the group outlives its leader (bubblewrap's own first process exits;
+        measured). `group_alive` counts a zombie as gone and a process table it can't read as
+        running, so only what is proved dead is removed; a pid reused as a group since reads as
+        alive, which only keeps placeholders longer."""
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
