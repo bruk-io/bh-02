@@ -37,7 +37,7 @@ from brig.stack import MATRIX_VERSION, strict_linux
 
 _JAIL_DIR = "/run/brig/strictlinux"
 _WORKSPACE = "/srv/ws"
-_ENDPOINT = "/run/brig/strictlinux/agent.sock"
+_ENDPOINT = "/run/brig/strictlinux/chan/agent.sock"
 
 _SPEC = Spec(
     fs=FsPolicy(

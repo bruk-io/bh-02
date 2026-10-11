@@ -36,6 +36,7 @@ from brig.mech import CompileCtx
 from brig.mech.bwrap import (
     DEFAULT_BWRAP_PATH,
     Bwrap,
+    ChannelInsideJailDir,
     ChannelInsideWriteDeny,
     NetworkUnsupported,
     PlatformUnsupported,
@@ -84,7 +85,7 @@ _WORKSPACE = "/srv/ws"
 _GIT = "/srv/ws/.git"
 _HOOKS = "/srv/ws/.git/hooks"
 _ENVRC = "/srv/ws/.envrc"
-_ENDPOINT = "/run/brig/jail0/agent.sock"
+_ENDPOINT = "/run/brig/chan0/agent.sock"
 
 _SPEC = Spec(
     fs=FsPolicy(
@@ -166,8 +167,8 @@ def test_golden_argv_for_the_reference_spec() -> None:
         # path policy did not choose, so it is the one that may contain
         # them; last, it stacked over the carve-outs and unmade them.
         "--bind",
-        "/run/brig/jail0",
-        "/run/brig/jail0",
+        "/run/brig/chan0",
+        "/run/brig/chan0",
         # Stage 5: the writable roots, over the read-only tree and the
         # channel directory.
         "--bind",
@@ -228,7 +229,7 @@ def test_the_channel_directory_is_bound_before_the_write_roots() -> None:
     ordered around; see the refusal test."""
     argv = bwrap.compile(_SPEC, _spec_ctx()).wrap(())
 
-    channel_at = argv.index("/run/brig/jail0")
+    channel_at = argv.index("/run/brig/chan0")
     assert channel_at < argv.index(_WORKSPACE)
     assert channel_at < argv.index(_HOOKS)
     assert channel_at < argv.index(_ENVRC)
@@ -268,7 +269,7 @@ def test_a_carve_out_inside_the_channel_directory_still_wins() -> None:
 def test_two_channels_in_one_directory_bind_that_directory_once() -> None:
     """Deduped on the DESTINATION directory: two channels beside each other
     in the jail dir are one mount, not two identical ones."""
-    endpoint_b = "/run/brig/jail0/second.sock"
+    endpoint_b = "/run/brig/chan0/second.sock"
     spec = Spec(
         fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)),
         channels=(
@@ -283,7 +284,7 @@ def test_two_channels_in_one_directory_bind_that_directory_once() -> None:
 
     argv = bwrap.compile(spec, ctx).wrap(())
 
-    assert argv.count("/run/brig/jail0") == 2  # one `--bind SRC DEST` pair
+    assert argv.count("/run/brig/chan0") == 2  # one `--bind SRC DEST` pair
 
 
 @pytest.mark.unit
@@ -620,7 +621,7 @@ def test_a_read_carve_out_inside_a_root_is_masked_last_by_its_kind() -> None:
     )
     step = bwrap.compile(_CARVE_OUT_SPEC, ctx)
     argv = step.wrap(("w",))
-    write_root_at = argv.index("--bind", argv.index("/run/brig/jail0") + 1)
+    write_root_at = argv.index("--bind", argv.index("/run/brig/chan0") + 1)
     assert argv[write_root_at : write_root_at + 3] == ("--bind", _WORKSPACE, _WORKSPACE)
     assert argv[write_root_at + 3 :] == (
         "--ro-bind", "/dev/null", _ABSENT,
@@ -867,12 +868,38 @@ def test_no_seal_without_a_writable_tree_above_the_jail_directory() -> None:
     assert "--bind-try" not in argv
 
 
+def _channel_only_spec(endpoint: str) -> Spec:
+    return Spec(
+        fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)),
+        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+    )
+
+
 @pytest.mark.unit
-def test_a_channel_whose_directory_is_the_jail_directory_keeps_it_writable() -> None:
-    """decision-173's stated residual: the endpoint's directory is the
-    smallest grant bwrap can make for a socket, so when that directory IS the
-    jail directory nothing is sealed, a write root above it or not."""
+@pytest.mark.parametrize("sealed", [True, False], ids=["write root above", "no write root above"])
+def test_a_channel_directly_in_the_jail_directory_is_refused(sealed: bool) -> None:
+    """decision-174: the endpoint's directory is the smallest grant bwrap can
+    make for a socket, so one that IS the jail directory makes brig's control
+    state writable; refused by name, both paths named and the remedy said,
+    whether or not a write root above the jail directory is there too."""
     endpoint = f"{_JAIL_DIR}/agent.sock"
-    argv = bwrap.compile(_above_spec(endpoint), _above_ctx(endpoint)).wrap(())
-    assert ("--ro-bind", _JAIL_DIR, _JAIL_DIR) not in zip(argv, argv[1:], argv[2:], strict=False)
-    assert "--bind-try" not in argv
+    spec = _above_spec(endpoint) if sealed else _channel_only_spec(endpoint)
+    ctx = _above_ctx(endpoint) if sealed else _ctx(resolved=_identity_resolved("/usr", endpoint))
+    with pytest.raises(ChannelInsideJailDir) as refusal:
+        bwrap.compile(spec, ctx)
+    message = str(refusal.value)
+    assert endpoint in message
+    assert _JAIL_DIR in message
+    assert "subdirectory" in message
+
+
+@pytest.mark.unit
+def test_a_channel_in_a_subdirectory_of_the_jail_directory_is_not_refused() -> None:
+    """The remedy: `<jail_dir>/chan/agent.sock` compiles, its directory bound
+    read-write and the jail directory itself never bound writable."""
+    endpoint = f"{_JAIL_DIR}/chan/agent.sock"
+    ctx = _ctx(resolved=_identity_resolved("/usr", endpoint))
+    argv = bwrap.compile(_channel_only_spec(endpoint), ctx).wrap(())
+    triples = list(zip(argv, argv[1:], argv[2:], strict=False))
+    assert ("--bind", f"{_JAIL_DIR}/chan", f"{_JAIL_DIR}/chan") in triples
+    assert ("--bind", _JAIL_DIR, _JAIL_DIR) not in triples

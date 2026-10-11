@@ -366,14 +366,35 @@ Notes:
   not the `Spec`'s: `write_allows` keeps its
   meaning, the algebra is untouched, and the jail directory is never a `Spec`
   path. A write root strictly inside the jail directory, with none above it,
-  is untouched: nothing reaches the control state through it. What this does
-  not close, stated: an endpoint whose directory IS the jail directory still
-  makes that directory writable on bwrap, because that is the smallest grant a
-  bind mount can make for a socket (§6); an embedder that wants the control
-  state sealed puts its endpoint elsewhere (bh-02 does), and decision-172's
-  residual stands for the one that does not. `fs_write` grades are unchanged:
-  the rule takes writes away and claims nothing new. Implementing task:
+  is untouched: nothing reaches the control state through it. What this
+  left open, and decision-174 closed: an endpoint whose directory IS the jail
+  directory made that directory writable on bwrap, because that is the
+  smallest grant a bind mount can make for a socket (§6). `fs_write` grades
+  are unchanged: the rule takes writes away and claims nothing new. Implementing task:
   TASK-0079.13. (Ruled 2026-10-11, decision-173.)
+- **A bwrap channel's endpoint is never directly in the jail directory
+  (2026-10-11, decision-174).** bwrap grants a LISTEN channel its endpoint's
+  DIRECTORY, bound read-write (§6), so an endpoint like `<jail_dir>/agent.sock`
+  made the whole jail directory writable from inside the jail: the exec
+  registrations teardown signals by, the exit record `wait()` answers from and
+  the logs, which decision-173 seals against every write root but could not
+  against this grant. The compile now refuses that layout
+  (`brig.mech.bwrap.ChannelInsideJailDir`, a `ValueError` propagated by `Stack`
+  as the other bwrap refusals are), naming the resolved endpoint and the jail
+  directory and saying to put the endpoint in a subdirectory of it. An endpoint
+  in a subdirectory (`<jail_dir>/chan/agent.sock`) needs nothing more: its
+  directory is bound read-write, decision-173's seal keeps the rest of the jail
+  directory read-only, and brig's own layout (`exit`, `execs/`, the logs) does
+  not move. An endpoint elsewhere is unchanged (bh-02's is in a directory of its
+  own). seatbelt does not refuse it: its channel grant is the socket's own path
+  (`(allow file-write* (literal ...))`), which opens nothing else in the jail
+  directory, so the hole is bwrap's alone and a refusal there would reject a
+  layout that is safe. The cost is a layout that compiles on darwin and is
+  refused on Linux; an embedder that wants one layout puts the endpoint in a
+  subdirectory everywhere, as brig's own journey does. Grades: unchanged (a
+  refusal grades nothing). Decision-172's forged-record residual no longer
+  stands for this arrangement. Implementing task: TASK-0079.16. (Ruled
+  2026-10-11, decision-174.)
 - Serialization: `to_dict`/`from_dict`, versioned, round-trip stable.
 - **The version is `SPEC_VERSION = 1`, and an unknown key at any level is a
   refusal.** There is no migration framework and no tolerated extra field: a
@@ -783,7 +804,8 @@ be the copy decision-152 deleted the event stream for).
   decision-163), and until it was, a `write_denies` carve-out inside a jail
   directory was compiled and then silently unmade.** The endpoint's directory
   is the one mount whose path policy does not choose — an embedder puts the
-  socket in the jail directory, and a jail directory that also HOLDS the
+  socket in a subdirectory of the jail directory (directly in it is refused,
+  decision-174, §5), and a jail directory that also HOLDS the
   workspace is the ordinary arrangement — so it is the one mount that can turn
   out to be an ANCESTOR of a write root or a carve-out. Emitted last it stacked
   read-write over both, and the jail could write the exact path `write_denies`
@@ -1324,8 +1346,8 @@ nothing still lets the ladder signal its pgid (the reaped-leader case above
 needs that), so a jail that can write its `jail_dir` can still forge one; that
 is a question of where records live, not of how they are read. (Ruled
 2026-10-11, decision-172.) (A write root at or above the `jail_dir` no longer
-makes it writable: decision-173, §5. A channel endpoint placed directly in it
-still does, on bwrap.)
+makes it writable: decision-173, §5. Nor does a channel endpoint placed
+directly in it, on bwrap: that layout is refused, decision-174, §5.)
 
 The handle is the fix for two documented failure classes in prior art: kill
 paths that lose a container's identity when a relay pid dies (identity lives

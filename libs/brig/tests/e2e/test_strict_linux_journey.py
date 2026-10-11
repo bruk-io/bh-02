@@ -170,8 +170,11 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
     jail_dir = f"/tmp/bg{os.getpid()}sl0"
     workspace = f"{jail_dir}/ws"
     hooks = f"{workspace}/.git/hooks"
-    endpoint = f"{jail_dir}/agent.sock"
+    # In a subdirectory of the jail directory: bwrap grants a socket its whole
+    # directory, and one directly in the jail directory is refused (decision-174).
+    endpoint = f"{jail_dir}/chan/agent.sock"
     os.makedirs(hooks, exist_ok=True)
+    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
 
     spec = Spec(
         fs=FsPolicy(

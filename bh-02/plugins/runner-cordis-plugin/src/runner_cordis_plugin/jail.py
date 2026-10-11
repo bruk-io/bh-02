@@ -727,6 +727,7 @@ class BrigJail:
         self._platform = platform
         # The grades are known before anything starts: compile once against a throwaway directory.
         # A platform brig has no preset for grades nothing; `start` says what to use instead.
+        # The probe's endpoint is in a subdirectory: bwrap refuses one directly in the jail directory.
         # What each start is (its own grades among it) is kept with that start (`_Facts`).
         self._report: Mapping[str, str] = {}
         # where bh-02 looks for its credential that a jail of this one's has held: what `release`
@@ -738,7 +739,7 @@ class BrigJail:
         self._starting: set[asyncio.Future[None]] = set()
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
-                self._report = self.compile(probe, str(Path(probe, "k.sock")), ".", ())[1]
+                self._report = self.compile(probe, str(Path(probe, "chan", "k.sock")), ".", ())[1]
 
     def report(self) -> Mapping[str, str]:
         """The grades, known before anything starts (what `approval` reads); no start changes
