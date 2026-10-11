@@ -370,7 +370,7 @@ def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() 
     # who runs the suite: an unprivileged user is refused (EACCES on the
     # mode-0000 tmpfs); root's CAP_DAC_OVERRIDE ignores the mode bits and
     # lists the tmpfs, which is empty. The property is the same for both:
-    # nothing under `state` is listed or readable.
+    # nothing under `state` is listed or readable, and its mode is 0000.
     assert "deep" not in stdout, stdout  # the listing shows no entry beneath it
     assert "MODE0\n" in stdout, stdout  # mode 0000, seen by root and user alike
     assert any(

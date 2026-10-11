@@ -510,8 +510,9 @@ def test_handle_probe_is_a_bound_method_returning_the_battery_report(run_id: str
 def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
     """AC #7: the case a rule written in the wrong order gets backwards. A
     battery carrying BOTH a failing `CONTROL` (its write fails: a
-    directory sits where the marker file goes) AND a contradicting `DENIAL` probe (`/usr/bin/true`, always
-    `FAIL`, against a handle forced to grade the axis `ENFORCED`) -- if
+    directory sits where the marker file goes) AND a contradicting
+    `DENIAL` probe (`/usr/bin/true`, always `FAIL`, against a handle
+    forced to grade the axis `ENFORCED`) -- if
     `run_battery` checked contradictions before the control, this would
     read `BatteryVerdict.CONTRADICTED`; the correct order reads
     `BatteryVerdict.VACUOUS` (task-053 AC #15 proves this order by
