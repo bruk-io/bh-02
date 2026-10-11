@@ -27,7 +27,13 @@ Read from the CLI bundled with claude-agent-sdk 0.2.159 (2.1.281) and its tool d
   - `agent_send` is marked as the parent agent's words, not the person's;
   - children end with their parent and with the jail;
   - the jail never reaches the tmux server's socket: scrub `TMUX` and `TMUX_PANE` under `--no-jail` too, and check that Seatbelt stops a connection to the socket in /tmp.
-- Accepted with a shared jail: no isolation between sibling agents (files, scratch, processes, `.bh-02/kernel.py`). A stricter child (read-only, or writing only in a worktree) is opt-in per type, in a jail of its own compiled from `parent_spec.narrowed_to(type_spec)`, brig's pointwise meet, a subset of both.
+- Agents talk only through bh-02, never to each other directly: a message from one agent to another (a prompt, `agent_send`, a result) is a call over the sender's own socket to bh-02, which routes it to the receiver's conversation (decision-0001, "Between processes and between agents"). bh-02, the router, decides:
+  - who may message whom: parent and child now, teams later;
+  - framing: a result is "the agent's report", an `agent_send` is "the parent agent's words", never the person's;
+  - provenance: which process sent a message, known by the socket it came over, never by a field the sender writes (brig's law 6);
+  - authority: a message carries none; anything that needs approval goes to the person;
+  - visibility: every message lands in a transcript the person can watch in tmux.
+- Shared within one jail (decision-0001's per-process namespace bundle on bwrap): sibling agents share the project's files, `.bh-02/kernel.py` among them, and nothing else: each sees only its own socket, scratch directory, processes and IPC. Where a jail type can't give that (Seatbelt, or nested user namespaces blocked), the rest is shared too, counted as shared media and said. A stricter child (read-only, or writing only in a worktree) is opt-in per type, in a jail of its own compiled from `parent_spec.narrowed_to(type_spec)`, brig's pointwise meet, a subset of both.
 
 ## Open questions
 
@@ -35,4 +41,4 @@ Read from the CLI bundled with claude-agent-sdk 0.2.159 (2.1.281) and its tool d
 - [ ] Limits: depth (a child gets `agent` only if its type grants it), how many at once, a budget per agent, and whether Ctrl-C in the parent stops a foreground child.
 - [ ] What comes back: the final answer only, with the child's transcript for detail and its usage added to the session's.
 - [ ] Parallel writers: worktrees inside the parent's writable roots, or narrowed jails.
-- [ ] Teams (agents messaging each other): later, or never.
+- [ ] Teams (agents messaging each other): later, or never. If later, through the same router, never a shared mailbox (a sender's "from" would be its own claim).

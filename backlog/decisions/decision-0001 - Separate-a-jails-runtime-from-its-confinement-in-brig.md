@@ -99,7 +99,12 @@ The protocols, the composition rules, the two grading scopes and the record rule
 Why a supervisor, and why a namespace per process: today each program is a jail of its own, so stopping it ends that jail's pid namespace, and the kernel kills everything in a namespace whose first process dies, `setsid()` children included. In a shared jail the jail's namespace can't end to stop one process, so a stop falls back to the process's group, which a `setsid()` child escapes, and every co-tenant can see, read and signal every other. A pid namespace per process inside the jail's gives the kernel's guarantee back at the process scope, for a few system calls instead of a jail start; the user namespace is what lets an unprivileged process create one.
 
 - It is PID 1 of the jail's pid namespace (`--as-pid-1`), so the kernel drops `SIGKILL` and `SIGSTOP` sent to it from inside, while a `SIGKILL` from the host still lands. It reaps orphans, which also ends the zombie problem inside the jail.
-- It starts each process as PID 1 of a nested pid namespace (`os.unshare(CLONE_NEWUSER | CLONE_NEWPID)`), so stopping a process ends its namespace, a `setsid()` escape included, and siblings can't see each other's `/proc`. Some hosts restrict nested user namespaces: measure, and grade the process scope by what holds.
+- It starts each process in a bundle of nested namespaces of its own (`os.unshare(CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWNET | CLONE_NEWIPC)`), as PID 1 of its pid namespace. Each closes a path between co-tenants (the table under "Co-tenants"):
+  - pid: stopping a process ends its namespace, a `setsid()` escape included, and siblings can't see or signal each other;
+  - mount: the process sees only its own socket in the channel directory and its own scratch directory, with `/proc` mounted for its own pid namespace;
+  - network: abstract Unix sockets are per network namespace, and the jail has no network to lose;
+  - IPC: System V IPC and POSIX message queues are per IPC namespace.
+  Some hosts restrict nested user namespaces: measure, and grade the process scope by what holds.
 - It runs `python -I` with an empty environment, from a working directory the jail can't write, with its source delivered read-only (`--ro-bind-data`, since bwrap's allowlist hides `jail_dir` and stages nothing) and every import done before any jail process exists. A Spec whose allowlist lacks the interpreter is refused.
 - Its control channel is a socketpair inherited from the runtime and passed to nothing it starts. It carries `SCM_RIGHTS`, so stdio the host opened is passed in and `IoPolicy` needs no writable directory the Spec didn't name. Requests from several callers are multiplexed by id.
 - EOF on that channel means the host is gone: the supervisor ends everything (the tether, from the inside). Every request has a host-side timeout that escalates to `destroy`.
@@ -110,7 +115,7 @@ Why a supervisor, and why a namespace per process: today each program is a jail 
 - `Jail`: the instance as the embedder holds it. Its report, its records, `start(argv, *, cwd, channel)`, `destroy()`, `processes()` (with labels), `stop(processes)`, `probe(battery)`, `to_dict()`.
 - `Process`: one process in it. `interrupt()`, `stop()`, `wait()`, `alive()`, its exit events, its fidelity and process-scope control grade, the in-jail path its channel binds and the host path the embedder dials (a relay where the instance can't share one). `dial` stays optional; bh-02 dials with asyncio itself.
 - Today's launch is `create` then `start`; today's exec sibling is a second `start`.
-- Channels: the runtime owns one channel directory per jail, mounted at `create` and passed to compile in `CompileCtx`; each `start` makes a socket there. `start(channel=...)` names a channel the Spec declares. One socket per process, so the host stamps provenance by socket (law 6).
+- Channels: the runtime owns one channel directory per jail, mounted at `create` and passed to compile in `CompileCtx`; each `start` makes a socket there, visible only to that process where its jail type gives it a mount namespace of its own. `start(channel=...)` names a channel the Spec declares. One socket per process, so the host stamps provenance by socket (law 6). A socket a co-tenant can reach is not a channel to the host: it is a path to that process, counted as shared media and graded.
 - Helpers with `JAIL_LIFETIME` live from `create` to `destroy` and are reached by the tether. Today the tether doesn't reach them and the exit waiter never ends them (run/_waiters.py), so a session's egress proxy would outlive a crashed embedder.
 
 ### Records and rehydration
@@ -120,9 +125,24 @@ Why a supervisor, and why a namespace per process: today each program is a jail 
 - `Jail.from_dict(d, runtimes={RuntimeKind.HOST: host})` takes the runtimes from the embedder; a record naming a kind it didn't pass is refused (law 2). A socketpair can't cross `to_dict`, so a rehydrated bwrap jail has no agent: it can be destroyed, and its `start` is absent, not raising (SPEC.md section 9).
 - Each process's exit record lives beside its record, which also settles decision-162's one exit record per directory.
 
+### Between processes and between agents
+
+brig carries no channel between two processes or two jails. Its one channel kind connects a process to the trusted side: the process listens, only the host dials (SPEC.md section 10). It once planned a mailbox for messages between parties and deleted it (decision-153) as the embedder's steering surface rather than a way into a jail. So agents talk through their embedder: a message from one agent to another is a call over the sender's own socket to the host, which applies the embedder's policy and delivers it to the receiver's conversation. Laws 5 (authority never travels inbound as data), 6 (provenance is stamped by the deliverer) and 9 (nothing crosses the boundary anonymously) are what make that the only path. brig's part is to guarantee it: the declared sockets, each between one process and the host, plus the enumerated shared media, are the only paths between processes; anything else is graded honestly; a Spec asking for isolation a jail type can't deliver is refused.
+
 ### Co-tenants are shared media
 
-Processes in one instance share a uid and the filesystem; without nested namespaces they also share a pid namespace and `/proc`, and can read each other's environment and reopen each other's descriptors (Yama limits attach, not reading). That is counted as shared media under law 9 and named in the report's `channel_exclusivity` detail.
+Processes in one instance share a uid and the filesystem. Each other path between them is closed by its jail type, or counted as shared media under law 9 and named in each process's `channel_exclusivity` detail:
+
+| Path between co-tenants | Open without per-process isolation | Closed by (bwrap: the namespace bundle) |
+|---|---|---|
+| another process's socket | a co-tenant can connect to the main REPL's kernel socket and send it code as if it were the host | a mount namespace showing each process only its own socket |
+| signals, `/proc`, environment, descriptors (Yama limits attach, not reading) | visible, readable, signallable | a pid namespace, `/proc` mounted for it |
+| abstract Unix sockets | shared | a network namespace |
+| System V IPC, POSIX message queues | shared | an IPC namespace |
+| scratch directory | shared | a `TMPDIR` mounted only for that process |
+| the project's files | shared | nothing, by intent: co-tenants work on the same code; counted as shared media, closed only by a worktree or a narrowed jail |
+
+A jail type that can't close a row (Seatbelt has no namespaces; a container without its own agent) counts it as shared media and says so in the grade's detail.
 
 ### Law 7
 
@@ -153,7 +173,7 @@ Each runtime is a row of its own in `brig-layers`, so `host` and `oci` can't imp
 - `/release` stops each program through its owner, then destroys the jail once nothing remains; otherwise it says which program still runs (the runner README's rule that each owner stops its own).
 - The mount tripwire ends the jail with a kill that doesn't depend on the runtime, tells every owner `ended()`, and the next start creates a new jail.
 - A session-long jail widens the window for absent `read_denies` paths (decision-164) and keeps decision-168's mount points for the whole session.
-- Sub-agents' REPLs are processes in the session jail. Without nested namespaces a sub-agent can reach the kernel's channel and read its environment; the M6 milestone also needs labelled processes, stopping a set of them, concurrent starts, and a narrowed child jail that ends with its parent's.
+- Sub-agents' REPLs are processes in the session jail. With bwrap's namespace bundle a sub-agent sees only its own socket, scratch and processes, and shares the project's files; without it (Seatbelt, or nested user namespaces blocked) it can reach the kernel's socket and read its environment, and bh-02 must say so. Agents talk to each other only through bh-02 ("Between processes and between agents"). The M6 milestone also needs labelled processes, stopping a set of them, concurrent starts, and a narrowed child jail that ends with its parent's.
 - `runner:unconfined` could become brig's empty stack instead of bh-02's own subprocess code.
 
 ### Migration, Spec first (WORKFLOW.md)
@@ -183,3 +203,4 @@ Two read-only reviews, 2026-10-10: one against brig's laws, SPEC and code; one a
 - [ ] Whether nested user namespaces are allowed on the hosts bh-02 runs on; if not, the process scope grades `cooperative` and "bh-02's use" names what a restart no longer ends.
 - [ ] Where records live so no Spec grant reaches them, given the channel directory is mounted writable.
 - [ ] Whether the control battery can plant a stopped supervisor without the test itself needing privileges.
+- [ ] What the namespace bundle costs per start (a mount namespace means bind mounts for the socket, scratch and `/proc`), measured beside a jail start.
