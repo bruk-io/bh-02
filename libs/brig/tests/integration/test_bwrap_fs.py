@@ -363,8 +363,16 @@ def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() 
 
     assert "SECRETVALUE" not in stdout and "DEEPVALUE" not in stdout
     assert f"cat: {secret}: Permission denied" in stderr, stderr
-    assert f"ls: cannot open directory '{state}': Permission denied" in stderr, stderr
-    assert f"cat: {state}/deep/key: Permission denied" in stderr, stderr
+    # The directory hides its contents. What the refusal looks like depends on
+    # who runs the suite: an unprivileged user is refused (EACCES on the
+    # mode-0000 tmpfs); root's CAP_DAC_OVERRIDE ignores the mode bits and
+    # lists the tmpfs, which is empty. The property is the same for both:
+    # nothing under `state` is listed or readable.
+    assert "deep" not in stdout, stdout  # the listing shows no entry beneath it
+    assert any(
+        f"cat: {state}/deep/key: {reason}" in stderr
+        for reason in ("Permission denied", "No such file or directory")
+    ), stderr
     assert f"chmod: changing permissions of '{state}': Read-only file system" in stderr, stderr
     assert "fine" in stdout and "CONTROL" in stdout  # the sibling read, same run
     with open(secret) as f:

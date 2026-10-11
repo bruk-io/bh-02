@@ -183,14 +183,17 @@ def _workspace_control_battery(workspace: str) -> Battery:
 @pytest.mark.integration
 def test_a_failed_control_marks_the_battery_vacuous_not_passed(run_id: str) -> None:
     """AC #1 / MILESTONES M4 EC2, executed literally: the battery's
-    `CONTROL` probe attempts to write into a directory `chmod`'d `0o500`
-    (read+execute, no write) -- a REAL OS permission denial, not a faked
+    `CONTROL` probe attempts to write a file whose path is a directory
+    (EISDIR) -- a REAL OS denial that root obeys too, not a faked
     verdict. `report.battery_verdict` is `BatteryVerdict.VACUOUS`, the
     control's own `ProbeOutcome.verdict` is `Verdict.FAIL`, and that
     outcome's `probe_name` names the failing control."""
     workspace = _new_root(run_id, "ws")
     os.makedirs(workspace)
-    os.chmod(workspace, stat.S_IRUSR | stat.S_IXUSR)  # 0o500: no write
+    # The denial must hold for root too: root's CAP_DAC_OVERRIDE ignores mode
+    # bits, so a `chmod 0o500` workspace is writable to it. A directory where
+    # the control's marker file should be (EISDIR) refuses every user.
+    os.mkdir(f"{workspace}/probe.txt")
     try:
         handle = _launch(
             Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac1", run_id=run_id
@@ -208,7 +211,6 @@ def test_a_failed_control_marks_the_battery_vacuous_not_passed(run_id: str) -> N
         finally:
             _teardown_group(handle)
     finally:
-        os.chmod(workspace, stat.S_IRWXU)
         shutil.rmtree(workspace)
 
 
@@ -515,7 +517,10 @@ def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
     mutation: reordering the branches makes this exact test fail)."""
     workspace = _new_root(run_id, "ws")
     os.makedirs(workspace)
-    os.chmod(workspace, stat.S_IRUSR | stat.S_IXUSR)  # 0o500: no write
+    # The denial must hold for root too: root's CAP_DAC_OVERRIDE ignores mode
+    # bits, so a `chmod 0o500` workspace is writable to it. A directory where
+    # the control's marker file should be (EISDIR) refuses every user.
+    os.mkdir(f"{workspace}/probe.txt")
     try:
         control = Probe(
             name="failing-workspace-control",
