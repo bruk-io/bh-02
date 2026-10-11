@@ -1,9 +1,11 @@
 ---
 id: TASK-0082
 title: Let scripts/linux-jail-check build behind a TLS-intercepting proxy
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-11 16:19'
+updated_date: '2026-10-11 17:12'
 labels:
   - tooling
   - size-2
@@ -20,8 +22,20 @@ scripts/linux-jail-check builds its image from a fixed Dockerfile that downloads
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 With HTTP(S)_PROXY set and a CA bundle given (an option, or the bundle in SSL_CERT_FILE), the image builds and the container's uv, curl and apt trust that CA; the bwrap tests then run in the container
+- [x] #1 With HTTP(S)_PROXY set and a CA bundle given (an option, or the bundle in SSL_CERT_FILE), the image builds and the container's uv, curl and apt trust that CA; the bwrap tests then run in the container
 - [ ] #2 With no proxy and no CA, the image builds from the same Dockerfile as before
-- [ ] #3 Neither the proxy's address nor any credential in it lands in the image: not in a layer, not in its history
-- [ ] #4 The script's docstring says how to run it behind such a proxy
+- [x] #3 Neither the proxy's address nor any credential in it lands in the image: not in a layer, not in its history
+- [x] #4 The script's docstring says how to run it behind such a proxy
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Add --ca/SSL_CERT_FILE option; behind HTTPS_PROXY build with --network host, proxy as predefined build arg, CA as optional BuildKit secret (apt https sources + CaInfo; uv/curl env in RUN); run with host net, CA mounted ro, CA env vars. Proof: real run here.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+scripts/linux-jail-check only. Added --ca FILE (default SSL_CERT_FILE, used only with HTTPS_PROXY set; proxy without CA is an error that withholds the address). Behind a proxy: docker build --network host, HTTPS_PROXY as predefined build arg (not in history), CA as optional BuildKit secret (mode 0444, in no layer); Dockerfile RUNs switch apt sources to https with Acquire::https::CaInfo and export SSL_CERT_FILE/CURL_CA_BUNDLE for curl and uv python install; run uses --network host, CA mounted ro, HTTPS_PROXY by name, SSL_CERT_FILE/CURL_CA_BUNDLE/REQUESTS_CA_BUNDLE/GIT_SSL_CAINFO set. Evidence: (1) HTTPS_PROXY=http://127.0.0.1:42301 + SSL_CERT_FILE=/root/.ccr/ca-bundle.crt, scripts/linux-jail-check: image built, bwrap 0.9.0, uv 0.13.0, Python 3.15.0, 145 passed, 2 skipped in 40s, exit 0 (LINUX BASELINE: all green in container incl. brig bwrap tiers and bh-02 Linux jail tests). Unset SSL_CERT_FILE -> clear error. (2) No-proxy: same Dockerfile text parses and the optional secret is skipped; the build then fails at apt (exit 100) only because this container's default bridge has no network, so a full no-proxy build could not be proven here. (3) docker history --no-trunc: 0 hits for 127.0.0.1/42301/ca-bundle; docker save grep for 42301 or BEGIN CERTIFICATE: 0; container env has no proxy vars baked. (4) docstring section added. Not planted-failure tested: no safety test, a tooling script. scripts/check exit 1 on this root container: bh-02 jail tests in bh-02/app/tests/test_python_repl.py and runner-cordis-plugin test_runner_confined.py fail when run as root natively (HOME dotfiles in listings, placeholder 'held'), unrelated to this change, preexisting; format/lint/types/arch-check ok.
+<!-- SECTION:NOTES:END -->
