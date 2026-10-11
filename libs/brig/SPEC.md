@@ -1207,6 +1207,18 @@ from `/proc/<pid>/stat` on Linux and `/bin/ps -o stat=` elsewhere). An
 unreadable state is not evidence of death: it reads as not a zombie.
 (Ruled 2026-10-11, decision-171.)
 
+*Amended 2026-10-11 (implementing task: TASK-0079.19).* **An embedder can ask
+whether a group still runs.** `Handle.alive()` answers for the leader only, and
+`os.killpg(pgid, 0)` counts a zombie as running, so an embedder that sweeps dead
+jails (bh-02's runner) never saw one end where PID 1 does not reap. brig
+exports `brig.run.group_alive(pgid) -> bool`: the same scan teardown's
+verification rung uses (`/bin/ps -Ao pid=,pgid=,stat=`, one function deciding
+membership, so the two cannot drift). A group with at least one member not in
+state `Z` reads alive; a group with no rows, or only `Z` rows, reads gone; when
+the process table cannot be read (`/bin/ps` missing or failing) it reads alive,
+so a sweep keeps what it cannot prove dead. The scan is injectable
+(`read_table=`) so that failure is testable. (Ruled 2026-10-11, decision-176.)
+
 **`exec` — a sibling process inside the same confinement** (the
 `docker exec -it` experience, for every stack). Semantics:
 

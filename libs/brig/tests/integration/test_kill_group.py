@@ -49,7 +49,7 @@ from brig.run import teardown as teardown_mod
 from brig.run._exit_status import EXIT_FILENAME
 from brig.run.handle import Handle
 from brig.run.launcher import IoPolicy, SubprocessLauncher
-from brig.run.teardown import KillOutcome
+from brig.run.teardown import KillOutcome, group_alive
 from brig.stack import CompiledJail
 from tests.conftest import workload_argv
 
@@ -390,6 +390,37 @@ def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
     assert still_there == zombies, "CONTROL failed: the zombie was reaped, so PID 1 reaps here"
     assert report.items[0].outcome is KillOutcome.ENDED, report.items[0].detail
     assert not handle.alive()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="PR_SET_CHILD_SUBREAPER is Linux")
+@pytest.mark.integration
+def test_group_alive_counts_a_zombie_the_init_never_reaps_as_gone(
+    run_id: str, non_reaping_init: list[int]
+) -> None:
+    """TASK-0079.19: a group whose only members are zombies reads gone through
+    `group_alive`, though `os.killpg(pgid, 0)` still finds it."""
+    body = f"{sys.executable} -c 'import subprocess, time; subprocess.Popen([\"true\"]); time.sleep(100)'"
+    handle = _launch(workload_argv(run_id, body))
+    deadline = time.monotonic() + 10
+    zombies: list[int] = []
+    while time.monotonic() < deadline and not zombies:
+        zombies = [
+            pid
+            for pid, _ppid, pgid in _ps_rows()
+            if pgid == handle.pgid and _ps_state(pid).startswith("Z")
+        ]
+        time.sleep(0.05)
+    assert zombies, "CONTROL failed: no zombie was planted in the jail's group"
+    non_reaping_init.extend(pid for pid, _ppid, pgid in _ps_rows() if pgid == handle.pgid)
+    assert group_alive(handle.pgid), "a live leader keeps the group alive"
+
+    os.killpg(handle.pgid, signal.SIGKILL)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and group_alive(handle.pgid):
+        time.sleep(0.05)
+
+    os.killpg(handle.pgid, 0)  # CONTROL: the group is still found, by its zombies
+    assert not group_alive(handle.pgid)
 
 
 _ZOMBIE_LEADER_PARENT = """

@@ -70,6 +70,7 @@ from brig.run.teardown import KILL_ITEM_KINDS as KILL_ITEM_KINDS
 from brig.run.teardown import KillItem as KillItem
 from brig.run.teardown import KillOutcome as KillOutcome
 from brig.run.teardown import KillReport as KillReport
+from brig.run.teardown import group_alive as group_alive
 from brig.run.teardown import kill_jail as kill_jail
 
 __all__ = (  # noqa: RUF022

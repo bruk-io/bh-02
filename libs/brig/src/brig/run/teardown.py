@@ -84,6 +84,7 @@ import os
 import signal
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final
@@ -172,20 +173,49 @@ def _live_group_members(ps_output: str, pgid: int) -> list[int]:
     return members
 
 
-def _group_member_pids(pgid: int) -> list[int]:
-    """Every live (non-zombie) pid currently in process group `pgid`, per a
-    fresh `/bin/ps` scan of the whole process table (`/bin/ps -Ao
-    pid=,pgid=,stat=`, alias-proof per decision-026 -- never a bare `ps`).
-    This is the module's sole source of truth for "is the group still there":
-    a signal call succeeding proves only that the signal was deliverable,
-    never that anything ended (SPEC.md §9's verification rung)."""
-    proc = subprocess.run(
+def _read_process_table() -> str:
+    """The whole process table as text: `/bin/ps -Ao pid=,pgid=,stat=`
+    (alias-proof per decision-026 -- never a bare `ps`).
+
+    Raises:
+        OSError: `/bin/ps` cannot be run.
+        subprocess.CalledProcessError: `/bin/ps` ran and failed.
+    """
+    return subprocess.run(
         ["/bin/ps", "-Ao", "pid=,pgid=,stat="],
         capture_output=True,
         text=True,
         check=True,
-    )
-    return _live_group_members(proc.stdout, pgid)
+    ).stdout
+
+
+def _group_member_pids(pgid: int) -> list[int]:
+    """Every live (non-zombie) pid currently in process group `pgid`, per a
+    fresh scan of the whole process table. This is the module's sole source of
+    truth for "is the group still there": a signal call succeeding proves only
+    that the signal was deliverable, never that anything ended (SPEC.md §9's
+    verification rung)."""
+    return _live_group_members(_read_process_table(), pgid)
+
+
+def group_alive(pgid: int, *, read_table: Callable[[], str] = _read_process_table) -> bool:
+    """Whether process group `pgid` still has a member that runs: the one
+    definition of "the group is there" that teardown's verification rung and
+    an embedder's liveness check share (decision-176, TASK-0079.19).
+
+    A group with at least one member not in state `Z` reads alive. A group
+    with no rows, or only zombies, reads gone (a zombie has exited; where PID 1
+    does not reap it stays for good, which `os.killpg(pgid, 0)` cannot see).
+    When the process table cannot be read (`/bin/ps` missing or failing) the
+    answer is alive: a caller that sweeps what is dead keeps what it cannot
+    prove dead. `read_table` is the seam for that failure; it returns the text
+    of `ps -Ao pid=,pgid=,stat=` and raises `OSError` or
+    `subprocess.CalledProcessError` as the default does."""
+    try:
+        table = read_table()
+    except OSError, subprocess.CalledProcessError:
+        return True
+    return bool(_live_group_members(table, pgid))
 
 
 def _reap_leader(leader_pid: int) -> None:
