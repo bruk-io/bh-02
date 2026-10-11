@@ -39,10 +39,12 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 import pytest
 
 from brig.core import Spec, unenforced_report
+from brig.run import _identity
 from brig.run import teardown as teardown_mod
 from brig.run._exit_status import EXIT_FILENAME
 from brig.run.handle import Handle
@@ -335,31 +337,32 @@ _PR_SET_CHILD_SUBREAPER = 36
 
 
 @pytest.fixture
-def non_reaping_init() -> Iterator[None]:
+def non_reaping_init() -> Iterator[list[int]]:
     """Make THIS process the init of every orphan beneath it, and never reap
     them: the shape of a container whose PID 1 does not reap (this
     container's `process_api`, Docker without `--init`), reproduced under
     any real PID 1, tini included. `PR_SET_CHILD_SUBREAPER` sends a dead
     parent's children to the nearest subreaper ancestor, which here is the
-    test process, and the test process never waits for them. The zombies it
-    ends up holding are reaped at teardown, so none outlives the test."""
+    test process, and the test process never waits for them. The test adds
+    the pids it planted to the yielded list, and only those are reaped at
+    teardown (never an exit status a brig waiter thread is waiting for)."""
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
         pytest.skip("PR_SET_CHILD_SUBREAPER is unavailable here")
+    planted: list[int] = []
     try:
-        yield
+        yield planted
     finally:
         libc.prctl(_PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0)
-        for pid, ppid, _pgid in _ps_rows():
-            if ppid == os.getpid() and _ps_state(pid).startswith("Z"):
-                with contextlib.suppress(ChildProcessError):
-                    os.waitpid(pid, os.WNOHANG)
+        for pid in planted:
+            with contextlib.suppress(ChildProcessError):
+                os.waitpid(pid, os.WNOHANG)
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="PR_SET_CHILD_SUBREAPER is Linux")
 @pytest.mark.integration
 def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
-    run_id: str, non_reaping_init: None
+    run_id: str, non_reaping_init: list[int]
 ) -> None:
     """The jail's leader runs a child that exits at once and is never waited
     for, so a zombie sits in the jail's group. `kill()` ends the leader, the
@@ -379,6 +382,7 @@ def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
         ]
         time.sleep(0.05)
     assert zombies, "CONTROL failed: no zombie was planted in the jail's group"
+    non_reaping_init.extend(pid for pid, _ppid, pgid in _ps_rows() if pgid == handle.pgid)
 
     report = handle.kill()
 
@@ -386,6 +390,65 @@ def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
     assert still_there == zombies, "CONTROL failed: the zombie was reaped, so PID 1 reaps here"
     assert report.items[0].outcome is KillOutcome.ENDED, report.items[0].detail
     assert not handle.alive()
+
+
+_ZOMBIE_LEADER_PARENT = """
+import subprocess, sys, time
+leader = subprocess.Popen(
+    [sys.executable, "-c", sys.argv[1]], start_new_session=True, stdout=subprocess.PIPE, text=True
+)
+print(leader.pid, leader.stdout.readline().strip(), flush=True)
+time.sleep(100)
+"""
+
+_LEADER_THAT_LEAVES_A_MEMBER = (
+    "import subprocess; m = subprocess.Popen(['sleep', '100']); print(m.pid, flush=True)"
+)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="PR_SET_CHILD_SUBREAPER is Linux")
+@pytest.mark.integration
+def test_kill_ends_a_live_member_of_a_group_whose_leader_is_a_zombie(
+    non_reaping_init: list[int],
+) -> None:
+    """The leader of the group has exited and sits as a zombie (its parent,
+    another process, never waits for it), while a member of its group still
+    runs. The leader reads gone, but the group is not: `kill()` must still
+    signal the group, end that member, and only then report `ENDED`."""
+    parent = subprocess.Popen(
+        [sys.executable, "-c", _ZOMBIE_LEADER_PARENT, _LEADER_THAT_LEAVES_A_MEMBER],
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    assert parent.stdout is not None
+    leader_s, member_s = parent.stdout.readline().split()
+    leader_pid, member_pid = int(leader_s), int(member_s)
+    non_reaping_init.extend([leader_pid, member_pid])
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not _ps_state(leader_pid).startswith("Z"):
+            time.sleep(0.02)
+        assert _ps_state(leader_pid).startswith("Z"), "CONTROL failed: the leader is not a zombie"
+        assert _ps_state(member_pid) and not _gone_or_zombie(member_pid), (
+            "CONTROL failed: the member is not running"
+        )
+        handle = SimpleNamespace(
+            pid=leader_pid,
+            pgid=leader_pid,
+            start_time=_identity.start_stamp(leader_pid),
+            jail_dir=_new_jail_dir(),
+            helper_pids=(),
+            helper_stamps=(),
+        )
+
+        report = teardown_mod.kill_jail(handle, grace=0.5)
+
+        assert _gone_or_zombie(member_pid), "the live member survived kill()"
+        assert report.items[0].outcome is KillOutcome.ENDED, report.items[0].detail
+    finally:
+        parent.kill()
+        parent.wait()
 
 
 # ---------------------------------------------------------------------------

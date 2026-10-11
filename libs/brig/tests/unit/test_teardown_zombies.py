@@ -32,3 +32,17 @@ def test_a_group_of_only_zombies_is_empty() -> None:
 def test_other_groups_and_unparsable_rows_are_ignored() -> None:
     assert _live_group_members(_PS, 200) == [200]
     assert _live_group_members(_PS, 999) == []
+
+
+@pytest.mark.unit
+def test_the_sweep_does_not_call_a_group_gone_that_ps_cannot_see(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No `ps` rows for a group `killpg` still finds is unexplained, not ended."""
+    from tests import conftest
+
+    monkeypatch.setattr(conftest, "_ps_rows", lambda: [(1, 0, 5, "S", "x")])
+    assert conftest._only_zombies_in(9) is False
+    assert conftest._only_zombies_in(5) is False
+    monkeypatch.setattr(conftest, "_ps_rows", lambda: [(1, 0, 5, "Z", "x"), (2, 0, 5, "Z+", "x")])
+    assert conftest._only_zombies_in(5) is True

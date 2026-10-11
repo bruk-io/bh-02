@@ -367,9 +367,12 @@ def _pgid_liveness(pgid: int) -> tuple[bool | None, str]:
 
 
 def _only_zombies_in(pgid: int) -> bool:
-    """True when every `/bin/ps` row in `pgid` is a zombie (and so a group
-    whose `killpg(pgid, 0)` still succeeds has, in fact, ended)."""
-    return all(row[3].startswith("Z") for row in _ps_rows() if row[2] == pgid)
+    """True when `/bin/ps` shows at least one row in `pgid` and every one is
+    a zombie (so a group whose `killpg(pgid, 0)` still succeeds has, in fact,
+    ended). No rows at all is NOT this: `killpg` finding a group that `ps`
+    cannot see is unexplained, and the sweep must not call it gone."""
+    states = [row[3] for row in _ps_rows() if row[2] == pgid]
+    return bool(states) and all(state.startswith("Z") for state in states)
 
 
 def _sweep_registry(

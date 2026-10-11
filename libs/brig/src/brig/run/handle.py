@@ -422,10 +422,14 @@ class Handle:
         (decision-171): it has ended, and where PID 1 does not reap it would
         otherwise read as running for good.
 
-        One limit remains, stated rather than left silent. A handle whose `start_time` is `_identity.UNKNOWN` --
-        the launch lost its race with a workload that exited within
-        microseconds -- degrades to the pid-only check, because there is
-        nothing recorded to compare against."""
+        This answers for the LEADER only. A zombie leader reads gone while
+        other members of its group may still run; `kill()` (teardown, which
+        scans the group, not the leader) is what ends a group.
+
+        One limit remains, stated rather than left silent. A handle whose
+        `start_time` is `_identity.UNKNOWN` -- the launch lost its race with a
+        workload that exited within microseconds -- degrades to the pid-only
+        check, because there is nothing recorded to compare against."""
         return _identity.identity_holds(self.pid, self.start_time)
 
     def interrupt(self) -> bool:
