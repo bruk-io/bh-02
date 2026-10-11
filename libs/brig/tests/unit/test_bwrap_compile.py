@@ -735,3 +735,144 @@ def test_an_absent_directory_between_a_root_and_a_carve_out_is_not_pinned() -> N
     assert _GIT not in bwrap.compile(spec, absent).wrap(())
     with pytest.raises(UnknownPathExistence, match=re.escape(_GIT)):
         bwrap.compile(spec, _ctx(resolved=resolved, exists={_HOOKS: True}))
+
+
+# --------------------------------------------------------------------------
+# The seal (decision-173): no write root grants the jail directory.
+# --------------------------------------------------------------------------
+
+#: A write root ABOVE the jail directory, the shape bh-02 run from `/tmp`
+#: has: a workspace carve-out (pinned outside the jail directory), a channel
+#: directory inside it, a carve-out in its scratch and one in the sealed part.
+_ABOVE = "/run/brig"
+_INNER_ENDPOINT = f"{_JAIL_DIR}/ch/agent.sock"
+_ABOVE_HOOKS = f"{_ABOVE}/ws/.git/hooks"
+_SEALED_DENY = f"{_JAIL_DIR}/execs/x"
+_SCRATCH_DENY = f"{_JAIL_DIR}/tmp/a/.envrc"
+_ABOVE_PINS = (
+    _JAIL_DIR,
+    f"{_ABOVE}/ws",
+    f"{_JAIL_DIR}/execs",
+    f"{_JAIL_DIR}/tmp",
+    f"{_ABOVE}/ws/.git",
+    f"{_JAIL_DIR}/tmp/a",
+)
+
+
+def _above_spec(endpoint: str = _INNER_ENDPOINT) -> Spec:
+    return Spec(
+        fs=FsPolicy(
+            read_model=ReadModel.ALLOW_LIST,
+            read_allows=("/usr",),
+            write_allows=(_ABOVE,),
+            write_denies=(_ABOVE_HOOKS, _SEALED_DENY, _SCRATCH_DENY),
+        ),
+        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+    )
+
+
+def _above_ctx(endpoint: str = _INNER_ENDPOINT) -> CompileCtx:
+    paths = ("/usr", _ABOVE, _ABOVE_HOOKS, _SEALED_DENY, _SCRATCH_DENY, endpoint, *_ABOVE_PINS)
+    return _ctx(
+        resolved=_identity_resolved(*paths),
+        exists={**dict.fromkeys(paths, True), _SCRATCH_DENY: False},
+        is_dir=dict.fromkeys(_ABOVE_PINS, True),
+    )
+
+
+@pytest.mark.unit
+def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
+    """decision-173, the whole argv. After the write root and the pins
+    outside the jail directory: the jail directory read-only, its scratch
+    writable again (`--bind-try`), the channel directory inside it bound
+    again, then only the pins inside the scratch. The pins at the jail
+    directory and in `execs/` are not bound (either would undo the seal),
+    and the carve-out in the sealed part is not mounted (its tmpfs could not
+    be made there, and nothing could write it anyway)."""
+    argv = bwrap.compile(_above_spec(), _above_ctx()).wrap(("w",))
+    assert argv == (
+        DEFAULT_BWRAP_PATH,
+        "--unshare-all",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--bind",
+        f"{_JAIL_DIR}/ch",
+        f"{_JAIL_DIR}/ch",
+        "--bind",
+        _ABOVE,
+        _ABOVE,
+        "--bind",
+        f"{_ABOVE}/ws",
+        f"{_ABOVE}/ws",
+        "--bind",
+        f"{_ABOVE}/ws/.git",
+        f"{_ABOVE}/ws/.git",
+        "--ro-bind",
+        _JAIL_DIR,
+        _JAIL_DIR,
+        "--bind-try",
+        f"{_JAIL_DIR}/tmp",
+        f"{_JAIL_DIR}/tmp",
+        "--bind",
+        f"{_JAIL_DIR}/ch",
+        f"{_JAIL_DIR}/ch",
+        "--bind",
+        f"{_JAIL_DIR}/tmp",
+        f"{_JAIL_DIR}/tmp",
+        "--bind",
+        f"{_JAIL_DIR}/tmp/a",
+        f"{_JAIL_DIR}/tmp/a",
+        "--tmpfs",
+        _SCRATCH_DENY,
+        "--remount-ro",
+        _SCRATCH_DENY,
+        "--ro-bind",
+        _ABOVE_HOOKS,
+        _ABOVE_HOOKS,
+        "--remount-ro",
+        "/",
+        "--",
+        "w",
+    )
+
+
+@pytest.mark.unit
+def test_the_seal_is_shown_where_each_writable_tree_puts_the_jail_directory() -> None:
+    """A write root spelled through a link mounts the jail directory at the
+    spec's spelling, so that is where it is sealed; `/` reaches it at its own
+    path. The source is always the resolved jail directory."""
+    for root, resolved_root, dest in (("/r", _ABOVE, "/r/jail0"), ("/", "/", _JAIL_DIR)):
+        spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, write_allows=(root,)))
+        argv = bwrap.compile(spec, _ctx(resolved={root: resolved_root})).wrap(())
+        seal = ("--ro-bind", _JAIL_DIR, dest, "--bind-try", f"{_JAIL_DIR}/tmp", f"{dest}/tmp")
+        assert argv[-9:-3] == seal, argv
+
+
+@pytest.mark.unit
+def test_no_seal_without_a_writable_tree_above_the_jail_directory() -> None:
+    """The control: the reference spec's write root is beside the jail
+    directory and its channel's directory IS the jail directory, so nothing
+    is sealed and the golden above holds unchanged. A write root strictly
+    inside the jail directory reaches none of its control state either."""
+    assert "--bind-try" not in bwrap.compile(_SPEC, _spec_ctx()).wrap(())
+    inside = f"{_JAIL_DIR}/ws"
+    spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, write_allows=(inside,)))
+    argv = bwrap.compile(spec, _ctx(resolved={inside: inside})).wrap(())
+    assert _JAIL_DIR not in argv
+    assert "--bind-try" not in argv
+
+
+@pytest.mark.unit
+def test_a_channel_whose_directory_is_the_jail_directory_keeps_it_writable() -> None:
+    """decision-173's stated residual: the endpoint's directory is the
+    smallest grant bwrap can make for a socket, so when that directory IS the
+    jail directory nothing is sealed, a write root above it or not."""
+    endpoint = f"{_JAIL_DIR}/agent.sock"
+    argv = bwrap.compile(_above_spec(endpoint), _above_ctx(endpoint)).wrap(())
+    assert ("--ro-bind", _JAIL_DIR, _JAIL_DIR) not in zip(argv, argv[1:], argv[2:], strict=False)
+    assert "--bind-try" not in argv

@@ -301,3 +301,65 @@ def test_network_bind_renders_exactly_once_with_one_listen_channel() -> None:
 def test_network_bind_renders_exactly_zero_times_with_no_channels() -> None:
     rendered = render_sbpl(Spec(), resolved={}, jail_dir="/private/tmp/x")
     assert rendered.splitlines().count("(allow network-bind)") == 0
+
+
+# --------------------------------------------------------------------------
+# The seal (decision-173): no write root grants the jail directory.
+# --------------------------------------------------------------------------
+
+#: bh-02's shape when run from `/tmp` on darwin: the project is
+#: `/private/tmp`, the jail directory `/private/tmp/bh-j-1` (its scratch
+#: `tmp/` beneath it), the endpoint in a directory of its own beside it.
+_SEALED_JAIL_DIR = "/private/tmp/bh-j-1"
+
+
+def _sealed_spec(root: str) -> Spec:
+    return Spec(
+        fs=FsPolicy(write_allows=(root,), write_denies=("/private/tmp/.git/hooks",)),
+        channels=(
+            Channel(name="kernel", kind=ChannelKind.LISTEN, endpoint=f"{_SEALED_JAIL_DIR}/k.sock"),
+        ),
+    )
+
+
+def _sealed_resolved(root: str) -> dict[str, str]:
+    return {
+        root: root,
+        "/private/tmp/.git/hooks": "/private/tmp/.git/hooks",
+        f"{_SEALED_JAIL_DIR}/k.sock": f"{_SEALED_JAIL_DIR}/k.sock",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("root", ["/private/tmp", _SEALED_JAIL_DIR, "/"])
+def test_a_write_root_at_or_above_the_jail_directory_is_denied_it_but_its_scratch(
+    root: str,
+) -> None:
+    """After the write roots' allows: a deny on the jail directory, then an
+    allow on its scratch, then the carve-outs, then the channel's literal
+    (an endpoint in the jail directory stays creatable). Later wins in both
+    directions, so this order is the whole of the rule."""
+    profile = render_sbpl(
+        _sealed_spec(root), resolved=_sealed_resolved(root), jail_dir=_SEALED_JAIL_DIR
+    )
+    lines = profile.splitlines()
+    start = lines.index('(deny file-write* (subpath "/"))')
+    assert lines[start : start + 6] == [
+        '(deny file-write* (subpath "/"))',
+        f'(allow file-write* (subpath "{root}"))',
+        f'(deny file-write* (subpath "{_SEALED_JAIL_DIR}"))',
+        f'(allow file-write* (subpath "{_SEALED_JAIL_DIR}/tmp"))',
+        '(deny file-write* (subpath "/private/tmp/.git/hooks"))',
+        f'(allow file-write* (literal "{_SEALED_JAIL_DIR}/k.sock"))',
+    ]
+
+
+@pytest.mark.unit
+def test_no_seal_when_no_write_root_reaches_the_jail_directory() -> None:
+    """The control: a write root inside the jail directory (the golden's
+    shape) or beside it adds no line about the jail directory."""
+    for root in ("/private/tmp/bg1/workspace", "/private/tmp/elsewhere"):
+        spec = Spec(fs=FsPolicy(write_allows=(root,)))
+        profile = render_sbpl(spec, resolved={root: root}, jail_dir=_GOLDEN_JAIL_DIR)
+        assert f'(subpath "{_GOLDEN_JAIL_DIR}")' not in profile
+        assert f'(subpath "{_GOLDEN_JAIL_DIR}/tmp")' not in profile

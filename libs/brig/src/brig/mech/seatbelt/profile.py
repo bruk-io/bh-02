@@ -54,6 +54,8 @@ has a feature the parent does not:**
       [per read_denies entry, spec order]   (deny file-read* (subpath "RESOLVED"))
     (deny file-write* (subpath "/"))
       [per write_allows entry, spec order]  (allow file-write* (subpath "RESOLVED"))
+      [when a write root reaches jail_dir]  (deny file-write* (subpath "JAIL_DIR"))
+                                            (allow file-write* (subpath "JAIL_DIR/tmp"))
       [per write_denies entry, spec order]  (deny file-write* (subpath "RESOLVED"))
       [per LISTEN channel, spec order]      (allow file-write* (literal "RESOLVED"))
     (allow network-bind)                    [ONLY when at least one LISTEN channel]
@@ -70,6 +72,20 @@ is a carve-out INSIDE `write_allows`), and it is the one line of this
 render `tests/unit/test_seatbelt_profile.py`'s mutation check (AC #8) is
 about: move the write_denies loop above the write_allows loop and both the
 ORDERING test and the GOLDEN test go red.
+
+**The jail directory is sealed against the write roots (decision-173).** A
+write root at or above `jail_dir` (an embedder run from `/private/tmp`, or
+from `/`) would otherwise let the workload write brig's control state there:
+exec registrations teardown signals by, the exit record, and this
+mechanism's own staged profile, which every exec sibling is confined by
+again. So when one reaches it, a deny on `jail_dir` follows the write
+roots' allows, then an allow on its scratch `tmp/`, both before the
+carve-outs. Later wins in both directions: the deny over the allow is the
+order `write_denies` already relies on, and the allow over the deny is the
+order every write root already relies on over the whole-tree deny. A LISTEN
+channel's literal still follows, so an endpoint in `jail_dir` stays
+creatable and nothing else there does. Only when a write root reaches it,
+so a profile with none (the ordinary one) is unchanged.
 
 **Two dialect facts, carried because the parent PROBED them -- do not "fix"
 these into something that reads better and enforces less:**
@@ -148,6 +164,10 @@ _SYMLINKED_ROOTS: tuple[str, ...] = ("/tmp", "/var", "/etc")
 #: that comes from a `Spec` or from `resolved`. Passed to `_sbpl_subpath`
 #: for this render's own two whole-tree default rules only.
 _WHOLE_TREE = "*"
+
+#: The jail's scratch, under `jail_dir`: the one part of it a write root
+#: reaching it still grants (decision-173).
+_SCRATCH: Final[str] = "tmp"
 
 
 class UnresolvedPath(ValueError):
@@ -253,7 +273,9 @@ def render_sbpl(
         jail_dir: The jail directory, already realpath'd by the caller
               (see `CompileCtx`'s own docstring for the invariant). This
               render only LEXICALLY guards it (see module docstring); it
-              never resolves it and never proves resolution.
+              never resolves it and never proves resolution It is
+              sealed against any write root at or above it, but for its
+              scratch `tmp/` (decision-173).
 
     Returns:
         The full SBPL profile text, newline-terminated.
@@ -293,8 +315,16 @@ def render_sbpl(
 
     lines.append(f"(deny file-write* {_sbpl_subpath(_WHOLE_TREE)})")
 
-    for path in spec.fs.write_allows:
-        lines.append(f"(allow file-write* {_sbpl_subpath(_resolve(path, resolved))})")
+    resolved_write_allows = tuple(_resolve(path, resolved) for path in spec.fs.write_allows)
+    for resolved_allow in resolved_write_allows:
+        lines.append(f"(allow file-write* {_sbpl_subpath(resolved_allow)})")
+
+    # The seal (decision-173): no write root grants the jail directory, only
+    # its scratch. After the allows, before the carve-outs; later wins.
+    if any(_is_subpath(jail_dir, root) for root in resolved_write_allows):
+        lines.append(f"(deny file-write* {_sbpl_subpath(jail_dir)})")
+        scratch = f"{jail_dir.rstrip('/')}/{_SCRATCH}"
+        lines.append(f"(allow file-write* {_sbpl_subpath(scratch)})")
 
     # write_denies is a carve-out INSIDE write_allows (SPEC.md §5): these
     # DENY lines must be emitted AFTER every write_allows ALLOW line above

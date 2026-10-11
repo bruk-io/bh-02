@@ -112,7 +112,9 @@ _FS_READ_DETAIL = (
 _FS_WRITE_DETAIL = (
     "seatbelt enforces fs_write by denying by default and allowing only "
     "spec.fs.write_allows; write_denies carve-outs are compiled deny-over-"
-    "allow -- inside the granted write_allows, never as a separate policy."
+    "allow -- inside the granted write_allows, never as a separate policy. "
+    "The jail directory is never writable through a write root above it: "
+    "it is denied after them, but for its scratch tmp/."
 )
 
 _NETWORK_DETAIL = (

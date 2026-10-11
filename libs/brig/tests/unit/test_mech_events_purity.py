@@ -206,9 +206,18 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
     # than being fetched here, which is exactly why `os` is absent from this
     # row while `_parent()` does POSIX dirname by string. `re` is its denial
     # signatures, `typing` its `Final` constants, `collections.abc` the
-    # `Mapping` its two ctx lookups take.
+    # `Mapping` its two ctx lookups take. `dataclasses` is the frozen value
+    # its seal decision returns (decision-173).
     "bwrap.py": frozenset(
-        {"__future__", "collections.abc", "re", "typing", "brig.core", "brig.mech.contract"}
+        {
+            "__future__",
+            "collections.abc",
+            "dataclasses",
+            "re",
+            "typing",
+            "brig.core",
+            "brig.mech.contract",
+        }
     ),
     # `connect_proxy.py` (M6). Note what is NOT here: `brig.proxy`. The
     # proxy process it starts has an empty layer row (decision-133) and

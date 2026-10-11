@@ -341,6 +341,39 @@ Notes:
 - **No shared `/tmp` by default.** A writable path shared between two jails is
   an unaccounted jail-to-jail channel. Temp space is per-jail, inside
   `write_allows`.
+- **No write root grants the jail directory (2026-10-11, decision-173).** The
+  `jail_dir` is brig's control state, not the workload's: the exec
+  registrations teardown signals by (`execs/`, §9), the exit record `wait()`
+  answers from (`exit`, §8), the stdio and helper logs, and the staged files an
+  exec sibling is confined by again (seatbelt's profile). A write root is a
+  subtree, so one AT or ABOVE the jail directory (a workspace that is `/tmp`,
+  an embedder run from `/`) used to hand all of that to the workload: bh-02 run
+  with its working directory at `/tmp` let a jailed input write
+  `<jail_dir>/execs/1.json`, `<jail_dir>/exit` and `<jail_dir>/x`, all seen on
+  the host, and a malformed registration made the jail's own `kill()` raise
+  (found by TASK-0078). So every mechanism that compiles `fs_write` takes the
+  jail directory back out of whatever write root reaches it, and grants inside
+  it exactly two things: **`<jail_dir>/tmp`, the jail's scratch** (an embedder
+  points `TMPDIR` there, and allow tuples are an antichain, so a `Spec` with a
+  write root above the jail directory cannot name a write root inside it: the
+  scratch has to be brig's own name), and **a declared LISTEN channel's own
+  grant**, unchanged (bwrap's endpoint directory, seatbelt's socket literal;
+  §6). bwrap compiles it as mounts after the write roots (§6's stage list);
+  seatbelt as `(deny file-write* (subpath JAIL_DIR))` after the write roots'
+  allows, then `(allow file-write* (subpath JAIL_DIR/tmp))`, both before the
+  carve-outs, since a later rule wins in either direction (the parent's probed
+  order that `write_denies` already relies on). The rule is the mechanism's,
+  not the `Spec`'s: `write_allows` keeps its
+  meaning, the algebra is untouched, and the jail directory is never a `Spec`
+  path. A write root strictly inside the jail directory, with none above it,
+  is untouched: nothing reaches the control state through it. What this does
+  not close, stated: an endpoint whose directory IS the jail directory still
+  makes that directory writable on bwrap, because that is the smallest grant a
+  bind mount can make for a socket (§6); an embedder that wants the control
+  state sealed puts its endpoint elsewhere (bh-02 does), and decision-172's
+  residual stands for the one that does not. `fs_write` grades are unchanged:
+  the rule takes writes away and claims nothing new. Implementing task:
+  TASK-0079.13. (Ruled 2026-10-11, decision-173.)
 - Serialization: `to_dict`/`from_dict`, versioned, round-trip stable.
 - **The version is `SPEC_VERSION = 1`, and an unknown key at any level is a
   refusal.** There is no migration framework and no tolerated extra field: a
@@ -673,6 +706,14 @@ be the copy decision-152 deleted the event stream for).
   `--dev /dev`, first among the mounts so every spec-derived mount stacks on
   top of it; (3) `read_allows` as `--ro-bind`; (4) the declared LISTEN
   channel's endpoint DIRECTORY as `--bind`; (5) `write_allows` as `--bind`;
+  (5a) the pins (decision-168, below), but those in a sealed jail directory;
+  (5b) when a write root or a channel directory is at or above the jail
+  directory, the SEAL (decision-173, §5): the jail directory `--ro-bind` at
+  every place a writable tree shows it, then its scratch `--bind-try` (a
+  scratch that does not exist is left unwritable, failing closed), each
+  channel directory inside it again, and the pins inside those; a pin or
+  carve-out in the sealed part is not mounted, since a pin would undo the
+  seal and a tmpfs mount point cannot be made on a read-only mount;
   (6) `write_denies` as submounts *after* the write roots — which is what
   makes deny-over-allow true here, and only the ones a writable tree (a write
   root or channel directory) reaches: one outside is unwritable already, and
@@ -1282,7 +1323,9 @@ What this does not close: a record whose stamp is present but whose pid names
 nothing still lets the ladder signal its pgid (the reaped-leader case above
 needs that), so a jail that can write its `jail_dir` can still forge one; that
 is a question of where records live, not of how they are read. (Ruled
-2026-10-11, decision-172.)
+2026-10-11, decision-172.) (A write root at or above the `jail_dir` no longer
+makes it writable: decision-173, §5. A channel endpoint placed directly in it
+still does, on bwrap.)
 
 The handle is the fix for two documented failure classes in prior art: kill
 paths that lose a container's identity when a relay pid dies (identity lives
