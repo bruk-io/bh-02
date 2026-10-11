@@ -1372,6 +1372,18 @@ residual decision-172 states (a stamp present, a pid naming nothing) is closed
 by where records live now: such a registration is genuine, its leader reaped,
 and teardown ends its group. (Ruled 2026-10-11, decision-175.)
 
+*Amended 2026-10-11 after review (decision-175, TASK-0079.14).* The paragraph
+above promised more than it did: "torn down as before" held for an unparseable
+file but not for a well-formed one that lied. Now (1) a pid or pgid outside the
+range a process id can hold (2 up to 2**31 - 1) makes the file unreadable, so
+`0`, `1`, negative and huge ids never reach a signal call; (2) teardown never
+signals the trusted process's own group or a pgid of 0 or 1, for any item
+(workload, sibling, helper): such an item is `FAILED` with a detail saying
+nothing was signalled; and (3) each item's ladder runs inside one boundary that
+turns an unexpected `Exception` (a `ps` that failed, a pid the OS rejects) into
+that item's `FAILED` outcome, its detail naming the exception and what to do, so
+`kill_jail` raises nothing from an item and one item never stops the next.
+
 The handle is the fix for two documented failure classes in prior art: kill
 paths that lose a container's identity when a relay pid dies (identity lives
 in the serialized handle, not in a live process's argv), and single-pid

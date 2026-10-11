@@ -47,6 +47,11 @@ EXECS_DIRNAME: Final = "execs"
 
 _SUFFIX: Final = ".json"
 
+#: A process id the kernel can hand out is above 1 (0 names the caller's own
+#: group to `killpg`, 1 is init) and below 2**31 (`pid_t` is 32 bits signed).
+#: A registration naming anything else is not one brig wrote.
+_PID_LIMIT: Final = 2**31
+
 
 def execs_dir(jail_dir: str) -> str:
     """Where this jail's sibling registrations live."""
@@ -115,6 +120,11 @@ class Scan:
     unreadable: tuple[Unreadable, ...]
 
 
+def _is_process_id(value: object) -> bool:
+    """Whether `value` is an int a process or group id can hold (2 up to 2**31)."""
+    return type(value) is int and 1 < value < _PID_LIMIT
+
+
 def _parse(text: str) -> Registration | str:
     """The registration `text` holds, or the reason it is not one."""
     try:
@@ -127,8 +137,8 @@ def _parse(text: str) -> Registration | str:
     if missing:
         return f"missing key(s) {', '.join(missing)}"
     pid, pgid, start_time = record["pid"], record["pgid"], record["start_time"]
-    if type(pid) is not int or type(pgid) is not int:
-        return f"'pid'/'pgid' must both be int, got {pid!r}/{pgid!r}"
+    if not (_is_process_id(pid) and _is_process_id(pgid)):
+        return f"'pid'/'pgid' must both be ints from 2 to {_PID_LIMIT - 1}, got {pid!r}/{pgid!r}"
     if type(start_time) is not str:
         return f"'start_time' must be a str, got {start_time!r}"
     return Registration(pid, pgid, start_time)

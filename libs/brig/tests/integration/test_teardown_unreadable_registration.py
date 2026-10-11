@@ -18,6 +18,7 @@ The last test is the other half of the story: a genuine registration whose
 leader was reaped, with its group still holding a live member, is still ended.
 """
 
+import dataclasses
 import itertools
 import os
 import subprocess
@@ -76,6 +77,12 @@ _UNREADABLE = {
     "missing-keys": b'{"pid": 1}',
     "wrong-types": b'{"pid": "1", "pgid": 1, "start_time": ""}',
     "stamp-not-str": b'{"pid": 1, "pgid": 1, "start_time": 5}',
+    "absurd-pid": b'{"pid": 1180591620717411303424, "pgid": 7, "start_time": "x"}',
+    "absurd-pgid": b'{"pid": 5, "pgid": 1180591620717411303424, "start_time": "x"}',
+    "pgid-zero": b'{"pid": 5, "pgid": 0, "start_time": "x"}',
+    "pgid-one": b'{"pid": 5, "pgid": 1, "start_time": "x"}',
+    "pgid-negative": b'{"pid": 5, "pgid": -5, "start_time": "x"}',
+    "pgid-past-pid-max": b'{"pid": 5, "pgid": 2147483648, "start_time": "x"}',
 }
 
 
@@ -85,9 +92,15 @@ def test_an_unreadable_registration_is_its_own_failed_item_and_the_rest_is_torn_
 ) -> None:
     handle = _launch(run_id)
     sibling = exec_in_jail(handle, workload_argv(run_id, "sleep 100"))
+    helper = subprocess.Popen(workload_argv(run_id, "sleep 100"), start_new_session=True)
+    handle = dataclasses.replace(
+        handle, helper_pids=(helper.pid,), helper_stamps=(_identity.start_stamp(helper.pid),)
+    )
     try:
         _wait_for_members(handle.pgid)
         _wait_for_members(sibling.pid)
+        _wait_for_members(helper.pid)
+        assert _live_members(helper.pid), "CONTROL failed: the helper group is empty"
         assert _live_members(handle.pgid), "CONTROL failed: the workload group is empty"
         assert _live_members(sibling.pid), "CONTROL failed: the sibling group is empty"
 
@@ -99,6 +112,10 @@ def test_an_unreadable_registration_is_its_own_failed_item_and_the_rest_is_torn_
 
         assert _live_members(handle.pgid) == [], report
         assert _live_members(sibling.pid) == [], f"the sibling outlived teardown ({report})"
+        assert _live_members(helper.pid) == [], f"the helper outlived teardown ({report})"
+        assert {i.kind: i.outcome for i in report.items if i.kind == "helper"} == {
+            "helper": KillOutcome.ENDED
+        }, report
         by_identity = {item.identity: item for item in report.items}
         assert by_identity[str(handle.pgid)].outcome is KillOutcome.ENDED, report
         assert by_identity[str(sibling.pid)].outcome is KillOutcome.ENDED, report
@@ -108,6 +125,57 @@ def test_an_unreadable_registration_is_its_own_failed_item_and_the_rest_is_torn_
         assert plant in bad.detail, bad.detail
         assert "nothing it names was signalled" in bad.detail, bad.detail
         assert "inspect" in bad.detail.lower(), bad.detail
+    finally:
+        teardown_group(handle)
+        subprocess.run(["/bin/kill", "-KILL", "--", f"-{helper.pid}"], check=False)
+        helper.wait()
+
+
+def test_a_record_naming_the_trusted_process_s_own_group_is_refused_and_nothing_is_signalled(
+    run_id: str,
+) -> None:
+    """A registration naming the group pytest itself runs in (a genuine-looking
+    one: in range, a stamp present) must not be signalled, and neither must a
+    workload group of 0, which `killpg` reads as the caller's own."""
+    handle = _launch(run_id)
+    own = os.getpgrp()
+    try:
+        _wait_for_members(handle.pgid)
+        _execs.register(handle.jail_dir, os.getpid(), own, _identity.start_stamp(os.getpid()))
+        zero = dataclasses.replace(handle, pgid=0)
+
+        report = handle.kill()
+        zero_report = zero.kill()
+
+        assert os.getpgrp() == own  # reaching here: pytest was not signalled
+        (own_item,) = [i for i in report.items if i.identity == str(own)]
+        assert own_item.outcome is KillOutcome.FAILED, own_item
+        assert "nothing was signalled" in own_item.detail, own_item.detail
+        assert report.items[0].outcome is KillOutcome.ENDED, report
+        (zero_item,) = [i for i in zero_report.items if i.kind == "workload_group"]
+        assert zero_item.outcome is KillOutcome.FAILED, zero_item
+        assert "nothing was signalled" in zero_item.detail, zero_item.detail
+    finally:
+        teardown_group(handle)
+
+
+def test_an_exception_from_one_item_is_that_item_s_failure_and_stops_no_other(
+    run_id: str,
+) -> None:
+    """A helper whose pid the OS rejects (`waitpid` raises `OverflowError`) is
+    its own `FAILED` item, and the genuine sibling after the workload is still
+    ended."""
+    handle = _launch(run_id)
+    sibling = exec_in_jail(handle, workload_argv(run_id, "sleep 100"))
+    handle = dataclasses.replace(handle, helper_pids=(2**70,), helper_stamps=("x",))
+    try:
+        _wait_for_members(sibling.pid)
+        report = handle.kill()  # must not raise
+
+        assert _live_members(sibling.pid) == [], report
+        (bad,) = [i for i in report.items if i.kind == "helper"]
+        assert bad.outcome is KillOutcome.FAILED, bad
+        assert "OverflowError" in bad.detail, bad.detail
     finally:
         teardown_group(handle)
 

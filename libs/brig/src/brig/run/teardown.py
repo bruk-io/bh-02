@@ -278,8 +278,10 @@ def _run_ladder(
     """
     if leader_stamp == _identity.UNKNOWN:
         # decision-172. No start time was recorded, so nothing shows this
-        # pid or this group is the jail's: a record in a `jail_dir` the jail
-        # can write may be forged. Nothing is signalled, and nothing reaped
+        # pid or this group is the jail's. (A jail can no longer forge the
+        # record, decision-173/174, but a launch that read no stamp, a record
+        # tampered with on the host or a disk fault still can leave one.)
+        # Nothing is signalled, and nothing reaped
         # either (the pid may be another child of this process, whose status
         # is not teardown's to take); a live member reads as FAILED.
         if not _group_member_pids(pgid):
@@ -319,6 +321,48 @@ def _run_ladder(
         KillOutcome.FAILED,
         f"process group {pgid} still had member(s) after SIGTERM+grace and SIGKILL+grace",
     )
+
+
+def _unsignalable(pgid: int, own_pgid: int) -> str | None:
+    """Why `pgid` must never be signalled, or `None` if it may be. 0 means the
+    caller's own group to `killpg`, 1 is init's, a negative one is no group, and
+    `own_pgid` is the trusted process itself: a record naming any of them aims
+    teardown at the process doing the tearing down (or at the machine)."""
+    if pgid == own_pgid:
+        return f"process group {pgid} is this process's own"
+    if pgid <= 1:
+        return f"{pgid} is not a process group a jail can have"
+    return None
+
+
+def _guarded_ladder(
+    pgid: int, leader_pid: int, leader_stamp: str, grace: float
+) -> tuple[KillOutcome, str]:
+    """`_run_ladder` for one item, behind the two things that make teardown
+    total: a group that must never be signalled is refused (`FAILED`, nothing
+    signalled), and any exception the ladder raises (a `ps` that failed, a pid
+    the OS rejects) becomes this item's `FAILED` outcome, so one item can never
+    stop the next.
+
+    Raises nothing from an item; only `BaseException`s that are not
+    `Exception`s (`KeyboardInterrupt`, `SystemExit`) pass through.
+    """
+    refusal = _unsignalable(pgid, os.getpgrp())
+    if refusal is not None:
+        return (
+            KillOutcome.FAILED,
+            f"{refusal}; nothing was signalled. Inspect the record that named it "
+            "and, if it names processes of this jail, end them yourself",
+        )
+    try:
+        return _run_ladder(pgid, leader_pid, leader_stamp, grace)
+    except Exception as error:
+        return (
+            KillOutcome.FAILED,
+            f"tearing down process group {pgid} raised {type(error).__name__}: {error}; "
+            "what it names may still run. List its members (`ps -eo pid,pgid,args`) "
+            f"and, if they are this jail's, end them yourself (`kill -KILL -- -{pgid}`)",
+        )
 
 
 def _live_exec_siblings(handle: Any) -> _execs.Scan:
@@ -366,18 +410,19 @@ def kill_jail(handle: Any, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
     workload first. The returned `KillReport` is the record: nothing is
     written anywhere (decision-152).
 
-    Total: a registration that cannot be read is its own `FAILED` item and
-    stops nothing else (decision-175)."""
+    Total (decision-175): a registration that cannot be read is its own
+    `FAILED` item, and each item's ladder runs inside `_guarded_ladder`, so no
+    exception from one item stops the next. Raises nothing from an item."""
     items: list[KillItem] = []
 
-    outcome, detail = _run_ladder(handle.pgid, handle.pid, handle.start_time, grace)
+    outcome, detail = _guarded_ladder(handle.pgid, handle.pid, handle.start_time, grace)
     items.append(
         KillItem(kind="workload_group", identity=str(handle.pgid), outcome=outcome, detail=detail)
     )
 
     siblings = _live_exec_siblings(handle)
     for registration in siblings.registrations:
-        outcome, detail = _run_ladder(
+        outcome, detail = _guarded_ladder(
             registration.pgid, registration.pid, registration.start_time, grace
         )
         items.append(
@@ -396,7 +441,7 @@ def kill_jail(handle: Any, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
     # that outlives the jail it filtered for is a listening socket nobody
     # owns.
     for helper_pid, helper_stamp in zip(handle.helper_pids, handle.helper_stamps, strict=True):
-        outcome, detail = _run_ladder(helper_pid, helper_pid, helper_stamp, grace)
+        outcome, detail = _guarded_ladder(helper_pid, helper_pid, helper_stamp, grace)
         items.append(
             KillItem(kind="helper", identity=str(helper_pid), outcome=outcome, detail=detail)
         )
