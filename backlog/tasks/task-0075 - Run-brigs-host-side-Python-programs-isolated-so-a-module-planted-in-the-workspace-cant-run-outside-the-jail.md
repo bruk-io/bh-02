@@ -7,12 +7,15 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-10 21:58'
-updated_date: '2026-10-11 16:21'
+updated_date: '2026-10-11 17:26'
 labels:
   - brig
   - runner
   - size-3
-dependencies: []
+dependencies:
+  - TASK-0076
+  - TASK-0077
+  - TASK-0079.11
 parent_task_id: TASK-0079
 priority: high
 type: bug
@@ -56,4 +59,6 @@ AC3: bh-02/app/tests/test_python_repl.py::test_on_linux_a_module_an_input_plants
 AC4 not met here, for reasons outside this change: brig integration+e2e: 12 failed + 1 error vs baseline 11 failed; the extra two (test_kill_group cooperative-timing, test_wait_ready teardown sweep of PID-1 zombies) fail identically with -I reverted (TASK-0077's zombie class). Egress tests with env -u NO_PROXY: 17 passed. brig unit: 614 passed. bh-02 jail tests (test_python_repl + runner plugin): 15 failed with the fix, the same 15 plus the new test with -I reverted (root + non-reaping PID 1 in this container). scripts/linux-jail-check: docker image build fails at apt-get (the build container has no route to the egress proxy); running as an unprivileged user natively fails too (the venv's interpreter lives under /root). scripts/check: format, lint, types, gates, docs ok; tests step stops at collection on Linux (warden-systray imports darwin-only rumps; TASK-0081). Full pytest with that member ignored: 27 failed, 2132 passed, all failures in the pre-existing sets above.
 
 Review 1 (2026-10-11, a reviewer who did not do the work): criteria 1-3 met with evidence; code fit to close; criterion 4 not verifiable here yet (scripts/linux-jail-check can't build behind this container's TLS proxy, TASK-0082; scripts/check stops at collection on rumps, TASK-0081). Should-fix taken: four docstrings and comments now show the trampoline and proxy argv with -I. The task stays open until criterion 4 is re-run after TASK-0081 and TASK-0082.
+
+AC4 re-run (2026-10-11, orchestrator), after TASK-0081 and TASK-0082: scripts/linux-jail-check (unprivileged user in a container, HEAD with this task's fix) passes: 145 passed, 2 skipped, exit 0, run by TASK-0082's worker and again by its reviewer. scripts/check as root natively: format, lint, types ok; tests 27 failed, every one in a class this task doesn't touch: 19 are PID-1 zombies (TASK-0077; under tini -s the same files give 1 failure), 6 are NO_PROXY egress (TASK-0076), 2 fail only as root (TASK-0079.11). Under tini as root: 8 failed, 2151 passed, 31 skipped (the 6 egress plus the 2 root-only). AC4 is re-run once TASK-0076, TASK-0077 and TASK-0079.11 land; the task closes then, on a reviewer's verdict.
 <!-- SECTION:NOTES:END -->
