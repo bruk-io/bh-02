@@ -1,4 +1,4 @@
-"""Entry point: `python -m brig.proxy`.
+"""Entry point: `python -I -m brig.proxy`.
 
 The `if __name__` guard lives here and nowhere else -- pypeeker treats a
 module-level `if` body as import-time unconditionally, so a real `main()`
