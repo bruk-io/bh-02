@@ -21,8 +21,11 @@ this task's (`RLIMIT_NPROC`/task count is SPEC.md §6's "Deliberately absent",
 never attempted by this or any mechanism).
 
 `compile` is a pure `spec -> argv` render, no I/O: it renders `Step.wrap` as
-the trampoline invocation task-035 ships, `python -m brig.mech.trampoline
---cpu N -- <argv>` (using `sys.executable` rather than the bare string
+the trampoline invocation task-035 ships, `python -I -m brig.mech.trampoline
+--cpu N -- <argv>` (isolated, decision-169: it is outermost, so it runs on
+the host in the workload's working directory, which `-m` alone would put
+first on its import path; brig is found in the interpreter's own
+site-packages) (using `sys.executable` rather than the bare string
 `"python"` -- a plain attribute read of an already-resolved interpreter path,
 not I/O, and the only invocation that reliably has `brig` importable when run
 under `uv run`, matching `tests/integration/test_trampoline.py`'s own
@@ -105,6 +108,7 @@ def _render_wrap(cpu_seconds: int) -> ArgvTransformer:
         cpu_flags: tuple[str, ...] = (_CPU_FLAG, str(cpu_seconds)) if cpu_seconds else ()
         return (
             sys.executable,
+            "-I",
             "-m",
             _TRAMPOLINE_MODULE,
             *cpu_flags,

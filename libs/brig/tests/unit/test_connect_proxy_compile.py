@@ -71,7 +71,7 @@ def test_helper_is_jail_lifetime_and_carries_every_allowed_domain() -> None:
         "the proxy must live as long as the jail; a LAUNCH_SCOPED proxy exits "
         "before the workload it is supposed to filter for ever starts"
     )
-    assert helper.argv[:3] == (_PY, "-m", _PROXY_MODULE)
+    assert helper.argv[:4] == (_PY, "-I", "-m", _PROXY_MODULE)
     allows = [helper.argv[i + 1] for i, tok in enumerate(helper.argv) if tok == "--allow"]
     assert allows == ["*.internal.test", "example.com"], (
         f"allow list did not survive the render: {helper.argv!r}"

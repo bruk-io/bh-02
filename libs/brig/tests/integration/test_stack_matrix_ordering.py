@@ -135,8 +135,16 @@ def test_composed_stack_rlimits_outermost_workload_environ_still_scrubbed(
     # launches (not merely reasoned about).
     argv = list(workload_argv(run_id, "env"))
     composed = jail.wrap(tuple(argv))
-    assert composed[:6] == (sys.executable, "-m", "brig.mech.trampoline", "--cpu", "60", "--")
-    assert composed[6] == "/bin/sh"
+    assert composed[:7] == (
+        sys.executable,
+        "-I",
+        "-m",
+        "brig.mech.trampoline",
+        "--cpu",
+        "60",
+        "--",
+    )
+    assert composed[7] == "/bin/sh"
 
     launcher = SubprocessLauncher()
     handle = launcher.launch(

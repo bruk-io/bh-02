@@ -174,8 +174,12 @@ def _render_wrap(port_path: str) -> ArgvTransformer:
 def _render_helper_argv(
     python: str, port_path: str, log_path: str, policy: NetworkPolicy
 ) -> tuple[str, ...]:
+    """`python -I -m brig.proxy ...`: isolated (decision-169), since the launcher starts the
+    proxy on the host in the workload's working directory, which `-m` alone would put first on
+    its import path."""
     argv: list[str] = [
         python,
+        "-I",
         "-m",
         _PROXY_MODULE,
         "--port-file",

@@ -519,6 +519,60 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
     assert token_file(None, [str(credential)]) == credential
 
 
+# Imported, a plant records its name, then loads the real module from the path without the
+# directory it was planted in, so one that ran shows in the record, not as a start that broke.
+_PLANT = """\
+import importlib.machinery, importlib.util, os, sys
+with open({record!r}, "a") as _record:
+    _record.write(__name__ + "\\n")
+_path = [p for p in sys.path if os.path.realpath(p or ".") != {root!r}]
+_spec = importlib.machinery.PathFinder.find_spec(__name__, _path)
+_real = importlib.util.module_from_spec(_spec)
+sys.modules[__name__] = _real
+_spec.loader.exec_module(_real)
+"""
+
+
+async def test_on_linux_a_module_an_input_plants_in_the_project_runs_nowhere_outside_the_jail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Python process works in the project root, which an input may write, and brig starts
+    its own programs there, on the host: the exit wrapper, the tether's watcher, the rlimits
+    trampoline. An input plants `subprocess.py`, `signal.py` and a `brig/` package in the root;
+    the Python process starts again (`/restart python`) and runs the next input, and none of them
+    ran outside the jail (brig's decision-169: each of its interpreters runs `-I`). THE CONTROL:
+    an interpreter started in the root without `-I` runs every one."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the project-root start is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    record = tmp_path / "ran"  # outside the project, which the jail can't write
+    source = _PLANT.format(record=str(record), root=os.path.realpath(project))
+    plants = (
+        "import os\nos.mkdir('brig')\n"
+        f"for name in ('subprocess.py', 'signal.py', 'brig/__init__.py'):\n"
+        f"    open(name, 'w').write({source!r})\n"
+        "print('planted')"
+    )
+    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
+        out = await kernel.run(plants)
+        assert "planted" in out, out
+        assert all((project / name).is_file() for name in ("subprocess.py", "signal.py", "brig/__init__.py"))
+        await kernel.__aexit__(None, None, None)  # `/restart python`: stops the jail ...
+        await kernel.__aenter__()  # ... and starts the Python process again, in the project root
+        out = await kernel.run("print('started again')")
+        assert "started again" in out, out
+    assert not record.exists(), f"planted modules ran outside the jail: {record.read_text()}"
+
+    for argv in (
+        [sys.executable, "-c", "import subprocess"],
+        [sys.executable, "-m", "brig.mech.trampoline", "--", "true"],
+    ):
+        subprocess.run(argv, cwd=project, check=True)
+    assert set(record.read_text().split()) == {"brig", "signal", "subprocess"}
+
+
 # A program that listens and waits, standing in for the extensions process: the runner's
 # second program, run from a directory of its own.
 _LISTENS = """

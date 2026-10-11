@@ -1021,6 +1021,28 @@ writing the project). Five things about it are constraints, not description:
   the one whose death it watched. `tether=None`, the default, launches exactly
   as before.
 
+**Every interpreter brig starts on the host runs isolated (2026-10-11,
+decision-169).** brig starts four Python programs of its own outside any jail:
+the exit wrapper (`python -c`), the tether's watcher the wrapper starts
+(`python -c`), the `rlimits` trampoline (`python -m brig.mech.trampoline`,
+outermost in every stack that has it, so on the host) and `connect_proxy`'s
+egress proxy (`python -m brig.proxy`, a `JAIL_LIFETIME` helper). Each runs in
+the workload's working directory, and `-c` and `-m` both put that directory
+first on the import path — a directory the workload can write. Until this
+ruling a `subprocess.py` the workload left there ran inside the next launch's
+exit wrapper, unconfined (reproduced 2026-10-10 on the empty stack), and a
+`signal.py` or a `brig/` package would have run in the watcher, the trampoline
+or the proxy. So all four run with `-I`: no working or script directory on the
+path, no `PYTHON*` variable from the environment the jail hands them, no user
+site directory. Two constraints follow. **brig must be importable from the
+interpreter's own `site-packages`** (an installed or editable install, whose
+`.pth` `-I` still reads), never from `PYTHONPATH` or a working directory; that
+is how every embedder already gets it. **A new host-side interpreter is added
+with `-I` and to the list `tests/unit/test_host_interpreters.py` keeps**, which
+finds every `sys.executable`/`python` argv in brig's source and fails on one it
+does not name. Workloads, a probe's `python3 -c` among them, are the jail's
+argv and are not brig's to isolate. (Implementing task: TASK-0075.)
+
 A launcher refuses a `CompiledJail` whose `requires` exceed its
 `capabilities`. Refusal names the missing feature.
 

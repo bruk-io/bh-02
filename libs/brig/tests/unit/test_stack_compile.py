@@ -618,7 +618,7 @@ def test_ordering_rlimits_outermost_regardless_of_construction_order() -> None:
     # uncapped (`cpu_seconds=0`, Spec()'s default) limit -- see
     # `brig/mech/rlimits.py::_render_wrap`. Asserted as an exact tuple
     # slice, never a substring: `rlimits` (the trampoline) is OUTERMOST.
-    expected_prefix = (sys.executable, "-m", "brig.mech.trampoline", "--")
+    expected_prefix = (sys.executable, "-I", "-m", "brig.mech.trampoline", "--")
     assert forward_argv[: len(expected_prefix)] == expected_prefix
     assert reverse_argv[: len(expected_prefix)] == expected_prefix
 
@@ -734,16 +734,17 @@ def test_real_pair_compiles_with_a_cpu_limit_and_scrub_env() -> None:
     )
     compiled = brig.stack.Stack([env_scrub, rlimits]).compile(spec, ctx=_CTX)
     argv = compiled.wrap(("true",))
-    assert argv[:6] == (
+    assert argv[:7] == (
         sys.executable,
+        "-I",
         "-m",
         "brig.mech.trampoline",
         "--cpu",
         "5",
         "--",
     )
-    assert argv[6:10] == ("/bin/sh", "-c", 'exec /usr/bin/env -i ${PATH:+"PATH=$PATH"} "$@"', "sh")
-    assert argv[10:] == ("true",)
+    assert argv[7:11] == ("/bin/sh", "-c", 'exec /usr/bin/env -i ${PATH:+"PATH=$PATH"} "$@"', "sh")
+    assert argv[11:] == ("true",)
 
 
 @pytest.mark.unit

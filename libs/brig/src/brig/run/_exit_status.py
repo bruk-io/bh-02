@@ -73,8 +73,10 @@ EXIT_FILENAME: Final = "exit"
 
 _PARTIAL_SUFFIX: Final = ".partial"
 
-#: The wrapper program, run as `python -c WRAPPER_SOURCE <exit file>
-#: <ready fd> <argv...>`. Kept as a string rather than a module so that
+#: The wrapper program, run as `python -I -c WRAPPER_SOURCE <exit file>
+#: <ready fd> <argv...>`: isolated, because it runs in the workload's working
+#: directory, which `-c` would put first on its import path (decision-169;
+#: the watcher it starts runs the same way). Kept as a string rather than a module so that
 #: running it needs no importable `brig` inside the launched environment and
 #: no `if __name__` guard for pypeeker's `import-time-side-effects` rule to
 #: find. It is pure text here and executable only when a launcher passes it
@@ -130,7 +132,7 @@ try:
         # group (no new session): its `killpg(0, ...)` is the jail's group, and while it lives
         # that group's number can't be handed to anyone else.
         subprocess.Popen(
-            [sys.executable, "-c", TETHER, str(tether_fd)],
+            [sys.executable, "-I", "-c", TETHER, str(tether_fd)],
             pass_fds=(tether_fd,),
             stdin=subprocess.DEVNULL,
         )
@@ -191,7 +193,7 @@ def partial_path(jail_dir: str) -> str:
 def wrapper_argv(
     python: str, jail_dir: str, ready_fd: int, argv: Sequence[str], tether_fd: int | None = None
 ) -> tuple[str, ...]:
-    """`python -c WRAPPER_SOURCE <exit file> <ready fd> <tether fd or -> <argv...>`.
+    """`python -I -c WRAPPER_SOURCE <exit file> <ready fd> <tether fd or -> <argv...>`.
 
     `tether_fd` (decision-167) is the read end of the launch's tether, inherited by the
     wrapper, which hands it to the watcher it starts before the workload; `-` when the launch
@@ -203,7 +205,7 @@ def wrapper_argv(
     prefix for `exec` to reproduce.
     """
     tether = "-" if tether_fd is None else str(tether_fd)
-    return (python, "-c", WRAPPER_SOURCE, exit_path(jail_dir), str(ready_fd), tether, *argv)
+    return (python, "-I", "-c", WRAPPER_SOURCE, exit_path(jail_dir), str(ready_fd), tether, *argv)
 
 
 def clear_exit_status(jail_dir: str) -> None:
