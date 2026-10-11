@@ -3,7 +3,7 @@ id: TASK-0081
 title: >-
   Let scripts/check collect on Linux: warden-systray's tests import rumps, which
   installs only on darwin
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-11 15:58'
@@ -31,4 +31,12 @@ On Linux, `scripts/check` (and a bare `uv run pytest -q`) stops at collection: e
 
 <!-- SECTION:NOTES:BEGIN -->
 Both systray test modules now call pytest.importorskip('rumps') before importing the package. Linux: uv run pytest examples/warden -q -rs gave 13 passed, 2 skipped, each skip named 'could not import rumps'. scripts/check: tests step collected everything (2132 passed, 27 failed, 31 skipped); the 27 failures are bwrap/root/NO_PROXY/zombie environment failures in brig, bh-02 jail tests (test_python_repl, test_runner_confined), not collection errors; gates, docs ok. AC2 unverified here: on darwin rumps is installed so importorskip does not skip, judged from code. Did not plant a failing check (a collection skip, no safety property).
+
+Closed 2026-10-11 by the orchestrator, who did not do the work: criterion 1 re-run (uv run pytest examples/warden: 13 passed, both systray modules skipped by name); criterion 2 judged from the code (importorskip skips only where rumps is absent), darwin unavailable here.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+On Linux the warden-systray tests skip by name where rumps is absent, so scripts/check gets past collection; on darwin they run as before.
+<!-- SECTION:FINAL_SUMMARY:END -->
