@@ -447,6 +447,9 @@ def test_kill_ends_a_live_member_of_a_group_whose_leader_is_a_zombie(
         assert _gone_or_zombie(member_pid), "the live member survived kill()"
         assert report.items[0].outcome is KillOutcome.ENDED, report.items[0].detail
     finally:
+        # A member kill() missed must not outlive the test.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(leader_pid, signal.SIGKILL)
         parent.kill()
         parent.wait()
 

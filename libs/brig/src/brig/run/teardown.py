@@ -63,10 +63,11 @@ least one member exists", not "which"), but a fresh `/bin/ps -Ao pid=,pgid=`
 scan (alias-proof per decision-026) filtered to the target `pgid`, zombies
 left out (decision-171: a zombie has ended, and where PID 1 does not reap it
 would stay in the table forever) -- the same technique
-`tests/integration/test_launcher.py`'s `_children_of` already uses. This module never signals a single pid on its own: the
-leader is reaped (`os.waitpid`, `WNOHANG`) purely so a zombie the trusted
-process is the real parent of does not make the group look perpetually
-non-empty; reaping is not a teardown signal and sends nothing.
+`tests/integration/test_launcher.py`'s `_children_of` already uses. This
+module never signals a single pid on its own: the leader is reaped
+(`os.waitpid`, `WNOHANG`) purely so a zombie the trusted process is the
+real parent of does not make the group look perpetually non-empty;
+reaping is not a teardown signal and sends nothing.
 
 `kill_jail` is idempotent: called again on an already-torn-down group, the
 group-membership scan is empty immediately, no signal is sent, and the
