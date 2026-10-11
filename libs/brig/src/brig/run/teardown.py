@@ -33,7 +33,10 @@ identity_holds`: a leader that has exited and been REAPED leaves a pid that
 names nothing at all, while its process group can still hold live children --
 the single-pid-SIGKILL failure class this module exists to close, inverted.
 Only a pid whose occupant is provably someone else is a reason to signal
-nothing.
+nothing -- that, and a record with no stamp at all (decision-172,
+2026-10-11): an unknown stamp leaves nothing to show the group is the jail's,
+and a registration in a `jail_dir` the jail can write may be forged, so the
+ladder signals nothing for it and the item says why.
 
 This is why teardown here signals the process **group** (`os.killpg`, never
 a single pid) at every rung, and why "ended" is only ever reported after an
@@ -246,7 +249,10 @@ def _run_ladder(
     group or one exec sibling, identically (task-027: "The ladder runs per
     item, and there is only one ladder"):
 
-    0. If `leader_pid` names a process that is provably NOT the one
+    0. If `leader_stamp` is unknown, the record cannot be verified: signal
+       nothing and reap nothing, and report `ALREADY_GONE` if the group has
+       no live member, else `FAILED` (decision-172).
+       If `leader_pid` names a process that is provably NOT the one
        `leader_stamp` was taken from, the OS recycled the number: report
        `ALREADY_GONE` and signal nothing (decision-155).
     1. If the group is already gone (idempotent re-call, or the process
@@ -270,6 +276,20 @@ def _run_ladder(
     reaping it, exactly like `Handle.alive()`'s own stated limit on a
     rehydrated handle.
     """
+    if leader_stamp == _identity.UNKNOWN:
+        # decision-172. No start time was recorded, so nothing shows this
+        # pid or this group is the jail's: a record in a `jail_dir` the jail
+        # can write may be forged. Nothing is signalled, and nothing reaped
+        # either (the pid may be another child of this process, whose status
+        # is not teardown's to take); a live member reads as FAILED.
+        if not _group_member_pids(pgid):
+            return KillOutcome.ALREADY_GONE, "process group had already ended before kill() ran"
+        return (
+            KillOutcome.FAILED,
+            f"no start time was recorded for pid {leader_pid}, so nothing shows process group "
+            f"{pgid} is this jail's; nothing was signalled",
+        )
+
     if _identity.recycled(leader_pid, leader_stamp):
         # decision-155. The pid exists, but it is not the process this
         # handle recorded: the OS reused the number. Signalling the group

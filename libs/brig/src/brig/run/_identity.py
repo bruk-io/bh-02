@@ -39,6 +39,9 @@ spawn, the same race `_spawn_pgid.py` documents for `getpgid`. A handle
 carrying `UNKNOWN` degrades to exactly the pid-only behaviour that shipped
 before this module existed: no worse than the old code, and it says so at
 every call site rather than silently pretending to a check it cannot make.
+Teardown is the exception (decision-172): a record it cannot verify is not
+kill authority, so `teardown._run_ladder` signals nothing for an `UNKNOWN`
+stamp rather than asking `recycled`.
 """
 
 from __future__ import annotations
@@ -195,7 +198,8 @@ def recycled(pid: int, stamp: str) -> bool:
     and been reaped leaves a pid that names nothing -- but its process
     *group* can still hold live children, and teardown must go on signalling
     that group. Only a pid whose current occupant is a different process is
-    a reason to signal nothing at all.
+    a reason to signal nothing at all here; teardown checks for an `UNKNOWN`
+    stamp itself, before asking this (decision-172).
     """
     if stamp == UNKNOWN:
         return False

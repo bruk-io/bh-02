@@ -132,8 +132,9 @@ def test_an_unknown_stamp_degrades_to_a_pid_check_rather_than_a_false_mismatch()
     """`UNKNOWN` is what a launch records when the read lost its race with a
     workload that had already exited. It must degrade to the pid-only
     behaviour that preceded decision-155 -- never to "gone", which would
-    report a live jail as dead, and never to "recycled", which would stop
-    teardown signalling a group that is still there."""
+    report a live jail as dead, and never to "recycled", which would read an
+    unrecorded stamp as a mismatch. (Teardown does not ask `recycled` for an
+    `UNKNOWN` stamp at all since decision-172: it signals nothing for one.)"""
     assert identity.identity_holds(os.getpid(), identity.UNKNOWN) is True
     assert identity.recycled(os.getpid(), identity.UNKNOWN) is False
 

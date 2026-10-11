@@ -1253,9 +1253,36 @@ that fast, but the claim is *narrowed by orders of magnitude*, not eliminated.
 And a launch that could not take the reading at all — the workload had already
 exited, microseconds in — records the stamp as unknown and degrades to exactly
 the pid-only behaviour that preceded this, which is no worse than before and
-says so at every call site. A pidfd (Linux) would close both; it is a future
+says so at every call site. (Teardown no longer degrades: decision-172, below.)
+A pidfd (Linux) would close both; it is a future
 mechanism decision, not an assumption this section makes. (decision-051,
 superseded here; decision-144's acceptance ends by its own terms.)
+
+*Amended 2026-10-11 (implementing task: TASK-0078).* **A record brig cannot
+verify is not kill authority.** An exec registration is a file under
+`<jail_dir>/execs/`, and a `jail_dir` writable from inside the jail is an
+arrangement this specification allows (the channel directory paragraph of §6
+calls a jail directory holding the workspace the ordinary one). A registration
+with an unknown stamp names a pid and a pgid and nothing that shows either is
+this jail's: `recycled()` has no stamp to compare, so it reads "not recycled",
+and the ladder used to run against whatever group the record named. A forged
+one could aim `SIGTERM` and `SIGKILL` at any group the trusted process may
+signal. So teardown's ladder now asks the record before it asks the group: an
+item whose stamp is unknown is **never signalled, and never reaped** (its pid
+may be some other child of the trusted process, whose exit status is not
+teardown's to take). It reports `ALREADY_GONE` when a fresh group scan finds no
+live member, and otherwise `FAILED`, with a detail saying no start time was
+recorded and nothing was signalled: something may still run that teardown would
+not touch, and the report says so rather than reading as ended. This holds for
+every item alike (the workload group, an exec sibling, a helper), so a workload
+whose leader exited before its stamp could be read, leaving children in its
+group, is now reported `FAILED` rather than ended by a signal brig could not
+justify. `alive()` and `interrupt()` keep decision-155's degraded pid check.
+What this does not close: a record whose stamp is present but whose pid names
+nothing still lets the ladder signal its pgid (the reaped-leader case above
+needs that), so a jail that can write its `jail_dir` can still forge one; that
+is a question of where records live, not of how they are read. (Ruled
+2026-10-11, decision-172.)
 
 The handle is the fix for two documented failure classes in prior art: kill
 paths that lose a container's identity when a relay pid dies (identity lives
