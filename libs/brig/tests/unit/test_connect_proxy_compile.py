@@ -128,9 +128,10 @@ def test_wrap_waits_for_the_port_and_execs_the_workload_unparsed() -> None:
     assert 'exec "$@"' in script
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
         assert f'{name}="http://127.0.0.1:$p"' in script, f"{name} is not pointed at the proxy"
-    # The wrap script never mentions NO_PROXY (the step's env sets it empty): a loopback exemption would put
-    # everything reachable on this host outside the allow list, and buys
-    # nothing, since channels are UNIX sockets no proxy variable touches.
+    # The wrap script never mentions NO_PROXY (the step's env sets it empty):
+    # a loopback exemption would put everything reachable on this host outside
+    # the allow list, and buys nothing, since channels are UNIX sockets no proxy
+    # variable touches.
     assert "NO_PROXY" not in script, script
 
 

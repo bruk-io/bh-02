@@ -558,6 +558,7 @@ that leaves `NO_PROXY` unset lets an inherited one (a host exempting loopback or
 a cloud metadata range) reach the workload and put those destinations outside
 the allow list. `connect_proxy`'s step therefore carries `NO_PROXY=` and
 `no_proxy=`, both empty, which the launcher overlays on whatever it inherited.
+(Ruled 2026-10-11, decision-170.)
 
 **The egress filter is a standalone process, outside the layer DAG.**
 `connect_proxy` is the only mechanism whose enforcement is a process rather

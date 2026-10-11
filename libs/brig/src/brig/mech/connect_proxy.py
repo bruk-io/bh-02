@@ -132,8 +132,9 @@ _WAIT_SECONDS = 30
 #: `NO_PROXY` is the stricter and the simpler reading, so it is the one
 #: taken. It is set EMPTY (`_NO_PROXY_VARS`), not left unset: the launcher
 #: passes the launching environment through, and an unset variable lets an
-#: inherited exemption (TASK-0076) reach the workload; a spec that genuinely needs loopback egress names it in
-#: `allowed_domains` like any other destination.
+#: inherited exemption reach the workload (SPEC.md §10, decision-170). A
+#: spec that genuinely needs loopback egress names it in `allowed_domains`
+#: like any other destination.
 _NO_PROXY_VARS = ("NO_PROXY", "no_proxy")
 _PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
 
