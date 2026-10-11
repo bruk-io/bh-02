@@ -55,7 +55,7 @@ Other systems put the plug-in point at the lifecycle: Kubernetes' CRI (`RunPodSa
 
 A mechanism may name the one `RuntimeKind` it needs (`Mechanism.runtime`; bwrap and Seatbelt: `HOST`; a container: `OCI`). The compatibility matrix stays the authority for which mechanisms compose and in what order, so `rlimits` stays outside bwrap and Seatbelt as SPEC.md section 7 records. Two mechanisms naming different runtimes are refused (law 2), and the matrix already refuses a pair it doesn't list, so an inner mechanism under a runtime it doesn't support needs no rule of its own.
 
-On `HOST`, `create` runs the whole composed wrap around brig's supervisor instead of around the workload. The scrubbed environment and `RLIMIT_CPU` are inherited by every process the supervisor starts; the gap is the supervisor's own CPU time, which the report names. Golden argv tests change only in the innermost argv.
+In a jail type with a supervisor (bwrap, below), `create` runs the whole composed wrap around it instead of around the workload. The scrubbed environment and `RLIMIT_CPU` are inherited by every process the supervisor starts; the gap is the supervisor's own CPU time, which the report names. Golden argv tests change only in the innermost argv.
 
 ### Grades stay in the stack, at two scopes
 
@@ -80,16 +80,30 @@ class Agent(Protocol):                  # inside the instance: shared by every r
     def stop(self, process: ProcessRecord) -> KillReport
 ```
 
-The instance part is the runtime's own (namespaces and a tether on `HOST`, the daemon on `OCI`, a VM or a lease elsewhere). The agent is one protocol every runtime shares: brig's supervisor on `HOST`, the same supervisor under `OCI` where the image has `python3` (with `docker exec` as a lower-fidelity fallback, since Docker can't signal an exec), a vsock agent for a microVM. Readiness and resolving an endpoint to a host path belong to the runtime, since a container on Docker Desktop or a remote sandbox shares no host socket. Pause, stats and file copy stay out until a runtime needs them.
+The instance part is the runtime's own (namespaces and a tether on `HOST`, the daemon on `OCI`, a VM or a lease elsewhere). The agent is one protocol every jail type that has one implements: brig's supervisor in a bwrap jail, the same supervisor under `OCI` where the image has `python3` (with `docker exec` as a lower-fidelity fallback, since Docker can't signal an exec), a vsock agent for a microVM. Readiness and resolving an endpoint to a host path belong to the runtime, since a container on Docker Desktop or a remote sandbox shares no host socket. Pause, stats and file copy stay out until a runtime needs them.
 
-### The supervisor (HOST, bwrap)
+### Each jail type implements it its own way
+
+The protocols, the composition rules, the two grading scopes and the record rules are brig's architecture. How a jail holds an instance, what its agent is and what stopping one process ends are each jail type's own design, graded per scope, and no jail type's choices bind another's. The supervisor below is one jail type's design, not brig's.
+
+| Jail type | Instance (created and ended without cooperation) | Agent inside | Stopping one process ends | Designed |
+|---|---|---|---|---|
+| empty stack (no jail) | none: the processes' groups | none (`PLAIN`) | its process group, escapable | as today |
+| Seatbelt (macOS) | none: no namespace, the profile applied again at each start (`EQUIVALENT_PROFILE`) | none | its process group; a `setsid()` escape is the named gap (bh-02's TASK-0035) | as today |
+| bwrap (Linux) | bwrap's namespaces, tethered | brig's supervisor, PID 1 of the jail | its own nested pid namespace, unescapable | below |
+| OCI container | `docker create --init`, `docker rm -f` | the same supervisor where the image has `python3`, else `docker exec` | its nested namespace; its group under `docker exec` | "OCI, walked through" |
+| microVM (Firecracker), remote sandbox, ssh host | the VM; a lease instead of a tether | an agent over vsock, or the service's own exec | the agent's own boundary | later, not designed here |
+
+### One jail type: bwrap's supervisor
+
+Why a supervisor, and why a namespace per process: today each program is a jail of its own, so stopping it ends that jail's pid namespace, and the kernel kills everything in a namespace whose first process dies, `setsid()` children included. In a shared jail the jail's namespace can't end to stop one process, so a stop falls back to the process's group, which a `setsid()` child escapes, and every co-tenant can see, read and signal every other. A pid namespace per process inside the jail's gives the kernel's guarantee back at the process scope, for a few system calls instead of a jail start; the user namespace is what lets an unprivileged process create one.
 
 - It is PID 1 of the jail's pid namespace (`--as-pid-1`), so the kernel drops `SIGKILL` and `SIGSTOP` sent to it from inside, while a `SIGKILL` from the host still lands. It reaps orphans, which also ends the zombie problem inside the jail.
 - It starts each process as PID 1 of a nested pid namespace (`os.unshare(CLONE_NEWUSER | CLONE_NEWPID)`), so stopping a process ends its namespace, a `setsid()` escape included, and siblings can't see each other's `/proc`. Some hosts restrict nested user namespaces: measure, and grade the process scope by what holds.
 - It runs `python -I` with an empty environment, from a working directory the jail can't write, with its source delivered read-only (`--ro-bind-data`, since bwrap's allowlist hides `jail_dir` and stages nothing) and every import done before any jail process exists. A Spec whose allowlist lacks the interpreter is refused.
 - Its control channel is a socketpair inherited from the runtime and passed to nothing it starts. It carries `SCM_RIGHTS`, so stdio the host opened is passed in and `IoPolicy` needs no writable directory the Spec didn't name. Requests from several callers are multiplexed by id.
 - EOF on that channel means the host is gone: the supervisor ends everything (the tether, from the inside). Every request has a host-side timeout that escalates to `destroy`.
-- On Seatbelt there is no namespace and no supervisor: each start applies the profile again (`EQUIVALENT_PROFILE`), process control is group-shaped, and the `setsid()` escape is the named gap (bh-02's TASK-0035).
+- Where nested user namespaces are blocked (Ubuntu 24.04's AppArmor restriction, a low `user.max_user_namespaces`), the fallback is cgroup v2's `cgroup.kill` on a delegated subtree, or a process scope graded `cooperative`.
 
 ### Jail and Process
 
@@ -148,7 +162,7 @@ Each runtime is a row of its own in `brig-layers`, so `host` and `oci` can't imp
 1. **Name the seam.** `Runtime`, `Agent` and a `HostRuntime` in `run` that holds today's launcher, teardown, exec and tether; `Handle` delegates. bwrap can't hold an empty instance yet, so `HostRuntime` offers launch-shaped `create` plus first `start` only. Tests that import `run`'s private modules (about 30), `test_probe_forgery`'s `dataclasses.replace` on `Handle`, the rehydration tests and the ps-based leak sweep move with it. A fake runtime gives the protocol a second implementation from the start.
 2. **Runtimes in composition**: `Mechanism.runtime`, the runtime kind in `CompiledJail`, static runtime grades. SPEC.md sections 6 and 7 change first; `MATRIX_VERSION` bumps if a row changes.
 3. **Jail and Process**: per-process records and exit, one channel directory per jail, probes as processes, `HANDLE_VERSION` bumped. SPEC.md sections 3, 8 and 9 change first. bh-02's runner moves to one jail per session (TASK-0074).
-4. **The supervisor**, with the control battery; SPEC.md section 4 and law 7 change first.
+4. **bwrap's supervisor** (one jail type), with the control battery; SPEC.md section 4 and law 7 change first.
 5. **`OCI` runtime** (brig's M10), reusing the supervisor as its agent; its integration tier skips visibly without docker.
 6. Later: remote runtimes (an agent over vsock or a lease instead of a tether), and cgroup limits per runtime.
 
@@ -158,7 +172,7 @@ Each runtime is a row of its own in `brig-layers`, so `host` and `oci` can't imp
 - Every backend can hold many processes, at the best fidelity it can give, and says which, per scope.
 - bh-02 gets one jail per session and sub-agents in it.
 - brig's most central code moves (the handle, launcher, teardown, exec); `HANDLE_VERSION` changes; SPEC.md sections 3, 4, 6, 7, 8 and 9 and law 7 change.
-- The supervisor is new code inside the jail, hardened as above, with its gaps graded rather than assumed.
+- bwrap's supervisor is new code inside that jail type, hardened as above, with its gaps graded rather than assumed; other jail types bring their own agent or none.
 
 ## Reviews
 
