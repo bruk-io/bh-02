@@ -26,8 +26,9 @@ that CA. Only `HTTPS_PROXY` is used (a proxy that serves CONNECT only answers `H
 requests with 405), and `NO_PROXY` is not passed on. The CA reaches the build as a BuildKit
 secret (in no layer) and the run as a read-only mount; the proxy's address reaches the build as
 Docker's predefined `HTTPS_PROXY` build argument, which `docker history` leaves out. So neither
-the address, nor a credential in it, nor the CA is in the image: the same image builds with no
-proxy and no CA. A proxy set without a CA is an error here (the build would fail at its first
+the address, nor a credential in it, nor the CA is in the image. BuildKit is needed only behind a
+proxy (the CA is a BuildKit secret); with no proxy the Dockerfile and the commands are what they
+were before this section existed. A proxy set without a CA is an error here (the build would fail at its first
 download), and a CA without a proxy is ignored.
 
 What reaches the container: the files git tracks or would track (`git ls-files --cached
@@ -74,23 +75,46 @@ DOCKER = "docker"
 DOCKERFILE = """\
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
-RUN --mount=type=secret,id=ca,required=false,mode=0444 set -eu; \\
-    apt_opts=""; \\
-    if [ -s /run/secrets/ca ]; then \\
-      sed -i 's|http://|https://|' /etc/apt/sources.list.d/ubuntu.sources; \\
-      apt_opts="-o Acquire::https::CaInfo=/run/secrets/ca"; \\
-    fi; \\
-    apt-get $apt_opts update -qq \\
- && apt-get $apt_opts install -y -qq bubblewrap procps curl ca-certificates python3 git gcc libc6-dev >/dev/null \\
+RUN apt-get update -qq \\
+ && apt-get install -y -qq bubblewrap procps curl ca-certificates python3 git gcc libc6-dev >/dev/null \\
  && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --shell /bin/bash bh && mkdir /work && chown bh:bh /work
 USER bh
 ENV PATH=/home/bh/.local/bin:$PATH UV_LINK_MODE=copy
-RUN --mount=type=secret,id=ca,required=false,mode=0444 \\
-    if [ -s /run/secrets/ca ]; then export SSL_CERT_FILE=/run/secrets/ca CURL_CA_BUNDLE=/run/secrets/ca; fi; \\
-    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null && uv python install 3.15
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null && uv python install 3.15
 WORKDIR /work
 """
+
+# Behind a proxy, two steps change: apt (which has no CA yet, ca-certificates is what it installs)
+# reads its sources over https and trusts the CA given as a BuildKit secret, and the uv installer
+# and `uv python install` trust it through the environment.
+APT_STEP = """\
+RUN apt-get update -qq \\
+ && apt-get install -y -qq bubblewrap procps curl ca-certificates python3 git gcc libc6-dev >/dev/null \\
+ && rm -rf /var/lib/apt/lists/*
+"""
+APT_STEP_BEHIND_PROXY = """\
+RUN --mount=type=secret,id=ca,mode=0444 set -eu; \\
+    sed -i 's|http://|https://|' /etc/apt/sources.list.d/ubuntu.sources; \\
+    apt_opts="-o Acquire::https::CaInfo=/run/secrets/ca"; \\
+    apt-get $apt_opts update -qq \\
+ && apt-get $apt_opts install -y -qq bubblewrap procps curl ca-certificates python3 git gcc libc6-dev >/dev/null \\
+ && rm -rf /var/lib/apt/lists/*
+"""  # noqa: E501
+UV_STEP = "RUN curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null && uv python install 3.15\n"
+UV_STEP_BEHIND_PROXY = """\
+RUN --mount=type=secret,id=ca,mode=0444 \\
+    export SSL_CERT_FILE=/run/secrets/ca CURL_CA_BUNDLE=/run/secrets/ca; \\
+    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null && uv python install 3.15
+"""
+
+
+def dockerfile(proxy: Proxy | None) -> str:
+    """The Dockerfile: `DOCKERFILE` as it always was with no proxy, the CA-aware steps behind one."""
+    if proxy is None:
+        return DOCKERFILE
+    return DOCKERFILE.replace(APT_STEP, APT_STEP_BEHIND_PROXY).replace(UV_STEP, UV_STEP_BEHIND_PROXY)
+
 
 # The default run: brig's bwrap tests (the mechanism, then the preset end to end) and its tether
 # (a jail ends with the process that launched it), then bh-02's
@@ -126,7 +150,12 @@ def resolve_proxy(environ: Mapping[str, str], ca_option: Path | None) -> Proxy |
     url = environ.get("HTTPS_PROXY") or environ.get("https_proxy")
     if not url:
         return None
-    named = ca_option or (Path(environ["SSL_CERT_FILE"]) if environ.get("SSL_CERT_FILE") else None)
+    if ca_option is not None:
+        named, source = ca_option, "`--ca`"
+    elif environ.get("SSL_CERT_FILE"):
+        named, source = Path(environ["SSL_CERT_FILE"]), "SSL_CERT_FILE"
+    else:
+        named, source = None, ""
     if named is None:
         raise click.ClickException(
             f"HTTPS_PROXY is set ({PROXY_REDACTED}) but no CA bundle is given: pass `--ca FILE`, or"
@@ -134,15 +163,15 @@ def resolve_proxy(environ: Mapping[str, str], ca_option: Path | None) -> Proxy |
         )
     if not named.is_file():
         raise click.ClickException(
-            f"the CA bundle {named} is not a file: pass `--ca FILE` with the proxy's CA bundle"
+            f"the CA bundle {named} (from {source}) is not a file: pass `--ca FILE` with the proxy's bundle"
         )
     return Proxy(url, named.resolve())
 
 
-def docker_env(proxy: Proxy | None) -> dict[str, str]:
+def docker_env(environ: Mapping[str, str], proxy: Proxy | None) -> dict[str, str]:
     """The docker client's environment, with `HTTPS_PROXY` set to the proxy found (which may have
     been given as `https_proxy`), for the `--build-arg`/`-e` that name it without its value."""
-    return {**os.environ, **({"HTTPS_PROXY": proxy.url} if proxy else {})}
+    return {**environ, **({"HTTPS_PROXY": proxy.url} if proxy else {})}
 
 
 def build_argv(proxy: Proxy | None) -> list[str]:
@@ -200,7 +229,7 @@ def source_tar() -> bytes:
     "--ca",
     "ca_option",
     type=click.Path(path_type=Path),
-    help="The CA bundle behind a TLS-intercepting proxy (default: SSL_CERT_FILE); used only with HTTPS_PROXY set.",
+    help="The CA bundle behind a TLS-intercepting proxy (default: SSL_CERT_FILE); needs HTTPS_PROXY.",
 )
 @click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
 def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...]) -> None:
@@ -209,7 +238,9 @@ def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...])
         raise click.ClickException("docker is not answering: this check needs a running Docker daemon")
     proxy = resolve_proxy(os.environ, ca_option)
     click.echo(click.style(f"== image {IMAGE} (ubuntu 24.04, bubblewrap, uv, Python 3.15)", bold=True))
-    subprocess.run(build_argv(proxy), input=DOCKERFILE.encode(), check=True, env=docker_env(proxy))
+    subprocess.run(
+        build_argv(proxy), input=dockerfile(proxy).encode(), check=True, env=docker_env(os.environ, proxy)
+    )
     if line is None:
         line = f"uv run --locked pytest {shlex.join(pytest_args)}" if pytest_args else DEFAULT
     script = (
@@ -237,7 +268,7 @@ def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...])
             script,
         ],
         input=source_tar(),
-        env=docker_env(proxy),
+        env=docker_env(os.environ, proxy),
     )
     sys.exit(run.returncode)
 
