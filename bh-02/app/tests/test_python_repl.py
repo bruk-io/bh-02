@@ -35,7 +35,15 @@ from cordis.loader import boot
 from extensions_cordis_plugin import Extensions, ExtensionsConfig
 from models_cordis_plugin.local_env import token_file
 from python_cordis_plugin import Kernel, KernelConfig, worker_argv
-from runner_cordis_plugin import Approval, BrigConfig, BrigJail, Runner, recorded_group, self_modify_denied
+from runner_cordis_plugin import (
+    Approval,
+    BrigConfig,
+    BrigJail,
+    Runner,
+    group_alive,
+    recorded_group,
+    self_modify_denied,
+)
 
 # darwin's jail (seatbelt) reads by denylist: everything but the secrets. Linux's (bubblewrap)
 # reads by allowlist: the system, the interpreter and the project, so a file anywhere else is
@@ -502,8 +510,7 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
             said
         )
         assert not credential.exists() and runner.released()
-        with pytest.raises(ProcessLookupError):
-            os.killpg(group, 0)  # the jail is gone, not only its worker
+        assert not group_alive(group)  # the jail is gone, not only its worker
         await kernel.run("1")
         assert credential.is_dir() and not runner.released()  # an input came first: held again
         await runner.release()
@@ -662,8 +669,7 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
                 assert not credential.exists()
                 for group in groups:
                     assert group is not None
-                    with pytest.raises(ProcessLookupError):
-                        os.killpg(group, 0)  # both jails are gone, the extensions process's too
+                    assert not group_alive(group)  # both jails are gone, the extensions process's too
                 assert runner.released()
                 await kernel.run("1")  # the next input
                 assert not runner.released() and credential.is_dir()
@@ -889,9 +895,7 @@ def _append_to(path: Path, mode: str = "a", text: str = "# planted by an input\n
 async def _ended(group: int, within: float = 2.0) -> None:
     """Wait until the process group `group` has no process left, or `within` seconds pass."""
     for _ in range(int(within / 0.02)):
-        try:
-            os.killpg(group, 0)
-        except ProcessLookupError:
+        if not group_alive(group):
             return
         await asyncio.sleep(0.02)
 

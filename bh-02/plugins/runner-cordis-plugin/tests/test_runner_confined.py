@@ -3,6 +3,7 @@ bh-02/app/tests/test_python_repl.py's: they need a kernel, which is another plug
 
 import asyncio
 import contextlib
+import ctypes
 import os
 import signal
 import socket
@@ -12,7 +13,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -33,6 +34,7 @@ from runner_cordis_plugin import (
     decoded,
     git_author,
     graded,
+    group_alive,
     held,
     holding,
     identity,
@@ -427,9 +429,7 @@ while True:
 async def _gone(group: int, within: float = 2.0) -> bool:
     """Whether process group `group` has no process left within `within` seconds."""
     for _ in range(int(within / 0.02)):
-        try:
-            os.killpg(group, 0)
-        except ProcessLookupError:
+        if not group_alive(group):
             return True
         await asyncio.sleep(0.02)
     return False
@@ -856,7 +856,7 @@ async def test_an_input_creating_the_project_s_own_absent_local_env_leaves_the_j
         await asyncio.sleep(0.3)  # the tripwire's thread has read the creation, if it watches it
         assert created.read_text() == "MINE=1\n"
         assert started.ended() == "", started.ended()
-        os.killpg(group, 0)  # still running
+        assert group_alive(group)  # still running
         (project / ".envrc").rmdir()  # a placeholder the jail holds, removed on the host
         assert await _gone(group)
         assert str(project / ".envrc") in started.ended()
@@ -979,8 +979,7 @@ async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what
     await asyncio.sleep(1.0)
     try:
         assert not await _still_writing(project / "alive")  # the program is gone
-        with pytest.raises(ProcessLookupError):
-            os.killpg(group, 0)  # and the whole jail
+        assert not group_alive(group)  # and the whole jail
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(group, signal.SIGKILL)
@@ -1054,6 +1053,76 @@ async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
     await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
     assert not held.exists() and not record.exists()  # its group gone, so are they
+
+
+_PR_SET_CHILD_SUBREAPER = 36
+
+
+@pytest.fixture
+def non_reaping_init() -> Iterator[list[int]]:
+    """Make this process the init of every orphan beneath it and never reap them: the shape of a
+    container whose PID 1 does not reap, under any real PID 1 (`PR_SET_CHILD_SUBREAPER`). The test
+    adds the pids it planted to the yielded list; only those are reaped at the end."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        pytest.skip("PR_SET_CHILD_SUBREAPER is unavailable here")
+    planted: list[int] = []
+    try:
+        yield planted
+    finally:
+        libc.prctl(_PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0)
+        for pid in planted:
+            with contextlib.suppress(ChildProcessError):
+                os.waitpid(pid, os.WNOHANG)
+
+
+def _group_states(group: int) -> dict[int, str]:
+    """Each member of process group `group` by pid, with its process state."""
+    table = subprocess.run(
+        ["/bin/ps", "-Ao", "pid=,pgid=,stat="], capture_output=True, text=True, check=True
+    ).stdout
+    rows = [line.split() for line in table.splitlines() if line.strip()]
+    return {int(pid): stat for pid, pgid, stat in rows if int(pgid) == group}
+
+
+async def test_the_sweep_removes_what_a_jail_left_whose_group_is_only_zombies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, non_reaping_init: list[int]
+) -> None:
+    """Where PID 1 does not reap, a dead jail's process group stays in the table as zombies for
+    good, and `os.killpg(group, 0)` still finds it. Nothing of it runs, so the sweep counts it
+    gone: it removes the record's placeholders and the record, and release does not say
+    another session holds them. The group here is a program that started a child and neither
+    waits for it, killed: both are zombies, the child's orphaned to this process as init."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    held = project / ".claude"
+    held.mkdir(parents=True)
+    records = tmp_path / "state" / "bh-02" / "jails"
+    records.mkdir(parents=True)
+    body = "import subprocess, time; subprocess.Popen(['true']); time.sleep(100)"
+    leader = subprocess.Popen([sys.executable, "-c", body], start_new_session=True)
+    non_reaping_init.append(leader.pid)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and len(_group_states(leader.pid)) < 2:
+        time.sleep(0.05)
+    os.killpg(leader.pid, signal.SIGKILL)
+    while time.monotonic() < deadline and any(
+        not state.startswith("Z") for state in _group_states(leader.pid).values()
+    ):
+        time.sleep(0.05)
+    states = _group_states(leader.pid)
+    non_reaping_init.extend(states)
+    assert states and all(state.startswith("Z") for state in states.values()), states
+    os.killpg(leader.pid, 0)  # CONTROL: the group is still found, by its zombies
+    record = records / "bh-j-zombies.json"
+    record.write_text(record_text([(str(held), identity(held.stat()))], leader.pid))
+    one = BrigJail(BrigConfig(), Host())
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
+    await (await one.start(argv, cwd=str(project), endpoint=endpoint)).stop()
+    assert not held.exists() and not record.exists()  # its group is zombies only, so gone
 
 
 # A bh-02 that crashes the moment it would start bubblewrap: what its jail holds on the host is
@@ -1208,8 +1277,7 @@ async def test_a_jail_start_cancelled_while_it_launches_ends_what_the_launch_sta
     assert groups  # the start returned only once the launch had
     await asyncio.sleep(1.0)
     (group,) = groups
-    with pytest.raises(ProcessLookupError):
-        os.killpg(group, 0)
+    assert not group_alive(group)
     assert list(project.iterdir()) == []
     assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
 

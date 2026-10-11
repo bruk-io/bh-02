@@ -88,7 +88,7 @@ from brig.core import (
     Spec,
 )
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH
-from brig.run import Handle, IoPolicy, KillOutcome, SubprocessLauncher, build_compile_ctx
+from brig.run import Handle, IoPolicy, KillOutcome, SubprocessLauncher, build_compile_ctx, group_alive
 from brig.stack import CompiledJail, Stack, scratch_darwin, strict_linux
 from host_paths import state_home
 from runner_cordis_plugin.tripwire import Tripwire
@@ -111,6 +111,7 @@ __all__ = [
     "readable_roots",
     "record_text",
     "recorded",
+    "group_alive",
     "recorded_group",
     "records_dir",
     "released_for",
@@ -664,19 +665,6 @@ def _clear_up(lock: int, made: Sequence[tuple[str, str | None]], record: str | N
             os.unlink(record)
 
 
-def _lives(group: int) -> bool:
-    """Whether any process of the process group `group` still runs. The group outlives its
-    leader (bubblewrap's own first process exits; measured), so the group, not the pid. A pid
-    reused as a group since reads as alive, which only keeps placeholders longer."""
-    try:
-        os.killpg(group, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 #: The extended attribute a Linux jail marks each placeholder with: the jail's id.
 MARK = "user.bh-02.placeholder"
 
@@ -981,7 +969,8 @@ class BrigJail:
 
     def _sweep(self, lock: int, records: str) -> None:
         """Take `lock` exclusively if it can be, and then remove what every record left in
-        `records` names, but those whose jail still runs (`_hold`)."""
+        `records` names, but those whose jail still runs (`_hold`; `group_alive` counts a zombie as gone and a
+        process table it can't read as running, so only what is proved dead is removed)."""
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -990,7 +979,7 @@ class BrigJail:
             with contextlib.suppress(OSError):
                 text = left.read_text()
                 group = recorded_group(text)
-                if group is not None and _lives(group):
+                if group is not None and group_alive(group):
                     continue  # its bh-02 is gone, but the jail is not: what it holds stays
                 remove_placeholders(recorded(text))
                 left.unlink()
