@@ -6,11 +6,13 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-10 03:31'
+updated_date: '2026-10-11 15:30'
 labels:
   - memory
   - runner
   - tools
   - docs
+  - size-5
 dependencies: []
 priority: medium
 type: feature
@@ -42,3 +44,9 @@ Decided with the owner (2026-10-10): the tool runs in bh-02's process, not in th
 - [ ] #6 The docs say plainly that the memory tool writes outside the jail, from bh-02's own process, and why: the memory plugin's README, the runner plugin's README where approval is described, CONTRACTS.md (`tools`, `approval`), bh-02/CLAUDE.md's list for the running harness, and the docs site's jail-and-approval page
 - [ ] #7 `scripts/check` passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Sized size-5 (2026-10-11): a host-side tool, an approval-rule case whose shape is still open, a no-link writer in host_paths, and docs in five places.
+<!-- SECTION:NOTES:END -->

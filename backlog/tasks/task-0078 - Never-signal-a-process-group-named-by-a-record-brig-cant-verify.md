@@ -4,9 +4,11 @@ title: Never signal a process group named by a record brig can't verify
 status: To Do
 assignee: []
 created_date: '2026-10-10 21:58'
+updated_date: '2026-10-11 15:30'
 labels:
   - brig
   - runner
+  - size-3
 dependencies: []
 priority: medium
 type: bug
@@ -24,3 +26,9 @@ type: bug
 - [ ] #2 A test plants a registration with an empty stamp naming a decoy group; the decoy survives the jail's kill; the test fails before the fix
 - [ ] #3 The task records whether bh-02's jails can write their jail_dir, checked on Linux and macOS
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Sized size-3 (2026-10-11): the fix is narrow, but whether bh-02's jails can write their jail_dir is unknown on both Linux and macOS.
+<!-- SECTION:NOTES:END -->

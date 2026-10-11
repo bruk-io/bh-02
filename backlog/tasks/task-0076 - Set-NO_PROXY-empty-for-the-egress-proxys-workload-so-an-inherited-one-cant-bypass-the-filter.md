@@ -6,8 +6,10 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-10 21:58'
+updated_date: '2026-10-11 15:30'
 labels:
   - brig
+  - size-1
 dependencies: []
 priority: medium
 type: bug
@@ -25,3 +27,9 @@ type: bug
 - [ ] #2 The egress tests set `NO_PROXY` in the launching environment and pass; they fail before the fix
 - [ ] #3 `uv run pytest libs/brig -q` passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Sized size-1 (2026-10-11): one environment change and a test that sets NO_PROXY; nothing unknown.
+<!-- SECTION:NOTES:END -->

@@ -6,8 +6,10 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-10 21:58'
+updated_date: '2026-10-11 15:30'
 labels:
   - brig
+  - size-2
 dependencies: []
 priority: medium
 type: bug
@@ -25,3 +27,9 @@ Teardown decides a process group is gone by listing its members with `/bin/ps` (
 - [ ] #2 A test plants a zombie in a jail's group under a PID 1 that doesn't reap, and the kill reports the jail ended; it fails before the fix
 - [ ] #3 brig's kill, teardown and probe tests pass in a container whose PID 1 doesn't reap
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Sized size-2 (2026-10-11): process state differs between Linux and darwin, and the test needs a PID 1 that doesn't reap.
+<!-- SECTION:NOTES:END -->

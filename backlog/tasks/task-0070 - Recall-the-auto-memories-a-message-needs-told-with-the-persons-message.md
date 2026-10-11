@@ -4,10 +4,12 @@ title: 'Recall the auto memories a message needs, told with the person''s messag
 status: To Do
 assignee: []
 created_date: '2026-10-10 03:45'
+updated_date: '2026-10-11 15:30'
 labels:
   - memory
   - agent
   - docs
+  - size-8
 dependencies:
   - TASK-0068
 priority: medium
@@ -43,3 +45,9 @@ Logged by the owner (2026-10-10) as its own task.
 - [ ] #6 CONTRACTS.md, the memory plugin's README and docs/bh-02/using/memory.md describe recall
 - [ ] #7 `scripts/check` passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Sized size-8 (2026-10-11): a new seam in the loop (open shape), two choosers, a labelled set to score them, and three open questions: split before starting, at least into the seam, the choosers, and the scoring set.
+<!-- SECTION:NOTES:END -->

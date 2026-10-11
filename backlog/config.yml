@@ -2,6 +2,7 @@ project_name: "Bruk Habtu’s Harness"
 default_status: "To Do"
 statuses: ["To Do", "In Progress", "Done"]
 labels: []
+types: ["intent", "design", "spike", "task", "bug", "feature", "enhancement", "chore", "docs"]
 date_format: yyyy-mm-dd
 max_column_width: 20
 auto_open_browser: true

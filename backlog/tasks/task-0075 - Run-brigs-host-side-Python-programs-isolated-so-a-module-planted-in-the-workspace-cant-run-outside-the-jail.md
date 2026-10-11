@@ -6,9 +6,11 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-10 21:58'
+updated_date: '2026-10-11 15:30'
 labels:
   - brig
   - runner
+  - size-3
 dependencies: []
 priority: high
 type: bug
@@ -27,3 +29,9 @@ brig's exit wrapper runs `python -c` with its working directory set to the workl
 - [ ] #3 In bh-02, a test plants a module in the project root, starts the Python process again, and nothing runs outside the jail
 - [ ] #4 brig's test tiers, `scripts/linux-jail-check` and `scripts/check` pass
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Sized size-3 (2026-10-11): the change is small (-I on three interpreters), but it is a jail escape across two codebases, -I's effect on editable installs and PYTHONPATH is unchecked, and bh-02 needs an end-to-end test.
+<!-- SECTION:NOTES:END -->

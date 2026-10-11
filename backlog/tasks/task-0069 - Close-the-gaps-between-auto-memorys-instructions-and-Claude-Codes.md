@@ -4,9 +4,11 @@ title: Close the gaps between auto memory's instructions and Claude Code's
 status: To Do
 assignee: []
 created_date: '2026-10-10 03:34'
+updated_date: '2026-10-11 15:30'
 labels:
   - memory
   - docs
+  - size-1
 dependencies: []
 priority: medium
 type: feature
@@ -34,3 +36,9 @@ These are judgement rules, so they are prose. The mechanical ones (a slug name, 
 - [ ] #3 The memory plugin's README and docs/bh-02/using/memory.md, where they say what the model is told about auto memory, say the same
 - [ ] #4 `scripts/check` passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Sized size-1 (2026-10-11): prompt text, a test that it says each rule, two docs; nothing unknown.
+<!-- SECTION:NOTES:END -->
