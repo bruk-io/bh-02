@@ -4,11 +4,12 @@ survives."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import pytest
 
-from brig.run import group_alive
+from brig.run import group_alive, teardown
 from brig.run.teardown import UnreadableProcessTable, _live_group_members
 
 _PS = """\
@@ -102,10 +103,14 @@ def test_blank_lines_are_skipped() -> None:
 def test_teardown_fails_an_item_whose_table_it_cannot_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import os
-
-    from brig.run import teardown
+    pgid = os.getpgrp() + 1000
+    # Control: the same call over a readable, empty table ends ALREADY_GONE, so
+    # the FAILED below is the unreadable table's doing.
+    monkeypatch.setattr(teardown, "_read_process_table", lambda: "")
+    outcome, detail = teardown._guarded_ladder(pgid, 1234, "x", 0.1)
+    assert outcome is teardown.KillOutcome.ALREADY_GONE, detail
 
     monkeypatch.setattr(teardown, "_read_process_table", lambda: "100 100\n")
-    outcome, detail = teardown._guarded_ladder(os.getpgrp() + 1000, 1234, "x", 0.1)
+    outcome, detail = teardown._guarded_ladder(pgid, 1234, "x", 0.1)
     assert outcome is teardown.KillOutcome.FAILED, detail
+    assert "UnreadableProcessTable" in detail, detail

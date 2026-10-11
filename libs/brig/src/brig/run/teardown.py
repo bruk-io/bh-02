@@ -229,10 +229,11 @@ def group_alive(pgid: int, *, read_table: Callable[[], str] = _read_process_tabl
     with no rows, or only zombies, reads gone (a zombie has exited; where PID 1
     does not reap it stays for good, which `os.killpg(pgid, 0)` cannot see).
     When the process table cannot be read (`/bin/ps` missing or failing, or a
-    row that is not `pid pgid stat`) the answer is alive: a caller that sweeps what is dead keeps what it cannot
-    prove dead. `read_table` is the seam for that failure; it returns the text
-    of `ps -Ao pid=,pgid=,stat=` and raises `OSError` or
-    `subprocess.CalledProcessError` as the default does."""
+    row that is not `pid pgid stat`) the answer is alive: a caller that sweeps
+    what is dead keeps what it cannot prove dead. `read_table` is the seam for
+    that failure; it returns the text of `ps -Ao pid=,pgid=,stat=` and raises
+    `OSError` or `subprocess.CalledProcessError` as the default does; a table
+    it returns with a malformed row reads alive too."""
     try:
         table = read_table()
     except OSError, subprocess.CalledProcessError:
