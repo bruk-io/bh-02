@@ -570,8 +570,8 @@ def render_bwrap_prefix(
     Raises:
         ReadModelUnsupported, NetworkUnsupported, UnresolvedPath,
         UnknownPathExistence, UnknownPathKind, ChannelInsideWriteDeny,
-        ChannelInsideJailDir -- each
-        naming its own subject; see the classes' own docstrings.
+        ChannelInsideJailDir -- each naming its own subject; see the
+        classes' own docstrings.
     """
     if spec.fs.read_model is not ReadModel.ALLOW_LIST:
         raise ReadModelUnsupported(
