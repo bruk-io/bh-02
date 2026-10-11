@@ -2,7 +2,7 @@
 id: decision-0001
 title: Separate a jail's runtime from its confinement in brig
 date: '2026-10-10 21:42'
-status: proposed
+status: accepted
 ---
 ## Context
 

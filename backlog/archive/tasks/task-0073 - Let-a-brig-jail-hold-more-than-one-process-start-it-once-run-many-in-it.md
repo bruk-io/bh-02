@@ -4,7 +4,7 @@ title: 'Let a brig jail hold more than one process: start it once, run many in i
 status: To Do
 assignee: []
 created_date: '2026-10-10 18:41'
-updated_date: '2026-10-10 21:58'
+updated_date: '2026-10-11 15:37'
 labels:
   - brig
 milestone: m-5
@@ -43,4 +43,6 @@ Decided with the owner (2026-10-10): a jail can hold more than one process.
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-10: this task's premise is wrong. brig already has Handle.exec (SPEC.md section 9), at EQUIVALENT_PROFILE fidelity at best; what is missing is same-instance exec, a working directory and a channel per process, and a seam for runtimes with a life of their own (Docker). decision-0001 (proposed) redesigns this; rewrite or replace this task once it is accepted.
+
+2026-10-11: superseded by decision-0001 (accepted) and its split, TASK-0079.02 to TASK-0079.10. Archived, not done.
 <!-- SECTION:NOTES:END -->

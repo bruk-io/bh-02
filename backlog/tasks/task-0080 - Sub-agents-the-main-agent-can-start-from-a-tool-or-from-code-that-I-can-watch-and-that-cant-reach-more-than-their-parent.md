@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0005
+id: TASK-0080
 title: >-
   Sub-agents the main agent can start from a tool or from code, that I can
   watch, and that can't reach more than their parent
-status: Draft
+status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-11 15:31'

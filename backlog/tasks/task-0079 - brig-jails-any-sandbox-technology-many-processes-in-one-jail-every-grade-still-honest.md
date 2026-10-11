@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0004
+id: TASK-0079
 title: >-
   brig jails: any sandbox technology, many processes in one jail, every grade
   still honest
-status: Draft
+status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-11 15:31'
