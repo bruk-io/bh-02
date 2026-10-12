@@ -2,7 +2,7 @@
 
 `Helper` and `HelperLifetime` have been in the mechanism contract since M2
 and `CompiledJail.helpers` has been carried through the stack the whole
-time -- with nothing ever reading it. `grep -c helpers brig/run/launcher.py`
+time -- with nothing ever reading it. `grep -c helpers brig/run/host.py`
 returned 0 until task-081. That is this codebase's named recurring defect
 (CLAUDE.md: "declared but never called"), and M6's `connect_proxy` is the
 first mechanism that needs the field to mean something, so it gets proven
@@ -10,7 +10,7 @@ here before a proxy is built on top of it.
 
 Every claim in this file is observed from the OS -- a pid's liveness read
 through `/bin/kill -0`, a file the helper itself wrote -- never from the
-launcher's own bookkeeping. `handle.helper_pids` is what is being GRADED
+launcher's own bookkeeping. `jail._base.helper_pids` is what is being GRADED
 here; it cannot also be the evidence that the helper ran.
 
 Helpers are spawned with the run token in their argv (`workload_argv`) so
@@ -32,13 +32,11 @@ import pytest
 from brig.core import Spec, unenforced_report
 from brig.core.runtime import Capability
 from brig.mech import Helper, HelperLifetime
+from brig.run import HelperFailed, IoPolicy, Jail, Process
 from brig.run import _identity as identity
 from brig.run import host as host_mod
-from brig.run import teardown as teardown_mod
-from brig.run.handle import Handle
-from brig.run.launcher import HelperFailed, IoPolicy, SubprocessLauncher
 from brig.stack import CompiledJail
-from tests.conftest import workload_argv
+from tests.conftest import launch, workload_argv
 
 pytestmark = pytest.mark.integration
 
@@ -74,7 +72,7 @@ def _alive(pid: int) -> bool:
     `/bin/kill` by absolute path, never the shell builtin or an alias
     (decision-026). A zombie answers 0 here, which is exactly the
     distinction this file needs to be careful about -- see
-    `test_kill_jail_reaps_a_jail_lifetime_helper`, which asserts on
+    `test_jail_lifetime_helper_runs_and_destroy_reaps_it`, which asserts on
     `/bin/ps` state, not on this, for the post-kill claim.
     """
     return subprocess.run(["/bin/kill", "-0", str(pid)], capture_output=True).returncode == 0
@@ -107,8 +105,8 @@ def _wait_until(predicate, timeout: float = 5.0) -> bool:  # type: ignore[no-unt
     return False
 
 
-def _launch(jail: CompiledJail, run_id: str, jail_dir: str) -> Handle:
-    return SubprocessLauncher().launch(
+def _launch(jail: CompiledJail, run_id: str, jail_dir: str) -> tuple[Jail, Process]:
+    return launch(
         jail,
         argv=workload_argv(run_id, "sleep 30"),
         cwd=jail_dir,
@@ -118,9 +116,9 @@ def _launch(jail: CompiledJail, run_id: str, jail_dir: str) -> Handle:
     )
 
 
-def test_jail_lifetime_helper_runs_and_kill_jail_reaps_it(run_id: str) -> None:
+def test_jail_lifetime_helper_runs_and_destroy_reaps_it(run_id: str) -> None:
     """A JAIL_LIFETIME helper is a live process while the jail lives, and
-    is gone after `kill_jail` -- both observed from the OS.
+    is gone after `Jail.destroy` -- both observed from the OS.
 
     THE CONTROL is the first half of this test, not a separate one: the
     helper is proven ALIVE (and proven to have executed, by the file it
@@ -138,19 +136,19 @@ def test_jail_lifetime_helper_runs_and_kill_jail_reaps_it(run_id: str) -> None:
         argv=tuple(workload_argv(run_id, f"touch {beacon}; sleep 30")),
         lifetime=HelperLifetime.JAIL_LIFETIME,
     )
-    handle = _launch(_jail((helper,)), run_id, jail_dir)
+    jail, process = _launch(_jail((helper,)), run_id, jail_dir)
     try:
-        assert len(handle.helper_pids) == 1, (
-            f"launcher recorded no pid for a JAIL_LIFETIME helper: {handle.helper_pids!r}"
+        assert len(jail._base.helper_pids) == 1, (
+            f"launcher recorded no pid for a JAIL_LIFETIME helper: {jail._base.helper_pids!r}"
         )
-        helper_pid = handle.helper_pids[0]
+        helper_pid = jail._base.helper_pids[0]
         # decision-155: a helper is torn down by pid, possibly from a process
         # that never started it, so its pid is recorded WITH the moment that
         # process began -- one stamp per pid, matching what the OS says about
         # this helper right now. A recycled number therefore reads as gone
         # rather than as this helper.
-        assert len(handle.helper_stamps) == len(handle.helper_pids)
-        assert handle.helper_stamps[0] == identity.start_stamp(helper_pid) != identity.UNKNOWN
+        assert len(jail._base.helper_stamps) == len(jail._base.helper_pids)
+        assert jail._base.helper_stamps[0] == identity.start_stamp(helper_pid) != identity.UNKNOWN
 
         # It RAN: the helper's own side effect, not our bookkeeping.
         assert _wait_until(lambda: os.path.exists(beacon)), (
@@ -163,18 +161,18 @@ def test_jail_lifetime_helper_runs_and_kill_jail_reaps_it(run_id: str) -> None:
             f"helper {helper_pid} is a zombie or gone while the jail is still up"
         )
 
-        # Its own process group: `kill_jail` kills the group, so a helper
+        # Its own process group: `Jail.destroy` kills the group, so a helper
         # sharing the launcher's group would take the test runner with it.
         assert os.getpgid(helper_pid) == helper_pid, (
             f"helper {helper_pid} did not get its own process group "
             f"(pgid={os.getpgid(helper_pid)}) -- killpg on it would hit the harness"
         )
 
-        report = teardown_mod.kill_jail(handle)
+        report = jail.destroy()
     finally:
-        # Belt and braces: if an assertion above fired before kill_jail ran,
+        # Belt and braces: if an assertion above fired before destroy ran,
         # do not leak the helper into the suite-wide sweep.
-        for pid in handle.helper_pids:
+        for pid in jail._base.helper_pids:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(pid, 9)
 
@@ -185,7 +183,7 @@ def test_jail_lifetime_helper_runs_and_kill_jail_reaps_it(run_id: str) -> None:
     assert helper_items[0].identity == str(helper_pid)
 
     assert _wait_until(lambda: _ps_state(helper_pid) in ("", "Z")), (
-        f"helper {helper_pid} survived kill_jail (ps state {_ps_state(helper_pid)!r}) -- "
+        f"helper {helper_pid} survived destroy (ps state {_ps_state(helper_pid)!r}) -- "
         "a helper that outlives its jail is the leak this whole field exists to prevent"
     )
 
@@ -208,7 +206,7 @@ def test_launch_scoped_helper_completes_before_the_workload_starts(run_id: str) 
         argv=("/bin/sh", "-c", f"printf ready > {prepared}"),
         lifetime=HelperLifetime.LAUNCH_SCOPED,
     )
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         _jail((helper,)),
         # The workload copies the prepared file the instant it starts. Any
         # ordering violation shows up as a missing or empty `observed`.
@@ -219,9 +217,9 @@ def test_launch_scoped_helper_completes_before_the_workload_starts(run_id: str) 
         jail_dir=jail_dir,
     )
     try:
-        assert handle.helper_pids == (), (
+        assert jail._base.helper_pids == (), (
             "a LAUNCH_SCOPED helper must not be recorded as a persistent pid: "
-            f"{handle.helper_pids!r}"
+            f"{jail._base.helper_pids!r}"
         )
         # The wait is for CONTENT, never for existence: `> observed` is a
         # shell redirect, so the file appears the instant the workload's
@@ -236,7 +234,7 @@ def test_launch_scoped_helper_completes_before_the_workload_starts(run_id: str) 
             "the workload started before its LAUNCH_SCOPED helper finished preparing"
         )
     finally:
-        teardown_mod.kill_jail(handle)
+        jail.destroy()
 
 
 def test_failed_launch_scoped_helper_refuses_the_launch(run_id: str) -> None:
@@ -258,7 +256,7 @@ def test_failed_launch_scoped_helper_refuses_the_launch(run_id: str) -> None:
         lifetime=HelperLifetime.LAUNCH_SCOPED,
     )
     with pytest.raises(HelperFailed) as exc_info:
-        SubprocessLauncher().launch(
+        launch(
             _jail((helper,)),
             argv=workload_argv(run_id, f"touch {marker}; sleep 30"),
             cwd=jail_dir,

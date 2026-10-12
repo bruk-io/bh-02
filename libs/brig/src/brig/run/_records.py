@@ -4,9 +4,9 @@ SPEC.md section 9, "The Jail and its processes" (decision-181). A start makes
 `<jail_dir>/procs/<id>/` before it spawns, and the process's stdio files go
 there. Once the spawn returns, the host writes `record.json` beside them,
 whole, to a temporary name renamed into place. The process's own exit wrapper
-writes `exit` there (`brig/run/_exit_status.py`). This replaced
-`<jail_dir>/execs/` (one file per exec sibling, deleted by its `wait`) and
-`<jail_dir>/exit` (one status per jail directory), which settles decision-162
+writes `exit` there (`brig/run/_exit_status.py`). This replaced a
+registration file per exec sibling, deleted by its `wait`, and one exit file
+per jail directory (deleted by decision-183), which settles decision-162
 for good: a status belongs to one process id and can't be read as another's.
 
 **The id** is 16 lowercase hex characters from `secrets` (64 bits), fresh per
@@ -128,17 +128,6 @@ def exit_path(jail_dir: str, process_id: str) -> str:
         ValueError: `process_id` is not an id brig makes.
     """
     return os.path.join(process_dir(jail_dir, process_id), EXIT_FILENAME)
-
-
-def id_of(jail_dir: str, path: str) -> str | None:
-    """The id of the records directory `path` (a process's stdio file) lies in
-    directly, or `None` when it lies in none. How a `Handle`, which carries its
-    first process's stdio paths but no id, names that process's records."""
-    directory, _name = os.path.split(path)
-    parent, name = os.path.split(directory)
-    if parent != procs_dir(jail_dir) or not is_id(name):
-        return None
-    return name
 
 
 def make_dir(jail_dir: str, process_id: str) -> str:
@@ -336,8 +325,7 @@ def scan(jail_dir: str) -> Scan:
 
 def disagrees(held: ProcessRecord, on_disk: ProcessRecord) -> bool:
     """Whether a record on disk for a process the caller holds says something
-    else about it: any field but `order`, which only sorts (a `Handle`, which
-    carries no order, names its first process with 0). Pure. A disk copy that
+    else about it: any field but `order`, which only sorts. Pure. A disk copy that
     disagrees is never used in place of the held record (decision-181)."""
     return dataclasses.replace(on_disk, order=held.order) != held
 
@@ -442,7 +430,7 @@ class JailDirInUse(RuntimeError):
         reasons = "; ".join(f"{item.path} {item.reason}" for item in held)
         super().__init__(
             f"jail directory {jail_dir!r} holds the records of an earlier jail that is not "
-            f"known to be gone: {reasons}. Destroy that jail (its Handle's kill(), or end "
+            f"known to be gone: {reasons}. Destroy that jail (`Jail.destroy()`, or end "
             "what those records name), or choose another directory. If the process it names "
             "has already been waited for in another process (an exit record exists), it is "
             "still leaving: wait a moment and retry; nothing was removed"

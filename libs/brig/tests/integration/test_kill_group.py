@@ -1,4 +1,4 @@
-"""`Handle.kill()` / `teardown.kill_jail`: group teardown of a launched
+"""`Jail.destroy()` / `teardown.kill_named`: group teardown of a launched
 workload, per SPEC.md §9's fixed ladder (SIGTERM -> grace -> SIGKILL ->
 VERIFY -> report).
 
@@ -15,7 +15,7 @@ already produces exactly the `<body> & wait` shape the exit criterion
 names when given `body="sleep 100"` (see that function's docstring) -- a
 leader `bash` process that backgrounds a `sleep 100` child and then blocks
 in `wait`, both landing in the leader's own process group because
-`SubprocessLauncher` launches with `start_new_session=True` (task-019).
+`Jail.create` and `jail.start` launches with `start_new_session=True` (task-019).
 
 Vocabulary, per decision-026 rule 3 (quoted in this task's description --
 read it before touching this file): THE CONTROL below is a test-local
@@ -43,13 +43,11 @@ from collections.abc import Iterator
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.run import _identity, _records
+from brig.run import IoPolicy, Jail, Process, _identity, _records
 from brig.run import teardown as teardown_mod
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.run.teardown import KillOutcome, group_alive
 from brig.stack import CompiledJail
-from tests.conftest import workload_argv
+from tests.conftest import destroy_with_grace, launch, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -59,14 +57,14 @@ def _new_jail_dir() -> str:
     (CLAUDE.md: `sun_path` is 104 bytes on darwin).
 
     The `kg` (kill-group) infix is load-bearing, not decorative:
-    `test_launcher.py`, `test_wait_ready.py` and `test_exec.py` each mint
+    `test_jail_launch.py`, `test_wait_ready.py` and `test_exec.py` each mint
     their own `/tmp/bg<pid>-<n>` sequence from an independent
     `itertools.count()` starting at 0 -- under `pytest -m integration`
     every one of these files shares the SAME `os.getpid()` (one pytest
     process), so without a distinguishing infix this file's Nth jail dir
     is byte-identical to some other file's Nth jail dir, and whichever
     test runs second silently inherits the first's leftover directory
-    (observed: this collided with `test_launcher.py`'s
+    (observed: this collided with `test_jail_launch.py`'s
     `test_launch_refuses_a_jail_that_requires_pty`, which asserts its
     jail_dir was never created, and its `test_spawn_event_...`, which read
     back a stale `events.jsonl` from an unrelated jail_id -- only when all
@@ -74,7 +72,7 @@ def _new_jail_dir() -> str:
     the collision depends on the exact cumulative dir count at the moment
     each file happens to reuse an index). This infix removes THIS file
     from that shared, order-dependent namespace; it does not fix the
-    remaining risk between `test_launcher.py`, `test_wait_ready.py` and
+    remaining risk between `test_jail_launch.py`, `test_wait_ready.py` and
     `test_exec.py`, which are outside this task's Deliverable."""
     return f"/tmp/bg{os.getpid()}kg{next(_jail_counter)}"
 
@@ -118,10 +116,9 @@ def _ps_state(pid: int) -> str:
     return proc.stdout.strip()
 
 
-def _launch(argv: list[str], *, jail_id: str = "jail-under-test") -> Handle:
+def _launch(argv: list[str], *, jail_id: str = "jail-under-test") -> tuple[Jail, Process]:
     jail_dir = _new_jail_dir()
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         _compiled_jail(),
         argv=argv,
         cwd=jail_dir,
@@ -156,22 +153,22 @@ def _ps_has_row_for(pid: int) -> bool:
     return proc.returncode == 0 and bool(data_lines)
 
 
-def _positive_pre_assertion(handle: Handle) -> tuple[int, int, int]:
+def _positive_pre_assertion(process: Process) -> tuple[int, int, int]:
     """AC #2: BEFORE any kill, prove the tree is real -- a second pid
     exists beyond the workload (leader) pid, it differs from the leader
     pid, and both report the same pgid. Returns (leader_pid, child_pid,
     pgid), parsed integers, for the caller to assert on directly and to
     print as evidence."""
     rows = _ps_rows()
-    children = [pid for pid, ppid, _pgid in rows if ppid == handle.pid]
+    children = [pid for pid, ppid, _pgid in rows if ppid == process.pid]
     assert children, (
-        f"expected the workload leader (pid={handle.pid}) to have a live "
+        f"expected the workload leader (pid={process.pid}) to have a live "
         f"child before any kill; full ps rows: {rows}"
     )
     child_pid = children[0]
-    assert child_pid != handle.pid
+    assert child_pid != process.pid
 
-    leader_rows = [r for r in rows if r[0] == handle.pid]
+    leader_rows = [r for r in rows if r[0] == process.pid]
     child_rows = [r for r in rows if r[0] == child_pid]
     assert leader_rows and child_rows
     leader_pgid = leader_rows[0][2]
@@ -179,10 +176,10 @@ def _positive_pre_assertion(handle: Handle) -> tuple[int, int, int]:
     assert leader_pgid == child_pgid
 
     print(
-        f"PRE-ASSERTION (AC #2): leader_pid={handle.pid} child_pid={child_pid} "
-        f"pgid={leader_pgid} (handle.pgid={handle.pgid})"
+        f"PRE-ASSERTION (AC #2): leader_pid={process.pid} child_pid={child_pid} "
+        f"pgid={leader_pgid} (process._record.pgid={process._record.pgid})"
     )
-    return handle.pid, child_pid, leader_pgid
+    return process.pid, child_pid, leader_pgid
 
 
 # ---------------------------------------------------------------------------
@@ -198,11 +195,11 @@ def test_kill_leaves_no_process_from_the_tree_alive(run_id: str) -> None:
     leader makes exactly this test fail, because the child below stops
     being torn down."""
     argv = workload_argv(run_id, "sleep 100")
-    handle = _launch(argv)
-    leader_pid, child_pid, pgid = _positive_pre_assertion(handle)
-    assert pgid == handle.pgid
+    jail, process = _launch(argv)
+    leader_pid, child_pid, pgid = _positive_pre_assertion(process)
+    assert pgid == process._record.pgid
 
-    report = handle.kill()
+    report = jail.destroy()
 
     # AC #3: every pid found in the pre-assertion, not just the leader.
     for pid in (leader_pid, child_pid):
@@ -213,7 +210,7 @@ def test_kill_leaves_no_process_from_the_tree_alive(run_id: str) -> None:
     workload_items = [item for item in report.items if item.kind == "workload_group"]
     assert len(workload_items) == 1
     item = workload_items[0]
-    assert item.identity == str(handle.pgid)
+    assert item.identity == str(process._record.pgid)
     assert item.outcome is KillOutcome.ENDED
     print(f"KillReport (AC #6): {report}")
 
@@ -233,13 +230,13 @@ def test_control_single_pid_kill_leaves_the_child_alive(run_id: str) -> None:
     and its child is shown to survive that -- proof that the tree-survival
     probe in the test above is discriminating, not vacuous."""
     argv = workload_argv(run_id, "sleep 100")
-    handle = _launch(argv)
-    leader_pid, child_pid, pgid = _positive_pre_assertion(handle)
+    jail, process = _launch(argv)
+    leader_pid, child_pid, pgid = _positive_pre_assertion(process)
 
     try:
         # THE CONTROL: single-pid kill, deliberately not a group kill.
         os.kill(leader_pid, signal.SIGKILL)
-        handle.wait(timeout=20.0)
+        process.wait(timeout=20.0)
 
         # Give the kernel a moment, then assert POSITIVELY that the child
         # is still a live, running process -- not merely an unreaped
@@ -269,7 +266,7 @@ def test_control_single_pid_kill_leaves_the_child_alive(run_id: str) -> None:
         # deliberate leak.
         with contextlib.suppress(ProcessLookupError):
             os.killpg(pgid, signal.SIGKILL)
-        handle.wait(timeout=20.0)
+        process.wait(timeout=20.0)
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline and _ps_has_row_for(child_pid):
             time.sleep(0.02)
@@ -289,10 +286,10 @@ def test_kill_escalates_to_sigkill_when_the_leader_ignores_sigterm(run_id: str) 
     SIGTERM was merely *sent* would be wrong here: the leader ignores it)."""
     body = "trap '' TERM; sleep 100"
     argv = workload_argv(run_id, body)
-    handle = _launch(argv)
-    leader_pid, child_pid, _pgid = _positive_pre_assertion(handle)
+    jail, process = _launch(argv)
+    leader_pid, child_pid, _pgid = _positive_pre_assertion(process)
 
-    report = teardown_mod.kill_jail(handle, grace=0.3)
+    report = destroy_with_grace(jail, 0.3)
 
     for pid in (leader_pid, child_pid):
         assert _gone_or_zombie(pid), f"pid {pid} is still running after kill()"
@@ -307,11 +304,11 @@ def test_control_kill_ends_a_cooperative_group_without_needing_escalation(run_id
     cannot distinguish "the SIGKILL rung actually ran" from "this
     machinery always reports ENDED no matter what"."""
     argv = workload_argv(run_id, "sleep 100")
-    handle = _launch(argv)
-    _positive_pre_assertion(handle)
+    jail, process = _launch(argv)
+    _positive_pre_assertion(process)
 
     started = time.monotonic()
-    report = teardown_mod.kill_jail(handle)  # default grace (2.0s)
+    report = jail.destroy()  # default grace (2.0s)
     elapsed = time.monotonic() - started
 
     assert report.items[0].outcome is KillOutcome.ENDED
@@ -369,25 +366,25 @@ def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
     Before decision-171 the `/bin/ps` scan counted it and the item was
     `FAILED`."""
     body = f"{sys.executable} -c 'import subprocess, time; subprocess.Popen([\"true\"]); time.sleep(100)'"
-    handle = _launch(workload_argv(run_id, body))
+    jail, process = _launch(workload_argv(run_id, body))
     deadline = time.monotonic() + 10
     zombies: list[int] = []
     while time.monotonic() < deadline and not zombies:
         zombies = [
             pid
             for pid, _ppid, pgid in _ps_rows()
-            if pgid == handle.pgid and _ps_state(pid).startswith("Z")
+            if pgid == process._record.pgid and _ps_state(pid).startswith("Z")
         ]
         time.sleep(0.05)
     assert zombies, "CONTROL failed: no zombie was planted in the jail's group"
-    non_reaping_init.extend(pid for pid, _ppid, pgid in _ps_rows() if pgid == handle.pgid)
+    non_reaping_init.extend(pid for pid, _ppid, pgid in _ps_rows() if pgid == process._record.pgid)
 
-    report = handle.kill()
+    report = jail.destroy()
 
     still_there = [pid for pid in zombies if _ps_state(pid).startswith("Z")]
     assert still_there == zombies, "CONTROL failed: the zombie was reaped, so PID 1 reaps here"
     assert report.items[0].outcome is KillOutcome.ENDED, report.items[0].detail
-    assert not handle.alive()
+    assert not jail.alive()
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="PR_SET_CHILD_SUBREAPER is Linux")
@@ -398,27 +395,27 @@ def test_group_alive_counts_a_zombie_the_init_never_reaps_as_gone(
     """TASK-0079.19: a group whose only members are zombies reads gone through
     `group_alive`, though `os.killpg(pgid, 0)` still finds it."""
     body = f"{sys.executable} -c 'import subprocess, time; subprocess.Popen([\"true\"]); time.sleep(100)'"
-    handle = _launch(workload_argv(run_id, body))
+    jail, process = _launch(workload_argv(run_id, body))
     deadline = time.monotonic() + 10
     zombies: list[int] = []
     while time.monotonic() < deadline and not zombies:
         zombies = [
             pid
             for pid, _ppid, pgid in _ps_rows()
-            if pgid == handle.pgid and _ps_state(pid).startswith("Z")
+            if pgid == process._record.pgid and _ps_state(pid).startswith("Z")
         ]
         time.sleep(0.05)
     assert zombies, "CONTROL failed: no zombie was planted in the jail's group"
-    non_reaping_init.extend(pid for pid, _ppid, pgid in _ps_rows() if pgid == handle.pgid)
-    assert group_alive(handle.pgid), "a live leader keeps the group alive"
+    non_reaping_init.extend(pid for pid, _ppid, pgid in _ps_rows() if pgid == process._record.pgid)
+    assert group_alive(process._record.pgid), "a live leader keeps the group alive"
 
-    os.killpg(handle.pgid, signal.SIGKILL)
+    os.killpg(process._record.pgid, signal.SIGKILL)
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and group_alive(handle.pgid):
+    while time.monotonic() < deadline and group_alive(process._record.pgid):
         time.sleep(0.05)
 
-    os.killpg(handle.pgid, 0)  # CONTROL: the group is still found, by its zombies
-    assert not group_alive(handle.pgid)
+    os.killpg(process._record.pgid, 0)  # CONTROL: the group is still found, by its zombies
+    assert not group_alive(process._record.pgid)
 
 
 _ZOMBIE_LEADER_PARENT = """
@@ -497,16 +494,16 @@ def test_kill_is_idempotent(run_id: str) -> None:
     """AC #8: a second `kill()` on the same handle reports `ALREADY_GONE`
     and raises nothing."""
     argv = workload_argv(run_id, "sleep 100")
-    handle = _launch(argv)
-    _positive_pre_assertion(handle)
+    jail, process = _launch(argv)
+    _positive_pre_assertion(process)
 
-    first = handle.kill()
+    first = jail.destroy()
     assert first.items[0].outcome is KillOutcome.ENDED
 
-    second = handle.kill()  # must not raise
+    second = jail.destroy()  # must not raise
     assert second.items[0].outcome is KillOutcome.ALREADY_GONE
     assert second.items[0].kind == "workload_group"
-    assert second.items[0].identity == str(handle.pgid)
+    assert second.items[0].identity == str(process._record.pgid)
 
 
 # ---------------------------------------------------------------------------
@@ -532,22 +529,22 @@ def test_kill_returns_the_teardown_record_and_writes_none(run_id: str) -> None:
     teardown rung leaves a status a later process can still read, and only
     the `SIGKILL` rung does not."""
     argv = workload_argv(run_id, "sleep 100")
-    handle = _launch(argv, jail_id="jail-kill-evt")
-    _positive_pre_assertion(handle)
+    jail, process = _launch(argv, jail_id="jail-kill-evt")
+    _positive_pre_assertion(process)
 
-    records_dir = os.path.dirname(handle.stdout_path)
-    before = sorted(os.listdir(handle.jail_dir))
+    records_dir = os.path.dirname(process.stdout_path)
+    before = sorted(os.listdir(jail.jail_dir))
     before_records = sorted(os.listdir(records_dir))
-    report = handle.kill()
+    report = jail.destroy()
 
     assert len(report.items) == 1
     item = report.items[0]
     assert item.kind == "workload_group"
-    assert item.identity == str(handle.pgid)
-    assert int(item.identity) == handle.pgid
+    assert item.identity == str(process._record.pgid)
+    assert int(item.identity) == process._record.pgid
     assert item.outcome is KillOutcome.ENDED
 
-    assert sorted(os.listdir(handle.jail_dir)) == before, "teardown wrote into the jail directory"
+    assert sorted(os.listdir(jail.jail_dir)) == before, "teardown wrote into the jail directory"
     after = sorted(os.listdir(records_dir))
     assert set(after) - set(before_records) == {_records.EXIT_FILENAME}, (
         f"teardown left files beside the exit record: {sorted(set(after) - set(before_records))!r}"

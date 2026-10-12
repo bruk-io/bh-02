@@ -2,7 +2,7 @@
 
 Pure: it starts nothing, signals nothing and reads nothing. It answers every
 `Runtime` and `Supervisor` call from its own state and logs the call, with the
-scope the call acts at, so a test can drive `Handle` (or anything else written
+scope the call acts at, so a test can drive `Jail` (or anything else written
 against the protocols) and check what was asked of the runtime. Its pids
 start at `FAKE_PID_BASE`, far above any real pid limit, so a fake record that
 leaked to real teardown would name no process.

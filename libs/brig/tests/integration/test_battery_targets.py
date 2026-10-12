@@ -37,7 +37,7 @@ pins only what it alone owns): the same probes reaching `PASS` under
 `scratch_darwin()`.
 
 Every REAL jail this file launches is built through the REAL `degraded()`
-preset and the REAL `SubprocessLauncher` -- same "observe from inside the
+preset and the REAL `Jail.create` and `jail.start` -- same "observe from inside the
 jail" posture `tests/integration/test_ec1_degraded_batteries.py` already
 established, whose helper shapes (`_new_root`, `_launch`, `_teardown_group`)
 this file mirrors rather than imports (that file's own helpers are private
@@ -68,10 +68,9 @@ from brig.core import (
 )
 from brig.probe.batteries.fs import fs_read_battery, fs_write_battery
 from brig.probe.battery import Battery, Expectation, Probe
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Jail, Process
 from brig.stack import Stack, degraded
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -88,11 +87,12 @@ def _new_root(run_id: str, tag: str) -> str:
     return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
 
 
-def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str) -> Handle:
+def _launch(
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+) -> tuple[Jail, Process]:
     jail_dir = _new_root(run_id, "t6")
     jail = stack.compile(spec)
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         jail,
         argv=list(argv),
         cwd=jail_dir,
@@ -102,8 +102,8 @@ def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_
     )
 
 
-def _teardown_group(handle: Handle) -> None:
-    """Hand-rolled group-kill, not `Handle.kill()` -- same reasoning as
+def _teardown_group(process: Process) -> None:
+    """Hand-rolled group-kill, not `Jail.destroy()` -- same reasoning as
     `test_ec1_degraded_batteries.py`'s own `_teardown_group`: a test's
     cleanup path must not be the code under test."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
@@ -111,7 +111,7 @@ def _teardown_group(handle: Handle) -> None:
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
 
 
 def _sleep_workload(run_id: str) -> list[str]:
@@ -162,7 +162,7 @@ def test_write_and_read_targets_are_genuinely_reachable_by_an_unjailed_process_a
     run_id: str,
 ) -> None:
     """AC #3: the write-outside probe's target is `outside_writable`, and a
-    genuinely UNJAILED process (no Stack, no Handle -- `subprocess.run`
+    genuinely UNJAILED process (no Stack, no Jail -- `subprocess.run`
     directly against the probe's own argv) can actually write there: exit
     0, and the file it wrote is on disk with the content it wrote. This is
     what makes a LATER denial under a real mechanism attributable to the
@@ -261,12 +261,12 @@ def test_write_and_read_targets_are_genuinely_reachable_by_an_unjailed_process_a
 # ---------------------------------------------------------------------------
 
 
-def _denial_verdicts(handle: Handle, battery: Battery) -> dict[str, Verdict]:
+def _denial_verdicts(jail: Jail, battery: Battery) -> dict[str, Verdict]:
     from typing import cast
 
     from brig.core.probes import Battery as CoreBattery
 
-    report = handle.probe(cast(CoreBattery, battery))
+    report = jail.probe(cast(CoreBattery, battery))
     return {
         outcome.probe_name: outcome.verdict
         for outcome in report.outcomes
@@ -303,7 +303,7 @@ def test_the_named_regression_first_half_every_fs_denial_probe_fails_under_scrub
 
     results: dict[str, dict[str, Verdict]] = {}
     for label, spec in (("scrub", scrub_spec), ("pass", pass_spec)):
-        handle = _launch(
+        jail, process = _launch(
             degraded(), spec, _sleep_workload(run_id), jail_id=f"t6-fs-{label}", run_id=run_id
         )
         try:
@@ -314,11 +314,11 @@ def test_the_named_regression_first_half_every_fs_denial_probe_fails_under_scrub
                 ssh_directory_canary=ssh_directory_canary,
             )
             verdicts: dict[str, Verdict] = {}
-            verdicts.update(_denial_verdicts(handle, write_battery))
-            verdicts.update(_denial_verdicts(handle, read_battery))
+            verdicts.update(_denial_verdicts(jail, write_battery))
+            verdicts.update(_denial_verdicts(jail, read_battery))
             results[label] = verdicts
         finally:
-            _teardown_group(handle)
+            _teardown_group(process)
 
     # Every DENIAL probe, both batteries, both spec modes: FAIL.
     for label, verdicts in results.items():
@@ -431,14 +431,14 @@ def test_the_discriminating_control_reproduces_doc_016_deviation_4_exactly(
 
     outcomes: dict[str, Verdict] = {}
     for label, spec in (("scrub", scrub_spec), ("pass", pass_spec)):
-        handle = _launch(
+        jail, process = _launch(
             degraded(), spec, _sleep_workload(run_id), jail_id=f"t6-pf-{label}", run_id=run_id
         )
         try:
-            verdicts = _denial_verdicts(handle, _pre_fix_control_battery(workspace))
+            verdicts = _denial_verdicts(jail, _pre_fix_control_battery(workspace))
             outcomes[label] = verdicts["read_home_ssh_directory_pre_fix"]
         finally:
-            _teardown_group(handle)
+            _teardown_group(process)
 
     print("\npre-fix control -- scrub:", outcomes["scrub"], "pass:", outcomes["pass"])
     assert outcomes["scrub"] is Verdict.VACUOUS, (

@@ -102,15 +102,11 @@ def runtime_grades(kind: RuntimeKind) -> Mapping[Axis, Graded]:
 #: reach it (`refuse_channel_on_records`).
 PROCS_DIRNAME: Final = "procs"
 
-#: `<jail_dir>/execs`: where exec registrations lived before decision-181. No
-#: code writes or reads it any more; the refusal keeps covering it until
-#: TASK-0079.28 retires the name with `Handle`.
-EXECS_DIRNAME: Final = "execs"
-
 
 class ChannelOnRecords(ValueError):
     """A LISTEN channel's endpoint is at or under brig's records
-    (`<jail_dir>/procs`, or `<jail_dir>/execs` until TASK-0079.28), decision-181.
+    (`<jail_dir>/procs`), decision-181. (`<jail_dir>/execs` too, until
+    decision-183 deleted the code that wrote it.)
 
     bwrap's grant for a socket is its endpoint's directory, bound read-write, so
     there it would let the jail write the records teardown signals by; seatbelt's
@@ -134,17 +130,16 @@ def refuse_channel_on_records(
 
     Raises:
         ChannelOnRecords: either form of the endpoint is at or under
-            `<jail_dir>/procs` or `<jail_dir>/execs`.
+            `<jail_dir>/procs`.
     """
-    for dirname in (PROCS_DIRNAME, EXECS_DIRNAME):
-        records = f"{jail_dir.rstrip('/')}/{dirname}"
-        if _at_or_under(endpoint, records) or _at_or_under(resolved_endpoint, records):
-            leaf = endpoint.rsplit("/", 1)[-1]
-            raise ChannelOnRecords(
-                f"LISTEN channel {name!r} endpoint {endpoint!r} (resolved "
-                f"{resolved_endpoint!r}) is at or under {records!r}, where brig keeps the "
-                "records teardown signals by: a grant there would let the jail write them, "
-                "or make one the host can't read. Put the endpoint in a subdirectory of "
-                f"its own, for example {jail_dir.rstrip('/')}/chan/{leaf}, or outside the "
-                "jail directory"
-            )
+    records = f"{jail_dir.rstrip('/')}/{PROCS_DIRNAME}"
+    if _at_or_under(endpoint, records) or _at_or_under(resolved_endpoint, records):
+        leaf = endpoint.rsplit("/", 1)[-1]
+        raise ChannelOnRecords(
+            f"LISTEN channel {name!r} endpoint {endpoint!r} (resolved "
+            f"{resolved_endpoint!r}) is at or under {records!r}, where brig keeps the "
+            "records teardown signals by: a grant there would let the jail write them, "
+            "or make one the host can't read. Put the endpoint in a subdirectory of "
+            f"its own, for example {jail_dir.rstrip('/')}/chan/{leaf}, or outside the "
+            "jail directory"
+        )

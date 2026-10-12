@@ -31,21 +31,17 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Iterator
-from types import SimpleNamespace
 
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.run import _identity, _records, _waiters
+from brig.run import IoPolicy, Jail, Process, _identity, _records, _waiters
 from brig.run._tether import TetherClosed
-from brig.run.exec_ import exec_in_jail
-from brig.run.handle import Handle
 from brig.run.host import HostRuntime, _clear_earlier_records
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.run.runtime import JailRecord
 from brig.run.teardown import KillOutcome
 from brig.stack import CompiledJail
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, teardown_pgid, workload_argv
 
 pytestmark = pytest.mark.integration
 
@@ -105,7 +101,7 @@ def _wait_for(predicate: Callable[[], bool], seconds: float = 10.0) -> bool:
 
 def _kill_group(pgid: int) -> None:
     """End `pgid` with the suite's own verified helper, never the code under test."""
-    teardown_group(SimpleNamespace(pgid=pgid))
+    teardown_pgid(pgid)
 
 
 @pytest.fixture
@@ -266,7 +262,7 @@ def test_destroy_after_a_waited_sibling_ends_what_it_left_in_its_group(
     the `sleep` escaped (seen on the tree before TASK-0079.25). Now its record
     outlives the wait and `kill()` ends it."""
     os.makedirs(jail_dir, exist_ok=True)
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         _compiled_jail(),
         argv=workload_argv(run_id, "sleep 100"),
         cwd=jail_dir,
@@ -275,16 +271,16 @@ def test_destroy_after_a_waited_sibling_ends_what_it_left_in_its_group(
         jail_dir=jail_dir,
     )
     left = shlex.join(workload_argv(run_id, "sleep 100"))
-    groups = [handle.pgid]
+    groups = [process._record.pgid]
     try:
-        sibling = exec_in_jail(handle, ["/bin/sh", "-c", f"{left} &\nexit 0"])
+        sibling = jail.start(["/bin/sh", "-c", f"{left} &\nexit 0"])
         groups.append(sibling.pid)
         assert sibling.wait(timeout=10.0) == 0
         assert _wait_for(lambda: bool(_live_members(sibling.pid))), (
             "CONTROL failed: the sibling left nothing running in its group"
         )
 
-        report = handle.kill()
+        report = jail.destroy()
 
         assert _live_members(sibling.pid) == [], f"the left-behind process escaped ({report})"
         by_identity = {item.identity: item for item in report.items}
@@ -337,9 +333,9 @@ def _gone_pid() -> tuple[int, str]:
     return proc.pid, stamp
 
 
-def _launch_live(run_id: str, jail_dir: str) -> Handle:
+def _launch_live(run_id: str, jail_dir: str) -> tuple[Jail, Process]:
     os.makedirs(jail_dir, exist_ok=True)
-    return SubprocessLauncher().launch(
+    return launch(
         _compiled_jail(),
         argv=workload_argv(run_id, "sleep 100"),
         cwd=jail_dir,
@@ -356,7 +352,7 @@ def _create(jail_dir: str) -> JailRecord:
 
 
 def test_create_over_a_live_jail_refuses_and_removes_nothing(run_id: str, jail_dir: str) -> None:
-    handle = _launch_live(run_id, jail_dir)
+    jail, process = _launch_live(run_id, jail_dir)
     try:
         before = _listing(jail_dir)
         with pytest.raises(_records.JailDirInUse) as refused:
@@ -364,16 +360,16 @@ def test_create_over_a_live_jail_refuses_and_removes_nothing(run_id: str, jail_d
         message = str(refused.value)
         assert jail_dir in message and "still runs" in message and "Destroy" in message
         assert _listing(jail_dir) == before
-        assert handle.alive() is True
+        assert jail.alive() is True
 
         # The control: once that jail is destroyed, the same create proceeds and
         # removes its records.
-        handle.kill()
+        jail.destroy()
         record = _create(jail_dir)
         assert not os.path.exists(_records.procs_dir(jail_dir))
         assert record.processes == ()
     finally:
-        teardown_group(handle)
+        teardown_group(process)
 
 
 def test_a_planted_record_naming_a_recycled_pid_holds_nothing_but_never_frees_a_live_jail(
@@ -388,7 +384,7 @@ def test_a_planted_record_naming_a_recycled_pid_holds_nothing_but_never_frees_a_
     _create(jail_dir)
     assert not os.path.exists(_records.procs_dir(jail_dir))
 
-    handle = _launch_live(run_id, jail_dir)
+    jail, process = _launch_live(run_id, jail_dir)
     try:
         planted = _plant(
             jail_dir, {"pid": os.getpid(), "pgid": os.getpgrp(), "start_time": "planted-stamp"}
@@ -398,9 +394,9 @@ def test_a_planted_record_naming_a_recycled_pid_holds_nothing_but_never_frees_a_
             _create(jail_dir)
         assert _listing(jail_dir) == before
         assert os.path.isdir(planted)
-        assert handle.alive() is True
+        assert jail.alive() is True
     finally:
-        teardown_group(handle)
+        teardown_group(process)
 
 
 def _doubt(jail_dir: str, kind: str, outside: str) -> None:
@@ -492,7 +488,7 @@ def test_a_gone_jails_records_are_removed_following_no_links(jail_dir: str, outs
     link planted inside a record's directory is removed, never followed (the
     directory it points at keeps its file)."""
     os.makedirs(jail_dir)
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         _compiled_jail(),
         argv=["/bin/sh", "-c", "exit 4"],
         cwd=jail_dir,
@@ -500,8 +496,8 @@ def test_a_gone_jails_records_are_removed_following_no_links(jail_dir: str, outs
         jail_id="records-gone",
         jail_dir=jail_dir,
     )
-    assert handle.wait(timeout=10.0) == 4
-    directory = os.path.dirname(handle.stdout_path)
+    assert process.wait(timeout=10.0) == 4
+    directory = os.path.dirname(process.stdout_path)
     assert os.path.isfile(os.path.join(directory, "exit"))
     os.symlink(outside, os.path.join(directory, "planted-link"))
 

@@ -140,7 +140,7 @@ class Battery:
         `core.probes.Battery`'s `Protocol` shape exactly, which is why
         `brig.probe.runner.run_battery` accepts the same `object` (widened
         to `Any` there for the reason its own docstring gives) rather than
-        `brig.run.handle.Handle`: narrowing it here would only move the
+        `brig.run.jail.Jail`: narrowing it here would only move the
         mismatch onto this call instead of resolving it.
 
         Delegates to `brig.probe.runner.run_battery`, imported locally --

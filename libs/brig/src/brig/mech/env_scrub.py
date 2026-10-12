@@ -139,7 +139,7 @@ exited (the mirror image of `rlimits`, whose interesting case is
 
 **This payload reuses `EventKind.SPAWN` rather than contributing a new
 kind, a DELIBERATE in-layer choice, named here so M3's closeout can rule on
-it rather than discover it.** `brig/run/launcher.py` already appends its
+it rather than discover it.** `brig/run/host.py` already appends its
 own `SPAWN` record (`argv`/`pid`/`pgid`/`cwd`) for every launch; this
 mechanism's `known_at_compile` payload is a SECOND, disjoint-schema
 `SPAWN`-kind payload, whereas `core/events.py`'s own precedent for a

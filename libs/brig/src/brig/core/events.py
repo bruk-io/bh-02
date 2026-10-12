@@ -13,7 +13,7 @@ the embedder, which owns a log of its own. `brig/run/events.py` therefore
 ships `stamp`/`stamp_all` where it used to ship `EventLog`, and this module
 ships `to_dict`/`from_dict` where it used to ship `to_json_line`/
 `from_json_line` -- a line-oriented encoding is what a file wanted; a dict is
-what a `Handle` carries and what an embedder's own encoder takes.
+what a `Jail` carries and what an embedder's own encoder takes.
 
 `Step.events` and `EventSource` are NOT here -- they are `mech`'s (per
 decision-052's residual, ruled at the M3 gate), parameterized over this
@@ -73,11 +73,11 @@ class EventKind(Enum):
     **The four lifecycle kinds are gone** (`EXEC`, `EXEC_END`, `KILL`,
     `EXIT`, deleted by decision-152, 2026-09-08). They existed to be written
     into the per-jail JSONL stream and read back off disk: `EXIT` was how a
-    rehydrated `Handle` learned an exit status, `EXEC`/`EXEC_END` were how
+    rehydrated handle learned an exit status, `EXEC`/`EXEC_END` were how
     teardown found live exec siblings, `KILL` was the audit copy of a
     `KillReport` the caller already holds. With the stream deleted, each of
     those readers has a better source -- see `brig/run/_waiters.py`,
-    `brig/run/_records.py` (once `_execs.py`), and `Handle.kill`'s own return value -- and a kind
+    `brig/run/_records.py`, and `Jail.destroy`'s own return value -- and a kind
     nothing produces is exactly the declared-but-never-used shape this
     library refuses. Pinned by set equality in
     `tests/unit/test_core_events_purity.py`, both directions -- dropping a
@@ -132,7 +132,7 @@ class Event:
     def to_dict(self) -> dict[str, Any]:
         """Versioned, JSON-native, deterministic key order. The embedder's
         own encoder turns this into whatever its log speaks;
-        `Handle.to_dict` embeds it directly."""
+        `Jail.to_dict` embeds it directly."""
         return {
             "version": EVENT_VERSION,
             "ts": self.ts,

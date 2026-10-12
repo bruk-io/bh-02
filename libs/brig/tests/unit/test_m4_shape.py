@@ -272,7 +272,7 @@ def test_probe_imports_only_allowed_layers() -> None:
         tree = ast.parse(py_file.read_text())
 
         for node in ast.walk(tree):
-            # Handle: from brig.<layer> import ...
+            # Jail: from brig.<layer> import ...
             if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("brig."):
                 layer = node.module.split(".", 1)[1].split(".", 1)[0]
 

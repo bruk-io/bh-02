@@ -3,7 +3,7 @@
 **What this restores, and what it deliberately does not bring back.**
 decision-152 (2026-09-08) deleted the per-jail event stream, and SPEC.md
 section 11 named the one capability that genuinely went with it: an exit
-status readable by a process that never parented the workload. `Handle.wait`
+status readable by a process that never parented the workload. `wait`
 answered in the launching process and raised `ExitStatusUnobservable`
 everywhere else, so a rehydrated handle -- the shape an embedder uses to
 clean up after a runtime that died holding a jail -- could tear a jail down
@@ -11,10 +11,10 @@ but never say how it ended. decision-156 (2026-09-08) gives that back
 WITHOUT the stream: not a log, not an appender, not a tail. One file, one
 line, written once.
 
-**The wrapper.** `SubprocessLauncher` no longer spawns the compiled jail's
-argv directly. It spawns this module's `WRAPPER_SOURCE` under the launching
+**The wrapper.** A start (`HostSupervisor.start`) never spawns the compiled
+jail's argv directly. It spawns this module's `WRAPPER_SOURCE` under the launching
 interpreter, and *that* spawns the jail's argv as its own child, waits for
-it, and writes the status to its exit record -- `<jail_dir>/exit` until
+it, and writes the status to its exit record -- one per jail directory until
 decision-181, `<jail_dir>/procs/<id>/exit` since, one per process, siblings
 included (`brig/run/_records.py`) -- written to a `.partial`
 name and renamed, so a reader sees a complete status or no file at all,
@@ -28,14 +28,14 @@ rather than four lines of shell.
 jail's own `wrap` (seatbelt, env scrub, the rlimits trampoline) is applied to
 the wrapper's CHILD, exactly as before -- the wrapper prepends nothing to the
 compiled argv and changes nothing about it, so what the jail runs is
-unchanged, and `Handle.argv` still reports the jail's own compiled argv
+unchanged, and `Process.argv` still reports the jail's own compiled argv
 rather than this plumbing. What the wrapper adds is one trusted-side process
 per process started (per jail until decision-181), the same shape as a `JAIL_LIFETIME` helper, whose only job is to
 outlive its child by the microseconds it takes to write a number.
 
 Four consequences, stated rather than left to be discovered:
 
-- **`Handle.pid` is the wrapper's pid**, and the jail's own process is its
+- **`Process.pid` is the wrapper's pid**, and the jail's own process is its
   child in the same process group. Teardown is group-shaped at every rung
   (SPEC.md section 9), so nothing about kill changes; `alive()` tracks the
   wrapper, which lives exactly as long as the workload plus the write.
@@ -46,7 +46,7 @@ Four consequences, stated rather than left to be discovered:
   `SIGTERM`/`SIGINT`/`SIGHUP`/`SIGQUIT` -- with a handler, never `SIG_IGN`,
   because `SIG_IGN` survives `exec` and would hand the workload an immunity
   the Spec never granted it -- so the ordinary teardown rung and
-  `Handle.interrupt` both still end with a status on disk.
+  `Process.interrupt` both still end with a status on disk.
 - **The record belongs to ONE process** (decision-162, 2026-09-08, settled
   by decision-181). `wait` prefers this file over any live observation, so a
   stale record left by an earlier launch into the same directory was once
@@ -168,11 +168,11 @@ sys.exit(code if code >= 0 else 128 - code)
 class WorkloadSpawnFailed(OSError):
     """The wrapper started but could not spawn the jail's own argv.
 
-    Raised out of `launch()` so a workload that cannot be exec'd is a LAUNCH
-    failure, exactly as it was when the launcher spawned the argv itself.
-    Without this the wrapper would swallow it: `launch()` would return a
-    `Handle` for a jail that was already dead, and the mistake would surface
-    later and somewhere else as a readiness timeout.
+    Raised out of `jail.start` so a workload that cannot be exec'd is a
+    START failure, exactly as it was when the launcher spawned the argv
+    itself. Without this the wrapper would swallow it: `start` would return
+    a `Process` that was already dead, and the mistake would surface later
+    and somewhere else as a readiness timeout.
     """
 
 

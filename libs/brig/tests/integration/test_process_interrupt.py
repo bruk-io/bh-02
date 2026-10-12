@@ -1,4 +1,4 @@
-"""`Handle.interrupt`: SIGINT to the workload group, and what `True` means.
+"""`Process.interrupt`: SIGINT to the workload group, and what `True` means.
 
 SPEC.md law 7, verbatim: "Control must not require cooperation. Interrupt
 and kill are delivered by mechanism-level means that work when the jail is
@@ -66,7 +66,7 @@ test, on the 5-second marker wait.
 
 Every workload is `workload_argv`-tagged so the suite's leak sweep catches
 anything a test's own teardown misses, and every test tears down with
-`tests.conftest.teardown_group` -- never with `Handle.kill`, which is code
+`tests.conftest.teardown_group` -- never with `Jail.destroy`, which is code
 under test elsewhere in this suite.
 """
 
@@ -81,9 +81,9 @@ import time
 import pytest
 
 from brig.core import Spec
-from brig.run import Handle, IoPolicy, SubprocessLauncher
+from brig.run import Jail, Process
 from brig.stack import Stack
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -167,13 +167,12 @@ def _new_jail_dir(run_id: str) -> str:
     return path
 
 
-def _launch(argv: list[str], *, run_id: str) -> Handle:
+def _launch(argv: list[str], *, run_id: str) -> tuple[Jail, Process]:
     jail_dir = _new_jail_dir(run_id)
-    return SubprocessLauncher().launch(
+    return launch(
         Stack([]).compile(Spec()),
-        argv=argv,
+        argv,
         cwd=jail_dir,
-        io=IoPolicy(),
         jail_id=f"interrupt-{os.path.basename(jail_dir)}",
         jail_dir=jail_dir,
     )
@@ -204,26 +203,25 @@ def _wait_until_empty(pgid: int, timeout: float = _SETTLE_S) -> bool:
     return not _group_members(pgid)
 
 
-def _launch_child(run_id: str, mode: str) -> tuple[Handle, str]:
+def _launch_child(run_id: str, mode: str) -> tuple[Process, str]:
     """A jail whose backgrounded child is `_INTERRUPT_CHILD` in `mode`,
     returned only once that child has ARMED its `SIGINT` handler. Returns
-    the handle and the marker path the child writes on arrival.
+    the first process and the marker path the child writes on arrival.
 
     The readiness wait is what makes every caller's `interrupt()` a test of
     brig rather than a race against a cold interpreter -- see the module
     docstring. A child that never arms is torn down and reported as a broken
     workload, not left to fail later as a missing marker (which reads as
     "the signal did not arrive" and would send the next reader hunting in
-    `Handle.interrupt`).
+    `Process.interrupt`).
     """
     jail_dir = _new_jail_dir(run_id)
     marker = os.path.join(jail_dir, "sigint-arrived")
     ready = os.path.join(jail_dir, "sigint-armed")
-    handle = SubprocessLauncher().launch(
+    _jail, process = launch(
         Stack([]).compile(Spec()),
-        argv=workload_argv(run_id, _child_body(jail_dir, marker, ready, mode)),
+        workload_argv(run_id, _child_body(jail_dir, marker, ready, mode)),
         cwd=jail_dir,
-        io=IoPolicy(),
         jail_id=f"interrupt-{os.path.basename(jail_dir)}",
         jail_dir=jail_dir,
     )
@@ -236,14 +234,14 @@ def _launch_child(run_id: str, mode: str) -> tuple[Handle, str]:
     while not os.path.exists(ready) and time.monotonic() < deadline:
         time.sleep(0.02)
     if not os.path.exists(ready):
-        teardown_group(handle)
+        teardown_group(process)
         raise AssertionError(
             f"the workload child never armed its SIGINT handler within {_START_S}s "
             f"({ready!r} was never written), so a signal sent now would land in the "
             "inherited SIG_IGN and be discarded. The workload is broken; nothing "
             "below would have been a claim about brig."
         )
-    return handle, marker
+    return process, marker
 
 
 def _wait_for_marker(marker: str) -> str:
@@ -269,31 +267,31 @@ def test_interrupt_reaches_a_non_leader_member_of_the_group(run_id: str) -> None
     which is what "group, not leader" means. CONTROL, in the same test: the
     group has at least two members BEFORE the interrupt, so "the child got
     it" is not satisfied by a workload that never forked one."""
-    handle, marker = _launch_child(run_id, "exit")
+    process, marker = _launch_child(run_id, "exit")
     try:
         # Read, not waited on: `_launch_child` already blocked until the
         # child announced its arm, and a child that has armed has forked.
-        before = _group_members(handle.pgid)
+        before = _group_members(process._record.pgid)
         assert len(before) >= 2, (
             f"CONTROL failed: expected the leader and its backgrounded child in "
-            f"pgid {handle.pgid}, got {before!r}"
+            f"pgid {process._record.pgid}, got {before!r}"
         )
 
-        assert handle.interrupt() is True
+        assert process.interrupt() is True
 
         reported = int(_wait_for_marker(marker))
-        assert reported != handle.pid, (
-            f"the marker names the LEADER ({handle.pid}), so this proves nothing "
+        assert reported != process.pid, (
+            f"the marker names the LEADER ({process.pid}), so this proves nothing "
             "about the rest of the group"
         )
         assert reported in before, (
-            f"pid {reported} was not a member of pgid {handle.pgid}: {before!r}"
+            f"pid {reported} was not a member of pgid {process._record.pgid}: {before!r}"
         )
-        assert _wait_until_empty(handle.pgid), (
-            f"pgid {handle.pgid} still had members after SIGINT: {_group_members(handle.pgid)!r}"
+        assert _wait_until_empty(process._record.pgid), (
+            f"pgid {process._record.pgid} still had members after SIGINT: {_group_members(process._record.pgid)!r}"
         )
     finally:
-        teardown_group(handle)
+        teardown_group(process)
 
 
 @pytest.mark.integration
@@ -305,37 +303,37 @@ def test_interrupt_returns_true_for_a_workload_that_survives_the_signal(
     the group is still non-empty afterwards, which is the half that proves
     the return value is not quietly claiming an outcome nothing verified.
     The marker is what keeps it non-vacuous: the signal really arrived."""
-    handle, marker = _launch_child(run_id, "survive")
+    process, marker = _launch_child(run_id, "survive")
     try:
-        assert handle.interrupt() is True
+        assert process.interrupt() is True
         _wait_for_marker(marker)
 
         # Give the group every chance to clear, then observe that it has not.
-        assert not _wait_until_empty(handle.pgid, timeout=1.0), (
+        assert not _wait_until_empty(process._record.pgid, timeout=1.0), (
             "the group cleared after all -- this test's whole point is a "
             "member that SURVIVES the interrupt, so it is now vacuous"
         )
     finally:
-        teardown_group(handle)
+        teardown_group(process)
 
 
 @pytest.mark.integration
 def test_interrupt_returns_false_once_the_group_is_gone(run_id: str) -> None:
-    """Claim 3, with its own control: the SAME handle returns `True` while
+    """Claim 3, with its own control: the SAME process returns `True` while
     the group is there and `False` once it is not -- so `False` is
-    attributable to the group's absence and not to this handle being
+    attributable to the group's absence and not to this process being
     unsignalable from the start."""
-    handle = _launch(workload_argv(run_id, "sleep 100"), run_id=run_id)
+    _jail, process = _launch(workload_argv(run_id, "sleep 100"), run_id=run_id)
     # A START wait, not a settle: the control below needs the group to be
     # THERE, and budgeting a process spawn at `_SETTLE_S` is the mistake the
     # module docstring's readiness note is about.
     deadline = time.monotonic() + _START_S
-    while not _group_members(handle.pgid) and time.monotonic() < deadline:
+    while not _group_members(process._record.pgid) and time.monotonic() < deadline:
         time.sleep(0.02)
 
-    assert handle.interrupt() is True  # control: deliverable while it exists
+    assert process.interrupt() is True  # control: deliverable while it exists
 
-    teardown_group(handle)
-    assert _wait_until_empty(handle.pgid)
+    teardown_group(process)
+    assert _wait_until_empty(process._record.pgid)
 
-    assert handle.interrupt() is False
+    assert process.interrupt() is False

@@ -1,7 +1,7 @@
 """Process identity: a pid plus the moment that process started.
 
 **A pid is not an identity.** SPEC.md section 9 named the window and
-decision-144 accepted it: a `Handle` records the workload's pid and pgid at
+decision-144 accepted it: a jail records the workload's pid and pgid at
 spawn, and a later liveness check or teardown -- possibly in another process,
 possibly minutes later -- signals those numbers. Between the two, the leader
 can exit, be reaped, and have its number handed to something else entirely.

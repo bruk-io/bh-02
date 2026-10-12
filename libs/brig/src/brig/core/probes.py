@@ -3,11 +3,11 @@
 
 SPEC.md §12 defines probes and their three-way verdict; §13's layer table
 puts the vocabulary in `core` because both `run` (SPEC.md §9:
-`Handle.probe(battery) -> ProbeReport`) and the not-yet-built `probe` layer
+`Jail.probe(battery) -> ProbeReport`) and the not-yet-built `probe` layer
 need to name it, and neither may import the other -- `run` may not import
 `probe`, and `probe` may not import `mech` (which is why `Battery.run`'s
-`handle` parameter is typed `object` here rather than `run.Handle`: naming
-`Handle` would require importing `run`, and this module is `core`). Same
+`handle` parameter is typed `object` here rather than `run.Jail`: naming
+`Jail` would require importing `run`, and this module is `core`). Same
 shape already shipped for `Graded` (`brig/core/report.py`) and `Event`
 (`brig/core/events.py`): pure data in `core`, built and consumed by higher
 layers. This module ships vocabulary only -- no battery, no probe
@@ -193,13 +193,13 @@ class ProbeReport:
 
 @runtime_checkable
 class Battery(Protocol):
-    """A canned set of probes against one `Handle` (SPEC.md §12).
+    """A canned set of probes against one `Jail` (SPEC.md §12).
 
-    Lives here, in `core`, rather than in `run` alongside `Handle`, so that
-    `Handle.probe(battery: Battery) -> ProbeReport` (SPEC.md §9) type-checks
+    Lives here, in `core`, rather than in `run` alongside `Jail`, so that
+    `Jail.probe(battery: Battery) -> ProbeReport` (SPEC.md §9) type-checks
     in `run` with no import from the not-yet-built `probe` layer -- `run`
     may not import `probe` (SPEC.md §13). `handle` is typed `object` for the
-    same reason: naming the real `Handle` type here would require `core` to
+    same reason: naming the real `Jail` type here would require `core` to
     import `run`, which SPEC.md §13's layer table forbids (`core` may import
     nothing).
     """

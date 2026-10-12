@@ -1,6 +1,6 @@
-"""`run_battery`/`Handle.probe` -- task-050. SPEC.md §12, verbatim:
+"""`run_battery`/`Jail.probe` -- task-050. SPEC.md §12, verbatim:
 
-    `handle.probe(battery)` runs canned violation attempts **inside the
+    `jail.probe(battery)` runs canned violation attempts **inside the
     jail, through the same stack, launcher, and channel the workload
     uses** -- a policy that holds for a side shell but not for the real
     path is not a policy.
@@ -17,13 +17,13 @@ MILESTONES.md M4 EC2, verbatim:
        by pointing the battery at a non-writable workspace.
 
 Every REAL jail this file launches is built through the REAL
-`SubprocessLauncher`, `stack.compile()`, and `handle.exec` -- no
-monkeypatching, no hand-built `ExecHandle`, same "observe from inside the
+`Jail.create` and `jail.start`, `stack.compile()`, and `jail.start` -- no
+monkeypatching, no hand-built `Process`, same "observe from inside the
 jail" posture `tests/integration/test_exec_confinement.py` established for
 the exec path this file's subject (`run_battery`) sits directly on top of.
 Where a test's whole point is the CONTRADICTION-TABLE logic rather than any
 real enforcement (AC #4/#7), the launched jail's `report` is deliberately
-overridden via `dataclasses.replace` (`Handle` is frozen) to a KNOWN grade,
+overridden via `dataclasses.replace` (`Jail` is frozen) to a KNOWN grade,
 and the probe's own verdict is forced by a `returncode`-only fact
 (`/usr/bin/true` always exits 0, which `classify` alone -- unmodified,
 per this task's Out of scope -- turns into `Verdict.FAIL` for a `DENIAL`
@@ -69,11 +69,9 @@ from brig.core import (
 from brig.core.probes import Battery as CoreBattery
 from brig.core.probes import BatteryVerdict
 from brig.probe.battery import Battery, Expectation, Probe
-from brig.run.handle import Handle
-from brig.run.jail import Jail
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Jail, Process
 from brig.stack import Stack, degraded
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 15.0
@@ -88,11 +86,12 @@ def _new_root(run_id: str, tag: str) -> str:
     return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
 
 
-def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str) -> Handle:
+def _launch(
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+) -> tuple[Jail, Process]:
     jail_dir = _new_root(run_id, "pr")
     jail = stack.compile(spec)
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         jail,
         argv=list(argv),
         cwd=jail_dir,
@@ -102,46 +101,45 @@ def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_
     )
 
 
-def _teardown_group(handle: Handle) -> None:
+def _teardown_group(process: Process) -> None:
     """Group-kill the long-lived workload -- the kill is hand-rolled, not
-    `Handle.kill()`, same reasoning as `test_exec_confinement.py`'s own
+    `Jail.destroy()`, same reasoning as `test_exec_confinement.py`'s own
     `_teardown_group`: a test's cleanup path must not be the code under
-    test. `handle.wait()` blocks until the launcher's exit-waiter has reaped
+    test. `process.wait()` blocks until the launcher's exit-waiter has reaped
     it (task-073)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
 
 
 def _sleep_workload(run_id: str) -> list[str]:
     return workload_argv(run_id, "sleep 100")
 
 
-def _with_axis_grade(handle: Handle, axis: Axis, grade: Grade) -> Handle:
-    """A copy of `handle` whose `report` grades `axis` as `grade`, every
-    other axis unchanged -- `Handle` and `EnforcementReport` are both
-    frozen, so this is `dataclasses.replace` two layers deep, never
-    mutation. Used only where a test's subject is the contradiction table
+def _with_axis_grade(jail: Jail, axis: Axis, grade: Grade) -> Jail:
+    """A copy of `jail` whose `report` grades `axis` as `grade`, every
+    other axis unchanged -- `dataclasses.replace` two layers deep, never
+    mutation (`EnforcementReport` is frozen, and the jail is copied). Used only where a test's subject is the contradiction table
     itself (AC #4/#7), not real per-mechanism enforcement."""
-    new_axes = dict(handle.report.axes)
+    new_axes = dict(jail.report.axes)
     new_axes[axis] = Graded(grade=grade)
-    return dataclasses.replace(handle, report=EnforcementReport(axes=new_axes))
+    return dataclasses.replace(jail, report=EnforcementReport(axes=new_axes))
 
 
-def _probe(handle: Handle, battery: Battery) -> ProbeReport:
-    """`Handle.probe`'s own parameter is typed against `core.probes.Battery`
+def _probe(jail: Jail, battery: Battery) -> ProbeReport:
+    """`Jail.probe`'s own parameter is typed against `core.probes.Battery`
     (task-050's Deliverable: "run imports nothing from probe"). Every
     concrete `Battery` this file builds is FROZEN (`brig/probe/battery.py`'s
     own convention throughout), and mypy models a frozen dataclass field as
     READ-ONLY -- so it never structurally matches `core.probes.Battery`'s
     plain `name: str` attribute, which mypy's Protocol check treats as
     requiring a settable variable. This is the exact same tension
-    `brig/run/exec_.py`'s own docstring documents for `Handle` on the OTHER
+    `brig/run/exec_.py`'s own docstring documents for `Jail` on the OTHER
     side of a Protocol-shaped boundary ("mypy models a frozen dataclass's
-    fields as read-only, so `Handle` (frozen) fails a `Protocol`'s default
+    fields as read-only, so `Jail` (frozen) fails a `Protocol`'s default
     read-write attribute check").
 
     It is a STATIC-ANALYSIS-ONLY mismatch, not a real one: `core.probes.
@@ -150,8 +148,8 @@ def _probe(handle: Handle, battery: Battery) -> ProbeReport:
     file builds already satisfies it at runtime
     (`isinstance(battery, CoreBattery)` is `True`, confirmed directly, not
     assumed). `cast` below tells mypy what is already true at runtime,
-    same idiom `exec_.py` uses `Any` for on the analogous `Handle` side."""
-    return handle.probe(cast(CoreBattery, battery))
+    same idiom `exec_.py` uses `Any` for on the analogous `Jail` side."""
+    return jail.probe(cast(CoreBattery, battery))
 
 
 # ---------------------------------------------------------------------------
@@ -197,12 +195,12 @@ def test_a_failed_control_marks_the_battery_vacuous_not_passed(run_id: str) -> N
     # the control's marker file should be (EISDIR) refuses every user.
     os.mkdir(f"{workspace}/probe.txt")
     try:
-        handle = _launch(
+        jail, process = _launch(
             Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac1", run_id=run_id
         )
         try:
             battery = _workspace_control_battery(workspace)
-            report = _probe(handle, battery)
+            report = _probe(jail, battery)
 
             assert report.battery_verdict is BatteryVerdict.VACUOUS
             control_outcome = next(
@@ -211,7 +209,7 @@ def test_a_failed_control_marks_the_battery_vacuous_not_passed(run_id: str) -> N
             assert control_outcome.verdict is Verdict.FAIL
             assert control_outcome.probe_name == "workspace-write-control"
         finally:
-            _teardown_group(handle)
+            _teardown_group(process)
     finally:
         shutil.rmtree(workspace)
 
@@ -227,7 +225,7 @@ def test_the_same_battery_against_a_writable_workspace_does_not_go_vacuous(run_i
     os.makedirs(workspace)
     os.chmod(workspace, stat.S_IRWXU)  # 0o700: writable
     try:
-        handle = _launch(
+        jail, process = _launch(
             Stack([]),
             Spec(),
             _sleep_workload(run_id),
@@ -236,7 +234,7 @@ def test_the_same_battery_against_a_writable_workspace_does_not_go_vacuous(run_i
         )
         try:
             battery = _workspace_control_battery(workspace)
-            report = _probe(handle, battery)
+            report = _probe(jail, battery)
 
             assert report.battery_verdict is not BatteryVerdict.VACUOUS
             assert report.battery_verdict is BatteryVerdict.CONSISTENT
@@ -245,7 +243,7 @@ def test_the_same_battery_against_a_writable_workspace_does_not_go_vacuous(run_i
             )
             assert control_outcome.verdict is Verdict.PASS
         finally:
-            _teardown_group(handle)
+            _teardown_group(process)
     finally:
         shutil.rmtree(workspace)
 
@@ -293,11 +291,11 @@ def test_controls_run_before_other_probes(run_id: str) -> None:
     # order.
     battery = Battery(name="t050-ordering", axis=Axis.LIMITS, probes=(other, control))
 
-    handle = _launch(
+    jail, process = _launch(
         Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac3", run_id=run_id
     )
     try:
-        _probe(handle, battery)
+        _probe(jail, battery)
 
         with open(order_path) as f:
             ran = [line.strip() for line in f if line.strip()]
@@ -305,7 +303,7 @@ def test_controls_run_before_other_probes(run_id: str) -> None:
             f"expected the CONTROL probe to run before the non-control probe, got order {ran!r}"
         )
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
         shutil.rmtree(order_dir, ignore_errors=True)
 
 
@@ -343,24 +341,24 @@ def _contradiction_battery() -> Battery:
 
 @pytest.mark.integration
 def test_a_probe_that_contradicts_an_enforced_grade_fails_the_battery(run_id: str) -> None:
-    """AC #4. `handle.report` is forced to grade `Axis.NETWORK` `ENFORCED`
+    """AC #4. `jail.report` is forced to grade `Axis.NETWORK` `ENFORCED`
     (`_with_axis_grade`); the battery's `DENIAL` probe verdicts `FAIL`
     (see `_contradiction_battery`'s docstring). `battery_verdict` is
     `BatteryVerdict.CONTRADICTED` and `report.contradictions` is non-empty
     and names the axis."""
-    handle = _launch(
+    jail, process = _launch(
         Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac4", run_id=run_id
     )
     try:
-        enforced_handle = _with_axis_grade(handle, Axis.NETWORK, Grade.ENFORCED)
+        enforced_jail = _with_axis_grade(jail, Axis.NETWORK, Grade.ENFORCED)
         battery = _contradiction_battery()
-        report = _probe(enforced_handle, battery)
+        report = _probe(enforced_jail, battery)
 
         assert report.battery_verdict is BatteryVerdict.CONTRADICTED
         assert report.contradictions != ()
         assert any(Axis.NETWORK.value in c for c in report.contradictions), report.contradictions
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
@@ -372,22 +370,22 @@ def test_the_same_fail_against_an_unenforced_grade_is_consistent(run_id: str) ->
     unmodified grade, since neither mechanism in `Stack([])` claims
     `Axis.NETWORK` -- leaves `report.contradictions` empty and does NOT
     make the battery `FAIL`."""
-    handle = _launch(
+    jail, process = _launch(
         Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac4-control", run_id=run_id
     )
     try:
-        assert handle.report.grade_for(Axis.NETWORK).grade is Grade.UNENFORCED
+        assert jail.report.grade_for(Axis.NETWORK).grade is Grade.UNENFORCED
         battery = _contradiction_battery()
-        report = _probe(handle, battery)
+        report = _probe(jail, battery)
 
         assert report.contradictions == ()
         assert report.battery_verdict is not BatteryVerdict.CONTRADICTED
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
-# AC #5 -- probes run through handle.exec and therefore inside the real
+# AC #5 -- probes run through jail.start and therefore inside the real
 # confinement, with an empty-stack control.
 # ---------------------------------------------------------------------------
 
@@ -400,11 +398,11 @@ def test_probes_run_through_handle_exec_and_therefore_inside_the_confinement(
     "HOME"))`, with a canary set in the LAUNCHING (this test) process's own
     environment. A one-probe (`CONTROL`-shaped, so it also satisfies
     `Battery`'s own construction rule) battery whose argv is
-    `/usr/bin/env` runs through `handle.probe` -- its recorded outcome's
+    `/usr/bin/env` runs through `jail.probe` -- its recorded outcome's
     `subject` (== the probe's captured stdout for a non-`DENIAL` shape,
     `brig/core/probes.py`'s own docstring) does NOT contain the canary,
     proving the probe ran through the SAME scrubbed environment
-    `handle.exec` gives the workload, not the test process's own.
+    `jail.start` gives the workload, not the test process's own.
 
     THE CONTROL, in the same test: the IDENTICAL battery against
     `Stack([])` (`wrap_prefix == ()`, unscrubbed) DOES see the canary --
@@ -426,14 +424,14 @@ def test_probes_run_through_handle_exec_and_therefore_inside_the_confinement(
         limits=Limits(cpu_seconds=60),
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH", "HOME")),
     )
-    scrubbed_handle = _launch(
+    scrubbed_jail, scrubbed_process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="jail-t050-ac5", run_id=run_id
     )
-    control_handle = _launch(
+    control_jail, control_process = _launch(
         Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac5-control", run_id=run_id
     )
     try:
-        scrubbed_report = _probe(scrubbed_handle, battery)
+        scrubbed_report = _probe(scrubbed_jail, battery)
         scrubbed_outcome = scrubbed_report.outcomes[0]
         assert canary_name not in scrubbed_outcome.subject, (
             f"{canary_name!r} leaked into a probe run through a SCRUB'd handle: "
@@ -441,16 +439,16 @@ def test_probes_run_through_handle_exec_and_therefore_inside_the_confinement(
         )
         assert "PATH=" in scrubbed_outcome.subject
 
-        control_report = _probe(control_handle, battery)
+        control_report = _probe(control_jail, battery)
         control_outcome = control_report.outcomes[0]
         assert canary_name in control_outcome.subject
     finally:
-        _teardown_group(scrubbed_handle)
-        _teardown_group(control_handle)
+        _teardown_group(scrubbed_process)
+        _teardown_group(control_process)
 
 
 # ---------------------------------------------------------------------------
-# AC #6 -- Handle.probe is a bound method returning battery.run's report;
+# AC #6 -- Jail.probe is a bound method returning battery.run's report;
 # run imports nothing from probe (grep evidence, pasted separately).
 # ---------------------------------------------------------------------------
 
@@ -460,28 +458,28 @@ class _RecordingBattery:
     """A test-only stand-in satisfying `core.probes.Battery`'s `Protocol`
     shape (`name: str`, `run(self, handle: object) -> ProbeReport`) that
     records exactly one thing: the `handle` object it was called with. Its
-    `run` never touches `handle.exec` at all -- this test's subject is
-    `Handle.probe`'s OWN delegation, not the probe engine underneath it,
-    same isolation `test_handle_delegates.py` uses for `kill`/`exec`."""
+    `run` never touches `jail.start` at all -- this test's subject is
+    `Jail.probe`'s OWN delegation, not the probe engine underneath it,
+    same isolation `test_jail_delegates.py` uses for `kill`/`exec`."""
 
     name: str
     _report: ProbeReport
-    seen_handle: object = None
+    seen_jail: object = None
 
     def run(self, handle: object) -> ProbeReport:
-        self.seen_handle = handle
+        self.seen_jail = handle
         return self._report
 
 
 @pytest.mark.integration
 def test_handle_probe_is_a_bound_method_returning_the_battery_report(run_id: str) -> None:
-    """AC #6. `handle.probe(battery)` returns the EXACT SAME `ProbeReport`
+    """AC #6. `jail.probe(battery)` returns the EXACT SAME `ProbeReport`
     object the battery's `run` returned (identity, via a battery whose `run`
     is instrumented to record its call and hand back a fixed report). Since
     decision-181 (TASK-0079.26) `run` is called with the `Jail` the handle
     describes, not the handle, so each probe is a `jail.start`: same jail id,
     directory, report and runtime, with a `start`."""
-    handle = _launch(
+    jail, process = _launch(
         Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac6", run_id=run_id
     )
     try:
@@ -493,20 +491,20 @@ def test_handle_probe_is_a_bound_method_returning_the_battery_report(run_id: str
         )
         battery = _RecordingBattery(name="recording", _report=fixed_report)
 
-        result = handle.probe(battery)
+        result = jail.probe(battery)
 
         assert result is fixed_report
-        seen = battery.seen_handle
+        seen = battery.seen_jail
         assert isinstance(seen, Jail)
         assert (seen.jail_id, seen.jail_dir, seen.report) == (
-            handle.jail_id,
-            handle.jail_dir,
-            handle.report,
+            jail.jail_id,
+            jail.jail_dir,
+            jail.report,
         )
         assert hasattr(seen, "start")
-        assert [process.pid for process in seen.processes()] == [handle.pid]
+        assert [p.pid for p in seen.processes()] == [process.pid]
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -555,12 +553,12 @@ def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
             name="t050-control-dominates", axis=Axis.FS_WRITE, probes=(control, denial)
         )
 
-        handle = _launch(
+        jail, process = _launch(
             Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac7", run_id=run_id
         )
         try:
-            enforced_handle = _with_axis_grade(handle, Axis.FS_WRITE, Grade.ENFORCED)
-            report = _probe(enforced_handle, battery)
+            enforced_jail = _with_axis_grade(jail, Axis.FS_WRITE, Grade.ENFORCED)
+            report = _probe(enforced_jail, battery)
 
             assert report.contradictions != ()  # the contradiction really is present
             # `is BatteryVerdict.VACUOUS` -- never `BatteryVerdict.CONTRADICTED` --
@@ -571,6 +569,6 @@ def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
             # `comparison-overlap` under --strict as redundant).
             assert report.battery_verdict is BatteryVerdict.VACUOUS
         finally:
-            _teardown_group(handle)
+            _teardown_group(process)
     finally:
         shutil.rmtree(workspace)

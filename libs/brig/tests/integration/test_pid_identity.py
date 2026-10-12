@@ -8,7 +8,7 @@ unrelated process that now happens to hold that number". decision-144
 accepted the window on the grounds that the blast radius was a signal and no
 atomic alternative existed at this layer; its second stated condition for
 ending that acceptance was "holding a pid across a durable boundary", which
-is exactly what a serialized `Handle` in an embedder's log does.
+is exactly what a serialized `Jail` in an embedder's log does.
 
 **How a recycled pid is reproduced here.** Not by exhausting the pid space
 and waiting for the OS to wrap -- that is hours of churn for one bit of
@@ -31,16 +31,17 @@ import itertools
 import os
 import subprocess
 import time
-from dataclasses import replace
 
 import pytest
 
 from brig.core import Spec
-from brig.run import Handle, IoPolicy, SubprocessLauncher
+from brig.run import HostRuntime, IoPolicy, Jail, Process, RuntimeKind
 from brig.run import _identity as identity
 from brig.run.teardown import KillOutcome
 from brig.stack import Stack
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
+
+_RUNTIMES = {RuntimeKind.HOST: HostRuntime()}
 
 pytestmark = pytest.mark.integration
 
@@ -62,9 +63,9 @@ def _new_jail_dir() -> str:
     return path
 
 
-def _launch(run_id: str, body: str = "sleep 100") -> Handle:
+def _launch(run_id: str, body: str = "sleep 100") -> tuple[Jail, Process]:
     jail_dir = _new_jail_dir()
-    return SubprocessLauncher().launch(
+    return launch(
         Stack([]).compile(Spec()),
         argv=workload_argv(run_id, body),
         cwd=jail_dir,
@@ -97,11 +98,15 @@ def _wait_for_the_group(pgid: int, timeout: float = 30.0) -> None:
         time.sleep(0.02)
 
 
-def _with_a_stranger_at_the_pid(handle: Handle) -> Handle:
-    """The same handle, describing a pid whose occupant is not the process
-    it was launched against -- what the OS recycling that number leaves
-    behind."""
-    return replace(handle, start_time=_A_STAMP_NO_PROCESS_HAS)
+def _with_a_stranger_at_the_pid(jail: Jail) -> Jail:
+    """The same jail, rehydrated from a dict whose first process names a pid
+    whose occupant is not the process it was started as -- what the OS
+    recycling that number leaves behind. The dict is the authority for the
+    processes it names (decision-181), so the jail holds the forged stamp,
+    and the record on disk, which disagrees, is never used in its place."""
+    d = jail.to_dict()
+    d["processes"] = [{**d["processes"][0], "start_time": _A_STAMP_NO_PROCESS_HAS}]
+    return Jail.from_dict(d, runtimes=_RUNTIMES)
 
 
 # ---------------------------------------------------------------------------
@@ -152,15 +157,15 @@ def test_an_unknown_stamp_degrades_to_a_pid_check_rather_than_a_false_mismatch()
 def test_alive_reads_a_recycled_pid_as_gone(run_id: str) -> None:
     """`alive()` asks two questions now. THE CONTROL is the first assertion:
     the same live jail, the same pid, the real stamp -- `True`."""
-    handle = _launch(run_id)
+    jail, process = _launch(run_id)
     try:
-        _wait_for_the_group(handle.pgid)
-        assert handle.alive() is True, "CONTROL failed: the jail is not running"
-        assert _with_a_stranger_at_the_pid(handle).alive() is False, (
+        _wait_for_the_group(process._record.pgid)
+        assert jail.alive() is True, "CONTROL failed: the jail is not running"
+        assert _with_a_stranger_at_the_pid(jail).alive() is False, (
             "a pid whose occupant is a different process still read as this jail"
         )
     finally:
-        teardown_group(handle)
+        teardown_group(process)
 
 
 def test_interrupt_delivers_nothing_to_a_recycled_pid(run_id: str) -> None:
@@ -173,22 +178,22 @@ def test_interrupt_delivers_nothing_to_a_recycled_pid(run_id: str) -> None:
     control, in the same test: the unmodified handle returns `True` against
     that same group, so `False` is attributable to the stamp and not to this
     jail being unsignalable from the start."""
-    handle = _launch(run_id)
+    jail, process = _launch(run_id)
     try:
-        _wait_for_the_group(handle.pgid)
-        before = _group_members(handle.pgid)
+        _wait_for_the_group(process._record.pgid)
+        before = _group_members(process._record.pgid)
         assert before, "CONTROL failed: the jail's process group is empty"
 
-        assert _with_a_stranger_at_the_pid(handle).interrupt() is False
-        assert set(before) <= set(_group_members(handle.pgid)), (
+        assert _with_a_stranger_at_the_pid(jail).processes()[0].interrupt() is False
+        assert set(before) <= set(_group_members(process._record.pgid)), (
             "a member of the group is gone, so something was delivered to it after all"
         )
 
-        assert handle.interrupt() is True, (
+        assert process.interrupt() is True, (
             "CONTROL failed: the real handle could not signal its own group"
         )
     finally:
-        teardown_group(handle)
+        teardown_group(process)
 
 
 def test_kill_reports_already_gone_for_a_recycled_pid_and_signals_nothing(
@@ -203,39 +208,40 @@ def test_kill_reports_already_gone_for_a_recycled_pid_and_signals_nothing(
     running after that report, and the unmodified handle then tears it down
     and reports `ENDED`. Without the second half, `ALREADY_GONE` would be
     indistinguishable from a jail that had died on its own."""
-    handle = _launch(run_id)
+    jail, process = _launch(run_id)
     try:
-        _wait_for_the_group(handle.pgid)
-        assert _group_members(handle.pgid), "CONTROL failed: the group is empty"
+        _wait_for_the_group(process._record.pgid)
+        assert _group_members(process._record.pgid), "CONTROL failed: the group is empty"
 
-        report = _with_a_stranger_at_the_pid(handle).kill()
+        report = _with_a_stranger_at_the_pid(jail).destroy()
         item = report.items[0]
         assert item.kind == "workload_group"
         assert item.outcome is KillOutcome.ALREADY_GONE, report
         assert "start time" in item.detail, item.detail
-        assert _group_members(handle.pgid), (
+        assert _group_members(process._record.pgid), (
             "the jail was torn down anyway -- the ladder ran against a pid the "
             "handle no longer names"
         )
 
-        ended = handle.kill()
+        ended = jail.destroy()
         assert ended.items[0].outcome is KillOutcome.ENDED, ended
     finally:
-        teardown_group(handle)
+        teardown_group(process)
 
 
 def test_the_launcher_records_a_real_stamp_on_every_handle(run_id: str) -> None:
     """The field is only worth comparing if a launch actually fills it. A
     `sleep 100` workload cannot have lost the read race, so `UNKNOWN` here
     means the launcher never took the reading at all."""
-    handle = _launch(run_id)
+    jail, process = _launch(run_id)
     try:
-        _wait_for_the_group(handle.pgid)
-        assert handle.start_time != identity.UNKNOWN
-        assert handle.start_time == identity.start_stamp(handle.pid)
+        _wait_for_the_group(process._record.pgid)
+        assert process.start_time != identity.UNKNOWN
+        assert process.start_time == identity.start_stamp(process.pid)
         # It survives serialization, which is the whole point of recording
         # it: the process that rehydrates the handle is the one whose pid
         # might have been recycled out from under it.
-        assert Handle.from_dict(handle.to_dict()).start_time == handle.start_time
+        rehydrated = Jail.from_dict(jail.to_dict(), runtimes=_RUNTIMES)
+        assert rehydrated.processes()[0].start_time == process.start_time
     finally:
-        teardown_group(handle)
+        teardown_group(process)

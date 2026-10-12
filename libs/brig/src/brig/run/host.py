@@ -12,48 +12,43 @@ then every `JAIL_LIFETIME` helper (`brig/run/teardown.py`); `HostSupervisor`
 signals a group after checking its leader's identity, waits through the exit
 waiter or the process's exit record, and stops one group with the same ladder.
 
-Everything here is what `SubprocessLauncher.launch`, `Handle.interrupt`,
-`Handle.wait` and `exec_in_jail` did before decision-178, moved rather than
-changed. The launcher's own notes on that code follow, as they stood ("this
-launcher" is now `create`; sensor stamping and `signatures` stayed in
-`launcher.py`):
+Everything here is what the launcher, the handle's `interrupt` and `wait`, and
+its `exec` did before decision-178, moved rather than changed; decision-183
+deleted those callers, and `Jail` (`brig/run/jail.py`) is this runtime's
+embedder-side face. The notes on that code follow:
 
-**`wrap_prefix` (task-046).** `handle.exec` (SPEC.md §9) needs to place a
-sibling process inside the same confinement `jail.wrap` compiled for the
-workload -- but `Handle` does not carry the `CompiledJail.wrap` callable
-itself (only the already-wrapped `argv` it launched), and a callable is not
-serializable across `to_dict`/`from_dict`'s process boundary anyway. So
-this launcher DERIVES `wrap_prefix` once, here, at launch time
-(`_derive_wrap_prefix`; since decision-181 at `create`, against a fixed
-sentinel argv, `_WRAP_SENTINEL`): the tuple of tokens `jail.wrap` prepended
-ahead of `argv`, verified -- not assumed -- to be a pure prefix (the wrap's output
-ends in exactly `argv`, unchanged). `exec_.exec_in_jail` then reproduces
-`jail.wrap`'s effect on an arbitrary exec argv by literally prepending this
-same prefix, and refuses exec outright when the verification found no pure
-prefix (`wrap_prefix is None`) rather than spawn a weaker sibling.
+**`wrap_prefix` (task-046).** Every start (SPEC.md §9) must place its
+process inside the same confinement `jail.wrap` compiled -- but a jail's dict
+cannot carry the `CompiledJail.wrap` callable across `to_dict`/`from_dict`'s
+process boundary. So `create` DERIVES `wrap_prefix` once
+(`_derive_wrap_prefix`, against a fixed sentinel argv, `_WRAP_SENTINEL`,
+decision-181): the tuple of tokens `jail.wrap` prepended ahead of `argv`,
+verified -- not assumed -- to be a pure prefix (the wrap's output ends in
+exactly `argv`, unchanged). `HostSupervisor.start` then reproduces
+`jail.wrap`'s effect on any argv by literally prepending this same prefix,
+and refuses outright when the verification found no pure prefix
+(`wrap_prefix is None`) rather than spawn a weaker process.
 
-**The exit wrapper (decision-156, 2026-09-08).** This launcher does not
-spawn the compiled jail's argv directly any more. It spawns
-`brig/run/_exit_status.py`'s wrapper program, which spawns that argv as its
-own child, waits for it, and writes the status to its exit record (since
-decision-181 one per process, `<jail_dir>/procs/<id>/exit`) -- so a
-`Handle` rehydrated in a process that never parented the workload can still
-read how it ended, which is the one capability decision-152 admitted it was
-giving up. The wrapper prepends NOTHING to the jail's argv: `wrap_prefix` is
-still derived against `jail.wrap`'s own output, `Handle.argv` still reports
-the jail's compiled argv, and what runs inside the confinement is byte for
-byte what ran before. What changes is that `Handle.pid` names the wrapper and
-the jail's own process is its child in the same group -- teardown is
-group-shaped at every rung, so nothing about kill depends on which of the two
+**The exit wrapper (decision-156, 2026-09-08).** A start does not spawn the
+compiled jail's argv directly. It spawns `brig/run/_exit_status.py`'s wrapper
+program, which spawns that argv as its own child, waits for it, and writes
+the status to the process's exit record, `<jail_dir>/procs/<id>/exit`
+(decision-181) -- so a `Jail` rehydrated in a process that never parented the
+workload can still read how it ended. The wrapper prepends NOTHING to the
+jail's argv: `wrap_prefix` is still derived against `jail.wrap`'s own output,
+`Process.argv` reports the jail's compiled argv, and what runs inside the
+confinement is byte for byte what ran before. `Process.pid` names the wrapper
+and the jail's own process is its child in the same group -- teardown is
+group-shaped at every rung, so nothing about it depends on which of the two
 the pid names. See that module for the `SIGKILL` case it cannot cover.
 
-**Start-time stamps (decision-155, 2026-09-08).** The leader's pid and every
-`JAIL_LIFETIME` helper's pid are recorded together with the moment that
-process started (`brig/run/_identity.py`), because a pid alone is a slot
-rather than an occupant: an OS that recycled the number between launch and
+**Start-time stamps (decision-155, 2026-09-08).** Every process leader's pid
+and every `JAIL_LIFETIME` helper's pid are recorded together with the moment
+that process started (`brig/run/_identity.py`), because a pid alone is a slot
+rather than an occupant: an OS that recycled the number between start and
 teardown would have `alive()` reporting a stranger as this jail and teardown
-signalling one. The stamps ride on the `Handle`, so a rehydrated handle
-compares them too.
+signalling one. The stamps ride in the records and the jail's dict, so a
+rehydrated jail compares them too.
 """
 
 import contextlib
@@ -156,8 +151,8 @@ def _derive_wrap_prefix(
     compiled `wrap` applied to `argv`) is `argv` prefixed by a PURE argv
     prefix: `tuple(wrapped_argv[-len(argv):]) == argv` and
     `len(wrapped_argv) >= len(argv)`. Returns the prefix tuple where that
-    holds, `None` where it does not -- `exec_.exec_in_jail` (SPEC.md §9)
-    refuses exec on `None` rather than spawn a weaker sibling.
+    holds, `None` where it does not -- every start (SPEC.md §9) refuses on
+    `None` rather than spawn a weaker process.
 
     The empty-`argv` case is special-cased deliberately: Python's
     `seq[-0:]` is `seq[0:]` (the WHOLE sequence), not the empty suffix,
@@ -280,13 +275,13 @@ def _start_helpers(
     did.
 
     `JAIL_LIFETIME` helpers are started detached, in their own process
-    group, and their pids returned so the `Handle` can carry them. They are
-    reaped by the same paths that reap the workload -- the exit waiter when
-    it exits on its own, `kill_jail` when it is torn down -- rather than by
-    a pipe-EOF scheme. Pid-watch is chosen over pipe-EOF (SPEC.md §6 allows
-    either, "chosen once, documented") because this launcher already owns a
-    per-jail waiter thread, and because a pid recorded on the Handle
-    survives serialization: a rehydrated handle in another process can kill
+    group, and their pids returned so the jail's record can carry them. They
+    are ended by the same path that ends the processes -- `destroy` --
+    rather than by a pipe-EOF scheme. Pid-watch is chosen over pipe-EOF
+    (SPEC.md §6 allows either, "chosen once, documented") because this
+    runtime already owns a waiter thread per process, and because a pid
+    recorded in the jail's dict survives serialization: a rehydrated jail in
+    another process can kill
     a helper it never started, which an inherited pipe fd could never give
     it.
     """
@@ -337,8 +332,8 @@ def _start_helpers(
             )
         # Deliberately NOT held: unlike the workload, a helper's exit STATUS
         # is not a claim anyone makes, so letting `subprocess._cleanup` reap
-        # it is harmless. What matters is that it can be KILLED, and a pid on
-        # the Handle is what gives every teardown path -- including a
+        # it is harmless. What matters is that it can be KILLED, and a pid in
+        # the jail's record is what gives every teardown path -- including a
         # rehydrated one in another process -- the ability to do that.
         persistent.append(proc.pid)
         # Read while the helper is as young as it will ever be: the stamp

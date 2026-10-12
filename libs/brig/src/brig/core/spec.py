@@ -42,7 +42,7 @@ class ChannelKind(Enum):
 
     A one-member enum rather than no field at all: the field is what lets a
     second kind arrive without a `SPEC_VERSION` bump, and `Channel.kind` is
-    already in every serialized `Spec` and `Handle`."""
+    already in every serialized `Spec` and `Jail`."""
 
     LISTEN = "listen"
 

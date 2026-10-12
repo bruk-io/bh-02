@@ -61,7 +61,7 @@ decision-125): that file's pair is about `network_battery` in general; this
 one is about the Spec THIS file's own journey drives.
 
 Public-API-only, per `.claude/rules/system-tests.md`: `Spec` ->
-`scratch_darwin()` -> `Launcher` -> `Handle` -> `handle.probe`.
+`scratch_darwin()` -> `Jail.create` -> `jail.start` -> `jail.probe`.
 `BatteryVerdict` (`brig.core.probes`) is the one name not re-exported by
 `brig.core`'s barrel -- imported directly, the same justified exception
 `test_probe_forgery.py`'s own module docstring already carries (grep
@@ -102,9 +102,9 @@ from brig.core.probes import (
 )
 from brig.probe.batteries.fs import fs_read_battery, fs_write_battery
 from brig.probe.batteries.network import network_battery
-from brig.run import Handle, IoPolicy, SubprocessLauncher, build_compile_ctx
+from brig.run import IoPolicy, Jail, Process, build_compile_ctx
 from brig.stack import CompiledJail, Stack, scratch_darwin
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
@@ -128,24 +128,23 @@ def _new_root(run_id: str, tag: str) -> str:
 
 def _launch_at(
     stack: Stack, spec: Spec, jail_dir: str, argv: Sequence[str], *, jail_id: str
-) -> tuple[Handle, CompiledJail]:
-    """`Spec -> Stack.compile(ctx=build_compile_ctx(...)) -> SubprocessLauncher
-    -> Handle`, through public methods on public types only -- the exact
+) -> tuple[Jail, Process, CompiledJail]:
+    """`Spec -> Stack.compile(ctx=build_compile_ctx(...)) -> Jail.create ->
+    jail.start`, through public methods on public types only -- the exact
     chain `.claude/rules/system-tests.md` names. `jail_dir` is a caller-
     supplied argument, not generated here, because a LISTEN channel's own
     endpoint must be built from it BEFORE the Spec exists (same ordering
     `tests/integration/test_seatbelt_channel.py` uses)."""
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
-    jail = stack.compile(spec, ctx=ctx)
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
-        jail, argv=list(argv), cwd=jail_dir, io=IoPolicy(), jail_id=jail_id, jail_dir=jail_dir
+    compiled = stack.compile(spec, ctx=ctx)
+    jail, process = launch(
+        compiled, argv=list(argv), cwd=jail_dir, io=IoPolicy(), jail_id=jail_id, jail_dir=jail_dir
     )
-    return handle, jail
+    return jail, process, compiled
 
 
-def _teardown_group(handle: Handle) -> None:
-    """Hand-rolled group-kill, not `Handle.kill()` -- a test's cleanup path
+def _teardown_group(process: Process) -> None:
+    """Hand-rolled group-kill, not `Jail.destroy()` -- a test's cleanup path
     must not be the code under test (same posture as this file's e2e
     siblings' own `_teardown_group`)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
@@ -153,14 +152,14 @@ def _teardown_group(handle: Handle) -> None:
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
 
 
-def _probe(handle: Handle, battery: object) -> ProbeReport:
+def _probe(jail: Jail, battery: object) -> ProbeReport:
     """Same cast idiom as `test_probe_forgery.py`'s own `_probe` -- see that
     module's docstring for why the cast, not the Protocol mismatch itself,
     is what mypy --strict needs silenced here."""
-    return handle.probe(cast(CoreBattery, battery))
+    return jail.probe(cast(CoreBattery, battery))
 
 
 def _seed_fs_targets(run_id: str) -> tuple[str, str, str, str, str]:
@@ -272,7 +271,7 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
         listen_endpoint=listen_endpoint,
     )
 
-    handle, jail = _launch_at(
+    jail, process, _compiled = _launch_at(
         scratch_darwin(),
         spec,
         jail_dir,
@@ -283,24 +282,22 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
         # Sanity: scratch_darwin() actually claims what this test is about
         # to probe -- otherwise nothing below would be evidence of anything.
         for axis in (Axis.FS_WRITE, Axis.FS_READ, Axis.NETWORK):
-            assert handle.report.axes[axis].grade is Grade.ENFORCED, (
+            assert jail.report.axes[axis].grade is Grade.ENFORCED, (
                 axis,
-                handle.report.axes[axis],
+                jail.report.axes[axis],
             )
 
         reports: dict[str, ProbeReport] = {
-            "fs_write": _probe(handle, fs_write_battery(spec, outside_writable=outside_writable)),
+            "fs_write": _probe(jail, fs_write_battery(spec, outside_writable=outside_writable)),
             "fs_read": _probe(
-                handle,
+                jail,
                 fs_read_battery(
                     spec,
                     credential_canary=credential_canary,
                     ssh_directory_canary=ssh_directory_canary,
                 ),
             ),
-            "network": _probe(
-                handle, network_battery(spec, denied_address=_DENIED_NETWORK_ADDRESS)
-            ),
+            "network": _probe(jail, network_battery(spec, denied_address=_DENIED_NETWORK_ADDRESS)),
         }
 
         # --- the per-probe table (AC #2's own pasted evidence) -- grade
@@ -311,7 +308,7 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
         print("\nbattery.probe | shape | verdict | report_grade | matched_signature")
         for name, report in reports.items():
             for outcome in report.outcomes:
-                grade = handle.report.axes[outcome.axis].grade
+                grade = jail.report.axes[outcome.axis].grade
                 print(
                     f"{name}.{outcome.probe_name} | {outcome.shape.value} | "
                     f"{outcome.verdict.value} | {grade.value} | {outcome.matched_signature!r}"
@@ -415,7 +412,7 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
                     network_signature,
                 )
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -468,23 +465,21 @@ def test_control_against_the_environment_stack_of_no_mechanisms_denies_nothing(
         listen_endpoint=listen_endpoint,
     )
 
-    handle, _jail = _launch_at(
+    jail, process, _compiled = _launch_at(
         Stack([]), spec, jail_dir, workload_argv(run_id, "sleep 100"), jail_id="sd-env-control"
     )
     try:
         reports: dict[str, ProbeReport] = {
-            "fs_write": _probe(handle, fs_write_battery(spec, outside_writable=outside_writable)),
+            "fs_write": _probe(jail, fs_write_battery(spec, outside_writable=outside_writable)),
             "fs_read": _probe(
-                handle,
+                jail,
                 fs_read_battery(
                     spec,
                     credential_canary=credential_canary,
                     ssh_directory_canary=ssh_directory_canary,
                 ),
             ),
-            "network": _probe(
-                handle, network_battery(spec, denied_address=_DENIED_NETWORK_ADDRESS)
-            ),
+            "network": _probe(jail, network_battery(spec, denied_address=_DENIED_NETWORK_ADDRESS)),
         }
         print("\n[AC #8 environment control] battery.probe | verdict")
         for name, report in reports.items():
@@ -497,7 +492,7 @@ def test_control_against_the_environment_stack_of_no_mechanisms_denies_nothing(
                         "control must never pass a denial probe"
                     )
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------

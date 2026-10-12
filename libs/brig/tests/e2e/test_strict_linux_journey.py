@@ -27,7 +27,7 @@ Six things happen in one run, and each is a claim:
    bind by CONNECTING (not by looking for the path), and the trusted side
    exchanges a line over it -- the channel crossing bwrap's stage-6
    directory bind exists for.
-6. `handle.kill()` ends the process group and its `KillReport` says
+6. `jail.destroy()` ends the process group and its `KillReport` says
    `ENDED` after the verification rung, not merely "signal sent".
 
 **Skips visibly by name.** bubblewrap is linux-only and installed by no
@@ -69,9 +69,10 @@ from brig.core import (
     require,
 )
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH
+from brig.run import IoPolicy
 from brig.run.compile_ctx import build_compile_ctx
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import strict_linux
+from tests.conftest import launch
 
 _PYTHON = "/usr/bin/python3"
 
@@ -194,7 +195,7 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
         ctx=ctx,
     )
 
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         jail,
         argv=[_PYTHON, "-c", _WORKLOAD, endpoint, workspace, hooks],
         cwd=workspace,
@@ -204,7 +205,7 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
     )
     try:
         # Claim 5a: readiness is a CONNECT, not a path check (SPEC.md sec 10).
-        handle.wait_ready("ctl", _READY_TIMEOUT_S)
+        jail.wait_ready("ctl", _READY_TIMEOUT_S)
 
         # Claim 5b: the crossing carries bytes. This is the SECOND
         # connection the jail serves; `wait_ready` above made the first.
@@ -215,9 +216,9 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
         client.close()
         assert greeting == b"hello from the jail\n"
 
-        with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+        with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
             stdout = f.read()
-        with open(handle.stderr_path, encoding="utf-8", errors="replace") as f:
+        with open(process.stderr_path, encoding="utf-8", errors="replace") as f:
             stderr = f.read()
 
         # Claims 2 and 4: it started (so /bin/sh and /usr/bin/env were
@@ -244,7 +245,7 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
             f"the jail carries a name neither env_scrub nor the interpreter accounts for: {names}"
         )
     finally:
-        report = handle.kill()
+        report = jail.destroy()
 
     # Claim 6: the ladder's last rung is verification, per item.
     outcomes = {item.kind: item.outcome.value for item in report.items}
@@ -253,4 +254,4 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
     # is accepted only because a jail that died on its own is not this
     # claim's business.
     assert outcomes["workload_group"] in {"ENDED", "ALREADY_GONE"}
-    assert not handle.alive()
+    assert not jail.alive()

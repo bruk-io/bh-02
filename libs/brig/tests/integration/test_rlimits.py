@@ -8,8 +8,8 @@ classify_exit brig/` finds only `brig/core/events.py` (the `EventKind`
 member) and `brig/mech/__init__.py`/`brig/mech/rlimits.py` (the contract and
 this mechanism) -- nothing under `brig/run/` calls `classify_exit` or
 `known_at_compile`. So the event-stream tests below play `run`'s part by
-hand: append `SPAWN` via `EventLog` exactly as `SubprocessLauncher.launch`
-does (`brig/run/launcher.py`), spawn the compiled argv, wait for the REAL
+hand: append `SPAWN` via `EventLog` exactly as `Jail.create` plus a first `jail.start`
+does (`brig/run/host.py`), spawn the compiled argv, wait for the REAL
 process, build `ExitOutcome` from its OBSERVED returncode, hand it to
 `step.events.classify_exit`, and append whatever payload comes back the same
 way `run` will once that wiring lands. This is a stand-in for that wiring,

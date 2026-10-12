@@ -5,7 +5,7 @@ Integration and system tests each mint scratch jail directories shaped
 what keeps one file's directories from colliding with another's in a single
 pytest process (same pid, independent counters -> identical paths). Nothing
 enforced that the infixes were distinct: `test_seatbelt_smoke.py` and
-`test_handle_signature_book.py` both used `sb`, found by hand and fixed by
+`test_jail_signature_book.py` both used `sb`, found by hand and fixed by
 hand (smoke now uses `sk`). This test makes the class impossible to
 reintroduce.
 

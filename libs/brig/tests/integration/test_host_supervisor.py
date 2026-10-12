@@ -1,8 +1,8 @@
 """`HostRuntime`'s supervisor against real processes (decision-178, TASK-0079.02).
 
-`Handle` reaches `Supervisor.start`, `Supervisor.signal` and `Supervisor.wait` through
+`Jail` reaches `Supervisor.start`, `Supervisor.signal` and `Supervisor.wait` through
 `exec`, `interrupt` and `wait`, which the rest of the suite covers.
-`Supervisor.stop`, one process's group alone, has no `Handle` method yet (step 3's
+`Supervisor.stop`, one process's group alone, has no `Jail` method yet (step 3's
 `Process.stop`), so it is driven here directly, and checked with `/bin/ps`,
 never through the module under test: the stopped sibling's group is gone, and
 in the same jail, the control, the first process and a second sibling still
@@ -17,12 +17,11 @@ import subprocess
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.run.handle import Handle
+from brig.run import IoPolicy, Jail, Process
 from brig.run.host import HostSupervisor
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.run.teardown import KillOutcome
 from brig.stack import CompiledJail
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -31,7 +30,7 @@ def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
     return argv
 
 
-def _launch(run_id: str) -> Handle:
+def _launch(run_id: str) -> tuple[Jail, Process]:
     jail_dir = f"/tmp/bg{os.getpid()}ha{next(_jail_counter)}"
     jail = CompiledJail(
         spec=Spec(),
@@ -44,7 +43,7 @@ def _launch(run_id: str) -> Handle:
         mechanism_names=(),
         matrix_version=1,
     )
-    return SubprocessLauncher().launch(
+    return launch(
         jail,
         argv=workload_argv(run_id, "sleep 100"),
         cwd=jail_dir,
@@ -68,13 +67,17 @@ def _live_members(pgid: int) -> list[int]:
 
 @pytest.mark.integration
 def test_stop_ends_one_siblings_group_and_leaves_the_rest(run_id: str) -> None:
-    handle = _launch(run_id)
-    record = handle.record()
-    supervisor = handle.runtime.supervisor(record)
+    jail, process = _launch(run_id)
+    record = jail._record()
+    supervisor = jail._runtime.supervisor(record)
     assert isinstance(supervisor, HostSupervisor)
     try:
-        doomed = supervisor.start(workload_argv(run_id, "sleep 100"), cwd=handle.cwd, io=IoPolicy())
-        kept = supervisor.start(workload_argv(run_id, "sleep 100"), cwd=handle.cwd, io=IoPolicy())
+        doomed = supervisor.start(
+            workload_argv(run_id, "sleep 100"), cwd=jail._base.cwd, io=IoPolicy()
+        )
+        kept = supervisor.start(
+            workload_argv(run_id, "sleep 100"), cwd=jail._base.cwd, io=IoPolicy()
+        )
         assert _live_members(doomed.pgid), "the sibling never ran"
 
         report = supervisor.stop(doomed)
@@ -86,10 +89,10 @@ def test_stop_ends_one_siblings_group_and_leaves_the_rest(run_id: str) -> None:
         assert supervisor.wait(doomed, 5.0) == -signal.SIGTERM
         # The control, in the same jail: what was not stopped still runs.
         assert _live_members(kept.pgid)
-        assert _live_members(handle.pgid)
+        assert _live_members(process._record.pgid)
         assert supervisor.signal(kept, signal.SIGKILL) is True
         assert supervisor.wait(kept, 5.0) == -signal.SIGKILL
         assert supervisor.wait(record.processes[0], 0.1) is None
     finally:
-        handle.kill()
-        teardown_group(handle)
+        jail.destroy()
+        teardown_group(process)

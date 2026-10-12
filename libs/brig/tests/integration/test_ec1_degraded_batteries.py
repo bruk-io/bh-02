@@ -7,7 +7,7 @@ jail (task-053), verbatim:
 
 Every REAL jail this file launches is built through the REAL `degraded()`
 preset (or `Stack([])` for the discriminating controls), the REAL
-`SubprocessLauncher`, and `handle.probe` -- no monkeypatching of
+`Jail.create` and `jail.start`, and `jail.probe` -- no monkeypatching of
 enforcement, same "observe from inside the jail" posture
 `tests/integration/test_probe_runner.py` and `test_env_scrub.py` already
 established. Every long-lived JAIL WORKLOAD (`sleep 100`) is built through
@@ -71,11 +71,9 @@ from brig.probe.batteries.env import CANARY_ENV_NAME, env_battery
 from brig.probe.batteries.fs import fs_read_battery, fs_write_battery
 from brig.probe.batteries.limits import limits_battery
 from brig.probe.batteries.network import network_battery
-from brig.run import _identity, _records
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Jail, Process, _identity, _records
 from brig.stack import Stack, degraded
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -96,11 +94,12 @@ def _new_root(run_id: str, tag: str) -> str:
     return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
 
 
-def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str) -> Handle:
+def _launch(
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+) -> tuple[Jail, Process]:
     jail_dir = _new_root(run_id, "e1")
     jail = stack.compile(spec)
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         jail,
         argv=list(argv),
         cwd=jail_dir,
@@ -110,33 +109,33 @@ def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_
     )
 
 
-def _teardown_group(handle: Handle) -> None:
+def _teardown_group(process: Process) -> None:
     """Group-kill the long-lived workload -- the kill is hand-rolled, not
-    `Handle.kill()`, same reasoning as `test_probe_runner.py`'s own
+    `Jail.destroy()`, same reasoning as `test_probe_runner.py`'s own
     `_teardown_group`: a test's cleanup path must not be the code under
-    test. `handle.wait()` blocks until the launcher's exit-waiter has reaped
+    test. `process.wait()` blocks until the launcher's exit-waiter has reaped
     it (task-073)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
 
 
 def _sleep_workload(run_id: str) -> list[str]:
     return workload_argv(run_id, "sleep 100")
 
 
-def _probe(handle: Handle, battery: object) -> ProbeReport:
+def _probe(jail: Jail, battery: object) -> ProbeReport:
     """Same `cast` idiom as `test_probe_runner.py`'s own `_probe` --
-    `Handle.probe`'s parameter is `core.probes.Battery`, a `@runtime_
+    `Jail.probe`'s parameter is `core.probes.Battery`, a `@runtime_
     checkable` `Protocol` every concrete `Battery` this file builds
     satisfies at runtime; the `cast` only silences the STATIC mismatch a
     frozen dataclass's read-only-modeled fields produce against a
     `Protocol`'s default read-write attribute check (see that file's own
     `_probe` docstring for the full explanation)."""
-    return handle.probe(cast(CoreBattery, battery))
+    return jail.probe(cast(CoreBattery, battery))
 
 
 #: How long a registered exec sibling has to still be registered before
@@ -205,12 +204,12 @@ def test_env_battery_is_consistent_against_degraded(
     `Axis.ENV` value is the two probes' observed `Verdict`s in order."""
     monkeypatch.setenv(CANARY_ENV_NAME, "topsecret-should-not-leak")
     spec = Spec(env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH",)))
-    handle = _launch(
+    jail, process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="ec1-env-pass", run_id=run_id
     )
     try:
         battery = env_battery(spec)
-        report = _probe(handle, battery)
+        report = _probe(jail, battery)
         assert report.battery_verdict is BatteryVerdict.CONSISTENT
         absence = next(o for o in report.outcomes if o.probe_name == "scrubbed_name_is_absent")
         assert absence.verdict is Verdict.PASS
@@ -222,7 +221,7 @@ def test_env_battery_is_consistent_against_degraded(
         assert view != {}
         assert view[Axis.ENV] == tuple(o.verdict for o in report.outcomes)
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
@@ -248,11 +247,11 @@ def test_control_env_battery_against_the_empty_stack_is_consistent_with_a_failin
         exactly what the retired word `PASS` made unreadable."""
     monkeypatch.setenv(CANARY_ENV_NAME, "topsecret-should-leak-here")
     spec = Spec(env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH",)))
-    handle = _launch(
+    jail, process = _launch(
         Stack([]), spec, _sleep_workload(run_id), jail_id="ec1-env-control", run_id=run_id
     )
     try:
-        report = _probe(handle, env_battery(spec))
+        report = _probe(jail, env_battery(spec))
         absence = next(o for o in report.outcomes if o.probe_name == "scrubbed_name_is_absent")
         assert absence.verdict is Verdict.FAIL, (
             "the probe must have actually observed the leaking canary -- a probe "
@@ -267,7 +266,7 @@ def test_control_env_battery_against_the_empty_stack_is_consistent_with_a_failin
             "with a report that claims nothing on this axis"
         )
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -286,18 +285,18 @@ def test_limits_battery_is_consistent_against_degraded(run_id: str) -> None:
     spin loop's real, observed termination, not to the mere fact that the
     attempt failed, and not to the battery's summary word."""
     spec = Spec(limits=Limits(cpu_seconds=1))
-    handle = _launch(
+    jail, process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="ec1-limits-pass", run_id=run_id
     )
     try:
-        report = _probe(handle, limits_battery(spec))
+        report = _probe(jail, limits_battery(spec))
         assert report.battery_verdict is BatteryVerdict.CONSISTENT
         spin = next(o for o in report.outcomes if o.probe_name == "cpu_spin_is_killed")
         assert spin.verdict is Verdict.PASS
         assert spin.matched_signature is not None
         assert "signal:SIGXCPU" in spin.subject
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
@@ -310,11 +309,11 @@ def test_control_limits_battery_against_the_empty_stack_is_not_consistent(run_id
     run for the full 15s of `run_battery`'s own internal `exec.wait()`
     timeout and then LEAK: `Popen.wait(timeout=...)` raising
     `TimeoutExpired` does not kill its subprocess, and the exception
-    propagates out of `handle.probe(...)` with no return value -- losing
+    propagates out of `jail.probe(...)` with no return value -- losing
     the only in-process reference `_run_one` ever had to the spin loop's
-    pid. This test instead runs `handle.probe` on a worker thread and, on
+    pid. This test instead runs `jail.probe` on a worker thread and, on
     the MAIN thread, polls the jail's exec-sibling registrations for the
-    spin loop's own (durably on disk -- `exec_.exec_in_jail` writes it
+    spin loop's own (durably on disk -- a sibling `jail.start` writes it
     BEFORE ever calling `.wait()`, so the pid/pgid survive even though the
     call that spawned it is still blocked) and sends it a real `SIGKILL`
     well inside that internal 15s window. The `finally` block re-issues
@@ -333,15 +332,15 @@ def test_control_limits_battery_against_the_empty_stack_is_not_consistent(run_id
     that clause is asserted separately, with the reason in the message, so
     the criterion cannot be satisfied by an outcome nobody looked at."""
     spec = Spec(limits=Limits(cpu_seconds=1))
-    handle = _launch(
+    jail, process = _launch(
         Stack([]), spec, _sleep_workload(run_id), jail_id="ec1-limits-control", run_id=run_id
     )
     battery = limits_battery(spec)
     killed_pgid: int | None = None
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_probe, handle, battery)
-            killed_pgid = _wait_for_spin_loop_pgid(handle.jail_dir)
+            future = pool.submit(_probe, jail, battery)
+            killed_pgid = _wait_for_spin_loop_pgid(jail.jail_dir)
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(killed_pgid, signal.SIGKILL)
             report = future.result(timeout=_WAIT_TIMEOUT_S + 5.0)
@@ -356,7 +355,7 @@ def test_control_limits_battery_against_the_empty_stack_is_not_consistent(run_id
         if killed_pgid is not None:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(killed_pgid, signal.SIGKILL)
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +440,9 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
         fs=FsPolicy(write_allows=(workspace,)),
         channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=channel_endpoint),),
     )
-    handle = _launch(degraded(), spec, _sleep_workload(run_id), jail_id="ec1-fs-net", run_id=run_id)
+    jail, process = _launch(
+        degraded(), spec, _sleep_workload(run_id), jail_id="ec1-fs-net", run_id=run_id
+    )
     try:
         batteries = (
             fs_write_battery(spec, outside_writable=outside_writable),
@@ -453,7 +454,7 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
             network_battery(spec, denied_address="192.0.2.1:80"),
         )
         for battery in batteries:
-            report = _probe(handle, battery)
+            report = _probe(jail, battery)
             assert report.contradictions == (), (
                 f"{battery.name!r}: unexpected contradiction(s) {report.contradictions!r}"
             )
@@ -470,7 +471,7 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
                 "host's real filesystem/network behavior should produce"
             )
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
@@ -504,14 +505,14 @@ def test_the_network_control_fails_when_the_declared_endpoint_cannot_be_bound(
     with open(channel_endpoint, "w", encoding="utf-8") as f:
         f.write("occupied\n")
     spec = Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=channel_endpoint),))
-    handle = _launch(
+    jail, process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="ec1-net-control-fail", run_id=run_id
     )
     try:
         battery = network_battery(spec, denied_address="192.0.2.1:80")
-        report = _probe(handle, battery)
+        report = _probe(jail, battery)
         control = next(o for o in report.outcomes if o.shape is ProbeShape.CONTROL)
         assert control.verdict is Verdict.FAIL
         assert report.battery_verdict is BatteryVerdict.VACUOUS
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)

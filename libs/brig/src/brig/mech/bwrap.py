@@ -240,8 +240,8 @@ an `ABSENCE` probe plus the battery's positive control, the same shape
 have to be rediscovered:**
 
 - `--new-session`. It calls `setsid()`, which would put the workload in a
-  process group of its own -- outside the one `Handle.kill`'s ladder and
-  `Handle.interrupt` signal (SPEC.md §9, law 7: control must not require
+  process group of its own -- outside the one `Jail.destroy`'s ladder and
+  `Process.interrupt` signal (SPEC.md §9, law 7: control must not require
   cooperation). Its own benefit (no TIOCSTI on an inherited terminal) buys
   nothing here: `IoPolicy` gives the workload `/dev/null` for stdin and no
   controlling terminal at all.
@@ -257,7 +257,7 @@ have to be rediscovered:**
   named would make the `fs_write` claim false by exactly one directory.
 
 **`events` is `None`, and that is a decision.** What this mechanism knows
-the instant it compiles is its own argv -- which `Handle` already carries
+the instant it compiles is its own argv -- which `Process.argv` already carries
 verbatim, having launched it. A sensor payload restating it would be the
 copy decision-152 deleted the event stream for. Nothing about how the
 workload EXITS is bwrap's to classify either: a mount denial is an EROFS
@@ -429,7 +429,7 @@ class ChannelInsideJailDir(ValueError):
     DIRECTORY, bound read-write, so that layout would make the whole jail
     directory writable from inside the jail: the process records under
     `procs/` that teardown signals by and `wait()` answers from (decision-181),
-    the logs. A subdirectory is no remedy when it is `procs/` (or `execs/`)
+    the logs. A subdirectory is no remedy when it is `procs/`
     itself: that is `ChannelOnRecords`'s refusal. Names the
     endpoint and the jail directory, and says to put the endpoint in a
     subdirectory of it, which stays writable on its own while the rest of the
@@ -571,8 +571,8 @@ def render_bwrap_prefix(
     """Render `spec` into the bwrap argv PREFIX. Pure: no I/O, no clock.
 
     The result ends in `"--"`, so `prefix + argv` is the whole command line
-    and `Step.wrap` stays a PURE ARGV PREFIX -- which `handle.exec`
-    (SPEC.md §9, `run.launcher._derive_wrap_prefix`) requires in order to
+    and `Step.wrap` stays a PURE ARGV PREFIX -- which `jail.start`
+    (SPEC.md §9, `run.host._derive_wrap_prefix`) requires in order to
     place a sibling inside the same confinement, and which every probe in
     this library depends on because probes run through `exec`.
 

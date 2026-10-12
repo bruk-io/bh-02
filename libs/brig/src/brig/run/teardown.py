@@ -1,4 +1,5 @@
-"""Group teardown of a launched jail: `kill()`, filled in by task-020.
+"""Group teardown of a jail: `Jail.destroy` and `Process.stop` (`kill()` until
+decision-183), filled in by task-020.
 
 SPEC.md §9, the fixed ladder, verbatim:
 
@@ -21,11 +22,11 @@ created was ACCEPTED by decision-144 and is CLOSED by decision-155
 reaped, its pid recycles, the new holder becomes a group leader with the same
 number, and is alive when teardown fires -- and its second condition for
 ending the acceptance was "holding a pid across a durable boundary", which a
-serialized `Handle` in an embedder's log is exactly. So every item this
+serialized jail in an embedder's log is exactly. So every item this
 module tears down now carries the moment its leader STARTED as well as its
 number (`brig/run/_identity.py`), and `_run_ladder` refuses to signal a pid
 whose current occupant is demonstrably a different process: that item reports
-`ALREADY_GONE`, because what the handle names is gone, and a stranger holding
+`ALREADY_GONE`, because what the jail names is gone, and a stranger holding
 its number is not it.
 
 The check is deliberately `_identity.recycled` and not `not
@@ -44,13 +45,13 @@ independent, post-signal observation of the group's membership -- never
 inferred from "the signal call did not raise".
 
 task-027 (decision-042) adds the second kind `KillReport.items` can hold:
-`kill_jail` tears down the workload group FIRST, then every exec sibling
-the handle names -- through the SAME ladder function, per SPEC.md §9's "the
+teardown ends the workload group FIRST, then every exec sibling
+the jail names -- through the SAME ladder function, per SPEC.md §9's "the
 ladder runs per item, and there is only one ladder." A sibling is found by
 listing the records under `<jail_dir>/procs` (`brig/run/_records.py`, one
-directory per process since decision-181; before it, `execs/`, and before
-decision-152 the event stream), never from an in-memory registration, which
-is what makes this work for a handle rehydrated in a process that never
+directory per process since decision-181; before it, a registration file
+per sibling, and before decision-152 the event stream), never from an in-memory registration, which
+is what makes this work for a jail rehydrated in a process that never
 itself started the sibling. The durability clause SPEC.md §9 binds this to is
 unchanged, only its medium.
 
@@ -65,13 +66,13 @@ least one member exists", not "which"), but a fresh `/bin/ps -Ao pid=,pgid=`
 scan (alias-proof per decision-026) filtered to the target `pgid`, zombies
 left out (decision-171: a zombie has ended, and where PID 1 does not reap it
 would stay in the table forever) -- the same technique
-`tests/integration/test_launcher.py`'s `_children_of` already uses. This
+`tests/integration/test_host_launch.py`'s `_children_of` already uses. This
 module never signals a single pid on its own: the leader is reaped
 (`os.waitpid`, `WNOHANG`) purely so a zombie the trusted process is the
 real parent of does not make the group look perpetually non-empty;
 reaping is not a teardown signal and sends nothing.
 
-`kill_jail` is idempotent: called again on an already-torn-down group, the
+Teardown is idempotent: called again on an already-torn-down group, the
 group-membership scan is empty immediately, no signal is sent, and the
 item reports `ALREADY_GONE`.
 """
@@ -86,7 +87,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Final
+from typing import Final
 
 from brig.run import _identity, _records, _waiters
 
@@ -124,7 +125,7 @@ class KillOutcome(Enum):
 @dataclass(frozen=True, slots=True)
 class KillItem:
     """One torn-down (or already-gone, or un-teardownable) thing the
-    handle names. `kind` is `"workload_group"` for the workload item and
+    jail names. `kind` is `"workload_group"` for the workload item and
     `"exec_sibling"` for each exec sibling (task-027, decision-042); the
     two kinds a jail can produce today, alongside `"helper"`;
     `"container"` is M10's to add. `identity` is the pgid, as text, for
@@ -275,12 +276,12 @@ def group_alive(pgid: int, *, read_table: Callable[[], str] = read_process_table
 
 def _reap_leader(leader_pid: int) -> None:
     """Collect the workload leader's exit status if it has one waiting.
-    The trusted process is this pid's real parent (`SubprocessLauncher`
+    The trusted process is this pid's real parent (`HostSupervisor.start`
     spawned it directly), so until this runs, a dead leader sits as a
     zombie that `/bin/ps` still reports -- which would make
     `_group_member_pids` report the group as non-empty forever. This sends
     no signal; it only reaps what already exited. Safe to call on an
-    already-reaped pid (idempotent second `kill_jail` call) or a pid this
+    already-reaped pid (an idempotent second `destroy`) or a pid this
     process never parented (`ChildProcessError`) -- both suppressed."""
     if _waiters.is_watched(leader_pid):
         # A waiter thread owns this reap and will record the EXIT status.
@@ -320,8 +321,8 @@ def _signal_group(pgid: int, sig: signal.Signals) -> None:
     cross-process case, task-027 AC #3, where `_reap_leader` is a
     documented no-op), `os.killpg` on that pgid raises `EPERM`, not
     `ESRCH`, even for the caller's own zombie. Without this, the SIGKILL
-    escalation rung would crash `kill_jail` outright on exactly the
-    handle-rehydrated-elsewhere path SPEC.md §9 exists to cover, instead of
+    escalation rung would crash `destroy` outright on exactly the
+    jail-rehydrated-elsewhere path SPEC.md §9 exists to cover, instead of
     reporting `FAILED` honestly if the group truly never clears."""
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(pgid, sig)
@@ -355,11 +356,11 @@ def _run_ladder(
     check -- this process's own child (the workload leader, or an exec
     sibling THIS process itself started) would otherwise linger as a
     zombie `/bin/ps` keeps reporting. When `leader_pid` is not this
-    process's child (a rehydrated handle tearing down an exec sibling it
+    process's child (a rehydrated jail tearing down an exec sibling it
     never itself started, task-027 AC #3), `_reap_leader` is a documented
     no-op (`ChildProcessError`, suppressed) -- the real parent still owns
-    reaping it, exactly like `Handle.alive()`'s own stated limit on a
-    rehydrated handle.
+    reaping it, exactly like `Process.alive()`'s own stated limit on a
+    rehydrated jail.
     """
     if leader_stamp == _identity.UNKNOWN:
         # decision-172. No start time was recorded, so nothing shows this
@@ -380,9 +381,9 @@ def _run_ladder(
 
     if _identity.recycled(leader_pid, leader_stamp):
         # decision-155. The pid exists, but it is not the process this
-        # handle recorded: the OS reused the number. Signalling the group
+        # jail recorded: the OS reused the number. Signalling the group
         # now would signal a stranger, so nothing is sent and the item
-        # reports what is true -- what the handle named is gone.
+        # reports what is true -- what the jail named is gone.
         return (
             KillOutcome.ALREADY_GONE,
             f"pid {leader_pid} now names a different process (start time does not match "
@@ -500,20 +501,6 @@ def end_group(
     return KillItem(kind=kind, identity=str(pgid), outcome=outcome, detail=detail)
 
 
-def kill_jail(handle: Any, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
-    """Tear down EVERYTHING `handle` names: `kill_named` over the record its
-    `record()` returns (the processes it holds, its `jail_dir`, its helpers).
-    Takes anything with that method (a `Handle`, in practice)."""
-    record = handle.record()
-    return kill_named(
-        known=record.processes,
-        jail_dir=record.jail_dir,
-        helper_pids=record.helper_pids,
-        helper_stamps=record.helper_stamps,
-        grace=grace,
-    )
-
-
 def kill_named(
     *,
     known: Sequence[_records.ProcessRecord],
@@ -525,8 +512,7 @@ def kill_named(
     """Tear down EVERYTHING a jail names, through the same ladder
     (`_run_ladder`), per process in start order, then every `JAIL_LIFETIME`
     helper (decision-181). The returned `KillReport` is the record: nothing
-    is written anywhere (decision-152). `HostRuntime.destroy` and `kill_jail`
-    both come here.
+    is written anywhere (decision-152). `HostRuntime.destroy` comes here.
 
     The processes are `known`, the ones the caller holds in memory, in start
     order, then every record under `<jail_dir>/procs` whose id `known` does

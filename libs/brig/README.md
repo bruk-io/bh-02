@@ -5,31 +5,32 @@ Composable, honestly-graded sandboxes for running untrusted processes.
 A `Spec` describes the jail (filesystem, network, limits, env, channels).
 `Mechanism`s — Seatbelt, bubblewrap, cgroup scopes, an egress proxy, rlimits,
 env scrubbing, containers, Nix closures — each compile a slice of it and
-compose into a `Stack`. The `subprocess` `Launcher` starts the result and
-hands back a serializable `Handle` for teardown, exec-into-jail, observation,
-and probes. Every axis of enforcement is graded — `enforced`, `best_effort`,
+compose into a `Stack`. A `Runtime` creates the result as a `Jail` (host
+process groups, `HostRuntime`, is brig's own), and every process in it is a
+`jail.start`, handed back as a `Process`; the jail serializes for teardown,
+observation and probes in another process. Every axis of enforcement is graded — `enforced`, `best_effort`,
 `cooperative`, `unenforced` — against what the stack can actually deliver, and
 `probe()` proves the grades by attempting violations from inside.
 
 brig keeps no log and no state of its own. A mechanism's sensors return
 their records as data, `run` stamps them, and they come back on the
-`Handle` — `compile_events` for what a mechanism knew when it compiled,
-`exit_events()` for what it makes of how the workload ended — plus
+`Jail` — `compile_events` for what a mechanism knew when it compiled,
+a `Process`'s `exit_events()` for what it makes of how that process ended — plus
 `run.read_egress_decisions`, the cursored reader for what the egress filter,
 which is a separate process, decided on the wire. The embedder decides where
 they all go. The one thing brig does write is a record per process under
 `<jail_dir>/procs/<id>/` (decision-181): who it is, so teardown in any process
-can end it, and its exit status, once, so a `Handle` rehydrated in another
-process can still say how it ended.
+can end it, and its exit status, once, so a `Jail` rehydrated in another
+process can still say how each process ended.
 
-`Jail` and `Process` (`brig.run`, decision-181) are the shape `Handle` is
-giving way to: `Jail.create(compiled, runtime=HostRuntime(), ...)` makes the
+`Jail` and `Process` (`brig.run`, decision-181) replaced `Handle`
+(decision-183, the old name gone with no alias): `Jail.create(compiled, runtime=HostRuntime(), ...)` makes the
 jail with nothing in it, and every process, the first included, is a
 `jail.start`. `Jail.from_dict(d, runtimes={RuntimeKind.HOST: HostRuntime()})`
 rehydrates one with the runtimes the embedder passes, never one the dict
 names. `start` and `probe` are absent where a jail cannot start (no
-supervisor, or created tethered in another process). `Handle` stays beside
-them until TASK-0079.28.
+supervisor, or created tethered in another process). Every exception
+`Jail.create` and `jail.start` raise is importable from `brig.run`.
 
 Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md
@@ -187,7 +188,7 @@ workspace's container run of the bwrap tiers.
 **A jail can end with its embedder, 2026-09-30 (decision-167).** A launch is
 detached, so a jail outlived an embedder that died without calling `kill`, and
 a program its workload left in the background kept running with its grants.
-`launch(..., tether=fd)` takes the read end of a pipe the embedder keeps the
+`launch(..., tether=fd)` (since decision-183, `Jail.create(..., tether=fd)`) takes the read end of a pipe the embedder keeps the
 write end of: when that closes (the embedder closed it, or died, `SIGKILL`
 included), a watcher in the jail's process group sends the group `SIGKILL`.
 Under `bwrap` that ends the whole pid namespace; under seatbelt a process that

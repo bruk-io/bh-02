@@ -1,4 +1,4 @@
-"""The parts of a jail's dict that `Handle` and `Jail` share: its report and
+"""The parts of a jail's dict that need their own codec: its report and
 its channels, as JSON-native data and back (SPEC.md section 5's posture: an
 unknown key at any level is a refusal)."""
 
@@ -13,7 +13,7 @@ _REPORT_AXIS_KEYS: Final = frozenset({"grade", "detail"})
 
 def report_to_dict(report: EnforcementReport) -> dict[str, Any]:
     """`EnforcementReport` has no `to_dict` of its own (core ships only
-    `Spec`'s per task-007) -- this is the serialization of it `Handle`'s and
+    `Spec`'s per task-007) -- this is the serialization of it `Jail`'s and
     `Jail`'s dicts share. Same shape idiom as `Spec.to_dict`: enums as
     their `.value` string, one entry per axis."""
     return {

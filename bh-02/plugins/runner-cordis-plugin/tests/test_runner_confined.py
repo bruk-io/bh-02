@@ -1262,8 +1262,7 @@ _REFUSED_FIRST_START = """
 import asyncio, dataclasses, sys, tempfile
 from pathlib import Path
 from brig.mech import Helper, HelperLifetime
-from brig.run import Jail
-from brig.run.exec_ import ExecWrapNotAPrefix
+from brig.run import ExecWrapNotAPrefix, Jail
 from runner_cordis_plugin import BrigConfig, BrigJail
 
 class Host:

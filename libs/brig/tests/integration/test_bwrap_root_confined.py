@@ -36,9 +36,10 @@ import pytest
 
 from brig.core import FsPolicy, ReadModel, Spec
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH, bwrap
+from brig.run import IoPolicy
 from brig.run.compile_ctx import build_compile_ctx
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import Stack
+from tests.conftest import launch
 
 _jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 30.0
@@ -104,7 +105,7 @@ def test_a_jail_started_as_root_holds_no_capabilities_and_cannot_unlock_a_read_o
         f"echo ok > {workspace}/control && echo CONTROL"
     )
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         Stack([bwrap]).compile(spec, ctx=ctx),
         argv=["/bin/sh", "-c", script],
         cwd=str(workspace),
@@ -113,14 +114,14 @@ def test_a_jail_started_as_root_holds_no_capabilities_and_cannot_unlock_a_read_o
         jail_dir=jail_dir,
     )
     try:
-        status = handle.wait(timeout=_WAIT_TIMEOUT_S)
-        stdout = Path(handle.stdout_path).read_text(errors="replace")
-        stderr = Path(handle.stderr_path).read_text(errors="replace")
+        status = process.wait(timeout=_WAIT_TIMEOUT_S)
+        stdout = Path(process.stdout_path).read_text(errors="replace")
+        stderr = Path(process.stderr_path).read_text(errors="replace")
         host_write_landed = planted.exists()
     finally:
         # Ends what is left and waits for it, so the leak sweep never meets the
         # leader still exiting (a race seen 2 times in 12 without it).
-        handle.kill()
+        jail.destroy()
         planted.unlink(missing_ok=True)
         shutil.rmtree(jail_dir, ignore_errors=True)
 

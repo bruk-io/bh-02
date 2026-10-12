@@ -13,12 +13,10 @@ exit record of its own (`brig/run/_records.py`). `Supervisor.start` takes no
 channel yet: a channel per process needs the channel directory
 (TASK-0079.05), and a parameter only `None` could be passed to would be a
 raising stub (SPEC.md section 9). `Jail` and `Process` (`brig/run/jail.py`,
-TASK-0079.26) are the embedder's side of it; `Handle` stays beside them until
-TASK-0079.28.
+TASK-0079.26) are the embedder's side of it.
 
-`IoPolicy` and `ExitStatusUnobservable` live here because both sides of the
-seam name them; `brig.run.launcher` and `brig.run.handle` re-export them, so
-every earlier import resolves.
+`IoPolicy`, `ExitStatusUnobservable` and `NoSupervisor` live here because
+both sides of the seam name them; `brig.run` re-exports them.
 """
 
 from collections.abc import Sequence
@@ -74,7 +72,7 @@ class ExitStatusUnobservable(RuntimeError):
 
     **What this no longer means (decision-156, 2026-09-08).** It used to mean
     "you are not the launching process": the status lived only in that
-    process's memory, so a rehydrated `Handle` -- the shape an embedder uses
+    process's memory, so a rehydrated jail -- the shape an embedder uses
     to clean up after a runtime that died holding a jail -- got this refusal
     every time. It does not any more. The exit wrapper writes the status to
     the process's own exit record (`brig/run/_exit_status.py`; since

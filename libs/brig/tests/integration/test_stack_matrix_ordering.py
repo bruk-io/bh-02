@@ -25,7 +25,7 @@ that must be RUN, not merely accepted on the rationale's own say-so:
    gap.
 
 This file runs the REAL `Stack([env_scrub, rlimits])`, compiled through the
-REAL matrix (no monkeypatching), launched via the REAL `SubprocessLauncher`
+REAL matrix (no monkeypatching), launched via the REAL `Jail.create` and `jail.start`
 -- the same "observe from inside the jail" posture
 `tests/integration/test_env_scrub.py` already establishes for `env_scrub`
 alone, extended here to the composed two-mechanism stack the unit tier
@@ -54,9 +54,9 @@ from brig.core import EnvMode, EnvPolicy, Limits, Spec
 from brig.mech import CompileCtx
 from brig.mech.env_scrub import env_scrub
 from brig.mech.rlimits import rlimits
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy
 from brig.stack import Stack
-from tests.conftest import workload_argv
+from tests.conftest import launch, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -103,7 +103,7 @@ def test_composed_stack_rlimits_outermost_workload_environ_still_scrubbed(
     """task-037 AC #7: under the REAL, matrix-ordered `Stack([env_scrub,
     rlimits])` (rlimits outermost, per the shipped matrix -- not asserted,
     read from the live module), a workload launched through the REAL
-    `SubprocessLauncher` prints its own environment from INSIDE the jail;
+    `Jail.create` and `jail.start` prints its own environment from INSIDE the jail;
     the unlisted canary is ABSENT and the allow-listed name is PRESENT
     with its exact value.
 
@@ -146,8 +146,7 @@ def test_composed_stack_rlimits_outermost_workload_environ_still_scrubbed(
     )
     assert composed[7] == "/bin/sh"
 
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
+    jail, process = launch(
         jail,
         argv=argv,
         cwd=jail_dir,
@@ -155,8 +154,8 @@ def test_composed_stack_rlimits_outermost_workload_environ_still_scrubbed(
         jail_id="t037-composed",
         jail_dir=jail_dir,
     )
-    handle.wait(timeout=20.0)
-    with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+    process.wait(timeout=20.0)
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         stdout = f.read()
 
     names = _parse_env_lines(stdout)
@@ -207,11 +206,10 @@ def test_composed_stack_rlimits_cpu_cap_still_reaches_through_env_scrubs_pre_exe
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=()),
     )
     jail = Stack([env_scrub, rlimits]).compile(spec, ctx=ctx)
-    launcher = SubprocessLauncher()
 
     argv = [sys.executable, "-c", _SPIN_LOOP]
     start = time.monotonic()
-    handle = launcher.launch(
+    jail, process = launch(
         jail,
         argv=argv,
         cwd=jail_dir,
@@ -219,7 +217,7 @@ def test_composed_stack_rlimits_cpu_cap_still_reaches_through_env_scrubs_pre_exe
         jail_id=f"t037-cpu-{run_id[:8]}",
         jail_dir=jail_dir,
     )
-    status = handle.wait(timeout=20.0)
+    status = process.wait(timeout=20.0)
     wall_time = time.monotonic() - start
 
     assert status == -signal.SIGXCPU, (

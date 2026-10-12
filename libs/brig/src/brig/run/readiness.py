@@ -89,10 +89,9 @@ def wait_ready(handle: Any, channel: str, timeout: float) -> None:
     """Block until `channel`'s bind is observable, or raise a named timeout.
 
     `handle` is duck-typed to anything carrying a `channels: Mapping[str,
-    Channel]` attribute (in practice `brig.run.handle.Handle`) -- this
-    module never imports `Handle` itself, since `run` importing its own
-    sibling module by name would be circular (`handle.py` imports THIS
-    module to build `Handle.wait_ready`'s delegate).
+    Channel]` attribute (in practice `brig.run.jail.Jail`) -- this module
+    never imports `Jail` itself, since that would be circular (`jail.py`
+    imports THIS module to build `Jail.wait_ready`'s delegate).
 
     Raises `UnknownChannel(channel)` immediately if `channel` names nothing
     on the handle -- answerable from the declared `Spec` alone, so it never

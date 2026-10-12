@@ -53,7 +53,7 @@ from brig.core import (
 )
 from brig.mech import CompileCtx
 from brig.mech.env_scrub import _SCRUB_DETAIL as _ENV_DETAIL
-from brig.run.exec_ import ExecFidelity
+from brig.run import ExecFidelity
 from brig.run.host import _derive_wrap_prefix
 from brig.stack import scratch_darwin
 
@@ -383,10 +383,9 @@ def test_scratch_darwin_function_contains_no_conditional() -> None:
 def test_scratch_darwin_composed_wrap_is_pure_argv_prefix() -> None:
     """AC #7 (first half): the composed wrap from the three-mechanism stack
     is a pure argv prefix, VERIFIED by the real production function --
-    `brig.run.launcher._derive_wrap_prefix` -- the exact function
-    `launcher.py`'s own `SubprocessLauncher.launch` calls to compute
-    `Handle.wrap_prefix`, and the exact function `exec_.exec_in_jail`
-    trusts. This does not reimplement the slice-check by hand: it calls
+    `brig.run.host._derive_wrap_prefix` -- the exact function
+    `HostRuntime.create` calls to compute the jail's `wrap_prefix`, which
+    every `jail.start` trusts. This does not reimplement the slice-check by hand: it calls
     the real seam so a regression in `_derive_wrap_prefix` itself would be
     caught here, not just in this test's own hand-rolled arithmetic.
     """
@@ -397,14 +396,14 @@ def test_scratch_darwin_composed_wrap_is_pure_argv_prefix() -> None:
 
     prefix = _derive_wrap_prefix(wrapped_argv, original_argv)
 
-    # None means "not a pure prefix" -- exec_.exec_in_jail refuses exec on
-    # this (ExecWrapNotAPrefix) rather than spawn a weaker sibling. This
-    # preset's three-mechanism wrap must not trigger that refusal, or every
-    # battery in task-065 that runs a probe via handle.exec fails for a
-    # reason that has nothing to do with a kernel.
+    # None means "not a pure prefix" -- every jail.start refuses on this
+    # (ExecWrapNotAPrefix) rather than spawn a weaker process. This preset's
+    # three-mechanism wrap must not trigger that refusal, or every battery in
+    # task-065 that runs a probe via jail.start fails for a reason that has
+    # nothing to do with a kernel.
     assert prefix is not None, (
-        "composed wrap is not a pure argv prefix; exec_.exec_in_jail would "
-        "refuse every probe that runs through handle.exec (task-065)"
+        "composed wrap is not a pure argv prefix; jail.start would "
+        "refuse every probe that runs through it (task-065)"
     )
     assert len(prefix) > 0, (
         "an empty (but non-None) prefix means the real exec seam grades "
@@ -414,21 +413,21 @@ def test_scratch_darwin_composed_wrap_is_pure_argv_prefix() -> None:
 
 @pytest.mark.unit
 def test_scratch_darwin_wrap_prefix_consistency() -> None:
-    """AC #7 (second half): `handle.exec` grades `ExecFidelity.EQUIVALENT_
+    """AC #7 (second half): `jail.start` grades `ExecFidelity.EQUIVALENT_
     PROFILE` for this preset, not `PLAIN` and not a refusal.
 
-    `brig.run.exec_.exec_in_jail` computes fidelity from `handle.wrap_prefix`
-    (itself `_derive_wrap_prefix`'s return value, stored at launch time) with
-    exactly this branch (brig/run/exec_.py):
+    A `Process` takes its fidelity from the jail's `wrap_prefix` (itself
+    `_derive_wrap_prefix`'s return value, stored at `create`) with exactly
+    this branch (`brig/run/jail.py`'s `_fidelity`):
 
         if wrap_prefix:
             fidelity = ExecFidelity.EQUIVALENT_PROFILE
         else:
             fidelity = ExecFidelity.PLAIN
 
-    `exec_in_jail` itself spawns a real subprocess, which is integration-tier,
+    `jail.start` itself spawns a real subprocess, which is integration-tier,
     not unit -- so this test stays at unit tier by calling the real,
-    subprocess-free `_derive_wrap_prefix` and applying `exec_in_jail`'s own
+    subprocess-free `_derive_wrap_prefix` and applying a start's own
     documented branch condition to its result, rather than reimplementing
     the prefix arithmetic separately from the AC #7 test above.
     """

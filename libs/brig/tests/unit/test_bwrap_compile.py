@@ -312,7 +312,7 @@ def test_a_symlinked_path_mounts_the_resolved_source_at_the_spec_s_own_path() ->
 
 @pytest.mark.unit
 def test_wrap_is_a_pure_argv_prefix_verified_by_derive_wrap_prefix() -> None:
-    """`handle.exec` (SPEC.md §9) reproduces a stack's confinement on a
+    """`jail.start` (SPEC.md §9) reproduces a stack's confinement on a
     sibling by prepending the derived prefix, and refuses outright when the
     wrap is not one. Every probe runs through `exec`, so this is not a
     stylistic property. Checked with the launcher's own real
@@ -513,7 +513,7 @@ def test_the_step_stages_nothing_starts_nothing_and_requires_nothing() -> None:
     """The whole mechanism is an argv prefix: no staged profile (unlike
     seatbelt), no helper process (unlike connect_proxy), no launch feature,
     and no sensor -- what it knows at compile time is its own argv, which
-    the `Handle` already carries verbatim (decision-152's own reason for
+    the `Jail` already carries verbatim (decision-152's own reason for
     deleting copies)."""
     step = bwrap.compile(_SPEC, _spec_ctx())
 
@@ -756,12 +756,12 @@ def test_an_absent_directory_between_a_root_and_a_carve_out_is_not_pinned() -> N
 _ABOVE = "/run/brig"
 _INNER_ENDPOINT = f"{_JAIL_DIR}/ch/ctl.sock"
 _ABOVE_HOOKS = f"{_ABOVE}/ws/.git/hooks"
-_SEALED_DENY = f"{_JAIL_DIR}/execs/x"
+_SEALED_DENY = f"{_JAIL_DIR}/logs/x"
 _SCRATCH_DENY = f"{_JAIL_DIR}/tmp/a/.envrc"
 _ABOVE_PINS = (
     _JAIL_DIR,
     f"{_ABOVE}/ws",
-    f"{_JAIL_DIR}/execs",
+    f"{_JAIL_DIR}/logs",
     f"{_JAIL_DIR}/tmp",
     f"{_ABOVE}/ws/.git",
     f"{_JAIL_DIR}/tmp/a",
@@ -795,7 +795,7 @@ def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
     outside the jail directory: the jail directory read-only, its scratch
     writable again (`--bind-try`), the channel directory inside it bound
     again, then only the pins inside the scratch. The pins at the jail
-    directory and in `execs/` are not bound (either would undo the seal),
+    directory and in `logs/` are not bound (either would undo the seal),
     and the carve-out in the sealed part is not mounted (its tmpfs could not
     be made there, and nothing could write it anyway)."""
     argv = bwrap.compile(_above_spec(), _above_ctx()).wrap(("w",))
@@ -939,15 +939,15 @@ def test_a_channel_in_a_subdirectory_of_the_jail_directory_is_not_refused() -> N
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("records", ["procs", "execs"])
 @pytest.mark.parametrize("deeper", [False, True], ids=["in the records", "under them"])
-def test_a_channel_at_or_under_the_records_is_refused(records: str, deeper: bool) -> None:
+def test_a_channel_at_or_under_the_records_is_refused(deeper: bool) -> None:
     """decision-181: bwrap grants a socket its whole directory read-write, so an
-    endpoint at or under `<jail_dir>/procs` (or `execs/` until TASK-0079.28)
-    would let the jail write the records teardown signals by. Refused, naming
-    the endpoint and the records directory, and saying where to put it. The
-    integration twin (`test_bwrap_records_refused.py`) saw the grant written
-    through before the refusal existed."""
+    endpoint at or under `<jail_dir>/procs` would let the jail write the
+    records teardown signals by. Refused, naming the endpoint and the records
+    directory, and saying where to put it. The integration twin
+    (`test_bwrap_records_refused.py`) saw the grant written through before the
+    refusal existed."""
+    records = "procs"
     endpoint = f"{_JAIL_DIR}/{records}/{'a/' if deeper else ''}ctl.sock"
     ctx = _ctx(resolved=_identity_resolved("/usr", endpoint))
     with pytest.raises(ChannelOnRecords) as refusal:
@@ -956,6 +956,23 @@ def test_a_channel_at_or_under_the_records_is_refused(records: str, deeper: bool
     assert endpoint in message
     assert f"{_JAIL_DIR}/{records}" in message
     assert f"{_JAIL_DIR}/chan/ctl.sock" in message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("deeper", [False, True], ids=["in it", "under it"])
+def test_a_channel_under_the_retired_execs_directory_compiles(deeper: bool) -> None:
+    """decision-183: `<jail_dir>/execs` held exec registrations until
+    decision-181, and the refusal covered it until the code that wrote it was
+    deleted. Nothing brig keeps lives there now, so it is a directory like any
+    other: a channel there compiles, granted its own directory and not the
+    jail directory. (Refused, as `procs/` is, until TASK-0079.28.)"""
+    endpoint = f"{_JAIL_DIR}/execs/{'a/' if deeper else ''}ctl.sock"
+    ctx = _ctx(resolved=_identity_resolved("/usr", endpoint))
+    argv = bwrap.compile(_channel_only_spec(endpoint), ctx).wrap(())
+    triples = list(zip(argv, argv[1:], argv[2:], strict=False))
+    granted = endpoint.rsplit("/", 1)[0]
+    assert ("--bind", granted, granted) in triples
+    assert ("--bind", _JAIL_DIR, _JAIL_DIR) not in triples
 
 
 @pytest.mark.unit

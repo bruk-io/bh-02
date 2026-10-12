@@ -1,24 +1,20 @@
-"""`Handle.exec` and `Handle.wait_ready`, exercised as BOUND methods.
+"""`Jail.start` and `Jail.wait_ready`, exercised as BOUND methods.
 
 task-030 / decision-053, on doc-007 §6 D-7's finding: SPEC.md §9's `exec`
-criterion (MILESTONES.md M2 EC4) reads `handle.exec(["pwd"])`, and
-`Handle.wait_ready`'s signature is likewise part of that same public block --
-but `handle.py`'s two methods here are each a short delegate to a private
-module function, and every existing test in the suite calls that private
-function directly rather than the bound method an embedder actually calls.
-decision-053, quoted: "**a public surface is not discharged one hop away.**
-A test that reaches past the method an embedder calls, into the function
-that method delegates to, proves the delegate's callee and not the
-delegate."
+criterion (MILESTONES.md M2 EC4) reads `handle.exec(["pwd"])` -- a sibling
+`jail.start(["pwd"])` since decision-183 -- and `Jail.wait_ready`'s signature
+is likewise part of that same public block, but each is a short delegate (to
+the jail's supervisor, and to `readiness.wait_ready`). decision-053, quoted:
+"**a public surface is not discharged one hop away.** A test that reaches
+past the method an embedder calls, into the function that method delegates
+to, proves the delegate's callee and not the delegate."
 
 This file exists to close exactly that gap, and only that gap -- it does not
 replace or duplicate the module-function coverage `test_exec.py` and
 `test_wait_ready.py` already carry; it adds the one thing they structurally
-cannot prove, which is that the bound method wires its arguments to that
-function correctly. Nothing here imports the delegate-callee functions or
-their private module paths at all, by construction: a test that could still
-pass after importing around `Handle.exec`/`Handle.wait_ready` would not be
-testing them.
+cannot prove, which is that the bound method wires its arguments to its
+delegate correctly. Nothing here imports the delegate-callee functions or
+their private module paths at all, by construction.
 
 Same environment traps as every other M2 integration file touching a jail or
 a socket (CLAUDE.md, this task's own text): short `/tmp/bg<pid>hd<n>` scratch
@@ -44,17 +40,15 @@ from typing import Protocol, cast
 import pytest
 
 from brig.core import Channel, ChannelKind, Spec, unenforced_report
-from brig.core.runtime import Capability
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import Jail, Process
 from brig.stack import CompiledJail
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _counter = itertools.count()
 
 
 class _NamedTimeout(Protocol):
-    """The structured-field shape of the timeout `Handle.wait_ready` is
+    """The structured-field shape of the timeout `Jail.wait_ready` is
     expected to raise, reproduced locally as a `Protocol` so this file can
     type-check the caught exception's fields under `mypy --strict` without
     importing the concrete exception class -- the same reason this module
@@ -64,16 +58,6 @@ class _NamedTimeout(Protocol):
     channel: str
     endpoint: str
     timeout: float
-
-
-class _NamedExecRefusal(Protocol):
-    """Same idiom as `_NamedTimeout`, for the exception `Handle.exec` is
-    expected to raise on `interactive=True` -- `Capability` is imported
-    (it lives in `brig.core.runtime`, a layer below `brig.run`, not in the module
-    this file is forbidden from importing), but the exception class itself
-    is still checked by name only."""
-
-    missing: frozenset[Capability]
 
 
 def _new_jail_dir() -> str:
@@ -117,21 +101,13 @@ def _launch(
     jail_dir: str,
     spec: Spec | None = None,
     jail_id: str = "jail-under-test",
-) -> Handle:
-    launcher = SubprocessLauncher()
-    return launcher.launch(
-        _compiled_jail(spec=spec),
-        argv=argv,
-        cwd=cwd,
-        io=IoPolicy(),
-        jail_id=jail_id,
-        jail_dir=jail_dir,
-    )
+) -> tuple[Jail, Process]:
+    return launch(_compiled_jail(spec=spec), argv, cwd=cwd, jail_id=jail_id, jail_dir=jail_dir)
 
 
-def _teardown_group(handle: Handle, jail_dir: str | None = None) -> None:
-    """Group-kill the workload (`Handle.kill()` is out of this task's scope);
-    `handle.wait()` blocks until the launcher's exit-waiter has reaped it
+def _teardown_group(process: Process, jail_dir: str | None = None) -> None:
+    """Group-kill the workload (`Jail.destroy()` is out of this task's scope);
+    `process.wait()` blocks until the exit waiter has reaped it
     (task-073). When `jail_dir` is given, also remove it -- a bound socket
     file outlives the process that bound it, so process teardown alone would
     leave one behind for the readiness tests below."""
@@ -140,7 +116,7 @@ def _teardown_group(handle: Handle, jail_dir: str | None = None) -> None:
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
     if jail_dir is not None:
         shutil.rmtree(jail_dir, ignore_errors=True)
 
@@ -158,71 +134,72 @@ def _bind_script(endpoint: str, *, delay: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# AC #1 -- Handle.exec, called as a bound method.
+# AC #1 -- Jail.start, called as a bound method.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-def test_handle_exec_pwd_writes_the_jail_cwd_through_the_bound_method(run_id: str) -> None:
-    """`handle.exec(["pwd"])` -- the BOUND method, never the private
+def test_jail_start_pwd_writes_the_jail_cwd_through_the_bound_method(run_id: str) -> None:
+    """`jail.start(["pwd"])` -- the BOUND method, never the private
     function it delegates to -- runs a sibling in the jail's own `cwd`.
     Same literal claim MILESTONES.md M2 EC4 makes; this is the one place in
-    the suite that reaches it through `Handle.exec` itself."""
+    the suite that reaches it through `Jail.start` itself."""
     cwd_dir = _new_cwd_dir()
     jail_dir = _new_jail_dir()
-    handle = _launch(
+    jail, process = _launch(
         workload_argv(run_id, "sleep 5"),
         cwd=cwd_dir,
         jail_dir=jail_dir,
     )
     try:
-        exec_handle = handle.exec(["pwd"])
-        assert exec_handle.wait(timeout=5.0) == 0
-        with open(exec_handle.stdout_path) as f:
+        sibling = jail.start(["pwd"])
+        assert sibling.wait(timeout=5.0) == 0
+        with open(sibling.stdout_path) as f:
             content = f.read().strip()
-        assert os.path.realpath(content) == os.path.realpath(handle.cwd)
+        assert os.path.realpath(content) == os.path.realpath(cwd_dir)
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
-def test_handle_exec_forwards_the_interactive_keyword_through_the_bound_method(
-    run_id: str,
-) -> None:
+def test_jail_start_forwards_the_cwd_keyword_through_the_bound_method(run_id: str) -> None:
     """decision-053 names TWO failure shapes for a wrong delegation: wrong
     argument order (task-030 AC #3's mutation) AND a DROPPED keyword. This
-    test is what would catch the second shape, which a swapped-positional
-    mutation does not exercise: `handle.exec([...], interactive=True)` --
-    the BOUND method -- must refuse, naming `PTY` on the structured
-    `missing` field (same posture as `test_exec.py`'s AC #8), which only
-    holds if `Handle.exec` actually forwards `interactive` through to its
-    delegate. A dropped `interactive` keyword would silently fall back to
-    the delegate's own default (`False`) and let this spawn a live process
-    instead of refusing. Control, same bound method, `interactive=False`
-    succeeds -- both invocations reached only through `Handle.exec`."""
+    test is what would catch the second shape: `jail.start(["pwd"],
+    cwd=other)` -- the BOUND method -- must run in `other`, which only holds
+    if `Jail.start` actually forwards `cwd` to its supervisor. A dropped
+    keyword would silently fall back to the jail's own cwd. Control, same
+    bound method, no `cwd`: the sibling runs in the jail's cwd -- both
+    invocations reached only through `Jail.start`.
+
+    Until decision-183 this test forwarded `interactive=True` through
+    `exec`, which could only refuse for want of `PTY`; that keyword went
+    with it, and `cwd` is the keyword `start` forwards now."""
     cwd_dir = _new_cwd_dir()
+    other_dir = _new_cwd_dir()
     jail_dir = _new_jail_dir()
-    handle = _launch(
+    jail, process = _launch(
         workload_argv(run_id, "sleep 5"),
         cwd=cwd_dir,
         jail_dir=jail_dir,
     )
     try:
-        with pytest.raises(ValueError) as exc_info:
-            handle.exec(["true"], interactive=True)
-        assert type(exc_info.value).__name__ == "ExecRefused"
-        refusal = cast(_NamedExecRefusal, exc_info.value)
-        assert Capability.PTY in refusal.missing
+        moved = jail.start(["pwd"], cwd=other_dir)
+        assert moved.wait(timeout=5.0) == 0
+        with open(moved.stdout_path) as f:
+            assert os.path.realpath(f.read().strip()) == os.path.realpath(other_dir)
 
-        # Control: the same bound method, interactive=False, succeeds.
-        exec_handle = handle.exec(["true"], interactive=False)
-        assert exec_handle.wait(timeout=5.0) == 0
+        # Control: the same bound method, no cwd, runs in the jail's own.
+        stayed = jail.start(["pwd"])
+        assert stayed.wait(timeout=5.0) == 0
+        with open(stayed.stdout_path) as f:
+            assert os.path.realpath(f.read().strip()) == os.path.realpath(cwd_dir)
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
-# AC #2 / AC #5 -- Handle.wait_ready, called as a bound method: positive
+# AC #2 / AC #5 -- Jail.wait_ready, called as a bound method: positive
 # control (the bind DOES appear) and the negative (it never does).
 # ---------------------------------------------------------------------------
 
@@ -232,7 +209,7 @@ def test_handle_wait_ready_returns_after_a_real_bind_appears_through_the_bound_m
     run_id: str,
 ) -> None:
     """Positive control (AC #5): a workload that sleeps ~0.5s and then
-    binds+listens on the declared endpoint makes `handle.wait_ready` --
+    binds+listens on the declared endpoint makes `jail.wait_ready` --
     the BOUND method -- RETURN, with elapsed time consistent with having
     actually waited for the bind rather than an instant false positive.
     Without this case, the timeout test below could pass for a probe that
@@ -245,27 +222,27 @@ def test_handle_wait_ready_returns_after_a_real_bind_appears_through_the_bound_m
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, _bind_script(endpoint, delay=0.5))
-    handle = _launch(argv, cwd=jail_dir, jail_dir=jail_dir, spec=spec)
+    jail, process = _launch(argv, cwd=jail_dir, jail_dir=jail_dir, spec=spec)
     try:
         start = time.monotonic()
-        handle.wait_ready("ctl", timeout=10.0)
+        jail.wait_ready("ctl", timeout=10.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 0.5, f"returned before the bind could have appeared: elapsed={elapsed}"
         assert elapsed < 5.0, f"returned suspiciously close to the 10s timeout: elapsed={elapsed}"
     finally:
-        _teardown_group(handle, jail_dir)
+        _teardown_group(process, jail_dir)
 
 
 @pytest.mark.integration
 def test_handle_wait_ready_raises_the_named_timeout_type_through_the_bound_method(
     run_id: str,
 ) -> None:
-    """Negative half: a workload that never binds makes `handle.wait_ready`
+    """Negative half: a workload that never binds makes `jail.wait_ready`
     -- the BOUND method -- raise the named timeout type, carrying the
     channel, endpoint and timeout as structured fields, within the expected
     window (not premature, not silently swallowed past the deadline). The
     exact class is checked by name rather than by importing it, so this
-    file never has a reason to import the module `Handle.wait_ready`
+    file never has a reason to import the module `Jail.wait_ready`
     delegates to."""
     jail_dir = _new_jail_dir()
     endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
@@ -273,11 +250,11 @@ def test_handle_wait_ready_raises_the_named_timeout_type_through_the_bound_metho
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, "sleep 30")  # never touches the endpoint
-    handle = _launch(argv, cwd=jail_dir, jail_dir=jail_dir, spec=spec)
+    jail, process = _launch(argv, cwd=jail_dir, jail_dir=jail_dir, spec=spec)
     try:
         start = time.monotonic()
         with pytest.raises(TimeoutError) as exc_info:
-            handle.wait_ready("ctl", timeout=1.0)
+            jail.wait_ready("ctl", timeout=1.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 1.0, f"raised before the deadline: elapsed={elapsed}"
         assert elapsed < 3.0, f"raised long after the deadline, not promptly: elapsed={elapsed}"
@@ -287,4 +264,4 @@ def test_handle_wait_ready_raises_the_named_timeout_type_through_the_bound_metho
         assert err.endpoint == endpoint
         assert err.timeout == 1.0
     finally:
-        _teardown_group(handle, jail_dir)
+        _teardown_group(process, jail_dir)

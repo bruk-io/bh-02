@@ -61,9 +61,10 @@ import pytest
 
 from brig.core import Channel, ChannelKind, FsPolicy, ReadModel, Spec
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH, bwrap
+from brig.run import IoPolicy
 from brig.run.compile_ctx import build_compile_ctx
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import Stack
+from tests.conftest import launch
 
 #: The skip is an AUTOUSE FIXTURE rather than a module-level
 #: `pytest.mark.skipif`, and the reason is mechanical: `skipif`'s condition
@@ -126,7 +127,7 @@ def _run_in_jail(*, jail_dir: str, spec: Spec, script: str, label: str) -> tuple
     """
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     jail = Stack([bwrap]).compile(spec, ctx=ctx)
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         jail,
         argv=["/bin/sh", "-c", script],
         cwd=spec.fs.write_allows[0],
@@ -134,10 +135,10 @@ def _run_in_jail(*, jail_dir: str, spec: Spec, script: str, label: str) -> tuple
         jail_id=f"bwrap-fs-{label}",
         jail_dir=jail_dir,
     )
-    status = handle.wait(timeout=_WAIT_TIMEOUT_S)
-    with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+    status = process.wait(timeout=_WAIT_TIMEOUT_S)
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         stdout = f.read()
-    with open(handle.stderr_path, encoding="utf-8", errors="replace") as f:
+    with open(process.stderr_path, encoding="utf-8", errors="replace") as f:
         stderr = f.read()
     return status, stdout, stderr
 
@@ -306,7 +307,7 @@ def test_a_path_outside_read_allows_is_absent_rather_than_denied() -> None:
     # The control: without the jail, the same read succeeds.
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     unjailed = Stack([]).compile(spec, ctx=ctx)
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         unjailed,
         argv=["/bin/sh", "-c", f"cat {secret}"],
         cwd=workspace,
@@ -314,8 +315,8 @@ def test_a_path_outside_read_allows_is_absent_rather_than_denied() -> None:
         jail_id="bwrap-fs-read-absent-control",
         jail_dir=jail_dir,
     )
-    handle.wait(timeout=_WAIT_TIMEOUT_S)
-    with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+    process.wait(timeout=_WAIT_TIMEOUT_S)
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         assert "SECRETVALUE" in f.read()
 
 

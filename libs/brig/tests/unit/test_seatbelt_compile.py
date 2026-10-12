@@ -1,7 +1,7 @@
 """Unit tests for `brig.mech.seatbelt.Seatbelt`: the mechanism class
 task-059 adds on top of task-058's pure `render_sbpl` -- axes as pinned
 data, the four named refusals, the wrap's pure-argv-prefix property (both
-asserted directly AND proved by `launcher.py`'s own real
+asserted directly AND proved by `host.py`'s own real
 `_derive_wrap_prefix`), the load-bearing grade-detail tokens, the denial
 signature in both match directions, and the compatibility-matrix rows plus
 the resulting three-mechanism composition order.
@@ -76,7 +76,7 @@ def test_wrap_is_a_pure_argv_prefix_verified_by_derive_wrap_prefix() -> None:
     """Applies `Step.wrap` to a known argv and asserts the result equals
     the three-element `sandbox-exec` prefix followed by that argv
     unchanged, element by element -- AND runs the actual
-    `launcher.py::_derive_wrap_prefix` verification `handle.exec`
+    `host.py::_derive_wrap_prefix` verification `jail.start`
     (task-046) depends on, so this checks the real constraint rather than
     a proxy for it."""
     step = seatbelt.compile(Spec(), _CTX)
@@ -315,8 +315,16 @@ def test_a_channel_at_or_under_the_records_is_refused(records: str) -> None:
     """decision-181: seatbelt grants a socket its literal path, but a socket
     made at a record's path is a record the host can't read; refused like
     bwrap's, naming the endpoint and the records directory. The control: the
-    same channel in a directory of its own compiles."""
+    same channel in a directory of its own compiles. `execs/` is no records
+    directory since decision-183 (nothing brig keeps lives there), so its
+    case is the second control: it compiles."""
     endpoint = f"{_JAIL_DIR}/{records}/control.sock"
+    if records == "execs":
+        seatbelt.compile(
+            Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=endpoint),)),
+            CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={endpoint: endpoint}),
+        )
+        return
     spec = Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=endpoint),))
     ctx = CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={endpoint: endpoint})
     with pytest.raises(ChannelOnRecords) as refusal:

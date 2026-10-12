@@ -3,8 +3,7 @@ through the SAME path the workload uses, classifies each result, and decides
 the battery's own verdict.
 
 **Each probe is a process of the jail** (decision-181, TASK-0079.26): `handle`
-is a `brig.run.jail.Jail` (`Handle.probe` hands over the `Jail` it
-describes), and each probe is a `jail.start`, waited with its deadline and
+is a `brig.run.jail.Jail` (`Jail.probe` hands over itself), and each probe is a `jail.start`, waited with its deadline and
 read from its own stdio files; its record stays for `destroy`. SPEC.md §9's
 "through `exec`" below reads "through `start`".
 
@@ -39,20 +38,17 @@ contradiction table below encodes:
     FAIL against an `unenforced` grade is *consistent*, not a
     contradiction).
 
-**Why `handle` is typed `Any`, not `brig.run.handle.Handle`.** `probe` may
+**Why `handle` is typed `Any`, not `brig.run.jail.Jail`.** `probe` may
 import `run` (`pyproject.toml`'s `[tool.pypeeker.brig-layers.allow]`), so
-naming `Handle` here would not itself be a layer or cycle violation -- the
+naming `Jail` here would not itself be a layer or cycle violation -- the
 reason is `Battery.run`'s own signature. `core.probes.Battery`'s `Protocol`
 declares `run(self, handle: object) -> ProbeReport` (that parameter is
-`object`, not `Handle`, because `core` may not import `run` at all -- see
+`object`, not `Jail`, because `core` may not import `run` at all -- see
 `brig/core/probes.py`'s own docstring). `brig/probe/battery.py`'s concrete
 `Battery.run` has to match that shape to satisfy the Protocol, so it also
 receives `handle: object` and passes it straight through to this function --
-narrowing it to `Handle` here would just move the same widen-or-narrow
-mismatch onto that call instead of resolving it. `handle: Any` is the same
-choice `brig/run/exec_.py`'s own `exec_in_jail` already made for the
-identical shape of tension (see that module's docstring); this function
-inherits it rather than fighting it a second time.
+narrowing it to `Jail` here would just move the same widen-or-narrow
+mismatch onto that call instead of resolving it.
 
 **Controls run first, unconditionally** (MILESTONES.md M4 EC2): every
 `ProbeShape.CONTROL` probe in `battery.probes` executes, in its original
@@ -72,7 +68,7 @@ over its opposite, so it is annotated onto the recorded outcome's `detail`
 rather than raised as a contradiction.
 
 This module is impure by necessity -- it drives real subprocess execution
-through `handle.exec` and reads their exit status and captured output back
+through `jail.start` and reads their exit status and captured output back
 off disk -- unlike every other module in `brig.probe`, which stays pure.
 """
 

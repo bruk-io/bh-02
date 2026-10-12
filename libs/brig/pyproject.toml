@@ -1,7 +1,7 @@
 [project]
 name = "brig"
 version = "0.0.1"
-description = "Composable, honestly-graded sandboxes: spec -> mechanisms -> stack -> launcher -> handle."
+description = "Composable, honestly-graded sandboxes: spec -> mechanisms -> stack -> runtime -> jail."
 readme = "README.md"
 requires-python = ">=3.15"
 license = "MIT"

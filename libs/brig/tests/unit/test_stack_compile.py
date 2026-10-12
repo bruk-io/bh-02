@@ -472,7 +472,7 @@ def test_compiled_jail_has_exactly_twelve_fields() -> None:
 
     Nine fields through M3; task-047 (M4) adds `signatures` -- the
     `SignatureBook` assembled alongside `report` in the same pass over
-    `steps`, so a rehydrated `Handle` can still name which mechanism claims
+    `steps`, so a rehydrated `Jail` can still name which mechanism claims
     an axis and what its denial looks like (SPEC.md §6, §12). decision-152
     (2026-09-08) adds `sensors` -- every non-`None` `Step.events` from the
     same pass, because `run` is the only layer permitted to CALL a sensor

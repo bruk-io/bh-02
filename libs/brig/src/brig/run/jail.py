@@ -53,7 +53,7 @@ from brig.run.teardown import KillReport
 from brig.stack import CompiledJail
 
 HANDLE_VERSION: Final = 6
-"""The version of a jail's dict (a `Handle`'s before it). Bumped 1 -> 2 by
+"""The version of a jail's dict (its predecessor's before decision-183). Bumped 1 -> 2 by
 task-046 (`wrap_prefix` and `jail_env` became REQUIRED top-level keys) and
 2 -> 3 by task-076 (`helper_pids`). SPEC.md section 5's posture applies here
 too -- "There is no migration framework and no tolerated extra field" -- so an
@@ -74,8 +74,8 @@ older dict would be exactly the silent downgrade that posture forbids.
 Bumped 5 -> 6 by decision-181 (TASK-0079.26): a `Jail`'s dict. The first
 process's fields (`pid`, `pgid`, `start_time`, `argv`, `stdout_path`,
 `stderr_path`) and `launcher_name` are gone, and `runtime`, `tethered` and
-`processes` are new and required. `Handle`'s dict, unchanged in shape, is
-written as 6 too until TASK-0079.28 deletes it."""
+`processes` are new and required. The object whose dict this replaced is
+gone (decision-183); the name stays, since it versions this dict."""
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {

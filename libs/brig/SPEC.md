@@ -192,6 +192,32 @@ runner and `scripts/check` green:
 
 (Ruled 2026-10-12, decision-181.)
 
+**`Handle` is gone (2026-10-12, decision-183).** Step 4 of the order above,
+done. `Handle`, its `JailStat` and `stat()`, `ExecHandle`, `ExecRefused` and
+`exec_in_jail`, `SubprocessLauncher` and its `launch`, `kill_jail`, and the
+records helper that named a `Handle`'s first process from its stdio path are
+deleted, and no code writes, reads or refuses `<jail_dir>/execs/` or
+`<jail_dir>/exit` (the records refusal covers `procs/` alone, §9). What an
+embedder calls instead: `Jail.create(compiled, runtime=HostRuntime(), ...)`
+then `jail.start(argv)` for a launch, a second `start` for an exec, `destroy`
+for `kill`, `Process.wait`/`interrupt`/`exit_events` for the first process's,
+`Jail.from_dict(d, runtimes=...)` for `Handle.from_dict`. Three things the
+launcher did now belong to the embedder, and the ruling says so rather than
+hiding them in a helper brig keeps: a launch whose first `start` is refused
+leaves a jail the caller destroys (bh-02's runner does, and so does brig's
+own test helper), the capability refusal is `HostRuntime.create`'s
+(`LaunchRefused`, unchanged), and the first process's stdio is that
+`Process`'s. `HANDLE_VERSION` keeps its name: it versions the jail's dict,
+still 6, and a rename would be a bump with nothing changed. Every exception
+`Jail.create` and `Jail.start` document is re-exported by `brig.run`
+(`LaunchRefused`, `JailDirInUse`, `HelperFailed`, `ExecWrapNotAPrefix`,
+`TetherClosed`, `WorkloadSpawnFailed`, `NoSupervisor`, beside
+`ExitStatusUnobservable`), so an embedder names them from the public surface,
+never from a private module. brig's tests assert through `Jail` and `Process`
+what they asserted through `Handle`; a test whose subject was `Handle` itself
+now holds `Jail` to the same property. Implementing task: TASK-0079.28.
+(Ruled 2026-10-12, decision-183.)
+
 ## 4. Axes and grades
 
 The report's fixed vocabulary. Axes:
@@ -1197,16 +1223,30 @@ Presets keep CLI ergonomics and give
 embedders a strength vocabulary; strength comparison between arbitrary stacks
 is report dominance per axis, not a total order.
 
-## 8. Launchers
+## 8. Runtimes (launchers until decision-183)
 
 ```python
-class Launcher(Protocol):
-    name: str
+class Runtime(Protocol):
+    kind: RuntimeKind                        # HOST, FAKE, ... (§3)
     capabilities: frozenset[Capability]      # NEW_PROCESS_GROUP, PTY, DETACH, ... (decision-179)
-    def launch(self, jail: CompiledJail, *, argv, cwd, io: IoPolicy) -> Handle: ...
+    def create(self, jail: CompiledJail, *, cwd, jail_id, jail_dir,
+               tether: int | None) -> JailRecord: ...   # holds no process
+    def alive(self, jail: JailRecord) -> bool: ...
+    def processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]: ...
+    def process_alive(self, jail: JailRecord, process: ProcessRecord) -> bool: ...
+    def tethered(self, jail: JailRecord) -> bool | None: ...
+    def destroy(self, jail: JailRecord) -> KillReport: ...
+    def supervisor(self, jail: JailRecord) -> Supervisor | None: ...
+
+class Supervisor(Protocol):
+    def start(self, argv, *, cwd, io: IoPolicy) -> ProcessRecord: ...  # every process
+    def signal(self, process: ProcessRecord, sig: Signals) -> bool: ...
+    def wait(self, process: ProcessRecord, timeout: float | None) -> int | None: ...
+    def stop(self, process: ProcessRecord) -> KillReport: ...
 ```
 
-- `subprocess` — pipes or files for stdio, detached, new process group.
+- `HostRuntime` — host process groups: each start detached, in a new process
+  group, stdio to files. (The `subprocess` launcher until decision-183.)
 
 **One launcher, and the roster is exactly what exists (2026-09-08,
 decision-158).** This list held three entries at various times and never held
@@ -1304,6 +1344,14 @@ writing the project). Five things about it are constraints, not description:
   the one whose death it watched. `tether=None`, the default, launches exactly
   as before.
 
+*Amended 2026-10-12 (decision-183, TASK-0079.28):* the tether is
+`Jail.create(..., tether=fd)`'s, held by the jail in memory, and every
+`jail.start` is tethered to it; what this paragraph calls `launch` is
+`create` plus a first `start`, `kill` is `Jail.destroy`, and the rehydrated
+`Handle` is a rehydrated `Jail`, which has no `start` when it was created
+tethered (§9). Each process's group has its watcher, and its exit wrapper
+writes the process's own exit record, `<jail_dir>/procs/<id>/exit`.
+
 **Every interpreter brig starts on the host runs isolated (2026-10-11,
 decision-169).** brig starts four Python programs of its own outside any jail:
 the exit wrapper (`python -c`), the tether's watcher the wrapper starts
@@ -1386,38 +1434,51 @@ makes before the first spawn. So:
 
 `SubprocessLauncher` stays, as `create` plus a first `start` returning a
 `Handle`, until TASK-0079.28 deletes it. Implementing task: TASK-0079.25.
-(Ruled 2026-10-12, decision-181.)
+(Ruled 2026-10-12, decision-181.) *(It is deleted: decision-183, §3.)*
 
-## 9. The Handle
+## 9. The Jail (the Handle until decision-183)
+
+The shape since decision-183 (§3); "the handle" in the rulings below, which
+are kept as written, is this `Jail`, and its `kill` is `destroy`, its `exec`
+a `start`:
 
 ```python
-class Handle:
-    def to_dict(self) -> dict: ...            # everything teardown/observe needs
+class Jail:
     @classmethod
-    def from_dict(cls, d) -> Handle: ...      # rehydrate in a later process
+    def create(cls, jail: CompiledJail, *, runtime: Runtime, cwd: str,
+               jail_id: str, jail_dir: str, tether: int | None = None) -> Jail
+    def to_dict(self) -> dict: ...                   # everything teardown/observe needs
+    @classmethod
+    def from_dict(cls, d, *, runtimes: Mapping[RuntimeKind, Runtime]) -> Jail
 
-    def wait_ready(self, channel: str, timeout: float) -> None
+    def start(self, argv, *, cwd: str | None = None,
+              io: IoPolicy = IoPolicy()) -> Process  # absent without a supervisor
+    def processes(self) -> tuple[Process, ...]          # start order
     def alive(self) -> bool
-    def stat(self) -> JailStat                # pids, rusage, current grades
-    def interrupt(self) -> bool               # mechanism-delivered
-    def kill(self) -> KillReport              # tree/group teardown of EVERYTHING
-                                              # the handle names: workload group,
-                                              # exec siblings (this section's
-                                              # `exec`, below), then
-                                              # helpers, containers
-    def dial(self, channel: str) -> Connection
-    def exec(self, argv, *, interactive=False) -> ExecHandle   # see below
-    def console(self) -> Console | None       # §11
+    def destroy(self) -> KillReport                    # tree/group teardown of EVERYTHING
+                                                       # the jail names: every process's
+                                                       # group in start order, then
+                                                       # helpers, containers
+    def wait_ready(self, channel: str, timeout: float) -> None
+    def probe(self, battery) -> ProbeReport            # §12; absent when start is
+    # fields: report, spec, signatures, channels, compile_events, jail_id, jail_dir
+
+class Process:
+    def interrupt(self) -> bool         # SIGINT to its group; absent without a supervisor
+    def stop(self) -> KillReport        # the ladder, its group alone; same
+    def wait(self, timeout: float | None = None) -> int   # same
+    def alive(self) -> bool
     def exit_events(self) -> tuple[Event, ...]  # §11
-    def probe(self, battery) -> ProbeReport   # §12
+    # fields: id, pid, start_time, argv, stdout_path, stderr_path, fidelity
 ```
 
-plus the fields an embedder reads rather than calls: `compile_events`, every
-mechanism sensor's `known_at_compile()` payload stamped at launch (§11);
-`report`, the `EnforcementReport` the stack compiled; and the identity pair
-`pid`/`start_time` (with `helper_pids`/`helper_stamps` beside it), which is
-what makes a recycled pid read as gone rather than as this jail — see "A pid
-is not an identity" below.
+`dial` (§10) and `console` (§11) stay absent. The fields an embedder reads
+rather than calls: `compile_events`, every mechanism sensor's
+`known_at_compile()` payload stamped at `create` (§11); `report`, the
+`EnforcementReport` the stack compiled; and each process's identity pair
+`pid`/`start_time` (with the jail's `helper_pids`/`helper_stamps` in its
+dict), which is what makes a recycled pid read as gone rather than as this
+jail — see "A pid is not an identity" below.
 
 **An unimplemented capability is absent from the surface, never a raising stub.**
 The block above is the finished shape. A milestone that cannot yet honour one of
@@ -1879,8 +1940,8 @@ channel's own grant; bwrap refuses an endpoint directly in the `jail_dir`
 notes): an endpoint at `<jail_dir>/execs/k.sock` compiles under
 `strict_linux()` and binds `<jail_dir>/execs` read-write into the jail, the
 directory teardown signals by. So **every mechanism that compiles a LISTEN
-channel refuses an endpoint at or under brig's records** (`<jail_dir>/procs`,
-and `<jail_dir>/execs` until TASK-0079.28 deletes it), testing the lexical
+channel refuses an endpoint at or under brig's records** (`<jail_dir>/procs`;
+`<jail_dir>/execs` too until decision-183 deleted it), testing the lexical
 and the resolved parent as TASK-0079.17 does, with a `ValueError` naming the
 endpoint and the records directory and saying to put the endpoint in a
 subdirectory of its own (`<jail_dir>/chan/`) or outside the `jail_dir`.
@@ -2139,7 +2200,8 @@ Three surfaces, all read-only (law 4):
   and `jail_id`, the two fields only it may supply; and the stamped `Event`s
   come back to the embedder on `Handle.compile_events` (what a sensor knew the
   instant it compiled) and from `Handle.exit_events()` (what a sensor makes of
-  how the workload ended). **brig writes no log.**
+  how the workload ended) -- since decision-183 `Jail.compile_events` and
+  `Process.exit_events()`, per process. **brig writes no log.**
 
   The deleted design was one append-only JSONL stream per jail, tailed by
   observers, carrying five lifecycle kinds — `SPAWN`, `EXEC`, `EXEC_END`,
@@ -2320,7 +2382,7 @@ core  ←  mech  ←  stack  ←  run  ←  observe
 | `core` | Spec, axes, grades, Graded, Report, subset algebra, frames, `Event` and its serialization, threat lists, serialization | nothing (pure: no I/O, no clock, no randomness, no subprocess) |
 | `mech` | Mechanism protocol, Step, all mechanisms, denial signatures | `core` |
 | `stack` | Stack, compatibility matrix, presets, floors, aggregation | `core`, `mech` |
-| `run` | the `Runtime` and `Supervisor` protocols and their records, `HostRuntime`, Launchers, Handle, teardown, readiness, dial, event stamping | `core`, `mech`, `stack` |
+| `run` | the `Runtime` and `Supervisor` protocols and their records, `HostRuntime`, `Jail` and `Process`, teardown, readiness, dial, event stamping | `core`, `mech`, `stack` |
 | `runtime` | runtimes that are not `run`'s own: `fake` today (decision-178); nothing in brig imports one, `run` included: an embedder picks a runtime by importing it | `core`, `mech`, `stack`, `run` |
 | `observe` | Console, stat, workspace diff | `core`, `run` |
 | `probe` | batteries, verdicts, report-vs-probe checks | `core`, `run`, `observe` |

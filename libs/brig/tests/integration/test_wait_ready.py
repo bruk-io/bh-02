@@ -44,11 +44,10 @@ import time
 import pytest
 
 from brig.core import Channel, ChannelKind, Spec, unenforced_report
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Jail, Process
 from brig.run.readiness import UnknownChannel, WaitReadyTimeout, wait_ready
 from brig.stack import CompiledJail
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -68,7 +67,7 @@ def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
 def _compiled_jail(*, spec: Spec) -> CompiledJail:
     """A minimal, mechanism-free `CompiledJail` carrying the given `Spec`
     (which is where the declared channels live) -- same empty-stack shape
-    `test_launcher.py` uses, with only `spec` ever varied in this file."""
+    `test_jail_launch.py` uses, with only `spec` ever varied in this file."""
     return CompiledJail(
         spec=spec,
         report=unenforced_report(),
@@ -82,9 +81,8 @@ def _compiled_jail(*, spec: Spec) -> CompiledJail:
     )
 
 
-def _launch(argv: list[str], *, jail_dir: str, spec: Spec) -> Handle:
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+def _launch(argv: list[str], *, jail_dir: str, spec: Spec) -> tuple[Jail, Process]:
+    return launch(
         _compiled_jail(spec=spec),
         argv=argv,
         cwd=jail_dir,
@@ -94,21 +92,21 @@ def _launch(argv: list[str], *, jail_dir: str, spec: Spec) -> Handle:
     )
 
 
-def _teardown(handle: Handle, jail_dir: str) -> None:
+def _teardown(process: Process, jail_dir: str) -> None:
     """Group-kill the workload, then remove the whole jail directory -- AC
     #9's "no socket file survives" requires deleting the file itself, not
     merely ending the process that created it. The kill is deliberately
-    hand-rolled (`killpg`) rather than `kill_jail`: a test's cleanup path
+    hand-rolled (`killpg`) rather than `Jail.destroy`: a test's cleanup path
     must not be the code under test, so a teardown bug cannot hide behind its
-    own helper. `kill_jail` has been functional since task-020; this is a
-    choice, not a gap. `handle.wait()` blocks until the launcher's exit-waiter
+    own helper. `Jail.destroy` has been functional since task-020; this is a
+    choice, not a gap. `process.wait()` blocks until the launcher's exit-waiter
     has reaped it (task-073)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
     shutil.rmtree(jail_dir, ignore_errors=True)
 
 
@@ -158,15 +156,15 @@ def test_wait_ready_returns_after_a_real_bind_appears(run_id: str) -> None:
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, _bind_script(endpoint, delay=0.5))
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    jail, process = _launch(argv, jail_dir=jail_dir, spec=spec)
     try:
         start = time.monotonic()
-        wait_ready(handle, "ctl", timeout=10.0)
+        wait_ready(jail, "ctl", timeout=10.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 0.5, f"returned before the bind could have appeared: elapsed={elapsed}"
         assert elapsed < 5.0, f"returned suspiciously close to the 10s timeout: elapsed={elapsed}"
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -186,11 +184,11 @@ def test_wait_ready_times_out_cleanly_when_the_bind_never_appears(run_id: str) -
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, "sleep 30")  # never touches the endpoint
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    jail, process = _launch(argv, jail_dir=jail_dir, spec=spec)
     try:
         start = time.monotonic()
         with pytest.raises(WaitReadyTimeout) as exc_info:
-            wait_ready(handle, "ctl", timeout=1.0)
+            wait_ready(jail, "ctl", timeout=1.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 1.0, f"raised before the deadline: elapsed={elapsed}"
         assert elapsed < 3.0, f"raised long after the deadline, not promptly: elapsed={elapsed}"
@@ -198,7 +196,7 @@ def test_wait_ready_times_out_cleanly_when_the_bind_never_appears(run_id: str) -
         assert exc_info.value.endpoint == endpoint
         assert exc_info.value.timeout == 1.0
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +219,7 @@ def test_stale_socket_file_still_times_out(run_id: str) -> None:
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, "sleep 30")  # never touches the endpoint either
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    jail, process = _launch(argv, jail_dir=jail_dir, spec=spec)
     try:
         # The stale socket file: bind, then close without unlinking, then
         # confirm the workload above (which never binds) hasn't raced us.
@@ -236,14 +234,14 @@ def test_stale_socket_file_still_times_out(run_id: str) -> None:
 
         start = time.monotonic()
         with pytest.raises(WaitReadyTimeout):
-            wait_ready(handle, "ctl", timeout=1.0)
+            wait_ready(jail, "ctl", timeout=1.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 1.0, (
             f"a path-exists implementation would return here instantly: elapsed={elapsed}"
         )
         assert elapsed < 3.0
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -328,9 +326,9 @@ def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str) -> None
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, _bind_and_record_cwd_script(endpoint, cwd_file))
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    jail, process = _launch(argv, jail_dir=jail_dir, spec=spec)
     try:
-        wait_ready(handle, "ctl", timeout=5.0)
+        wait_ready(jail, "ctl", timeout=5.0)
         with open(cwd_file) as f:
             child_reported_cwd = f.read()
 
@@ -342,7 +340,7 @@ def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str) -> None
                 f"{child_reported_cwd!r} -- os.path.realpath() reconciles them"
             )
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -368,13 +366,13 @@ def test_wait_ready_on_unknown_channel_name_raises_and_names_it(run_id: str) -> 
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, _bind_script(endpoint, delay=0.0))
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    jail, process = _launch(argv, jail_dir=jail_dir, spec=spec)
     try:
         with pytest.raises(UnknownChannel) as exc_info:
-            wait_ready(handle, "does-not-exist", timeout=1.0)
+            wait_ready(jail, "does-not-exist", timeout=1.0)
         assert exc_info.value.channel == "does-not-exist"
 
         # Control: the declared name does not raise.
-        wait_ready(handle, "ctl", timeout=5.0)
+        wait_ready(jail, "ctl", timeout=5.0)
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)

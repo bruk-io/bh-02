@@ -42,10 +42,9 @@ from brig.core import Battery as CoreBattery
 from brig.core.probes import BatteryVerdict  # not barrel-exported; see test_probe_forgery.py
 from brig.mech import env_scrub, rlimits
 from brig.probe.batteries.network import network_battery
-from brig.run import Handle, IoPolicy, SubprocessLauncher, build_compile_ctx
-from brig.run.teardown import kill_jail
+from brig.run import IoPolicy, Jail, Process, build_compile_ctx
 from brig.stack import Stack, confined_egress_darwin
-from tests.conftest import teardown_group
+from tests.conftest import launch, teardown_group
 
 pytestmark = [
     pytest.mark.e2e,
@@ -91,8 +90,8 @@ def origin():  # type: ignore[no-untyped-def]
     sock.close()
 
 
-def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, run_id: str) -> Handle:
-    """`Spec -> Stack -> Launcher -> Handle`, the public chain
+def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, run_id: str) -> tuple[Jail, Process]:
+    """`Spec -> Stack -> Jail.create -> jail.start`, the public chain
     `.claude/rules/system-tests.md` names. No internal seam."""
     jail_dir = _new_root(run_id, "nb")
     # seatbelt needs a real platform and resolved paths, so the ctx is built
@@ -101,7 +100,7 @@ def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, run_id: str) -> Ha
     jail = stack.compile(
         spec, ctx=build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
     )
-    return SubprocessLauncher().launch(
+    return launch(
         jail,
         argv=list(argv),
         cwd=jail_dir,
@@ -111,28 +110,28 @@ def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, run_id: str) -> Ha
     )
 
 
-def _teardown_group(handle: Handle) -> None:
+def _teardown_group(jail: Jail, process: Process) -> None:
     """Tear the whole jail down, HELPERS INCLUDED.
 
-    A bare `os.killpg(handle.pgid, ...)` -- which the sibling e2e
+    A bare `os.killpg(process._record.pgid, ...)` -- which the sibling e2e
     files use -- is not enough here and the leak checker said so: it reaps
     the workload's group and leaves `connect_proxy`'s JAIL_LIFETIME proxy
     running, a listening socket outliving the jail it filtered for. This is
     the first e2e file whose stack declares a helper at all.
 
-    `kill_jail` is not the code under test (`handle.probe` is), so using the
+    `Jail.destroy` is not the code under test (`jail.probe` is), so using the
     real teardown here does not make a test mark its own homework."""
-    # `kill_jail` first, because THIS stack declares a JAIL_LIFETIME helper
+    # `destroy` first, because THIS stack declares a JAIL_LIFETIME helper
     # (connect_proxy's proxy) and the group kill below does not reach it --
     # a proxy outliving the jail it filtered for is a listening socket with
     # no owner. Then the shared verified teardown (task-086) confirms the
     # workload's own group actually emptied.
-    kill_jail(handle)
-    teardown_group(handle)
+    jail.destroy()
+    teardown_group(process)
 
 
-def _probe(handle: Handle, battery: object) -> ProbeReport:
-    return handle.probe(cast(CoreBattery, battery))
+def _probe(jail: Jail, battery: object) -> ProbeReport:
+    return jail.probe(cast(CoreBattery, battery))
 
 
 def _spec() -> Spec:
@@ -160,14 +159,14 @@ def test_the_battery_is_consistent_against_a_stack_that_really_enforces(origin: 
     CONSISTENT -- not merely non-contradicting.
     """
     run_id = uuid.uuid4().hex
-    handle = _launch(
+    jail, process = _launch(
         confined_egress_darwin(sys.executable),
         _spec(),
         ("/bin/sh", "-c", "while :; do sleep 0.2; done"),
         run_id=run_id,
     )
     try:
-        report = _probe(handle, _battery(origin))
+        report = _probe(jail, _battery(origin))
 
         denial = next(o for o in report.outcomes if o.shape is ProbeShape.DENIAL)
         control = next(o for o in report.outcomes if o.shape is ProbeShape.CONTROL)
@@ -182,7 +181,7 @@ def test_the_battery_is_consistent_against_a_stack_that_really_enforces(origin: 
         )
         assert report.battery_verdict is BatteryVerdict.CONSISTENT, report
     finally:
-        _teardown_group(handle)
+        _teardown_group(jail, process)
 
 
 def test_forgery_a_stack_with_no_confinement_carrying_the_confined_report_fails_its_battery(
@@ -226,10 +225,10 @@ def test_forgery_a_stack_with_no_confinement_carrying_the_confined_report_fails_
     assert honest_report.axes[Axis.NETWORK].grade is Grade.BEST_EFFORT
 
     weakened = Stack([rlimits, env_scrub])
-    handle = _launch(
+    jail, process = _launch(
         weakened, spec, ("/bin/sh", "-c", "while :; do sleep 0.2; done"), run_id=run_id
     )
-    forged = dataclasses.replace(handle, report=honest_report)
+    forged = dataclasses.replace(jail, report=honest_report)
     try:
         report = _probe(forged, _battery(origin))
         assert report.battery_verdict is not BatteryVerdict.CONSISTENT, (
@@ -238,4 +237,4 @@ def test_forgery_a_stack_with_no_confinement_carrying_the_confined_report_fails_
         )
         assert report.battery_verdict is BatteryVerdict.VACUOUS, report
     finally:
-        _teardown_group(handle)
+        _teardown_group(jail, process)

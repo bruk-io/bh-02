@@ -14,8 +14,8 @@ per-jail `events.jsonl` file it appended to, and the `SPAWN`/`EXEC`/
 `EXEC_END`/`KILL`/`EXIT` lifecycle records are deleted. What `run` does with
 a mechanism's sensor feed instead is STAMP it -- `brig/run/events.py`'s
 `stamp`/`stamp_all` supply the `ts` and `jail_id` only this layer may supply
--- and hand the records to the embedder: `Handle.compile_events` for
-`EventSource.known_at_compile()`, `Handle.exit_events()` for
+-- and hand the records to the embedder: `Jail.compile_events` for
+`EventSource.known_at_compile()`, `Process.exit_events()` for
 `EventSource.classify_exit()`. An embedder that wants them durable writes
 them into its own log, which is where a durable record belongs; brig was
 otherwise shipping a second, worse log beside every embedder's real one.
@@ -25,17 +25,23 @@ embedder's side of the runtime seam: `Jail.create(compiled, runtime=...)`,
 then a `jail.start` per process. `HostRuntime` and `RuntimeKind` are
 re-exported with them, because `Jail.from_dict(d, runtimes=...)` takes
 the runtimes from the embedder, keyed by kind; `ExecFidelity` names
-`Process.fidelity`. `Handle` stays beside them until TASK-0079.28.
+`Process.fidelity`. They are the whole surface: what they replaced is gone,
+with no alias (decision-183, TASK-0079.28).
 
-`wait_ready` and `exec_in_jail` are private delegates (`readiness.py`,
-`exec_.py`); they are intentionally NOT re-exported here --
-`Handle.wait_ready`/`.exec`, and `Jail.wait_ready`/`.start` with
-`Process.wait` (decision-181), are the public surface, per SPEC.md §9.
+**Every exception `Jail.create` and `Jail.start` raise is re-exported here**
+(decision-183): `LaunchRefused`, `JailDirInUse`, `HelperFailed`,
+`ExecWrapNotAPrefix`, `TetherClosed`, `WorkloadSpawnFailed` and
+`NoSupervisor`, beside `ExitStatusUnobservable` (a process's `wait`), so an
+embedder names what it catches from the public surface, never from a private
+module.
 
-`kill_jail` (`teardown.py`, task-020) and its full report vocabulary --
-`KillReport`, `KillItem`, `KillOutcome`, `KILL_ITEM_KINDS` -- ARE re-exported
-here (task-072, decision-131): SPEC.md §9 makes `Handle.kill()` a public
-method that RETURNS a `KillReport`, so the vocabulary a caller needs in order
+`wait_ready` is a private delegate (`readiness.py`), intentionally NOT
+re-exported here -- `Jail.wait_ready` is the public surface, per SPEC.md §9.
+
+Teardown's full report vocabulary -- `KillReport`, `KillItem`,
+`KillOutcome`, `KILL_ITEM_KINDS` -- IS re-exported here (task-072,
+decision-131): SPEC.md §9 makes `Jail.destroy()` a public method that
+RETURNS a `KillReport`, so the vocabulary a caller needs in order
 to name that return value is exposed at this module's own surface -- a public
 method whose return type callers cannot name is the "true-as-tested but
 weaker than it reads" incompleteness this library refuses.
@@ -46,9 +52,9 @@ import brig, so its live allow/deny decisions cannot travel through
 `EventSource`; it writes them itself and `brig/run/egress.py` --
 `read_egress_decisions`, returning stamped `Event`s and a cursor -- is the
 `run`-layer reader that both that module and the proxy's own docstring had
-been promising since M6. It is a free function rather than a `Handle`
+been promising since M6. It is a free function rather than a `Jail`
 method because the feed is CURSORED: resuming where the last read stopped
-is caller state, and a frozen `Handle` has nowhere to keep it.
+is caller state, and a jail's dict has nowhere to keep it.
 
 task-059 adds `build_compile_ctx` (`compile_ctx.py`): the one helper that
 resolves a `Spec` + `jail_dir` into a real `CompileCtx`, performing the two
@@ -61,6 +67,9 @@ from brig.core import DataValue as DataValue
 from brig.core import Event as Event
 from brig.core import EventKind as EventKind
 from brig.core.runtime import RuntimeKind as RuntimeKind
+from brig.run._exit_status import WorkloadSpawnFailed as WorkloadSpawnFailed
+from brig.run._records import JailDirInUse as JailDirInUse
+from brig.run._tether import TetherClosed as TetherClosed
 from brig.run._waiters import ExitRecord as ExitRecord
 from brig.run.compile_ctx import build_compile_ctx as build_compile_ctx
 from brig.run.egress import EgressRead as EgressRead
@@ -69,50 +78,51 @@ from brig.run.egress import read_egress_decisions as read_egress_decisions
 from brig.run.events import stamp as stamp
 from brig.run.events import stamp_all as stamp_all
 from brig.run.exec_ import ExecFidelity as ExecFidelity
-from brig.run.handle import HANDLE_VERSION as HANDLE_VERSION
-from brig.run.handle import ExitStatusUnobservable as ExitStatusUnobservable
-from brig.run.handle import Handle as Handle
-from brig.run.handle import JailStat as JailStat
+from brig.run.exec_ import ExecWrapNotAPrefix as ExecWrapNotAPrefix
+from brig.run.host import HelperFailed as HelperFailed
 from brig.run.host import HostRuntime as HostRuntime
+from brig.run.host import LaunchRefused as LaunchRefused
+from brig.run.jail import HANDLE_VERSION as HANDLE_VERSION
 from brig.run.jail import Jail as Jail
 from brig.run.jail import Process as Process
-from brig.run.launcher import IoPolicy as IoPolicy
-from brig.run.launcher import LaunchRefused as LaunchRefused
-from brig.run.launcher import SubprocessLauncher as SubprocessLauncher
+from brig.run.runtime import ExitStatusUnobservable as ExitStatusUnobservable
+from brig.run.runtime import IoPolicy as IoPolicy
+from brig.run.runtime import NoSupervisor as NoSupervisor
 from brig.run.teardown import KILL_ITEM_KINDS as KILL_ITEM_KINDS
 from brig.run.teardown import KillItem as KillItem
 from brig.run.teardown import KillOutcome as KillOutcome
 from brig.run.teardown import KillReport as KillReport
 from brig.run.teardown import group_alive as group_alive
-from brig.run.teardown import kill_jail as kill_jail
 
 __all__ = (  # noqa: RUF022
     "DataValue",
     "EgressRead",
     "ExitRecord",
     "ExecFidelity",
+    "ExecWrapNotAPrefix",
     "ExitStatusUnobservable",
     "EVENT_VERSION",
     "Event",
     "EventKind",
     "HANDLE_VERSION",
-    "Handle",
+    "HelperFailed",
     "HostRuntime",
     "IoPolicy",
     "Jail",
-    "JailStat",
+    "JailDirInUse",
     "KILL_ITEM_KINDS",
     "KillItem",
     "KillOutcome",
     "KillReport",
     "LaunchRefused",
+    "NoSupervisor",
     "Process",
     "RuntimeKind",
-    "SubprocessLauncher",
+    "TetherClosed",
+    "WorkloadSpawnFailed",
     "build_compile_ctx",
     "decisions_path",
     "group_alive",
-    "kill_jail",
     "read_egress_decisions",
     "stamp",
     "stamp_all",

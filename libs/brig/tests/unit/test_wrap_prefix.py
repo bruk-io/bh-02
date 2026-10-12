@@ -2,8 +2,8 @@
 
 SPEC.md §9, `exec`, verbatim: "The exec'd process is subject to the same
 Spec as the workload -- never a weaker one. A mechanism that cannot
-guarantee this refuses exec." `handle.exec` (`brig/run/exec_.py`) trusts
-`launcher.py`'s `wrap_prefix` derivation to decide whether the compiled
+guarantee this refuses exec." `jail.start` (`brig/run/exec_.py`) trusts
+`host.py`'s `wrap_prefix` derivation to decide whether the compiled
 stack's `wrap` can safely be reproduced on an arbitrary exec argv by
 prepending a fixed tuple -- so the derivation has to be VERIFIED against
 the actual compiled wrap's output, never assumed from the wrap's shape or
@@ -12,7 +12,7 @@ the mechanism roster.
 `_derive_wrap_prefix` is pure: no I/O, no clock, no subprocess -- exactly
 the unit tier's "render function" shape (`.claude/rules/unit-tests.md`:
 "Render functions are the unit-test goldmine"). It is private to
-`brig.run.launcher` (no public re-export); imported directly here, the
+`brig.run.host` (no public re-export); imported directly here, the
 same posture the module's own docstring takes toward it.
 """
 
@@ -36,7 +36,7 @@ def test_prefix_is_derived_only_when_the_suffix_matches() -> None:
     5. a wrap returning FEWER elements than `argv` -> `None`.
     """
     # 1. Identity: wrapped_argv == argv itself -- the prefix is empty, not
-    # None. This is the degenerate case `exec_in_jail` reads as "spawn
+    # None. This is the degenerate case a sibling `jail.start` reads as "spawn
     # bare" (PLAIN fidelity), so it must be DISTINGUISHED from a refusal.
     assert _derive_wrap_prefix(_ARGV, _ARGV) == ()
 
@@ -85,7 +85,7 @@ def test_empty_argv_is_not_corrupted_by_pythons_negative_zero_slice() -> None:
 def test_zero_length_wrap_prefix_is_distinguishable_from_refusal() -> None:
     """Non-vacuity closer: `()` (empty tuple, a valid prefix) and `None`
     (refused) must never compare equal or be confusable by a caller doing
-    `if not wrap_prefix`. `exec_.exec_in_jail` uses `is None` specifically
+    `if not wrap_prefix`. A start uses `is None` specifically
     to keep these apart (see that module's own docstring); this test pins
     that the two are actually distinct values, not merely reasoned to be."""
     result = _derive_wrap_prefix(_ARGV, _ARGV)

@@ -5,7 +5,7 @@ This is the seam test the two tiers below it cannot reach.
 `test_connect_proxy_compile.py` proves the render; `test_proxy_egress.py`
 proves the filter; neither proves that a launched workload is actually
 POINTED at that filter and constrained by it. Here a real
-`SubprocessLauncher` compiles the mechanism, starts the helper, and runs a
+`Jail.create` and `jail.start` compiles the mechanism, starts the helper, and runs a
 workload that makes real HTTP requests -- and the claim is read from what
 the WORKLOAD saw, never from the proxy's log or the report.
 
@@ -31,10 +31,9 @@ import pytest
 from brig.core import NetworkPolicy, Spec
 from brig.mech import CompileCtx
 from brig.mech.connect_proxy import DECISIONS_FILE, PORT_FILE, ConnectProxy
-from brig.run import teardown as teardown_mod
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy
 from brig.stack import CompiledJail
-from tests.conftest import workload_argv
+from tests.conftest import launch, workload_argv
 
 pytestmark = pytest.mark.integration
 
@@ -151,7 +150,7 @@ def _fetch_script(url: str, out: str) -> str:
 
 def _run(jail_dir: str, domains: tuple[str, ...], body: str, run_id: str):  # type: ignore[no-untyped-def]
     jail, _step = _jail(jail_dir, domains)
-    return SubprocessLauncher().launch(
+    return launch(
         jail,
         argv=workload_argv(run_id, body),
         cwd=jail_dir,
@@ -221,7 +220,7 @@ def test_the_workload_reaches_an_allowed_host_through_the_proxy(run_id: str, ori
     traffic actually flowed."""
     jail_dir = _new_jail_dir()
     out = os.path.join(jail_dir, "got")
-    handle = _run(
+    jail, process = _run(
         jail_dir,
         ("localhost",),
         _fetch_script(f"http://localhost:{origin.port}/x", out),
@@ -235,7 +234,7 @@ def test_the_workload_reaches_an_allowed_host_through_the_proxy(run_id: str, ori
         )
         assert got == "OK:" + _BODY.decode(), got
     finally:
-        teardown_mod.kill_jail(handle)
+        jail.destroy()
 
 
 def test_the_workload_is_refused_a_host_outside_the_allow_list(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
@@ -245,7 +244,7 @@ def test_the_workload_is_refused_a_host_outside_the_allow_list(run_id: str, orig
     would have produced whether or not any policy existed."""
     jail_dir = _new_jail_dir()
     out = os.path.join(jail_dir, "got")
-    handle = _run(
+    jail, process = _run(
         jail_dir,
         ("localhost",),
         _fetch_script(f"http://127.0.0.1:{origin.port}/x", out),
@@ -259,7 +258,7 @@ def test_the_workload_is_refused_a_host_outside_the_allow_list(run_id: str, orig
             "a denied request still returned the origin's payload"
         )
     finally:
-        teardown_mod.kill_jail(handle)
+        jail.destroy()
 
 
 def test_the_denial_signature_matches_what_the_proxy_actually_wrote(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
@@ -270,7 +269,7 @@ def test_the_denial_signature_matches_what_the_proxy_actually_wrote(run_id: str,
     jail_dir = _new_jail_dir()
     out = os.path.join(jail_dir, "got")
     _jail_obj, step = _jail(jail_dir, ("localhost",))
-    handle = _run(
+    jail, process = _run(
         jail_dir,
         ("localhost",),
         # `--` reads the body verbatim: urllib raises on 403, so the body
@@ -288,16 +287,16 @@ def test_the_denial_signature_matches_what_the_proxy_actually_wrote(run_id: str,
             f"the mechanism's denial signature does not match the proxy's real wire text: {body!r}"
         )
     finally:
-        teardown_mod.kill_jail(handle)
+        jail.destroy()
 
 
 def test_the_helper_dies_with_the_jail(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
     """A surviving proxy is a listening socket nobody owns. Proven alive
     first, so "gone after kill" cannot pass against one that never ran."""
     jail_dir = _new_jail_dir()
-    handle = _run(jail_dir, ("localhost",), "sleep 30", run_id)
-    assert len(handle.helper_pids) == 1
-    pid = handle.helper_pids[0]
+    jail, process = _run(jail_dir, ("localhost",), "sleep 30", run_id)
+    assert len(jail._base.helper_pids) == 1
+    pid = jail._base.helper_pids[0]
     try:
         assert _wait_file(os.path.join(jail_dir, PORT_FILE)) is not None, (
             "the proxy helper never published a port"
@@ -306,7 +305,7 @@ def test_the_helper_dies_with_the_jail(run_id: str, origin) -> None:  # type: ig
         alive = subprocess_alive(pid)
         assert alive, f"proxy helper {pid} is not running while the jail is up"
     finally:
-        teardown_mod.kill_jail(handle)
+        jail.destroy()
 
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline and subprocess_alive(pid):
@@ -341,7 +340,7 @@ def test_the_decisions_file_lands_where_the_mechanism_said_it_would(run_id: str,
     """
     jail_dir = _new_jail_dir()
     out = os.path.join(jail_dir, "got")
-    handle = _run(
+    jail, process = _run(
         jail_dir,
         ("localhost",),
         _fetch_script(f"http://localhost:{origin.port}/x", out),
@@ -353,4 +352,4 @@ def test_the_decisions_file_lands_where_the_mechanism_said_it_would(run_id: str,
         rows = [json.loads(line) for line in text.splitlines() if line.strip()]
         assert any(row["decision"] == "allow" and row["host"] == "localhost" for row in rows), rows
     finally:
-        teardown_mod.kill_jail(handle)
+        jail.destroy()

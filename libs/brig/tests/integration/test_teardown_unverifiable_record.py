@@ -1,7 +1,7 @@
 """A record brig cannot verify is not kill authority (TASK-0078, decision-172).
 
-Process records are files under `<jail_dir>/procs/<id>/` (decision-181; exec
-registrations under `<jail_dir>/execs/` before it), and a stack with no
+Process records are files under `<jail_dir>/procs/<id>/` (decision-181; a registration file
+per exec sibling before it), and a stack with no
 `fs_write` mechanism leaves the `jail_dir` writable from inside the jail. A
 record whose start-time stamp is empty (`_identity.UNKNOWN`) names a pid
 and a pgid with nothing to show either is the jail's, and before decision-172
@@ -25,15 +25,14 @@ import json
 import os
 import subprocess
 import time
-from types import SimpleNamespace
 
 import pytest
 
 from brig.core import Spec
-from brig.run import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy
 from brig.run.teardown import KillOutcome
 from brig.stack import Stack
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, teardown_pgid, workload_argv
 
 pytestmark = pytest.mark.integration
 
@@ -96,7 +95,7 @@ def test_kill_signals_no_group_a_record_with_an_empty_stamp_names(run_id: str) -
     `FAILED` with a detail saying nothing was signalled and why, and the same
     `kill()` ends the jail's own workload group (the control)."""
     jail_dir = _new_jail_dir()
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         Stack([]).compile(Spec()),
         argv=workload_argv(run_id, "sleep 100"),
         cwd=jail_dir,
@@ -105,16 +104,16 @@ def test_kill_signals_no_group_a_record_with_an_empty_stamp_names(run_id: str) -
         jail_dir=jail_dir,
     )
     decoy = subprocess.Popen(workload_argv(run_id, "sleep 100"), start_new_session=True)
-    decoy_group = SimpleNamespace(pgid=decoy.pid, wait=decoy.wait)
+
     try:
-        _wait_for_members(handle.pgid)
+        _wait_for_members(process._record.pgid)
         _wait_for_members(decoy.pid)
-        assert _live_members(handle.pgid), "CONTROL failed: the jail's group is empty"
+        assert _live_members(process._record.pgid), "CONTROL failed: the jail's group is empty"
         before = _live_members(decoy.pid)
         assert before, "CONTROL failed: the decoy group is empty"
 
         _forge_registration(jail_dir, decoy.pid, decoy.pid)
-        report = handle.kill()
+        report = jail.destroy()
 
         assert set(before) <= set(_live_members(decoy.pid)), (
             f"a member of the decoy group is gone: teardown signalled a group named by a "
@@ -129,8 +128,8 @@ def test_kill_signals_no_group_a_record_with_an_empty_stamp_names(run_id: str) -
             forged.detail
         )
     finally:
-        teardown_group(decoy_group)
-        teardown_group(handle)
+        teardown_pgid(decoy.pid, wait=decoy.wait)
+        teardown_group(process)
 
 
 def test_a_record_with_an_empty_stamp_whose_group_has_ended_reads_already_gone(
@@ -140,7 +139,7 @@ def test_a_record_with_an_empty_stamp_whose_group_has_ended_reads_already_gone(
     failure: nothing of it runs, so `ALREADY_GONE`, and nothing is signalled
     either way."""
     jail_dir = _new_jail_dir()
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         Stack([]).compile(Spec()),
         argv=workload_argv(run_id, "sleep 100"),
         cwd=jail_dir,
@@ -151,14 +150,14 @@ def test_a_record_with_an_empty_stamp_whose_group_has_ended_reads_already_gone(
     ended = subprocess.Popen(["/usr/bin/true"], start_new_session=True)
     ended.wait()
     try:
-        _wait_for_members(handle.pgid)
+        _wait_for_members(process._record.pgid)
         assert not _live_members(ended.pid), "CONTROL failed: the ended group still runs"
         _forge_registration(jail_dir, ended.pid, ended.pid)
 
-        report = handle.kill()
+        report = jail.destroy()
 
         (forged,) = [item for item in report.items if item.kind == "exec_sibling"]
         assert forged.outcome is KillOutcome.ALREADY_GONE, forged
         assert report.items[0].outcome is KillOutcome.ENDED, report
     finally:
-        teardown_group(handle)
+        teardown_group(process)

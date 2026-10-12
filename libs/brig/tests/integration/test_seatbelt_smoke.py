@@ -10,7 +10,7 @@ away, which would test nothing (`.claude/rules/integration-tests.md`).
 
 **AC #8/#9's SMOKE, observed from inside the jail rather than asserted
 about argv.** A real `/bin/sh`, launched through a real `Stack([seatbelt])`
-via the real `SubprocessLauncher`, attempts three writes: one OUTSIDE
+via the real `Jail.create` and `jail.start`, attempts three writes: one OUTSIDE
 `write_allows` entirely (AC #8's own literal wording), one under a
 `write_denies` CARVE-OUT inside `write_allows` (so AC #10's own mutation --
 "delete the write_denies emission ... and the SMOKE test goes red" -- has
@@ -52,9 +52,10 @@ import pytest
 
 from brig.core import FsPolicy, Spec
 from brig.mech.seatbelt import seatbelt
+from brig.run import IoPolicy
 from brig.run.compile_ctx import build_compile_ctx
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import Stack
+from tests.conftest import launch
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
@@ -77,15 +78,14 @@ def _run_seatbelt_and_capture(
     *, jail_dir: str, spec: Spec, argv: list[str], label: str
 ) -> tuple[int, str, str]:
     """Compile `spec` through a real `Stack([seatbelt])`, launch `argv`
-    through the real `SubprocessLauncher`, wait for it to exit, and return
+    through the real `Jail.create` and `jail.start`, wait for it to exit, and return
     `(exit_status, stdout_text, stderr_text)`, read from the jail's own log
     files -- SPEC.md's "observe from inside the jail, not from the
     outside." `label` disambiguates the `jail_id` across the several
     launches this file's one test performs against distinct jail dirs."""
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="darwin")
     jail = Stack([seatbelt]).compile(spec, ctx=ctx)
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
+    jail, process = launch(
         jail,
         argv=argv,
         cwd=jail_dir,
@@ -93,10 +93,10 @@ def _run_seatbelt_and_capture(
         jail_id=f"seatbelt-smoke-{label}",
         jail_dir=jail_dir,
     )
-    status = handle.wait()
-    with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+    status = process.wait()
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         stdout_text = f.read()
-    with open(handle.stderr_path, encoding="utf-8", errors="replace") as f:
+    with open(process.stderr_path, encoding="utf-8", errors="replace") as f:
         stderr_text = f.read()
     return status, stdout_text, stderr_text
 

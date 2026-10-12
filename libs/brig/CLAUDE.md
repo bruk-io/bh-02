@@ -1,6 +1,6 @@
 # brig
 
-A standalone sandbox library (spec -> mechanisms -> stack -> launcher -> handle, every axis of
+A standalone sandbox library (spec -> mechanisms -> stack -> runtime -> jail, every axis of
 enforcement graded). `README.md`, `SPEC.md`, `WORKFLOW.md` and `MILESTONES.md` are its docs.
 
 - It imports the standard library and itself, nothing else: no cordis, no app, no plugin. A

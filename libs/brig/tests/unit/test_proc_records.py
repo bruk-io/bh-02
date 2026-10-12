@@ -89,9 +89,6 @@ def test_an_id_is_sixteen_lowercase_hex_and_nothing_traverses() -> None:
         assert not _records.is_id(name), name
     with pytest.raises(ValueError, match="not a process id"):
         _records.process_dir(_JAIL, "../x")
-    assert _records.id_of(_JAIL, f"{_JAIL}/procs/{_ID}/stdout.log") == _ID
-    assert _records.id_of(_JAIL, f"{_JAIL}/stdout.log") is None
-    assert _records.id_of(_JAIL, f"{_JAIL}/procs/../stdout.log") is None
 
 
 @pytest.mark.unit
@@ -178,12 +175,13 @@ def test_the_records_refusal_reads_both_forms_of_the_endpoint() -> None:
 
     assert refused(f"{_JAIL}/procs/k.sock", f"{_JAIL}/procs/k.sock")
     assert refused(f"{_JAIL}/procs", f"{_JAIL}/procs")
-    assert refused(f"{_JAIL}/execs/a/k.sock", f"{_JAIL}/execs/a/k.sock")
     assert refused(f"{_JAIL}/chan/k.sock", f"{_JAIL}/procs/k.sock")
     assert refused(f"{_JAIL}/procs/k.sock", "/elsewhere/k.sock")
     # Controls: a directory of its own, a name that only starts like `procs`,
-    # and a socket outside the jail directory.
+    # a socket outside the jail directory, and `execs/`, which holds nothing
+    # brig keeps since decision-183 (refused until then).
     assert not refused(f"{_JAIL}/chan/k.sock", f"{_JAIL}/chan/k.sock")
+    assert not refused(f"{_JAIL}/execs/a/k.sock", f"{_JAIL}/execs/a/k.sock")
     assert not refused(f"{_JAIL}/procs2/k.sock", f"{_JAIL}/procs2/k.sock")
     assert not refused("/elsewhere/k.sock", "/elsewhere/k.sock")
 
@@ -238,7 +236,7 @@ def test_jail_dir_in_use_names_the_pid_and_group_it_holds() -> None:
 @pytest.mark.unit
 def test_a_disk_copy_disagrees_on_any_field_but_order() -> None:
     """decision-181, TASK-0079.26's settled point 3: `order` only sorts (a
-    `Handle` names its first process with 0), every other field is identity."""
+    `Jail` names its first process with 0), every other field is identity."""
     held = _record()
     assert not _records.disagrees(held, _record(order=0))
     for change in ({"pid": 101}, {"pgid": 101}, {"start_time": "x"}, {"argv": ["sh"]}):

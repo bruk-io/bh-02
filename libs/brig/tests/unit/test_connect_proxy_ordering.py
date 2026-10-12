@@ -7,7 +7,7 @@ task-080 / decision-135. Two claims that look alike and are not:
   that asserted the matrix contains what the matrix contains would pass for
   a stack that composed in the opposite order.
 - The HELPER's exemption from wrapping is NOT an ordering property at all.
-  It belongs to `run.launcher._start_helpers`, which spawns `helper.argv`
+  It belongs to `run.host._start_helpers`, which spawns `helper.argv`
   directly while only the workload becomes `wrapped_argv`. No matrix entry
   can protect it, so it is pinned separately, at the launcher.
 """

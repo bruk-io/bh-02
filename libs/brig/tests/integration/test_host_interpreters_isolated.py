@@ -32,10 +32,9 @@ from brig.core import Limits, NetworkPolicy, Spec
 from brig.mech import CompileCtx
 from brig.mech.connect_proxy import ConnectProxy
 from brig.mech.rlimits import rlimits
-from brig.run import teardown as teardown_mod
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Jail, Process
 from brig.stack import Stack
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 pytestmark = pytest.mark.integration
 
@@ -117,12 +116,12 @@ def test_a_module_planted_in_the_workload_s_directory_runs_in_no_host_side_progr
         limits=Limits(cpu_seconds=60), network=NetworkPolicy(allowed_domains=("localhost",))
     )
     ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
-    jail = Stack([rlimits, ConnectProxy(sys.executable)]).compile(spec, ctx=ctx)
+    compiled = Stack([rlimits, ConnectProxy(sys.executable)]).compile(spec, ctx=ctx)
     tether_read, tether_write = os.pipe()
-    handle = None
+    launched: tuple[Jail, Process] | None = None
     try:
-        handle = SubprocessLauncher().launch(
-            jail,
+        launched = launch(
+            compiled,
             argv=workload_argv(run_id, f"printf ran > {jail_dir}/workload"),
             cwd=root,
             io=IoPolicy(),
@@ -130,14 +129,15 @@ def test_a_module_planted_in_the_workload_s_directory_runs_in_no_host_side_progr
             jail_dir=jail_dir,
             tether=tether_read,
         )
-        assert handle.wait(timeout=30.0) == 0, Path(handle.stderr_path).read_text()
+        jail, process = launched
+        assert process.wait(timeout=30.0) == 0, Path(process.stderr_path).read_text()
         # The workload ran behind the trampoline and the proxy's published port, so both
         # programs got past their imports.
         assert Path(jail_dir, "workload").read_text() == "ran"
         # The watcher ends its group once the tether's last write end closes, past its imports.
         os.close(tether_write)
         tether_write = -1
-        assert _group_has_ended(handle.pgid), "the tether's watcher did not end its group"
+        assert _group_has_ended(process._record.pgid), "the tether's watcher did not end its group"
 
         ran = _planted_that_ran(record)
         assert ran == [], f"planted modules imported on the host: {ran}"
@@ -145,9 +145,9 @@ def test_a_module_planted_in_the_workload_s_directory_runs_in_no_host_side_progr
         os.close(tether_read)
         if tether_write != -1:
             os.close(tether_write)
-        if handle is not None:
-            teardown_mod.kill_jail(handle)
-            teardown_group(handle)
+        if launched is not None:
+            launched[0].destroy()
+            teardown_group(launched[1])
 
     # THE CONTROL: no `-I`, the same directory, and every plant runs.
     for argv in (

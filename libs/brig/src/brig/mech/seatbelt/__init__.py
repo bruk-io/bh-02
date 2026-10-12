@@ -54,16 +54,16 @@ its subject:**
 4. Any path `render_sbpl` needs that `ctx.resolved_paths` does not carry --
    `profile.py`'s own `UnresolvedPath`, propagated UNCHANGED, never
    swallowed.
-5. A LISTEN endpoint at or under brig's records (`<jail_dir>/procs`, and
-   `<jail_dir>/execs` until TASK-0079.28) -- `core.runtime.ChannelOnRecords`,
+5. A LISTEN endpoint at or under brig's records (`<jail_dir>/procs`) --
+   `core.runtime.ChannelOnRecords`,
    naming the endpoint and the records directory (decision-181).
 
 **`wrap` is a PURE argv prefix**: `("/usr/bin/sandbox-exec", "-f",
 f"{ctx.jail_dir}/seatbelt.sb", *argv)` -- absolute path, never the bare
 name (decision-026 rule 1's family). It MUST stay a pure prefix:
-`brig/run/launcher.py`'s `_derive_wrap_prefix` refuses `handle.exec` for a
+`brig/run/host.py`'s `_derive_wrap_prefix` refuses every `jail.start` for a
 wrap that turns out not to be one, and every probe in this milestone runs
-through `handle.exec`.
+through `jail.start`.
 
 **Grade details are load-bearing text, not free prose** -- see
 `_FS_READ_DETAIL` / `_FS_WRITE_DETAIL` / `_network_detail` below for the

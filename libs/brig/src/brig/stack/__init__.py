@@ -280,7 +280,7 @@ _CONNECT_PROXY_RLIMITS_RATIONALE: Final[str] = (
 )
 
 #: decision-135 (4): a `Step.helpers` process is spawned by
-#: `run.launcher._start_helpers` as `list(helper.argv)` directly, while only
+#: `run.host._start_helpers` as `list(helper.argv)` directly, while only
 #: the workload is spawned as `wrapped_argv`. A helper therefore passes
 #: through NO mechanism's wrap, whatever this matrix says -- which is what
 #: lets connect_proxy's proxy reach upstream while seatbelt denies the
@@ -288,7 +288,7 @@ _CONNECT_PROXY_RLIMITS_RATIONALE: Final[str] = (
 #: belongs to the launcher and not to the ordering; it is pinned by
 #: `tests/unit/test_connect_proxy_helper_unwrapped.py` instead.
 _CONNECT_PROXY_HELPER_NOTE: Final[str] = (
-    "helpers are launched unwrapped by run.launcher._start_helpers; "
+    "helpers are launched unwrapped by run.host._start_helpers; "
     "composition order does not reach them (decision-135)"
 )
 

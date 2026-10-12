@@ -12,7 +12,7 @@ launches is required to carry a per-run token in its argv (see
 sweep look for that token -- and for the process groups it was ever seen
 tagging -- with no cooperation required from the test that leaked.
 
-**task-027's third arm: a leaked exec sibling.** `handle.exec()`'s argv is
+**task-027's third arm: a leaked exec sibling.** A sibling `jail.start()`'s argv is
 CALLER-supplied, not built by any brig code, so the two arms above are
 structurally blind to a leaked exec sibling whose caller never bothered to
 route it through `workload_argv`: no run-id token then ever lands in its
@@ -84,10 +84,15 @@ import subprocess
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any, Final, Literal, assert_never
 
 import pytest
+
+from brig.run import HostRuntime, IoPolicy, Jail, KillReport, Process
+from brig.run.runtime import Runtime
+from brig.run.teardown import kill_named
+from brig.stack import CompiledJail
 
 # How often the background poller samples `/bin/ps` for the run-id token,
 # in seconds. This exists because the token can live only in the argv of
@@ -203,12 +208,74 @@ def workload_argv(run_id: str, body: str) -> list[str]:
 # ============================================================================
 
 
-def teardown_group(handle: object, *, timeout: float = 20.0) -> None:
+def launch(
+    compiled: CompiledJail,
+    argv: Sequence[str],
+    *,
+    cwd: str,
+    jail_id: str,
+    jail_dir: str,
+    io: IoPolicy | None = None,
+    tether: int | None = None,
+    runtime: Runtime | None = None,
+) -> tuple[Jail, Process]:
+    """A jail with one process: `Jail.create` (through `HostRuntime` unless
+    `runtime` says otherwise) and its first `jail.start`, returned together.
+
+    What the launcher did until decision-183 (TASK-0079.28) deleted it, kept
+    here so brig's tests keep asserting what they asserted
+    then, through `Jail` and `Process`. A first start that raises destroys
+    what `create` started (its `JAIL_LIFETIME` helpers) before the error
+    propagates, as the launcher did and as an embedder must, so a refused
+    launch leaves nothing running.
+
+    Raises:
+        Whatever `Jail.create` or `jail.start` raise.
+    """
+    jail = Jail.create(
+        compiled,
+        runtime=HostRuntime() if runtime is None else runtime,
+        cwd=cwd,
+        jail_id=jail_id,
+        jail_dir=jail_dir,
+        tether=tether,
+    )
+    try:
+        return jail, jail.start(argv, cwd=cwd, io=IoPolicy() if io is None else io)
+    except BaseException:
+        jail.destroy()
+        raise
+
+
+def destroy_with_grace(jail: Jail, grace: float) -> KillReport:
+    """`jail.destroy()` with the ladder's grace period shortened: the same
+    `teardown.kill_named` over the record `destroy` passes its runtime, for
+    tests that time the ladder's escalation (the handle-era teardown took
+    `grace=` until decision-183)."""
+    record = jail._record()
+    return kill_named(
+        known=record.processes,
+        jail_dir=record.jail_dir,
+        helper_pids=record.helper_pids,
+        helper_stamps=record.helper_stamps,
+        grace=grace,
+    )
+
+
+def teardown_group(process: Process, *, timeout: float = 20.0) -> None:
+    """`teardown_pgid` for a process's group, waiting on the process between
+    passes so this process's exit waiter reaps its leader."""
+    teardown_pgid(process._record.pgid, wait=process.wait, timeout=timeout)
+
+
+def teardown_pgid(
+    pgid: int, *, wait: Callable[[float], object] | None = None, timeout: float = 20.0
+) -> None:
     """Group-kill a launched workload, RE-SIGNALLING until the group clears.
 
     task-086, and the root cause it closes. Fifteen test modules had each
     grown their own `_teardown_group` with the same body: one
-    `killpg(pgid, SIGKILL)`, then `handle.wait()` for the LEADER. That body
+    `killpg(pgid, SIGKILL)`, then a wait for the LEADER. That body
     leaks, intermittently, and here is the mechanism.
 
     A `workload_argv` workload is `<body> & wait` -- the leader forks a
@@ -243,24 +310,24 @@ def teardown_group(handle: object, *, timeout: float = 20.0) -> None:
     alive. Demonstrated with a control: the old body raises PermissionError
     on that shape; this one does not.
 
-    Deliberately NOT `Handle.kill()` / `kill_jail`: those are the code under
-    test in several callers, and a test's cleanup path must not be the thing
+    Deliberately NOT `Jail.destroy()` / `Process.stop()`: those are the code
+    under test in several callers, and a test's cleanup path must not be the thing
     it is testing (the reasoning every copied helper already carried).
     """
     import signal as _signal
 
-    pgid = handle.pgid  # type: ignore[attr-defined]
     deadline = time.monotonic() + timeout
     survivors: list[tuple[int, int, int, str, str]] = []
     while True:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, _signal.SIGKILL)
-        with contextlib.suppress(Exception):
-            handle.wait(timeout=0.5)  # type: ignore[attr-defined]
+        if wait is not None:
+            with contextlib.suppress(Exception):
+                wait(0.5)
 
         # Zombies are excluded: an exited-but-unreaped member is not a leak,
         # and its own parent owns reaping it (`_reap_leader`'s documented
-        # no-op case for a handle rehydrated in another process).
+        # no-op case for a jail rehydrated in another process).
         survivors = [row for row in _ps_rows() if row[2] == pgid and not row[3].startswith("Z")]
         if not survivors:
             return
@@ -754,7 +821,7 @@ def run_id() -> Iterator[str]:
     # from the POLLER thread instead (`_flush_registry`, called each poll
     # cycle and once more at teardown), never synchronously inside
     # `__init__`: a file `open`/`write`/`close` there measurably shifts
-    # spawn/reap timing for every caller in the process, `handle.pid`'s
+    # spawn/reap timing for every caller in the process, `process.pid`'s
     # own launcher included, and this file exists for crash durability
     # only -- THIS session's own sweep never reads it back.
     registry: list[tuple[int, int, str]] = []

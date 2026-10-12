@@ -1,4 +1,4 @@
-"""`Handle` rehydrated from `to_dict()` in a genuinely SEPARATE interpreter
+"""A `Jail` rehydrated from `to_dict()` in a genuinely SEPARATE interpreter
 kills the workload the original launched (task-023).
 
 MILESTONES.md M2 exit criterion 1, verbatim -- this file IS that criterion:
@@ -30,8 +30,8 @@ helper, rehydrating the same way, reporting `alive=True`, but never calling
 The actual cross-process boundary is `tests/integration/
 _rehydrate_and_kill_helper.py`, run via `subprocess.run([sys.executable,
 _HELPER, json_path, ...])` -- a genuinely separate interpreter, not
-`Handle.from_dict(handle.to_dict())` called in-process (that in-process
-round trip is `test_launcher.py`'s AC #8, explicitly out of scope here; see
+`Jail.from_dict(jail.to_dict(), runtimes=...)` called in-process (that in-process
+round trip is `test_jail_launch.py`'s AC #8, explicitly out of scope here; see
 that test's docstring: "the separate-process proof is task-023's, not
 claimed here").
 
@@ -60,10 +60,11 @@ import time
 import pytest
 
 from brig.core import Channel, ChannelKind, EnforcementReport, Spec, unenforced_report
-from brig.run.handle import HANDLE_VERSION, Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import HANDLE_VERSION, HostRuntime, Jail, Process, RuntimeKind
 from brig.stack import CompiledJail
-from tests.conftest import workload_argv
+from tests.conftest import launch, workload_argv
+
+_RUNTIMES = {RuntimeKind.HOST: HostRuntime()}
 
 _HELPER = str(pathlib.Path(__file__).parent / "_rehydrate_and_kill_helper.py")
 _HELPER_TIMEOUT_S = 30.0
@@ -90,7 +91,7 @@ def _compiled_jail(
 ) -> CompiledJail:
     """The empty stack's shape (SPEC.md §3) by default -- mechanism-free,
     every axis unenforced, no requires -- overridable via `spec`/`report`
-    for the non-vacuity closer below (mirrors `test_launcher.py`'s
+    for the non-vacuity closer below (mirrors `test_jail_launch.py`'s
     `_compiled_jail`, same reason: an empty-stack `Spec` has no channels
     and `unenforced_report()`'s `detail` is `""` on every axis, which would
     make a dict-equality round-trip check pass even if `channels`/`detail`
@@ -114,14 +115,12 @@ def _launch(
     jail_id: str = "jail-rehydration",
     spec: Spec | None = None,
     report: EnforcementReport | None = None,
-) -> Handle:
+) -> tuple[Jail, Process]:
     jail_dir = _new_jail_dir()
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         _compiled_jail(spec=spec, report=report),
         argv=argv,
         cwd=jail_dir,
-        io=IoPolicy(),
         jail_id=jail_id,
         jail_dir=jail_dir,
     )
@@ -150,34 +149,34 @@ def _ps_has_row_for(pid: int) -> bool:
     return proc.returncode == 0 and bool(data_lines)
 
 
-def _positive_pre_assertion(handle: Handle) -> tuple[int, int, int]:
+def _positive_pre_assertion(process: Process) -> tuple[int, int, int]:
     """Before any rehydration/kill: prove the tree is real -- a second pid
     exists beyond the workload leader, it differs from the leader pid, and
     both report the same pgid. Returns (leader_pid, child_pid, pgid),
     captured BEFORE the helper ever runs (AC #5: "both captured before the
     helper ran")."""
     rows = _ps_rows()
-    children = [pid for pid, ppid, _pgid in rows if ppid == handle.pid]
+    children = [pid for pid, ppid, _pgid in rows if ppid == process.pid]
     assert children, (
-        f"expected the workload leader (pid={handle.pid}) to have a live "
+        f"expected the workload leader (pid={process.pid}) to have a live "
         f"child before rehydration; full ps rows: {rows}"
     )
     child_pid = children[0]
-    assert child_pid != handle.pid
+    assert child_pid != process.pid
 
-    leader_rows = [r for r in rows if r[0] == handle.pid]
+    leader_rows = [r for r in rows if r[0] == process.pid]
     child_rows = [r for r in rows if r[0] == child_pid]
     assert leader_rows and child_rows
     leader_pgid = leader_rows[0][2]
     child_pgid = child_rows[0][2]
     assert leader_pgid == child_pgid
-    assert leader_pgid == handle.pgid
+    assert leader_pgid == process._record.pgid
 
     print(
-        f"PRE-ASSERTION: leader_pid={handle.pid} child_pid={child_pid} "
-        f"pgid={leader_pgid} (handle.pgid={handle.pgid})"
+        f"PRE-ASSERTION: leader_pid={process.pid} child_pid={child_pid} "
+        f"pgid={leader_pgid} (process._record.pgid={process._record.pgid})"
     )
-    return handle.pid, child_pid, leader_pgid
+    return process.pid, child_pid, leader_pgid
 
 
 def _run_helper(json_path: str, *extra_args: str) -> dict[str, object]:
@@ -215,16 +214,16 @@ def test_rehydrated_handle_in_a_separate_process_kills_the_workload_tree(run_id:
     handle's `to_dict()` is written to a JSON file under the scratch root
     -- the only thing that crosses the process boundary. A genuinely
     separate interpreter (`sys.executable`, AC #2) reads that file,
-    rehydrates via `Handle.from_dict`, and calls `kill()`. Back here: every
+    rehydrates via `Jail.from_dict`, and calls `destroy()`. Back here: every
     pid captured before the helper ran is gone (AC #5), the rehydrated
     handle's own `to_dict()` matches the original exactly (AC #4), and the
     parsed `KillReport` names the original pgid and `ENDED` (AC #7)."""
     argv = workload_argv(run_id, "sleep 100")
-    handle = _launch(argv)
-    leader_pid, child_pid, pgid = _positive_pre_assertion(handle)
+    jail, process = _launch(argv)
+    leader_pid, child_pid, pgid = _positive_pre_assertion(process)
 
-    original_dict = handle.to_dict()
-    json_path = os.path.join(handle.jail_dir, "handle.json")
+    original_dict = jail.to_dict()
+    json_path = os.path.join(jail.jail_dir, "jail.dict.json")
     with open(json_path, "w") as f:
         json.dump(original_dict, f)
 
@@ -235,10 +234,10 @@ def test_rehydrated_handle_in_a_separate_process_kills_the_workload_tree(run_id:
 
     # AC #2: a genuinely separate process -- its own pid differs from this
     # test process's, and it was launched via `sys.executable`, not an
-    # in-process `Handle.from_dict(handle.to_dict())` call. No in-process
+    # in-process `Jail.from_dict(jail.to_dict(), runtimes=...)` call. No in-process
     # from_dict is being passed off as the rehydration anywhere in this
-    # test: `Handle.from_dict` is imported here only for type context on
-    # `Handle`, and is never called by this process.
+    # test: `Jail.from_dict` is never called by this test (the version test
+    # below is another test).
     helper_pid = result["pid"]
     assert isinstance(helper_pid, int)
     assert helper_pid != os.getpid(), (
@@ -269,7 +268,7 @@ def test_rehydrated_handle_in_a_separate_process_kills_the_workload_tree(run_id:
     assert len(workload_items) == 1
     item = workload_items[0]
     assert item["identity"] == str(pgid)
-    assert item["identity"] == str(handle.pgid)
+    assert item["identity"] == str(process._record.pgid)
     assert item["outcome"] == "ENDED"
     print(f"KillReport (AC #7): {kill_report}")
 
@@ -291,11 +290,11 @@ def test_control_rehydrated_handle_without_kill_leaves_the_tree_alive(run_id: st
     deliberate) so this file's own control leak does not trip the suite's
     leak-check."""
     argv = workload_argv(run_id, "sleep 100")
-    handle = _launch(argv, jail_id="jail-rehydration-control")
-    leader_pid, child_pid, pgid = _positive_pre_assertion(handle)
+    jail, process = _launch(argv, jail_id="jail-rehydration-control")
+    leader_pid, child_pid, pgid = _positive_pre_assertion(process)
 
-    original_dict = handle.to_dict()
-    json_path = os.path.join(handle.jail_dir, "handle.json")
+    original_dict = jail.to_dict()
+    json_path = os.path.join(jail.jail_dir, "jail.dict.json")
     with open(json_path, "w") as f:
         json.dump(original_dict, f)
 
@@ -336,7 +335,7 @@ def test_control_rehydrated_handle_without_kill_leaves_the_tree_alive(run_id: st
         # catch as an actual bug.
         with contextlib.suppress(ProcessLookupError):
             os.killpg(pgid, signal.SIGKILL)
-        handle.wait(timeout=20.0)
+        process.wait(timeout=20.0)
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline and _ps_has_row_for(child_pid):
             time.sleep(0.02)
@@ -351,7 +350,7 @@ def test_control_rehydrated_handle_without_kill_leaves_the_tree_alive(run_id: st
 @pytest.mark.integration
 def test_rehydrated_round_trip_carries_a_channel_and_a_non_empty_detail(run_id: str) -> None:
     """Non-vacuity closer for AC #4, same reasoning as
-    `test_launcher.py`'s own `test_launch_writes_staged_files_and_
+    `test_jail_launch.py`'s own `test_launch_writes_staged_files_and_
     handle_round_trips_channels_and_detail`: every other test in THIS file
     uses the empty-stack defaults (`Spec()` / `unenforced_report()`), whose
     `channels` serializes to `[]` and whose every axis `detail` is `""` --
@@ -370,22 +369,22 @@ def test_rehydrated_round_trip_carries_a_channel_and_a_non_empty_detail(run_id: 
     report = unenforced_report("m2: no mechanisms enforce anything yet")
 
     argv = workload_argv(run_id, "sleep 100")
-    handle = _launch(argv, jail_id="jail-rehydration-nonvacuous", spec=spec, report=report)
-    _leader_pid, child_pid, pgid = _positive_pre_assertion(handle)
+    jail, process = _launch(argv, jail_id="jail-rehydration-nonvacuous", spec=spec, report=report)
+    _leader_pid, child_pid, pgid = _positive_pre_assertion(process)
 
     # The channel and the non-empty detail are on the live handle before
     # any serialization -- so a later equality failure can be pinned to
     # the round trip specifically, not to construction.
-    assert handle.channels["ctl"] == channel
+    assert jail.channels["ctl"] == channel
     assert all(
         graded.detail == "m2: no mechanisms enforce anything yet"
-        for graded in handle.report.axes.values()
+        for graded in jail.report.axes.values()
     )
 
-    original_dict = handle.to_dict()
+    original_dict = jail.to_dict()
     assert original_dict["channels"] != []
     assert original_dict["report"]["fs_read"]["detail"] == "m2: no mechanisms enforce anything yet"
-    json_path = os.path.join(handle.jail_dir, "handle.json")
+    json_path = os.path.join(jail.jail_dir, "jail.dict.json")
     with open(json_path, "w") as f:
         json.dump(original_dict, f)
 
@@ -404,7 +403,7 @@ def test_rehydrated_round_trip_carries_a_channel_and_a_non_empty_detail(run_id: 
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(pgid, signal.SIGKILL)
-        handle.wait(timeout=20.0)
+        process.wait(timeout=20.0)
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline and _ps_has_row_for(child_pid):
             time.sleep(0.02)
@@ -423,7 +422,7 @@ def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
     genuine, freshly-serialized handle dict, with only the version field
     rolled back -- refuses, its message naming BOTH the rejected version
     (1) and the current one, never only one of the two (SPEC.md §5's
-    posture, applied to `Handle`: "There is no migration framework and no
+    posture, applied to `Jail`: "There is no migration framework and no
     tolerated extra field").
 
     THE CONTROL, in the same test: the UNMODIFIED current-version dict
@@ -434,17 +433,16 @@ def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
     version 1" vacuous -- true of every input, not just a stale version).
     """
     argv = workload_argv(run_id, "sleep 5")
-    handle = _launch(argv, jail_id="jail-rehydration-version")
+    jail, process = _launch(argv, jail_id="jail-rehydration-version")
     try:
-        d = handle.to_dict()
-        # 6 since decision-181 (TASK-0079.26): the version brig writes, `Jail`'s
-        # dict and this unchanged one alike.
+        d = jail.to_dict()
+        # 6 since decision-181 (TASK-0079.26): the version of `Jail`'s dict.
         assert d["version"] == HANDLE_VERSION == 6
 
         stale = dict(d)
         stale["version"] = 1
         with pytest.raises(ValueError) as exc_info:
-            Handle.from_dict(stale)
+            Jail.from_dict(stale, runtimes=_RUNTIMES)
         message = str(exc_info.value)
         assert "unsupported version 1" in message, (
             f"refusal message does not name the rejected version 1: {message!r}"
@@ -456,10 +454,10 @@ def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
         # THE CONTROL: same dict, version untouched -- rehydrates cleanly,
         # and its wrap_prefix (task-046's own new field) survives the
         # round trip intact.
-        rehydrated = Handle.from_dict(d)
-        assert rehydrated == handle
-        assert rehydrated.wrap_prefix == handle.wrap_prefix
+        rehydrated = Jail.from_dict(d, runtimes=_RUNTIMES)
+        assert rehydrated.to_dict() == d
+        assert rehydrated._base.wrap_prefix == jail._base.wrap_prefix
     finally:
         with contextlib.suppress(ProcessLookupError):
-            os.killpg(handle.pgid, signal.SIGKILL)
-        handle.wait(timeout=20.0)
+            os.killpg(process._record.pgid, signal.SIGKILL)
+        process.wait(timeout=20.0)

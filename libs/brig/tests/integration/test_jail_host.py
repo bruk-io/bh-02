@@ -12,8 +12,9 @@ concerned (`/bin/ps`, a second interpreter):
 - when a record on disk disagrees with the one the holder knows, `destroy`
   ends the known identity and reports the disk copy as its own `FAILED` item,
   signalling nothing it names (AC8; seen failing with the item removed);
-- a launch whose first start is refused ends the helpers `create` started
-  (AC9; seen failing with the launcher's `destroy` removed);
+- a refused first start leaves the jail to its caller, and `destroy` ends
+  the helpers `create` started (AC9; the launcher did this itself until
+  decision-183);
 - probes are processes the jail starts, each kept for `destroy` (AC4).
 """
 
@@ -27,7 +28,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
-from types import SimpleNamespace
 
 import pytest
 
@@ -36,11 +36,18 @@ from brig.core.probes import Battery as CoreBattery
 from brig.core.probes import BatteryVerdict
 from brig.mech import Helper, HelperLifetime
 from brig.probe.battery import Battery, Expectation, Probe
-from brig.run import ExecFidelity, HostRuntime, Jail, KillOutcome, RuntimeKind, _identity, _records
-from brig.run.exec_ import ExecWrapNotAPrefix
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import (
+    ExecFidelity,
+    ExecWrapNotAPrefix,
+    HostRuntime,
+    Jail,
+    KillOutcome,
+    RuntimeKind,
+    _identity,
+    _records,
+)
 from brig.stack import CompiledJail
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import teardown_pgid, workload_argv
 
 pytestmark = pytest.mark.integration
 
@@ -107,7 +114,7 @@ def _wait_for(predicate: Callable[[], bool], seconds: float = 10.0) -> bool:
 
 def _kill_group(pgid: int) -> None:
     """End `pgid` with the suite's own verified helper, never the code under test."""
-    teardown_group(SimpleNamespace(pgid=pgid))
+    teardown_pgid(pgid)
 
 
 @pytest.fixture
@@ -376,7 +383,8 @@ def test_a_disagreeing_disk_record_is_its_own_failed_item_and_the_known_process_
 
 
 # ---------------------------------------------------------------------------
-# AC9: a refused first start ends what create started.
+# AC9: a refused first start leaves the jail to its caller, and destroy ends
+# what create started.
 # ---------------------------------------------------------------------------
 
 
@@ -387,18 +395,22 @@ def _helper_groups(marker: str) -> list[int]:
 
 
 @pytest.mark.parametrize("wrap", [_appending_wrap, _identity_wrap], ids=["refused", "control"])
-def test_a_refused_first_start_ends_the_helpers_create_started(
+def test_a_refused_first_start_leaves_the_jail_whose_destroy_ends_its_helpers(
     run_id: str, jail_dir: str, wrap: Callable[[tuple[str, ...]], tuple[str, ...]]
 ) -> None:
     """A jail with a `JAIL_LIFETIME` helper and a wrap that is not a pure
-    prefix: `create` starts the helper, then the launch's first start is
-    refused (`ExecWrapNotAPrefix`). Nobody was handed a handle, so the launch
-    must end the helper. The control: the same helper with a prefix wrap is
-    running once the launch returns, so the helper does start.
+    prefix: `create` starts the helper, then the first start is refused
+    (`ExecWrapNotAPrefix`). A refused start changes nothing (TASK-0079.26's
+    settled point 6): the helper still runs and the jail is the caller's, and
+    its `destroy` ends the helper even though no process ever started. The
+    control: the same helper with a prefix wrap, whose first start succeeds.
 
-    Planted on 2026-10-12 (scratch copy of `launcher.py`, sha256-restored):
-    with the launcher's `runtime.destroy(record)` removed, the refused case
-    failed with the helper still running."""
+    Until decision-183 the launcher destroyed the jail itself when its first
+    start was refused (planted 2026-10-12: with that `destroy` removed, the
+    helper outlived the refused launch). With the launcher gone that is the
+    embedder's to do -- bh-02's runner does it, as `tests.conftest.launch`
+    does -- and what brig guarantees is what this test holds: `destroy` on a
+    jail with nothing started still ends its helpers."""
     marker = f"t26helper{run_id[:8]}{next(_jail_counter)}"
     helper = Helper(
         name="keeper",
@@ -408,25 +420,27 @@ def test_a_refused_first_start_ends_the_helpers_create_started(
     os.makedirs(jail_dir, exist_ok=True)
     groups: list[int] = []
     try:
-        launch = lambda: SubprocessLauncher().launch(  # noqa: E731
+        jail = Jail.create(
             _compiled(wrap=wrap, helpers=(helper,)),
-            argv=workload_argv(run_id, "sleep 100"),
+            runtime=HostRuntime(),
             cwd=jail_dir,
-            io=IoPolicy(),
             jail_id="jail-refused-first",
             jail_dir=jail_dir,
         )
+        assert _wait_for(lambda: bool(_helper_groups(marker)), 5.0), "the helper never ran"
         if wrap is _appending_wrap:
             with pytest.raises(ExecWrapNotAPrefix):
-                launch()
-            assert _wait_for(lambda: not _helper_groups(marker), 5.0), (
-                f"the helper outlived a refused launch: groups {_helper_groups(marker)}"
-            )
+                jail.start(workload_argv(run_id, "sleep 100"))
+            assert _helper_groups(marker), "a refused start ended the helper: it changed something"
+            assert jail.processes() == ()
         else:
-            handle = launch()
-            groups.append(handle.pgid)
-            assert _wait_for(lambda: bool(_helper_groups(marker)), 5.0), "the helper never ran"
-            handle.kill()
+            process = jail.start(workload_argv(run_id, "sleep 100"))
+            groups.append(process._record.pgid)
+        report = jail.destroy()
+        assert _wait_for(lambda: not _helper_groups(marker), 5.0), (
+            f"the helper outlived its jail's destroy: groups {_helper_groups(marker)}"
+        )
+        assert [item.kind for item in report.items][-1] == "helper", report
     finally:
         groups.extend(_helper_groups(marker))
         for pgid in groups:
