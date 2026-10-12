@@ -2285,9 +2285,13 @@ and `Process.wait_ready` reported ready. Ruled, superseding that residual:
   nothing. The group, not the jail's processes or descent from the leader:
   brig's control is group-shaped (§9, law 7), every host start leads a group of
   its own (`start_new_session`), and bwrap emits no `--new-session` (§6), so a
-  workload and everything it forks stay in it; a co-tenant is another start's
-  group and is refused, which closes decision-184's co-tenant residual for the
-  host's dial (not for the co-tenants themselves, TASK-0079.07's). Descent was
+  workload and everything it forks stay in it; with a pid namespace a
+  co-tenant is another start's group and is refused, which closes
+  decision-184's co-tenant residual for the host's dial (not for the
+  co-tenants themselves, TASK-0079.07's). Without one (the empty stack, all
+  host starts in one session) a co-tenant could setpgid into a sibling's
+  group and pass as it: never a host socket, but the residual stands there.
+  Descent was
   rejected: an orphan reparents out of it on a host without a pid namespace,
   and the process table must be walked to see it. A listener that left its
   group (`setsid`) is refused, which is the safe direction. A nested pid
