@@ -1263,6 +1263,7 @@ import asyncio, dataclasses, sys, tempfile
 from pathlib import Path
 from brig.mech import Helper, HelperLifetime
 from brig.run import Jail
+from brig.run.exec_ import ExecWrapNotAPrefix
 from runner_cordis_plugin import BrigConfig, BrigJail
 
 class Host:
@@ -1293,7 +1294,7 @@ async def main():
         started = await BrigJail(BrigConfig(), Host()).start(
             [sys.executable, "-I", "-c", worker, sock], cwd=project, endpoint=sock
         )
-    except ValueError as error:
+    except ExecWrapNotAPrefix as error:
         print("refused:", str(error).replace("\\n", " "), flush=True)
     else:
         print("started", flush=True)
@@ -1382,6 +1383,58 @@ async def test_a_refused_first_start_destroys_the_jail_so_nothing_it_made_outliv
         with contextlib.suppress(ConnectionError):
             await bh02.stdin.drain()
         await asyncio.wait_for(bh02.wait(), 30)
+
+
+class _Refused:
+    """What brig's `Jail.create` returns, for a jail whose first start is refused and whose
+    `destroy` reports `ended` (a report's items) or, when it is an exception, raises it."""
+
+    def __init__(self, ended: Any) -> None:
+        self._ended = ended
+
+    def start(self, argv: Sequence[str], **rest: object) -> None:
+        raise RuntimeError("start refused today")
+
+    def destroy(self) -> Any:
+        if isinstance(self._ended, BaseException):
+            raise self._ended
+        return SimpleNamespace(items=self._ended)
+
+
+@pytest.mark.parametrize("ended", ["failed", "raised"])
+async def test_a_refused_start_s_error_crosses_with_what_ending_its_jail_left(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ended: str
+) -> None:
+    """The runner ends a jail whose first start brig refused; the start's error is what the
+    caller sees, whatever the ending found: a helper it could not end ("failed") is named on
+    it with brig's detail, and an ending that itself raised ("raised") is named too, never put
+    in the start's place. Its placeholders and record go either way.
+
+    Planted on 2026-10-12 (scratch copy of `jail.py`, restored by sha256): with `_launch`'s
+    ending back to a bare `jail.destroy()`, "failed" had no note and "raised" let the ending's
+    OSError cross in place of the start's error."""
+    if sys.platform != "linux":
+        pytest.skip("the placeholders are bubblewrap's: Linux only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(sys.modules["runner_cordis_plugin.jail"], "DEFAULT_BWRAP_PATH", sys.executable)
+    failed = SimpleNamespace(
+        kind="helper", identity="4242", outcome=SimpleNamespace(value="FAILED"), detail="EPERM"
+    )
+    outcome: Any = (failed,) if ended == "failed" else OSError("no ending today")
+    monkeypatch.setattr("brig.run.Jail.create", lambda *args, **kwargs: _Refused(outcome))
+    project = tmp_path / "project"
+    project.mkdir()
+    with pytest.raises(RuntimeError, match="start refused today") as refused:
+        await BrigJail(BrigConfig(), Host()).start(
+            [sys.executable, "-c", "pass"], cwd=str(project), endpoint=_endpoint()
+        )
+    notes = " ".join(getattr(refused.value, "__notes__", ()))
+    if ended == "failed":
+        assert "helper 4242 FAILED: EPERM" in notes and "kill -KILL -- -4242" in notes, notes
+    else:
+        assert "failed too" in notes and "no ending today" in notes, notes
+    assert list(project.iterdir()) == []
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
 
 
 async def test_a_jail_start_cancelled_while_it_launches_ends_what_the_launch_started(

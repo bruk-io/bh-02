@@ -88,7 +88,16 @@ from brig.core import (
     Spec,
 )
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH
-from brig.run import HostRuntime, IoPolicy, Jail, KillOutcome, Process, build_compile_ctx, group_alive
+from brig.run import (
+    HostRuntime,
+    IoPolicy,
+    Jail,
+    KillItem,
+    KillOutcome,
+    Process,
+    build_compile_ctx,
+    group_alive,
+)
 from brig.stack import CompiledJail, Stack, scratch_darwin, strict_linux
 from host_paths import state_home
 from runner_cordis_plugin.tripwire import Tripwire
@@ -717,7 +726,8 @@ def _launch(
     to `tether` (the read end; the jail holds a duplicate), then its first and only `start`.
     A refused start changes nothing in brig (the jail is its creator's), so this ends the jail
     itself before saying why: what `create` started (a `JAIL_LIFETIME` helper) never outlives a
-    start nobody was handed.
+    start nobody was handed. The start's error is the one that crosses, whatever the ending
+    found: each item it could not end, or its own failure, is a note on it (`_unended`).
 
     Raises:
         LaunchRefused: the jail needs a capability the host runtime lacks.
@@ -733,9 +743,30 @@ def _launch(
     )
     try:
         return jail, jail.start(argv, cwd=cwd, io=IoPolicy())
-    except BaseException:
-        jail.destroy()
+    except BaseException as error:
+        try:
+            report = jail.destroy()
+        except Exception as failed:
+            error.add_note(
+                f"ending jail {jail_id} after its refused start failed too ({failed!r}): what it "
+                f"started may still run; look for its processes in {jail_dir} and end them"
+            )
+        else:
+            for note in _unended(jail_id, report.items):
+                error.add_note(note)
         raise
+
+
+def _unended(jail_id: str, items: Sequence[KillItem]) -> tuple[str, ...]:
+    """What the person must know of a jail ended after a refused start: one line for each item
+    brig's teardown neither ended nor found gone, with its detail; nothing when all went."""
+    return tuple(
+        f"ending jail {jail_id} after its refused start left its {item.kind} {item.identity} "
+        f"{item.outcome.value}: {item.detail}; end it yourself (`kill -KILL -- -{item.identity}` "
+        "for a process group)"
+        for item in items
+        if item.outcome not in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE)
+    )
 
 
 class BrigJail:
@@ -858,7 +889,8 @@ class BrigJail:
                 running, process = await asyncio.shield(launching)
             except asyncio.CancelledError:
                 # The launch's thread runs on whatever happens here: wait for it before its fds
-                # are closed and its placeholders removed, and end what it started.
+                # are closed and its placeholders removed, and end what it started. A launch that
+                # raised has nothing to end here: `_launch` destroyed its jail before raising.
                 with contextlib.suppress(Exception):
                     await asyncio.to_thread((await launching)[0].destroy)
                 raise
