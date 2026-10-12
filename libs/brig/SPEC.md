@@ -1988,6 +1988,48 @@ record with only `HostRuntime` passed among it), `start` absent, and
 probes; TASK-0079.27 for bh-02's runner; TASK-0079.28 for retiring `Handle`
 and this section's old shape. (Ruled 2026-10-12, decision-181.)
 
+**Settled by TASK-0079.26 (2026-10-12, no new ruling).** What the ruling left
+to the implementation of `Jail` and `Process` (`brig/run/jail.py`):
+
+1. **Absent is an attribute that is not there.** `Jail.start` and
+   `Jail.probe`, and `Process.interrupt`, `stop` and `wait`, are properties
+   that raise `AttributeError` when the call is absent, so `hasattr` is false
+   and `getattr(jail, "start", None)` is `None`, while a type checker still
+   knows the call's signature where it is present. One class each, no
+   subclass per case.
+2. **The runtime answers for processes.** `Runtime` gains `processes(jail)`
+   (the ones the record holds, then every other one the runtime finds, in
+   start order; a disk copy of a held process is never used in its place) and
+   `process_alive(jail, process)` (its leader holds its identity), which
+   `Jail.processes()` and `Process.alive()` delegate to, as every other call
+   does.
+3. **What a jail holds in memory.** The processes its dict named, then every
+   process it started itself, in start order: these are what it "knows", and
+   `destroy` ends them by the identity it holds. A disk record **disagrees**
+   when any field but `order` differs (`order` only sorts; a `Handle`, which
+   carries no order, names its first process with 0).
+4. **The dict.** `version` (6), `runtime`, `tethered`, `jail_id`, `jail_dir`,
+   `cwd`, `jail_env`, `wrap_prefix`, `spec`, `report`, `signatures`,
+   `channels`, `compile_events`, `helper_pids`, `helper_stamps` and
+   `processes` (each a record's own fields, checked as a `record.json` is: an
+   id brig makes, ids unique). `launcher_name` gives way to `runtime`: a jail
+   has no launcher. `Handle`'s dict is unchanged in shape and is written as 6
+   too, until TASK-0079.28 deletes it; nothing persists one across the bump
+   (bh-02 never calls `Handle.from_dict`).
+5. **`Jail.create` refuses a runtime of another kind** (`ValueError`, naming
+   both kinds), unless it is `FAKE`, as the ruling says.
+6. **A refused start changes nothing** (`ExecWrapNotAPrefix`, `TetherClosed`):
+   the jail is the embedder's, to start again or destroy. The launcher, which
+   creates and starts in one call and hands nobody a jail when the start is
+   refused, destroys what `create` started, as TASK-0079.25 settled; a test
+   now shows the helper ended.
+7. **`Handle.probe` runs through `jail.start` too**: it builds the `Jail` its
+   handle describes (its runtime, its first process known, its tether hold)
+   and probes that, so every battery runs as processes until
+   TASK-0079.28 deletes `Handle`.
+
+Implementing task: TASK-0079.26.
+
 **`wait` means gone, where it can (2026-10-12, decision-182).** The exit
 wrapper writes its process's exit record just before it exits, so a `wait()`
 that answered on the record let a `create` into the same `jail_dir` meet a

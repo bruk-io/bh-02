@@ -1,6 +1,12 @@
 """`run_battery`: SPEC.md §12's probe engine -- runs a `Battery`'s probes
-through the SAME `handle.exec` path the workload uses, classifies each
-result, and decides the battery's own verdict.
+through the SAME path the workload uses, classifies each result, and decides
+the battery's own verdict.
+
+**Each probe is a process of the jail** (decision-181, TASK-0079.26): `handle`
+is a `brig.run.jail.Jail` (`Handle.probe` hands over the `Jail` it
+describes), and each probe is a `jail.start`, waited with its deadline and
+read from its own stdio files; its record stays for `destroy`. SPEC.md §9's
+"through `exec`" below reads "through `start`".
 
 SPEC.md §12's opening, verbatim:
 
@@ -80,7 +86,7 @@ from brig.core.probes import BatteryVerdict
 from brig.probe.battery import Battery, Probe
 from brig.probe.verdict import classify
 
-#: Bounded deadline for one probe's `exec.wait()` (SPEC.md §12 names no
+#: Bounded deadline for one probe's `wait()` (SPEC.md §12 names no
 #: number; this task's own Deliverable says only "waits with a bounded
 #: deadline"). Generous enough for a probe under `degraded()`'s cpu limits
 #: in the shipped batteries (tasks 051-053) without letting one hung probe
@@ -93,8 +99,8 @@ _UNDERCLAIM_GRADES: Final = (Grade.UNENFORCED, Grade.COOPERATIVE)
 
 
 def run_battery(handle: Any, battery: Battery) -> ProbeReport:
-    """Run every probe in `battery` against `handle`, through `handle.exec`,
-    and decide the battery's own verdict.
+    """Run every probe in `battery` against `handle` (a `Jail`), each a
+    `handle.start`, and decide the battery's own verdict.
 
     **Battery verdict, in this order and no other** (task-050's own
     Deliverable, verbatim algorithm; task-053/decision-104 renamed only the
@@ -158,18 +164,19 @@ def run_battery(handle: Any, battery: Battery) -> ProbeReport:
 
 
 def _run_one(handle: Any, probe: Probe) -> ProbeOutcome:
-    """Run one probe through `handle.exec`, wait for it with a bounded
-    deadline, and classify it against `handle.signatures.for_axis(probe.axis)`
+    """Run one probe as a process of the jail (`handle.start`, decision-181:
+    a probe is a `Jail.start`, its record kept for `destroy` like any
+    process's), wait for it with a bounded deadline, and classify it against `handle.signatures.for_axis(probe.axis)`
     -- the axis's claim, which may be `None`.
 
-    Reads `stdout`/`stderr` back from the exec's own files on disk, exactly
-    as `handle.exec` wrote them (SPEC.md §12: probes run through the same
+    Reads `stdout`/`stderr` back from the process's own files on disk, exactly
+    as its start wrote them (SPEC.md §12: probes run through the same
     stack, launcher, and channel the workload uses; this reads what that
     real path actually produced, not an in-process capture)."""
-    exec_handle = handle.exec(list(probe.argv))
-    returncode = exec_handle.wait(timeout=_PROBE_WAIT_TIMEOUT_S)
-    stdout = _read_text(exec_handle.stdout_path)
-    stderr = _read_text(exec_handle.stderr_path)
+    process = handle.start(list(probe.argv))
+    returncode = process.wait(timeout=_PROBE_WAIT_TIMEOUT_S)
+    stdout = _read_text(process.stdout_path)
+    stderr = _read_text(process.stderr_path)
     claim = handle.signatures.for_axis(probe.axis)
     return classify(probe, returncode, stdout, stderr, claim)
 

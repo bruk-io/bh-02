@@ -437,7 +437,9 @@ def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
     handle = _launch(argv, jail_id="jail-rehydration-version")
     try:
         d = handle.to_dict()
-        assert d["version"] == HANDLE_VERSION == 5
+        # 6 since decision-181 (TASK-0079.26): the version brig writes, `Jail`'s
+        # dict and this unchanged one alike.
+        assert d["version"] == HANDLE_VERSION == 6
 
         stale = dict(d)
         stale["version"] = 1

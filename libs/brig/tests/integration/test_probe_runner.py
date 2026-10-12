@@ -70,6 +70,7 @@ from brig.core.probes import Battery as CoreBattery
 from brig.core.probes import BatteryVerdict
 from brig.probe.battery import Battery, Expectation, Probe
 from brig.run.handle import Handle
+from brig.run.jail import Jail
 from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import Stack, degraded
 from tests.conftest import teardown_group, workload_argv
@@ -475,10 +476,11 @@ class _RecordingBattery:
 @pytest.mark.integration
 def test_handle_probe_is_a_bound_method_returning_the_battery_report(run_id: str) -> None:
     """AC #6. `handle.probe(battery)` returns the EXACT SAME `ProbeReport`
-    object `battery.run(handle)` would (identity, via a battery whose `run`
-    is instrumented to record its call and hand back a fixed report), and
-    the battery's own `run` was called with `handle` itself (identity, not
-    equality)."""
+    object the battery's `run` returned (identity, via a battery whose `run`
+    is instrumented to record its call and hand back a fixed report). Since
+    decision-181 (TASK-0079.26) `run` is called with the `Jail` the handle
+    describes, not the handle, so each probe is a `jail.start`: same jail id,
+    directory, report and runtime, with a `start`."""
     handle = _launch(
         Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac6", run_id=run_id
     )
@@ -494,8 +496,15 @@ def test_handle_probe_is_a_bound_method_returning_the_battery_report(run_id: str
         result = handle.probe(battery)
 
         assert result is fixed_report
-        assert battery.seen_handle is handle
-        assert result == battery.run(handle)
+        seen = battery.seen_handle
+        assert isinstance(seen, Jail)
+        assert (seen.jail_id, seen.jail_dir, seen.report) == (
+            handle.jail_id,
+            handle.jail_dir,
+            handle.report,
+        )
+        assert hasattr(seen, "start")
+        assert [process.pid for process in seen.processes()] == [handle.pid]
     finally:
         _teardown_group(handle)
 

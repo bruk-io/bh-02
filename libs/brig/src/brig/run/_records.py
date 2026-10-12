@@ -27,6 +27,7 @@ here treats what it finds as data to check, never as a fact.
 """
 
 import contextlib
+import dataclasses
 import json
 import os
 import re
@@ -150,7 +151,9 @@ def make_dir(jail_dir: str, process_id: str) -> str:
     return directory
 
 
-def _to_json(record: ProcessRecord) -> dict[str, Any]:
+def to_json(record: ProcessRecord) -> dict[str, Any]:
+    """`record` as JSON-native data: what `record.json` holds, and each entry
+    of a jail's dict's `processes` (decision-181)."""
     return {
         "id": record.id,
         "order": record.order,
@@ -174,7 +177,7 @@ def write(jail_dir: str, record: ProcessRecord) -> str:
     """
     path = os.path.join(process_dir(jail_dir, record.id), RECORD_FILENAME)
     tmp = path + _PARTIAL
-    encoded = json.dumps(_to_json(record)).encode("utf-8")
+    encoded = json.dumps(to_json(record)).encode("utf-8")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     try:
         os.write(fd, encoded)
@@ -196,6 +199,13 @@ def parse(text: str, expected_id: str) -> ProcessRecord | str:
         raw = json.loads(text)
     except ValueError as error:
         return f"is not JSON ({error})"
+    return from_json(raw, expected_id)
+
+
+def from_json(raw: object, expected_id: str) -> ProcessRecord | str:
+    """The record `raw` (decoded JSON) holds, or the reason it is not one brig
+    wrote for the directory named `expected_id`. Pure. `parse` reads a
+    `record.json` through it, and `Jail.from_dict` each entry of `processes`."""
     if type(raw) is not dict:
         return f"holds a JSON {type(raw).__name__}, not an object"
     missing = [key for key in _KEYS if key not in raw]
@@ -317,6 +327,14 @@ def scan(jail_dir: str) -> Scan:
             records.append(read)
     records.sort(key=lambda record: (record.order, record.id))
     return Scan(tuple(records), tuple(unreadable))
+
+
+def disagrees(held: ProcessRecord, on_disk: ProcessRecord) -> bool:
+    """Whether a record on disk for a process the caller holds says something
+    else about it: any field but `order`, which only sorts (a `Handle`, which
+    carries no order, names its first process with 0). Pure. A disk copy that
+    disagrees is never used in place of the held record (decision-181)."""
+    return dataclasses.replace(on_disk, order=held.order) != held
 
 
 class Standing(Enum):

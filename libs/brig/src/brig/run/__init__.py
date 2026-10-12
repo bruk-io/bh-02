@@ -20,6 +20,13 @@ a mechanism's sensor feed instead is STAMP it -- `brig/run/events.py`'s
 them into its own log, which is where a durable record belongs; brig was
 otherwise shipping a second, worse log beside every embedder's real one.
 
+**`Jail` and `Process`** (`jail.py`, decision-181, TASK-0079.26) are the
+embedder's side of the runtime seam: `Jail.create(compiled, runtime=...)`,
+then a `jail.start` per process. `HostRuntime` and `RuntimeKind` are
+re-exported with them, because `Jail.from_dict(d, runtimes=...)` takes
+the runtimes from the embedder, keyed by kind; `ExecFidelity` names
+`Process.fidelity`. `Handle` stays beside them until TASK-0079.28.
+
 `wait_ready` and `exec_in_jail` are private delegates (`readiness.py`,
 `exec_.py`); they are intentionally NOT re-exported here --
 `Handle.wait_ready`/`.exec` are the public surface, per SPEC.md §9.
@@ -52,6 +59,7 @@ from brig.core import EVENT_VERSION as EVENT_VERSION
 from brig.core import DataValue as DataValue
 from brig.core import Event as Event
 from brig.core import EventKind as EventKind
+from brig.core.runtime import RuntimeKind as RuntimeKind
 from brig.run._waiters import ExitRecord as ExitRecord
 from brig.run.compile_ctx import build_compile_ctx as build_compile_ctx
 from brig.run.egress import EgressRead as EgressRead
@@ -59,10 +67,14 @@ from brig.run.egress import decisions_path as decisions_path
 from brig.run.egress import read_egress_decisions as read_egress_decisions
 from brig.run.events import stamp as stamp
 from brig.run.events import stamp_all as stamp_all
+from brig.run.exec_ import ExecFidelity as ExecFidelity
 from brig.run.handle import HANDLE_VERSION as HANDLE_VERSION
 from brig.run.handle import ExitStatusUnobservable as ExitStatusUnobservable
 from brig.run.handle import Handle as Handle
 from brig.run.handle import JailStat as JailStat
+from brig.run.host import HostRuntime as HostRuntime
+from brig.run.jail import Jail as Jail
+from brig.run.jail import Process as Process
 from brig.run.launcher import IoPolicy as IoPolicy
 from brig.run.launcher import LaunchRefused as LaunchRefused
 from brig.run.launcher import SubprocessLauncher as SubprocessLauncher
@@ -77,19 +89,24 @@ __all__ = (  # noqa: RUF022
     "DataValue",
     "EgressRead",
     "ExitRecord",
+    "ExecFidelity",
     "ExitStatusUnobservable",
     "EVENT_VERSION",
     "Event",
     "EventKind",
     "HANDLE_VERSION",
     "Handle",
+    "HostRuntime",
     "IoPolicy",
+    "Jail",
     "JailStat",
     "KILL_ITEM_KINDS",
     "KillItem",
     "KillOutcome",
     "KillReport",
     "LaunchRefused",
+    "Process",
+    "RuntimeKind",
     "SubprocessLauncher",
     "build_compile_ctx",
     "decisions_path",

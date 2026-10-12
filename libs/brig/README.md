@@ -22,6 +22,15 @@ they all go. The one thing brig does write is a record per process under
 can end it, and its exit status, once, so a `Handle` rehydrated in another
 process can still say how it ended.
 
+`Jail` and `Process` (`brig.run`, decision-181) are the shape `Handle` is
+giving way to: `Jail.create(compiled, runtime=HostRuntime(), ...)` makes the
+jail with nothing in it, and every process, the first included, is a
+`jail.start`. `Jail.from_dict(d, runtimes={RuntimeKind.HOST: HostRuntime()})`
+rehydrates one with the runtimes the embedder passes, never one the dict
+names. `start` and `probe` are absent where a jail cannot start (no
+supervisor, or created tethered in another process). `Handle` stays beside
+them until TASK-0079.28.
+
 Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md
 is the one describing the library.

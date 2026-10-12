@@ -233,3 +233,20 @@ def test_jail_dir_in_use_names_the_pid_and_group_it_holds() -> None:
     assert "pid 4242" in held[0].reason
     assert "process group 4242" in held[0].reason
     assert "wait a moment and retry" in str(_records.JailDirInUse("/jail", held))
+
+
+@pytest.mark.unit
+def test_a_disk_copy_disagrees_on_any_field_but_order() -> None:
+    """decision-181, TASK-0079.26's settled point 3: `order` only sorts (a
+    `Handle` names its first process with 0), every other field is identity."""
+    held = _record()
+    assert not _records.disagrees(held, _record(order=0))
+    for change in ({"pid": 101}, {"pgid": 101}, {"start_time": "x"}, {"argv": ["sh"]}):
+        assert _records.disagrees(held, _record(**change)), change
+
+
+@pytest.mark.unit
+def test_a_record_round_trips_through_json_data() -> None:
+    held = _record()
+    assert _records.from_json(_records.to_json(held), _ID) == held
+    assert _records.from_json([], _ID) == "holds a JSON list, not an object"

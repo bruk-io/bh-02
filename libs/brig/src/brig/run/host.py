@@ -493,17 +493,28 @@ class HostRuntime:
         (decision-155, decision-171); an unknown stamp degrades to the pid-only
         check. A jail with nothing started and no helper reads gone. This
         answers for leaders; `destroy` is what ends groups."""
-        known_ids = {process.id for process in jail.processes}
-        processes = (
-            *jail.processes,
-            *(p for p in _records.scan(jail.jail_dir).records if p.id not in known_ids),
-        )
-        return any(
-            _identity.identity_holds(process.pid, process.start_time) for process in processes
-        ) or any(
+        return any(self.process_alive(jail, process) for process in self.processes(jail)) or any(
             _identity.identity_holds(pid, stamp)
             for pid, stamp in zip(jail.helper_pids, jail.helper_stamps, strict=True)
         )
+
+    def processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]:
+        """The processes `jail` holds, by the records it holds, then every
+        other readable record under `<jail_dir>/procs`, each in start order. A
+        disk copy of a held process is not used (decision-181); `destroy`
+        reports one that disagrees."""
+        held = {process.id for process in jail.processes}
+        return (
+            *jail.processes,
+            *(p for p in _records.scan(jail.jail_dir).records if p.id not in held),
+        )
+
+    def process_alive(self, jail: JailRecord, process: ProcessRecord) -> bool:
+        """Whether `process`'s leader holds its identity: a recycled pid and a
+        zombie read gone (decision-155, decision-171); an unknown stamp
+        degrades to the pid-only check."""
+        del jail
+        return _identity.identity_holds(process.pid, process.start_time)
 
     def destroy(self, jail: JailRecord) -> KillReport:
         """SPEC.md section 9's ladder per process in start order -- the ones

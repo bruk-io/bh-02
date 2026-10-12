@@ -137,6 +137,17 @@ class FakeRuntime:
         self.calls.append(Call("create", Scope.JAIL, record))
         return record
 
+    def processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]:
+        """Every process of `jail`, in start order (`_processes`)."""
+        self.calls.append(Call("processes", Scope.JAIL, jail))
+        return self._processes(jail)
+
+    def process_alive(self, jail: JailRecord, process: ProcessRecord) -> bool:
+        """Whether `process` has neither ended nor been stopped."""
+        del jail
+        self.calls.append(Call("process_alive", Scope.PROCESS, process))
+        return self.running(process)
+
     def alive(self, jail: JailRecord) -> bool:
         """Whether any process of `jail` still runs."""
         self.calls.append(Call("alive", Scope.JAIL, jail))

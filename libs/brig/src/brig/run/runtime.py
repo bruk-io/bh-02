@@ -12,8 +12,9 @@ a process enters it, the first included, and each start has a record and an
 exit record of its own (`brig/run/_records.py`). `Supervisor.start` takes no
 channel yet: a channel per process needs the channel directory
 (TASK-0079.05), and a parameter only `None` could be passed to would be a
-raising stub (SPEC.md section 9). `Jail` and `Process` in place of `Handle`
-are TASK-0079.26.
+raising stub (SPEC.md section 9). `Jail` and `Process` (`brig/run/jail.py`,
+TASK-0079.26) are the embedder's side of it; `Handle` stays beside them until
+TASK-0079.28.
 
 `IoPolicy` and `ExitStatusUnobservable` live here because both sides of the
 seam name them; `brig.run.launcher` and `brig.run.handle` re-export them, so
@@ -208,6 +209,19 @@ class Runtime(Protocol):
     def alive(self, jail: JailRecord) -> bool:
         """Whether the instance still runs: any process it started, or any
         helper (for `HostRuntime`, each by identity)."""
+        ...
+
+    def processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]:
+        """Every process of `jail`, in start order: the ones `jail` holds, by
+        the record it holds, then every other one the runtime finds (for
+        `HostRuntime`, under `<jail_dir>/procs`). A copy the runtime finds of
+        a held process is never used in its place (decision-181)."""
+        ...
+
+    def process_alive(self, jail: JailRecord, process: ProcessRecord) -> bool:
+        """Whether `process` of `jail` still runs: its leader holds its
+        identity (for `HostRuntime`, decision-155; a zombie is gone,
+        decision-171)."""
         ...
 
     def destroy(self, jail: JailRecord) -> KillReport:

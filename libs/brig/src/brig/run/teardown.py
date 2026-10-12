@@ -466,6 +466,26 @@ def _unreadable_item(unreadable: _records.Unreadable) -> KillItem:
     )
 
 
+def _disagreeing_item(jail_dir: str, on_disk: _records.ProcessRecord) -> KillItem:
+    """The `FAILED` item for a record on disk that disagrees with the one the
+    caller holds for the same process (decision-181): the held identity is
+    ended through the ladder as its own item, and this copy signals nothing it
+    names. Its identity is the file's path."""
+    path = os.path.join(_records.process_dir(jail_dir, on_disk.id), _records.RECORD_FILENAME)
+    return KillItem(
+        kind="exec_sibling",
+        identity=path,
+        outcome=KillOutcome.FAILED,
+        detail=(
+            f"process record {path} disagrees with the record the caller holds for "
+            f"process {on_disk.id} (it names pid {on_disk.pid}, process group "
+            f"{on_disk.pgid}); the held identity was ended, and nothing this copy names "
+            "was signalled. Something rewrote it: inspect it, and if it names a process "
+            "of this jail, end that process yourself"
+        ),
+    )
+
+
 def end_group(
     kind: str, pgid: int, leader_pid: int, leader_stamp: str, *, grace: float = DEFAULT_GRACE_S
 ) -> KillItem:
@@ -512,7 +532,9 @@ def kill_named(
     order, then every record under `<jail_dir>/procs` whose id `known` does
     not name (`_records.scan`), in start order: what a later start, or a
     start in another process, recorded. A known process is ended by the
-    identity the caller holds, never by a disk copy of it. The first process
+    identity the caller holds, never by a disk copy of it; a disk copy that
+    disagrees with it (`_records.disagrees`) is its own `FAILED` item, its
+    identity the file's path, signalling nothing it names (decision-181). The first process
     is reported as `workload_group` and every later one as `exec_sibling`, so
     a report reads as it did when only the first process had a group of its
     own. A record outlives its process's `wait`, so a waited process is
@@ -531,11 +553,16 @@ def kill_named(
         raise ValueError(
             f"kill_named: {len(helper_stamps)} helper stamp(s) for {len(helper_pids)} pid(s)"
         )
-    known_ids = {process.id for process in known}
+    held = {process.id: process for process in known}
     scanned = _records.scan(jail_dir)
     processes = (
         *known,
-        *(record for record in scanned.records if record.id not in known_ids),
+        *(record for record in scanned.records if record.id not in held),
+    )
+    disagreeing = tuple(
+        record
+        for record in scanned.records
+        if record.id in held and _records.disagrees(held[record.id], record)
     )
     items: list[KillItem] = [
         end_group(
@@ -547,6 +574,7 @@ def kill_named(
         )
         for position, process in enumerate(processes)
     ]
+    items.extend(_disagreeing_item(jail_dir, record) for record in disagreeing)
     items.extend(_unreadable_item(unreadable) for unreadable in scanned.unreadable)
 
     # `Step.helpers` with JAIL_LIFETIME (SPEC.md §6). Each ran with

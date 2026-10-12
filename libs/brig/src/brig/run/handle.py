@@ -43,7 +43,7 @@ wants are `compile_events` (a field, below) and `exit_events()` (a method),
 both of them plain data.
 
 **Identity, and the exit file (decision-155 and decision-156, 2026-09-08).**
-Two fields arrived together with `HANDLE_VERSION` 5, and both close a gap
+Two fields arrived together with `HANDLE_VERSION` 5 (6 since decision-181, `brig/run/jail.py`), and both close a gap
 SPEC.md section 9 had been naming rather than fixing. `start_time` (plus
 `helper_stamps`, one per helper) makes the recorded pids an identity instead
 of a number: every liveness and kill decision in this layer compares pid AND
@@ -70,45 +70,28 @@ from types import MappingProxyType
 from typing import Any, Final
 
 from brig.core import (
-    AXES,
-    Axis,
     Battery,
     Channel,
-    ChannelKind,
     EnforcementReport,
     Event,
-    Grade,
-    Graded,
     ProbeReport,
     SignatureBook,
     Spec,
 )
 from brig.run import _records, _waiters
+from brig.run._dicts import (
+    channels_from_list,
+    channels_to_list,
+    report_from_dict,
+    report_to_dict,
+)
 from brig.run.exec_ import exec_in_jail as _exec_in_jail
 from brig.run.host import HostRuntime
+from brig.run.jail import HANDLE_VERSION as HANDLE_VERSION
+from brig.run.jail import Jail
 from brig.run.readiness import wait_ready as _wait_ready
 from brig.run.runtime import ExitStatusUnobservable as ExitStatusUnobservable
 from brig.run.runtime import Held, JailRecord, NoSupervisor, ProcessRecord, Runtime
-
-HANDLE_VERSION: Final = 5
-"""Bumped 1 -> 2 by task-046 (`wrap_prefix` and `jail_env` became REQUIRED
-top-level keys) and 2 -> 3 by task-076 (`helper_pids`). SPEC.md section 5's
-posture applies to `Handle` too -- "There is no migration framework and no
-tolerated extra field" -- so an older dict is refused outright rather than
-defaulted in.
-
-Bumped 3 -> 4 by decision-152 (2026-09-08), which changes the format in both
-directions at once: `events_path` and `env` are GONE, and `compile_events` is
-new and required. `events_path` named a file that no longer exists. `env` was
-the launching process's whole environment, and dropping it is what makes a
-serialized handle safe for the embedder's own log to carry (see the class
-docstring).
-
-Bumped 4 -> 5 by decision-155 (2026-09-08): `start_time` and `helper_stamps`
-are new and REQUIRED. They are the second half of an identity a pid alone
-cannot carry -- a handle that named only pids could not tell this jail from
-whatever the OS handed those numbers to next, and defaulting them in for an
-older dict would be exactly the silent downgrade that posture forbids."""
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
@@ -135,61 +118,6 @@ _TOP_LEVEL_KEYS: Final = frozenset(
     }
 )
 _REQUIRED_KEYS: Final = tuple(_TOP_LEVEL_KEYS - {"version"})
-_CHANNEL_KEYS: Final = frozenset({"name", "kind", "endpoint"})
-_REPORT_AXIS_KEYS: Final = frozenset({"grade", "detail"})
-
-
-def _report_to_dict(report: EnforcementReport) -> dict[str, Any]:
-    """`EnforcementReport` has no `to_dict` of its own (core ships only
-    `Spec`'s per task-007) -- this is the Handle-scoped serialization of it,
-    private to this module. Same shape idiom as `Spec.to_dict`: enums as
-    their `.value` string, one entry per axis."""
-    return {
-        axis.value: {"grade": report.axes[axis].grade.value, "detail": report.axes[axis].detail}
-        for axis in AXES
-    }
-
-
-def _report_from_dict(d: Mapping[str, Any]) -> EnforcementReport:
-    """Inverse of `_report_to_dict`. Runs `EnforcementReport`'s own
-    constructor, so a missing axis or bogus grade string raises from there,
-    not from a from_dict-specific check (same posture as `Spec.from_dict`).
-    Also refuses an unknown key inside any per-axis entry (SPEC.md section 5:
-    "an unknown key at any level is a refusal"), same shape as
-    `_channels_from_list`'s check."""
-    axes: dict[Axis, Graded] = {}
-    for axis in AXES:
-        if axis.value not in d:
-            raise ValueError(f"Handle.from_dict: report is missing axis {axis.value!r}")
-        entry = d[axis.value]
-        unknown = set(entry) - _REPORT_AXIS_KEYS
-        if unknown:
-            raise ValueError(
-                f"Handle.from_dict: unknown key(s) {sorted(unknown)!r} in report[{axis.value!r}]"
-            )
-        axes[axis] = Graded(grade=Grade(entry["grade"]), detail=entry.get("detail", ""))
-    return EnforcementReport(axes=axes)
-
-
-def _channels_to_list(channels: Mapping[str, Channel]) -> list[dict[str, str]]:
-    return [
-        {"name": c.name, "kind": c.kind.value, "endpoint": c.endpoint} for c in channels.values()
-    ]
-
-
-def _channels_from_list(raw: Sequence[Mapping[str, Any]]) -> dict[str, Channel]:
-    result: dict[str, Channel] = {}
-    for entry in raw:
-        unknown = set(entry) - _CHANNEL_KEYS
-        if unknown:
-            raise ValueError(f"Handle.from_dict: unknown key(s) {sorted(unknown)!r} in channels[]")
-        channel = Channel(
-            name=entry["name"],
-            kind=ChannelKind(entry["kind"]),
-            endpoint=entry["endpoint"],
-        )
-        result[channel.name] = channel
-    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,9 +259,9 @@ class Handle:
             "jail_env": dict(self.jail_env),
             "wrap_prefix": None if self.wrap_prefix is None else list(self.wrap_prefix),
             "spec": self.spec.to_dict(),
-            "report": _report_to_dict(self.report),
+            "report": report_to_dict(self.report),
             "signatures": self.signatures.to_list(),
-            "channels": _channels_to_list(self.channels),
+            "channels": channels_to_list(self.channels),
             "compile_events": [event.to_dict() for event in self.compile_events],
             "stdout_path": self.stdout_path,
             "stderr_path": self.stderr_path,
@@ -376,9 +304,9 @@ class Handle:
             jail_env=dict(d["jail_env"]),
             wrap_prefix=None if d["wrap_prefix"] is None else tuple(d["wrap_prefix"]),
             spec=Spec.from_dict(d["spec"]),
-            report=_report_from_dict(d["report"]),
+            report=report_from_dict(d["report"], who="Handle.from_dict"),
             signatures=SignatureBook.from_list(d["signatures"]),
-            channels=_channels_from_list(d["channels"]),
+            channels=channels_from_list(d["channels"], who="Handle.from_dict"),
             compile_events=tuple(Event.from_dict(raw) for raw in d["compile_events"]),
             stdout_path=d["stdout_path"],
             stderr_path=d["stderr_path"],
@@ -585,12 +513,35 @@ class Handle:
         here would close a cycle."""
         return _exec_in_jail(self, argv, interactive)
 
+    def _as_jail(self) -> Jail:
+        """The `Jail` this handle describes (decision-181): its runtime, its
+        first process known, its hold on the tether when this process
+        launched it. What `probe` runs through, so every probe is a
+        `jail.start` (TASK-0079.26). A jail built from a rehydrated handle carries
+        no tether hold and is treated as untethered, as a rehydrated handle's
+        `exec` always was."""
+        return Jail(
+            jail_id=self.jail_id,
+            jail_dir=self.jail_dir,
+            spec=self.spec,
+            report=self.report,
+            signatures=self.signatures,
+            channels=self.channels,
+            compile_events=self.compile_events,
+            _runtime=self.runtime,
+            _base=self.record(),
+            _tethered=self.held is not None and self.held.tether is not None,
+            _created_here=True,
+        )
+
     def probe(self, battery: Battery) -> ProbeReport:
-        """Delegates to `battery.run(self)` (task-050, SPEC.md section 9/12).
+        """`battery.run` on the `Jail` this handle describes (`_as_jail()`), so
+        each probe is a process started through `Jail.start` (decision-181,
+        TASK-0079.26; before it, `battery.run(self)`, task-050).
 
         `run` imports nothing from `probe`: `Battery` and `ProbeReport` are
         `core`-typed names (task-045/task-048), which is the whole reason
         they were put there -- `run` may not import `probe` (SPEC.md section
         13), so this method names both its parameter and its return type
         without ever reaching for `brig.probe`."""
-        return battery.run(self)
+        return battery.run(self._as_jail())
