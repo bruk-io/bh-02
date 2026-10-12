@@ -84,6 +84,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **tripwire** (Linux): the jail ending itself at once when the host replaces, moves or removes a path it holds with a mount ([The jail](../docs/bh-02/using/jail.md#on-linux)).
 - **release** (row): `runner:release`: `/release`, which stops the Python process and the extensions process until the next input and frees what their jails held.
 - **approval** (row and key): `runner:approval`, the one rule for whether what the model asked for runs unasked; what it doesn't let run is put to you ([The jail and approval](../docs/bh-02/how-it-works/jail-and-approval.md)).
+- **runs** (a tool's): where a tool's calls run, which decides whether they are asked: `"jail"` (the runner's, the default), `"harness"` (bh-02's own process acting only on the session's jail and its own state, such as a sub-agent tool; only a layer's row may say it) and `"jail"` alike are unasked when the runner confines, and `"host"` is always asked (CONTRACTS.md: tools).
 - **the modal**: the question the model's code is put to you in when it is unjailed: `y` runs it, `n` or Esc doesn't.
 - **host**: the side outside the jail: bh-02's own process and brig's host process, whose import paths, environment and files a jailed input can't reach.
 - **composer**: the box along the bottom of the app where you type a message or a command.

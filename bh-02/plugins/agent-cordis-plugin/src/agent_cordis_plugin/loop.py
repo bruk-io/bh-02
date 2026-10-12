@@ -10,8 +10,9 @@ kept there too and told to the model as an aside on the next message it reads (`
 while each request offers the list as the provider chooses (`tool_changes`: by default the one
 the conversation began with, so a model server's cache of the conversation's start stays good).
 Each call is put to `approval` first and runs only on its yes (at once when it runs in a jail
-that confines it; otherwise the person's answer): one place for every model provider, and the
-loop knows whether a stopped call ever reached its tool.
+that confines it, or is bh-02's own harness tool and the runner confines; otherwise the
+person's answer): one place for every model provider, and the loop knows whether a stopped call
+ever reached its tool.
 
 Every request begins with the system prompt the conversation began with, kept in its transcript,
 so a model server's cache of the conversation stays good. When the prompt reads differently (an
@@ -148,7 +149,8 @@ class Approval(Protocol):
 @runtime_checkable
 class Rule(Protocol):
     """What the loop needs of the `approval` value (CONTRACTS.md: approval): whether a call runs
-    without asking the person (it runs in a runner that confines it)."""
+    without asking the person (it runs in a runner that confines it, or it is bh-02's own
+    harness tool and the runner confines)."""
 
     def unasked(self, request: Json) -> bool: ...
 
