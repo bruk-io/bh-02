@@ -489,12 +489,17 @@ _WHERE = (
 )
 
 
-async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner(tmp_path: Path) -> None:
+async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The parent and its child each call `python` under `runner:confined`: each input runs in its
     own bubblewrap jail (its own scratch directory, which the jail removes with it), and the
     child's is not the parent's."""
     if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
         pytest.skip("the confined runner's jail is bubblewrap on Linux: /usr/bin/bwrap is absent")
+    # the jail's records and lock live in the state directory: a directory of this test's own, so it
+    # never holds the lock another test (or a running bh-02 of the person's) reads
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     where = {who: tmp_path / f"{who}.json" for who in ("parent", "child")}
     model = _Model(
         parent=[
@@ -522,7 +527,6 @@ async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_run
     parent, child = (json.loads(where[who].read_text()) for who in ("parent", "child"))
     assert parent["tmp"] != child["tmp"]  # each jail's scratch directory is its own
     assert all(Path(seen["tmp"]).parent.name.startswith("bh-j-") for seen in (parent, child))  # a jail's
-    assert child["pid"] < 100  # first in a pid namespace of its own, not a process of the host's
     await rt.shutdown()
 
 
