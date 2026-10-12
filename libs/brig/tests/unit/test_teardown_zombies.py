@@ -10,7 +10,7 @@ import subprocess
 import pytest
 
 from brig.run import group_alive, teardown
-from brig.run.teardown import UnreadableProcessTable, _live_group_members
+from brig.run.teardown import UnreadableProcessTable, _live_group_members, _unsignalable
 
 _PS = """\
   100   100 Ss
@@ -114,3 +114,16 @@ def test_teardown_fails_an_item_whose_table_it_cannot_read(
     outcome, detail = teardown._guarded_ladder(pgid, 1234, "x", 0.1)
     assert outcome is teardown.KillOutcome.FAILED, detail
     assert "UnreadableProcessTable" in detail, detail
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pgid", [0, 1, -1, -5])
+def test_a_group_that_is_not_one_a_jail_can_have_is_unsignalable(pgid: int) -> None:
+    assert _unsignalable(pgid, own_pgid=4242) is not None
+
+
+@pytest.mark.unit
+def test_the_callers_own_group_is_unsignalable_and_any_other_is_not() -> None:
+    assert "own" in (_unsignalable(4242, own_pgid=4242) or "")
+    assert _unsignalable(4243, own_pgid=4242) is None
+    assert _unsignalable(2, own_pgid=4242) is None

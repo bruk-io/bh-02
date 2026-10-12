@@ -33,7 +33,7 @@ from brig.core import Spec
 from brig.run import IoPolicy, SubprocessLauncher, _execs, _identity
 from brig.run.exec_ import exec_in_jail
 from brig.run.handle import Handle
-from brig.run.teardown import KillOutcome, unsignalable
+from brig.run.teardown import KillOutcome
 from brig.stack import Stack
 from tests.conftest import teardown_group, workload_argv
 
@@ -183,7 +183,7 @@ def test_a_record_naming_the_trusted_process_s_own_group_is_refused_and_nothing_
     )
     try:
         assert child.returncode == 0, (
-            f"the child running kill_jail exited with {child.returncode} (negative: killed by "
+            f"the child running handle.kill() exited with {child.returncode} (negative: killed by "
             f"that signal), so the own-group guard regressed and teardown signalled its own "
             f"group; stderr: {child.stderr}"
         )
@@ -198,17 +198,6 @@ def test_a_record_naming_the_trusted_process_s_own_group_is_refused_and_nothing_
         assert "nothing was signalled" in zero_item[2], zero_item
     finally:
         shutil.rmtree(jail_dir, ignore_errors=True)
-
-
-@pytest.mark.parametrize("pgid", [0, 1, -1, -5])
-def test_a_group_that_is_not_one_a_jail_can_have_is_unsignalable(pgid: int) -> None:
-    assert unsignalable(pgid, own_pgid=4242) is not None
-
-
-def test_the_callers_own_group_is_unsignalable_and_any_other_is_not() -> None:
-    assert "own" in (unsignalable(4242, own_pgid=4242) or "")
-    assert unsignalable(4243, own_pgid=4242) is None
-    assert unsignalable(2, own_pgid=4242) is None
 
 
 def test_an_exception_from_one_item_is_that_item_s_failure_and_a_later_item_still_ends(
