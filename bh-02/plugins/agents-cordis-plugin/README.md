@@ -1,6 +1,6 @@
 # agents-cordis-plugin
 
-Sub-agents: the `agent` and `agent_wait` tools, each `agent` call a child conversation of its
+Sub-agents: the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools and `/agents`, each `agent` call a child conversation of its
 own, of a type that is data, mounted in a sealed cordis realm while it runs, its questions put to
 the person labelled with its name and type, and its last answer handed back as its report, in the
 foreground or, with `background`, to `agent_wait`. The design is decision-0002
@@ -8,9 +8,9 @@ foreground or, with `background`, to `agent_wait`. The design is decision-0002
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agents:agents` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; registers the `agent` and `agent_wait` tools (`runs="harness"`) and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `executor`, `python`), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
+| `agents:agents` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `executor`, `python`), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
 | `agents:output` | a child's `output`, inside its realm: `confirm(request)` through `asker`, the request labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
-| `agents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system` |
+| `agents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system`, `asides` (`add`: what `agent_send` left) |
 
 The agents row writes the two inner rows' config; a layer names only `agents:agents`.
 
@@ -122,7 +122,7 @@ screen; the person sees the `agent` call and its report.
   one is up is withdrawn, and the child is retired.
 - **Retired from outside** while it replies (its realm's fiber), the call ends with no report:
   `gave no report: it was stopped before it answered`.
-- **Background children** keep running through Ctrl-C (and an `agent_wait` it stops).
+- **Background children** keep running through Ctrl-C (and an `agent_wait` it stops); the stop notice says how many.
 - **The agents row unloading** (a restart, a layer that drops it, the session ending) cancels
   every background run and retires every child it still holds: each mount is an effect
   performed on its fiber, whose undo is the child's retirement.
@@ -134,7 +134,50 @@ they run under `agents/NAME/...` instead, and the ui shows none of their lifecyc
 keeps every one, prefixed. The runner's status field describes its last start, which may be a
 child's: the policy is the same.
 
-Later (decision-0002's split): `agent_send` and `agent_stop`, `/agents stop`, and what `/clear`,
-`/model` and the rest do to running children (TASK-0080.05), watching a child: its event log,
-`bh-02 watch`, tmux panes, `/agents` (TASK-0080.06), and the project's guidance in a child
+## Talking to a child, and ending it
+
+- **`agent_send(name, text)`** (`tools.agent_send(name=..., text=...)` in an input) leaves `text`
+  in a running child's mailbox (`Hand`). The child reads it as an *aside* (`agents:child` adds
+  one to its `asides`, which the loop asks after every call, on the executor): the text rides
+  with its next call's result, framed `Message from your parent agent (the agent that started
+  you), not from the person:` (`parent_message`, decision-0002's default, the owner's to revise).
+  A child that answers before another call is made reads what is left as a message of its own:
+  the run replies again with it, and the report is then the last turn's. Once the reply has ended
+  with the mailbox empty it takes no more: the call answers that the agent has just finished. A
+  name that is no running child is answered `error: no sub-agent named ... is running; the
+  running ones are ...`. The mailbox is the parent's only way to a child; the child's text never
+  reaches the parent but as its report.
+- **`agent_stop(name)`** (`tools.agent_stop(name=...)`) retires the child's realm (`Fiber.retire`),
+  and with it its python row, whose program the runner stops: the run's report is `gave no
+  report: it was stopped before it answered`, and a child still waiting for a slot never mounts.
+  Same error for a name that is not running. Foreground children are the parent's reply's: only
+  a background one can be stopped from the parent's own tool, and `/agents stop` reaches the
+  rest once the reply has ended.
+- **`/agents`** lists the running children (name, type, foreground or background, what each is
+  doing: waiting to start, starting, calling a tool, thinking, answering, and the path of its
+  transcript, for the person). **`/agents stop [NAME]`** ends one or all.
+
+### What other commands do to children
+
+Children are the agents row's, so what ends them is the row reloading:
+
+| | children |
+|---|---|
+| `/clear` | end, each with a note. The shipped `conversation` row's `clear` names `agents` beside `loop`, `transcript` and `python`, so a new conversation restarts this row; a layer replacing that row's config must keep it to keep this. |
+| `/model NAME` | end, each with a note: the row consumes `model` (for its lifetime alone), which a switch reloads; their reports would land in another conversation. |
+| a restart of the row (`/restart agents`, a layer that changes it) | end, each with a note. |
+| `/compact` | keep running: nothing it restarts (`loop`, `transcript`) is a row this one depends on. |
+| `/release` | stops their python programs only: each child's python row registers its stop with the runner as the parent's does. Their conversations go on, and the next input starts a program again. |
+
+The note for a child ended this way is `agent NAME (TYPE) was ended before it answered: the agents
+row restarted ...` (shown by the run as it ends, whatever ended it from outside), and a restart
+counts the session's budget and names afresh. Unloading waits (5 seconds) for the runs of retired
+children to say so before cancelling the rest.
+
+After Ctrl-C the chat row shows the notes rows have for a stop (`commands.stop_notes`): this
+row's is `2 background agents still run; /agents stop ends them`, none when no background child
+runs.
+
+Later (decision-0002's split): watching a child: its event log, `bh-02 watch`, tmux panes, a
+status field and `/agents watch` (TASK-0080.06), and the project's guidance in a child
 (TASK-0080.07).

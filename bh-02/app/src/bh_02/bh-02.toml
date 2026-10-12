@@ -127,10 +127,13 @@ use = "commands:jobs"
 id = "switch"
 use = "models:switch"
 
-# `/clear` and `/compact`; config `timeout`: the seconds `/compact`'s summary may take (300).
+# `/clear` and `/compact`; config `timeout`: the seconds `/compact`'s summary may take (300);
+# `clear`: the rows `/clear` restarts, `agents` among them so a new conversation ends the sub-agents
+# running for the old one (`/compact` keeps them).
 [[plugin]]
 id = "conversation"
 use = "agent:conversation"
+config = { clear = ["loop", "transcript", "python", "agents"] }
 
 # `!COMMAND`: your shell, as you, unjailed; config `timeout` (120 s), `prefix`, `cwd`, `shell`.
 [[plugin]]

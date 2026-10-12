@@ -19,6 +19,8 @@ from typing import Any, Protocol, runtime_checkable
 import cordis.loader
 from agents_cordis_plugin.agents import (
     AGENT,
+    AGENT_SEND,
+    AGENT_STOP,
     AGENT_WAIT,
     Agents,
     AgentsConfig,
@@ -73,6 +75,31 @@ class _Sections(Protocol):
     def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]: ...
 
 
+@runtime_checkable
+class _Commands(Protocol):
+    """What the agents row needs of the `commands` value (CONTRACTS.md: commands): a command
+    registered, and a note for the stop notice after Ctrl-C, each with its remover back."""
+
+    def register(
+        self, spec: Mapping[str, Any], run: Callable[[str], Awaitable[str]]
+    ) -> Callable[[], None]: ...
+    def on_stop(self, note: Callable[[], str]) -> Callable[[], None]: ...
+
+
+@runtime_checkable
+class _Asides(Protocol):
+    """What a child's row needs of its `asides` value (CONTRACTS.md: asides): a function added."""
+
+    def add(self, fn: Callable[[Mapping[str, Any]], str]) -> Callable[[], None]: ...
+
+
+_AGENTS: Mapping[str, str] = {
+    "name": "agents",
+    "help": "list the running sub-agents, or end them",
+    "usage": "[stop [NAME]]",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class _Child:
     """A mounted child: its realm's fiber, retired to end it, and read (through cordis's
@@ -117,16 +144,20 @@ async def agents(
     output: Output,
     loader: Rows,
     host: _Trusted,
+    commands: _Commands,
+    model: object,
     config: AgentsConfig,
 ) -> Effects:
     """Fills an `agents` row: `use = "agents:agents"`. Binds `asker` (a confirm-only view of the
-    parent's `output`, for its children), registers the `agent` and `agent_wait` tools
+    parent's `output`, for its children), registers the `agent`, `agent_wait`, `agent_send` and
+    `agent_stop` tools
     (`runs="harness"`: bh-02's own, unasked exactly when the runner confines) and tells the model
     of them in the `system` section `agents`. Each `agent` call mounts one child through this
     row's performer, of a type read from bh-02's config directories (`host.trusted`) or shipped,
     from the rows the parent's loader mounted (`loader.rows`, as `config.rows` names them),
     drives its reply and retires it; unloading this row cancels every background run and retires
-    every child still up."""
+    every child still up. It consumes `model` for its lifetime alone: a model switch (`/model`) reloads
+    it, ending the children, whose reports would land in another conversation."""
     performing: Performer = yield performer()
     yield bind("asker", Asker(output))
     types = partial(read_types, host.trusted, config.tools)
@@ -134,6 +165,10 @@ async def agents(
     yield acquire(run.held)
     yield acquire(tools.register, AGENT, run.agent, runs="harness")
     yield acquire(tools.register, AGENT_WAIT, run.agent_wait, runs="harness")
+    yield acquire(tools.register, AGENT_SEND, run.agent_send, runs="harness")
+    yield acquire(tools.register, AGENT_STOP, run.agent_stop, runs="harness")
+    yield acquire(commands.register, _AGENTS, run.command)
+    yield acquire(commands.on_stop, run.stop_note)
     # the section names the types there are as a conversation begins (read on the executor)
     yield acquire(system.add, "agents", lambda: section(type_names(host.trusted, config.tools)))
 
@@ -163,8 +198,10 @@ class ChildConfig:
 
 
 @component
-async def child(*, loop: Loop, system: _Sections, config: ChildConfig) -> Effects:
+async def child(*, loop: Loop, system: _Sections, asides: _Asides, config: ChildConfig) -> Effects:
     """A child's own row (`use = "agents:child"`, inside its realm): adds its type's section to
-    its prompt (`agent`) and passes its loop to the run that mounted it; leaving says it is gone."""
+    its prompt (`agent`), an aside that tells it what `agent_send` left for it, and passes its
+    loop to the run that mounted it; leaving says it is gone."""
     yield acquire(system.add, "agent", lambda: config.section)
+    yield acquire(asides.add, config.hand.aside)
     yield acquire(config.hand.give, loop)

@@ -1426,7 +1426,7 @@ async def test_a_resumed_conversation_is_told_its_asides_once_and_clear_tells_th
     assert afresh.startswith(told) and afresh.endswith("\n[2] 6\n[3] 0\n"), afresh  # /clear: told afresh
     assert (
         f"the conversation was cleared (the old one is kept as {history}.bak); starting afresh: loop, "
-        "transcript, python"
+        "transcript, python, agents"
     ) in fragile.NOTES
 
 

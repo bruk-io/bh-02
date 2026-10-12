@@ -26,11 +26,12 @@ A line is a command when it starts with `/name` followed by a space or nothing. 
 | Command | What it does |
 |---|---|
 | `/help` | lists the commands |
-| `/clear` | starts a new conversation and an empty Python process, the old conversation kept as `transcript.jsonl.bak`. The screen clears to one note; the session's usage totals stay. |
-| `/compact [WHAT TO KEEP]` | asks the model to summarise the conversation, then carries on in a new one that starts from the summary. The Python process keeps its namespace. |
-| `/model [NAME]` | lists the models, or switches to `NAME` for this session ([Models](models.md)) |
+| `/clear` | starts a new conversation and an empty Python process, the old conversation kept as `transcript.jsonl.bak`. The screen clears to one note; the session's usage totals stay. Running sub-agents end, each with a note. |
+| `/compact [WHAT TO KEEP]` | asks the model to summarise the conversation, then carries on in a new one that starts from the summary. The Python process keeps its namespace, and running sub-agents carry on. |
+| `/model [NAME]` | lists the models, or switches to `NAME` for this session ([Models](models.md)); running sub-agents end, each with a note |
 | `/memory` | lists the memory files the model is told and how each loads ([Memory](memory.md)) |
-| `/release` | stops what runs in the jail (the Python process, the extensions' process) until the next input ([The jail](jail.md)) |
+| `/agents [stop [NAME]]` | lists the sub-agents running (name, type, what each is doing, its transcript's path), or ends one or all of them ([Sub-agents](#sub-agents)) |
+| `/release` | stops what runs in the jail (the Python process, the extensions' process, each running sub-agent's Python process) until the next input ([The jail](jail.md)); sub-agents' conversations go on |
 | `/rows` | shows the running composition: each row, the component that fills it, and its state |
 | `/explain ROW` | says what cordis knows about a row |
 | `/restart ROW` | starts a row afresh; the rows that depend on it reload |
@@ -52,6 +53,18 @@ too): [the conversation row](../reference/plugins/agent.md).
 example `/restart python` starts a new Python process, which runs your startup files again when it is jailed. `/clear`
 is a restart too, of the conversation's rows. [Rows and layers](../how-it-works/rows-and-layers.md)
 explains what a row is.
+
+### Sub-agents
+
+The model can start sub-agents (`agent`), tell a running one something (`agent_send`, which the
+child reads framed as from its parent agent) and end one (`agent_stop`). `/agents` lists those
+running: name, type, foreground or background, what each is doing, and the path of its
+transcript. `/agents stop NAME` ends one, `/agents stop` all of them; each conversation ends with
+its Python process. Ctrl-C stops the reply and the sub-agent it waits on, but not the background
+ones: its notice says how many still run and that `/agents stop` ends them. `/clear`, `/model`
+and `/restart agents` end the running ones too, each with a note; `/compact` keeps them, and
+`/release` stops only their Python processes. Details:
+[agents-cordis-plugin](../../../bh-02/plugins/agents-cordis-plugin/README.md).
 
 ## Shell commands: `!COMMAND`
 

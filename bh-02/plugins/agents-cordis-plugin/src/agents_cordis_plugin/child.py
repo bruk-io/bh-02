@@ -30,18 +30,27 @@ __all__ = [
     "agents_dir",
     "asked_why",
     "child_rows",
+    "Listed",
     "denied",
+    "doing",
     "ended",
     "framed",
     "label",
     "labelled",
     "limited",
+    "listing",
+    "lost",
     "next_name",
+    "not_running",
+    "parent_message",
+    "parsed_command",
     "prefixed",
     "report_of",
     "session_model",
     "start_request",
     "stepped",
+    "stop_note",
+    "stopped",
     "unknown_type",
     "usage_event",
     "waited",
@@ -342,4 +351,92 @@ def waited(
     return (
         "\n\n".join(parts)
         or "No agents named: give agent_wait the names `agent(..., background=True)` returned."
+    )
+
+
+def parent_message(texts: Sequence[str]) -> str:
+    """What a child reads of `agent_send` texts: framed as from its parent agent, the one that
+    started it, and not from the person or the project (decision-0002's framing)."""
+    body = "\n\n".join(texts)
+    return f"Message from your parent agent (the agent that started you), not from the person:\n\n{body}"
+
+
+def not_running(name: str, running: Iterable[str]) -> str:
+    """`agent_send`'s and `agent_stop`'s result for a name that is no running child."""
+    names = ", ".join(running) or "none"
+    return f"error: no sub-agent named {name!r} is running; the running ones are {names}"
+
+
+def doing(event: Mapping[str, Any], before: str) -> str:
+    """What a child is doing after one of its reply's events, for `/agents`: calling a tool,
+    thinking (a result came back), or answering."""
+    match event.get("type"):
+        case "tool_call":
+            return f"calling {event.get('name', '?')}"
+        case "tool_result":
+            return "thinking"
+        case "text":
+            return "answering"
+    return before
+
+
+@dataclass(frozen=True, slots=True)
+class Listed:
+    """One running child as `/agents` lists it: who, what it is doing, and its transcript (for the
+    person; None when the session keeps its conversation in memory)."""
+
+    name: str
+    type: str
+    background: bool
+    doing: str
+    transcript: str | None
+
+
+def listing(children: Sequence[Listed]) -> str:
+    """`/agents`' answer: the running children, one line each."""
+    if not children:
+        return "No sub-agents are running."
+    many = "s" if len(children) != 1 else ""
+    lines = [f"{len(children)} sub-agent{many} running (/agents stop [NAME] ends them):"]
+    for child in children:
+        where = f"; transcript {child.transcript}" if child.transcript else ""
+        mode = "background" if child.background else "foreground"
+        lines.append(f"  {child.name} ({child.type}, {mode}): {child.doing}{where}")
+    return "\n".join(lines)
+
+
+def parsed_command(args: str) -> tuple[str, str] | str:
+    """`/agents`' arguments as `("list", "")`, `("stop", NAME)` (NAME empty: all), or why they are
+    none of those."""
+    words = args.split()
+    match words:
+        case []:
+            return ("list", "")
+        case ["stop"]:
+            return ("stop", "")
+        case ["stop", name]:
+            return ("stop", name)
+    return f"/agents takes nothing (it lists) or `stop [NAME]`, not {args!r}"
+
+
+def stopped(names: Sequence[str], running: Iterable[str]) -> str:
+    """The answer to a stop: which children ended, or that none was running."""
+    if not names:
+        return f"No sub-agent was running to stop (running: {', '.join(running) or 'none'})."
+    return f"Stopped {', '.join(names)}: each conversation ended, with its python program."
+
+
+def stop_note(background: int) -> str:
+    """What the stop notice adds after Ctrl-C: how many background agents still run ('' for none)."""
+    if background == 0:
+        return ""
+    many = f"{background} background agents still run" if background != 1 else "1 background agent still runs"
+    return f"{many}; /agents stop ends them"
+
+
+def lost(name: str, kind: str) -> str:
+    """The note for a child ended from outside: its realm was retired while it ran."""
+    return (
+        f"agent {name} ({kind}) was ended before it answered: the agents row restarted "
+        "(/clear, /model and /restart agents do that) or bh-02 is leaving"
     )

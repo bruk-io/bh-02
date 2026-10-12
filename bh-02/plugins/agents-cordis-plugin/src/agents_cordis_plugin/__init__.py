@@ -5,6 +5,8 @@ and its last answer handed back as its report."""
 
 from agents_cordis_plugin.agents import (
     AGENT,
+    AGENT_SEND,
+    AGENT_STOP,
     AGENT_WAIT,
     Agents,
     AgentsConfig,
@@ -54,6 +56,8 @@ from agents_cordis_plugin.wiring import ChildConfig, OutputConfig, agents, child
 
 __all__ = [
     "AGENT",
+    "AGENT_SEND",
+    "AGENT_STOP",
     "AGENT_WAIT",
     "EXPLORE",
     "GENERAL",

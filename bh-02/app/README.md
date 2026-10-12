@@ -48,7 +48,7 @@ rest of the user guide is on the docs site: [Sessions](../../docs/bh-02/using/se
 | `operator` | `commands:operator` | |
 | `jobs` | `commands:jobs` | |
 | `switch` | `models:switch` | `layer` (the session's), `model_row` (`model`) |
-| `conversation` | `agent:conversation` (`timeout`: 300) | |
+| `conversation` | `agent:conversation` (`timeout`: 300; `clear`: `loop`, `transcript`, `python`, `agents`) | |
 | `shell-command` | `commands:shell_command` | |
 | `status` | `tui:status` | |
 | `grades` | `tui:grades` | |
@@ -110,7 +110,7 @@ tui:grades              pushes the jail field              depends on Runner, Ap
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:converse           runs the chat, binds Done          depends on Loop, Input, Output, Commands, Jobs
 extensions:extensions   loads the model's own plugins      depends on Runner, Commands, Frame, System, Tools, Approval, Output
-agents:agents           binds Asker, registers agent tools depends on Tools, System, Output, Loader, Host (each call mounts a child; see below)
+agents:agents           binds Asker, registers agent tools depends on Tools, System, Output, Loader, Host, Commands, Model (each call mounts a child; /agents; a Model reload ends them; see below)
 ```
 
 A sub-agent (`agent`, the agents row) is not a row of these layers: each call mounts one child
@@ -124,7 +124,7 @@ bh-02's config directory (`host.trusted`). From outside it reads only `runner`, 
 `host` and `asker`. It runs in the foreground, or in the background for `agent_wait`, at most
 `max_running` at once, until its type's step limit; past `session_agents`, or naming a model
 other than its type's, its start is asked first. It is retired when it answers, when the call is
-stopped (Ctrl-C; a background child is not), or with the agents row, and what it used joins
+stopped (Ctrl-C; a background child is not), by `agent_stop` or `/agents stop`, or with the agents row (a `/clear`, a `/model` switch or a restart of it), and what it used joins
 the session's totals; the ui shows none of its rows' lifecycle, and `--trace` keeps them ([agents-cordis-plugin](../plugins/agents-cordis-plugin/README.md)).
 
 So a new model or ui keeps the Python process and its namespace (the python row depends on the
@@ -143,7 +143,7 @@ has its rows' config and the keys' methods each one uses.
 | Package | Binds / registers | Consumes |
 |---|---|---|
 | [`agent-cordis-plugin`](../plugins/agent-cordis-plugin/README.md) | `loop`, `tools`, `transcript`, `system`, `asides`, `access`, `executor`; `/clear` and `/compact` (`agent:conversation`) | `model`, `tools`, `transcript`, `system`, `approval`, `output`, `asides`, `executor`, `loader`, `commands`, `jobs` |
-| [`agents-cordis-plugin`](../plugins/agents-cordis-plugin/README.md) | `asker` and the `agent` and `agent_wait` tools (`agents:agents`); inside a child's realm, its `output` (`agents:output`) and its type's section (`agents:child`) | `tools`, `system`, `output`, `loader`, `host`; in a child, `asker`, `loop`, `system` |
+| [`agents-cordis-plugin`](../plugins/agents-cordis-plugin/README.md) | `asker`, the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools and `/agents` (`agents:agents`); inside a child's realm, its `output` (`agents:output`) and its type's section (`agents:child`) | `tools`, `system`, `output`, `loader`, `host`, `commands`, `model`; in a child, `asker`, `loop`, `system` |
 | [`chat-cordis-plugin`](../plugins/chat-cordis-plugin/README.md) | `done` (`chat:converse`, the chat itself) | `loop`, `input`, `output`, `commands`, `jobs` |
 | [`commands-cordis-plugin`](../plugins/commands-cordis-plugin/README.md) | `commands` (the broker), `jobs`; `/rows`, `/explain`, `/restart` (`commands:operator`); the `!` prefix (`commands:shell_command`) | `output`, `commands`, `loader`, `jobs` |
 | [`extensions-cordis-plugin`](../plugins/extensions-cordis-plugin/README.md) | nothing: loads the model's own plugins into the extensions process, whose additions go into `commands`, `frame`, `system` and `tools` | `runner`, `commands`, `frame`, `system`, `tools`, `approval`, `output` |

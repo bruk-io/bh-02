@@ -87,6 +87,8 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **sub-agent**, **agent** (a child): a conversation the model starts with the `agent` tool (or `tools.agent(...)` in an input) to do one task, named by bh-02 `TYPE-N` (`general-1`); it runs on the host with a python tool of its own and its last answer comes back as its report (agents plugin).
 - **agent type**: what kind of sub-agent: its section of the prompt, its model, its step limit and the tool rows it gets; data, never a row: `explore` and `general` are shipped, and yours are `~/.config/bh-02/agents/NAME.toml` (agents plugin).
 - **background agent**: a sub-agent started with `agent(..., background=True)`, which answers its name at once; `agent_wait(names)` returns its report, and Ctrl-C leaves it running.
+- **agent_send**, **agent_stop** (tools): `agent_send(name, text)` leaves text for a running sub-agent, which reads it framed as from its parent agent with its next call's result (or as a message of its own if it answers first); `agent_stop(name)` ends it and its Python process. `/agents` lists the running ones and `/agents stop [NAME]` ends them.
+- **stop notice**: what the ui shows when Ctrl-C stops a reply, with the notes rows add to it (`commands.on_stop`), such as how many background agents still run.
 - **step limit** (a sub-agent's): how many model steps its type lets it take (30 unless it says), after which it ends with what it has, its report saying so.
 - **session budget**: how many sub-agents start before each further start is put to you (`session_agents`, 16); a start naming a model other than its type's is asked too.
 - **max_running**: how many sub-agents run at once (4); a further one waits for a slot, and a note says so.

@@ -82,6 +82,32 @@ async def test_an_interrupt_stops_the_turn_says_so_and_the_session_carries_on() 
     await asyncio.wait_for(session, 1)
 
 
+async def test_the_stop_notice_carries_the_notes_rows_have_for_it() -> None:
+    """After a stopped turn the notes rows have for a stop (`commands.stop_notes`: background
+    agents still running) are shown as notes; a turn that ends on its own shows none."""
+
+    class Endless:
+        async def reply(self, message: str) -> AsyncIterator[dict[str, Any]]:
+            await asyncio.Event().wait()
+            yield {}  # pragma: no cover
+
+    screen, typed, commands = Screen(), Typed("first"), Noted()
+    commands.stops = ["2 background agents still run; /agents stop ends them"]
+    session = asyncio.create_task(converse(Endless(), typed, screen, commands))
+    await asyncio.sleep(0.01)
+    typed.interrupt()
+    await asyncio.sleep(0.01)
+    assert screen.events[-2:] == [
+        {"type": "stop", "reason": "interrupted"},
+        {"type": "note", "text": "2 background agents still run; /agents stop ends them"},
+    ]
+    typed.type(None)
+    await asyncio.wait_for(session, 1)
+    done = Screen()
+    await converse(Echo(), Typed("hi", None), done, commands)  # type: ignore[arg-type]
+    assert all(e.get("type") != "note" for e in done.events)
+
+
 async def test_a_line_the_commands_claim_goes_to_them_and_never_to_the_model() -> None:
     """Which lines are commands is the `commands` value's to say (`claims`), not the chat's."""
     echo, screen, commands = Echo(), Screen(), Noted("/rows", "!ls", "/model haiku")

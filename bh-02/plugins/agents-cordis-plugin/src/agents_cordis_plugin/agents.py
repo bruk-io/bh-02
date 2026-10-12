@@ -22,6 +22,7 @@ the agents row unloading, which retires every child) ends the run with no report
 """
 
 import asyncio
+import collections
 import contextlib
 import dataclasses
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -32,21 +33,30 @@ from typing import Any, Protocol, runtime_checkable
 from agents_cordis_plugin.child import (
     ChildRow,
     Entry,
+    Listed,
     Steps,
     agents_dir,
     asked_why,
     child_rows,
     denied,
+    doing,
     ended,
     framed,
     label,
     labelled,
     limited,
+    listing,
+    lost,
     next_name,
+    not_running,
+    parent_message,
+    parsed_command,
     report_of,
     session_model,
     start_request,
     stepped,
+    stop_note,
+    stopped,
     unknown_type,
     usage_event,
     waited,
@@ -55,6 +65,8 @@ from agents_cordis_plugin.kinds import AgentType
 
 __all__ = [
     "AGENT",
+    "AGENT_SEND",
+    "AGENT_STOP",
     "AGENT_WAIT",
     "Agents",
     "AgentsConfig",
@@ -106,6 +118,29 @@ AGENT_WAIT: Json = {
     },
 }
 
+AGENT_SEND: Json = {
+    "name": "agent_send",
+    "description": "Send a message to a running sub-agent, framed as from you, its parent.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "The running agent's name."},
+            "text": {"type": "string", "description": "What to tell it."},
+        },
+        "required": ["name", "text"],
+    },
+}
+
+AGENT_STOP: Json = {
+    "name": "agent_stop",
+    "description": "End a running sub-agent and everything it started.",
+    "parameters": {
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "The running agent's name."}},
+        "required": ["name"],
+    },
+}
+
 
 def section(types: Sequence[str]) -> str:
     """What the model is told of the tools, in a section of their own: the `types` there are."""
@@ -118,8 +153,12 @@ def section(types: Sequence[str]) -> str:
         f"you. The types are {', '.join(types)}; `explore` finds things out and changes nothing. "
         "Give it a whole task and what it needs to know. With `background=True` the call answers "
         "its name at once, and `agent_wait(names, timeout)` returns the reports as they finish. "
+        "`agent_send(name, text)` tells a running one something (it reads it framed as from you, "
+        "with its next call's result, or as its next message if it is about to answer), and "
+        "`agent_stop(name)` ends it. "
         "A few run at once; more wait their turn. A sub-agent can't start one of its own. In a "
-        "python input they are `tools.agent(prompt=..., type=...)` and `tools.agent_wait(names=[...])`."
+        "python input they are `tools.agent(prompt=..., type=...)`, `tools.agent_wait(names=[...])`, "
+        "`tools.agent_send(name=..., text=...)` and `tools.agent_stop(name=...)`."
     )
 
 
@@ -206,6 +245,8 @@ class Hand:
         self._loop: Loop | None = None
         self._given = asyncio.Event()
         self._gone = asyncio.Event()
+        self._mail: collections.deque[str] = collections.deque()  # `agent_send` texts not yet read
+        self._closed = False  # the reply has ended: no more mail is taken
 
     def give(self, loop: Loop) -> Callable[[], None]:
         """Pass the child's loop; the remover says it is gone."""
@@ -225,6 +266,34 @@ class Hand:
     async def gone(self) -> None:
         """Return once the child's loop is gone."""
         await self._gone.wait()
+
+    def is_gone(self) -> bool:
+        return self._gone.is_set()
+
+    def send(self, text: str) -> bool:
+        """Leave `text` for the child to read; False once its reply has ended and it reads no more.
+        Called on the event loop, as `close` is."""
+        if self._closed:
+            return False
+        self._mail.append(text)
+        return True
+
+    def take(self) -> tuple[str, ...]:
+        """The texts left since the last take, in order (called on the executor too, as an
+        aside: a deque's pop is atomic)."""
+        taken: list[str] = []
+        while self._mail:
+            taken.append(self._mail.popleft())
+        return tuple(taken)
+
+    def close(self) -> None:
+        """The reply has ended with no mail left: `send` says so from now on."""
+        self._closed = True
+
+    def aside(self, call: Json) -> str:
+        """The child's `asides` function: what was sent, framed as from its parent, with its
+        next call's result ('' for none)."""
+        return parent_message(taken) if (taken := self.take()) else ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +348,29 @@ class AgentsConfig:
             )
 
 
+class _Live:
+    """A child that is running: what `/agents` lists, `agent_send` leaves mail for and a stop ends."""
+
+    def __init__(self, name: str, kind: str, background: bool, place: PurePath | None, hand: Hand) -> None:
+        self.name, self.kind, self.background, self.place, self.hand = name, kind, background, place, hand
+        self.doing = "waiting to start"
+        self.child: _Child | None = None
+        self.stopped = False
+
+    def seen(self, event: Json) -> None:
+        self.doing = doing(event, self.doing)
+
+    async def stop(self) -> None:
+        """End it: its realm retired (its python program with it); one not yet mounted never is."""
+        self.stopped = True
+        if self.child is not None:
+            await self.child.retire()
+
+    def listed(self) -> Listed:
+        where = str(self.place / "transcript.jsonl") if self.place is not None else None
+        return Listed(self.name, self.kind, self.background, self.doing, where)
+
+
 class Agents:
     """The `agent` and `agent_wait` tools' runs, over the parent's rows (`loader`), its `output`,
     the types there are (`types`) and a way to mount a child (`mount`). Keeps the names it gave,
@@ -297,6 +389,7 @@ class Agents:
         self._started = 0
         self._slots = asyncio.Semaphore(config.max_running)
         self._background: dict[str, asyncio.Task[str]] = {}
+        self._live: dict[str, _Live] = {}
 
     async def agent(self, input: Json) -> dict[str, Any]:
         """Start one child on `input["prompt"]` and answer with its report, framed
@@ -339,8 +432,10 @@ class Agents:
             hand=hand,
         )
         self._started += 1
-        run = self._run(name, kind, str(input.get("prompt", "")), rows, hand)
-        if input.get("background") is not True:
+        background = input.get("background") is True
+        live = self._live[name] = _Live(name, kind.name, background, place, hand)
+        run = self._run(live, kind, str(input.get("prompt", "")), rows)
+        if not background:
             return {"content": await run}
         self._background[name] = asyncio.ensure_future(run)
         return {
@@ -367,31 +462,90 @@ class Agents:
         unknown = [n for n in dict.fromkeys(names) if n not in self._background]
         return {"content": waited(reports, running, unknown, list(self._background))}
 
-    def held(self) -> Callable[[], None]:
-        """Keep the background runs; the remover cancels those still running (the row unloading)."""
+    async def agent_send(self, input: Json) -> dict[str, Any]:
+        """Leave `input["text"]` for the running child `input["name"]`, to read framed as from
+        its parent; or say which children run."""
+        name, text = str(input.get("name", "")), str(input.get("text", ""))
+        live = self._live.get(name)
+        if live is None or live.stopped:
+            return {"content": not_running(name, self._names())}
+        if not text.strip():
+            return {"content": "error: agent_send needs a `text` to tell the agent"}
+        if not live.hand.send(text):
+            return {"content": f"error: agent {name} has just finished answering; its report is on its way"}
+        return {
+            "content": f"sent to agent {name} ({live.kind}): it reads it with the result of its next call, "
+            "or as its next message if it answers first"
+        }
+
+    async def agent_stop(self, input: Json) -> dict[str, Any]:
+        """End the running child `input["name"]` and everything it started; or say which run."""
+        name = str(input.get("name", ""))
+        live = self._live.get(name)
+        if live is None or live.stopped:
+            return {"content": not_running(name, self._names())}
+        await live.stop()
+        return {"content": stopped([name], ())}
+
+    async def command(self, args: str) -> str:
+        """`/agents` (list the running children) and `/agents stop [NAME]` (end one or all)."""
+        parsed = parsed_command(args)
+        if isinstance(parsed, str):
+            return parsed
+        verb, name = parsed
+        if verb == "list":
+            return listing([live.listed() for live in self._live.values() if not live.stopped])
+        if name and name not in self._names():
+            return not_running(name, self._names())
+        names = [name] if name else self._names()
+        for each in names:
+            await self._live[each].stop()
+        return stopped(names, self._names())
+
+    def stop_note(self) -> str:
+        """The stop notice's addition after Ctrl-C: how many background agents still run."""
+        return stop_note(sum(live.background and not live.stopped for live in self._live.values()))
+
+    def _names(self) -> list[str]:
+        return [name for name, live in self._live.items() if not live.stopped]
+
+    def held(self) -> Callable[[], Awaitable[None]]:
+        """Keep the background runs; the remover lets those whose child was retired with the row
+        say so, then cancels any still running (the row unloading)."""
         return self._cancel
 
-    def _cancel(self) -> None:
+    async def _cancel(self) -> None:
+        if runs := [run for run in self._background.values() if not run.done()]:
+            await asyncio.wait(runs, timeout=5)  # their children are retired by now
         for run in self._background.values():
             run.cancel()
 
-    async def _run(
-        self, name: str, kind: AgentType, prompt: str, rows: Sequence[ChildRow], hand: Hand
-    ) -> str:
-        """Run child `name` in a slot to its end, retire it, and show what it used, however it ends.
+    async def _run(self, live: _Live, kind: AgentType, prompt: str, rows: Sequence[ChildRow]) -> str:
+        """Run child `live` in a slot to its end, retire it, and show what it used, however it
+        ends; a note says so when its realm was retired from outside (the row restarting).
 
         Raises:
             Exception: what the child's reply raised that is not a recoverable failure (a bug).
         """
+        name = live.name
         events: list[Json] = []
         try:
             async with self._slot(name, kind.name):
+                if live.stopped:
+                    return ended(name, kind.name, "it was stopped before it started")
+                live.doing = "starting"
                 child = await self._mount(name, rows)
+                live.child = child
                 try:
-                    return await _driven(name, kind, prompt, hand, child, self._config.start, events)
+                    if live.stopped:
+                        return ended(name, kind.name, "it was stopped before it started")
+                    return await _driven(live, kind, prompt, child, self._config.start, events)
                 finally:
+                    if live.hand.is_gone() and not live.stopped:
+                        await self._output.show(_shown({"type": "note", "text": lost(name, kind.name)}))
                     await child.retire()
         finally:
+            self._live.pop(name, None)
             if (used := usage_event(report_of(events))) is not None:
                 await self._output.show(
                     _shown({"type": "note", "text": f"agent {name} ({kind.name}) ended; it used:"}, used)
@@ -442,7 +596,7 @@ def _outcome(name: str, run: asyncio.Task[str]) -> str:
 
 
 async def _driven(
-    name: str, kind: AgentType, prompt: str, hand: Hand, child: _Child, start: float, events: list[Json]
+    live: _Live, kind: AgentType, prompt: str, child: _Child, start: float, events: list[Json]
 ) -> str:
     """Drive the child's reply to its end, to its step limit, or until it is retired, keeping
     its events in `events`, and say what it came to.
@@ -450,6 +604,7 @@ async def _driven(
     Raises:
         Exception: what the child's reply raised that is not a recoverable failure (a bug).
     """
+    name, hand = live.name, live.hand
     loop = await hand.loop(start)
     if loop is None:
         stalled = child.stalled() or "its loop never came up"
@@ -459,18 +614,24 @@ async def _driven(
     async def reply() -> bool:
         """The reply to its end; whether the step limit ended it."""
         nonlocal steps
-        stream = loop.reply(prompt)
-        try:
-            async for event in stream:
-                events.append(event)
-                steps = stepped(steps, event)
-                if limited(steps, event, kind.steps):
-                    return True
-            return False
-        finally:
-            aclose = getattr(stream, "aclose", None)
-            if aclose is not None:
-                await aclose()
+        message = prompt
+        while True:
+            stream = loop.reply(message)
+            try:
+                async for event in stream:
+                    events.append(event)
+                    live.seen(event)
+                    steps = stepped(steps, event)
+                    if limited(steps, event, kind.steps):
+                        return True
+            finally:
+                aclose = getattr(stream, "aclose", None)
+                if aclose is not None:
+                    await aclose()
+            if not (mail := hand.take()):  # what was sent too late for an aside is a message of its own
+                hand.close()
+                return False
+            message = parent_message(mail)
 
     work = asyncio.ensure_future(reply())
     gone = asyncio.ensure_future(hand.gone())

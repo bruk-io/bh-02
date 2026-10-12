@@ -558,7 +558,10 @@ def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tm
         m["content"] for m in map(json.loads, transcript.read_text().splitlines()) if m["role"] == "tool"
     ]
     assert results[0].startswith("not run: the person stopped the turn before this call started")
-    assert results[1].endswith("tools.agent, tools.agent_wait; help(tools.NAME) says what one takes)\n42")
+    assert results[1].endswith(
+        "tools.agent, tools.agent_send, tools.agent_stop, tools.agent_wait; "
+        "help(tools.NAME) says what one takes)\n42"
+    )
 
 
 def test_a_narrow_screen_keeps_every_jail_grade_named(launch: Launch) -> None:
@@ -735,7 +738,9 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     # either way.
     again = app.wait_for("echo: AGAIN (message 1)", 20, after=replied)
     said = app.text()[replied:again]
-    assert "⧗ waiting for loop, python, transcript to start" in said or "waiting for `python`" in said, said
+    assert (
+        "⧗ waiting for agents, loop, python, transcript to start" in said or "waiting for `python`" in said
+    ), said
     assert "stopped: interrupted" not in said
     app.press(b"\x11")
     assert app.exit_code() == 0
@@ -760,7 +765,7 @@ def test_a_message_typed_the_moment_after_model_waits_for_the_new_model(launch: 
     status = shown[shown.rfind("model: slow-2") :]
     assert status.startswith("model: slow-2 "), status[:80]  # up again
     app.press(b"/clear\ragain\r")  # the same for /clear, which restarts the python row too
-    waiting = app.wait_for("⧗ waiting for loop, python, transcript to start", 10, after=replied)
+    waiting = app.wait_for("⧗ waiting for agents, loop, python, transcript to start", 10, after=replied)
     again = app.wait_for("echo: AGAIN", 20, after=waiting)
     assert "stopped: interrupted" not in app.text()[replied:again]
     app.press(b"\x11")

@@ -291,7 +291,7 @@ async def test_slash_commands_act_on_the_running_session(composition: Callable[.
     await asyncio.wait_for(run([*layers(), patch]), 10)
     rows, cleared, model, unknown = fragile.NOTES
     assert "python" in rows and "python:tool" in rows and "active" in rows
-    assert cleared == "the conversation was cleared; starting afresh: loop, transcript, python"
+    assert cleared == "the conversation was cleared; starting afresh: loop, transcript, python, agents"
     assert model.startswith("● sonnet  claude-code  sonnet\n  opus") and "/model NAME switches" in model
     assert unknown == "unknown command /nope; /help lists them"
     assert fragile.SHOWN == ["after"]  # only the message reached the model, after the restart
