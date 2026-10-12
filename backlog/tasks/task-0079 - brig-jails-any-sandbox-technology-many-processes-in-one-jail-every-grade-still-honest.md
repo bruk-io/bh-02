@@ -7,6 +7,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-11 15:31'
+updated_date: '2026-10-12 14:46'
 labels: []
 dependencies: []
 type: intent
@@ -25,9 +26,15 @@ brig can only run a jail as a command prefix around processes it starts itself, 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A sandbox technology with a life of its own (a container) can be added as a mechanism plus a runtime without changing brig's other mechanisms; a fake runtime proves the protocol in tests, and Docker itself if it is in scope
-- [ ] #2 One bwrap jail holds several processes, each stopped without stopping the others, none able to reach another's socket or signal it
-- [ ] #3 Must not break: every grade in a report is backed by a probe that plants the violation, and no grade rises without one (laws 1 and 10)
-- [ ] #4 Must not break: bh-02's jail guarantees hold: writes only where spec_for allows, no network, secrets unreadable, the mount tripwire, a jail ends with bh-02
-- [ ] #5 Must not break: brig stays standalone, the standard library and itself only
+- [ ] #1 Must not break: every grade in a report is backed by a probe that plants the violation, and no grade rises without one (laws 1 and 10)
+- [ ] #2 Must not break: bh-02's jail guarantees hold: writes only where spec_for allows, no network, secrets unreadable, the mount tripwire, a jail ends with bh-02
+- [ ] #3 Must not break: brig stays standalone, the standard library and itself only
+- [ ] #4 A runtime is a seam of its own: a fake runtime implements the protocol and proves it in tests (a container runtime, Docker included, is TASK-0084's)
+- [ ] #5 One bwrap jail holds several processes, each started, waited for and stopped without stopping the others, each with its own socket reserved in the jail's channel directory (keeping them apart from each other is TASK-0084's)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Scope narrowed by the owner (2026-10-12, option B of four): this intent closes on brig's runtime seam, Jail and Process, the channel directory with reserve-then-start and the Spec naming channels (TASK-0079.05, .31, .32, and .33's socket check), and bh-02's one jail per session (TASK-0074); then the sub-agents milestone. Deferred to a new intent, TASK-0084: bwrap's supervisor, per-process isolation, the control battery, OCI and Docker, the macOS checks, and follow-ups .21, .22 and .29. Criteria 1 and 2 were narrowed to match (counted as a finish line changed after work started); the three must-not-breaks stand.
+<!-- SECTION:NOTES:END -->
