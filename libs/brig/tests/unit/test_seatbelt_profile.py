@@ -309,7 +309,7 @@ def test_network_bind_renders_exactly_zero_times_with_no_channels() -> None:
 
 #: bh-02's shape when run from `/tmp` on darwin: the project is
 #: `/private/tmp`, the jail directory `/private/tmp/bh-j-1` (its scratch
-#: `tmp/` beneath it), the endpoint in a directory of its own beside it.
+#: `tmp/` beneath it), the endpoint in a subdirectory of it (`chan/`).
 _SEALED_JAIL_DIR = "/private/tmp/bh-j-1"
 
 
@@ -317,7 +317,9 @@ def _sealed_spec(root: str) -> Spec:
     return Spec(
         fs=FsPolicy(write_allows=(root,), write_denies=("/private/tmp/.git/hooks",)),
         channels=(
-            Channel(name="kernel", kind=ChannelKind.LISTEN, endpoint=f"{_SEALED_JAIL_DIR}/k.sock"),
+            Channel(
+                name="kernel", kind=ChannelKind.LISTEN, endpoint=f"{_SEALED_JAIL_DIR}/chan/k.sock"
+            ),
         ),
     )
 
@@ -326,7 +328,7 @@ def _sealed_resolved(root: str) -> dict[str, str]:
     return {
         root: root,
         "/private/tmp/.git/hooks": "/private/tmp/.git/hooks",
-        f"{_SEALED_JAIL_DIR}/k.sock": f"{_SEALED_JAIL_DIR}/k.sock",
+        f"{_SEALED_JAIL_DIR}/chan/k.sock": f"{_SEALED_JAIL_DIR}/chan/k.sock",
     }
 
 
@@ -350,7 +352,7 @@ def test_a_write_root_at_or_above_the_jail_directory_is_denied_it_but_its_scratc
         f'(deny file-write* (subpath "{_SEALED_JAIL_DIR}"))',
         f'(allow file-write* (subpath "{_SEALED_JAIL_DIR}/tmp"))',
         '(deny file-write* (subpath "/private/tmp/.git/hooks"))',
-        f'(allow file-write* (literal "{_SEALED_JAIL_DIR}/k.sock"))',
+        f'(allow file-write* (literal "{_SEALED_JAIL_DIR}/chan/k.sock"))',
     ]
 
 

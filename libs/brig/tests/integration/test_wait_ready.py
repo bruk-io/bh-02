@@ -153,7 +153,8 @@ def test_wait_ready_returns_after_a_real_bind_appears(run_id: str) -> None:
     positive) and well under the timeout (it noticed promptly, not merely
     eventually)."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
+    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
+    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, _bind_script(endpoint, delay=0.5))
@@ -180,7 +181,8 @@ def test_wait_ready_times_out_cleanly_when_the_bind_never_appears(run_id: str) -
     1.0 as structured fields (not just a message). Elapsed is at least 1.0
     (it wasn't a premature give-up) and under 3.0 (clean means promptly)."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
+    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
+    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, "sleep 30")  # never touches the endpoint
@@ -214,7 +216,8 @@ def test_stale_socket_file_still_times_out(run_id: str) -> None:
     test above would also pass for an implementation that only stats the
     path -- a stat sees this stale file too."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
+    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
+    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, "sleep 30")  # never touches the endpoint either
@@ -260,7 +263,8 @@ def test_endpoint_fits_sun_path() -> None:
     """AC #5, the half that holds on every platform: this suite's actual
     scratch-root endpoint fits `sun_path` with room to spare."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
+    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
+    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
     real_len = len(os.fsencode(endpoint))
     print(f"AC#5: scratch-root endpoint = {endpoint!r}, byte length = {real_len}")
     assert real_len < _SUN_PATH_MAX
@@ -318,7 +322,8 @@ def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str) -> None
     reading the child's own `os.getcwd()` back and comparing it against
     `os.path.realpath(jail_dir)`."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
+    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
+    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
     cwd_file = os.path.join(jail_dir, "cwd.txt")
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
@@ -358,7 +363,8 @@ def test_wait_ready_on_unknown_channel_name_raises_and_names_it(run_id: str) -> 
     """AC #8: an unknown channel name raises `UnknownChannel`, naming it as
     a structured field. Control: the declared name does not raise."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
+    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
+    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, _bind_script(endpoint, delay=0.0))

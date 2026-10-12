@@ -894,6 +894,23 @@ def test_a_channel_directly_in_the_jail_directory_is_refused(sealed: bool) -> No
 
 
 @pytest.mark.unit
+def test_a_channel_whose_lexical_parent_is_the_jail_directory_is_refused() -> None:
+    """decision-174 amended: `<jail_dir>/agent.sock` as a symlink to a socket
+    elsewhere resolves to a directory that is not the jail directory, but bwrap
+    binds that directory writable AT the lexical parent, over the jail
+    directory's place in the jail. Refused by the lexical parent too."""
+    endpoint = f"{_JAIL_DIR}/agent.sock"
+    target = "/elsewhere/agent.sock"
+    ctx = _ctx(resolved={**_identity_resolved("/usr"), endpoint: target})
+    with pytest.raises(ChannelInsideJailDir) as refusal:
+        bwrap.compile(_channel_only_spec(endpoint), ctx)
+    message = str(refusal.value)
+    assert endpoint in message
+    assert _JAIL_DIR in message
+    assert "subdirectory" in message
+
+
+@pytest.mark.unit
 def test_a_channel_in_a_subdirectory_of_the_jail_directory_is_not_refused() -> None:
     """The remedy: `<jail_dir>/chan/agent.sock` compiles, its directory bound
     read-write and the jail directory itself never bound writable."""

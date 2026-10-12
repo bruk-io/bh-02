@@ -162,7 +162,7 @@ def test_network_grade_with_listen_channel_names_unscoped_bind_and_file_write_co
     """For a spec with a LISTEN channel, the network detail must name that
     `network-bind` is UNSCOPED by dialect necessity and that the socket
     path is confined by the `file-write*` literal rule instead."""
-    endpoint = f"{_JAIL_DIR}/control.sock"
+    endpoint = f"{_JAIL_DIR}/chan/control.sock"
     spec = Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=endpoint),))
     ctx = CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={endpoint: endpoint})
     step = seatbelt.compile(spec, ctx)

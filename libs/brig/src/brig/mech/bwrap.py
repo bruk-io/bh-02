@@ -611,11 +611,11 @@ def render_bwrap_prefix(
     seen_dirs: set[str] = set()
     for channel in spec.channels:
         resolved_endpoint = _resolve(channel.endpoint, resolved)
-        if _parent(resolved_endpoint) == jail_dir:
+        if jail_dir in (_parent(resolved_endpoint), _parent(channel.endpoint)):
             raise ChannelInsideJailDir(
-                f"LISTEN channel {channel.name!r} resolved endpoint "
-                f"{resolved_endpoint!r} sits directly in the jail directory "
-                f"{jail_dir!r}: bwrap can only grant a socket its whole "
+                f"LISTEN channel {channel.name!r} endpoint "
+                f"{channel.endpoint!r} (resolved {resolved_endpoint!r}) sits "
+                f"directly in the jail directory {jail_dir!r}: bwrap can only grant a socket its whole "
                 "directory, read-write, which would let the jail write brig's "
                 "own control state there (exec registrations, the exit record, "
                 "the logs). Put the endpoint in a subdirectory of the jail "

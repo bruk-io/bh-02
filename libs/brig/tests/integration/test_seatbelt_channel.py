@@ -220,8 +220,9 @@ def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -
     control-bearing assertion below (`pattern.search` on the BIND2 line
     only, never on the BIND1_OK / DONE lines)."""
     jail_dir = _new_jail_dir()
-    ep1 = f"{jail_dir}/ep1.sock"
-    ep2 = f"{jail_dir}/ep2.sock"
+    ep1 = f"{jail_dir}/chan/ep1.sock"
+    os.makedirs(f"{jail_dir}/chan", exist_ok=True)
+    ep2 = f"{jail_dir}/chan/ep2.sock"
     channel = Channel(name="ch", kind=ChannelKind.LISTEN, endpoint=ep1)
     spec = Spec(channels=(channel,))
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="darwin")
@@ -355,8 +356,9 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
 
     # --- the pair probe, unconfined: BOTH binds succeed -----------------
     jail_dir = _new_jail_dir()
-    ep1 = f"{jail_dir}/ep1.sock"
-    ep2 = f"{jail_dir}/ep2.sock"
+    ep1 = f"{jail_dir}/chan/ep1.sock"
+    os.makedirs(f"{jail_dir}/chan", exist_ok=True)
+    ep2 = f"{jail_dir}/chan/ep2.sock"
     channel = Channel(name="ch", kind=ChannelKind.LISTEN, endpoint=ep1)
     spec = Spec(channels=(channel,))
     jail = Stack([]).compile(spec)
@@ -443,7 +445,8 @@ def test_mutation_check_removing_endpoint_write_rule_denies_the_declared_bind() 
     digest_before = hashlib.sha256(_PROFILE_PY_PATH.read_bytes()).hexdigest()
 
     jail_dir = _new_jail_dir()
-    ep1 = f"{jail_dir}/ep1.sock"
+    ep1 = f"{jail_dir}/chan/ep1.sock"
+    os.makedirs(f"{jail_dir}/chan", exist_ok=True)
     channel = Channel(name="ch", kind=ChannelKind.LISTEN, endpoint=ep1)
     spec = Spec(channels=(channel,))
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="darwin")

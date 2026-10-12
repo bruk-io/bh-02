@@ -262,7 +262,8 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
         _seed_fs_targets(run_id)
     )
     jail_dir = _new_root(run_id, "sdj")
-    listen_endpoint = f"{jail_dir}/ctl.sock"
+    listen_endpoint = f"{jail_dir}/chan/ctl.sock"
+    os.makedirs(f"{jail_dir}/chan", exist_ok=True)
     spec = _journey_spec(
         workspace=workspace,
         hooks_dir=hooks_dir,
@@ -457,7 +458,8 @@ def test_control_against_the_environment_stack_of_no_mechanisms_denies_nothing(
         _seed_fs_targets(run_id)
     )
     jail_dir = _new_root(run_id, "sde")
-    listen_endpoint = f"{jail_dir}/ctl.sock"
+    listen_endpoint = f"{jail_dir}/chan/ctl.sock"
+    os.makedirs(f"{jail_dir}/chan", exist_ok=True)
     spec = _journey_spec(
         workspace=workspace,
         hooks_dir=hooks_dir,
@@ -523,7 +525,8 @@ def test_journey_spec_declares_a_listen_channel_and_its_removal_makes_the_batter
        naming both missing declarations), pasted below.
     """
     jail_dir = _new_root(run_id, "sdn")
-    listen_endpoint = f"{jail_dir}/ctl.sock"
+    listen_endpoint = f"{jail_dir}/chan/ctl.sock"
+    os.makedirs(f"{jail_dir}/chan", exist_ok=True)
     # network_battery reads only spec.channels and spec.network.allowed_domains
     # (this file's own imported source, `brig/probe/batteries/network.py`) --
     # the fs-shaped placeholders below need not exist on disk for this

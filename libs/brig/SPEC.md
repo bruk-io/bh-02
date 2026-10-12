@@ -395,6 +395,11 @@ Notes:
   refusal grades nothing). Decision-172's forged-record residual no longer
   stands for this arrangement. Implementing task: TASK-0079.16. (Ruled
   2026-10-11, decision-174.)
+  Amended 2026-10-12 (TASK-0079.17, no new ruling): the refusal tests the
+  endpoint's lexical parent as well as its resolved one, because bwrap binds
+  the resolved directory writable at the lexical parent: `<jail_dir>/agent.sock`
+  as a symlink to a socket elsewhere would otherwise lay that directory over the
+  jail directory's place in the jail. The message names both paths.
 - Serialization: `to_dict`/`from_dict`, versioned, round-trip stable.
 - **The version is `SPEC_VERSION = 1`, and an unknown key at any level is a
   refusal.** There is no migration framework and no tolerated extra field: a

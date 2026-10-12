@@ -240,7 +240,8 @@ def test_handle_wait_ready_returns_after_a_real_bind_appears_through_the_bound_m
     timeout unless something in the same suite proves the non-timeout path
     genuinely returns."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
+    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
+    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, _bind_script(endpoint, delay=0.5))
@@ -267,7 +268,8 @@ def test_handle_wait_ready_raises_the_named_timeout_type_through_the_bound_metho
     file never has a reason to import the module `Handle.wait_ready`
     delegates to."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
+    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
+    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
     spec = Spec(channels=(channel,))
     argv = workload_argv(run_id, "sleep 30")  # never touches the endpoint
