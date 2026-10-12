@@ -5,6 +5,7 @@ requires-python = ">=3.15"
 [manifest]
 members = [
     "agent-cordis-plugin",
+    "agents-cordis-plugin",
     "bh-02",
     "brig",
     "chat-cordis-plugin",
@@ -53,6 +54,17 @@ requires-dist = [
     { name = "cordis-helpers", editable = "libs/cordis-helpers" },
     { name = "host-paths", editable = "libs/host-paths" },
 ]
+
+[[package]]
+name = "agents-cordis-plugin"
+version = "0.1.0"
+source = { editable = "bh-02/plugins/agents-cordis-plugin" }
+dependencies = [
+    { name = "cordis" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cordis", editable = "libs/cordis" }]
 
 [[package]]
 name = "annotated-types"
@@ -135,6 +147,7 @@ version = "0.1.0"
 source = { editable = "bh-02/app" }
 dependencies = [
     { name = "agent-cordis-plugin" },
+    { name = "agents-cordis-plugin" },
     { name = "chat-cordis-plugin" },
     { name = "click" },
     { name = "commands-cordis-plugin" },
@@ -151,6 +164,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agent-cordis-plugin", editable = "bh-02/plugins/agent-cordis-plugin" },
+    { name = "agents-cordis-plugin", editable = "bh-02/plugins/agents-cordis-plugin" },
     { name = "chat-cordis-plugin", editable = "bh-02/plugins/chat-cordis-plugin" },
     { name = "click", specifier = ">=8" },
     { name = "commands-cordis-plugin", editable = "bh-02/plugins/commands-cordis-plugin" },

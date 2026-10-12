@@ -1,0 +1,63 @@
+"""Sub-agents: the `agent` tool, each call a child conversation of its own, mounted in a sealed
+cordis realm while it runs, its questions put to the person labelled with its name and type,
+and its last answer handed back as its report."""
+
+from agents_cordis_plugin.agents import (
+    AGENT,
+    SECTION,
+    Agents,
+    AgentsConfig,
+    Asker,
+    Hand,
+    Labelled,
+)
+from agents_cordis_plugin.child import (
+    GENERAL,
+    PREFIX,
+    TYPES,
+    AgentType,
+    ChildRow,
+    Report,
+    agents_dir,
+    child_rows,
+    ended,
+    framed,
+    label,
+    labelled,
+    next_name,
+    prefixed,
+    report_of,
+    unknown_type,
+)
+from agents_cordis_plugin.wiring import ChildConfig, OutputConfig, agents, child, output
+
+__all__ = [
+    "AGENT",
+    "GENERAL",
+    "PREFIX",
+    "SECTION",
+    "TYPES",
+    "AgentType",
+    "Agents",
+    "AgentsConfig",
+    "Asker",
+    "ChildConfig",
+    "ChildRow",
+    "Hand",
+    "Labelled",
+    "OutputConfig",
+    "Report",
+    "agents",
+    "agents_dir",
+    "child",
+    "child_rows",
+    "ended",
+    "framed",
+    "label",
+    "labelled",
+    "next_name",
+    "output",
+    "prefixed",
+    "report_of",
+    "unknown_type",
+]

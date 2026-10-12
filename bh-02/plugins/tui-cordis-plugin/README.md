@@ -44,7 +44,8 @@ question just shown answers nothing for 0.4 s (`GRACE`; `BhApp(grace=...)`), its
 dimmed meanwhile: a person typing when it comes up ("Run n...") must not decline it with the
 `n`. Those keys are dropped, not handed to the composer: the modal holds focus, and a message
 half-typed around a question is less surprising cut short than finished with stray letters.
-Ctrl-C still stops the turn at once.
+Ctrl-C still stops the turn at once. A sub-agent's question (a request carrying `agent`, its
+name and type) says who asks above it: `Agent general-1 (general) asks:`.
 
 The frame. `tui:palette` pushes the `commands` broker's `specs` method itself, which the
 palette (Ctrl-P) calls each time it opens, so a command registered
@@ -75,7 +76,8 @@ and `session`, the grades row over `runner`, told each start), so `/clear` blank
 output's lifecycle tells the bridge which rows are coming up, so a line typed while nobody
 reads says `⧗ waiting for loop to start; ...` and is read once it is up. It names only rows that
 bind a key, which is all the chat row depends on: a status-bar row reloading with them is not
-waited on. A restarted row's old fiber ends `inactive` before its new one's `reload`; a line kept
+waited on. A sub-agent's rows (`agents/NAME/...`, its own conversation's) are neither noted nor
+waited on: the output passes over their lifecycle, which `--trace` keeps. A restarted row's old fiber ends `inactive` before its new one's `reload`; a line kept
 in that moment says it waits at the `reload`. The chat row reads
 again only once a restart a command queued is done (`jobs`), so a line typed right after
 `/model` or `/clear` stays in the bridge for the new chat row; the command's `restarting` event

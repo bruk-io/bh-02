@@ -12,10 +12,10 @@ transcript and the session's own layer (`/clear`, a resume) run as they do with 
 the one turn being fake. Each takes whatever `config` the row already had, since a patch that
 only names `use` keeps it (the session layer gives `model` a `state`).
 
-`echo_provider`, `slow_provider` and `repl_provider` are providers, not rows: a models file
-names one for a model of its own (`provider = "bh_02.testing:echo_provider"`), so `/model`
-switches between it and any other model under the shipped `models:model` row, as it would
-between Claude and an OpenAI model.
+`echo_provider`, `slow_provider`, `repl_provider` and `delegating_provider` (every message to a
+sub-agent, `agent`) are providers, not rows: a models file names one for a model of its own
+(`provider = "bh_02.testing:echo_provider"`), so `/model` switches between it and any other
+model under the shipped `models:model` row, as it would between Claude and an OpenAI model.
 """
 
 import asyncio
@@ -26,6 +26,7 @@ from cordis import Effects, bind, component
 
 __all__ = [
     "bomb",
+    "delegating_provider",
     "repl_model",
     "repl_provider",
     "echo",
@@ -142,26 +143,80 @@ def slow_provider(table: Mapping[str, Any]) -> _SlowStart:
     return _SlowStart(str(table.get("id") or "slow"))
 
 
+def _printed(content: str) -> str:
+    """What an input printed, from its result: without the python tool's note of bh-02's other
+    tools in the namespace (`(bh-02's other tools are functions ...)`), told with the first."""
+    lines = content.strip().splitlines()
+    while lines and lines[0].startswith("(bh-02's "):
+        lines.pop(0)
+    return "\n".join(lines)
+
+
 class _Repl:
-    """Each message the person sends is one call of the offered tool, `python`, with the message
-    as its code; once the input has answered, the turn says what it printed."""
+    """Each message the person sends is one call of the `python` tool, with the message as its
+    code; once the input has answered, the turn says what it printed."""
 
     async def complete(
         self, messages: Sequence[Mapping[str, Any]], tools: Sequence[Mapping[str, Any]]
     ) -> AsyncIterator[dict[str, Any]]:
         last = messages[-1]
         if last.get("role") == "tool":
-            yield {"type": "text", "text": f"the input said: {str(last['content']).strip()}"}
+            yield {"type": "text", "text": f"the input said: {_printed(str(last['content']))}"}
             yield {"type": "stop", "reason": "end_turn"}
             return
         code = _words(last)
         yield {
             "type": "tool_call",
             "id": f"input{len(messages)}",
-            "name": tools[0]["name"],
+            "name": "python",
             "input": {"code": code},
         }
         yield {"type": "stop", "reason": "tool_use"}
+
+
+# What the shipped `general` type's section of a sub-agent's prompt says (agents plugin): how the
+# fake tells a child's request from its parent's.
+_SUB_AGENT = "You are a sub-agent"
+
+
+class _Delegating:
+    """Each message the person sends is one call of the `agent` tool, the message its prompt. A
+    sub-agent (its prompt says it is one) answers `report:` and its prompt upper-cased, or, for a
+    prompt starting `run `, first runs the rest as a python input. Once a call has answered, the
+    turn says what it said: `the agent said: ...`, or a child's `the input said: ...`."""
+
+    async def complete(
+        self, messages: Sequence[Mapping[str, Any]], tools: Sequence[Mapping[str, Any]]
+    ) -> AsyncIterator[dict[str, Any]]:
+        child = _SUB_AGENT in str(messages[0].get("content", "")) if messages else False
+        last = messages[-1]
+        if last.get("role") == "tool":
+            said = (
+                f"the input said: {_printed(str(last['content']))}"
+                if child
+                else f"the agent said: {last['content']}"
+            )
+            yield {"type": "text", "text": said}
+            yield {"type": "stop", "reason": "end_turn"}
+            return
+        words = _words(last)
+        if child and not words.startswith("run "):
+            yield {"type": "text", "text": f"report: {words.upper()}"}
+            yield {"type": "stop", "reason": "end_turn"}
+            return
+        call = (
+            {"name": "python", "input": {"code": words.removeprefix("run ")}}
+            if child
+            else {"name": "agent", "input": {"prompt": words, "type": "general"}}
+        )
+        yield {"type": "tool_call", "id": f"call{len(messages)}", **call}
+        yield {"type": "stop", "reason": "tool_use"}
+
+
+def delegating_provider(table: Mapping[str, Any]) -> _Delegating:
+    """A provider a models file names: every message the person sends goes to a sub-agent
+    (`agent`), whose report the turn says, so a real screen shows a child end to end."""
+    return _Delegating()
 
 
 def repl_provider(table: Mapping[str, Any]) -> _Repl:

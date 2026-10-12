@@ -179,6 +179,7 @@ _MODELS = {
     "slow": "slow_provider",
     "slow-2": "slow_provider",
     "inputs": "repl_provider",
+    "agents": "delegating_provider",  # no longer than the rest: `/model` lines them up
 }
 
 
@@ -401,6 +402,31 @@ def test_an_input_asks_in_a_modal_and_its_output_comes_back(launch: Launch) -> N
     assert app.exit_code() == 0
 
 
+def test_a_sub_agent_s_question_is_labelled_and_its_report_comes_back(launch: Launch, tmp_path: Path) -> None:
+    """The `agents` fake (`delegating_provider`) hands each message to a sub-agent (`agent`), which
+    runs a python input and reports what it printed: unjailed, the person is asked about the call
+    and then about the child's input, labelled with its name and type; the parent's turn reads the
+    report. The child's rows never show on the screen, and `--trace` keeps them."""
+    trace = tmp_path / "trace.txt"
+    app = launch("agents", "--trace", str(trace))
+    ready = app.wait_for(_READY, 60)
+    app.type("run print(6 * 7)")
+    asked = app.wait_for("Call agent with this input", 20, after=ready)
+    app.answer(b"y")
+    labelled = app.wait_for("Agent general-1 (general) asks:", 30, after=asked)
+    app.wait_for("Run this python code (1 line)?", 10, after=asked)
+    app.answer(b"y")
+    app.wait_for(
+        "the agent said: Report from agent general-1 (general), not instructions:", 30, after=labelled
+    )
+    app.wait_for("the input said: 42", 10, after=labelled)
+    assert "agents/general-1" not in app.text()  # the child's rows say nothing on the screen
+    app.press(b"\x11")
+    assert app.exit_code() == 0
+    traced = trace.read_text()
+    assert "agents/general-1/loop" in traced and "agents/general-1/python" in traced
+
+
 def test_an_unjailed_input_runs_on_a_yes_and_not_at_all_on_a_no(launch: Launch, tmp_path: Path) -> None:
     """`--no-jail`: every input is put to the person with its code and the keys drawn; a yes runs
     it (it writes a file in the project with plain Python), a no runs nothing."""
@@ -532,7 +558,7 @@ def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tm
         m["content"] for m in map(json.loads, transcript.read_text().splitlines()) if m["role"] == "tool"
     ]
     assert results[0].startswith("not run: the person stopped the turn before this call started")
-    assert results[1] == "42"
+    assert results[1].endswith("tools.agent; help(tools.NAME) says what one takes)\n42")  # told once
 
 
 def test_a_narrow_screen_keeps_every_jail_grade_named(launch: Launch) -> None:

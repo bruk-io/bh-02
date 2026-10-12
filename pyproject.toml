@@ -100,6 +100,8 @@ src = [
     "bh-02/app/tests",
     "bh-02/plugins/agent-cordis-plugin/src",
     "bh-02/plugins/agent-cordis-plugin/tests",
+    "bh-02/plugins/agents-cordis-plugin/src",
+    "bh-02/plugins/agents-cordis-plugin/tests",
     "bh-02/plugins/chat-cordis-plugin/src",
     "bh-02/plugins/chat-cordis-plugin/tests",
     "bh-02/plugins/commands-cordis-plugin/src",
@@ -234,6 +236,8 @@ exclude = [
     "chat_cordis_plugin.chat:converse",
     "agent_cordis_plugin.loop:LoopModel.reply",
     "agent_cordis_plugin.loop:_today",                        # the clock: the date the loop tells with a message
+    # a sub-agent: its state directory made (the session's agents/NAME, 0700), in the call that runs it
+    "agents_cordis_plugin.agents:Agents._claim", "agents_cordis_plugin.agents:Agents.agent",
     "agent_cordis_plugin.transcript:MemoryTranscript.append",
     # Claude Code: one process per conversation and what it holds, saved in the session's
     # state dir; the one read of local.env; a rebuilt session file; the CLI's stderr to a log;
@@ -317,6 +321,7 @@ allow = [
     "bh_02.testing:echo", "bh_02.testing:bomb", "bh_02.testing:showcase", "bh_02.testing:slow_start",
     "bh_02.testing:echo_model", "bh_02.testing:slow_model", "bh_02.testing:repl_model",
     "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:repl_provider",
+    "bh_02.testing:delegating_provider",
     # registered by decorator or by [project.scripts], never called by name
     "bh_02.cli:sessions_command", "bh_02.cli:update_layer_command", "models_cordis_plugin.claude_code.detach:main",
     # the documentation site's MkDocs hook: MkDocs calls these by name (mkdocs.yml `hooks`)

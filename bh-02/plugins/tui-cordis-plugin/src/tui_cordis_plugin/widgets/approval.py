@@ -95,7 +95,7 @@ class ApprovalScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         code = render.approval_lines(self.request)
         with Vertical(id="approval", classes="-code" if code else ""):
-            yield Static(render.approval_title(self.request), id="approval-title", markup=False)
+            yield Static(render.approval_heading(self.request), id="approval-title", markup=False)
             if code:
                 with VerticalScroll(id="approval-code"):
                     # highlighted as the transcript highlights code: the theme's colours

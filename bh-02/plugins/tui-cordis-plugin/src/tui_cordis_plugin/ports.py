@@ -437,7 +437,10 @@ class TuiOutput:
 
     def lifecycle(self, event: _Lifecycle) -> None:
         """Note a change to the running composition: a row reloaded, or one that failed; and
-        tell the bridge which rows are coming up, for a line typed meanwhile."""
+        tell the bridge which rows are coming up, for a line typed meanwhile. A sub-agent's rows
+        (`agents/NAME/...`) are its own conversation's, not the session's: none of theirs."""
+        if render.of_a_sub_agent(event.fiber):
+            return
         if waiting := self._bridge.row_changed(event.kind, event.fiber):
             self._post(Noted(render.waiting_line(waiting)))
         line = render.lifecycle_line(event.kind, event.fiber, event.error, event.fiber in self._up)

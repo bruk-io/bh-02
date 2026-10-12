@@ -12,6 +12,11 @@ import pytest
 # Linux with bubblewrap, and a test of a model or a chat row should not depend on the platform.
 UNJAILED = '[[plugin]]\nid = "runner"\nuse = "runner:unconfined"\n'
 
+# These tests read the python tool's output and the tool list exactly; the agents row's `agent`
+# would be told as a function in the namespace with the first input and offered beside `python`.
+# Its own tests are the agents plugin's and the real launch's.
+NO_AGENTS = '[[plugin]]\nid = "agents"\nuse = "agents:agents"\ndisabled = true\n'
+
 # bh-02 has no one-shot chat row, but many of its tests want one: the reply to one prompt (the
 # `chat` override's config), recorded rather than drawn, with a failure left to reach `done`.
 ONE_REPLY = (
@@ -571,12 +576,13 @@ def composition(tmp_path: Path) -> Iterator[Composition]:
     written = 0
 
     def layer(text: str, *, one_reply: bool = False) -> Path:
-        """A layer file; every one also puts the kernel in no jail (see UNJAILED), and
+        """A layer file; every one also puts the kernel in no jail (see UNJAILED) and drops the
+        agents row (NO_AGENTS), and
         `one_reply` makes the chat row a one-shot whose reply is recorded (see ONE_REPLY)."""
         nonlocal written
         written += 1
         path = tmp_path / f"layer{written}.toml"
-        path.write_text(UNJAILED + (ONE_REPLY if one_reply else "") + text)
+        path.write_text(UNJAILED + NO_AGENTS + (ONE_REPLY if one_reply else "") + text)
         return path
 
     try:

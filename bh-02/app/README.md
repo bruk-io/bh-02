@@ -63,6 +63,7 @@ rest of the user guide is on the docs site: [Sessions](../../docs/bh-02/using/se
 | `on-touch` | `memory:on_touch` | |
 | `memory-auto` | `memory:auto` | |
 | `extensions` | `extensions:extensions` | |
+| `agents` | `agents:agents` (`rows`: the parent's rows a child is made of; `start`: 30) | |
 
 `run()` adds three rows of its own after every layer, pinned on (`disabled = false`) so no layer
 can remove them: `host` (what the host is: the layer files as `paths`, where the credential is
@@ -109,7 +110,18 @@ tui:grades              pushes the jail field              depends on Runner, Ap
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:converse           runs the chat, binds Done          depends on Loop, Input, Output, Commands, Jobs
 extensions:extensions   loads the model's own plugins      depends on Runner, Commands, Frame, System, Tools, Approval, Output
+agents:agents           binds Asker, registers agent       depends on Tools, System, Output, Loader (each call mounts a child; see below)
 ```
+
+A sub-agent (`agent`, the agents row) is not a row of these layers: each call mounts one child
+under the agents row, a sealed cordis realm whose own loader runs copies of `loop`, `tools`,
+`transcript`, `model`, `system`, `asides`, `access`, `executor` and `python` as the parent's
+loader mounted them, each under `agents/NAME/` (its transcript in the session's
+`agents/NAME/`), plus `agents:output` (its `output`: a `confirm` over `asker`, labelled) and
+`agents:child` (its type's section of the prompt). From outside it reads only `runner`,
+`approval`, `host` and `asker`. It is retired when it answers, when the call is stopped
+(Ctrl-C), or with the agents row; the ui shows none of its rows' lifecycle, and `--trace`
+keeps them ([agents-cordis-plugin](../plugins/agents-cordis-plugin/README.md)).
 
 So a new model or ui keeps the Python process and its namespace (the python row depends on the
 runner and brokers that never reload), a new runner starts a new one, and a `/model` switch
@@ -127,6 +139,7 @@ has its rows' config and the keys' methods each one uses.
 | Package | Binds / registers | Consumes |
 |---|---|---|
 | [`agent-cordis-plugin`](../plugins/agent-cordis-plugin/README.md) | `loop`, `tools`, `transcript`, `system`, `asides`, `access`, `executor`; `/clear` and `/compact` (`agent:conversation`) | `model`, `tools`, `transcript`, `system`, `approval`, `output`, `asides`, `executor`, `loader`, `commands`, `jobs` |
+| [`agents-cordis-plugin`](../plugins/agents-cordis-plugin/README.md) | `asker` and the `agent` tool (`agents:agents`); inside a child's realm, its `output` (`agents:output`) and its type's section (`agents:child`) | `tools`, `system`, `output`, `loader`; in a child, `asker`, `loop`, `system` |
 | [`chat-cordis-plugin`](../plugins/chat-cordis-plugin/README.md) | `done` (`chat:converse`, the chat itself) | `loop`, `input`, `output`, `commands`, `jobs` |
 | [`commands-cordis-plugin`](../plugins/commands-cordis-plugin/README.md) | `commands` (the broker), `jobs`; `/rows`, `/explain`, `/restart` (`commands:operator`); the `!` prefix (`commands:shell_command`) | `output`, `commands`, `loader`, `jobs` |
 | [`extensions-cordis-plugin`](../plugins/extensions-cordis-plugin/README.md) | nothing: loads the model's own plugins into the extensions process, whose additions go into `commands`, `frame`, `system` and `tools` | `runner`, `commands`, `frame`, `system`, `tools`, `approval`, `output` |

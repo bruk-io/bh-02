@@ -11,6 +11,12 @@ config = { requires = ["python"] }
 id = "tools"
 use = "agent:tools"
 
+# Sub-agents: the `agent` tool, each child a conversation of its own in a sealed realm, its rows
+# copied from these (`rows`), its questions labelled; `start`: how long a child has to come up (30 s).
+[[plugin]]
+id = "agents"
+use = "agents:agents"
+
 # The model, by name: `default` (`sonnet`), which `--model` and `/model` set in the session's layer.
 [[plugin]]
 id = "model"
