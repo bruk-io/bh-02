@@ -23,6 +23,9 @@ _CONFINING = (
     "network",
 )  # the axes a runner must enforce for what runs in it to count as confined
 _JAIL = "jail"  # where a call runs when its request says nothing (CONTRACTS.md: tools, `runs`)
+# bh-02's own tool that reaches only the jail and bh-02's own state: asked exactly as the jail's are
+_HARNESS = "harness"
+_UNASKED_WHEN_CONFINED = (_JAIL, _HARNESS)
 
 
 @runtime_checkable
@@ -52,5 +55,6 @@ class Approval:
 
     def unasked(self, request: Mapping[str, Any]) -> bool:
         """Whether what `request` asks for runs without asking the person: it runs in the runner
-        (`request["runs"]`, the runner when it says nothing) and the runner confines it."""
-        return request.get("runs", _JAIL) == _JAIL and self.confined
+        (`request["runs"]`, the runner when it says nothing) or is bh-02's own tool bounded to the
+        jail and bh-02's own state (`"harness"`), and the runner confines it. `"host"` is never."""
+        return request.get("runs", _JAIL) in _UNASKED_WHEN_CONFINED and self.confined

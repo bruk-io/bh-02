@@ -129,11 +129,14 @@ def test_a_registration_says_its_name_and_where_its_calls_run() -> None:
     broker = ToolBroker()
     with pytest.raises(ValueError, match="a tool's spec needs a `name`"):
         broker.register({"description": "nameless"}, _echo)
-    with pytest.raises(ValueError, match="say 'jail' .* or 'host'"):
+    with pytest.raises(ValueError, match="say 'jail' .* 'harness' .* or 'host'"):
         broker.register(ECHO, _echo, runs="cloud")
     broker.register(ECHO, _echo, runs="host")
     tool = broker.get("echo")
     assert tool is not None and tool.runs == "host" and tool.spec is ECHO
+    broker.register({**ECHO, "name": "own"}, _echo, runs="harness")
+    own = broker.get("own")
+    assert own is not None and own.runs == "harness"
 
 
 async def test_ready_waits_for_a_tool_to_register_and_names_those_that_never_do() -> None:

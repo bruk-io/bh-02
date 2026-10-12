@@ -44,10 +44,11 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 `approval.py` is the rule, written once: `is_confined(report)` (the runner enforces `fs_write`
 and `network`), and `Approval`, the `approval` value over the runner: `confined` (read from its
 `report()` each time) and `unasked(request)` (it runs in the runner, `runs` `"jail"` when the
-request says nothing, and the runner confines it). Asking is not the rule's: the loop puts each
+request says nothing, or is bh-02's own tool bounded to the session's jail and bh-02's own
+state, `runs` `"harness"`, and the runner confines it). Asking is not the rule's: the loop puts each
 call the rule does not let run unasked to the person (`{"name", "input", "runs", "title",
 "lines", ...}`: a call to a tool that runs in bh-02's own process, `runs = "host"`, is put to
-the person however confined the runner), and the extensions row each extension it loads, each
+the person however confined the runner; a `"harness"` one only when the runner does not confine), and the extensions row each extension it loads, each
 through `output.confirm`; the python row's `confined`, what the model is told, is the rule's.
 Its row depends on `runner` alone, so `/clear` (a new Python process) and a new ui leave it up,
 and the rows that depend on it. It is a capability, bound by one row: two rows' answers could

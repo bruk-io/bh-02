@@ -30,13 +30,16 @@ from typing import Any
 
 from cordis_helpers import Registry
 
-__all__ = ["HOST", "JAIL", "ToolBroker"]
+__all__ = ["HARNESS", "HOST", "JAIL", "ToolBroker"]
 
 type Json = Mapping[str, Any]
 
 JAIL = "jail"  # a call runs in the runner's jail: asked about only when the runner does not confine
+# bh-02's own tool, acting only on the session's jail and bh-02's own state: asked about only when
+# the runner does not confine
+HARNESS = "harness"
 HOST = "host"  # a call runs in bh-02's own process: always put to the person
-_WHERE = (JAIL, HOST)
+_WHERE = (JAIL, HARNESS, HOST)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +83,8 @@ class ToolBroker:
         if runs not in _WHERE:
             raise ValueError(
                 f"the tool {name!r} says its calls run in {runs!r}; say {JAIL!r} (in the runner's "
-                f"jail) or {HOST!r} (in bh-02's own process, every call put to the person)"
+                f"jail), {HARNESS!r} (bh-02's own tool acting only on the jail and bh-02's own state) or "
+                f"{HOST!r} (in bh-02's own process, every call put to the person)"
             )
         remove = self._tools.register(name, _Tool(spec, run, runs, show))
         self._now_changed()

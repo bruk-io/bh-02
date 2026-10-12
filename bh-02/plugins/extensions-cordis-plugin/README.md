@@ -54,7 +54,7 @@ What an extension reaches of bh-02, each only to add to it, each returning its r
   `problem`, a name that is not lowercase letters, digits and `_` (48 at most), one of bh-02's
   own (`python`, and every name a layer row has registered, kept even while that row restarts),
   parameters that are no object schema, or a spec over 16 KiB. It registers the tool with
-  `runs = "jail"`, so the `approval` rule decides each call as it does an input, and `show`
+  `runs = "jail"` whatever the extension says (`"harness"` is a layer row's claim alone), so the `approval` rule decides each call as it does an input, and `show`
   (`offered.shown_tool_call`): unjailed, the person is asked, shown the tool's name, its
   extension and the arguments as JSON. A call goes to the extensions process (`call`) and its answer, or the
   error `run` raised, is the result; a redefined extension offers its new spec, a deleted one
