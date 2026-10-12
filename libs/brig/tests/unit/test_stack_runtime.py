@@ -315,6 +315,9 @@ def test_no_stack_reports_control_or_channel_exclusivity_above_unenforced() -> N
     compiled = _every_compiling_stack()
     names = {name for name, _ in compiled}
     assert {"strict_linux", "scratch_darwin", "bwrap+env_scrub+rlimits"} <= names
+    # The count, so a stack that starts raising ValueError can't leave the pin
+    # unseen; a new mechanism or preset changes it on purpose.
+    assert len(compiled) == 35, sorted(names)
     for name, jail in compiled:
         assert set(jail.report.axes) == set(AXES)
         for axis in RUNTIME_AXES:
