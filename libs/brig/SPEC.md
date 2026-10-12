@@ -1824,11 +1824,24 @@ workload starts, so an embedder that dies in that window takes it down.
   every record, and one whose group is empty reports `ALREADY_GONE`. A report
   after a waited sibling gains that item; nothing else in it changes.
 - **`create` over a used `jail_dir`.** Records left by an earlier jail are
-  removed by `create` once nothing they name runs (no live member in any
-  recorded group, `group_alive`; a record that can't be read, or has an
-  unknown stamp, counts as running). While anything does, `create` refuses,
-  naming the directory and saying to destroy that jail or choose another
-  directory. Removing a gone jail's records gives up authority over nothing.
+  removed by `create` only once nothing they name runs, and it decides that
+  per record as teardown does, the stamp before the group: a record whose
+  leader holds its identity (decision-155) runs; one whose leader's pid now
+  names another process (recycled, or a planted record naming a stranger) no
+  longer holds that group, whatever `group_alive` says of its pgid; one whose
+  leader is gone runs while its group has a live member (`group_alive`, the
+  reaped-leader case). So a recycled pgid can't hold the directory forever,
+  and a live jail's records are never removed. **On any doubt it refuses and
+  removes nothing**: a record that can't be read, has an unknown stamp
+  (decision-172), or names an id out of range, a process table that can't be
+  read, or anything under `procs/` that is not a directory brig made (a link,
+  a file). While anything runs or is in doubt, `create` refuses, naming the
+  directory and what holds it, and saying to destroy that jail or choose
+  another directory. The removal follows no links: it opens each entry
+  beneath `procs/` without following a symlink (`O_NOFOLLOW`, directory file
+  descriptors), because on a stack without an `fs_write` mechanism the jail
+  could write that directory. Removing a gone jail's records gives up
+  authority over nothing.
 - **Teardown keeps every guard.** The ladder (§9 above) runs per record in
   start order, then per helper, with decision-155 (a recycled pid is gone,
   nothing signalled), decision-171 (a zombie is gone), decision-172 (an
@@ -1872,8 +1885,13 @@ every bump before. `Jail.from_dict(d, runtimes=...)` takes the runtimes from
 the embedder, never from the dict: a dict naming a kind the embedder did not
 pass, or one whose runtime's own `kind` differs, is refused (law 2), naming
 the kind and saying what to pass. The dict is the authority for the processes
-it names; a record on disk for one of them that disagrees is not used, and
-`destroy` reports it as it reports an unreadable one, signalling nothing. A
+it names; a record on disk for one of them that disagrees is not used.
+`destroy` still runs the ladder for the identity the dict names, under the
+same stamp guards (a recycled pid is gone and nothing is signalled,
+decision-155; an unknown stamp is never signalled, decision-172), so the
+process the dict names is ended, as teardown-total requires (decision-175);
+only the disk copy becomes its own `FAILED` item, its identity the file's
+path, signalling nothing it names. A
 record on disk the dict does not name is a later start and is read like any
 other. A rehydrated jail reads each process's exit record, so `wait` answers
 for every process, siblings included.
@@ -1899,12 +1917,15 @@ mechanism names it, so no compiled jail has it. `Jail.create` accepts a
 runtime whose kind is the compiled jail's, or `FAKE` standing in for any
 (the report keeps the compiled kind's grades); the jail's record says `FAKE`,
 so `from_dict` sends it only to the runtime passed under `FAKE`, and a fake
-record rehydrated with only `HostRuntime` passed is refused.
+record rehydrated with only `HostRuntime` passed is refused. The kind is
+TASK-0079.25's; the refusal, and its test, are TASK-0079.26's, since
+`from_dict(runtimes=)` arrives there.
 
 Implementing tasks: TASK-0079.25 for the records, `create` with no process,
 the per-start wrapper and tether (§8), the refusal that keeps every grant off
-the records, and the fake's kind with its refusal; TASK-0079.26 for `Jail` and
-`Process`, `to_dict`/`from_dict` and `HANDLE_VERSION` 6, `start` absent, and
+the records, and the fake's own kind; TASK-0079.26 for `Jail` and
+`Process`, `to_dict`/`from_dict` and `HANDLE_VERSION` 6 (the refusal of a fake
+record with only `HostRuntime` passed among it), `start` absent, and
 probes; TASK-0079.27 for bh-02's runner; TASK-0079.28 for retiring `Handle`
 and this section's old shape. (Ruled 2026-10-12, decision-181.)
 
