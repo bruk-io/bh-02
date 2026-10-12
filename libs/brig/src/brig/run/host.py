@@ -658,8 +658,10 @@ class HostSupervisor:
         its process's `wait` (decision-181).
 
         In the process that started it, only once its exit wrapper has exited
-        and been reaped (this process's waiter record), so its jail directory
-        is free when this returns (decision-182). Anywhere else, from the
+        and been reaped (this process's waiter record), so the process's leader
+        has left when this returns (decision-182); a workload that left
+        children in its group still holds the jail directory, and `create`
+        rightly refuses until they are gone. Anywhere else, from the
         process's own exit record, written by its exit wrapper just before it
         exits (decision-156): that process cannot reap it, so the wrapper may
         still be leaving for a moment, and a `create` into the directory then
@@ -720,10 +722,20 @@ class HostSupervisor:
         return KillReport(items=(end_group(kind, process.pgid, process.pid, process.start_time),))
 
 
+def _chosen_status(waited: int, recorded: int | None) -> int:
+    """The status to answer once this process's waiter has reaped the wrapper:
+    the exit record's if the wrapper wrote one, else the waiter's. Pure.
+
+    The record is the workload's own status; the waiter's is the wrapper's,
+    which differs when the wrapper was killed after it wrote (decision-182)."""
+    return waited if recorded is None else recorded
+
+
 def _recorded_status(process: ProcessRecord, jail_dir: str) -> int | None:
-    """How `process` ended, if anything recorded it: this process's waiter, or
-    its exit record (decision-156, decision-181). While this process's waiter
-    still owns the reap, nothing: the exit record is written before the
+    """How `process` ended, if anything recorded it: its exit record
+    (decision-156, decision-181) once this process's waiter has reaped the
+    wrapper, else this process's waiter alone (`_chosen_status`). While the
+    waiter still owns the reap, nothing: the exit record is written before the
     wrapper has left, and `wait` answers once it has (decision-182).
 
     Raises:
@@ -731,7 +743,7 @@ def _recorded_status(process: ProcessRecord, jail_dir: str) -> int | None:
     """
     record = _waiters.recorded_exit(process.pid)
     if record is not None:
-        return record.returncode
+        return _chosen_status(record.returncode, _records.read_exit(jail_dir, process.id))
     if _waiters.is_watched(process.pid):
         return None
     return _records.read_exit(jail_dir, process.id)

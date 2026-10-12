@@ -14,7 +14,7 @@ import pytest
 from brig.core.runtime import ChannelOnRecords, refuse_channel_on_records
 from brig.run import _records
 from brig.run._identity import UNKNOWN
-from brig.run.host import _WRAP_SENTINEL, _derive_wrap_prefix
+from brig.run.host import _WRAP_SENTINEL, _chosen_status, _derive_wrap_prefix
 from brig.run.runtime import IoPolicy
 
 _ID = "0123456789abcdef"
@@ -199,3 +199,37 @@ def test_the_wrap_sentinel_is_no_real_argv_and_a_rewriting_wrap_derives_no_prefi
     first, second = _WRAP_SENTINEL
     assert _derive_wrap_prefix((*prefix, first.upper(), second), _WRAP_SENTINEL) is None
     assert _derive_wrap_prefix((*prefix, first, second, "--tail"), _WRAP_SENTINEL) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("waited", "recorded", "expected"),
+    [(0, 0, 0), (-9, 7, 7), (-9, None, -9), (3, None, 3)],
+)
+def test_a_recorded_exit_wins_over_the_waiters_status(
+    waited: int, recorded: int | None, expected: int
+) -> None:
+    """decision-182: the exit record is the workload's status; the waiter's is
+    the wrapper's, used only where nothing was recorded."""
+    assert _chosen_status(waited, recorded) == expected
+
+
+@pytest.mark.unit
+def test_jail_dir_in_use_names_the_pid_and_group_it_holds() -> None:
+    record = _records.ProcessRecord(
+        id="0123456789abcdef",
+        order=1,
+        pid=4242,
+        pgid=4242,
+        start_time="stamp",
+        argv=("x",),
+        stdout_path="o",
+        stderr_path="e",
+    )
+    scanned = _records.Scan(records=(record,), unreadable=())
+    held = _records.held_by(
+        "/jail", scanned, stamps={4242: "stamp"}, zombies=frozenset(), live_groups=frozenset({4242})
+    )
+    assert "pid 4242" in held[0].reason
+    assert "process group 4242" in held[0].reason
+    assert "wait a moment and retry" in str(_records.JailDirInUse("/jail", held))

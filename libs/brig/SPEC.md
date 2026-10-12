@@ -2005,6 +2005,14 @@ process's pid and group and says that a process already waited for elsewhere
 is still leaving, to wait a moment and retry, or to destroy the jail.
 Implementing task: TASK-0079.30. (Ruled 2026-10-12, decision-182.)
 
+*Amended 2026-10-12 (decision-182, TASK-0079.30 review):* once the waiter has
+reaped, an exit record that exists wins over the waiter's status, and the
+waiter's is used only where there is none. The record is the workload's own
+status ("recorded, not invented"); the waiter's is the wrapper's, which differs
+when teardown kills the wrapper after it wrote. `wait()` returning means the
+process's leader has left; a workload that left children in its group still
+holds the jail directory, and `create` rightly refuses until they are gone.
+
 ## 10. Communication with jails
 
 Three inbound kinds, each with different liveness, trust, and delivery:
