@@ -585,7 +585,7 @@ class HostSupervisor:
                 before anything is made or spawned.
             TetherClosed: the jail is tethered and its tether has ended; raised
                 before anything is made or spawned.
-            _exit_status.WorkloadSpawnFailed: the argv could not be spawned.
+            WorkloadSpawnFailed: the argv could not be spawned (`brig.run.WorkloadSpawnFailed`).
             OSError: the records directory or the record could not be written
                 (a process whose record could not be written is ended first).
         """

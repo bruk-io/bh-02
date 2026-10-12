@@ -20,7 +20,7 @@ import pytest
 from brig.core import Spec, unenforced_report
 from brig.core.runtime import RuntimeKind, Scope
 from brig.run import ExecFidelity, HostRuntime, Jail, KillOutcome, Process
-from brig.run.jail import HANDLE_VERSION
+from brig.run.jail import JAIL_VERSION
 from brig.runtime.fake import FakeRuntime
 from brig.stack import CompiledJail, Stack
 
@@ -118,7 +118,7 @@ def test_the_dict_is_version_6_and_round_trips_with_the_runtime_passed() -> None
     jail = _create(runtime)
     first = jail.start(["sleep", "100"])
     d = jail.to_dict()
-    assert d["version"] == HANDLE_VERSION == 6
+    assert d["version"] == JAIL_VERSION == 6
     assert d["runtime"] == "FAKE" and d["tethered"] is False
     assert [p["id"] for p in d["processes"]] == [first.id]
     assert not {"pid", "pgid", "argv", "launcher_name"} & set(d)

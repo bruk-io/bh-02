@@ -82,7 +82,7 @@ from brig.run.exec_ import ExecWrapNotAPrefix as ExecWrapNotAPrefix
 from brig.run.host import HelperFailed as HelperFailed
 from brig.run.host import HostRuntime as HostRuntime
 from brig.run.host import LaunchRefused as LaunchRefused
-from brig.run.jail import HANDLE_VERSION as HANDLE_VERSION
+from brig.run.jail import JAIL_VERSION as JAIL_VERSION
 from brig.run.jail import Jail as Jail
 from brig.run.jail import Process as Process
 from brig.run.runtime import ExitStatusUnobservable as ExitStatusUnobservable
@@ -104,7 +104,7 @@ __all__ = (  # noqa: RUF022
     "EVENT_VERSION",
     "Event",
     "EventKind",
-    "HANDLE_VERSION",
+    "JAIL_VERSION",
     "HelperFailed",
     "HostRuntime",
     "IoPolicy",

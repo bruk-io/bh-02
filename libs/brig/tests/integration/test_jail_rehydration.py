@@ -60,7 +60,7 @@ import time
 import pytest
 
 from brig.core import Channel, ChannelKind, EnforcementReport, Spec, unenforced_report
-from brig.run import HANDLE_VERSION, HostRuntime, Jail, Process, RuntimeKind
+from brig.run import JAIL_VERSION, HostRuntime, Jail, Process, RuntimeKind
 from brig.stack import CompiledJail
 from tests.conftest import launch, workload_argv
 
@@ -437,7 +437,7 @@ def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
     try:
         d = jail.to_dict()
         # 6 since decision-181 (TASK-0079.26): the version of `Jail`'s dict.
-        assert d["version"] == HANDLE_VERSION == 6
+        assert d["version"] == JAIL_VERSION == 6
 
         stale = dict(d)
         stale["version"] = 1
@@ -447,8 +447,8 @@ def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
         assert "unsupported version 1" in message, (
             f"refusal message does not name the rejected version 1: {message!r}"
         )
-        assert f"expected {HANDLE_VERSION}" in message, (
-            f"refusal message does not name the expected version {HANDLE_VERSION}: {message!r}"
+        assert f"expected {JAIL_VERSION}" in message, (
+            f"refusal message does not name the expected version {JAIL_VERSION}: {message!r}"
         )
 
         # THE CONTROL: same dict, version untouched -- rehydrates cleanly,

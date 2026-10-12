@@ -207,8 +207,10 @@ hiding them in a helper brig keeps: a launch whose first `start` is refused
 leaves a jail the caller destroys (bh-02's runner does, and so does brig's
 own test helper), the capability refusal is `HostRuntime.create`'s
 (`LaunchRefused`, unchanged), and the first process's stdio is that
-`Process`'s. `HANDLE_VERSION` keeps its name: it versions the jail's dict,
-still 6, and a rename would be a bump with nothing changed. Every exception
+`Process`'s. The dict's version constant is renamed `JAIL_VERSION`, since it
+versions the jail's dict; its value stays 6, so the `version` a dict carries
+is unchanged and nothing persisted needs a bump (the rulings above that say
+`HANDLE_VERSION` are records of the name it had). Every exception
 `Jail.create` and `Jail.start` document is re-exported by `brig.run`
 (`LaunchRefused`, `JailDirInUse`, `HelperFailed`, `ExecWrapNotAPrefix`,
 `TetherClosed`, `WorkloadSpawnFailed`, `NoSupervisor`, beside

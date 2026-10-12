@@ -52,8 +52,9 @@ from brig.run.runtime import IoPolicy, JailRecord, NoSupervisor, ProcessRecord, 
 from brig.run.teardown import KillReport
 from brig.stack import CompiledJail
 
-HANDLE_VERSION: Final = 6
-"""The version of a jail's dict (its predecessor's before decision-183). Bumped 1 -> 2 by
+JAIL_VERSION: Final = 6
+"""The version of a jail's dict (`HANDLE_VERSION` until decision-183 renamed it,
+the value unchanged). Bumped 1 -> 2 by
 task-046 (`wrap_prefix` and `jail_env` became REQUIRED top-level keys) and
 2 -> 3 by task-076 (`helper_pids`). SPEC.md section 5's posture applies here
 too -- "There is no migration framework and no tolerated extra field" -- so an
@@ -74,8 +75,7 @@ older dict would be exactly the silent downgrade that posture forbids.
 Bumped 5 -> 6 by decision-181 (TASK-0079.26): a `Jail`'s dict. The first
 process's fields (`pid`, `pgid`, `start_time`, `argv`, `stdout_path`,
 `stderr_path`) and `launcher_name` are gone, and `runtime`, `tethered` and
-`processes` are new and required. The object whose dict this replaced is
-gone (decision-183); the name stays, since it versions this dict."""
+`processes` are new and required."""
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
@@ -356,13 +356,21 @@ class Jail:
         jail's, and `io` names its stdio files. Absent when the jail cannot
         start (no supervisor, or created tethered in another process).
 
-        The returned call raises what the supervisor refuses with
-        (`ExecWrapNotAPrefix`, `TetherClosed`, `WorkloadSpawnFailed`,
-        `OSError`). A refused start changes nothing: the jail is the
-        caller's, to start again or destroy.
+        A refused start changes nothing: the jail is the caller's, to start
+        again or destroy. Every exception below but `AttributeError` is
+        raised by the returned call; all are importable from `brig.run`.
 
         Raises:
-            AttributeError: the jail cannot start a process.
+            AttributeError: the jail cannot start a process (on access).
+            ExecWrapNotAPrefix: the jail's wrap is not a pure argv prefix, or
+                does not map this argv to its prefix followed by it; nothing
+                is made or spawned.
+            TetherClosed: the jail is tethered and its tether has ended;
+                nothing is made or spawned.
+            WorkloadSpawnFailed: `argv` could not be spawned inside the jail.
+            OSError: the process's records directory or record could not be
+                written (a process whose record could not be written is
+                ended first).
         """
         reason = self._cannot_start()
         if reason is not None:
@@ -432,7 +440,7 @@ class Jail:
         own overlay."""
         record = self._record()
         return {
-            "version": HANDLE_VERSION,
+            "version": JAIL_VERSION,
             "runtime": record.kind.value,
             "tethered": self._tethered,
             "jail_id": self.jail_id,
@@ -466,9 +474,9 @@ class Jail:
         """
         if "version" not in d:
             raise ValueError(f"{_WHO}: missing required key 'version'")
-        if d["version"] != HANDLE_VERSION:
+        if d["version"] != JAIL_VERSION:
             raise ValueError(
-                f"{_WHO}: unsupported version {d['version']!r}, expected {HANDLE_VERSION!r}"
+                f"{_WHO}: unsupported version {d['version']!r}, expected {JAIL_VERSION!r}"
             )
         unknown = set(d) - _TOP_LEVEL_KEYS
         if unknown:

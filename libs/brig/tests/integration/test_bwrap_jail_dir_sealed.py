@@ -29,10 +29,10 @@ import pytest
 
 from brig.core import FsPolicy, ReadModel, Spec
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH, bwrap
-from brig.run import IoPolicy
+from brig.run import IoPolicy, _records
 from brig.run.compile_ctx import build_compile_ctx
 from brig.stack import Stack
-from tests.conftest import launch
+from tests.conftest import launch, teardown_group, workload_argv
 
 _WAIT_TIMEOUT_S = 30.0
 _SYSTEM_ROOTS = ("/bin", "/usr", "/lib", "/lib64", "/etc")
@@ -60,10 +60,10 @@ def outer() -> Iterator[str]:
 #: Each attempt prints its token only when the write succeeded. The rename
 #: puts the directory straight back, so an unsealed jail still ends cleanly.
 _SCRIPT = """
-J="$1"; OUTER="$2"
+J="$1"; OUTER="$2"; EXIT="$3"
 mkdir "$J/procs/0123456789abcdef" && echo MADE_RECORD
 echo '{"pid": 1, "pgid": 1, "start_time": ""}' > "$J/procs/0123456789abcdef/record.json" && echo WROTE_RECORD
-for d in "$J"/procs/*/; do echo 0 > "$d/exit" && echo WROTE_EXIT; done
+echo 0 > "$EXIT" && echo WROTE_EXIT
 echo x > "$J/x" && echo WROTE_X
 mv "$J" "$J-moved" && mv "$J-moved" "$J" && echo MOVED_JAIL_DIR
 echo ok > "$J/tmp/scratch" && echo SCRATCH
@@ -75,7 +75,7 @@ _FORGED = ("MADE_RECORD", "WROTE_RECORD", "WROTE_EXIT", "WROTE_X", "MOVED_JAIL_D
 
 
 @pytest.mark.integration
-def test_a_write_root_above_the_jail_directory_cannot_write_it(outer: str) -> None:
+def test_a_write_root_above_the_jail_directory_cannot_write_it(run_id: str, outer: str) -> None:
     jail_dir = os.path.join(outer, "jail")
     os.makedirs(os.path.join(jail_dir, "tmp"))
     spec = Spec(
@@ -88,15 +88,26 @@ def test_a_write_root_above_the_jail_directory_cannot_write_it(outer: str) -> No
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     signature = bwrap.compile(spec, ctx).denial_signatures[0]
     compiled = Stack([bwrap]).compile(spec, ctx=ctx)
-    _jail, process = launch(
+    # The process whose exit record the plant forges: a known, running one,
+    # so its record's path is named exactly rather than found by a listing
+    # the jail might not be allowed to make.
+    jail, holder = launch(
         compiled,
-        argv=["/bin/sh", "-c", _SCRIPT, "sh", jail_dir, outer],
+        argv=workload_argv(run_id, "sleep 100"),
         cwd=outer,
         io=IoPolicy(),
         jail_id="bwrap-jail-dir-sealed",
         jail_dir=jail_dir,
     )
-    status = process.wait(timeout=_WAIT_TIMEOUT_S)
+    holder_exit = _records.exit_path(jail_dir, holder.id)
+    try:
+        process = jail.start(["/bin/sh", "-c", _SCRIPT, "sh", jail_dir, outer, holder_exit])
+        status = process.wait(timeout=_WAIT_TIMEOUT_S)
+        # Read while the holder still runs: it has written no exit record of
+        # its own, so one there now is the jail's forgery.
+        exit_forged = os.path.exists(holder_exit)
+    finally:
+        teardown_group(holder)
     with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         stdout = f.read()
     with open(process.stderr_path, encoding="utf-8", errors="replace") as f:
@@ -107,6 +118,8 @@ def test_a_write_root_above_the_jail_directory_cannot_write_it(outer: str) -> No
     assert signature.search(stderr) is not None, stderr
     assert not os.path.exists(os.path.join(jail_dir, "procs", "0123456789abcdef"))
     assert not os.path.exists(os.path.join(jail_dir, "x"))
+    assert os.path.isdir(os.path.dirname(holder_exit)), "CONTROL failed: no record to forge"
+    assert not exit_forged, "the jail forged the running process's exit record"
     # The controls, same jail, same run: the scratch and the write root beside
     # the jail directory are written, and the exit record is the workload's.
     assert "SCRATCH" in stdout and "BESIDE" in stdout, (stdout, stderr)
