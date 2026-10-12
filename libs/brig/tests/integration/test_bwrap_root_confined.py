@@ -28,6 +28,7 @@ jail too.
 
 import itertools
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -117,7 +118,11 @@ def test_a_jail_started_as_root_holds_no_capabilities_and_cannot_unlock_a_read_o
         stderr = Path(handle.stderr_path).read_text(errors="replace")
         host_write_landed = planted.exists()
     finally:
+        # Ends what is left and waits for it, so the leak sweep never meets the
+        # leader still exiting (a race seen 2 times in 12 without it).
+        handle.kill()
         planted.unlink(missing_ok=True)
+        shutil.rmtree(jail_dir, ignore_errors=True)
 
     # The controls: the jail ran, wrote its workspace and read its tree.
     assert status == 0, (stdout, stderr)

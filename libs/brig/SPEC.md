@@ -804,7 +804,14 @@ be the copy decision-152 deleted the event stream for).
   unmeasured (no Mac in reach) and is carried to TASK-0079.15. Implementing
   task: TASK-0079.20; `tests/integration/test_bwrap_root_confined.py` plants
   the remount, the host write, the mode-000 read and the sysctl write as
-  root. (Ruled 2026-10-12, decision-177.)
+  root. What a root jail can still write by its mode bits, listed from
+  inside one by TASK-0079.20's review (`access(W_OK)` only, nothing opened):
+  `/proc/mtrr` (its write needs CAP_SYS_ADMIN), `/proc/pressure/*` (a write
+  sets a monitor on that open file and changes nothing on the host), the
+  jail's own `/proc/<pid>` files (its own pid namespace) and bwrap's own
+  `/dev` tmpfs (TASK-0079.22); `/proc/sysrq-trigger` is absent and
+  `/proc/irq` and `/proc/bus` are read-only. (Ruled 2026-10-12,
+  decision-177.)
 - **Read carve-outs: masked where they exist, graded where they do not
   (2026-09-28, decision-164).** Each `read_denies` entry is compared, resolved,
   against every tree the render mounts (read allows, channel directories,
