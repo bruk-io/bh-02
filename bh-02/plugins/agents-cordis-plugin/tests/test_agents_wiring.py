@@ -497,8 +497,8 @@ async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_run
     child's is not the parent's."""
     if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
         pytest.skip("the confined runner's jail is bubblewrap on Linux: /usr/bin/bwrap is absent")
-    # the jail's records and lock live in the state directory: a directory of this test's own, so it
-    # never holds the lock another test (or a running bh-02 of the person's) reads
+    # the jail's records live in the state directory: a directory of this test's own, so it never
+    # writes the person's (the shared lock is in /tmp whatever this says: TASK-0085)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     where = {who: tmp_path / f"{who}.json" for who in ("parent", "child")}
     model = _Model(
