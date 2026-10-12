@@ -379,7 +379,7 @@ def _run_ladder(
     )
 
 
-def _unsignalable(pgid: int, own_pgid: int) -> str | None:
+def unsignalable(pgid: int, own_pgid: int) -> str | None:
     """Why `pgid` must never be signalled, or `None` if it may be. 0 means the
     caller's own group to `killpg`, 1 is init's, a negative one is no group, and
     `own_pgid` is the trusted process itself: a record naming any of them aims
@@ -403,7 +403,7 @@ def _guarded_ladder(
     Raises nothing from an item; only `BaseException`s that are not
     `Exception`s (`KeyboardInterrupt`, `SystemExit`) pass through.
     """
-    refusal = _unsignalable(pgid, os.getpgrp())
+    refusal = unsignalable(pgid, os.getpgrp())
     if refusal is not None:
         return (
             KillOutcome.FAILED,
