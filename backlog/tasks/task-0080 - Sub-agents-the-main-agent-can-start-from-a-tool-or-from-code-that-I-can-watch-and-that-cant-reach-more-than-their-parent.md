@@ -7,6 +7,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-11 15:31'
+updated_date: '2026-10-12 22:22'
 labels: []
 milestone: m-5
 dependencies: []
@@ -34,3 +35,9 @@ The main agent can't hand work to another agent. I want it to start sub-agents f
 - [ ] #4 Must not break: approval stays one rule in one row, and a sub-agent's questions come to me, never to its parent
 - [ ] #5 Must not break: a conversation's prompt stays fixed, and nothing blocks the TUI's event loop
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner's trim, 2026-10-12: this run delivers .02 to .06 and .09; watching without tmux panes (panes and darwin's check: TASK-0080.10, deferred); project guidance in a child (.07) deferred; TASK-0080.08 parked. From here only blocking review findings are fixed in this run; the rest is filed.
+<!-- SECTION:NOTES:END -->

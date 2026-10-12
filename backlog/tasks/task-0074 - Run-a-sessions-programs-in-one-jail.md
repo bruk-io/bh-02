@@ -4,7 +4,7 @@ title: Run a session's programs in one jail
 status: To Do
 assignee: []
 created_date: '2026-10-10 18:42'
-updated_date: '2026-10-12 14:46'
+updated_date: '2026-10-12 22:22'
 labels:
   - runner
 milestone: m-5
@@ -37,4 +37,6 @@ type: feature
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-11: rewired onto decision-0001's split. It no longer depends on TASK-0073 (superseded): it needs a channel per start (TASK-0079.05) and per-process isolation (TASK-0079.07), so the Python process and the extensions process can't reach each other in one jail.
+
+Owner's trim, 2026-10-12: moved out of TASK-0079's finish line to the deferred brig intent TASK-0084. Sub-agents run with a jail each from the same policy until this lands (decision-0002).
 <!-- SECTION:NOTES:END -->

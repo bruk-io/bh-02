@@ -5,6 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-12 14:45'
+updated_date: '2026-10-12 22:22'
 labels: []
 dependencies: []
 type: intent
@@ -33,3 +34,9 @@ TASK-0079.06 (bwrap's supervisor), .07 (the namespace bundle), .08 (the control 
 - [ ] #3 A sandbox technology with a life of its own (a container) is added as a mechanism plus a runtime without changing brig's other mechanisms, Docker included
 - [ ] #4 Must not break: every grade backed by a probe that plants the violation; bh-02's jail guarantees; brig standalone, the standard library and itself only
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner's trim, 2026-10-12: TASK-0074 (one jail per session) joins this deferred intent.
+<!-- SECTION:NOTES:END -->
