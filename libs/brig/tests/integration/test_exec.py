@@ -1,14 +1,15 @@
 """`exec_in_jail` against a real OS process: MILESTONES.md M2 exit criterion
 4 verbatim -- `handle.exec(["pwd"])` runs in the jail's cwd; the exec is
-durably registered so a later process can reap it -- plus SPEC.md §9's
+durably recorded so a later process can reap it -- plus SPEC.md §9's
 same-Spec-env law (the jail's own declared overlay reaches the sibling, and
 wins over the calling process's environment).
 
 The registration used to be an `EXEC` record in the per-jail event stream;
-decision-152 (2026-09-08) deleted that stream and `brig/run/_execs.py`'s
-one-file-per-live-sibling directory replaced it. The assertions here follow
-the medium; the clause they enforce -- durability outside the live object --
-is unchanged.
+decision-152 (2026-09-08) deleted that stream and a one-file-per-live-sibling
+directory (`execs/`) replaced it, and decision-181 (2026-10-12) replaced that
+with a records directory per process (`brig/run/_records.py`) whose record
+outlives the process's `wait`. The assertions here follow the medium; the
+clause they enforce -- durability outside the live object -- is unchanged.
 
 Every test tears its own long-lived workload down directly
 (`os.killpg`/`os.kill` + reap), same as `test_launcher.py`. Teardown here is
@@ -47,7 +48,7 @@ import pytest
 from brig.core import Spec, unenforced_report
 from brig.core.runtime import Capability
 from brig.run import _identity as identity
-from brig.run._execs import live as live_execs
+from brig.run import _records
 from brig.run.exec_ import ExecFidelity, ExecRefused, exec_in_jail
 from brig.run.handle import Handle
 from brig.run.launcher import IoPolicy, SubprocessLauncher
@@ -142,11 +143,16 @@ def _ps_pgid(pid: int) -> int:
 
 
 def _registered(handle: Handle) -> list[tuple[int, int, str]]:
-    """`(pid, pgid, start_time)` for every sibling still registered against
-    this jail -- read off disk, the way a rehydrated handle in another
-    process would read it. The third field is decision-155's start-time
-    stamp."""
-    return live_execs(handle.jail_dir)
+    """`(pid, pgid, start_time)` for every sibling recorded in this jail (every
+    record but the handle's own first process's) -- read off disk, the way a
+    rehydrated handle in another process would read it. The third field is
+    decision-155's start-time stamp."""
+    first = handle.first().id
+    return [
+        (record.pid, record.pgid, record.start_time)
+        for record in _records.scan(handle.jail_dir).records
+        if record.id != first
+    ]
 
 
 def _new_handle(
@@ -266,18 +272,18 @@ def test_exec_env_jail_overlay_reaches_the_sibling_and_wins(run_id: str) -> None
 
 
 # ---------------------------------------------------------------------------
-# AC #6 -- the sibling's durable registration, and its removal.
+# AC #6 -- the sibling's durable record, which outlives its wait.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-def test_exec_registers_the_sibling_and_wait_deregisters_it(run_id: str) -> None:
+def test_exec_records_the_sibling_and_the_record_outlives_wait(run_id: str) -> None:
     """AC #6, EC4 second half: `exec` records the sibling somewhere a LATER
     process can read (SPEC.md §9's binding durability clause) -- carrying
-    both `pid` and `pgid`, because teardown signals the GROUP -- and the
-    first `wait()` that observes an exit status takes it back off the live
-    list. Asserted by reading the registration off disk, never from the
-    live `ExecHandle`."""
+    both `pid` and `pgid`, because teardown signals the GROUP. Since
+    decision-181 the record outlives the sibling's `wait()`, so a teardown
+    after it still ends anything the sibling left in its group. Asserted by
+    reading the record off disk, never from the live `ExecHandle`."""
     handle = _new_handle(run_id, jail_id="jail-exec-evt")
     try:
         assert _registered(handle) == []
@@ -286,30 +292,29 @@ def test_exec_registers_the_sibling_and_wait_deregisters_it(run_id: str) -> None
         registered = _registered(handle)
         assert [pid for pid, _pgid, _stamp in registered] == [exec_handle.pid]
         assert registered[0][1] == _ps_pgid(exec_handle.pid)
-        # decision-155: the registration carries WHEN this sibling started as
-        # well as its number, so a teardown running later cannot mistake a
+        # decision-155: the record carries WHEN this sibling started as well
+        # as its number, so a teardown running later cannot mistake a
         # recycled pid for a sibling it still has to reap.
         assert registered[0][2] == identity.start_stamp(exec_handle.pid) != identity.UNKNOWN
 
         os.killpg(registered[0][1], signal.SIGKILL)
         exec_handle.wait(timeout=5.0)
-        assert _registered(handle) == []
+        assert _registered(handle) == registered
     finally:
         _teardown_group(handle)
 
 
 @pytest.mark.integration
-def test_wait_is_idempotent_and_deregisters_once(run_id: str) -> None:
-    """Mutation-target for `ExecHandle._ended`: calling `wait()` twice
-    returns the same status both times, and the second call does not fail
-    on an already-removed registration."""
+def test_wait_is_idempotent_and_deletes_nothing(run_id: str) -> None:
+    """Calling `wait()` twice returns the same status both times, and the
+    record is still there after both (decision-181)."""
     handle = _new_handle(run_id)
     try:
         exec_handle = exec_in_jail(handle, ["true"])
         first = exec_handle.wait(timeout=5.0)
         second = exec_handle.wait(timeout=5.0)
         assert first == second == 0
-        assert _registered(handle) == []
+        assert [pid for pid, _pgid, _stamp in _registered(handle)] == [exec_handle.pid]
     finally:
         _teardown_group(handle)
 
@@ -343,8 +348,8 @@ def test_exit_status_propagates_and_control_is_zero(run_id: str) -> None:
 def test_interactive_refuses_naming_pty_control_noninteractive_succeeds(run_id: str) -> None:
     """AC #8: `interactive=True` refuses, naming `PTY` on the structured
     `missing` field (not `str(exc)`), and spawns nothing -- no sibling is
-    registered for the refused attempt. The control: the same call with
-    `interactive=False` succeeds and IS registered."""
+    recorded for the refused attempt. The control: the same call with
+    `interactive=False` succeeds and IS recorded."""
     handle = _new_handle(run_id)
     try:
         assert _registered(handle) == []

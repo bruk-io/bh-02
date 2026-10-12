@@ -63,29 +63,26 @@ the operator's environment is a handle no embedder can put in its own log.
 The two cases now compose the env identically, which is also one fewer way
 for them to differ.
 
-**Why the sibling's `pgid` is REGISTERED, not inferred (task-027,
+**Why the sibling's `pgid` is RECORDED, not inferred (task-027,
 decision-042).** "An exec sibling is the handle's to reap" (SPEC.md §9)
 requires a handle rehydrated in a LATER process to find and tear down a
 sibling it never itself started -- `teardown.kill_jail` does this by
-listing `brig/run/_execs.py`'s registration directory under
-`handle.jail_dir` rather than reading any in-memory registration on
-`Handle` (which is frozen and carries none). Until decision-152
-(2026-09-08) the registration was an `EXEC` record in the per-jail event
-stream with no matching `EXEC_END`; the stream is gone and the directory
-replaced it, but the binding clause -- durability outside the live object
--- is unchanged, and so is the pid-reuse limit SPEC.md §9 names.
+listing the records under `<jail_dir>/procs` (`brig/run/_records.py`)
+rather than reading any in-memory state on `Handle` (which is frozen and
+carries none). The medium changed twice (the event stream until
+decision-152, `execs/` until decision-181); the binding clause --
+durability outside the live object -- did not.
 
-**The registration is created BEFORE the sibling can matter and removed
-the moment its exit status is observed** (`ExecHandle.wait`). A sibling
-whose `wait()` is never called stays registered, which is the safe
-direction: teardown then runs the ladder against a group that is already
-gone and reports `ALREADY_GONE`, rather than skipping a group that is not.
+**A sibling is a start like the first process** (decision-181): its own
+exit wrapper, its own records directory, its own tether watcher when the
+jail is tethered, and a record that outlives its `wait`. A teardown after
+the wait still runs the ladder for its group: `ALREADY_GONE` when empty, and
+anything the sibling left running there is ended.
 """
 
 from __future__ import annotations
 
 import subprocess
-import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -115,30 +112,35 @@ class ExecRefused(ValueError):
 class ExecWrapNotAPrefix(ValueError):
     """SPEC.md §9: "The exec'd process is subject to the same Spec as the
     workload -- never a weaker one. A mechanism that cannot guarantee this
-    refuses exec." Raised when `handle.wrap_prefix` is `None` --
-    `launcher.py`'s own `_derive_wrap_prefix` verified, at launch time,
-    that the compiled stack's `wrap` is NOT a pure argv prefix for this
-    handle's own `argv` (a rewritten element, an appended trailing token,
-    or a wrap that returns fewer tokens than it was given), so this module
-    cannot reproduce that wrap's effect on an exec's argv by prepending a
-    fixed prefix and refuses rather than spawn a sibling under a weaker
-    confinement than the workload's own. Typed fields (`handle_argv`,
-    `requested_argv`), never a `str(exc)` parse -- same posture as
-    `ExecRefused` above and `launcher.LaunchRefused`.
+    refuses exec." Raised by every start in a jail whose `wrap_prefix` is
+    `None` -- `create` verified that the compiled stack's `wrap` is NOT a
+    pure argv prefix (a rewritten element, an appended trailing token, or a
+    wrap that returns fewer tokens than it was given) -- and, in the process
+    that created the jail, by a start whose own argv the compiled `wrap` does
+    not map to `(*wrap_prefix, *argv)` (decision-181). Nothing is spawned
+    rather than a process under a weaker confinement than the jail's. Typed
+    fields (`wrap_prefix`, `requested_argv`), never a `str(exc)` parse --
+    same posture as `ExecRefused` above and `launcher.LaunchRefused`.
     """
 
-    def __init__(self, handle_argv: tuple[str, ...], requested_argv: tuple[str, ...]) -> None:
-        self.handle_argv = handle_argv
+    def __init__(
+        self, wrap_prefix: tuple[str, ...] | None, requested_argv: tuple[str, ...]
+    ) -> None:
+        self.wrap_prefix = wrap_prefix
         self.requested_argv = requested_argv
         super().__init__(str(self))
 
     def __str__(self) -> str:
+        found = (
+            "no prefix was found"
+            if self.wrap_prefix is None
+            else f"it does not map this argv to the jail's prefix {self.wrap_prefix!r} followed by it"
+        )
         return (
-            "exec refused: the compiled stack's wrap is not a pure argv prefix "
-            f"for this jail (handle.argv={self.handle_argv!r}), so a sibling "
-            f"exec of {self.requested_argv!r} cannot be guaranteed the same "
-            "Spec as the workload -- refusing rather than spawning a weaker "
-            "sibling"
+            "start refused: the compiled stack's wrap is not a pure argv prefix "
+            f"for this jail ({found}), so {self.requested_argv!r} cannot be "
+            "guaranteed the same Spec as the jail's other processes -- refusing "
+            "rather than starting it under a weaker confinement"
         )
 
 
@@ -184,14 +186,14 @@ class ExecHandle:
 
     def wait(self, timeout: float | None = None) -> int:
         """Block for the exec'd process's exit status, through the supervisor
-        that started it, which then DEREGISTERS this sibling
-        (`brig/run/_execs.py`) -- the first `wait()` that observes a status
-        is what makes it no longer a thing teardown must reap. Idempotent: a
-        second `wait()` returns the same status and deregisters nothing
-        twice.
+        that started it. Deletes nothing: the sibling's record outlives its
+        `wait` (decision-181), so a later teardown still ends anything it left
+        running in its group, and reports its group `ALREADY_GONE` when empty.
+        Idempotent: a second `wait()` returns the same status.
 
         Raises:
             subprocess.TimeoutExpired: still running after `timeout` seconds.
+            ExitStatusUnobservable: gone, and nothing recorded how it ended.
         """
         status = self._supervisor.wait(self._process, timeout)
         if status is None:
@@ -236,19 +238,16 @@ def exec_in_jail(handle: Any, argv: Sequence[str], interactive: bool = False) ->
     argv_t = tuple(argv)
     wrap_prefix: tuple[str, ...] | None = handle.wrap_prefix
     if wrap_prefix is None:
-        raise ExecWrapNotAPrefix(tuple(handle.argv), argv_t)
+        raise ExecWrapNotAPrefix(wrap_prefix, argv_t)
     fidelity = ExecFidelity.EQUIVALENT_PROFILE if wrap_prefix else ExecFidelity.PLAIN
 
     supervisor = handle.runtime.supervisor(handle.record())
     if supervisor is None:
         raise NoSupervisor(f"jail {handle.jail_id!r} has no supervisor to start {argv_t!r} with")
 
-    token = uuid.uuid4().hex[:12]
-    process = supervisor.start(
-        argv_t,
-        cwd=handle.cwd,
-        io=IoPolicy(stdout_name=f"exec-{token}-stdout.log", stderr_name=f"exec-{token}-stderr.log"),
-    )
+    # Each process has a records directory of its own (decision-181), so its
+    # stdio needs no name of its own any more.
+    process = supervisor.start(argv_t, cwd=handle.cwd, io=IoPolicy())
 
     return ExecHandle(
         pid=process.pid,

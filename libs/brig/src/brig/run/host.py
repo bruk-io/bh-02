@@ -1,13 +1,16 @@
 """`HostRuntime`: brig's own runtime, the one every jail ran under before it had a name.
 
 SPEC.md section 3 (decision-178, decision-0001 step 1). Its instance is host
-process groups: `create` runs the compiled jail's argv under the exit wrapper,
-detached in a new process group, tethered when asked; `destroy` is SPEC.md
-section 9's verified ladder over the workload's group, every exec sibling and
-every `JAIL_LIFETIME` helper (`brig/run/teardown.py`); `HostSupervisor` starts a
-sibling under the same wrap (`EQUIVALENT_PROFILE`, or `PLAIN` for the empty
-stack), signals a group after checking its leader's identity, waits through the
-exit record or its own `Popen`, and stops one group with the same ladder.
+process groups. Since decision-181 (TASK-0079.25) `create` holds no process:
+it makes `jail_dir`, clears what an earlier jail left there (refused while any
+of it runs), stages files, runs and starts the helpers, derives `wrap_prefix`
+and keeps the tether; every process, the first included, is a
+`HostSupervisor.start`, with its own exit wrapper, its own tether watcher and
+its own records directory `<jail_dir>/procs/<id>/` (`brig/run/_records.py`).
+`destroy` is SPEC.md section 9's verified ladder per process in start order,
+then every `JAIL_LIFETIME` helper (`brig/run/teardown.py`); `HostSupervisor`
+signals a group after checking its leader's identity, waits through the exit
+waiter or the process's exit record, and stops one group with the same ladder.
 
 Everything here is what `SubprocessLauncher.launch`, `Handle.interrupt`,
 `Handle.wait` and `exec_in_jail` did before decision-178, moved rather than
@@ -21,8 +24,9 @@ workload -- but `Handle` does not carry the `CompiledJail.wrap` callable
 itself (only the already-wrapped `argv` it launched), and a callable is not
 serializable across `to_dict`/`from_dict`'s process boundary anyway. So
 this launcher DERIVES `wrap_prefix` once, here, at launch time
-(`_derive_wrap_prefix`): the tuple of tokens `jail.wrap` prepended ahead of
-`argv`, verified -- not assumed -- to be a pure prefix (the wrap's output
+(`_derive_wrap_prefix`; since decision-181 at `create`, against a fixed
+sentinel argv, `_WRAP_SENTINEL`): the tuple of tokens `jail.wrap` prepended
+ahead of `argv`, verified -- not assumed -- to be a pure prefix (the wrap's output
 ends in exactly `argv`, unchanged). `exec_.exec_in_jail` then reproduces
 `jail.wrap`'s effect on an arbitrary exec argv by literally prepending this
 same prefix, and refuses exec outright when the verification found no pure
@@ -31,7 +35,8 @@ prefix (`wrap_prefix is None`) rather than spawn a weaker sibling.
 **The exit wrapper (decision-156, 2026-09-08).** This launcher does not
 spawn the compiled jail's argv directly any more. It spawns
 `brig/run/_exit_status.py`'s wrapper program, which spawns that argv as its
-own child, waits for it, and writes the status to `<jail_dir>/exit` -- so a
+own child, waits for it, and writes the status to its exit record (since
+decision-181 one per process, `<jail_dir>/procs/<id>/exit`) -- so a
 `Handle` rehydrated in a process that never parented the workload can still
 read how it ended, which is the one capability decision-152 admitted it was
 giving up. The wrapper prepends NOTHING to the jail's argv: `wrap_prefix` is
@@ -51,29 +56,41 @@ signalling one. The stamps ride on the `Handle`, so a rehydrated handle
 compares them too.
 """
 
+import contextlib
 import math
 import os
+import shutil
 import signal
 import subprocess
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
 from brig.core.runtime import Capability, RuntimeKind
 from brig.mech import HelperLifetime
-from brig.run import _execs, _exit_status, _identity, _waiters
+from brig.run import _exit_status, _identity, _records, _waiters
 from brig.run._spawn_pgid import spawn_pgid
+from brig.run._tether import HeldTether
 from brig.run.exec_ import ExecWrapNotAPrefix
 from brig.run.runtime import (
     ExitStatusUnobservable,
+    Held,
     IoPolicy,
     JailRecord,
     ProcessRecord,
     Supervisor,
 )
-from brig.run.teardown import KillReport, end_group, kill_named
+from brig.run.teardown import (
+    KillOutcome,
+    KillReport,
+    UnreadableProcessTable,
+    end_group,
+    kill_named,
+    live_groups,
+    read_process_table,
+)
 from brig.stack import CompiledJail
 
 #: How long a LAUNCH_SCOPED helper may take to finish. It is a preparation
@@ -174,7 +191,7 @@ def _spawn(
     env: Mapping[str, str],
     stdout_path: str,
     stderr_path: str,
-    jail_dir: str,
+    exit_file: str,
     tether: int | None = None,
 ) -> subprocess.Popen[bytes]:
     """Spawn the jail's argv under the exit wrapper, detached, new group.
@@ -186,8 +203,9 @@ def _spawn(
 
     The process this returns is `_exit_status.WRAPPER_SOURCE`, not the
     jail's argv: the wrapper spawns THAT as its own child, inheriting this
-    cwd, env and stdio unchanged, and writes the status to
-    `<jail_dir>/exit` when it ends (decision-156). The ready pipe is what
+    cwd, env and stdio unchanged, and writes the status to `exit_file`, the
+    process's own exit record, when it ends (decision-156, decision-181).
+    `tether` is passed to this wrapper alone (`pass_fds`). The ready pipe is what
     keeps a workload that cannot be exec'd a LAUNCH failure rather than a
     handle for something already dead -- the wrapper writes one token
     through it the instant the spawn succeeds or fails, and closing it is
@@ -201,7 +219,9 @@ def _spawn(
             open(os.devnull, "rb") as stdin_f,
         ):
             proc = subprocess.Popen(
-                _exit_status.wrapper_argv(sys.executable, jail_dir, write_fd, wrapped_argv, tether),
+                _exit_status.wrapper_argv(
+                    sys.executable, exit_file, write_fd, wrapped_argv, tether
+                ),
                 cwd=cwd,
                 env=dict(env),
                 stdin=stdin_f,
@@ -218,14 +238,19 @@ def _spawn(
             os.close(write_fd)
         os.close(read_fd)
 
-    if token.startswith(b"err:"):
+    if token != b"ok":
+        # The wrapper's group may hold its tether watcher, started before the
+        # workload: end the group while the wrapper is still unreaped (so its
+        # number can't be anyone else's), then reap the wrapper.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
+    if token.startswith(b"err:"):
         raise _exit_status.WorkloadSpawnFailed(
             f"the workload {wrapped_argv[0]!r} could not be spawned inside its jail: "
             + token[4:].decode(errors="replace")
         )
     if token != b"ok":
-        proc.wait()
         raise _exit_status.WorkloadSpawnFailed(
             f"the exit wrapper for {wrapped_argv[0]!r} ended before it spawned the "
             f"workload (reported {token!r}); see {stderr_path}"
@@ -328,16 +353,62 @@ def _refused(jail: CompiledJail, capabilities: frozenset[Capability]) -> frozens
     return jail.requires - capabilities
 
 
+#: The argv `create` applies the compiled `wrap` to, to derive `wrap_prefix`
+#: (decision-181), since `create` has no process's argv to derive it from. Each
+#: token holds a NUL, which no real argv can (`execve` takes C strings, and
+#: `subprocess` refuses an embedded NUL), so it never equals an argv a start
+#: is asked for. Two tokens, so a wrap that rewrites either the first or a
+#: later argument fails the prefix check here, and in the creating process
+#: every start also checks `wrap` of its own argv against the prefix.
+_WRAP_SENTINEL: Final = ("\x00brig-wrap-sentinel-argv0", "\x00brig-wrap-sentinel-argv1")
+
+
+def _clear_earlier_records(
+    jail_dir: str, *, read_table: Callable[[], str] = read_process_table
+) -> None:
+    """Remove the records an earlier jail left under `<jail_dir>/procs`, once
+    nothing they name runs; on any doubt remove nothing and refuse
+    (decision-181). Per record, the stamp before the group
+    (`_records.standing`): a leader that holds its identity runs; one whose pid
+    now names another process holds no group; one that is gone runs while its
+    group has a live member. An unreadable record, an unknown stamp, a link or
+    a file under `procs/`, or a process table that can't be read is a doubt.
+    `read_table` is the process table's seam, as `group_alive`'s.
+
+    Raises:
+        _records.JailDirInUse: something a record names runs, or is in doubt.
+        OSError: the records could not be removed.
+    """
+    scanned = _records.scan(jail_dir)
+    if not scanned.records and not scanned.unreadable:
+        return
+    try:
+        live: frozenset[int] | None = live_groups(read_table())
+    except OSError, subprocess.CalledProcessError, UnreadableProcessTable:
+        live = None
+    pids = {record.pid for record in scanned.records}
+    held = _records.held_by(
+        jail_dir,
+        scanned,
+        stamps={pid: _identity.start_stamp(pid) for pid in pids},
+        zombies=frozenset(pid for pid in pids if _identity.is_zombie(pid)),
+        live_groups=live,
+    )
+    if held:
+        raise _records.JailDirInUse(jail_dir, held)
+    _records.remove_procs(jail_dir)
+
+
 @dataclass(frozen=True, slots=True)
 class HostRuntime:
     """Host process groups as a jail's instance (decision-178).
 
     Holds no state: everything a later call needs is in the `JailRecord`
-    `create` returns, so a record rehydrated in another process is
-    controlled the same way. The one thing that does not cross processes is
-    what `_waiters` and a `HostSupervisor` hold in memory (the exit observation,
-    a sibling's `Popen`); the exit file and the registration directory under
-    `jail_dir` are what stand in for them elsewhere."""
+    `create` returns and in the records under `<jail_dir>/procs`, so a record
+    rehydrated in another process is controlled the same way. What does not
+    cross processes is what `_waiters` holds (the exit observation) and the
+    record's `Held` (the compiled wrap, the sensors, the tether); each
+    process's exit record stands in for the first elsewhere."""
 
     kind: RuntimeKind = RuntimeKind.HOST
     capabilities: frozenset[Capability] = frozenset(
@@ -348,98 +419,59 @@ class HostRuntime:
         self,
         jail: CompiledJail,
         *,
-        argv: Sequence[str],
         cwd: str,
-        io: IoPolicy,
         jail_id: str,
         jail_dir: str,
         tether: int | None,
     ) -> JailRecord:
-        """What `SubprocessLauncher.launch` did, in its order: create
-        `jail_dir`, clear any exit record an earlier launch left in it
-        (decision-162), write `jail.staged`, start `jail.helpers`, spawn
-        `jail.wrap(argv)` under the exit wrapper, detached in a new process
-        group with stdio per `io`, read its identity, and hand its reap to a
-        waiter thread.
+        """Make the jail's instance, with no process in it (decision-181):
+        create `jail_dir`, clear the records an earlier jail left there
+        (refused while any of it runs or is in doubt), write `jail.staged`,
+        run `LAUNCH_SCOPED` helpers to completion and start `JAIL_LIFETIME`
+        ones, and derive `wrap_prefix` once, from `jail.wrap` applied to a
+        fixed sentinel argv, verified as a pure prefix (`None`: every start
+        refuses). Spawns no workload: every process is a `HostSupervisor.start`.
 
         `tether` (decision-167, SPEC.md section 8) is the read end of a pipe
-        whose write end the caller keeps: once every write end is closed, the
-        workload's process group is sent `SIGKILL`. `None`: the jail lives
-        until it ends or is destroyed.
+        whose write end the caller keeps: the jail holds a duplicate of it
+        (`HeldTether`), so the caller may close its own read end once this
+        returns, and every start is tethered to it. `None`: the jail lives
+        until its processes end or it is destroyed.
 
         Raises:
             LaunchRefused: `jail.requires` names a feature `capabilities`
                 lacks.
+            _records.JailDirInUse: `jail_dir` holds an earlier jail's records
+                and something they name runs, or brig can't tell.
             HelperFailed: a `LAUNCH_SCOPED` helper exited non-zero or did not
                 finish.
-            _exit_status.WorkloadSpawnFailed: the workload could not be
-                spawned inside its jail.
+            OSError: `tether` is not an open descriptor, or `jail_dir` could
+                not be made or written.
         """
         missing = _refused(jail, self.capabilities)
         if missing:
             raise LaunchRefused(missing, "host")
 
+        held = Held(
+            wrap=jail.wrap,
+            sensors=jail.sensors,
+            tether=None if tether is None else HeldTether(tether),
+        )
         os.makedirs(jail_dir, exist_ok=True)
-        # Before anything is staged or spawned: a status left in this
-        # directory by an EARLIER launch would be returned by this launch's
-        # own `Handle.wait` as if it were this workload's (decision-162).
-        _exit_status.clear_exit_status(jail_dir)
+        _clear_earlier_records(jail_dir)
         _write_staged_files(jail_dir, jail)
 
-        argv_t = tuple(argv)
-        wrapped_argv = tuple(jail.wrap(argv_t))
-        # SPEC.md §9's exec fidelity depends on this: `exec_.exec_in_jail`
-        # trusts `wrap_prefix` to reproduce the workload's own compiled
-        # wrap for an arbitrary exec argv, so it must be DERIVED and
-        # VERIFIED here, once, against the actual compiled wrap's output --
-        # never assumed from the mechanism roster or the stack's shape.
-        wrap_prefix = _derive_wrap_prefix(wrapped_argv, argv_t)
+        # SPEC.md §9's exec fidelity depends on this: every start trusts
+        # `wrap_prefix` to reproduce the jail's compiled wrap for its own argv,
+        # so it is DERIVED and VERIFIED here, once, against the compiled wrap's
+        # actual output -- never assumed from the mechanism roster.
+        wrap_prefix = _derive_wrap_prefix(tuple(jail.wrap(_WRAP_SENTINEL)), _WRAP_SENTINEL)
 
-        # The workload's env is the launching process's own environment
-        # (so `bash`/PATH-relative lookups work at all) overlaid with the
-        # jail's compiled env (SPEC.md §7 Composition: mechanism env
-        # merges, later-wins). M2 has zero mechanisms, so `jail.env` is
-        # ordinarily empty and this is exactly os.environ; real scrubbing
-        # is a mechanism's job and arrives with M3 (env axis grades
-        # UNENFORCED here regardless of what this launcher passes through).
+        # The env is the creating process's own environment overlaid with the
+        # jail's compiled env (SPEC.md §7 Composition: mechanism env merges,
+        # later-wins); scrubbing is a mechanism's job.
         full_env: dict[str, str] = {**os.environ, **jail.env}
-
-        stdout_path = os.path.join(jail_dir, io.stdout_name)
-        stderr_path = os.path.join(jail_dir, io.stderr_name)
-
         helper_pids, helper_stamps = _start_helpers(jail, cwd=cwd, env=full_env, jail_dir=jail_dir)
-
-        proc = _spawn(
-            wrapped_argv,
-            cwd=cwd,
-            env=full_env,
-            stdout_path=stdout_path,
-            stderr_path=stderr_path,
-            jail_dir=jail_dir,
-            tether=tether,
-        )
-        pid = proc.pid
-        # decision-155: read the leader's start time now, while it is
-        # certainly still the process this launch just created. Every
-        # liveness and kill decision compares it against the pid's current
-        # occupant, so a recycled pid reads as gone rather than as this
-        # jail. `_identity.UNKNOWN` when the host can't read it (`/proc` or
-        # `ps` unavailable or failing); teardown then signals nothing for
-        # this record and reports it FAILED while its group runs
-        # (decision-172).
-        start_time = _identity.start_stamp(pid)
-        # task-075: same darwin getpgid-zombie race as `exec_.py` -- a fast
-        # workload command that exits before this read would crash
-        # `launch()` after the spawn but before the SPAWN record and the
-        # exit-waiter registration. See `brig/run/_spawn_pgid.py`.
-        pgid = spawn_pgid(proc)
-
-        # One thread owns this workload's reap, records its exit status, and
-        # asks every sensor what it makes of that ending. Without it,
-        # `subprocess._cleanup()` reaps the workload at the next Popen
-        # anywhere in the process and the status is lost -- see
-        # brig/run/_waiters.py for why holding the Popen instead is worse.
-        _waiters.watch(proc, jail_id=jail_id, sensors=jail.sensors)
 
         return JailRecord(
             kind=self.kind,
@@ -448,127 +480,149 @@ class HostRuntime:
             cwd=cwd,
             jail_env=frozendict(jail.env),
             wrap_prefix=wrap_prefix,
-            first=ProcessRecord(
-                pid=pid,
-                pgid=pgid,
-                start_time=start_time,
-                argv=wrapped_argv,
-                stdout_path=stdout_path,
-                stderr_path=stderr_path,
-            ),
             helper_pids=helper_pids,
             helper_stamps=helper_stamps,
+            held=held,
         )
 
     def alive(self, jail: JailRecord) -> bool:
-        """Whether the first process still runs, by identity: its pid and the
-        start time recorded for it (decision-155). A recycled pid and a
-        zombie read gone (decision-171); an unknown stamp degrades to the
-        pid-only check. This answers for the leader only; `destroy` is what
-        ends a group."""
-        return _identity.identity_holds(jail.first.pid, jail.first.start_time)
+        """Whether anything of the jail runs (decision-181): a process it
+        started whose leader holds its identity -- each known process by the
+        identity `jail` holds, then every other record under `procs/` -- or a
+        `JAIL_LIFETIME` helper that does. A recycled pid and a zombie read gone
+        (decision-155, decision-171); an unknown stamp degrades to the pid-only
+        check. A jail with nothing started and no helper reads gone. This
+        answers for leaders; `destroy` is what ends groups."""
+        known_ids = {process.id for process in jail.processes}
+        processes = (
+            *jail.processes,
+            *(p for p in _records.scan(jail.jail_dir).records if p.id not in known_ids),
+        )
+        return any(
+            _identity.identity_holds(process.pid, process.start_time) for process in processes
+        ) or any(
+            _identity.identity_holds(pid, stamp)
+            for pid, stamp in zip(jail.helper_pids, jail.helper_stamps, strict=True)
+        )
 
     def destroy(self, jail: JailRecord) -> KillReport:
-        """SPEC.md section 9's ladder over the first process's group, every
-        exec sibling registered under `jail_dir`, then every `JAIL_LIFETIME`
-        helper, each verified (`teardown.kill_named`). Total: raises nothing
-        from an item."""
+        """SPEC.md section 9's ladder per process in start order -- the ones
+        `jail` holds, then every other record under `procs/` -- then every
+        `JAIL_LIFETIME` helper, each verified (`teardown.kill_named`). Total:
+        raises nothing from an item."""
         return kill_named(
-            pgid=jail.first.pgid,
-            pid=jail.first.pid,
-            start_time=jail.first.start_time,
+            known=jail.processes,
             jail_dir=jail.jail_dir,
             helper_pids=jail.helper_pids,
             helper_stamps=jail.helper_stamps,
         )
 
     def supervisor(self, jail: JailRecord) -> Supervisor:
-        """A fresh `HostSupervisor` bound to `jail`. Every host jail has one: a
-        sibling is started from the record alone."""
+        """A `HostSupervisor` bound to `jail`. Every host jail has one: a
+        process is started from the record alone."""
         return HostSupervisor(jail)
 
 
+def _end_unrecorded(process: ProcessRecord, jail_dir: str, error: OSError) -> None:
+    """A start whose `record.json` could not be written: its process runs
+    unrecorded, so end its group now, through the ladder and its guards, and
+    remove its records directory once it is gone. Says what happened on
+    `error`, which the caller re-raises (decision-181)."""
+    item = end_group("exec_sibling", process.pgid, process.pid, process.start_time)
+    if item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE):
+        with contextlib.suppress(OSError):
+            shutil.rmtree(_records.process_dir(jail_dir, process.id))
+        error.add_note(
+            f"its record could not be written, so the process (pid {process.pid}) was "
+            "ended and its records directory removed; nothing of it runs"
+        )
+    else:
+        error.add_note(
+            f"its record could not be written, and ending its process group {process.pgid} "
+            f"failed ({item.detail}); end it yourself (`kill -KILL -- -{process.pgid}`)"
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class HostSupervisor:
     """Starts, signals, waits for and stops processes in one host jail.
 
-    A class because it holds state its own methods change: the `Popen` of
-    every sibling it started, so `wait` can collect its status, and which of
-    them it has already deregistered. Whoever holds the supervisor holds those
-    `Popen`s (an `ExecHandle` holds the supervisor that started it), so a sibling
-    nobody waits for is dropped with its handle and reaped by `subprocess`,
-    as before decision-178."""
+    Holds nothing but the jail's record: each process's exit observation is
+    the exit waiter's (`_waiters`) and its exit record's, never a `Popen` held
+    here, so a process started through one supervisor is waited through any
+    other, in this process or a later one."""
 
-    def __init__(self, jail: JailRecord) -> None:
-        self._jail = jail
-        self._spawned: dict[int, subprocess.Popen[bytes]] = {}
-        self._deregistered: set[int] = set()
+    jail: JailRecord
 
     def start(self, argv: Sequence[str], *, cwd: str, io: IoPolicy) -> ProcessRecord:
-        """Run `argv` as a sibling under the jail's own wrap: `(*wrap_prefix,
-        *argv)`, env `{**os.environ, **jail_env}`, stdio per `io` under
-        `jail_dir`, stdin `/dev/null`, a new process group, registered under
-        `jail_dir` before this returns so a teardown in any process finds it.
+        """Start `argv` in the jail (decision-181): `(*wrap_prefix, *argv)`
+        under its own exit wrapper, detached in a new process group, env
+        `{**os.environ, **jail_env}`, stdin `/dev/null`, stdio per `io` in its
+        own records directory `<jail_dir>/procs/<id>/`, made before the spawn;
+        tethered when the jail is, by a watcher of its own started before the
+        workload; its `record.json` written once the spawn returns.
 
         Raises:
             ExecWrapNotAPrefix: the jail's wrap is not a pure argv prefix
-                (`wrap_prefix is None`); raised before anything is opened or
-                spawned, rather than start a sibling under a weaker
-                confinement than the jail's first process.
+                (`wrap_prefix is None`), or, where the compiled wrap is held,
+                `wrap` of this argv is not the prefix followed by it; raised
+                before anything is made or spawned.
+            TetherClosed: the jail is tethered and its tether has ended; raised
+                before anything is made or spawned.
+            _exit_status.WorkloadSpawnFailed: the argv could not be spawned.
+            OSError: the records directory or the record could not be written
+                (a process whose record could not be written is ended first).
         """
         argv_t = tuple(argv)
-        wrap_prefix = self._jail.wrap_prefix
+        jail = self.jail
+        wrap_prefix = jail.wrap_prefix
         if wrap_prefix is None:
-            raise ExecWrapNotAPrefix(self._jail.first.argv, argv_t)
-
+            raise ExecWrapNotAPrefix(wrap_prefix, argv_t)
         spawned_argv = (*wrap_prefix, *argv_t)
-        # The launcher's OWN env composition (`create`'s `full_env`),
-        # evaluated fresh at exec time -- the sibling's starting environment is
-        # the workload's declared overlay over this process's environment, in
-        # both fidelity cases (decision-152; see `exec_.py`'s docstring).
-        spawn_env: dict[str, str] = {**os.environ, **self._jail.jail_env}
-        stdout_path = os.path.join(self._jail.jail_dir, io.stdout_name)
-        stderr_path = os.path.join(self._jail.jail_dir, io.stderr_name)
+        held = jail.held
+        if held is not None and tuple(held.wrap(argv_t)) != spawned_argv:
+            raise ExecWrapNotAPrefix(wrap_prefix, argv_t)
+        tether_fd = None if held is None or held.tether is None else held.tether.fd()
 
-        with (
-            open(stdout_path, "wb") as stdout_f,
-            open(stderr_path, "wb") as stderr_f,
-            open(os.devnull, "rb") as stdin_f,
-        ):
-            proc = subprocess.Popen(
+        process_id = _records.new_id()
+        order = time.time_ns()
+        directory = _records.make_dir(jail.jail_dir, process_id)
+        stdout_path = os.path.join(directory, io.stdout_name)
+        stderr_path = os.path.join(directory, io.stderr_name)
+        # The creating process's env, overlaid with the jail's own, evaluated
+        # fresh for every start (decision-152).
+        spawn_env: dict[str, str] = {**os.environ, **jail.jail_env}
+        try:
+            proc = _spawn(
                 spawned_argv,
                 cwd=cwd,
                 env=spawn_env,
-                stdin=stdin_f,
-                stdout=stdout_f,
-                stderr=stderr_f,
-                start_new_session=True,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                exit_file=os.path.join(directory, _records.EXIT_FILENAME),
+                tether=tether_fd,
             )
-
+        except BaseException:
+            # Nothing was started (`_spawn` waits for a wrapper that could not
+            # start its argv), so the directory records nothing; left, it
+            # would hold the jail directory for the next `create`.
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
         pid = proc.pid
-        # SPEC.md §9 / decision-042 (task-027): the registration carries the
-        # sibling's pgid EXPLICITLY, read fresh via `os.getpgid` -- never
-        # inferred from `pid`. `start_new_session=True` makes them equal
-        # today, but an inferred identity would be a claim about a launcher
-        # detail, not a recorded fact; `teardown.kill_jail` (task-027) reads
-        # this field back from a REHYDRATED handle in a separate process, so
-        # the fact has to be on disk, not reconstructed.
-        # task-075: the read goes through `spawn_pgid`, because darwin's
-        # `getpgid()` raises ESRCH for a sibling that has ALREADY EXITED (a
-        # fast command like `/usr/bin/true` under any scheduling delay) -- a
-        # bare call here crashed `exec_in_jail` after the spawn but before the
-        # registration, leaving the sibling unregistered and its zombie to the
-        # GC. The fallback records the same fact (setsid-before-exec makes the
-        # group the pid from birth); see `brig/run/_spawn_pgid.py`.
-        pgid = spawn_pgid(proc)
-        # decision-155: the registration carries WHEN this sibling started as
-        # well as its number, so a teardown running later -- possibly in another
-        # process -- can tell it from whatever the OS handed that pid to next.
-        # Read here, while the sibling is as young as it will ever be.
+        # decision-155: read the leader's start time now, while it is
+        # certainly still the process this start just made. `UNKNOWN` when the
+        # host can't read it; teardown then signals nothing for this record
+        # and reports it FAILED while its group runs (decision-172).
         start_time = _identity.start_stamp(pid)
-        _execs.register(self._jail.jail_dir, pid, pgid, start_time)
-        self._spawned[pid] = proc
-
-        return ProcessRecord(
+        # task-075: through `spawn_pgid`, because darwin's `getpgid()` raises
+        # ESRCH for a process that has already exited; see that module.
+        pgid = spawn_pgid(proc)
+        # One thread owns this process's reap and records its status, and asks
+        # the sensors what they make of its ending (brig/run/_waiters.py).
+        _waiters.watch(proc, jail_id=jail.jail_id, sensors=() if held is None else held.sensors)
+        process = ProcessRecord(
+            id=process_id,
+            order=order,
             pid=pid,
             pgid=pgid,
             start_time=start_time,
@@ -576,6 +630,12 @@ class HostSupervisor:
             stdout_path=stdout_path,
             stderr_path=stderr_path,
         )
+        try:
+            _records.write(jail.jail_dir, process)
+        except OSError as error:
+            _end_unrecorded(process, jail.jail_dir, error)
+            raise
+        return process
 
     def signal(self, process: ProcessRecord, sig: signal.Signals) -> bool:
         """Deliver `sig` to `process`'s **group** (`os.killpg`), never a
@@ -593,82 +653,53 @@ class HostSupervisor:
         return True
 
     def wait(self, process: ProcessRecord, timeout: float | None) -> int | None:
-        """The exit status of `process`, or `None` while it still runs at
-        the deadline (`timeout=None`: none).
+        """The exit status of `process`, or `None` while it still runs at the
+        deadline (`timeout=None`: none). Deletes nothing: a record outlives
+        its process's `wait` (decision-181).
 
-        The first process: this process's waiter record if it holds one,
-        else `<jail_dir>/exit`, written by the exit wrapper (decision-156).
-        A sibling this supervisor started: its own `Popen`, and the first status
-        observed deregisters it, once.
-
-        Raises:
-            ExitStatusUnobservable: the first process is gone and neither
-                source recorded how it ended; or `process` is a sibling this
-                supervisor did not start, whose status nothing records.
-        """
-        if process == self._jail.first:
-            return self._wait_first(timeout)
-        proc = self._spawned.get(process.pid)
-        if proc is None:
-            raise ExitStatusUnobservable(
-                f"pid {process.pid} was not started by this supervisor, and nothing records how a "
-                f"sibling in jail {self._jail.jail_id!r} ended"
-            )
-        try:
-            status = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return None
-        if process.pid not in self._deregistered:
-            _execs.deregister(self._jail.jail_dir, process.pid)
-            self._deregistered.add(process.pid)
-        return status
-
-    def _wait_first(self, timeout: float | None) -> int | None:
-        """`Handle.wait`'s loop before decision-178, unchanged but for
-        returning `None` at the deadline instead of raising.
+        From this process's waiter record if it holds one, else the process's
+        own exit record, written by its exit wrapper (decision-156), for every
+        process, siblings included.
 
         Raises:
-            ExitStatusUnobservable: gone, and no record in either place.
+            ExitStatusUnobservable: `process` is gone and neither source
+                recorded how it ended.
+            ValueError: its exit record does not hold an integer.
         """
-        first = self._jail.first
-        jail_dir = self._jail.jail_dir
+        jail_dir = self.jail.jail_dir
         deadline = math.inf if timeout is None else time.monotonic() + timeout
         next_liveness_check = 0.0
         gone = False
         while True:
-            record = _waiters.recorded_exit(first.pid)
-            if record is not None:
-                return record.returncode
-            recorded = _exit_status.read_exit_status(jail_dir)
-            if recorded is not None:
-                return recorded
+            status = _recorded_status(process, jail_dir)
+            if status is not None:
+                return status
             if gone:
                 # Gone, and no record in either place. Give the wrapper and
                 # the waiter thread a moment -- ending, writing and
                 # recording are not one atomic step.
                 grace = time.monotonic() + 1.0
                 while time.monotonic() < grace:
-                    record = _waiters.recorded_exit(first.pid)
-                    if record is not None:
-                        return record.returncode
-                    recorded = _exit_status.read_exit_status(jail_dir)
-                    if recorded is not None:
-                        return recorded
+                    status = _recorded_status(process, jail_dir)
+                    if status is not None:
+                        return status
                     time.sleep(0.02)
+                where = (
+                    _records.exit_path(jail_dir, process.id)
+                    if _records.is_id(process.id)
+                    else "no records directory"
+                )
                 raise ExitStatusUnobservable(
-                    f"pid {first.pid} is gone and nothing recorded how jail "
-                    f"{self._jail.jail_id!r} ended: no exit file at "
-                    f"{_exit_status.exit_path(jail_dir)!r} and no observation in "
-                    "this process"
+                    f"pid {process.pid} is gone and nothing recorded how it ended in jail "
+                    f"{self.jail.jail_id!r}: no exit record at {where!r} and no observation "
+                    "in this process"
                 )
             now = time.monotonic()
             if now >= next_liveness_check:
                 # Liveness costs a process-table read on every platform but
                 # Linux (`brig/run/_identity.py`), so this loop asks it on a
                 # slower cadence than it polls the two cheap sources above.
-                # The answer is the same answer, at most `_LIVENESS_POLL_S`
-                # later.
-                gone = not _identity.identity_holds(first.pid, first.start_time)
+                gone = not _identity.identity_holds(process.pid, process.start_time)
                 next_liveness_check = now + _LIVENESS_POLL_S
                 continue
             if now > deadline:
@@ -677,8 +708,22 @@ class HostSupervisor:
 
     def stop(self, process: ProcessRecord) -> KillReport:
         """SPEC.md section 9's ladder against `process`'s group alone,
-        verified: one item, `workload_group` for the first process and
-        `exec_sibling` for any other. A sibling stays registered, as after
-        `destroy`, so a later `destroy` reports it `ALREADY_GONE`."""
-        kind = "workload_group" if process == self._jail.first else "exec_sibling"
+        verified: one item, `workload_group` for the jail's first process and
+        `exec_sibling` for any other. Its record stays, as after `destroy`, so
+        a later `destroy` reports it `ALREADY_GONE`."""
+        first = self.jail.processes[0].id if self.jail.processes else None
+        kind = "workload_group" if process.id == first else "exec_sibling"
         return KillReport(items=(end_group(kind, process.pgid, process.pid, process.start_time),))
+
+
+def _recorded_status(process: ProcessRecord, jail_dir: str) -> int | None:
+    """How `process` ended, if anything recorded it: this process's waiter, or
+    its exit record (decision-156, decision-181).
+
+    Raises:
+        ValueError: its exit record does not hold an integer.
+    """
+    record = _waiters.recorded_exit(process.pid)
+    if record is not None:
+        return record.returncode
+    return _records.read_exit(jail_dir, process.id)

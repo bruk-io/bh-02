@@ -848,7 +848,7 @@ class BrigJail:
         try:
             await asyncio.to_thread(handle.wait_ready, "kernel", _READY_TIMEOUT_S)
         except BaseException as error:
-            log = Path(jail_dir, "stderr.log")
+            log = Path(handle.stderr_path)
             detail = log.read_text(errors="replace")[-2000:] if log.is_file() else ""
             await started.stop()
             raise RuntimeError(f"the jailed kernel never listened: {error}\n{detail}") from error

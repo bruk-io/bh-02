@@ -77,7 +77,7 @@ class EventKind(Enum):
     teardown found live exec siblings, `KILL` was the audit copy of a
     `KillReport` the caller already holds. With the stream deleted, each of
     those readers has a better source -- see `brig/run/_waiters.py`,
-    `brig/run/_execs.py`, and `Handle.kill`'s own return value -- and a kind
+    `brig/run/_records.py` (once `_execs.py`), and `Handle.kill`'s own return value -- and a kind
     nothing produces is exactly the declared-but-never-used shape this
     library refuses. Pinned by set equality in
     `tests/unit/test_core_events_purity.py`, both directions -- dropping a

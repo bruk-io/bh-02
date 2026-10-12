@@ -82,7 +82,7 @@ ORDERING test and the GOLDEN test go red.
 **The jail directory is sealed against the write roots (decision-173).** A
 write root at or above `jail_dir` (an embedder run from `/private/tmp`, or
 from `/`) would otherwise let the workload write brig's control state there:
-exec registrations teardown signals by, the exit record, and this
+the process records under `procs/` teardown signals by (decision-181), and this
 mechanism's own staged profile, which every exec sibling is confined by
 again. So when one reaches it, a deny on `jail_dir` follows the write
 roots' allows, then an allow on its scratch `tmp/`, both before the

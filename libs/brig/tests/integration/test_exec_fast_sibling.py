@@ -36,7 +36,7 @@ pid itself -- not a guess about launcher details, but the same fact
 
 The recorded facts used to be read back out of the per-jail event stream's
 `EXEC`/`SPAWN` records; decision-152 (2026-09-08) deleted that stream, so
-AC #3 reads the sibling registration (`brig/run/_execs.py`) and AC #4 reads
+AC #3 reads the siblings' records (`brig/run/_records.py`, decision-181) and AC #4 reads
 the `Handle` the launch returned and the exit status the waiter recorded.
 """
 
@@ -52,7 +52,7 @@ import subprocess
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.run._execs import live as live_execs
+from brig.run import _records
 from brig.run._spawn_pgid import spawn_pgid
 from brig.run.exec_ import exec_in_jail
 from brig.run.handle import Handle
@@ -170,10 +170,13 @@ def test_hundred_fast_exec_siblings_all_record_and_end(run_id: str) -> None:
             exec_handle = exec_in_jail(handle, ["/usr/bin/true"])
             assert exec_handle.wait(timeout=5.0) == 0
 
-        # Every one of the 100 siblings registered and then deregistered on
-        # its own `wait()` -- a crash in the pgid read would have left an
-        # unregistered zombie instead.
-        assert live_execs(handle.jail_dir) == []
+        # Every one of the 100 siblings recorded `pgid == pid`, and its record
+        # outlived its own `wait()` (decision-181) -- a crash in the pgid read
+        # would have left an unrecorded zombie instead.
+        records = _records.scan(handle.jail_dir).records
+        siblings = [record for record in records if record.id != handle.first().id]
+        assert len(siblings) == 100
+        assert all(record.pgid == record.pid for record in siblings)
     finally:
         _teardown_group(handle, jail_dir)
 

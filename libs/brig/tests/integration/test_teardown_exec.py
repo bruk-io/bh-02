@@ -54,8 +54,8 @@ import time
 import pytest
 
 from brig.core import Spec, unenforced_report
+from brig.run import _records
 from brig.run import teardown as teardown_mod
-from brig.run._execs import live as live_execs
 from brig.run.exec_ import ExecHandle, exec_in_jail
 from brig.run.handle import Handle
 from brig.run.launcher import IoPolicy, SubprocessLauncher
@@ -178,9 +178,7 @@ def _ps_state(pid: int) -> str:
     `""` if `pid` has no row at all. A `Z`-prefixed state means the
     process has already exited but is not yet reaped -- this is how AC #5
     below observes a sibling exit on its own from OUTSIDE, without calling
-    `ExecHandle.wait()` (which would reap it itself and deregister it,
-    making the already-exited scenario indistinguishable from "never
-    exec'd")."""
+    `ExecHandle.wait()` (which would reap it itself)."""
     proc = subprocess.run(
         ["/bin/ps", "-o", "state=", "-p", str(pid)], capture_output=True, text=True
     )
@@ -188,12 +186,18 @@ def _ps_state(pid: int) -> str:
 
 
 def _registered(handle: Handle) -> list[tuple[int, int, str]]:
-    """`(pid, pgid, start_time)` for every sibling still registered against
-    this jail, read off disk the way a rehydrated handle would read it. The
-    third field is decision-155's start-time stamp -- what makes the pid an
-    identity rather than a number teardown might find pointing at a
+    """`(pid, pgid, start_time)` for every sibling recorded in this jail (every
+    record under `<jail_dir>/procs` but the handle's own first process's,
+    decision-181), read off disk the way a rehydrated handle would read it.
+    The third field is decision-155's start-time stamp -- what makes the pid
+    an identity rather than a number teardown might find pointing at a
     stranger."""
-    return live_execs(handle.jail_dir)
+    first = handle.first().id
+    return [
+        (record.pid, record.pgid, record.start_time)
+        for record in _records.scan(handle.jail_dir).records
+        if record.id != first
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -369,18 +373,18 @@ def test_already_exited_sibling_reports_already_gone_fast(run_id: str) -> None:
     try:
         sibling = exec_in_jail(handle, workload_argv(run_id, "true"))
         # Let the sibling actually exit on its own, WITHOUT calling
-        # `.wait()` -- calling it here would append EXEC_END ourselves and
-        # make this scenario indistinguishable from "never happened".
-        # Observed from OUTSIDE via `/bin/ps`'s STAT field (`Z` = exited,
-        # not yet reaped), not by touching `ExecHandle`'s own internals.
+        # `.wait()`. Observed from OUTSIDE via `/bin/ps`'s STAT field: no row
+        # (its exit waiter reaped it, as every start's is since decision-181)
+        # or `Z` (exited, not yet reaped), never by touching `ExecHandle`'s
+        # own internals.
         deadline = time.monotonic() + 5.0
         state = _ps_state(sibling.pid)
-        while time.monotonic() < deadline and not state.startswith("Z"):
+        while time.monotonic() < deadline and state and not state.startswith("Z"):
             time.sleep(0.01)
             state = _ps_state(sibling.pid)
-        assert state.startswith("Z"), (
-            f"expected sibling pid={sibling.pid} to be a zombie (exited, unreaped) "
-            f"before kill() runs; last observed state={state!r}"
+        assert not state or state.startswith("Z"), (
+            f"expected sibling pid={sibling.pid} to have exited before kill() runs; "
+            f"last observed state={state!r}"
         )
 
         started = time.monotonic()

@@ -37,7 +37,7 @@ seatbelt does not restrict, and the operator's own golden for
 `scratch_darwin()` (task-064) grades it `unenforced`. Declaring it here
 would be a grade-up.
 
-**Four refusals, never a silent downgrade (SPEC.md §2 law 2), each naming
+**Five refusals, never a silent downgrade (SPEC.md §2 law 2), each naming
 its subject:**
 
 1. `ctx.platform != "darwin"` -- `PlatformUnsupported`, naming the
@@ -54,6 +54,9 @@ its subject:**
 4. Any path `render_sbpl` needs that `ctx.resolved_paths` does not carry --
    `profile.py`'s own `UnresolvedPath`, propagated UNCHANGED, never
    swallowed.
+5. A LISTEN endpoint at or under brig's records (`<jail_dir>/procs`, and
+   `<jail_dir>/execs` until TASK-0079.28) -- `core.runtime.ChannelOnRecords`,
+   naming the endpoint and the records directory (decision-181).
 
 **`wrap` is a PURE argv prefix**: `("/usr/bin/sandbox-exec", "-f",
 f"{ctx.jail_dir}/seatbelt.sb", *argv)` -- absolute path, never the bare
@@ -74,7 +77,7 @@ import re
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, Spec
-from brig.core.runtime import RuntimeKind
+from brig.core.runtime import RuntimeKind, refuse_channel_on_records
 from brig.mech.contract import ArgvTransformer, CompileCtx, StagedFile, Step
 from brig.mech.seatbelt.profile import ChannelInsideWriteDeny as ChannelInsideWriteDeny
 from brig.mech.seatbelt.profile import ReadModelUnsupported as ReadModelUnsupported
@@ -198,7 +201,7 @@ class Seatbelt:
         self.axes: frozenset[Axis] = _AXES_CEDING_NETWORK if cedes_network else _AXES_OWNING_NETWORK
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
-        """Refuses in four cases (this module's own docstring); cases 2
+        """Refuses in five cases (this module's own docstring); cases 2
         and 4 are `profile.render_sbpl`'s own refusals, propagated here
         UNCHANGED -- this method never catches and re-raises them, and
         never swallows them."""
@@ -232,6 +235,17 @@ class Seatbelt:
             jail_dir=ctx.jail_dir,
             cedes_network=self._cedes_network,
         )
+
+        # decision-181: no grant reaches brig's records. seatbelt grants a
+        # socket its literal path, but a socket made at a record's path is a
+        # record the host can't read, so the layout is refused here too.
+        for channel in spec.channels:
+            refuse_channel_on_records(
+                name=channel.name,
+                endpoint=channel.endpoint,
+                resolved_endpoint=ctx.resolved_paths[channel.endpoint],
+                jail_dir=ctx.jail_dir,
+            )
 
         jail_dir = ctx.jail_dir
 

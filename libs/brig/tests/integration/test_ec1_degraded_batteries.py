@@ -71,7 +71,7 @@ from brig.probe.batteries.env import CANARY_ENV_NAME, env_battery
 from brig.probe.batteries.fs import fs_read_battery, fs_write_battery
 from brig.probe.batteries.limits import limits_battery
 from brig.probe.batteries.network import network_battery
-from brig.run._execs import live as live_execs
+from brig.run import _identity, _records
 from brig.run.handle import Handle
 from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import Stack, degraded
@@ -148,35 +148,36 @@ _SETTLE_S = 0.5
 
 
 def _wait_for_spin_loop_pgid(jail_dir: str, deadline: float = 10.0) -> int:
-    """Poll this jail's exec-sibling registrations (`brig/run/_execs.py`)
-    for the PERSISTENT one -- the spin loop -- and return its `pgid`.
+    """Poll this jail's process records (`brig/run/_records.py`) for the
+    PERSISTENT probe -- the spin loop -- and return its `pgid`.
 
     `run_battery` runs every CONTROL probe before any other,
-    unconditionally, and waits for it; the control's registration is
-    therefore created and removed again long before the spin loop's
-    appears. "Persistent" is what distinguishes them without needing to
-    know either pid in advance: a registration still present `_SETTLE_S`
-    after it was first seen belongs to a process that is still running.
+    unconditionally, and waits for it; the control has therefore ended long
+    before the spin loop starts. "Persistent" is what distinguishes them
+    without needing to know either pid in advance: a probe whose leader still
+    runs `_SETTLE_S` after it was first seen is the spin loop. The jail's
+    first process (the workload, the first record in start order) is not a
+    probe and is skipped.
 
-    This polled the per-jail event stream for the SECOND `EXEC` record
-    until decision-152 (2026-09-08) deleted it. The registration is
-    written before `exec_in_jail` ever returns, exactly as the `EXEC`
-    record was, so the pid/pgid still survive while the call that spawned
-    the sibling is blocked in `.wait()` -- which is the property this
-    watchdog depends on."""
+    This polled the per-jail event stream until decision-152 (2026-09-08),
+    then the exec registrations until decision-181, which made a record
+    outlive its process's `wait`, so presence alone no longer says a probe
+    still runs; its leader's identity does. The record is written before the
+    start ever returns, so the pid/pgid are there while the call that started
+    the probe is blocked in `.wait()` -- the property this watchdog depends
+    on."""
     deadline_at = time.monotonic() + deadline
     while time.monotonic() < deadline_at:
-        registered = live_execs(jail_dir)
-        if registered:
-            pid, pgid, _stamp = registered[0]
+        probes = _records.scan(jail_dir).records[1:]
+        running = [p for p in probes if _identity.identity_holds(p.pid, p.start_time)]
+        if running:
+            candidate = running[0]
             time.sleep(_SETTLE_S)
-            if any(other == pid for other, _pgid, _s in live_execs(jail_dir)):
-                return pgid
+            if _identity.identity_holds(candidate.pid, candidate.start_time):
+                return candidate.pgid
             continue
         time.sleep(0.02)
-    raise TimeoutError(
-        f"no persistent exec sibling registered under {jail_dir!r} within {deadline}s"
-    )
+    raise TimeoutError(f"no persistent probe recorded under {jail_dir!r} within {deadline}s")
 
 
 # ---------------------------------------------------------------------------

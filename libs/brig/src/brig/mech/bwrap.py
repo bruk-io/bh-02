@@ -70,8 +70,8 @@ restrictive".
                                            carve-out under it.
     5b. when a write root or a channel     the SEAL (decision-173): the jail
         directory is at or above the       directory is brig's control state
-        jail directory:                    (exec registrations, the exit
-        `--ro-bind JAIL DEST` per place    record, logs), so no write root
+        jail directory:                    (the process records under
+        `--ro-bind JAIL DEST` per place    procs/, logs), so no write root
         a writable tree shows it,          grants it. Read-only wherever a
         `--bind-try JAIL/tmp DEST/tmp`,    writable tree shows it, AFTER the
         `--bind SRC DEST` per channel      pins outside it (one above it
@@ -157,14 +157,18 @@ that refusal is load-bearing rather than defensive.
 **The jail directory is sealed against the write roots (decision-173).** A
 write root is a subtree, so a workspace at or above the jail directory (an
 embedder run from `/tmp`, or from `/`) handed the jail brig's own control
-state: it could forge an exec registration teardown signals by, or the exit
-record `wait()` answers from (found by an embedder, TASK-0078). The seal takes it
+state: it could forge a process record teardown signals by, or the exit
+record `wait()` answers from (found by an embedder, TASK-0078; since
+decision-181 both live under `<jail_dir>/procs/<id>/`). The seal takes it
 back: the jail directory bound read-only over itself wherever a writable
 tree shows it, after the write roots, then `<jail_dir>/tmp`, the jail's
 scratch, writable again, and every channel directory inside it. A channel
 whose directory IS the jail directory cannot be sealed (the directory is the
 smallest grant a socket can have here), so it is refused at compile
-(`ChannelInsideJailDir`, decision-174). bwrap's `--ro-bind` makes the whole subtree
+(`ChannelInsideJailDir`, decision-174), and so is one at or under the records
+(`ChannelOnRecords`, decision-181): a channel directory inside the jail
+directory is bound writable again after the seal, and `<jail_dir>/procs` must
+never be. bwrap's `--ro-bind` makes the whole subtree
 read-only and hides every mount made under it before, which is why what stays
 writable is bound again after it, and why no pin or carve-out is mounted in
 the sealed part (a pin would undo the seal; a carve-out's mount point could
@@ -268,7 +272,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, ReadModel, Spec
-from brig.core.runtime import RuntimeKind
+from brig.core.runtime import RuntimeKind, refuse_channel_on_records
 from brig.mech.contract import ArgvTransformer, CompileCtx, Step
 
 #: Absolute, never the bare name `bwrap` (decision-026 rule 1's family, the
@@ -423,8 +427,10 @@ class ChannelInsideJailDir(ValueError):
     """Raised when a LISTEN `Channel`'s endpoint sits directly in the jail
     directory (decision-174). bwrap's grant for a socket is its endpoint's
     DIRECTORY, bound read-write, so that layout would make the whole jail
-    directory writable from inside the jail: the exec registrations teardown
-    signals by, the exit record `wait()` answers from, the logs. Names the
+    directory writable from inside the jail: the process records under
+    `procs/` that teardown signals by and `wait()` answers from (decision-181),
+    the logs. A subdirectory is no remedy when it is `procs/` (or `execs/`)
+    itself: that is `ChannelOnRecords`'s refusal. Names the
     endpoint and the jail directory, and says to put the endpoint in a
     subdirectory of it, which stays writable on its own while the rest of the
     jail directory does not. seatbelt makes no such refusal: its grant is the
@@ -660,11 +666,17 @@ def render_bwrap_prefix(
                 f"directly in the jail directory {jail_dir!r}: bwrap can "
                 "only grant a socket its whole directory, read-write, which "
                 "would let the jail write brig's own control state there "
-                "(exec registrations, the exit record, the logs). Put the "
+                "(the process records under procs/, the logs). Put the "
                 "endpoint in a subdirectory of the jail directory, for "
                 f"example {jail_dir.rstrip('/')}/chan/"
                 f"{channel.endpoint.rsplit('/', 1)[-1]}"
             )
+        refuse_channel_on_records(
+            name=channel.name,
+            endpoint=channel.endpoint,
+            resolved_endpoint=resolved_endpoint,
+            jail_dir=jail_dir,
+        )
         for deny_root in resolved_write_denies:
             if _is_subpath(resolved_endpoint, deny_root):
                 raise ChannelInsideWriteDeny(

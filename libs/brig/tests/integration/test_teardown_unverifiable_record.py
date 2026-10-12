@@ -1,8 +1,9 @@
 """A record brig cannot verify is not kill authority (TASK-0078, decision-172).
 
-Exec registrations are files under `<jail_dir>/execs/`, and SPEC.md calls a
-`jail_dir` that is writable from inside the jail an ordinary arrangement. A
-registration whose start-time stamp is empty (`_identity.UNKNOWN`) names a pid
+Process records are files under `<jail_dir>/procs/<id>/` (decision-181; exec
+registrations under `<jail_dir>/execs/` before it), and a stack with no
+`fs_write` mechanism leaves the `jail_dir` writable from inside the jail. A
+record whose start-time stamp is empty (`_identity.UNKNOWN`) names a pid
 and a pgid with nothing to show either is the jail's, and before decision-172
 teardown ran the ladder against it anyway: `recycled()` reads an empty stamp as
 "not recycled", so a forged registration could aim `SIGTERM` and `SIGKILL` at
@@ -11,7 +12,7 @@ any group the trusted process may signal.
 The plant here is exactly that forgery: a decoy process group that is not the
 jail's, started by the test in a session of its own, and a registration that
 names it with an empty stamp, written as a file the way a jail that can write
-its `jail_dir` would write it, never through brig's own `register`.
+its `jail_dir` would write it, never through brig's own `write`.
 
 Every observation of the decoy goes through `/bin/ps`, never through the module
 under test, and the control is in the same test: the same `kill()` ends the
@@ -69,12 +70,25 @@ def _wait_for_members(pgid: int, timeout: float = 30.0) -> None:
 
 
 def _forge_registration(jail_dir: str, pid: int, pgid: int) -> None:
-    """Write `<jail_dir>/execs/<pid>.json` with an empty stamp, as a jail that
-    can write its own `jail_dir` could."""
-    execs = os.path.join(jail_dir, "execs")
-    os.makedirs(execs, exist_ok=True)
-    with open(os.path.join(execs, f"{pid}.json"), "w", encoding="utf-8") as record:
-        json.dump({"pid": pid, "pgid": pgid, "start_time": ""}, record)
+    """Write `<jail_dir>/procs/<id>/record.json` with an empty stamp, as a jail
+    that can write its own `jail_dir` could, by hand rather than through brig."""
+    process_id = "f0f0f0f0f0f0f0f0"
+    directory = os.path.join(jail_dir, "procs", process_id)
+    os.makedirs(directory)
+    with open(os.path.join(directory, "record.json"), "w", encoding="utf-8") as record:
+        json.dump(
+            {
+                "id": process_id,
+                "order": time.time_ns(),
+                "pid": pid,
+                "pgid": pgid,
+                "start_time": "",
+                "argv": [],
+                "stdout_path": "",
+                "stderr_path": "",
+            },
+            record,
+        )
 
 
 def test_kill_signals_no_group_a_record_with_an_empty_stamp_names(run_id: str) -> None:

@@ -39,14 +39,12 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from types import SimpleNamespace
 
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.run import _identity
+from brig.run import _identity, _records
 from brig.run import teardown as teardown_mod
-from brig.run._exit_status import EXIT_FILENAME
 from brig.run.handle import Handle
 from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.run.teardown import KillOutcome, group_alive
@@ -464,16 +462,20 @@ def test_kill_ends_a_live_member_of_a_group_whose_leader_is_a_zombie(
         assert _ps_state(member_pid) and not _gone_or_zombie(member_pid), (
             "CONTROL failed: the member is not running"
         )
-        handle = SimpleNamespace(
+        leader = _records.ProcessRecord(
+            id="",
+            order=0,
             pid=leader_pid,
             pgid=leader_pid,
             start_time=_identity.start_stamp(leader_pid),
-            jail_dir=_new_jail_dir(),
-            helper_pids=(),
-            helper_stamps=(),
+            argv=(),
+            stdout_path="",
+            stderr_path="",
         )
 
-        report = teardown_mod.kill_jail(handle, grace=0.5)
+        report = teardown_mod.kill_named(
+            known=(leader,), jail_dir=_new_jail_dir(), helper_pids=(), helper_stamps=(), grace=0.5
+        )
 
         assert _gone_or_zombie(member_pid), "the live member survived kill()"
         assert report.items[0].outcome is KillOutcome.ENDED, report.items[0].detail
@@ -522,7 +524,8 @@ def test_kill_returns_the_teardown_record_and_writes_none(run_id: str) -> None:
     no log beside it, which is the half a deletion has to prove.
 
     **Exactly one file appears, and teardown did not write it**
-    (decision-156, 2026-09-08): `<jail_dir>/exit`, written by the exit
+    (decision-156, 2026-09-08): the process's exit record (since
+    decision-181 `<jail_dir>/procs/<id>/exit`), written by the exit
     wrapper as the group came down, holding `-15` because the ladder's first
     rung is what ended the workload. Asserting its CONTENT rather than
     merely tolerating its name is what keeps this a claim: the ordinary
@@ -532,7 +535,9 @@ def test_kill_returns_the_teardown_record_and_writes_none(run_id: str) -> None:
     handle = _launch(argv, jail_id="jail-kill-evt")
     _positive_pre_assertion(handle)
 
+    records_dir = os.path.dirname(handle.stdout_path)
     before = sorted(os.listdir(handle.jail_dir))
+    before_records = sorted(os.listdir(records_dir))
     report = handle.kill()
 
     assert len(report.items) == 1
@@ -542,9 +547,10 @@ def test_kill_returns_the_teardown_record_and_writes_none(run_id: str) -> None:
     assert int(item.identity) == handle.pgid
     assert item.outcome is KillOutcome.ENDED
 
-    after = sorted(os.listdir(handle.jail_dir))
-    assert set(after) - set(before) == {EXIT_FILENAME}, (
-        f"teardown left files beside the exit record: {sorted(set(after) - set(before))!r}"
+    assert sorted(os.listdir(handle.jail_dir)) == before, "teardown wrote into the jail directory"
+    after = sorted(os.listdir(records_dir))
+    assert set(after) - set(before_records) == {_records.EXIT_FILENAME}, (
+        f"teardown left files beside the exit record: {sorted(set(after) - set(before_records))!r}"
     )
-    with open(os.path.join(handle.jail_dir, EXIT_FILENAME), encoding="utf-8") as recorded:
+    with open(os.path.join(records_dir, _records.EXIT_FILENAME), encoding="utf-8") as recorded:
         assert recorded.read().strip() == str(-signal.SIGTERM)

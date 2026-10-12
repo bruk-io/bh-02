@@ -6,14 +6,14 @@ verified. Inside it, an `Supervisor` starts, signals, waits for and stops proces
 `HostRuntime` (`brig/run/host.py`) is brig's own; `brig.runtime.fake` is the
 second implementation, pure, for tests.
 
-**Step 1's shape, and what changes later.** A bwrap jail cannot hold an
-instance with nothing in it until its supervisor exists (decision-0001 step 4),
-so `create` is launch-shaped: it takes the first process's argv and io, and
-`JailRecord.first` is that process. `Supervisor.start` takes no channel yet: a
-channel per process needs the channel directory (step 3, TASK-0079.05), and a
-parameter only `None` could be passed to would be a raising stub (SPEC.md
-section 9). Per-process records and exit records, and `Jail` and `Process` in
-place of `Handle`, are step 3 (TASK-0079.04).
+**`create` holds no process, and every process is a `start`** (decision-181,
+TASK-0079.25). `create` makes the instance; `Supervisor.start` is the only way
+a process enters it, the first included, and each start has a record and an
+exit record of its own (`brig/run/_records.py`). `Supervisor.start` takes no
+channel yet: a channel per process needs the channel directory
+(TASK-0079.05), and a parameter only `None` could be passed to would be a
+raising stub (SPEC.md section 9). `Jail` and `Process` in place of `Handle`
+are TASK-0079.26.
 
 `IoPolicy` and `ExitStatusUnobservable` live here because both sides of the
 seam name them; `brig.run.launcher` and `brig.run.handle` re-export them, so
@@ -21,11 +21,15 @@ every earlier import resolves.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from signal import Signals
 from typing import Protocol
 
 from brig.core.runtime import Capability, RuntimeKind
+from brig.mech import ArgvTransformer, EventSource
+from brig.run._records import RESERVED_NAMES
+from brig.run._records import ProcessRecord as ProcessRecord
+from brig.run._tether import HeldTether
 from brig.run.teardown import KillReport
 from brig.stack import CompiledJail
 
@@ -38,6 +42,23 @@ class IoPolicy:
 
     stdout_name: str = "stdout.log"
     stderr_name: str = "stderr.log"
+
+    def __post_init__(self) -> None:
+        """Raises:
+        ValueError: a name is not one plain file name, is one of the records'
+            own (`record.json`, `exit`, their `.partial`), or both are the same.
+        """
+        for name in (self.stdout_name, self.stderr_name):
+            if not name or "/" in name or name in (".", "..") or name in RESERVED_NAMES:
+                raise ValueError(
+                    f"IoPolicy: {name!r} is not a stdio file name a process can have: it must "
+                    "be one plain file name, and not one of its records' own "
+                    f"({', '.join(sorted(RESERVED_NAMES))})"
+                )
+        if self.stdout_name == self.stderr_name:
+            raise ValueError(
+                f"IoPolicy: stdout and stderr are both {self.stdout_name!r}; name two files"
+            )
 
 
 class ExitStatusUnobservable(RuntimeError):
@@ -55,8 +76,9 @@ class ExitStatusUnobservable(RuntimeError):
     process's memory, so a rehydrated `Handle` -- the shape an embedder uses
     to clean up after a runtime that died holding a jail -- got this refusal
     every time. It does not any more. The exit wrapper writes the status to
-    `<jail_dir>/exit` (`brig/run/_exit_status.py`), which any process holding
-    the handle can read, so a rehydrated handle now answers.
+    the process's own exit record (`brig/run/_exit_status.py`; since
+    decision-181 `<jail_dir>/procs/<id>/exit`, siblings included), which any
+    process holding the handle can read, so a rehydrated handle now answers.
 
     What is left is exactly the case where **no wrapper ever wrote**:
 
@@ -80,35 +102,32 @@ class NoSupervisor(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class ProcessRecord:
-    """One process in a jail, as its runtime identifies it.
+class Held:
+    """What the process that created a jail holds of it in memory, and nothing
+    serialized does (decision-181): the compiled `wrap`, so each start checks
+    that `wrap` of its own argv is the jail's prefix followed by the argv; the
+    sensors, which the exit waiter asks about each process's ending; and the
+    jail's hold on its tether, which every start's watcher reads. A record
+    rehydrated in another process has none of it."""
 
-    `pid` and `start_time` are an identity, not a number: nothing acts on a
-    pid whose current occupant started at another time, and an unknown stamp
-    (`brig/run/_identity.py`'s `UNKNOWN`) is acted on by nothing
-    (decision-155, decision-172). `argv` is what was spawned (the jail's
-    wrap included); `stdout_path` and `stderr_path` are where `IoPolicy`
-    sent its output."""
-
-    pid: int
-    pgid: int
-    start_time: str
-    argv: tuple[str, ...]
-    stdout_path: str
-    stderr_path: str
+    wrap: ArgvTransformer
+    sensors: tuple[EventSource, ...] = ()
+    tether: HeldTether | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class JailRecord:
     """A jail's instance, as its runtime identifies it.
 
-    `first` is the process `create` started with the instance (step 1's
-    launch-shaped create). `wrap_prefix` and `jail_env` are what a later
-    start needs to place a process under the same confinement: the compiled
-    wrap's verified argv prefix (`None` when it is not a pure prefix, and a
-    start is refused) and the jail's own env overlay. `helper_pids` and
-    `helper_stamps` are the `JAIL_LIFETIME` helpers `destroy` must end too,
-    one stamp per pid."""
+    `wrap_prefix` and `jail_env` are what a start needs to place a process
+    under the jail's confinement: the compiled wrap's verified argv prefix
+    (`None` when it is not a pure prefix, and every start is refused) and the
+    jail's own env overlay. `processes` are the processes the holder knows, in
+    start order; a runtime finds later ones in its own records (for
+    `HostRuntime`, under `<jail_dir>/procs`). `helper_pids` and
+    `helper_stamps` are the `JAIL_LIFETIME` helpers `destroy` must end too, one
+    stamp per pid. `held` is what the creating process holds in memory (`Held`),
+    never compared or shown."""
 
     kind: RuntimeKind
     jail_id: str
@@ -116,9 +135,10 @@ class JailRecord:
     cwd: str
     jail_env: frozendict[str, str]
     wrap_prefix: tuple[str, ...] | None
-    first: ProcessRecord
+    processes: tuple[ProcessRecord, ...] = ()
     helper_pids: tuple[int, ...] = ()
     helper_stamps: tuple[str, ...] = ()
+    held: Held | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Raises:
@@ -135,8 +155,9 @@ class Supervisor(Protocol):
     its processes. Bound to one `JailRecord` (`Runtime.supervisor`)."""
 
     def start(self, argv: Sequence[str], *, cwd: str, io: IoPolicy) -> ProcessRecord:
-        """Start `argv` in the jail, under the same confinement as its first
-        process, never a weaker one; raise rather than start it weaker."""
+        """Start `argv` in the jail, under the jail's confinement, never a
+        weaker one; raise rather than start it weaker. The only way a process
+        enters a jail, the first included (decision-181)."""
         ...
 
     def signal(self, process: ProcessRecord, sig: Signals) -> bool:
@@ -172,23 +193,21 @@ class Runtime(Protocol):
         self,
         jail: CompiledJail,
         *,
-        argv: Sequence[str],
         cwd: str,
-        io: IoPolicy,
         jail_id: str,
         jail_dir: str,
         tether: int | None,
     ) -> JailRecord:
-        """Create the instance and start its first process, `argv`
-        (launch-shaped until decision-0001 step 4). `tether` is the read end
-        of a pipe whose write end the caller keeps; when every write end is
-        closed the jail ends. Refuses a jail whose requirements exceed
+        """Create the instance, with no process in it (decision-181): every
+        process is a `Supervisor.start`. `tether` is the read end of a pipe
+        whose write end the caller keeps; when every write end is closed, every
+        process the jail started ends. Refuses a jail whose requirements exceed
         `capabilities`."""
         ...
 
     def alive(self, jail: JailRecord) -> bool:
-        """Whether the instance still runs (for `HostRuntime`, its first
-        process, by identity)."""
+        """Whether the instance still runs: any process it started, or any
+        helper (for `HostRuntime`, each by identity)."""
         ...
 
     def destroy(self, jail: JailRecord) -> KillReport:

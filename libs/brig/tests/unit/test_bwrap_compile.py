@@ -32,6 +32,7 @@ from brig.core import (
     ReadModel,
     Spec,
 )
+from brig.core.runtime import ChannelOnRecords
 from brig.mech import CompileCtx
 from brig.mech.bwrap import (
     DEFAULT_BWRAP_PATH,
@@ -935,3 +936,36 @@ def test_a_channel_in_a_subdirectory_of_the_jail_directory_is_not_refused() -> N
     triples = list(zip(argv, argv[1:], argv[2:], strict=False))
     assert ("--bind", f"{_JAIL_DIR}/chan", f"{_JAIL_DIR}/chan") in triples
     assert ("--bind", _JAIL_DIR, _JAIL_DIR) not in triples
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("records", ["procs", "execs"])
+@pytest.mark.parametrize("deeper", [False, True], ids=["in the records", "under them"])
+def test_a_channel_at_or_under_the_records_is_refused(records: str, deeper: bool) -> None:
+    """decision-181: bwrap grants a socket its whole directory read-write, so an
+    endpoint at or under `<jail_dir>/procs` (or `execs/` until TASK-0079.28)
+    would let the jail write the records teardown signals by. Refused, naming
+    the endpoint and the records directory, and saying where to put it. The
+    integration twin (`test_bwrap_records_refused.py`) saw the grant written
+    through before the refusal existed."""
+    endpoint = f"{_JAIL_DIR}/{records}/{'a/' if deeper else ''}ctl.sock"
+    ctx = _ctx(resolved=_identity_resolved("/usr", endpoint))
+    with pytest.raises(ChannelOnRecords) as refusal:
+        bwrap.compile(_channel_only_spec(endpoint), ctx)
+    message = str(refusal.value)
+    assert endpoint in message
+    assert f"{_JAIL_DIR}/{records}" in message
+    assert f"{_JAIL_DIR}/chan/ctl.sock" in message
+
+
+@pytest.mark.unit
+def test_a_channel_whose_resolved_path_is_under_the_records_is_refused() -> None:
+    """The resolved endpoint is tested as well as the declared one, as
+    decision-174's refusal tests both parents (TASK-0079.17): a link in a
+    channel directory pointing into `procs/` is refused. The control: a
+    channel directory of its own beside the records compiles."""
+    endpoint = f"{_JAIL_DIR}/chan/ctl.sock"
+    linked = _ctx(resolved={**_identity_resolved("/usr"), endpoint: f"{_JAIL_DIR}/procs/ctl.sock"})
+    with pytest.raises(ChannelOnRecords):
+        bwrap.compile(_channel_only_spec(endpoint), linked)
+    bwrap.compile(_channel_only_spec(endpoint), _ctx(resolved=_identity_resolved("/usr", endpoint)))

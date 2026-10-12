@@ -2,19 +2,21 @@
 
 An exec registration brig cannot read (not JSON, a missing key, a wrong type)
 used to make `_execs.live` raise, so `kill_jail` stopped after the workload
-group and left every exec sibling and every helper running. Now the file is its
-own `FAILED` item, saying which file and what to do, and every other item is
-torn down.
+group and left every exec sibling and every helper running. Now the entry is its
+own `FAILED` item, saying which entry and what to do, and every other item is
+torn down. Since decision-181 the records are directories under
+`<jail_dir>/procs/` (`brig/run/_records.py`), and the plants moved there: a
+`record.json` brig can't read, and an entry that is no record at all (a link,
+a file, a name that is no id, a directory with no `record.json`).
 
-The plant is made from the HOST side, as a file written beside the genuine
-registrations: no jail can write its `jail_dir` any more (decision-173,
-decision-174), so what produces such a file is tampering on the host or a
-broken disk. Every observation of a process goes through `/bin/ps`, never
+The plant is made from the HOST side, beside the genuine records: no grant
+reaches `procs/` (decision-173, decision-174, decision-181), so what produces
+such an entry is tampering on the host or a broken disk. Every observation of a process goes through `/bin/ps`, never
 through the module under test, and a genuine sibling registered BEFORE the plant
 is the control: it must be `ENDED`, so a surviving process is the bug and not a
 teardown that ran nothing.
 
-The last test is the other half of the story: a genuine registration whose
+The last test is the other half of the story: a genuine record whose
 leader was reaped, with its group still holding a live member, is still ended.
 """
 
@@ -30,7 +32,7 @@ import time
 import pytest
 
 from brig.core import Spec
-from brig.run import IoPolicy, SubprocessLauncher, _execs, _identity
+from brig.run import IoPolicy, SubprocessLauncher, _identity, _records
 from brig.run.exec_ import exec_in_jail
 from brig.run.handle import Handle
 from brig.run.teardown import KillOutcome
@@ -72,26 +74,106 @@ def _wait_for_members(pgid: int, timeout: float = 30.0) -> None:
         time.sleep(0.02)
 
 
-_UNREADABLE = {
+def _plant_record(jail_dir: str, pid: int, pgid: int, stamp: str) -> str:
+    """Write a well-formed record under `<jail_dir>/procs/`, as brig would;
+    returns its directory."""
+    process_id = _records.new_id()
+    directory = _records.make_dir(jail_dir, process_id)
+    _records.write(
+        jail_dir,
+        _records.ProcessRecord(
+            id=process_id,
+            order=time.time_ns(),
+            pid=pid,
+            pgid=pgid,
+            start_time=stamp,
+            argv=("planted",),
+            stdout_path=os.path.join(directory, "stdout.log"),
+            stderr_path=os.path.join(directory, "stderr.log"),
+        ),
+    )
+    return directory
+
+
+def _record(**fields: object) -> dict[str, object]:
+    """A `record.json`'s content: `fields` over a well-formed record's, with
+    `id` left for `_plant` to fill in."""
+    base: dict[str, object] = {
+        "order": 1,
+        "pid": 5,
+        "pgid": 5,
+        "start_time": "x",
+        "argv": [],
+        "stdout_path": "",
+        "stderr_path": "",
+    }
+    base.update(fields)
+    return base
+
+
+_UNREADABLE: dict[str, bytes | dict[str, object]] = {
     "not-json": b"{ this is not json",
     "empty": b"",
     "not-utf8": b"\xff\xfe\x00",
     "not-an-object": b"[1, 2, 3]",
     "missing-keys": b'{"pid": 1}',
-    "wrong-types": b'{"pid": "1", "pgid": 1, "start_time": ""}',
-    "stamp-not-str": b'{"pid": 1, "pgid": 1, "start_time": 5}',
-    "absurd-pid": b'{"pid": 1180591620717411303424, "pgid": 7, "start_time": "x"}',
-    "absurd-pgid": b'{"pid": 5, "pgid": 1180591620717411303424, "start_time": "x"}',
-    "pgid-zero": b'{"pid": 5, "pgid": 0, "start_time": "x"}',
-    "pgid-one": b'{"pid": 5, "pgid": 1, "start_time": "x"}',
-    "pgid-negative": b'{"pid": 5, "pgid": -5, "start_time": "x"}',
-    "pgid-past-pid-max": b'{"pid": 5, "pgid": 2147483648, "start_time": "x"}',
+    "wrong-types": _record(pid="1"),
+    "stamp-not-str": _record(start_time=5),
+    "absurd-pid": _record(pid=1180591620717411303424, pgid=7),
+    "absurd-pgid": _record(pgid=1180591620717411303424),
+    "pgid-zero": _record(pgid=0),
+    "pgid-one": _record(pgid=1),
+    "pgid-negative": _record(pgid=-5),
+    "pgid-past-pid-max": _record(pgid=2147483648),
+    "another-id": _record(id="fedcba9876543210"),
+    "unknown-key": _record(extra=1),
 }
 
+#: Entries under `procs/` that are no record brig made, by what they are.
+_NOT_RECORDS = ("link", "file", "bad-name", "no-record")
 
-@pytest.mark.parametrize("content", _UNREADABLE.values(), ids=_UNREADABLE.keys())
-def test_an_unreadable_registration_is_its_own_failed_item_and_the_rest_is_torn_down(
-    run_id: str, content: bytes
+
+def _plant(procs: str, kind: str, content: bytes | dict[str, object] = b"") -> str:
+    """Plant one unreadable entry under `procs`; returns its path."""
+    match kind:
+        case "record":
+            process_id = _records.new_id()
+            path = os.path.join(procs, process_id)
+            os.mkdir(path)
+            if isinstance(content, dict):
+                content = json.dumps({"id": process_id, **content}).encode()
+            with open(os.path.join(path, "record.json"), "wb") as record:
+                record.write(content)
+            return path
+        case "link":
+            path = os.path.join(procs, _records.new_id())
+            os.symlink("/tmp", path)
+            return path
+        case "file":
+            path = os.path.join(procs, _records.new_id())
+            with open(path, "wb") as record:
+                record.write(b"{}")
+            return path
+        case "bad-name":
+            path = os.path.join(procs, "..notanid")
+            os.mkdir(path)
+            return path
+        case "no-record":
+            path = os.path.join(procs, _records.new_id())
+            os.mkdir(path)
+            return path
+    raise AssertionError(kind)
+
+
+_PLANTS: list[tuple[str, bytes | dict[str, object]]] = [
+    ("record", content) for content in _UNREADABLE.values()
+] + [(kind, b"") for kind in _NOT_RECORDS]
+_PLANT_IDS = [*_UNREADABLE, *_NOT_RECORDS]
+
+
+@pytest.mark.parametrize(("kind", "content"), _PLANTS, ids=_PLANT_IDS)
+def test_an_unreadable_record_is_its_own_failed_item_and_the_rest_is_torn_down(
+    run_id: str, kind: str, content: bytes | dict[str, object]
 ) -> None:
     handle = _launch(run_id)
     sibling = exec_in_jail(handle, workload_argv(run_id, "sleep 100"))
@@ -107,9 +189,7 @@ def test_an_unreadable_registration_is_its_own_failed_item_and_the_rest_is_torn_
         assert _live_members(handle.pgid), "CONTROL failed: the workload group is empty"
         assert _live_members(sibling.pid), "CONTROL failed: the sibling group is empty"
 
-        plant = os.path.join(_execs.execs_dir(handle.jail_dir), "99999.json")
-        with open(plant, "wb") as record:
-            record.write(content)
+        plant = _plant(_records.procs_dir(handle.jail_dir), kind, content)
 
         report = handle.kill()  # must not raise
 
@@ -128,6 +208,7 @@ def test_an_unreadable_registration_is_its_own_failed_item_and_the_rest_is_torn_
         assert plant in bad.detail, bad.detail
         assert "nothing it names was signalled" in bad.detail, bad.detail
         assert "inspect" in bad.detail.lower(), bad.detail
+        assert os.path.lexists(plant), "teardown removed the entry it could not read"
     finally:
         teardown_group(handle)
         subprocess.run(["/bin/kill", "-KILL", "--", f"-{helper.pid}"], check=False)
@@ -137,7 +218,7 @@ def test_an_unreadable_registration_is_its_own_failed_item_and_the_rest_is_torn_
 _OWN_GROUP_CHILD = """
 import dataclasses, json, os, sys
 from brig.core import Spec
-from brig.run import IoPolicy, SubprocessLauncher, _execs, _identity
+from brig.run import IoPolicy, SubprocessLauncher, _identity, _records
 from brig.stack import Stack
 
 jail_dir = sys.argv[1]
@@ -151,7 +232,13 @@ handle = SubprocessLauncher().launch(
     jail_dir=jail_dir,
 )
 own = os.getpgrp()
-_execs.register(jail_dir, os.getpid(), own, _identity.start_stamp(os.getpid()))
+process_id = _records.new_id()
+directory = _records.make_dir(jail_dir, process_id)
+_records.write(jail_dir, _records.ProcessRecord(
+    id=process_id, order=0, pid=os.getpid(), pgid=own,
+    start_time=_identity.start_stamp(os.getpid()), argv=(),
+    stdout_path=os.path.join(directory, "o"), stderr_path=os.path.join(directory, "e"),
+))
 report = handle.kill()
 zero_report = dataclasses.replace(handle, pgid=0).kill()
 print(json.dumps({
@@ -165,7 +252,7 @@ print(json.dumps({
 def test_a_record_naming_the_trusted_process_s_own_group_is_refused_and_nothing_is_signalled(
     run_id: str,
 ) -> None:
-    """A registration naming the group the trusted process itself runs in (in
+    """A record naming the group the trusted process itself runs in (in
     range, a stamp present) must not be signalled, and neither must a workload
     group of 0, which `killpg` reads as the caller's own.
 
@@ -231,11 +318,11 @@ def test_an_exception_from_one_item_is_that_item_s_failure_and_a_later_item_stil
         later.wait()
 
 
-def test_teardown_still_ends_the_group_of_a_genuine_registration_whose_leader_was_reaped(
+def test_teardown_still_ends_the_group_of_a_genuine_record_whose_leader_was_reaped(
     run_id: str,
 ) -> None:
     """The leader exits and is reaped, so its pid names nothing; a member of its
-    group lives on. The registration is genuine (a real stamp taken while the
+    group lives on. The record is genuine (a real stamp taken while the
     leader lived), so the ladder signals the group and ends it."""
     handle = _launch(run_id)
     body = f": {run_id}; sleep 100 & sleep 1"
@@ -243,7 +330,7 @@ def test_teardown_still_ends_the_group_of_a_genuine_registration_whose_leader_wa
     try:
         stamp = _identity.start_stamp(leader.pid)
         assert stamp != _identity.UNKNOWN, "CONTROL failed: the leader's stamp was not readable"
-        _execs.register(handle.jail_dir, leader.pid, leader.pid, stamp)
+        _plant_record(handle.jail_dir, leader.pid, leader.pid, stamp)
         _wait_for_members(leader.pid)
         leader.wait()  # reaped: the pid names nothing, the backgrounded sleep remains
         assert _live_members(leader.pid), "CONTROL failed: the group has no member left"

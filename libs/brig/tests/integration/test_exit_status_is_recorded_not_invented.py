@@ -16,7 +16,7 @@ becomes vacuous itself.
 decision-152 (2026-09-08) deleted that stream, and lived only in the
 launching process's memory until decision-156 (2026-09-08) gave the durable
 half back.** It is now two agreeing sources: the launching process's own
-waiter thread (`brig/run/_waiters.py`), and `<jail_dir>/exit`, written once
+waiter thread (`brig/run/_waiters.py`), and the process's exit record (`<jail_dir>/procs/<id>/exit` since decision-181), written once
 by the tiny wrapper the launcher runs every workload under
 (`brig/run/_exit_status.py`). The wrapper ends the same way its child did, so
 the number the waiter thread observes and the number on disk are the same
@@ -45,13 +45,25 @@ import time
 import pytest
 
 from brig.core import Spec
-from brig.run import ExitStatusUnobservable, Handle, IoPolicy, SubprocessLauncher, _waiters
-from brig.run._exit_status import exit_path
+from brig.run import (
+    ExitStatusUnobservable,
+    Handle,
+    IoPolicy,
+    SubprocessLauncher,
+    _records,
+    _waiters,
+)
 from brig.stack import Stack
 
 _jail_counter = itertools.count()
 
 _HELPER = str(pathlib.Path(__file__).parent / "_rehydrate_and_kill_helper.py")
+
+
+def _exit_file(handle: Handle) -> str:
+    """The handle's first process's own exit record,
+    `<jail_dir>/procs/<id>/exit` (decision-181)."""
+    return _records.exit_path(handle.jail_dir, handle.first().id)
 
 
 def _new_jail_dir() -> str:
@@ -77,7 +89,7 @@ def _forget_the_in_process_record(handle: Handle) -> None:
     """Drop this process's own observation of how the workload ended.
 
     It WAITS for that observation first, and the wait is not caution: the
-    wrapper writes `<jail_dir>/exit` and only then exits, so the file is
+    wrapper writes its exit record and only then exits, so the file is
     readable a moment BEFORE the launching process's waiter thread reaps and
     records. `wait()` can therefore answer from the file while no record
     exists yet, and a `forget` fired at that instant would forget nothing --
@@ -157,7 +169,7 @@ def test_death_by_signal_is_recorded_as_a_signal_not_as_128_plus_n(
     handle = _launch(["/bin/sh", "-c", "kill -TERM $$"])
     assert handle.wait(timeout=20.0) == -signal.SIGTERM
 
-    with open(exit_path(handle.jail_dir), encoding="utf-8") as recorded:
+    with open(_exit_file(handle), encoding="utf-8") as recorded:
         assert recorded.read().strip() == str(-signal.SIGTERM)
 
     result = _in_a_second_process(handle, tmp_path)
@@ -175,7 +187,7 @@ def test_a_rehydrated_handle_in_a_second_process_reads_the_exit_file(
     process DROPS its own waiter record (`_waiters.forget`) before the second
     process runs. Nothing in this interpreter can answer the question any
     more, and the fresh one -- which never parented the workload -- answers
-    it anyway, from `<jail_dir>/exit` and nothing else."""
+    it anyway, from the exit record and nothing else."""
     handle = _launch(["/bin/sh", "-c", "exit 9"])
     assert handle.wait(timeout=20.0) == 9
 
@@ -206,7 +218,7 @@ def test_an_unrecorded_exit_refuses_instead_of_reporting_success() -> None:
     assert handle.wait(timeout=20.0) == 0
 
     _forget_the_in_process_record(handle)
-    os.remove(exit_path(handle.jail_dir))
+    os.remove(_exit_file(handle))
 
     with pytest.raises(ExitStatusUnobservable):
         handle.wait(timeout=5.0)
@@ -244,7 +256,7 @@ def test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status() -> Non
 
     first = launch_in(["/bin/sh", "-c", "exit 7"], IoPolicy())
     assert first.wait(timeout=20.0) == 7
-    assert os.path.exists(exit_path(jail_dir))
+    assert os.path.exists(_exit_file(first))
 
     second = launch_in(
         ["/bin/sh", "-c", "sleep 0.3; echo SECOND; exit 0"],

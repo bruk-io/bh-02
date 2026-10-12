@@ -47,13 +47,12 @@ task-027 (decision-042) adds the second kind `KillReport.items` can hold:
 `kill_jail` tears down the workload group FIRST, then every exec sibling
 the handle names -- through the SAME ladder function, per SPEC.md §9's "the
 ladder runs per item, and there is only one ladder." A sibling is found by
-listing `brig/run/_execs.py`'s registration directory under `handle.jail_dir`
-(never from an in-memory registration -- `Handle` is frozen and carries
-none), which is what makes this work for a handle rehydrated in a process
-that never itself called `exec()`. That directory replaced the event
-stream's `EXEC`-without-`EXEC_END` pairing at decision-152 (2026-09-08),
-when the stream was deleted; the durability clause SPEC.md §9 binds this to
-is unchanged, only its medium.
+listing the records under `<jail_dir>/procs` (`brig/run/_records.py`, one
+directory per process since decision-181; before it, `execs/`, and before
+decision-152 the event stream), never from an in-memory registration, which
+is what makes this work for a handle rehydrated in a process that never
+itself started the sibling. The durability clause SPEC.md §9 binds this to is
+unchanged, only its medium.
 
 **`kill` no longer writes a `KILL` record either** (decision-152). The
 report this function RETURNS is the record: it carries every item, and it
@@ -84,12 +83,12 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final
 
-from brig.run import _execs, _identity, _waiters
+from brig.run import _identity, _records, _waiters
 
 #: SPEC.md §9: "grace period (default 2.0s, a keyword argument)". Applied
 #: once after SIGTERM (letting a cooperative group exit on its own) and
@@ -195,7 +194,37 @@ def _live_group_members(ps_output: str, pgid: int) -> list[int]:
     return members
 
 
-def _read_process_table() -> str:
+def live_groups(ps_output: str) -> frozenset[int]:
+    """Every process group with a member that is not a zombie, from the text
+    of `/bin/ps -Ao pid=,pgid=,stat=` (`_live_group_members`'s reading of the
+    table, for every group at once).
+
+    Raises:
+        UnreadableProcessTable: a non-blank row is not exactly pid, pgid and state.
+    """
+    groups: set[int] = set()
+    for line in ps_output.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        if len(parts) != 3:
+            raise UnreadableProcessTable(
+                f"process table row {line!r} is not 'pid pgid stat'; the table cannot be read"
+            )
+        _pid, pgid_s, state = parts
+        try:
+            int(_pid)
+            pgid = int(pgid_s)
+        except ValueError:
+            raise UnreadableProcessTable(
+                f"process table row {line!r} has a non-integer pid or pgid; the table cannot be read"
+            ) from None
+        if not state.startswith("Z"):
+            groups.add(pgid)
+    return frozenset(groups)
+
+
+def read_process_table() -> str:
     """The whole process table as text: `/bin/ps -Ao pid=,pgid=,stat=`
     (alias-proof per decision-026 -- never a bare `ps`).
 
@@ -217,10 +246,10 @@ def _group_member_pids(pgid: int) -> list[int]:
     truth for "is the group still there": a signal call succeeding proves only
     that the signal was deliverable, never that anything ended (SPEC.md §9's
     verification rung)."""
-    return _live_group_members(_read_process_table(), pgid)
+    return _live_group_members(read_process_table(), pgid)
 
 
-def group_alive(pgid: int, *, read_table: Callable[[], str] = _read_process_table) -> bool:
+def group_alive(pgid: int, *, read_table: Callable[[], str] = read_process_table) -> bool:
     """Whether process group `pgid` still has a member that runs: the one
     definition of "the group is there" that teardown's verification rung and
     an embedder's liveness check share (decision-176, TASK-0079.19).
@@ -421,40 +450,18 @@ def _guarded_ladder(
         )
 
 
-def _live_exec_siblings(jail_dir: str) -> _execs.Scan:
-    """The registrations of every exec sibling a jail has registered
-    (SPEC.md §9: "`exec` records the sibling ... somewhere the handle can
-    read back in a later process") and whose exit status has not yet been
-    observed -- read from `brig/run/_execs.py`'s registration directory
-    under `jail_dir`, not from any in-memory state, which is what
-    lets a handle rehydrated in a LATER process find execs it never itself
-    started (task-027, decision-042; medium changed by decision-152).
-    Order matches registration order.
-
-    Each registration carries the sibling's start-time stamp alongside its
-    pid and pgid (decision-155), which is what closes the reuse gap this
-    docstring used to name as open: a pid the OS handed to something else
-    between one sibling's deregistration and this scan is signalled by
-    nothing, because `_run_ladder` compares the stamp before it signals.
-
-    A file that is not a registration comes back in `Scan.unreadable`, not as
-    an exception: `kill_jail` reports it and tears down everything else
-    (decision-175).
-    """
-    return _execs.scan(jail_dir)
-
-
-def _unreadable_item(unreadable: _execs.Unreadable) -> KillItem:
-    """The `FAILED` item for a registration file brig cannot read. Nothing it
-    names is known, so nothing is signalled; the detail says where to look."""
+def _unreadable_item(unreadable: _records.Unreadable) -> KillItem:
+    """The `FAILED` item for an entry under `procs/` brig cannot read as a
+    record. Nothing it names is known, so nothing is signalled; the detail says
+    where to look."""
     return KillItem(
         kind="exec_sibling",
         identity=unreadable.path,
         outcome=KillOutcome.FAILED,
         detail=(
-            f"registration file {unreadable.path} {unreadable.reason}; nothing it names was "
+            f"process record {unreadable.path} {unreadable.reason}; nothing it names was "
             "signalled. Inspect it: if it names a process of this jail, end that process "
-            "yourself, and remove the file"
+            "yourself, and remove it"
         ),
     )
 
@@ -474,58 +481,73 @@ def end_group(
 
 
 def kill_jail(handle: Any, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
-    """Tear down EVERYTHING `handle` names: `kill_named` over its fields.
-    Takes anything carrying `pgid`, `pid`, `start_time`, `jail_dir`,
-    `helper_pids` and `helper_stamps` (a `Handle`, in practice)."""
+    """Tear down EVERYTHING `handle` names: `kill_named` over the record its
+    `record()` returns (the processes it holds, its `jail_dir`, its helpers).
+    Takes anything with that method (a `Handle`, in practice)."""
+    record = handle.record()
     return kill_named(
-        pgid=handle.pgid,
-        pid=handle.pid,
-        start_time=handle.start_time,
-        jail_dir=handle.jail_dir,
-        helper_pids=handle.helper_pids,
-        helper_stamps=handle.helper_stamps,
+        known=record.processes,
+        jail_dir=record.jail_dir,
+        helper_pids=record.helper_pids,
+        helper_stamps=record.helper_stamps,
         grace=grace,
     )
 
 
 def kill_named(
     *,
-    pgid: int,
-    pid: int,
-    start_time: str,
+    known: Sequence[_records.ProcessRecord],
     jail_dir: str,
     helper_pids: tuple[int, ...],
     helper_stamps: tuple[str, ...],
     grace: float = DEFAULT_GRACE_S,
 ) -> KillReport:
-    """Tear down EVERYTHING a jail names -- the workload group, then
-    every still-live exec sibling it registered (task-027), then every
-    `JAIL_LIFETIME` helper -- through the same ladder (`_run_ladder`),
-    workload first. The returned `KillReport` is the record: nothing is
-    written anywhere (decision-152). `HostRuntime.destroy` and `kill_jail`
-    both come here (decision-178).
+    """Tear down EVERYTHING a jail names, through the same ladder
+    (`_run_ladder`), per process in start order, then every `JAIL_LIFETIME`
+    helper (decision-181). The returned `KillReport` is the record: nothing
+    is written anywhere (decision-152). `HostRuntime.destroy` and `kill_jail`
+    both come here.
 
-    Total (decision-175): a registration that cannot be read is its own
-    `FAILED` item, and each item's ladder runs inside `_guarded_ladder`, so no
-    exception from one item stops the next. Raises nothing from an item.
+    The processes are `known`, the ones the caller holds in memory, in start
+    order, then every record under `<jail_dir>/procs` whose id `known` does
+    not name (`_records.scan`), in start order: what a later start, or a
+    start in another process, recorded. A known process is ended by the
+    identity the caller holds, never by a disk copy of it. The first process
+    is reported as `workload_group` and every later one as `exec_sibling`, so
+    a report reads as it did when only the first process had a group of its
+    own. A record outlives its process's `wait`, so a waited process is
+    still ended here: its group, if empty, reads `ALREADY_GONE`, and anything
+    it left running in that group is ended.
+
+    Total (decision-175): an entry under `procs/` that cannot be read as a
+    record is its own `FAILED` item, and each item's ladder runs inside
+    `_guarded_ladder`, so no exception from one item stops the next. Raises
+    nothing from an item.
 
     Raises:
         ValueError: `helper_stamps` does not have one entry per helper pid.
     """
-    items: list[KillItem] = [end_group("workload_group", pgid, pid, start_time, grace=grace)]
-
-    siblings = _live_exec_siblings(jail_dir)
-    items.extend(
+    if len(helper_stamps) != len(helper_pids):
+        raise ValueError(
+            f"kill_named: {len(helper_stamps)} helper stamp(s) for {len(helper_pids)} pid(s)"
+        )
+    known_ids = {process.id for process in known}
+    scanned = _records.scan(jail_dir)
+    processes = (
+        *known,
+        *(record for record in scanned.records if record.id not in known_ids),
+    )
+    items: list[KillItem] = [
         end_group(
-            "exec_sibling",
-            registration.pgid,
-            registration.pid,
-            registration.start_time,
+            "workload_group" if position == 0 else "exec_sibling",
+            process.pgid,
+            process.pid,
+            process.start_time,
             grace=grace,
         )
-        for registration in siblings.registrations
-    )
-    items.extend(_unreadable_item(unreadable) for unreadable in siblings.unreadable)
+        for position, process in enumerate(processes)
+    ]
+    items.extend(_unreadable_item(unreadable) for unreadable in scanned.unreadable)
 
     # `Step.helpers` with JAIL_LIFETIME (SPEC.md §6). Each ran with
     # `start_new_session=True`, so its pid is its own pgid and the same

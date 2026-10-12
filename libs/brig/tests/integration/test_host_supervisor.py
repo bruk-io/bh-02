@@ -89,7 +89,7 @@ def test_stop_ends_one_siblings_group_and_leaves_the_rest(run_id: str) -> None:
         assert _live_members(handle.pgid)
         assert supervisor.signal(kept, signal.SIGKILL) is True
         assert supervisor.wait(kept, 5.0) == -signal.SIGKILL
-        assert supervisor.wait(record.first, 0.1) is None
+        assert supervisor.wait(record.processes[0], 0.1) is None
     finally:
         handle.kill()
         teardown_group(handle)

@@ -33,6 +33,7 @@ from brig.core import (
     ReadModel,
     Spec,
 )
+from brig.core.runtime import ChannelOnRecords
 from brig.mech import CompileCtx
 from brig.mech.env_scrub import env_scrub
 from brig.mech.rlimits import rlimits
@@ -306,3 +307,24 @@ def test_three_mechanism_stack_composes_rlimits_outermost_then_seatbelt_then_env
     shell_idx = result.index("/bin/sh")
     assert trampoline_idx < sandbox_idx < shell_idx
     assert result[-1] == "/bin/true"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("records", ["procs", "execs"])
+def test_a_channel_at_or_under_the_records_is_refused(records: str) -> None:
+    """decision-181: seatbelt grants a socket its literal path, but a socket
+    made at a record's path is a record the host can't read; refused like
+    bwrap's, naming the endpoint and the records directory. The control: the
+    same channel in a directory of its own compiles."""
+    endpoint = f"{_JAIL_DIR}/{records}/control.sock"
+    spec = Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=endpoint),))
+    ctx = CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={endpoint: endpoint})
+    with pytest.raises(ChannelOnRecords) as refusal:
+        seatbelt.compile(spec, ctx)
+    assert endpoint in str(refusal.value)
+    assert f"{_JAIL_DIR}/{records}" in str(refusal.value)
+    own = f"{_JAIL_DIR}/chan/control.sock"
+    seatbelt.compile(
+        Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=own),)),
+        CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={own: own}),
+    )

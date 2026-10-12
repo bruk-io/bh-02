@@ -106,11 +106,11 @@ def test_teardown_fails_an_item_whose_table_it_cannot_read(
     pgid = os.getpgrp() + 1000
     # Control: the same call over a readable, empty table ends ALREADY_GONE, so
     # the FAILED below is the unreadable table's doing.
-    monkeypatch.setattr(teardown, "_read_process_table", lambda: "")
+    monkeypatch.setattr(teardown, "read_process_table", lambda: "")
     outcome, detail = teardown._guarded_ladder(pgid, 1234, "x", 0.1)
     assert outcome is teardown.KillOutcome.ALREADY_GONE, detail
 
-    monkeypatch.setattr(teardown, "_read_process_table", lambda: "100 100\n")
+    monkeypatch.setattr(teardown, "read_process_table", lambda: "100 100\n")
     outcome, detail = teardown._guarded_ladder(pgid, 1234, "x", 0.1)
     assert outcome is teardown.KillOutcome.FAILED, detail
     assert "UnreadableProcessTable" in detail, detail

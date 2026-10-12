@@ -24,7 +24,7 @@ of *the action that made the network call*, so it needs "what is new since I
 last looked", not "everything so far". The cursor is a byte offset into an
 append-only file and only ever advances past COMPLETE lines, so a read that
 catches the proxy mid-write returns what was whole and leaves the rest for
-the next call -- the same discipline `_execs.py` gets from writing whole
+the next call -- the same discipline `_records.py` gets from writing whole
 files and renaming them, applied to a stream that cannot be renamed because
 its writer appends to it for the life of the jail.
 

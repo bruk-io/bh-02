@@ -83,12 +83,12 @@ from brig.core import (
     SignatureBook,
     Spec,
 )
-from brig.run import _waiters
+from brig.run import _records, _waiters
 from brig.run.exec_ import exec_in_jail as _exec_in_jail
 from brig.run.host import HostRuntime
 from brig.run.readiness import wait_ready as _wait_ready
 from brig.run.runtime import ExitStatusUnobservable as ExitStatusUnobservable
-from brig.run.runtime import JailRecord, NoSupervisor, ProcessRecord, Runtime
+from brig.run.runtime import Held, JailRecord, NoSupervisor, ProcessRecord, Runtime
 
 HANDLE_VERSION: Final = 5
 """Bumped 1 -> 2 by task-046 (`wrap_prefix` and `jail_env` became REQUIRED
@@ -289,6 +289,14 @@ class Handle:
     #: until `Jail.from_dict` takes runtimes from the embedder (decision-0001
     #: step 3).
     runtime: Runtime = field(default_factory=HostRuntime, repr=False, compare=False)
+    #: What the launching process holds of this jail in memory (`Held`,
+    #: decision-181): the compiled wrap each start is checked against, the
+    #: sensors, and the jail's hold on its tether, so a sibling `exec`
+    #: starts tethered too. Not serialized: a rehydrated handle has none, and
+    #: a sibling it starts is checked against `wrap_prefix` alone and runs
+    #: untethered, as every sibling did before decision-181 (a rehydrated
+    #: `Jail` has no `start` at all in that case, TASK-0079.26).
+    held: Held | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "argv", tuple(self.argv))
@@ -378,9 +386,28 @@ class Handle:
             helper_stamps=tuple(str(stamp) for stamp in d["helper_stamps"]),
         )
 
+    def first(self) -> ProcessRecord:
+        """The jail's first process, the one this handle names: its identity
+        from this handle's fields, its id from the records directory its
+        stdio paths lie in (`<jail_dir>/procs/<id>/`, decision-181), which is
+        how a handle that carries no id names that process's records. `""` as
+        the id when the paths lie in none (a handle written by hand): its
+        identity is still ended and signalled, but no exit record is read."""
+        return ProcessRecord(
+            id=_records.id_of(self.jail_dir, self.stdout_path) or "",
+            order=0,
+            pid=self.pid,
+            pgid=self.pgid,
+            start_time=self.start_time,
+            argv=self.argv,
+            stdout_path=self.stdout_path,
+            stderr_path=self.stderr_path,
+        )
+
     def record(self) -> JailRecord:
         """This jail as its runtime identifies it: what `runtime` is asked
-        about on every control call."""
+        about on every control call. Its one known process is `first()`;
+        the runtime finds every later start in its own records."""
         return JailRecord(
             kind=self.runtime.kind,
             jail_id=self.jail_id,
@@ -388,22 +415,17 @@ class Handle:
             cwd=self.cwd,
             jail_env=frozendict(self.jail_env),
             wrap_prefix=self.wrap_prefix,
-            first=ProcessRecord(
-                pid=self.pid,
-                pgid=self.pgid,
-                start_time=self.start_time,
-                argv=self.argv,
-                stdout_path=self.stdout_path,
-                stderr_path=self.stderr_path,
-            ),
+            processes=(self.first(),),
             helper_pids=self.helper_pids,
             helper_stamps=self.helper_stamps,
+            held=self.held,
         )
 
     def alive(self) -> bool:
-        """True while this jail's own leader is running, false once it is
-        gone -- and false for a pid the OS has since handed to something
-        else.
+        """True while anything of this jail runs: its own leader, a process
+        started in it since, or a `JAIL_LIFETIME` helper (decision-181) --
+        false once all are gone, and false for a pid the OS has since handed to
+        something else.
 
         Two questions, not one (decision-155, 2026-09-08). First
         `os.kill(pid, 0)`, which sends no signal and only runs the kernel's
@@ -420,7 +442,7 @@ class Handle:
         (decision-171): it has ended, and where PID 1 does not reap it would
         otherwise read as running for good.
 
-        This answers for the LEADER only. A zombie leader reads gone while
+        This answers for LEADERS only. A zombie leader reads gone while
         other members of its group may still run; `kill()` (teardown, which
         scans the group, not the leader) is what ends a group.
 
@@ -478,7 +500,7 @@ class Handle:
         supervisor = self.runtime.supervisor(record)
         if supervisor is None:
             return False
-        return supervisor.signal(record.first, signal.SIGINT)
+        return supervisor.signal(record.processes[0], signal.SIGINT)
 
     def wait(self, timeout: float = 30.0) -> int:
         """Block until the workload exits; return the status it exited with.
@@ -513,7 +535,7 @@ class Handle:
         supervisor = self.runtime.supervisor(record)
         if supervisor is None:
             raise NoSupervisor(f"jail {self.jail_id!r} has no supervisor to wait through")
-        status = supervisor.wait(record.first, timeout)
+        status = supervisor.wait(record.processes[0], timeout)
         if status is None:
             raise TimeoutError(f"pid {self.pid} did not exit within {timeout}s")
         return status

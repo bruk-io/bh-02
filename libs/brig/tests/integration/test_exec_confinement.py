@@ -44,6 +44,7 @@ import pytest
 from brig.core import Axis, EnvMode, EnvPolicy, Limits, Spec
 from brig.core.runtime import RuntimeKind
 from brig.mech import CompileCtx, Step
+from brig.run import _records
 from brig.run.exec_ import ExecFidelity, ExecWrapNotAPrefix, exec_in_jail
 from brig.run.handle import Handle
 from brig.run.launcher import IoPolicy, SubprocessLauncher
@@ -296,59 +297,49 @@ def test_control_exec_sibling_short_command_exits_zero_under_the_same_limit(
 
 
 @pytest.mark.integration
-def test_exec_refuses_when_the_composed_wrap_is_not_a_pure_prefix(run_id: str) -> None:
-    """AC #3: a REAL `Stack` containing `_AppendingMechanism` (its `wrap`
-    APPENDS a trailing token, so the suffix check fails) compiles and
-    launches normally -- the refusal is `handle.exec`'s to make, not the
-    launcher's. `handle.exec(...)` raises `ExecWrapNotAPrefix`, naming that
-    the composed wrap is not a pure argv prefix; NO process is spawned --
-    no new `exec-*` file appears under `jail_dir` at all (the refusal is
-    checked before either exec stdio file is even opened).
+def test_every_start_refuses_when_the_composed_wrap_is_not_a_pure_prefix(run_id: str) -> None:
+    """AC #3, as decision-181 (2026-10-12) moved it: a REAL `Stack` containing
+    `_AppendingMechanism` (its `wrap` APPENDS a trailing token, so the suffix
+    check fails) compiles, and `create` derives no prefix (`None`), so EVERY
+    start refuses, the first included: the launch raises `ExecWrapNotAPrefix`
+    and NO process is spawned -- no records directory appears under
+    `<jail_dir>/procs` at all (the refusal is checked before one is made).
+    Before decision-181 the first process ran and only a later `exec`
+    refused; now the first process is a start like any other.
 
-    THE CONTROL, in the same test: the identical `exec-*` scan, against a
-    SECOND (empty-stack) handle where the exec actually succeeds, DOES
-    find a new file -- without this, `after == before` on the refused
-    handle would pass just as happily if the scan pattern could never
-    match anything at all (a scan that never finds anything cannot tell
-    "refused" apart from "broken probe")."""
-    handle = _launch(
-        Stack([_AppendingMechanism()]),
-        Spec(),
-        _sleep_workload(run_id),
-        jail_id="jail-t046-ac3",
-        run_id=run_id,
-    )
+    THE CONTROL, in the same test: the identical `procs/` scan, against a
+    SECOND (empty-stack) launch where the start succeeds, DOES find a new
+    entry -- without this, an empty scan on the refused jail would pass just
+    as happily if the scan could never match anything at all."""
+    jail_dir = _new_jail_dir(run_id)
+    ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
+    jail = Stack([_AppendingMechanism()]).compile(Spec(), ctx=ctx)
+
+    with pytest.raises(ExecWrapNotAPrefix) as exc_info:
+        SubprocessLauncher().launch(
+            jail,
+            argv=_sleep_workload(run_id),
+            cwd=jail_dir,
+            io=IoPolicy(),
+            jail_id="jail-t046-ac3",
+            jail_dir=jail_dir,
+        )
+    assert "is not a pure argv prefix" in str(exc_info.value)
+    assert exc_info.value.wrap_prefix is None
+    assert not os.path.exists(_records.procs_dir(jail_dir))
+
     control_handle = _launch(
         Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t046-ac3-control", run_id=run_id
     )
     try:
-        assert handle.wrap_prefix is None
-
-        before = {name for name in os.listdir(handle.jail_dir) if name.startswith("exec-")}
-
-        with pytest.raises(ExecWrapNotAPrefix) as exc_info:
-            handle.exec(["true"])
-        assert "is not a pure argv prefix" in str(exc_info.value)
-
-        after = {name for name in os.listdir(handle.jail_dir) if name.startswith("exec-")}
-        assert after == before  # no exec-*-{stdout,stderr}.log file was ever created
-
-        # THE CONTROL: the SAME scan, on a handle whose exec is allowed
-        # to succeed, DOES see a new exec-* file -- proving the scan
-        # pattern can positively detect an exec artifact at all.
-        control_before = {
-            name for name in os.listdir(control_handle.jail_dir) if name.startswith("exec-")
-        }
-        assert control_before == set()
+        assert control_handle.wrap_prefix == ()
+        before = os.listdir(_records.procs_dir(control_handle.jail_dir))
+        assert len(before) == 1  # the control's own first process
         control_exec = exec_in_jail(control_handle, ["true"])
         assert control_exec.wait(timeout=_WAIT_TIMEOUT_S) == 0
-        control_after = {
-            name for name in os.listdir(control_handle.jail_dir) if name.startswith("exec-")
-        }
-        assert control_after != control_before
-        assert len(control_after) == 2  # exec-<token>-stdout.log, exec-<token>-stderr.log
+        after = os.listdir(_records.procs_dir(control_handle.jail_dir))
+        assert len(after) == 2
     finally:
-        _teardown_group(handle)
         _teardown_group(control_handle)
 
 

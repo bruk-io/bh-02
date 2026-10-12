@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from signal import Signals
 from typing import Final
 
-from brig.core.runtime import Capability, RuntimeKind, Scope
+from brig.core.runtime import PROCS_DIRNAME, Capability, RuntimeKind, Scope
 from brig.run.runtime import IoPolicy, JailRecord, ProcessRecord, Supervisor
 from brig.run.teardown import KillItem, KillOutcome, KillReport
 from brig.stack import CompiledJail
@@ -41,10 +41,15 @@ class FakeRuntime:
     """A runtime whose instance is a set of pids it made up.
 
     A class because it holds state its own methods (and its supervisors') change:
-    which fake processes still run, and the log of calls. `exit_status` is
-    what `Supervisor.wait` answers for any process that has ended (`None`: they
-    never end on their own, so a wait reaches its deadline). `has_supervisor`
-    `False` makes `supervisor` return `None`, a jail that can only be destroyed."""
+    which fake processes still run, which jail started which, and the log of
+    calls. `exit_status` is what `Supervisor.wait` answers for any process that
+    has ended (`None`: they never end on their own, so a wait reaches its
+    deadline). `has_supervisor` `False` makes `supervisor` return `None`, a jail
+    that can only be destroyed.
+
+    Its `kind` is `RuntimeKind.FAKE` (decision-181), whatever kind the jail was
+    compiled for, so its records say `FAKE` and can't be sent to a real
+    runtime."""
 
     def __init__(
         self,
@@ -58,29 +63,37 @@ class FakeRuntime:
         self._capabilities = capabilities
         self.calls: list[Call] = []
         self._running: set[int] = set()
+        self._started: dict[str, list[ProcessRecord]] = {}
         self._next_pid = FAKE_PID_BASE
 
     @property
     def kind(self) -> RuntimeKind:
-        return RuntimeKind.HOST
+        return RuntimeKind.FAKE
 
     @property
     def capabilities(self) -> frozenset[Capability]:
         return self._capabilities
 
-    def _spawn(self, argv: Sequence[str], jail_dir: str, io: IoPolicy) -> ProcessRecord:
-        """A new fake process, running until stopped or destroyed."""
+    def _spawn(self, argv: Sequence[str], jail: JailRecord, io: IoPolicy) -> ProcessRecord:
+        """A new fake process in `jail`, running until stopped or destroyed."""
         pid = self._next_pid
         self._next_pid += 1
         self._running.add(pid)
-        return ProcessRecord(
+        started = self._started.setdefault(jail.jail_id, [])
+        process_id = f"{pid:016x}"
+        directory = os.path.join(jail.jail_dir, PROCS_DIRNAME, process_id)
+        process = ProcessRecord(
+            id=process_id,
+            order=len(started),
             pid=pid,
             pgid=pid,
             start_time=FAKE_STAMP,
             argv=tuple(argv),
-            stdout_path=os.path.join(jail_dir, io.stdout_name),
-            stderr_path=os.path.join(jail_dir, io.stderr_name),
+            stdout_path=os.path.join(directory, io.stdout_name),
+            stderr_path=os.path.join(directory, io.stderr_name),
         )
+        started.append(process)
+        return process
 
     def running(self, process: ProcessRecord) -> bool:
         """Whether `process` has neither ended nor been stopped."""
@@ -93,21 +106,26 @@ class FakeRuntime:
             return KillOutcome.ENDED
         return KillOutcome.ALREADY_GONE
 
+    def _processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]:
+        """Every process of `jail`: the ones it names, then every other one
+        this runtime started in it, in start order."""
+        named = {process.pid for process in jail.processes}
+        started = self._started.get(jail.jail_id, [])
+        return (*jail.processes, *(p for p in started if p.pid not in named))
+
     def create(
         self,
         jail: CompiledJail,
         *,
-        argv: Sequence[str],
         cwd: str,
-        io: IoPolicy,
         jail_id: str,
         jail_dir: str,
         tether: int | None,
     ) -> JailRecord:
-        """A record for a jail whose first process is `argv`. The fake
-        applies no wrap: its wrap prefix is empty, so a later start is
-        `PLAIN`. Refuses nothing; `capabilities` is only reported."""
-        first = self._spawn(argv, jail_dir, io)
+        """A record for a jail with no process in it (decision-181). The fake
+        applies no wrap: its wrap prefix is empty, so every start is `PLAIN`.
+        Refuses nothing; `capabilities` is only reported, and `tether` is
+        ignored."""
         record = JailRecord(
             kind=self.kind,
             jail_id=jail_id,
@@ -115,35 +133,39 @@ class FakeRuntime:
             cwd=cwd,
             jail_env=frozendict(jail.env),
             wrap_prefix=(),
-            first=first,
         )
         self.calls.append(Call("create", Scope.JAIL, record))
         return record
 
     def alive(self, jail: JailRecord) -> bool:
+        """Whether any process of `jail` still runs."""
         self.calls.append(Call("alive", Scope.JAIL, jail))
-        return self.running(jail.first)
+        return any(self.running(process) for process in self._processes(jail))
 
     def destroy(self, jail: JailRecord) -> KillReport:
-        """Ends the first process and every process the supervisors started; one
-        item each, the first process first."""
+        """Ends every process of `jail`, one item each in start order: the
+        first `workload_group`, every later one `exec_sibling`."""
         self.calls.append(Call("destroy", Scope.JAIL, jail))
-        first = KillItem(
-            kind="workload_group",
-            identity=str(jail.first.pgid),
-            outcome=self._end(jail.first),
-            detail="",
+        return KillReport(
+            items=tuple(
+                KillItem(
+                    kind="workload_group" if position == 0 else "exec_sibling",
+                    identity=str(process.pgid),
+                    outcome=self._end(process),
+                    detail="",
+                )
+                for position, process in enumerate(self._processes(jail))
+            )
         )
-        siblings = tuple(
-            KillItem(kind="exec_sibling", identity=str(pid), outcome=KillOutcome.ENDED, detail="")
-            for pid in sorted(self._running)
-        )
-        self._running.clear()
-        return KillReport(items=(first, *siblings))
 
     def supervisor(self, jail: JailRecord) -> Supervisor | None:
         self.calls.append(Call("supervisor", Scope.JAIL, jail))
         return FakeSupervisor(self, jail) if self.has_supervisor else None
+
+    def first(self, jail: JailRecord) -> ProcessRecord | None:
+        """The first process of `jail`, or `None` when nothing was started."""
+        processes = self._processes(jail)
+        return processes[0] if processes else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,9 +176,7 @@ class FakeSupervisor:
     jail: JailRecord
 
     def start(self, argv: Sequence[str], *, cwd: str, io: IoPolicy) -> ProcessRecord:
-        process = self.runtime._spawn(
-            (*(self.jail.wrap_prefix or ()), *argv), self.jail.jail_dir, io
-        )
+        process = self.runtime._spawn((*(self.jail.wrap_prefix or ()), *argv), self.jail, io)
         self.runtime.calls.append(Call("start", Scope.PROCESS, process))
         return process
 
@@ -177,7 +197,10 @@ class FakeSupervisor:
 
     def stop(self, process: ProcessRecord) -> KillReport:
         self.runtime.calls.append(Call("stop", Scope.PROCESS, process))
-        kind = "workload_group" if process == self.jail.first else "exec_sibling"
+        first = self.runtime.first(self.jail)
+        kind = (
+            "workload_group" if first is not None and process.pid == first.pid else "exec_sibling"
+        )
         return KillReport(
             items=(
                 KillItem(

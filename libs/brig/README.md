@@ -17,9 +17,10 @@ their records as data, `run` stamps them, and they come back on the
 `exit_events()` for what it makes of how the workload ended — plus
 `run.read_egress_decisions`, the cursored reader for what the egress filter,
 which is a separate process, decided on the wire. The embedder decides where
-they all go. The one thing brig does write is `<jail_dir>/exit`: the
-workload's exit status, once, so a `Handle` rehydrated in another process can
-still say how the jail ended.
+they all go. The one thing brig does write is a record per process under
+`<jail_dir>/procs/<id>/` (decision-181): who it is, so teardown in any process
+can end it, and its exit status, once, so a `Handle` rehydrated in another
+process can still say how it ended.
 
 Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md
@@ -57,7 +58,8 @@ decision paragraph in the section it belongs to.
   a log, so brig was keeping a second, worse one; and four of the five
   lifecycle kinds were copies of something the caller already held. What
   replaced each reader: exec-sibling registration is a file per live
-  sibling under `<jail_dir>/execs/`, teardown's record is the `KillReport`
+  sibling under `<jail_dir>/execs/` (a records directory per process,
+  `<jail_dir>/procs/<id>/`, since decision-181), teardown's record is the `KillReport`
   it returns, and the exit status lives in the launching process
   (`Handle.wait()` refuses honestly anywhere else — superseded four rulings
   later by decision-156, below). `Handle.env` — the
@@ -96,7 +98,8 @@ a gap this library had been *naming* rather than closing.
   decision-152 deleted the event stream and admitted it cost exactly one
   capability: a status readable by a process that never parented the workload.
   The launcher now runs the workload under a tiny wrapper that writes the
-  status to `<jail_dir>/exit`, once, atomically. Not a log — one line, one
+  status to `<jail_dir>/exit` (each process's own `procs/<id>/exit` since
+  decision-181), once, atomically. Not a log — one line, one
   write, nothing to tail or rotate. `ExitStatusUnobservable` remains for the
   jail whose wrapper never wrote, which is the `SIGKILL`ed group.
 - **The egress proxy's decisions have a reader** (decision-157). The filter is

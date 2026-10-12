@@ -89,46 +89,60 @@ class SubprocessLauncher:
         jail_dir: str,
         tether: int | None = None,
     ) -> Handle:
-        """SPEC.md §8's five steps, in order:
+        """SPEC.md §8's steps, in order (decision-181: `create`, then the
+        first `start`):
 
         1. Refuse if `jail.requires - capabilities` is non-empty, naming
            the missing feature(s) via `LaunchRefused.missing`.
-        2-3. `HostRuntime().create` (decision-178): create `jail_dir`,
-           clear any exit record an earlier launch left in it
-           (decision-162), write `jail.staged` into it, and spawn
-           `jail.wrap(argv)`, detached, new process group, stdio per `io`,
-           cwd and env from the jail.
+        2. `HostRuntime().create`: create `jail_dir`, clear the records an
+           earlier jail left there (refused while any of it runs), write
+           `jail.staged`, start `jail.helpers`, derive `wrap_prefix`.
+        3. The first `start`: `jail.wrap(argv)` under its own exit wrapper,
+           detached, new process group, stdio per `io` in its own records
+           directory `<jail_dir>/procs/<id>/`, cwd and env from the jail. A
+           start that fails ends the helpers `create` started.
         4. Stamp every sensor's `known_at_compile()` payloads.
-        5. Return a `Handle` carrying them, and the runtime it delegates to.
+        5. Return a `Handle` naming that first process, and the runtime it
+           delegates to.
 
         `tether` (decision-167, SPEC.md section 8) is the read end of a pipe whose write end
         the caller keeps: once every write end is closed (the caller closed it, or died, however
-        it died), the workload's process group is sent `SIGKILL`. The caller keeps the read end
-        too, and may close it once this returns. `None` (the default): the jail lives until it
-        ends or is killed, whatever happens to the process that launched it.
+        it died), every process the jail started is sent `SIGKILL`, siblings `exec` starts
+        included (decision-181). The caller keeps the read end too, and may close it once this
+        returns. `None` (the default): the jail lives until it ends or is killed, whatever
+        happens to the process that launched it.
+
+        Raises:
+            LaunchRefused: `jail.requires` names a feature this launcher lacks.
+            JailDirInUse: `jail_dir` holds an earlier jail's records and something
+                they name runs, or brig can't tell.
+            HelperFailed: a `LAUNCH_SCOPED` helper failed.
+            ExecWrapNotAPrefix: the compiled wrap is not a pure argv prefix.
+            TetherClosed: `tether` has already ended.
+            WorkloadSpawnFailed: `argv` could not be spawned inside the jail.
+            OSError: the jail directory or a record could not be written.
         """
         missing = jail.requires - self.capabilities
         if missing:
             raise LaunchRefused(missing, self.name)
 
         runtime = HostRuntime()
-        record = runtime.create(
-            jail,
-            argv=argv,
-            cwd=cwd,
-            io=io,
-            jail_id=jail_id,
-            jail_dir=jail_dir,
-            tether=tether,
-        )
+        record = runtime.create(jail, cwd=cwd, jail_id=jail_id, jail_dir=jail_dir, tether=tether)
+        try:
+            first = runtime.supervisor(record).start(argv, cwd=cwd, io=io)
+        except BaseException:
+            # Nothing runs for the jail but its JAIL_LIFETIME helpers, which
+            # would outlive a launch that never handed anyone a handle.
+            runtime.destroy(record)
+            raise
         return Handle(
             jail_id=jail_id,
             jail_dir=jail_dir,
             launcher_name=self.name,
-            pid=record.first.pid,
-            pgid=record.first.pgid,
-            start_time=record.first.start_time,
-            argv=record.first.argv,
+            pid=first.pid,
+            pgid=first.pgid,
+            start_time=first.start_time,
+            argv=first.argv,
             cwd=cwd,
             jail_env=jail.env,
             wrap_prefix=record.wrap_prefix,
@@ -140,9 +154,10 @@ class SubprocessLauncher:
                 (payload for sensor in jail.sensors for payload in sensor.known_at_compile()),
                 jail_id,
             ),
-            stdout_path=record.first.stdout_path,
-            stderr_path=record.first.stderr_path,
+            stdout_path=first.stdout_path,
+            stderr_path=first.stderr_path,
             helper_pids=record.helper_pids,
             helper_stamps=record.helper_stamps,
             runtime=runtime,
+            held=record.held,
         )

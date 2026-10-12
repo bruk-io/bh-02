@@ -1256,7 +1256,11 @@ integration tier ran on Linux — by `tests/integration/test_bwrap_fs.py`, whose
 allowlist control is the only test that launches twice into one directory — but
 the defect was never platform-specific, and its regression test
 (`test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status`) runs on
-the empty stack, everywhere.
+the empty stack, everywhere. *Settled 2026-10-12 by decision-181
+(TASK-0079.25):* each process writes its own exit record under a fresh id
+(`<jail_dir>/procs/<id>/exit`), so there is no shared record to clear; `create`
+removes an earlier jail's records, once they are gone, as §9's records ruling
+says, and the regression test still runs.
 
 **A launch may be tethered to the process that made it (2026-09-30,
 decision-167).** `launch(..., tether=fd)` takes the read end of a pipe whose
@@ -1280,7 +1284,9 @@ writing the project). Five things about it are constraints, not description:
 - **The watcher is a member of the group it ends**, so the group's number can't
   be handed to a stranger while it waits, and it outlives the wrapper: on darwin
   the workload is the wrapper's direct child and may exit by itself the moment
-  its embedder goes, leaving a background program in a leaderless group.
+  its embedder goes, leaving a background program in a leaderless group. Since
+  decision-181 every start has a group and a watcher of its own, each a member
+  of the group it ends.
 - **It ignores `SIGINT` and nothing else.** `interrupt` is for the workload;
   `SIGTERM` keeps its default, so `kill`'s first rung ends the watcher like any
   member and the verification rung still sees the group empty.
@@ -1289,8 +1295,10 @@ writing the project). Five things about it are constraints, not description:
   ends every process in the namespace, one that called `setsid()` included.
   Under seatbelt, which has no namespace, a process that left the group (a
   `setsid()`, a double-fork daemon) is out of reach — of `kill`'s ladder too,
-  which is group-shaped. Exec siblings and `JAIL_LIFETIME` helpers are groups of
-  their own and are not tethered.
+  which is group-shaped. `JAIL_LIFETIME` helpers are groups of their own and
+  are not tethered. *Amended 2026-10-12 (decision-181, TASK-0079.25):* exec
+  siblings are tethered: every start's exit wrapper starts a watcher of its
+  own on the jail's tether, so no process of a tethered jail runs untethered.
 - **It does not serialize.** An fd can't cross `to_dict`; a rehydrated `Handle`
   has no tether and needs none, since the process that held the write end is
   the one whose death it watched. `tether=None`, the default, launches exactly
@@ -1519,6 +1527,12 @@ verification rung lets it reach the per-item boundary, so the item is `FAILED`
   close. (decision-042: §9's teardown enumeration is illustrative, not
   exhaustive. decision-049: the clause is durability, not a named field, and the
   event-stream mechanism is compliant with it.)
+  *Amended 2026-10-12 (decision-181, TASK-0079.25):* the record is now a
+  directory per process, `<jail_dir>/procs/<id>/` (the first process's too),
+  written before `exec` returns and **never removed by `wait()`**: a record
+  outlives its process's wait, so `kill` still ends what a waited sibling left
+  in its group, and reports an empty one `ALREADY_GONE`. Nothing writes or
+  reads `execs/` any more.
 - Probes (§12) run *through* `exec`, which is what makes them exercise the
   real path — probe and exec are the same machinery, one canned and judged,
   one free-form.
@@ -1692,6 +1706,8 @@ handle, the shape an embedder uses to clean up after a runtime that died
 holding a jail, could tear that jail down but never say how it ended. That is
 given back here, without the stream: **the launcher runs the workload under a
 tiny wrapper that writes the status to `<jail_dir>/exit`, once, atomically**
+(since decision-181 every process, siblings included, runs under one of its own,
+writing `<jail_dir>/procs/<id>/exit`)
 (written to a temporary name and renamed, so a reader sees a complete status
 or no file). One line, one write, no appender, no tail, nothing to rotate —
 the objections that killed the stream do not apply to a file whose entire
@@ -1922,6 +1938,46 @@ so `from_dict` sends it only to the runtime passed under `FAKE`, and a fake
 record rehydrated with only `HostRuntime` passed is refused. The kind is
 TASK-0079.25's; the refusal, and its test, are TASK-0079.26's, since
 `from_dict(runtimes=)` arrives there.
+
+**Settled by TASK-0079.25 (2026-10-12, no new ruling).** Seven points the
+review left to the implementation, and three edges it found:
+
+1. **The sentinel.** `create` derives `wrap_prefix` from `wrap` applied to two
+   tokens that each hold a NUL (`"\0brig-wrap-sentinel-argv0"`, `"…argv1"`).
+   No argv `execve` takes can hold a NUL, so it never equals an argv a start is
+   asked for; a wrap that rewrites either token (or appends, or drops) derives
+   no prefix and every start refuses; in the creating process each start also
+   checks `wrap` of its own argv.
+2. **A start on a tether that has ended is refused** (`TetherClosed`), before
+   anything is made: a process started then would be killed at once by its own
+   watcher. A tether that ends after the check is the watcher's to act on.
+3. **The jail's tether fd.** `create` duplicates the read end (not
+   inheritable) and the creating process holds the duplicate in memory, so the
+   embedder may close its own once `create` returns, as after `launch` before.
+   Each start passes it to its own wrapper alone (`pass_fds`); the wrapper hands
+   it to its watcher and closes its copy. The duplicate is closed when the
+   last in-memory holder is collected, never by `destroy`.
+4. **The id** is 16 lowercase hex characters (64 bits from `secrets`). Read
+   back, only a name that is exactly that is an id, and a record's own `id`
+   must equal its directory's name; anything else under `procs/` is an
+   unreadable entry (teardown: a `FAILED` item; `create`: a doubt).
+5. **A `record.json` that can't be written** after the spawn: the start ends
+   the process's group through the ladder (every guard), removes its records
+   directory once it is gone, and re-raises the error with a note saying so.
+6. **What `create` removes** of an earlier jail: the whole `procs/` tree
+   (records, exit records, stdio), all or nothing. The jail directory's
+   top-level files (staged files, helper logs) are overwritten as before; the
+   old layout's `exit` and `execs/` are read by nothing and left alone.
+7. **bh-02's runner tests** assert no `KillReport` item beyond "every item
+   ended or already gone", and the runner never starts a sibling, so a waited
+   sibling's new `ALREADY_GONE` item changes none of them.
+
+And: **a stdio name may not be a record's** (`IoPolicy` refuses a name that is
+not one plain file name, is `record.json`, `exit` or their `.partial`, or
+names both streams the same); **a start whose argv can't be spawned** ends its
+wrapper's group (its watcher with it) and removes its records directory, so
+nothing is left to hold the jail directory; and **a launch whose first start
+fails** destroys what `create` started (its `JAIL_LIFETIME` helpers).
 
 Implementing tasks: TASK-0079.25 for the records, `create` with no process,
 the per-start wrapper and tether (§8), the refusal that keeps every grant off
