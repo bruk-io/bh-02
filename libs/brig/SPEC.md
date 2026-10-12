@@ -728,9 +728,10 @@ be the copy decision-152 deleted the event stream for).
 - **The mount order IS the policy**, because bwrap applies operations in the
   order they appear and a later mount stacks over an earlier one. One rule —
   later wins — with the stages ordered so that later means more specific:
-  (1) `--unshare-all`; (2) the jail's own furniture, `--proc /proc` and
-  `--dev /dev`, first among the mounts so every spec-derived mount stacks on
-  top of it; (3) `read_allows` as `--ro-bind`; (4) the declared LISTEN
+  (1) `--unshare-all --cap-drop ALL` (decision-177, below); (2) the jail's
+  own furniture, `--proc /proc`, `/proc/sys` bound read-only over it
+  (decision-177) and `--dev /dev`, first among the mounts so every
+  spec-derived mount stacks on top of it; (3) `read_allows` as `--ro-bind`; (4) the declared LISTEN
   channel's endpoint DIRECTORY as `--bind`; (5) `write_allows` as `--bind`;
   (5a) the pins (decision-168, below), but those in a sealed jail directory;
   (5b) when a write root or a channel directory is at or above the jail
@@ -760,6 +761,50 @@ be the copy decision-152 deleted the event stream for).
   mounts keep their own flags. (Found by bh-02's jailed-kernel tests, the
   first to write outside the workspace at a path whose parent the jail had
   made: `tests/integration/test_bwrap_fs.py` pins it now.)
+- **A jail started as root holds no capabilities, and its `/proc/sys` is
+  read-only (2026-10-12, decision-177); until then, run as root, `fs_write`'s
+  `enforced` was void.** bwrap run as root maps the jail's uid 0 to the
+  host's uid 0 (`uid_map` `0 0 1`) and, unless told otherwise, leaves the
+  workload every capability (CapEff and CapBnd full) over its own user and
+  mount namespaces. So every read-only bind was a suggestion: the workload
+  remounted one read-write (`mount -o remount,bind,rw`) and wrote through it
+  to the host (TASK-0079.01's review did it on the host's `/etc`), and
+  CAP_DAC_OVERRIDE read any root-owned file the jail could see, whatever its
+  mode. Stage 1 now emits `--cap-drop ALL`: bwrap makes its mounts and then
+  empties the workload's effective, permitted, inheritable, ambient and
+  bounding sets, and it sets no_new_privs as it always does, so an `exec` as
+  uid 0 gains nothing back and a setuid binary gains nothing. Dropping the
+  capabilities is not the whole of it: the workload is still the host's uid
+  0, and a sysctl's write check is its mode bits alone (the owner's, for the
+  host's root), while bwrap 0.9 leaves `/proc/sys` uncovered (it covers what
+  it can write to, and the `/proc/sys` directory itself is `r-xr-xr-x`). A
+  capability-less root wrote `kernel.hostname` (measured, in the jail's own
+  UTS namespace), and `kernel.core_pattern` or `kernel.modprobe` take the same
+  check and run a program as the host's root. So stage 2 binds `/proc/sys`
+  read-only over the jail's own proc (`--ro-bind /proc/sys /proc/sys`: bwrap's
+  bind sources are the host's, and `--remount-ro` refuses a path that is not
+  a mount point; the tree is the same either way, and `/proc/sys/net` answers
+  for the reader's own network namespace). Measured after: CapEff and CapBnd
+  empty, the remount `EPERM`, the write `EROFS`, a root-owned mode-000 file
+  `EACCES`, the sysctl write `EROFS`, and an unmapped nested user namespace
+  can't unlock a bind either (mapping uid 0 needs CAP_SETFCAP). The masks
+  hold without CAP_DAC_OVERRIDE: the mode-0000 tmpfs and the `/dev/null`
+  binds (`nodev`) refuse uid 0 like anyone, and the seal is a read-only
+  mount. Considered and not taken: an unprivileged `--uid`/`--gid` inside.
+  bwrap maps it to the host's uid 0 all the same, so the sysctl check is
+  unchanged, and the workload would see its own files owned by a stranger.
+  Both flags are emitted whoever runs bwrap, so the render stays pure (no
+  uid on `CompileCtx`); for an unprivileged user they change nothing (no
+  capabilities to drop, and a mapped uid that is not the host's root). No
+  grade moves: the change makes `enforced` true as root, where it had been
+  claimed and void. A host with no `/proc/sys` fails the launch, closed.
+  Seatbelt has nothing to drop: its profile is mandatory access control the
+  kernel applies to root too, and capabilities are a Linux notion; whether
+  root under its `(deny default)` profile can remount or change a sysctl is
+  unmeasured (no Mac in reach) and is carried to TASK-0079.15. Implementing
+  task: TASK-0079.20; `tests/integration/test_bwrap_root_confined.py` plants
+  the remount, the host write, the mode-000 read and the sysctl write as
+  root. (Ruled 2026-10-12, decision-177.)
 - **Read carve-outs: masked where they exist, graded where they do not
   (2026-09-28, decision-164).** Each `read_denies` entry is compared, resolved,
   against every tree the render mounts (read allows, channel directories,

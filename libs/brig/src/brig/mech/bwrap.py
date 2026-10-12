@@ -35,16 +35,20 @@ mount stacks over an earlier one.** One rule, no exceptions: LATER WINS,
 and the stages are ordered so that "later" means "more specific and more
 restrictive".
 
-    1. `--unshare-all`                     namespaces: mount, pid, ipc, uts,
+    1. `--unshare-all --cap-drop ALL`      namespaces: mount, pid, ipc, uts,
                                            cgroup, user (try), and NET --
                                            the network axis's whole
-                                           enforcement (deny-all).
-    2. `--proc /proc`, `--dev /dev`        the jail's OWN furniture: a proc
-                                           for its own pid namespace and a
-                                           minimal device set. First among
-                                           the mounts, so every spec-derived
-                                           mount below stacks ON TOP of it
-                                           rather than being shadowed by it.
+                                           enforcement (deny-all); and no
+                                           capability for the workload
+                                           (decision-177, below).
+    2. `--proc /proc`,                     the jail's OWN furniture: a proc
+       `--ro-bind /proc/sys /proc/sys`,    for its own pid namespace, its
+       `--dev /dev`                        sysctls read-only (decision-177),
+                                           and a minimal device set. First
+                                           among the mounts, so every
+                                           spec-derived mount below stacks ON
+                                           TOP of it rather than being
+                                           shadowed by it.
     3. `--ro-bind SRC DEST` per            the readable tree: an ALLOWLIST,
        `fs.read_allows`                    so what is not named here does not
                                            exist inside the jail at all.
@@ -106,6 +110,21 @@ restrictive".
                                            mount point cannot be made on a
                                            read-only root.
     9. `--` then the workload's argv.
+
+**A jail started as root holds no capabilities (decision-177).** Run as
+root, bwrap maps the jail's uid 0 to the host's and keeps every capability
+for the workload unless told otherwise: a read-only bind could be remounted
+read-write and written through to the host, and CAP_DAC_OVERRIDE read any
+root-owned file whatever its mode. `--cap-drop ALL` empties every set,
+bounding included, after bwrap's own mounts (and bwrap always sets
+no_new_privs, so an exec gains nothing back). The workload is still the
+host's uid 0, though, and a sysctl's write check is the mode bits alone, so
+`/proc/sys` -- which bwrap 0.9 leaves uncovered -- is bound read-only over
+the jail's own proc: the source is the host's `/proc/sys`, since a bwrap
+bind source is a host path and `--remount-ro` refuses a path that is not a
+mount point. Both are emitted whoever runs bwrap, which keeps this render
+pure; an unprivileged bwrap has no capability to drop and no host root to
+be, so for it they change nothing.
 
 **Read carve-outs inside the allowlist (decision-164).** An allowlist
 denies by absence, but a secret can sit INSIDE an allowed root: a
@@ -307,7 +326,9 @@ _FS_WRITE_DETAIL: Final[str] = (
     "refused at compile). Every carve-out is a mount on "
     "a host directory entry, so enforced is against the workload, not the host: a "
     "file the host renames over a denied path, or a held directory it removes, is "
-    "writable inside the jail until a new jail starts."
+    "writable inside the jail until a new jail starts. Run as root the "
+    "workload holds no capability and /proc/sys is read-only, so it cannot "
+    "remount a read-only bind writable or write a sysctl (decision-177)."
 )
 
 #: Must contain the literal token "unshare": the whole network claim is the
@@ -326,6 +347,11 @@ _NETWORK_DETAIL: Final[str] = (
 #: device. bwrap binds with `nodev`, so opening it inside the jail fails with
 #: EACCES -- a read of the masked path is refused, not answered with nothing.
 _NULL: Final[str] = "/dev/null"
+
+#: The jail's sysctls, bound read-only over its own proc at stage 2
+#: (decision-177): run as root the workload is the host's uid 0, a sysctl's
+#: write check is the mode bits alone, and bwrap 0.9 leaves this uncovered.
+_PROC_SYS: Final[str] = "/proc/sys"
 
 _AXES: Final[frozenset[Axis]] = frozenset({Axis.FS_READ, Axis.FS_WRITE, Axis.NETWORK})
 
@@ -585,7 +611,22 @@ def render_bwrap_prefix(
         )
 
     # Stage 1 and 2: the namespaces, then the jail's own furniture.
-    args: list[str] = [bwrap_path, "--unshare-all", "--proc", "/proc", "--dev", "/dev"]
+    # `--cap-drop ALL` and the read-only `/proc/sys` are decision-177: as
+    # root the workload is the host's uid 0, and without them a read-only
+    # bind could be remounted writable and a sysctl written.
+    args: list[str] = [
+        bwrap_path,
+        "--unshare-all",
+        "--cap-drop",
+        "ALL",
+        "--proc",
+        "/proc",
+        "--ro-bind",
+        _PROC_SYS,
+        _PROC_SYS,
+        "--dev",
+        "/dev",
+    ]
 
     # Stage 3: the readable tree (allowlist).
     for path in spec.fs.read_allows:

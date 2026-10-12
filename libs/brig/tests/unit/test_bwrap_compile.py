@@ -149,9 +149,16 @@ def test_golden_argv_for_the_reference_spec() -> None:
     assert step.wrap(("/bin/true", "arg")) == (
         DEFAULT_BWRAP_PATH,
         "--unshare-all",
-        # Stage 2: the jail's own furniture, before anything spec-derived.
+        # No capability for the workload, whoever runs bwrap (decision-177).
+        "--cap-drop",
+        "ALL",
+        # Stage 2: the jail's own furniture, before anything spec-derived;
+        # its sysctls read-only (decision-177).
         "--proc",
         "/proc",
+        "--ro-bind",
+        "/proc/sys",
+        "/proc/sys",
         "--dev",
         "/dev",
         # Stage 3: the readable tree (allowlist), in the Spec's own sorted
@@ -299,7 +306,7 @@ def test_a_symlinked_path_mounts_the_resolved_source_at_the_spec_s_own_path() ->
 
     argv = bwrap.compile(spec, ctx).wrap(())
 
-    assert argv[argv.index("--ro-bind") :][:3] == ("--ro-bind", "/usr/bin", "/bin")
+    assert ("--ro-bind", "/usr/bin", "/bin") in zip(argv, argv[1:], argv[2:], strict=False)
 
 
 @pytest.mark.unit
@@ -794,8 +801,13 @@ def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
     assert argv == (
         DEFAULT_BWRAP_PATH,
         "--unshare-all",
+        "--cap-drop",
+        "ALL",
         "--proc",
         "/proc",
+        "--ro-bind",
+        "/proc/sys",
+        "/proc/sys",
         "--dev",
         "/dev",
         "--ro-bind",
