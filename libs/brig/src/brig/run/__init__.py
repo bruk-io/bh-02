@@ -29,7 +29,8 @@ the runtimes from the embedder, keyed by kind; `ExecFidelity` names
 
 `wait_ready` and `exec_in_jail` are private delegates (`readiness.py`,
 `exec_.py`); they are intentionally NOT re-exported here --
-`Handle.wait_ready`/`.exec` are the public surface, per SPEC.md §9.
+`Handle.wait_ready`/`.exec`, and `Jail.wait_ready`/`.start` with
+`Process.wait` (decision-181), are the public surface, per SPEC.md §9.
 
 `kill_jail` (`teardown.py`, task-020) and its full report vocabulary --
 `KillReport`, `KillItem`, `KillOutcome`, `KILL_ITEM_KINDS` -- ARE re-exported

@@ -244,7 +244,7 @@ zero_report = dataclasses.replace(handle, pgid=0).kill()
 print(json.dumps({
     "own": own,
     "items": [[i.kind, i.identity, i.outcome.name, i.detail] for i in report.items],
-    "zero": [[i.kind, i.outcome.name, i.detail] for i in zero_report.items],
+    "zero": [[i.kind, i.identity, i.outcome.name, i.detail] for i in zero_report.items],
 }))
 """
 
@@ -280,9 +280,12 @@ def test_a_record_naming_the_trusted_process_s_own_group_is_refused_and_nothing_
         assert own_item[2] == "FAILED", own_item
         assert "nothing was signalled" in own_item[3], own_item
         assert said["items"][0][2] == "ENDED", said
-        (zero_item,) = [i for i in said["zero"] if i[0] == "workload_group"]
-        assert zero_item[1] == "FAILED", zero_item
-        assert "nothing was signalled" in zero_item[2], zero_item
+        # By identity: the handle's group 0 now disagrees with the first
+        # process's record on disk, whose copy is its own FAILED workload_group
+        # item since TASK-0079.26 (identity the record's path).
+        (zero_item,) = [i for i in said["zero"] if i[0] == "workload_group" and i[1] == "0"]
+        assert zero_item[2] == "FAILED", zero_item
+        assert "nothing was signalled" in zero_item[3], zero_item
     finally:
         shutil.rmtree(jail_dir, ignore_errors=True)
 

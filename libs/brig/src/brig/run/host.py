@@ -427,6 +427,7 @@ class HostRuntime:
         """Make the jail's instance, with no process in it (decision-181):
         create `jail_dir`, clear the records an earlier jail left there
         (refused while any of it runs or is in doubt), write `jail.staged`,
+        then the jail's own record (`jail.json`: whether it is tethered),
         run `LAUNCH_SCOPED` helpers to completion and start `JAIL_LIFETIME`
         ones, and derive `wrap_prefix` once, from `jail.wrap` applied to a
         fixed sentinel argv, verified as a pure prefix (`None`: every start
@@ -471,6 +472,10 @@ class HostRuntime:
         # jail's compiled env (SPEC.md §7 Composition: mechanism env merges,
         # later-wins); scrubbing is a mechanism's job.
         full_env: dict[str, str] = {**os.environ, **jail.env}
+        # Whether this jail is tethered, kept apart from any dict, so a jail
+        # rehydrated from a hand-edited one can't start untethered (TASK-0079.26).
+        # Written after the staged files, so no staged file can stand in for it.
+        _records.write_jail_record(jail_dir, jail_id=jail_id, tethered=tether is not None)
         helper_pids, helper_stamps = _start_helpers(jail, cwd=cwd, env=full_env, jail_dir=jail_dir)
 
         return JailRecord(
@@ -508,6 +513,11 @@ class HostRuntime:
             *jail.processes,
             *(p for p in _records.scan(jail.jail_dir).records if p.id not in held),
         )
+
+    def tethered(self, jail: JailRecord) -> bool | None:
+        """What `<jail_dir>/jail.json` says, written by `create`; `None` when
+        it is missing, unreadable, or names another jail."""
+        return _records.read_tethered(jail.jail_dir, jail.jail_id)
 
     def process_alive(self, jail: JailRecord, process: ProcessRecord) -> bool:
         """Whether `process`'s leader holds its identity: a recycled pid and a

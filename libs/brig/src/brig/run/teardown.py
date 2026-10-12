@@ -466,14 +466,14 @@ def _unreadable_item(unreadable: _records.Unreadable) -> KillItem:
     )
 
 
-def _disagreeing_item(jail_dir: str, on_disk: _records.ProcessRecord) -> KillItem:
+def _disagreeing_item(kind: str, jail_dir: str, on_disk: _records.ProcessRecord) -> KillItem:
     """The `FAILED` item for a record on disk that disagrees with the one the
     caller holds for the same process (decision-181): the held identity is
     ended through the ladder as its own item, and this copy signals nothing it
-    names. Its identity is the file's path."""
+    names. Its identity is the file's path, its `kind` the held process's."""
     path = os.path.join(_records.process_dir(jail_dir, on_disk.id), _records.RECORD_FILENAME)
     return KillItem(
-        kind="exec_sibling",
+        kind=kind,
         identity=path,
         outcome=KillOutcome.FAILED,
         detail=(
@@ -574,7 +574,11 @@ def kill_named(
         )
         for position, process in enumerate(processes)
     ]
-    items.extend(_disagreeing_item(jail_dir, record) for record in disagreeing)
+    kinds = {
+        process.id: "workload_group" if position == 0 else "exec_sibling"
+        for position, process in enumerate(processes)
+    }
+    items.extend(_disagreeing_item(kinds[record.id], jail_dir, record) for record in disagreeing)
     items.extend(_unreadable_item(unreadable) for unreadable in scanned.unreadable)
 
     # `Step.helpers` with JAIL_LIFETIME (SPEC.md §6). Each ran with

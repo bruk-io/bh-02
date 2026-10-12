@@ -23,7 +23,11 @@ so it never reaches `HostRuntime`.
 **Absent, not raising** (SPEC.md section 9's law). `Jail.start` and
 `Jail.probe` are absent when the jail cannot start: its runtime has no
 supervisor, or it was created tethered in another process (the tether's fd
-did not cross `to_dict`, and a start here would run untethered).
+did not cross `to_dict`, and a start here would run untethered). A
+rehydrated jail starts only when its dict and its runtime's own record of it
+(`Runtime.tethered`, `<jail_dir>/jail.json` for a host jail) both say
+untethered, so a hand-edited dict can't give a tethered jail its `start`
+back.
 `Process.interrupt`, `stop` and `wait` are absent on a process of a jail with
 no supervisor. Each is a property that raises `AttributeError` then, so
 `hasattr` is false, and a type checker still knows the call where it is
@@ -329,13 +333,20 @@ class Jail:
 
     def _cannot_start(self) -> str | None:
         """Why this jail cannot start a process, or `None` when it can."""
-        if self._tethered and not self._created_here:
-            return (
-                "it was created tethered in another process, and its tether did not cross "
-                "to_dict, so a process started here would run untethered"
-            )
         if self._supervisor() is None:
             return "its runtime has no supervisor in it"
+        if not self._created_here:
+            if self._tethered:
+                return (
+                    "it was created tethered in another process, and its tether did not "
+                    "cross to_dict, so a process started here would run untethered"
+                )
+            if self._runtime.tethered(self._base) is not False:
+                return (
+                    "its dict says untethered, and its runtime's own record of it (for a "
+                    "host jail, jail.json in its jail directory) is missing, unreadable or "
+                    "says tethered; a process started here could run untethered"
+                )
         return None
 
     @property

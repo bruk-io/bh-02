@@ -218,6 +218,13 @@ class Runtime(Protocol):
         a held process is never used in its place (decision-181)."""
         ...
 
+    def tethered(self, jail: JailRecord) -> bool | None:
+        """Whether `create` tethered `jail`, as the runtime recorded it apart
+        from any dict (for `HostRuntime`, `<jail_dir>/jail.json`); `None` when
+        it can't tell. A rehydrated `Jail` starts only when this and its dict
+        both say untethered (decision-181, TASK-0079.26)."""
+        ...
+
     def process_alive(self, jail: JailRecord, process: ProcessRecord) -> bool:
         """Whether `process` of `jail` still runs: its leader holds its
         identity (for `HostRuntime`, decision-155; a zombie is gone,

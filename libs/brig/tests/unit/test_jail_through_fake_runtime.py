@@ -251,5 +251,25 @@ def test_a_jail_created_tethered_has_no_start_once_rehydrated() -> None:
     (process,) = elsewhere.processes()
     assert all(hasattr(process, name) for name in ("interrupt", "stop", "wait"))
 
-    untethered = _create(FakeRuntime())
-    assert hasattr(_rehydrated(untethered, FakeRuntime()), "start")
+    other = FakeRuntime()
+    untethered = _create(other)
+    assert hasattr(_rehydrated(untethered, other), "start")
+
+
+def test_a_hand_edited_dict_does_not_give_a_tethered_jail_its_start_back() -> None:
+    """Review 1 of TASK-0079.26: the dict alone can't say untethered. A
+    rehydrated jail starts only when its dict AND its runtime's own record
+    (`Runtime.tethered`) say so; a runtime that never created the jail can't
+    tell, so `start` is absent there too. The control: the honest untethered
+    jail, through the runtime that created it, starts."""
+    runtime = FakeRuntime()
+    tethered = _create(runtime, tether=_A_TETHER)
+    edited = {**tethered.to_dict(), "tethered": False}
+    forged = Jail.from_dict(edited, runtimes={RuntimeKind.FAKE: runtime})
+    assert not hasattr(forged, "start") and not hasattr(forged, "probe")
+    with pytest.raises(AttributeError, match="runtime's own record"):
+        _ = forged.start
+
+    honest = _create(runtime)
+    assert hasattr(_rehydrated(honest, runtime), "start")
+    assert not hasattr(_rehydrated(honest, FakeRuntime()), "start")

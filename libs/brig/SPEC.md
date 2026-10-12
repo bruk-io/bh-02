@@ -2027,6 +2027,14 @@ to the implementation of `Jail` and `Process` (`brig/run/jail.py`):
    handle describes (its runtime, its first process known, its tether hold)
    and probes that, so every battery runs as processes until
    TASK-0079.28 deletes `Handle`.
+8. **The dict alone can't say untethered** (review 1). `create` writes the
+   jail's own record, `<jail_dir>/jail.json` (its id and whether it is
+   tethered; sealed from the jail as the rest of the jail directory is,
+   decision-173), and `Runtime.tethered` reads it. A rehydrated jail has
+   `start` only when its dict and that record both say untethered: a record
+   missing, unreadable, naming another jail or saying tethered means absent,
+   so a hand-edited dict can't start a process untethered in a tethered jail.
+   A disagreeing disk copy's `FAILED` item takes the held process's kind.
 
 Implementing task: TASK-0079.26.
 

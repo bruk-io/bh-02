@@ -272,6 +272,52 @@ def test_start_is_absent_on_a_tethered_jail_rehydrated_elsewhere(
             _kill_group(pgid)
 
 
+def test_a_hand_edited_dict_does_not_give_a_tethered_jail_its_start_back(
+    run_id: str, jail_dir: str, scratch: str
+) -> None:
+    """Review 1 of TASK-0079.26. A tethered jail's dict hand-edited to say
+    untethered is rehydrated in a second interpreter: `start` and `probe`
+    stay absent, because `<jail_dir>/jail.json`, which `create` wrote, says
+    tethered. So is a jail whose `jail.json` is gone. The control: the honest
+    untethered jail starts there.
+
+    Planted on 2026-10-12 (scratch copy of `jail.py`, sha256-restored): with
+    `_cannot_start` reading the dict alone, the edited jail had `start`."""
+    read_end, write_end = os.pipe()
+    tethered = _create(jail_dir, tether=read_end)
+    os.close(read_end)
+    groups: list[int] = []
+    try:
+        process = tethered.start(workload_argv(run_id, "sleep 100"))
+        groups.append(process.pid)
+        edited = {**tethered.to_dict(), "tethered": False}
+        path = os.path.join(scratch, "jail.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(edited, f)
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", _ELSEWHERE, path, "look"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert done.returncode == 0, done.stderr
+        seen = json.loads(done.stdout)
+        assert seen["has_start"] is False and seen["has_probe"] is False
+
+        untethered = _create(f"{jail_dir}u")
+        try:
+            assert _elsewhere(untethered, scratch, "look")["has_start"] is True
+            os.unlink(os.path.join(f"{jail_dir}u", _records.JAIL_RECORD_FILENAME))
+            assert _elsewhere(untethered, scratch, "look")["has_start"] is False
+        finally:
+            shutil.rmtree(f"{jail_dir}u", ignore_errors=True)
+    finally:
+        os.close(write_end)
+        for pgid in groups:
+            _kill_group(pgid)
+
+
 # ---------------------------------------------------------------------------
 # AC8: a disk record that disagrees with the one the holder knows.
 # ---------------------------------------------------------------------------
@@ -320,6 +366,7 @@ def test_a_disagreeing_disk_record_is_its_own_failed_item_and_the_known_process_
         assert _live_members(decoy.pid), "the disk copy's process was signalled"
         disagreeing = by_identity[path]
         assert disagreeing.outcome is KillOutcome.FAILED, report
+        assert disagreeing.kind == "workload_group", "the first process's copy, by its kind"
         assert "disagrees" in disagreeing.detail and str(decoy.pid) in disagreeing.detail
         assert str(decoy.pid) not in by_identity
     finally:

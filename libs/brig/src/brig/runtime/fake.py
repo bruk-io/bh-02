@@ -64,6 +64,7 @@ class FakeRuntime:
         self.calls: list[Call] = []
         self._running: set[int] = set()
         self._started: dict[str, list[ProcessRecord]] = {}
+        self._tethered: dict[str, bool] = {}
         self._next_pid = FAKE_PID_BASE
 
     @property
@@ -125,7 +126,7 @@ class FakeRuntime:
         """A record for a jail with no process in it (decision-181). The fake
         applies no wrap: its wrap prefix is empty, so every start is `PLAIN`.
         Refuses nothing; `capabilities` is only reported, and `tether` is
-        ignored."""
+        only remembered as given or not (`tethered`)."""
         record = JailRecord(
             kind=self.kind,
             jail_id=jail_id,
@@ -134,8 +135,14 @@ class FakeRuntime:
             jail_env=frozendict(jail.env),
             wrap_prefix=(),
         )
+        self._tethered[jail_id] = tether is not None
         self.calls.append(Call("create", Scope.JAIL, record))
         return record
+
+    def tethered(self, jail: JailRecord) -> bool | None:
+        """Whether this runtime's `create` was given a tether for `jail`;
+        `None` for a jail it never created."""
+        return self._tethered.get(jail.jail_id)
 
     def processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]:
         """Every process of `jail`, in start order (`_processes`)."""

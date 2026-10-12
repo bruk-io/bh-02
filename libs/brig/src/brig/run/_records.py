@@ -50,6 +50,11 @@ EXIT_FILENAME: Final = "exit"
 
 _PARTIAL: Final = ".partial"
 
+#: The jail's own record, at the top of its jail directory: whether `create`
+#: tethered it (decision-181, TASK-0079.26). Sealed from the jail as the rest
+#: of the jail directory is (decision-173).
+JAIL_RECORD_FILENAME: Final = "jail.json"
+
 #: The names a process's stdio may not take: they are its records' own.
 RESERVED_NAMES: Final = frozenset(
     {RECORD_FILENAME, RECORD_FILENAME + _PARTIAL, EXIT_FILENAME, EXIT_FILENAME + _PARTIAL}
@@ -335,6 +340,60 @@ def disagrees(held: ProcessRecord, on_disk: ProcessRecord) -> bool:
     carries no order, names its first process with 0). Pure. A disk copy that
     disagrees is never used in place of the held record (decision-181)."""
     return dataclasses.replace(on_disk, order=held.order) != held
+
+
+def write_jail_record(jail_dir: str, *, jail_id: str, tethered: bool) -> str:
+    """Write the jail's own record, `<jail_dir>/jail.json`, whole (a fresh
+    `.partial` renamed into place, opened without following a link): its id
+    and whether `create` tethered it. Returns its path.
+
+    Raises:
+        OSError: it could not be written.
+    """
+    path = os.path.join(jail_dir, JAIL_RECORD_FILENAME)
+    tmp = path + _PARTIAL
+    encoded = json.dumps({"jail_id": jail_id, "tethered": tethered}).encode("utf-8")
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(tmp)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.write(fd, encoded)
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
+    return path
+
+
+def tethered_from_json(text: str, jail_id: str) -> bool | None:
+    """Whether the jail record `text` says jail `jail_id` was created
+    tethered, or `None` when it is not a record brig wrote for that jail.
+    Pure."""
+    try:
+        raw = json.loads(text)
+    except ValueError:
+        return None
+    if type(raw) is not dict or set(raw) != {"jail_id", "tethered"}:
+        return None
+    if raw["jail_id"] != jail_id or type(raw["tethered"]) is not bool:
+        return None
+    tethered: bool = raw["tethered"]
+    return tethered
+
+
+def read_tethered(jail_dir: str, jail_id: str) -> bool | None:
+    """Whether `<jail_dir>/jail.json` says jail `jail_id` was created
+    tethered, read without following a link; `None` when it is missing,
+    can't be read, or is not a record brig wrote for that jail."""
+    try:
+        fd = os.open(os.path.join(jail_dir, JAIL_RECORD_FILENAME), os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        with os.fdopen(fd, encoding="utf-8") as recorded:
+            text = recorded.read()
+    except OSError, UnicodeDecodeError:
+        return None
+    return tethered_from_json(text, jail_id)
 
 
 class Standing(Enum):
