@@ -63,7 +63,7 @@ They run in bh-02's process. Today a request with `runs="host"` is always asked 
 - **How many at once:** the `agents` row's `max_running`, default 4; a fifth `agent` call waits for a slot, saying so.
 - **Steps:** each child has a step limit from its type (default 30 model steps); reaching it ends the child with what it has, said in its report.
 - **The session:** a session budget, `session_agents` (default 16 children); once spent, each further `agent` call is asked. A call naming a model other than its type's is asked.
-- **Stopping:** Ctrl-C stops the parent's reply and any child it is waiting on (`agent` without `background`, from the tool or from a python input). Background children keep running; the stop notice says how many and `/agents stop`. They also end at `agent_stop`, `/agents stop`, `/clear`, `/model` (their reports would land in another conversation), a restart of the `agents` row (each with a notice), and the end of the session. `/compact` keeps them. `/release` stops their REPLs, as it does the parent's; their conversations go on.
+- **Stopping:** Ctrl-C stops the parent's reply and any child it is waiting on (`agent` without `background`, from the tool or from a python input). Background children keep running; the stop notice says how many and `/agents stop`. Ctrl-C refuses only the questions of the reply it stops (the parent's and its foreground child's); a background child's open question stays queued (today the TUI answers every open question no on Ctrl-C, which changes with background children, TASK-0080.04). They also end at `agent_stop`, `/agents stop`, `/clear`, `/model` (their reports would land in another conversation), a restart of the `agents` row (each with a notice), and the end of the session. `/compact` keeps them. `/release` stops their REPLs, as it does the parent's; their conversations go on.
 - **Questions under `--no-jail`:** each child's python call is asked, labelled; questions queue and each child waits on its own.
 
 ### What comes back
@@ -87,11 +87,11 @@ Not in this milestone. If built, through the same router, never a shared mailbox
 M6 needs no brig task: a child's REPL runs in a jail of its own from the same policy until TASK-0074, which later moves it into the session's jail. The tasks, in order:
 
 1. TASK-0080.02 (size-1): approval's `runs="harness"` case and CONTRACTS.
-2. TASK-0080.03 (size-3): one child end to end: the realm mounted and retired through a performer, the exposed set with `asker` and the labelled confirm, row-id prefixing, `agent(prompt, type)` in the foreground with the shipped `general` type, the report as the tool result, Ctrl-C from the tool and from a python input, a real-launch test.
+2. TASK-0080.03 (size-5): one child end to end: the realm mounted and retired through a performer, the exposed set with `asker` and the labelled confirm, row-id prefixing, `agent(prompt, type)` in the foreground with the shipped `general` type, the report as the tool result, Ctrl-C from the tool and from a python input, a real-launch test.
 3. TASK-0080.04 (size-3): types as data, `background` and `agent_wait`, `max_running`, the step limit, the session budget, a model other than the type's asked, usage into the totals.
 4. TASK-0080.05 (size-2): `agent_send` and `agent_stop`, and what `/clear`, `/model`, `/compact`, `/release` and a row restart do to children.
-5. TASK-0080.06 (size-2): watching: the event log, `bh-02 watch`, tmux panes, `/agents` and the status field, the TMUX scrub in the unconfined runner, darwin's tmux-socket check (on a Mac, TASK-0079.15). Can run beside 4 and 5 once 2 lands.
-6. Later, low priority: project guidance in a child (`memory:files` with a private `commands` registry).
+5. TASK-0080.06 (size-2): watching: the event log, `bh-02 watch`, tmux panes, `/agents` and the status field, the TMUX scrub in the unconfined runner, darwin's tmux-socket check (on a Mac, TASK-0079.15). Can run beside 4 and 5 once 3 lands, since it needs a child to watch.
+6. TASK-0080.07 (size-2, later, low priority): project guidance in a child (`memory:files` with a private `commands` registry).
 
 ## Consequences
 
@@ -109,4 +109,5 @@ The reviews asked the owner these; the decision sets a default for each so the w
 Two reviews, 2026-10-12, neither by the author, both ACCEPT WITH CHANGES; all taken:
 
 - **Composition.** cordis needed no new effect: `performer` plus `use(loader, expose=...)` mounts and retires a child (the draft's "children" effect is gone). The exposed set lacked a way to confirm and carried `models`, which nothing in the realm reads. The loop never calls `show`; the agents row writes the events. Confirm queues safely but needed a label; lifecycle events leaked into the parent's screen; memory in a child was unaddressed; usage had no path to the totals. Re-sized split.
+- **Closing review of TASK-0080.01** (2026-10-12): CLOSE; taken: Ctrl-C refuses only the stopped reply's questions; TASK-0080.03 resized to size-5; the split's wording on TASK-0080.06; the M6 milestone brought in line with this decision.
 - **Boundaries.** No path to the person (now `asker`); a transcript path the jailed parent can't read (now the person's only); unasked spending on any model with no session cap (now asked past a type's model and the session budget); the unconfined runner keeps `TMUX` (now scrubbed, said to be hygiene); the dropped darwin tmux-socket check (restored as a precondition); the reversal of where types live (recorded); runner state shared with children (said); Ctrl-C leaving spend running (a notice, and `/agents stop`); `/release` kept to REPLs; queued, labelled questions under `--no-jail`.

@@ -13,12 +13,14 @@ Read from the CLI bundled with claude-agent-sdk 0.2.159 (2.1.281) and its tool d
 
 ## Design so far (with the owner, 2026-10-10)
 
+Decided in decision-0002 (accepted 2026-10-12), split into TASK-0080.02 to .07. Where this section and the decision differ, the decision holds; the differences are marked below.
+
 - A sub-agent lives in its parent's jail, so it can reach nothing the parent couldn't, and starting one starts no jail. Its python tool is another REPL process in the same jail.
-- A jail holds more than one process: a session has one jail, started once, that all its programs run in (the main REPL, the extensions process, sub-agents' REPLs). Today each program is a jail of its own, one launch each, which also fits Docker/OCI (in brig's stated purpose) badly, since a container is something you exec into. First pieces: TASK-0073 (brig) and TASK-0074 (the runner).
+- A jail holds more than one process: a session has one jail, started once, that all its programs run in (the main REPL, the extensions process, sub-agents' REPLs). Today each program is a jail of its own, one launch each, which also fits Docker/OCI (in brig's stated purpose) badly, since a container is something you exec into. First pieces: the brig intent TASK-0079 (decision-0001) and TASK-0074 (the runner). Until TASK-0074, a child's REPL runs in a jail of its own from the same policy (decision-0002).
 - Model steps stay on the host: the credential, the network and Claude Code never enter the jail. The host checks the model a child asks for and enforces its budget.
-- The interface is tools: `agent(prompt, type, model?, background?)`, `agent_wait(ids)`, `agent_send(id, text)`, `agent_stop(id)`. Every registered tool is a function in a python input, so fan-out and fan-in are code: `tools.agent(..., background=True)` in a loop, then `tools.agent_wait(ids=...)`.
-- Agent types are data (a prompt, a tool subset, a model name), interpreted inside the jail, so they may live in the project, as Claude Code's do.
-- Watching: each agent shows in a tmux pane running a host-side viewer of its events (inside tmux, a detached split; outside it, a detached session to attach to; without tmux, a status field, `/agents` and a viewer command). The child never runs in a pane itself, so the jail never reaches the tmux socket; typing in a pane reaches the child through the host.
+- The interface is tools: `agent(prompt, type, model?, background?)`, `agent_wait(names)`, `agent_send(name, text)`, `agent_stop(name)` (bh-02 names agents, decision-0002). Every registered tool is a function in a python input, so fan-out and fan-in are code: `tools.agent(..., background=True)` in a loop, then `tools.agent_wait(names=...)`.
+- Agent types are data (a prompt, a tool subset, a model name). Reversed by decision-0002: types are read only from bh-02's config directory and the shipped ones, never the project, because a type chooses a model and so the spend.
+- Watching: each agent shows in a tmux pane running a host-side viewer of its events (inside tmux, a detached split; outside it, a status field, `/agents` and `bh-02 watch`, decision-0002). The child never runs in a pane itself, so the jail never reaches the tmux socket; typing in a pane reaches the child through the host.
 - Rules:
   - a child is never less confined than its parent;
   - model text never reaches a command line or a tmux argument, only plain names (tmux formats can run commands, `#(...)`);
@@ -37,8 +39,8 @@ Read from the CLI bundled with claude-agent-sdk 0.2.159 (2.1.281) and its tool d
 
 ## Open questions
 
-- [ ] Where a child's loop runs: in the jail (an agents program runs it; the host's prompt sections and asides need a second copy there) or on the host (it gets the whole composition; `tools.serve`, `transcript` and `model` become per conversation).
-- [ ] Limits: depth (a child gets `agent` only if its type grants it), how many at once, a budget per agent, and whether Ctrl-C in the parent stops a foreground child.
-- [ ] What comes back: the final answer only, with the child's transcript for detail and its usage added to the session's.
-- [ ] Parallel writers: worktrees inside the parent's writable roots, or narrowed jails.
-- [ ] Teams (agents messaging each other): later, or never. If later, through the same router, never a shared mailbox (a sender's "from" would be its own claim).
+- [x] Where a child's loop runs (decision-0002: on the host, in a sealed cordis realm, its tools in the session's jail): in the jail (an agents program runs it; the host's prompt sections and asides need a second copy there) or on the host (it gets the whole composition; `tools.serve`, `transcript` and `model` become per conversation).
+- [x] Limits (decision-0002: depth one, `max_running` 4, a step limit per type, a session budget, Ctrl-C stops the foreground child): depth (a child gets `agent` only if its type grants it), how many at once, a budget per agent, and whether Ctrl-C in the parent stops a foreground child.
+- [x] What comes back (decision-0002: the report as the tool's result, with usage; the transcript for the person only): the final answer only, with the child's transcript for detail and its usage added to the session's.
+- [x] Parallel writers (decision-0002: shared files, cooperative, said; enforced isolation is later work): worktrees inside the parent's writable roots, or narrowed jails.
+- [x] Teams (decision-0002: not in M6; if built, through the same router): later, or never. If later, through the same router, never a shared mailbox (a sender's "from" would be its own claim).
