@@ -85,7 +85,7 @@ import threading
 import time
 import uuid
 from collections.abc import Iterator
-from typing import Any, Final
+from typing import Any, Final, Literal, assert_never
 
 import pytest
 
@@ -310,12 +310,42 @@ def _is_ps_probe(args: object) -> bool:
     return isinstance(argv, str) and os.path.basename(argv) == "ps"
 
 
+#: What one observation of a pid or group says: `exiting` is "the kernel still
+#: answers `kill(.., 0)` but `ps` has no live row" -- a process caught between
+#: its last write and its disappearance, which a later look settles.
+type _Verdict = Literal["gone", "alive", "exiting"]
+
+#: How long `_sweep_registry` waits before it looks once more at something
+#: that read `exiting`. A process mid-exit is gone within milliseconds.
+_EXITING_GRACE_SECONDS: Final = 0.25
+
+
+def _pid_verdict(signalable: bool, state: str) -> _Verdict:
+    """Pure: a pid that `kill(pid, 0)` finds (`signalable`) and whose `ps` state
+    letters are `state` (`""` for no row). A zombie has exited. No row for a pid
+    the kernel still signals is a process mid-exit, not a live one."""
+    if not signalable or state.startswith("Z"):
+        return "gone"
+    return "exiting" if not state else "alive"
+
+
+def _group_verdict(signalable: bool, states: tuple[str, ...]) -> _Verdict:
+    """Pure: as `_pid_verdict`, for a group's members' `ps` states. Only zombies
+    has ended; no rows at all is a group caught mid-exit; any other state is a
+    live member."""
+    if not signalable:
+        return "gone"
+    if not states:
+        return "exiting"
+    return "gone" if all(state.startswith("Z") for state in states) else "alive"
+
+
 def _pid_liveness(pid: int) -> tuple[bool | None, str]:
-    """Classify whether `pid` is alive using `os.kill(pid, 0)` alone --
-    no argv is ever read. `True` means alive, `False` means confirmed
-    gone (`ProcessLookupError`), `None` means liveness could not be
-    determined (e.g. permission denied) -- a pid this cannot classify is
-    reported by `_sweep_registry`, never silently treated as gone
+    """Classify whether `pid` is alive using `os.kill(pid, 0)` and the pid's own
+    `ps` row -- no argv is ever read. `True` means alive (or still exiting: the
+    caller re-checks it), `False` means confirmed gone, `None` means liveness
+    could not be determined (e.g. permission denied) -- a pid this cannot
+    classify is reported by `_sweep_registry`, never silently treated as gone
     (task-049 AC #6).
     """
     try:
@@ -326,9 +356,15 @@ def _pid_liveness(pid: int) -> tuple[bool | None, str]:
         return None, f"permission denied ({exc})"
     except OSError as exc:
         return None, f"os error ({exc})"
-    if _ps_state(pid).startswith("Z"):
-        return False, "exited, unreaped (zombie)"
-    return True, "alive"
+    match _pid_verdict(True, _ps_state(pid)):
+        case "gone":
+            return False, "exited, unreaped (zombie)"
+        case "exiting":
+            return True, "exiting"
+        case "alive":
+            return True, "alive"
+        case never:
+            assert_never(never)
 
 
 def _ps_state(pid: int) -> str:
@@ -351,19 +387,29 @@ def _pgid_liveness(pgid: int) -> tuple[bool | None, str]:
     immediate parent already exited is still caught here even though only
     the leader's `(pid, pgid)` was ever recorded.
     """
+    denied: PermissionError | None = None
     try:
         os.killpg(pgid, 0)
     except ProcessLookupError:
         return False, "no such process group"
     except PermissionError as exc:
-        if _only_zombies_in(pgid):
-            return False, "only exited, unreaped members (zombies)"
-        return None, f"permission denied ({exc})"
+        denied = exc
     except OSError as exc:
         return None, f"os error ({exc})"
-    if _only_zombies_in(pgid):
-        return False, "only exited, unreaped members (zombies)"
-    return True, "alive"
+    states = tuple(row[3] for row in _ps_rows() if row[2] == pgid)
+    match _group_verdict(True, states):
+        case "gone":
+            return False, "only exited, unreaped members (zombies)"
+        case "exiting":
+            if denied is not None:
+                return None, f"permission denied ({denied})"
+            return True, "exiting"
+        case "alive":
+            if denied is not None:
+                return None, f"permission denied ({denied})"
+            return True, "alive"
+        case never:
+            assert_never(never)
 
 
 def _only_zombies_in(pgid: int) -> bool:
@@ -371,8 +417,28 @@ def _only_zombies_in(pgid: int) -> bool:
     a zombie (so a group whose `killpg(pgid, 0)` still succeeds has, in fact,
     ended). No rows at all is NOT this: `killpg` finding a group that `ps`
     cannot see is unexplained, and the sweep must not call it gone."""
-    states = [row[3] for row in _ps_rows() if row[2] == pgid]
-    return bool(states) and all(state.startswith("Z") for state in states)
+    states = tuple(row[3] for row in _ps_rows() if row[2] == pgid)
+    return _group_verdict(True, states) == "gone"
+
+
+def _caught_mid_exit(
+    pid_alive: bool | None, pid_reason: str, pgid_alive: bool | None, pgid_reason: str
+) -> bool:
+    """Pure: does one look at a registry entry read as a process leaving? Either
+    side says `exiting`, or the pid answers while its own group is already gone
+    (a leader leaves its group before its pid; a live leader never does)."""
+    if "exiting" in (pid_reason, pgid_reason):
+        return True
+    return pid_alive is True and pgid_alive is False and pgid_reason.startswith("no such")
+
+
+def _observe(pid: int, pgid: int, harness_pgid: int) -> tuple[bool | None, str, bool | None, str]:
+    """One look at a registry entry: (pid alive, why, pgid alive, why)."""
+    pid_alive, pid_reason = _pid_liveness(pid)
+    if pgid == harness_pgid:
+        return pid_alive, pid_reason, False, "skipped (shares harness pgid)"
+    pgid_alive, pgid_reason = _pgid_liveness(pgid)
+    return pid_alive, pid_reason, pgid_alive, pgid_reason
 
 
 def _sweep_registry(
@@ -404,12 +470,13 @@ def _sweep_registry(
     leaked: list[str] = []
     unclassifiable: list[str] = []
     for pid, pgid, spawned_by in registry:
-        pid_alive, pid_reason = _pid_liveness(pid)
-        if pgid == harness_pgid:
-            pgid_alive: bool | None = False
-            pgid_reason = "skipped (shares harness pgid)"
-        else:
-            pgid_alive, pgid_reason = _pgid_liveness(pgid)
+        pid_alive, pid_reason, pgid_alive, pgid_reason = _observe(pid, pgid, harness_pgid)
+        if _caught_mid_exit(pid_alive, pid_reason, pgid_alive, pgid_reason):
+            # Caught mid-exit (kill() still answers, /proc and ps no longer show a live
+            # process, or the group is gone under a pid that still answers): look once
+            # more after a grace before calling it a leak.
+            time.sleep(_EXITING_GRACE_SECONDS)
+            pid_alive, pid_reason, pgid_alive, pgid_reason = _observe(pid, pgid, harness_pgid)
         if pid_alive or pgid_alive:
             leaked.append(
                 f"  pid={pid} pgid={pgid} arm=registry "

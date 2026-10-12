@@ -127,3 +127,83 @@ def test_the_callers_own_group_is_unsignalable_and_any_other_is_not() -> None:
     assert "own" in (_unsignalable(4242, own_pgid=4242) or "")
     assert _unsignalable(4243, own_pgid=4242) is None
     assert _unsignalable(2, own_pgid=4242) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("signalable", "state", "verdict"),
+    [
+        (False, "", "gone"),
+        (False, "S", "gone"),
+        (True, "Z", "gone"),
+        (True, "Z+", "gone"),
+        (True, "", "exiting"),
+        (True, "S", "alive"),
+        (True, "R", "alive"),
+    ],
+)
+def test_a_pid_the_kernel_signals_without_a_live_ps_row_is_exiting(
+    signalable: bool, state: str, verdict: str
+) -> None:
+    from tests import conftest
+
+    assert conftest._pid_verdict(signalable, state) == verdict
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("signalable", "states", "verdict"),
+    [
+        (False, (), "gone"),
+        (False, ("S",), "gone"),
+        (True, (), "exiting"),
+        (True, ("Z", "Z+"), "gone"),
+        (True, ("Z", "S"), "alive"),
+        (True, ("S",), "alive"),
+    ],
+)
+def test_a_group_with_no_ps_rows_is_exiting_only_zombies_gone_a_live_member_alive(
+    signalable: bool, states: tuple[str, ...], verdict: str
+) -> None:
+    from tests import conftest
+
+    assert conftest._group_verdict(signalable, states) == verdict
+
+
+@pytest.mark.unit
+def test_the_sweep_still_reports_a_live_process() -> None:
+    import signal
+
+    from tests import conftest
+
+    proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        leaked, unclassifiable = conftest._sweep_registry(
+            [(proc.pid, os.getpgid(proc.pid), "planted")], os.getpgrp()
+        )
+        assert len(leaked) == 1 and f"pid={proc.pid}" in leaked[0]
+        assert unclassifiable == []
+    finally:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("look", "mid_exit"),
+    [
+        ((True, "exiting", False, "no such process group"), True),
+        ((True, "alive", True, "exiting"), True),
+        ((True, "alive", False, "no such process group"), True),
+        ((True, "alive", True, "alive"), False),
+        ((False, "no such process", False, "no such process group"), False),
+        ((True, "alive", False, "skipped (shares harness pgid)"), False),
+        ((None, "permission denied (x)", False, "no such process group"), False),
+    ],
+)
+def test_a_look_that_reads_as_a_process_leaving_is_taken_again(
+    look: tuple[bool | None, str, bool | None, str], mid_exit: bool
+) -> None:
+    from tests import conftest
+
+    assert conftest._caught_mid_exit(*look) is mid_exit
