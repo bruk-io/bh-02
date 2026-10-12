@@ -271,7 +271,9 @@ def _channels_incompatible(a: Spec, b: Spec) -> bool:
 
 
 @pytest.mark.unit
-@settings(max_examples=25)
+# too_slow is drawing the pairs under a loaded machine (seen failing once in
+# three runs beside the full suite); it says nothing about the property.
+@settings(max_examples=25, suppress_health_check=[HealthCheck.too_slow])
 @given(data=st.data())
 def test_ec1_narrowed_to_is_subset_of_both(data: st.DataObject) -> None:
     """task-057 (decision-105): max_examples cut 100 (implicit default) ->
