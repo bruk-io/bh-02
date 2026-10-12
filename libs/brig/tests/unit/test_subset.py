@@ -809,14 +809,14 @@ def test_root_allow_confers_every_absolute_path() -> None:
 
 
 @pytest.mark.unit
-def test_a_subagent_narrows_onto_a_workspace_subdirectory() -> None:
-    """The end-to-end shape decision-160 exists for: a session spec that
-    grants the workspace, a subagent asking for one directory inside it, and
-    the meet keel's driver runs the child at."""
-    session = Spec(fs=FsPolicy(write_allows=("/ws",), write_denies=("/ws/.git",)))
+def test_a_child_narrows_onto_a_workspace_subdirectory() -> None:
+    """The end-to-end shape decision-160 exists for: a parent spec that
+    grants the workspace, a child asking for one directory inside it, and
+    the meet the embedder runs the child at."""
+    parent = Spec(fs=FsPolicy(write_allows=("/ws",), write_denies=("/ws/.git",)))
     child = Spec(fs=FsPolicy(write_allows=("/ws/pkg",)))
-    meet = session.narrowed_to(child)
+    meet = parent.narrowed_to(child)
     assert meet.fs.write_allows == ("/ws/pkg",)
     assert meet.fs.write_denies == ("/ws/.git",)
-    assert meet.is_subset_of(session)
+    assert meet.is_subset_of(parent)
     assert meet.is_subset_of(child)

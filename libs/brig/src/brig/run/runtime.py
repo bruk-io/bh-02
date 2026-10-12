@@ -1,15 +1,15 @@
-"""The runtime seam: `Runtime`, `Agent`, and the records they hand back.
+"""The runtime seam: `Runtime`, `Supervisor`, and the records they hand back.
 
 SPEC.md section 3 (decision-178, decision-0001 step 1). A jail's instance is
 the runtime's: how it is created, whether it is alive, how it is destroyed and
-verified. Inside it, an `Agent` starts, signals, waits for and stops processes.
+verified. Inside it, an `Supervisor` starts, signals, waits for and stops processes.
 `HostRuntime` (`brig/run/host.py`) is brig's own; `brig.runtime.fake` is the
 second implementation, pure, for tests.
 
 **Step 1's shape, and what changes later.** A bwrap jail cannot hold an
 instance with nothing in it until its supervisor exists (decision-0001 step 4),
 so `create` is launch-shaped: it takes the first process's argv and io, and
-`JailRecord.first` is that process. `Agent.start` takes no channel yet: a
+`JailRecord.first` is that process. `Supervisor.start` takes no channel yet: a
 channel per process needs the channel directory (step 3, TASK-0079.05), and a
 parameter only `None` could be passed to would be a raising stub (SPEC.md
 section 9). Per-process records and exit records, and `Jail` and `Process` in
@@ -71,11 +71,11 @@ class ExitStatusUnobservable(RuntimeError):
     """
 
 
-class NoAgent(RuntimeError):
-    """The jail's runtime has no agent inside it (`Runtime.agent` returned
+class NoSupervisor(RuntimeError):
+    """The jail's runtime has no supervisor inside it (`Runtime.supervisor` returned
     `None`), so nothing can be started in it or waited for through it: it can
     only be destroyed. `HostRuntime` always has one; a rehydrated jail whose
-    agent was a live channel will not (decision-0001, "Records and
+    supervisor was a live channel will not (decision-0001, "Records and
     rehydration")."""
 
 
@@ -130,9 +130,9 @@ class JailRecord:
             )
 
 
-class Agent(Protocol):
+class Supervisor(Protocol):
     """Inside a jail's instance: what starts, signals, waits for and stops
-    its processes. Bound to one `JailRecord` (`Runtime.agent`)."""
+    its processes. Bound to one `JailRecord` (`Runtime.supervisor`)."""
 
     def start(self, argv: Sequence[str], *, cwd: str, io: IoPolicy) -> ProcessRecord:
         """Start `argv` in the jail, under the same confinement as its first
@@ -196,6 +196,6 @@ class Runtime(Protocol):
         (law 7)."""
         ...
 
-    def agent(self, jail: JailRecord) -> Agent | None:
-        """The agent inside `jail`, or `None` when it can only be destroyed."""
+    def supervisor(self, jail: JailRecord) -> Supervisor | None:
+        """The supervisor inside `jail`, or `None` when it can only be destroyed."""
         ...

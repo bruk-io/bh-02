@@ -59,13 +59,13 @@ def _spec(endpoint: str) -> Spec:
             read_model=ReadModel.ALLOW_LIST,
             read_allows=tuple(path for path in _SYSTEM_ROOTS if os.path.exists(path)),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),),
     )
 
 
 @pytest.mark.integration
 def test_an_endpoint_directly_in_the_jail_directory_is_refused(jail_dir: str) -> None:
-    endpoint = os.path.join(jail_dir, "agent.sock")
+    endpoint = os.path.join(jail_dir, "ctl.sock")
     spec = _spec(endpoint)
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     with pytest.raises(ChannelInsideJailDir) as refusal:
@@ -94,7 +94,7 @@ def test_an_endpoint_in_a_subdirectory_works_and_the_rest_of_the_jail_directory_
 ) -> None:
     chan = os.path.join(jail_dir, "chan")
     os.makedirs(chan)
-    spec = _spec(os.path.join(chan, "agent.sock"))
+    spec = _spec(os.path.join(chan, "ctl.sock"))
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     signature = bwrap.compile(spec, ctx).denial_signatures[0]
     jail = Stack([bwrap]).compile(spec, ctx=ctx)

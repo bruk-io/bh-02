@@ -13,7 +13,7 @@ surface.
 
 `SELF_MODIFY_WORKSPACE_RELATIVE` — Workspace (current working directory) paths
 that must not be writable by jailed processes. A jail that can write `.git/hooks`,
-`.envrc`, or an agent config file inside its granted workspace executes code
+`.envrc`, or a tool's config file inside its granted workspace executes code
 *outside* the jail later — a self-escalation threat. This is the threat
 `write_denies` was introduced to contain, new relative to prior art in the
 parent project.
@@ -28,7 +28,7 @@ a workspace capture threat that should raise alerts.
 `.claude` appears in both `CREDENTIAL_READ_DENIES_HOME_RELATIVE` and
 `SELF_MODIFY_WORKSPACE_RELATIVE`. It is credential-bearing when read under
 `$HOME` (harboring API tokens, workspace configuration), and self-modifying
-when written inside a workspace (an agent config file that later executes
+when written inside a workspace (a tool's config file that later executes
 outside the jail).
 """
 

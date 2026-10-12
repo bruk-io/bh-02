@@ -130,7 +130,7 @@ FORWARDING (`EnvPolicy.allow_names`) and which literal names it is SETTING
 (`EnvPolicy.set`'s keys) -- not which names get scrubbed AWAY, because a pure
 compile with no environment read cannot enumerate a vocabulary it never
 looked at (claiming to name "scrubbed" variables would be exactly the
-CLAUDE.md "true-as-tested but weaker than it reads" trap: sounding like a
+"true-as-tested but weaker than it reads" trap: sounding like a
 census of what was removed while only ever having seen what was kept).
 `classify_exit` always returns `None`: scrubbing is a compile-time decision,
 not something a mechanism recognizes retroactively from how the workload

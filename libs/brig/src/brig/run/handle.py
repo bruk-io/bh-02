@@ -28,7 +28,7 @@ Task-019 shipped the complete M2 shape. What lands HERE:
 **Since decision-178 (2026-10-12) every control method delegates to the
 handle's runtime** (`runtime`, `brig/run/runtime.py`'s `Runtime`):
 `alive` to `Runtime.alive`, `kill` to `Runtime.destroy`, and `interrupt`,
-`wait` and `exec` to its `Agent`. `HostRuntime` (`brig/run/host.py`) does
+`wait` and `exec` to its `Supervisor`. `HostRuntime` (`brig/run/host.py`) does
 what this module and the launcher did before, unchanged; `wait_ready` still
 connects to the channel itself.
 
@@ -88,7 +88,7 @@ from brig.run.exec_ import exec_in_jail as _exec_in_jail
 from brig.run.host import HostRuntime
 from brig.run.readiness import wait_ready as _wait_ready
 from brig.run.runtime import ExitStatusUnobservable as ExitStatusUnobservable
-from brig.run.runtime import JailRecord, NoAgent, ProcessRecord, Runtime
+from brig.run.runtime import JailRecord, NoSupervisor, ProcessRecord, Runtime
 
 HANDLE_VERSION: Final = 5
 """Bumped 1 -> 2 by task-046 (`wrap_prefix` and `jail_env` became REQUIRED
@@ -471,14 +471,14 @@ class Handle:
         names is gone -- rather than delivering a `SIGINT` to a stranger that
         happens to lead a group with the same number.
 
-        Delegates to the runtime's agent (`Agent.signal`, decision-178); a
-        jail whose runtime has no agent was not signalled, so `False`.
+        Delegates to the runtime's supervisor (`Supervisor.signal`, decision-178); a
+        jail whose runtime has no supervisor was not signalled, so `False`.
         """
         record = self.record()
-        agent = self.runtime.agent(record)
-        if agent is None:
+        supervisor = self.runtime.supervisor(record)
+        if supervisor is None:
             return False
-        return agent.signal(record.first, signal.SIGINT)
+        return supervisor.signal(record.first, signal.SIGINT)
 
     def wait(self, timeout: float = 30.0) -> int:
         """Block until the workload exits; return the status it exited with.
@@ -501,19 +501,19 @@ class Handle:
         in either place -- see that exception for the cases that remain. It
         never invents a status.
 
-        Delegates to the runtime's agent (`Agent.wait`, decision-178), whose
+        Delegates to the runtime's supervisor (`Supervisor.wait`, decision-178), whose
         `None` at the deadline is this method's `TimeoutError`.
 
         Raises:
             TimeoutError: still running at the deadline.
             ExitStatusUnobservable: gone, and nothing recorded how it ended.
-            NoAgent: the jail's runtime has no agent to wait through.
+            NoSupervisor: the jail's runtime has no supervisor to wait through.
         """
         record = self.record()
-        agent = self.runtime.agent(record)
-        if agent is None:
-            raise NoAgent(f"jail {self.jail_id!r} has no agent to wait through")
-        status = agent.wait(record.first, timeout)
+        supervisor = self.runtime.supervisor(record)
+        if supervisor is None:
+            raise NoSupervisor(f"jail {self.jail_id!r} has no supervisor to wait through")
+        status = supervisor.wait(record.first, timeout)
         if status is None:
             raise TimeoutError(f"pid {self.pid} did not exit within {timeout}s")
         return status
@@ -556,7 +556,7 @@ class Handle:
 
     def exec(self, argv: Sequence[str], *, interactive: bool = False) -> Any:
         """Delegates to `exec_.exec_in_jail` (task-022), which starts the
-        sibling through the runtime's agent (`Agent.start`, decision-178). `Any` is final
+        sibling through the runtime's supervisor (`Supervisor.start`, decision-178). `Any` is final
         here for the same reason as `kill`'s return type: `ExecHandle`
         (ambiguity A13) lives in the module this one imports, so naming it
         here would close a cycle."""

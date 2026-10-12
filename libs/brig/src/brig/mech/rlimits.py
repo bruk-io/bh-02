@@ -12,7 +12,7 @@ grade that resists a hostile process *with a named gap* is `best_effort` --
 "limits-cpu `enforced`" (MILESTONES.md M3 EC2's wording) is a statement about
 the *field*, and EC2's own trailing clause ("with the uncovered limit fields
 named in detail") already spells `best_effort`'s defining signature. Grading
-the axis `enforced` here would be CLAUDE.md's never-grade-up trap landing on
+the axis `enforced` here would be the never-grade-up trap landing on
 M3's golden snapshot artifact (`degraded()`, task-039). `memory`, `tasks`,
 `wall` and `output` are named in `detail`, parseable as an exact token set
 after the `"uncovered:"` marker (see `_BEST_EFFORT_DETAIL` and

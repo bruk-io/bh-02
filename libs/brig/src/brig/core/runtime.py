@@ -1,7 +1,7 @@
 """The runtime's vocabulary: which kind of runtime, what it can do, at which scope.
 
 Pure data (SPEC.md section 3, decision-178). `run` defines the `Runtime` and
-`Agent` protocols that use these; they live in `core` so that `mech` can name
+`Supervisor` protocols that use these; they live in `core` so that `mech` can name
 the runtime a mechanism needs and `stack` can grade a runtime's axes without
 importing `run` (SPEC.md sections 6 and 7, decision-179). Each enum holds only
 the members something in brig can produce: more arrive with the runtimes that
@@ -40,7 +40,7 @@ class Scope(Enum):
     """The two scopes control is graded at (decision-0001, "Grades stay in
     the stack, at two scopes"): `JAIL`, whether the jail and everything in it
     can be ended without cooperation, which `Runtime.destroy` delivers; and
-    `PROCESS`, whether one process in it can, which `Agent.stop` delivers.
+    `PROCESS`, whether one process in it can, which `Supervisor.stop` delivers.
     A report's `control` axis is the `JAIL` scope (`runtime_grades`); the
     `PROCESS` scope travels on each process (decision-0001 step 3)."""
 

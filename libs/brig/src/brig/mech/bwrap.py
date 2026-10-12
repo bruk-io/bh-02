@@ -158,7 +158,7 @@ that refusal is load-bearing rather than defensive.
 write root is a subtree, so a workspace at or above the jail directory (an
 embedder run from `/tmp`, or from `/`) handed the jail brig's own control
 state: it could forge an exec registration teardown signals by, or the exit
-record `wait()` answers from (found in bh-02 by TASK-0078). The seal takes it
+record `wait()` answers from (found by an embedder, TASK-0078). The seal takes it
 back: the jail directory bound read-only over itself wherever a writable
 tree shows it, after the write roots, then `<jail_dir>/tmp`, the jail's
 scratch, writable again, and every channel directory inside it. A channel

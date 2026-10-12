@@ -1,7 +1,7 @@
 """`FakeRuntime`: the runtime protocols' second implementation, for tests.
 
 Pure: it starts nothing, signals nothing and reads nothing. It answers every
-`Runtime` and `Agent` call from its own state and logs the call, with the
+`Runtime` and `Supervisor` call from its own state and logs the call, with the
 scope the call acts at, so a test can drive `Handle` (or anything else written
 against the protocols) and check what was asked of the runtime. Its pids
 start at `FAKE_PID_BASE`, far above any real pid limit, so a fake record that
@@ -15,7 +15,7 @@ from signal import Signals
 from typing import Final
 
 from brig.core.runtime import Capability, RuntimeKind, Scope
-from brig.run.runtime import Agent, IoPolicy, JailRecord, ProcessRecord
+from brig.run.runtime import IoPolicy, JailRecord, ProcessRecord, Supervisor
 from brig.run.teardown import KillItem, KillOutcome, KillReport
 from brig.stack import CompiledJail
 
@@ -28,8 +28,8 @@ FAKE_STAMP: Final = "fake"
 
 @dataclass(frozen=True, slots=True)
 class Call:
-    """One call a `FakeRuntime` or its agent answered: the method's name, the
-    scope it acts at (`JAIL` for the runtime's, `PROCESS` for the agent's),
+    """One call a `FakeRuntime` or its supervisor answered: the method's name, the
+    scope it acts at (`JAIL` for the runtime's, `PROCESS` for the supervisor's),
     and the record or argv it was about."""
 
     method: str
@@ -40,21 +40,21 @@ class Call:
 class FakeRuntime:
     """A runtime whose instance is a set of pids it made up.
 
-    A class because it holds state its own methods (and its agents') change:
+    A class because it holds state its own methods (and its supervisors') change:
     which fake processes still run, and the log of calls. `exit_status` is
-    what `Agent.wait` answers for any process that has ended (`None`: they
-    never end on their own, so a wait reaches its deadline). `has_agent`
-    `False` makes `agent` return `None`, a jail that can only be destroyed."""
+    what `Supervisor.wait` answers for any process that has ended (`None`: they
+    never end on their own, so a wait reaches its deadline). `has_supervisor`
+    `False` makes `supervisor` return `None`, a jail that can only be destroyed."""
 
     def __init__(
         self,
         *,
         exit_status: int | None = None,
-        has_agent: bool = True,
+        has_supervisor: bool = True,
         capabilities: frozenset[Capability] = frozenset(Capability),
     ) -> None:
         self.exit_status = exit_status
-        self.has_agent = has_agent
+        self.has_supervisor = has_supervisor
         self._capabilities = capabilities
         self.calls: list[Call] = []
         self._running: set[int] = set()
@@ -125,7 +125,7 @@ class FakeRuntime:
         return self.running(jail.first)
 
     def destroy(self, jail: JailRecord) -> KillReport:
-        """Ends the first process and every process the agents started; one
+        """Ends the first process and every process the supervisors started; one
         item each, the first process first."""
         self.calls.append(Call("destroy", Scope.JAIL, jail))
         first = KillItem(
@@ -141,14 +141,14 @@ class FakeRuntime:
         self._running.clear()
         return KillReport(items=(first, *siblings))
 
-    def agent(self, jail: JailRecord) -> Agent | None:
-        self.calls.append(Call("agent", Scope.JAIL, jail))
-        return FakeAgent(self, jail) if self.has_agent else None
+    def supervisor(self, jail: JailRecord) -> Supervisor | None:
+        self.calls.append(Call("supervisor", Scope.JAIL, jail))
+        return FakeSupervisor(self, jail) if self.has_supervisor else None
 
 
 @dataclass(frozen=True, slots=True)
-class FakeAgent:
-    """`FakeRuntime`'s agent for one jail. Its state is the runtime's."""
+class FakeSupervisor:
+    """`FakeRuntime`'s supervisor for one jail. Its state is the runtime's."""
 
     runtime: FakeRuntime
     jail: JailRecord

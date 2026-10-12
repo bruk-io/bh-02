@@ -465,7 +465,7 @@ def end_group(
     """One item of a `KillReport`: the ladder against one group, guarded
     (`_guarded_ladder`), reported as `kind` with the pgid as its identity.
     The workload group, an exec sibling and a helper are each ended through
-    this, and `HostAgent.stop` ends one process's group with it.
+    this, and `HostSupervisor.stop` ends one process's group with it.
 
     Raises nothing from the item; only `BaseException`s that are not
     `Exception`s pass through."""

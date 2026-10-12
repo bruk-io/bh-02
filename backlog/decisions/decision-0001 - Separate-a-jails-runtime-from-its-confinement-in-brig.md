@@ -63,6 +63,8 @@ In a jail type with a supervisor (bwrap, below), `create` runs the whole compose
 
 ### The Runtime protocol: an instance and an agent
 
+*2026-10-12: brig names this in-jail protocol `Supervisor`, not `Agent` (TASK-0079.24); the text below stays as written.*
+
 ```python
 class Runtime(Protocol):                # the instance: non-cooperative
     kind: RuntimeKind

@@ -4,7 +4,7 @@ SPEC.md section 3 (decision-178, decision-0001 step 1). Its instance is host
 process groups: `create` runs the compiled jail's argv under the exit wrapper,
 detached in a new process group, tethered when asked; `destroy` is SPEC.md
 section 9's verified ladder over the workload's group, every exec sibling and
-every `JAIL_LIFETIME` helper (`brig/run/teardown.py`); `HostAgent` starts a
+every `JAIL_LIFETIME` helper (`brig/run/teardown.py`); `HostSupervisor` starts a
 sibling under the same wrap (`EQUIVALENT_PROFILE`, or `PLAIN` for the empty
 stack), signals a group after checking its leader's identity, waits through the
 exit record or its own `Popen`, and stops one group with the same ladder.
@@ -67,11 +67,11 @@ from brig.run import _execs, _exit_status, _identity, _waiters
 from brig.run._spawn_pgid import spawn_pgid
 from brig.run.exec_ import ExecWrapNotAPrefix
 from brig.run.runtime import (
-    Agent,
     ExitStatusUnobservable,
     IoPolicy,
     JailRecord,
     ProcessRecord,
+    Supervisor,
 )
 from brig.run.teardown import KillReport, end_group, kill_named
 from brig.stack import CompiledJail
@@ -83,7 +83,7 @@ from brig.stack import CompiledJail
 _LAUNCH_SCOPED_TIMEOUT_S: Final = 120.0
 
 
-#: How often `HostAgent.wait` re-asks whether the first process is alive
+#: How often `HostSupervisor.wait` re-asks whether the first process is alive
 #: while polling. The two cheap sources (this process's waiter record, the
 #: exit file) are polled far more often; the liveness question exists only
 #: to turn "still running" into "gone, and nothing recorded it", and paying a
@@ -242,7 +242,7 @@ def _start_helpers(
 
     `Helper` and `HelperLifetime` have been in the mechanism contract since
     M2 and nothing ever started one -- the declared-but-uncalled shape this
-    repo's CLAUDE.md names as its recurring defect. M6's `connect_proxy` is
+    repo's guidance names as its recurring defect. M6's `connect_proxy` is
     the first mechanism that needs them, so they run now.
 
     Two lifetimes, and the difference is when this function returns:
@@ -335,7 +335,7 @@ class HostRuntime:
     Holds no state: everything a later call needs is in the `JailRecord`
     `create` returns, so a record rehydrated in another process is
     controlled the same way. The one thing that does not cross processes is
-    what `_waiters` and a `HostAgent` hold in memory (the exit observation,
+    what `_waiters` and a `HostSupervisor` hold in memory (the exit observation,
     a sibling's `Popen`); the exit file and the registration directory under
     `jail_dir` are what stand in for them elsewhere."""
 
@@ -482,19 +482,19 @@ class HostRuntime:
             helper_stamps=jail.helper_stamps,
         )
 
-    def agent(self, jail: JailRecord) -> Agent:
-        """A fresh `HostAgent` bound to `jail`. Every host jail has one: a
+    def supervisor(self, jail: JailRecord) -> Supervisor:
+        """A fresh `HostSupervisor` bound to `jail`. Every host jail has one: a
         sibling is started from the record alone."""
-        return HostAgent(jail)
+        return HostSupervisor(jail)
 
 
-class HostAgent:
+class HostSupervisor:
     """Starts, signals, waits for and stops processes in one host jail.
 
     A class because it holds state its own methods change: the `Popen` of
     every sibling it started, so `wait` can collect its status, and which of
-    them it has already deregistered. Whoever holds the agent holds those
-    `Popen`s (an `ExecHandle` holds the agent that started it), so a sibling
+    them it has already deregistered. Whoever holds the supervisor holds those
+    `Popen`s (an `ExecHandle` holds the supervisor that started it), so a sibling
     nobody waits for is dropped with its handle and reaped by `subprocess`,
     as before decision-178."""
 
@@ -598,20 +598,20 @@ class HostAgent:
 
         The first process: this process's waiter record if it holds one,
         else `<jail_dir>/exit`, written by the exit wrapper (decision-156).
-        A sibling this agent started: its own `Popen`, and the first status
+        A sibling this supervisor started: its own `Popen`, and the first status
         observed deregisters it, once.
 
         Raises:
             ExitStatusUnobservable: the first process is gone and neither
                 source recorded how it ended; or `process` is a sibling this
-                agent did not start, whose status nothing records.
+                supervisor did not start, whose status nothing records.
         """
         if process == self._jail.first:
             return self._wait_first(timeout)
         proc = self._spawned.get(process.pid)
         if proc is None:
             raise ExitStatusUnobservable(
-                f"pid {process.pid} was not started by this agent, and nothing records how a "
+                f"pid {process.pid} was not started by this supervisor, and nothing records how a "
                 f"sibling in jail {self._jail.jail_id!r} ended"
             )
         try:

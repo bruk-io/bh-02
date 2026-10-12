@@ -6,7 +6,7 @@ out of the way. It does not cache, does not rewrite, does not terminate TLS,
 and does not inspect a tunnel's bytes once one is opened.
 
 **The two paths are genuinely different and are never used as evidence
-about each other** (`.claude/rules/integration-tests.md`: "plain HTTP is not
+about each other** (the integration-test rules: "plain HTTP is not
 evidence about CONNECT tunnels"):
 
 - `CONNECT host:port` -- the HTTPS path. The destination is read from the

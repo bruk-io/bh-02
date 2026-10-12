@@ -1,8 +1,8 @@
-"""`HostRuntime`'s agent against real processes (decision-178, TASK-0079.02).
+"""`HostRuntime`'s supervisor against real processes (decision-178, TASK-0079.02).
 
-`Handle` reaches `Agent.start`, `Agent.signal` and `Agent.wait` through
+`Handle` reaches `Supervisor.start`, `Supervisor.signal` and `Supervisor.wait` through
 `exec`, `interrupt` and `wait`, which the rest of the suite covers.
-`Agent.stop`, one process's group alone, has no `Handle` method yet (step 3's
+`Supervisor.stop`, one process's group alone, has no `Handle` method yet (step 3's
 `Process.stop`), so it is driven here directly, and checked with `/bin/ps`,
 never through the module under test: the stopped sibling's group is gone, and
 in the same jail, the control, the first process and a second sibling still
@@ -18,7 +18,7 @@ import pytest
 
 from brig.core import Spec, unenforced_report
 from brig.run.handle import Handle
-from brig.run.host import HostAgent
+from brig.run.host import HostSupervisor
 from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.run.teardown import KillOutcome
 from brig.stack import CompiledJail
@@ -49,7 +49,7 @@ def _launch(run_id: str) -> Handle:
         argv=workload_argv(run_id, "sleep 100"),
         cwd=jail_dir,
         io=IoPolicy(),
-        jail_id="jail-host-agent",
+        jail_id="jail-host-supervisor",
         jail_dir=jail_dir,
     )
 
@@ -70,26 +70,26 @@ def _live_members(pgid: int) -> list[int]:
 def test_stop_ends_one_siblings_group_and_leaves_the_rest(run_id: str) -> None:
     handle = _launch(run_id)
     record = handle.record()
-    agent = handle.runtime.agent(record)
-    assert isinstance(agent, HostAgent)
+    supervisor = handle.runtime.supervisor(record)
+    assert isinstance(supervisor, HostSupervisor)
     try:
-        doomed = agent.start(workload_argv(run_id, "sleep 100"), cwd=handle.cwd, io=IoPolicy())
-        kept = agent.start(workload_argv(run_id, "sleep 100"), cwd=handle.cwd, io=IoPolicy())
+        doomed = supervisor.start(workload_argv(run_id, "sleep 100"), cwd=handle.cwd, io=IoPolicy())
+        kept = supervisor.start(workload_argv(run_id, "sleep 100"), cwd=handle.cwd, io=IoPolicy())
         assert _live_members(doomed.pgid), "the sibling never ran"
 
-        report = agent.stop(doomed)
+        report = supervisor.stop(doomed)
 
         assert [(item.kind, item.identity, item.outcome) for item in report.items] == [
             ("exec_sibling", str(doomed.pgid), KillOutcome.ENDED)
         ]
         assert _live_members(doomed.pgid) == []
-        assert agent.wait(doomed, 5.0) == -signal.SIGTERM
+        assert supervisor.wait(doomed, 5.0) == -signal.SIGTERM
         # The control, in the same jail: what was not stopped still runs.
         assert _live_members(kept.pgid)
         assert _live_members(handle.pgid)
-        assert agent.signal(kept, signal.SIGKILL) is True
-        assert agent.wait(kept, 5.0) == -signal.SIGKILL
-        assert agent.wait(record.first, 0.1) is None
+        assert supervisor.signal(kept, signal.SIGKILL) is True
+        assert supervisor.wait(kept, 5.0) == -signal.SIGKILL
+        assert supervisor.wait(record.first, 0.1) is None
     finally:
         handle.kill()
         teardown_group(handle)

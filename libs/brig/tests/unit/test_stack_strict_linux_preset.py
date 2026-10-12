@@ -37,7 +37,7 @@ from brig.stack import MATRIX_VERSION, strict_linux
 
 _JAIL_DIR = "/run/brig/strictlinux"
 _WORKSPACE = "/srv/ws"
-_ENDPOINT = "/run/brig/strictlinux/chan/agent.sock"
+_ENDPOINT = "/run/brig/strictlinux/chan/ctl.sock"
 
 _SPEC = Spec(
     fs=FsPolicy(
@@ -51,7 +51,7 @@ _SPEC = Spec(
         write_allows=(_WORKSPACE,),
         write_denies=("/srv/ws/.envrc",),
     ),
-    channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+    channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
 )
 
 

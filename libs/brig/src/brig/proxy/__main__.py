@@ -3,7 +3,7 @@
 The `if __name__` guard lives here and nowhere else -- pypeeker treats a
 module-level `if` body as import-time unconditionally, so a real `main()`
 under that guard inside `server.py` would be an unavoidable
-`import-time-side-effects` finding (CLAUDE.md).
+`import-time-side-effects` finding.
 """
 
 from __future__ import annotations

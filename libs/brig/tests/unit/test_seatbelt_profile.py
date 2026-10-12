@@ -311,7 +311,7 @@ def test_network_bind_renders_exactly_zero_times_with_no_channels() -> None:
 # The seal (decision-173): no write root grants the jail directory.
 # --------------------------------------------------------------------------
 
-#: bh-02's shape when run from `/tmp` on darwin: the project is
+#: An embedder's shape when run from `/tmp` on darwin: the project is
 #: `/private/tmp`, the jail directory `/private/tmp/bh-j-1` (its scratch
 #: `tmp/` beneath it), the endpoint in a subdirectory of it (`chan/`).
 _SEALED_JAIL_DIR = "/private/tmp/bh-j-1"

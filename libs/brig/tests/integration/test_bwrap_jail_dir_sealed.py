@@ -1,7 +1,7 @@
 """decision-173 in a real bubblewrap jail: a write root ABOVE the jail
 directory does not let the workload write brig's control state there.
 
-Found by TASK-0078 in bh-02: run with its working directory at `/tmp`, the
+Found by an embedder (TASK-0078): run with its working directory at `/tmp`, the
 project's write root covered `/tmp/bh-j-*`, and a jailed input wrote
 `<jail_dir>/execs/1.json`, `<jail_dir>/exit` and `<jail_dir>/x`, all seen on
 the host. This plants the same writes from inside a jail whose one write root

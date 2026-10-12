@@ -85,7 +85,7 @@ _WORKSPACE = "/srv/ws"
 _GIT = "/srv/ws/.git"
 _HOOKS = "/srv/ws/.git/hooks"
 _ENVRC = "/srv/ws/.envrc"
-_ENDPOINT = "/run/brig/chan0/agent.sock"
+_ENDPOINT = "/run/brig/chan0/ctl.sock"
 
 _SPEC = Spec(
     fs=FsPolicy(
@@ -94,7 +94,7 @@ _SPEC = Spec(
         write_allows=(_WORKSPACE,),
         write_denies=(_HOOKS, _ENVRC),
     ),
-    channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+    channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
 )
 _SPEC_RESOLVED = _identity_resolved("/bin", "/usr", _WORKSPACE, _GIT, _HOOKS, _ENVRC, _ENDPOINT)
 _SPEC_EXISTS = {
@@ -250,7 +250,7 @@ def test_a_carve_out_inside_the_channel_directory_still_wins() -> None:
     chan_dir = "/run/brig/chan9"
     workspace = f"{chan_dir}/ws"
     hooks = f"{workspace}/.git/hooks"
-    endpoint = f"{chan_dir}/agent.sock"
+    endpoint = f"{chan_dir}/ctl.sock"
     spec = Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
@@ -258,7 +258,7 @@ def test_a_carve_out_inside_the_channel_directory_still_wins() -> None:
             write_allows=(workspace,),
             write_denies=(hooks,),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),),
     )
     git = f"{workspace}/.git"
     ctx = _ctx(
@@ -409,14 +409,14 @@ def test_a_channel_endpoint_under_a_write_deny_is_refused() -> None:
     it the other way round would hand the jail a socket path it can never
     create. Refused by name, both paths named -- the same refusal seatbelt
     makes on its own side."""
-    endpoint = "/srv/ws/.git/hooks/agent.sock"
+    endpoint = "/srv/ws/.git/hooks/ctl.sock"
     spec = Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
             write_allows=(_WORKSPACE,),
             write_denies=(_HOOKS,),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),),
     )
     ctx = _ctx(
         resolved=_identity_resolved(_WORKSPACE, _HOOKS, endpoint),
@@ -443,7 +443,7 @@ def test_a_write_deny_of_the_whole_tree_swallows_every_channel() -> None:
             write_allows=(_WORKSPACE,),
             write_denies=("/",),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
     )
     ctx = _ctx(
         resolved=_identity_resolved(_WORKSPACE, "/", _ENDPOINT),
@@ -601,7 +601,7 @@ _CARVE_OUT_SPEC = Spec(
         write_allows=(_WORKSPACE,),
         read_denies=(_SECRET, _STATE, _ABSENT, _ELSEWHERE),
     ),
-    channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+    channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
 )
 
 
@@ -700,7 +700,7 @@ def test_a_write_carve_out_no_writable_tree_reaches_is_not_mounted() -> None:
             write_allows=(_WORKSPACE,),
             write_denies=(layer, _HOOKS),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
     )
     ctx = _ctx(
         resolved=_identity_resolved("/usr", _WORKSPACE, layer, _GIT, _HOOKS, _ENDPOINT),
@@ -749,11 +749,11 @@ def test_an_absent_directory_between_a_root_and_a_carve_out_is_not_pinned() -> N
 # The seal (decision-173): no write root grants the jail directory.
 # --------------------------------------------------------------------------
 
-#: A write root ABOVE the jail directory, the shape bh-02 run from `/tmp`
+#: A write root ABOVE the jail directory, the shape an embedder run from `/tmp`
 #: has: a workspace carve-out (pinned outside the jail directory), a channel
 #: directory inside it, a carve-out in its scratch and one in the sealed part.
 _ABOVE = "/run/brig"
-_INNER_ENDPOINT = f"{_JAIL_DIR}/ch/agent.sock"
+_INNER_ENDPOINT = f"{_JAIL_DIR}/ch/ctl.sock"
 _ABOVE_HOOKS = f"{_ABOVE}/ws/.git/hooks"
 _SEALED_DENY = f"{_JAIL_DIR}/execs/x"
 _SCRATCH_DENY = f"{_JAIL_DIR}/tmp/a/.envrc"
@@ -775,7 +775,7 @@ def _above_spec(endpoint: str = _INNER_ENDPOINT) -> Spec:
             write_allows=(_ABOVE,),
             write_denies=(_ABOVE_HOOKS, _SEALED_DENY, _SCRATCH_DENY),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),),
     )
 
 
@@ -883,7 +883,7 @@ def test_no_seal_without_a_writable_tree_above_the_jail_directory() -> None:
 def _channel_only_spec(endpoint: str) -> Spec:
     return Spec(
         fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),),
     )
 
 
@@ -894,7 +894,7 @@ def test_a_channel_directly_in_the_jail_directory_is_refused(sealed: bool) -> No
     make for a socket, so one that IS the jail directory makes brig's control
     state writable; refused by name, both paths named and the remedy said,
     whether or not a write root above the jail directory is there too."""
-    endpoint = f"{_JAIL_DIR}/agent.sock"
+    endpoint = f"{_JAIL_DIR}/ctl.sock"
     spec = _above_spec(endpoint) if sealed else _channel_only_spec(endpoint)
     ctx = _above_ctx(endpoint) if sealed else _ctx(resolved=_identity_resolved("/usr", endpoint))
     with pytest.raises(ChannelInsideJailDir) as refusal:
@@ -907,12 +907,12 @@ def test_a_channel_directly_in_the_jail_directory_is_refused(sealed: bool) -> No
 
 @pytest.mark.unit
 def test_a_channel_whose_lexical_parent_is_the_jail_directory_is_refused() -> None:
-    """decision-174 amended: `<jail_dir>/agent.sock` as a symlink to a socket
+    """decision-174 amended: `<jail_dir>/ctl.sock` as a symlink to a socket
     elsewhere resolves to a directory that is not the jail directory, but bwrap
     binds that directory writable AT the lexical parent, over the jail
     directory's place in the jail. Refused by the lexical parent too."""
-    endpoint = f"{_JAIL_DIR}/agent.sock"
-    target = "/elsewhere/agent.sock"
+    endpoint = f"{_JAIL_DIR}/ctl.sock"
+    target = "/elsewhere/ctl.sock"
     ctx = _ctx(resolved={**_identity_resolved("/usr"), endpoint: target})
     with pytest.raises(ChannelInsideJailDir) as refusal:
         bwrap.compile(_channel_only_spec(endpoint), ctx)
@@ -921,15 +921,15 @@ def test_a_channel_whose_lexical_parent_is_the_jail_directory_is_refused() -> No
     assert _JAIL_DIR in message
     assert "subdirectory" in message
     # The remedy carries the endpoint's own (lexical) name, not the target's.
-    assert f"{_JAIL_DIR}/chan/agent.sock" in message
+    assert f"{_JAIL_DIR}/chan/ctl.sock" in message
     assert "elsewhere" not in message.split("for example", 1)[1]
 
 
 @pytest.mark.unit
 def test_a_channel_in_a_subdirectory_of_the_jail_directory_is_not_refused() -> None:
-    """The remedy: `<jail_dir>/chan/agent.sock` compiles, its directory bound
+    """The remedy: `<jail_dir>/chan/ctl.sock` compiles, its directory bound
     read-write and the jail directory itself never bound writable."""
-    endpoint = f"{_JAIL_DIR}/chan/agent.sock"
+    endpoint = f"{_JAIL_DIR}/chan/ctl.sock"
     ctx = _ctx(resolved=_identity_resolved("/usr", endpoint))
     argv = bwrap.compile(_channel_only_spec(endpoint), ctx).wrap(())
     triples = list(zip(argv, argv[1:], argv[2:], strict=False))

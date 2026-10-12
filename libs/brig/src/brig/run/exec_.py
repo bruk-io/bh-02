@@ -93,7 +93,7 @@ from typing import Any
 
 from brig.core import Spec
 from brig.core.runtime import Capability
-from brig.run.runtime import Agent, IoPolicy, NoAgent, ProcessRecord
+from brig.run.runtime import IoPolicy, NoSupervisor, ProcessRecord, Supervisor
 
 
 class ExecRefused(ValueError):
@@ -161,11 +161,11 @@ class ExecFidelity(Enum):
 
 @dataclass(frozen=True, slots=True)
 class ExecHandle:
-    """SPEC.md §9's per-exec handle. `_agent`/`_process` are this
+    """SPEC.md §9's per-exec handle. `_supervisor`/`_process` are this
     module's own bookkeeping for `wait()` -- not part of the SPEC-named
     shape (`pid`, `argv`, `interactive`, `fidelity`, `spec`, `stdout_path`,
     `stderr_path`, `wait`) -- so they are excluded from `repr`/`__eq__`
-    (`compare=False`). `_agent` is the runtime's agent that started this
+    (`compare=False`). `_supervisor` is the runtime's supervisor that started this
     sibling (decision-178); it holds the sibling's `Popen` for as long as
     this handle holds it."""
 
@@ -176,14 +176,14 @@ class ExecHandle:
     spec: Spec
     stdout_path: str
     stderr_path: str
-    _agent: Agent = field(repr=False, compare=False)
+    _supervisor: Supervisor = field(repr=False, compare=False)
     _process: ProcessRecord = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "argv", tuple(self.argv))
 
     def wait(self, timeout: float | None = None) -> int:
-        """Block for the exec'd process's exit status, through the agent
+        """Block for the exec'd process's exit status, through the supervisor
         that started it, which then DEREGISTERS this sibling
         (`brig/run/_execs.py`) -- the first `wait()` that observes a status
         is what makes it no longer a thing teardown must reap. Idempotent: a
@@ -193,7 +193,7 @@ class ExecHandle:
         Raises:
             subprocess.TimeoutExpired: still running after `timeout` seconds.
         """
-        status = self._agent.wait(self._process, timeout)
+        status = self._supervisor.wait(self._process, timeout)
         if status is None:
             raise subprocess.TimeoutExpired(self._process.argv, timeout or 0.0)
         return status
@@ -211,8 +211,8 @@ def exec_in_jail(handle: Any, argv: Sequence[str], interactive: bool = False) ->
     this private delegate's is looser.
 
     cwd always comes from `handle`, never from this process's own
-    `os.getcwd()`. The sibling is started by `handle.runtime`'s agent
-    (`Agent.start`, decision-178): for `HostRuntime`, `(*wrap_prefix,
+    `os.getcwd()`. The sibling is started by `handle.runtime`'s supervisor
+    (`Supervisor.start`, decision-178): for `HostRuntime`, `(*wrap_prefix,
     *argv)` with env `{**os.environ, **jail_env}` (see this module's
     docstring's three-case list) -- in every case SPEC.md §9's "subject to
     the same Spec as the workload, never a weaker one" holds: an exec that
@@ -220,7 +220,7 @@ def exec_in_jail(handle: Any, argv: Sequence[str], interactive: bool = False) ->
     confinement than the workload's own.
 
     **The refusal (`wrap_prefix is None`) is raised BEFORE anything is
-    opened or spawned** -- checked first, ahead of the agent, so a refused
+    opened or spawned** -- checked first, ahead of the supervisor, so a refused
     exec creates no artifacts on disk (SPEC.md §9: "A mechanism that cannot
     guarantee this refuses exec" -- a refusal that still half-runs is not a
     refusal).
@@ -228,7 +228,7 @@ def exec_in_jail(handle: Any, argv: Sequence[str], interactive: bool = False) ->
     Raises:
         ExecRefused: `interactive=True`; no launcher here has `PTY`.
         ExecWrapNotAPrefix: the jail's wrap is not a pure argv prefix.
-        NoAgent: the jail's runtime has no agent to start a sibling with.
+        NoSupervisor: the jail's runtime has no supervisor to start a sibling with.
     """
     if interactive:
         raise ExecRefused(frozenset({Capability.PTY}))
@@ -239,12 +239,12 @@ def exec_in_jail(handle: Any, argv: Sequence[str], interactive: bool = False) ->
         raise ExecWrapNotAPrefix(tuple(handle.argv), argv_t)
     fidelity = ExecFidelity.EQUIVALENT_PROFILE if wrap_prefix else ExecFidelity.PLAIN
 
-    agent = handle.runtime.agent(handle.record())
-    if agent is None:
-        raise NoAgent(f"jail {handle.jail_id!r} has no agent to start {argv_t!r} with")
+    supervisor = handle.runtime.supervisor(handle.record())
+    if supervisor is None:
+        raise NoSupervisor(f"jail {handle.jail_id!r} has no supervisor to start {argv_t!r} with")
 
     token = uuid.uuid4().hex[:12]
-    process = agent.start(
+    process = supervisor.start(
         argv_t,
         cwd=handle.cwd,
         io=IoPolicy(stdout_name=f"exec-{token}-stdout.log", stderr_name=f"exec-{token}-stderr.log"),
@@ -258,6 +258,6 @@ def exec_in_jail(handle: Any, argv: Sequence[str], interactive: bool = False) ->
         spec=handle.spec,
         stdout_path=process.stdout_path,
         stderr_path=process.stderr_path,
-        _agent=agent,
+        _supervisor=supervisor,
         _process=process,
     )

@@ -99,7 +99,7 @@ Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──create──�
   compatibility, composes argv wrappers, aggregates the report. The empty
   stack is valid and grades every axis `unenforced`.
 - **Runtime** — creates a jail's instance and controls it: `create`,
-  `alive`, `destroy` (verified) and `agent`, the part inside the instance
+  `alive`, `destroy` (verified) and `supervisor`, the part inside the instance
   that starts, signals, waits for and stops its processes. Declares its kind
   and capabilities; refuses stacks whose requirements it cannot honor.
   `HostRuntime` (`brig/run/host.py`) is today's: host process groups, the
@@ -115,8 +115,8 @@ groups, with no seam a container, a VM or a remote sandbox could fill
 (decision-0001 in the workspace's backlog, its migration step 1). `run` now
 names that seam as two protocols (`brig/run/runtime.py`): `Runtime`, the
 instance (`kind`, `capabilities`, `create`, `alive`, `destroy -> KillReport`,
-`agent -> Agent | None`, `None` meaning the jail can only be destroyed), and
-`Agent`, inside it (`start -> ProcessRecord`, `signal -> bool`,
+`supervisor -> Supervisor | None`, `None` meaning the jail can only be destroyed), and
+`Supervisor`, inside it (`start -> ProcessRecord`, `signal -> bool`,
 `wait -> int | None`, `None` at the deadline, `stop -> KillReport`). Their
 records, `JailRecord` and `ProcessRecord`, are frozen data; `RuntimeKind`,
 `Capability` and `Scope` are enums in `core` (`brig/core/runtime.py`; not in
@@ -137,6 +137,23 @@ changes: every other existing test asserts what it asserted. `Mechanism.runtime`
 and the runtime kind in `CompiledJail` are step 2 (TASK-0079.03); `Jail`
 and `Process` in place of `Handle` are step 3 (TASK-0079.04). Implementing
 task: TASK-0079.02. (Ruled 2026-10-12, decision-178.)
+
+**The part inside a jail is the Supervisor (2026-10-12, decision-180).**
+decision-0001 and decision-178 named the protocol that starts, signals, waits
+for and stops processes inside a jail `Agent`, after the agent of Kata and
+other sandboxes. In a library whose first line says it knows nothing of
+agents, the word reads as a dependency on one kind of embedder, and the part
+is what a supervisor is: the process that holds the others. brig names it
+`Supervisor` (`run.runtime`); `HostSupervisor`, `NoSupervisor` and
+`FakeSupervisor` follow, `Runtime.agent` is `Runtime.supervisor`, and the fake
+runtime's `has_agent` is `has_supervisor`. The same ruling keeps brig's code,
+SPEC and README free of an embedder's concepts: an application (an AI agent,
+its sessions, its configuration files) is named only as an example of a class
+or as where a finding came from, never as something brig's behaviour depends
+on. The threat tuples in `core.threats` that list a coding tool's files stay
+data an embedder folds in, not a default of any preset. No behaviour changes:
+tests change by names. Implementing task: TASK-0079.24. (Ruled 2026-10-12,
+decision-180.)
 
 ## 4. Axes and grades
 
@@ -210,7 +227,7 @@ Notes:
 
 - **`write_denies` is new relative to prior art in the parent project** and
   exists for the self-escalation threat: a jail that can write `.git/hooks`,
-  `.envrc`, or an agent config file inside its granted workspace executes code
+  `.envrc`, or a tool's config file inside its granted workspace executes code
   *outside* the jail later. Every mechanism must compile carve-outs
   (deny-over-allow precedence, mount ordering, submounts).
 - **Two read models, declared not layered.** Denylist (Seatbelt-native) and
@@ -221,7 +238,7 @@ Notes:
   `write_denies`, deny-over-allow. An allowlist denies by absence, but a secret
   can sit *inside* an allowed root: a credential file at the top of a
   workspace the jail may write, which is the ordinary shape for an embedder
-  that jails a coding agent in its own repository. Until this ruling that
+  that jails a program working in its own repository. Until this ruling that
   secret had no spelling in an allowlist `Spec` at all (the field was refused
   as inactive), so the only allowlist jail over such a workspace was one that
   could read it. A mechanism compiles each carve-out against the trees it
@@ -230,17 +247,18 @@ Notes:
   path that does not exist yet, §6) the `fs_read` grade drops and names it.
   The algebra is unchanged in shape: read denies union in the meet and grow
   in the denies clause under both models, and the two models stay
-  incomparable. (Ruled 2026-09-28, decision-164. First embedder: bh-02's
+  incomparable. (Ruled 2026-09-28, decision-164. First embedder: a
   jailed kernel on Linux, whose project root is a write root and whose
   `local.env` is the credential it must not read.)
 - **Threat lists ship as data, not defaults.** brig provides curated,
   documented tuples the embedder folds in explicitly:
   - `CREDENTIAL_READ_DENIES_HOME_RELATIVE` — `.ssh`, `.aws`, `.gnupg`,
     `.netrc`, `.config/gh`, `.docker`, `.kube`, `.npmrc`, `.git-credentials`,
-    `.config/gcloud`, `.claude`, `.claude.json`, …
+    `.config/gcloud`, `.claude`, `.claude.json` (the two a coding tool keeps its
+    credentials in, as examples of a class), …
   - `SELF_MODIFY_WORKSPACE_RELATIVE` — `.git/hooks`, `.git/config`,
-    `.bashrc`, `.zshrc`, `.profile`, `.envrc`, `.vscode`, `.idea`, agent
-    config files (`AGENTS.md`, `CLAUDE.md`, `.claude`), …
+    `.bashrc`, `.zshrc`, `.profile`, `.envrc`, `.vscode`, `.idea`, a tool's
+    config files that later run code (`AGENTS.md`, `CLAUDE.md`, `.claude`: examples of a class), …
   - `BARE_REPO_TOPLEVEL` — `HEAD`, `objects`, `refs` (creating these at the
     workspace root turns it into a bare git repository, silently changing
     what every later git command means).
@@ -380,7 +398,7 @@ Notes:
   answers from (`exit`, §8), the stdio and helper logs, and the staged files an
   exec sibling is confined by again (seatbelt's profile). A write root is a
   subtree, so one AT or ABOVE the jail directory (a workspace that is `/tmp`,
-  an embedder run from `/`) used to hand all of that to the workload: bh-02 run
+  an embedder run from `/`) used to hand all of that to the workload: an embedder run
   with its working directory at `/tmp` let a jailed input write
   `<jail_dir>/execs/1.json`, `<jail_dir>/exit` and `<jail_dir>/x`, all seen on
   the host, and a malformed registration made the jail's own `kill()` raise
@@ -407,7 +425,7 @@ Notes:
   TASK-0079.13. (Ruled 2026-10-11, decision-173.)
 - **A bwrap channel's endpoint is never directly in the jail directory
   (2026-10-11, decision-174).** bwrap grants a LISTEN channel its endpoint's
-  DIRECTORY, bound read-write (§6), so an endpoint like `<jail_dir>/agent.sock`
+  DIRECTORY, bound read-write (§6), so an endpoint like `<jail_dir>/ctl.sock`
   made the whole jail directory writable from inside the jail: the exec
   registrations teardown signals by, the exit record `wait()` answers from and
   the logs, which decision-173 seals against every write root but could not
@@ -415,10 +433,10 @@ Notes:
   (`brig.mech.bwrap.ChannelInsideJailDir`, a `ValueError` propagated by `Stack`
   as the other bwrap refusals are), naming the resolved endpoint and the jail
   directory and saying to put the endpoint in a subdirectory of it. An endpoint
-  in a subdirectory (`<jail_dir>/chan/agent.sock`) needs nothing more: its
+  in a subdirectory (`<jail_dir>/chan/ctl.sock`) needs nothing more: its
   directory is bound read-write, decision-173's seal keeps the rest of the jail
   directory read-only, and brig's own layout (`exit`, `execs/`, the logs) does
-  not move. An endpoint elsewhere is unchanged (bh-02's is in a directory of its
+  not move. An endpoint elsewhere is unchanged (an embedder's own is in a directory of its
   own). seatbelt does not refuse it: its channel grant is the socket's own path
   (`(allow file-write* (literal ...))`), which opens nothing else in the jail
   directory, so the hole is bwrap's alone and a refusal there would reject a
@@ -430,7 +448,7 @@ Notes:
   2026-10-11, decision-174.)
   Amended 2026-10-12 (TASK-0079.17, no new ruling): the refusal tests the
   endpoint's lexical parent as well as its resolved one, because bwrap binds
-  the resolved directory writable at the lexical parent: `<jail_dir>/agent.sock`
+  the resolved directory writable at the lexical parent: `<jail_dir>/ctl.sock`
   as a symlink to a socket elsewhere would otherwise lay that directory over the
   jail directory's place in the jail. The message names both paths.
 - Serialization: `to_dict`/`from_dict`, versioned, round-trip stable.
@@ -814,7 +832,7 @@ be the copy decision-152 deleted the event stream for).
   so it was not an escape, but it was a denial the `fs_write` grade claimed
   and the jail did not make, and a cell told "denied" by the policy was told
   "wrote" by the kernel. `--remount-ro /` after every mount fixes it; the
-  mounts keep their own flags. (Found by bh-02's jailed-kernel tests, the
+  mounts keep their own flags. (Found by an embedder's jailed-kernel tests, the
   first to write outside the workspace at a path whose parent the jail had
   made: `tests/integration/test_bwrap_fs.py` pins it now.)
 - **A jail started as root holds no capabilities, and its `/proc/sys` is
@@ -901,7 +919,7 @@ be the copy decision-152 deleted the event stream for).
   or removed, but the directory it is in is writable: renaming `.git` to
   `.git-moved` took the `.git/config` and `.git/hooks` mounts with it, and the
   workload then made a new `.git/config` of its own where the host's next
-  `git` reads it (`core.hooksPath`: code run on the host; measured in bh-02).
+  `git` reads it (`core.hooksPath`: code run on the host; measured by an embedder).
   Each such directory that exists is now bound over itself, read-write, before
   the carve-outs (stage 5a): a mount point, so it can't be renamed or removed,
   and as writable as before (a jailed `git commit` still works). The cost: a
@@ -909,7 +927,7 @@ be the copy decision-152 deleted the event stream for).
   mount and fails with `EXDEV` (`mv` copies instead; `os.rename` does not). An
   absent directory there is not pinned: bwrap makes it, as the mount point's
   parent, on the host (above), and the embedder that cares holds the topmost
-  absent one instead (bh-02 does). `pins` names them lexically and `run`'s
+  absent one instead. `pins` names them lexically and `run`'s
   `build_compile_ctx` observes whether each exists; a pin with no answer is
   `UnknownPathExistence`, never a guess. darwin's seatbelt needs no pin: it
   denies the path, whatever directory ends up there.
@@ -958,15 +976,15 @@ be the copy decision-152 deleted the event stream for).
   jail's life: renaming a file over a denied path (a host `git config` writes
   `.git/config` by rename; editors save by rename), and removing the empty
   directory an absent one is held by (the bullet on absent `write_denies`
-  above). The workload can then write that path (measured in bh-02, before its
+  above). The workload can then write that path (measured by an embedder, before its
   tripwire). A new jail holds it again. The same is true of a masked
   `read_denies` file, which is why an embedder that holds secrets that way may
-  grade `fs_read` lower (bh-02 does); nothing in this mechanism can see the host
+  grade `fs_read` lower; nothing in this mechanism can see the host
   do it, and the grade is not lowered for it: what it grades is whether the
   workload can get past a carve-out by itself, and it can't. Seeing it is the
-  embedder's: bh-02 watches each carve-out's directory with inotify and ends the
-  jail at the first such change (its runner-cordis-plugin README, "When the host
-  undoes a mount", has the window that leaves). The mount can't be put back from
+  embedder's: an embedder can watch each carve-out's directory with inotify and
+  end the jail at the first such change (the window that leaves is the
+  embedder's to document). The mount can't be put back from
   outside: the host can't enter the jail's mount namespace (`EPERM`, measured;
   bwrap nests it in a user namespace of its own).
   `network` is deny-**all**: the netns is the whole enforcement, so a spec
@@ -1211,7 +1229,7 @@ taken because nobody is left to run the others or read a `KillReport`. It
 exists because a detached jail (`start_new_session=True`, the launcher's whole
 shape) outlives an embedder that dies without calling `kill`, and a program the
 workload left running in the background kept its grants with nobody holding
-the handle (measured in bh-02: a killed harness's background program kept
+the handle (measured by an embedder: a killed host process's background program kept
 writing the project). Five things about it are constraints, not description:
 
 - **It is a pipe, not `PR_SET_PDEATHSIG`.** bwrap's `--die-with-parent` is
@@ -1356,7 +1374,7 @@ unreadable state is not evidence of death: it reads as not a zombie.
 *Amended 2026-10-11 (implementing task: TASK-0079.19).* **An embedder can ask
 whether a group still runs.** `Handle.alive()` answers for the leader only, and
 `os.killpg(pgid, 0)` counts a zombie as running, so an embedder that sweeps dead
-jails (bh-02's runner) never saw one end where PID 1 does not reap. brig
+jails never saw one end where PID 1 does not reap. brig
 exports `brig.run.group_alive(pgid) -> bool`: the same scan teardown's
 verification rung uses (`/bin/ps -Ao pid=,pgid=,stat=`, one function deciding
 membership, so the two cannot drift). A group with at least one member not in
@@ -1571,7 +1589,7 @@ and `exec` composes `{**os.environ, **jail_env}` fresh at exec time in every
 fidelity case, which is what it already did whenever the wrap prefix was
 non-empty. **A serialized handle is now plain enough to live in the embedder's
 own log**, which is where handle persistence belongs: the log is already the
-durable record of the session, and a handle in it is a handle a later process
+durable record of the embedder's work, and a handle in it is a handle a later process
 can rehydrate and kill with nothing else. (Implementing task: this phase.)
 
 **The exit status is readable again, and it is not a log (2026-09-08,
@@ -1686,8 +1704,7 @@ from the other kinds. Every sentence of that description is a sentence about
 the primitive's own contract said the jail never touches it. A queue that only
 trusted code writes and only trusted code reads is not a way into a jail; it
 is the embedder's own steering surface, and brig has no business shipping one.
-keel's Session Interface is that surface for this embedder, and any other
-embedder already has its own. What brig keeps is the part that genuinely
+Every embedder already has its own such surface. What brig keeps is the part that genuinely
 crosses the boundary: the LISTEN channel above, on which steering arrives
 re-encoded as work — which is what mailbox's own text said had to happen
 anyway. `ChannelKind.MAILBOX` goes with it (§5); the framed-file primitive was
@@ -1906,7 +1923,7 @@ core  ←  mech  ←  stack  ←  run  ←  observe
 | `core` | Spec, axes, grades, Graded, Report, subset algebra, frames, `Event` and its serialization, threat lists, serialization | nothing (pure: no I/O, no clock, no randomness, no subprocess) |
 | `mech` | Mechanism protocol, Step, all mechanisms, denial signatures | `core` |
 | `stack` | Stack, compatibility matrix, presets, floors, aggregation | `core`, `mech` |
-| `run` | the `Runtime` and `Agent` protocols and their records, `HostRuntime`, Launchers, Handle, teardown, readiness, dial, event stamping | `core`, `mech`, `stack` |
+| `run` | the `Runtime` and `Supervisor` protocols and their records, `HostRuntime`, Launchers, Handle, teardown, readiness, dial, event stamping | `core`, `mech`, `stack` |
 | `runtime` | runtimes that are not `run`'s own: `fake` today (decision-178); nothing in brig imports one, `run` included: an embedder picks a runtime by importing it | `core`, `mech`, `stack`, `run` |
 | `observe` | Console, stat, workspace diff | `core`, `run` |
 | `probe` | batteries, verdicts, report-vs-probe checks | `core`, `run`, `observe` |
@@ -1928,8 +1945,8 @@ the spec module and trip the builtin `no-import-cycles`.
 
 - Python ≥ 3.14, `uv` for everything, `ruff` (format + lint), `mypy --strict`,
   `pypeeker` strict as the architecture gate. `scripts/verify.sh` is the one
-  definition of "the tree is good"; the Claude commit hook runs its fast tier.
-- Test tiers are defined in `.claude/rules/` (unit / integration / system)
+  definition of "the tree is good"; a commit hook runs its fast tier.
+- Test tiers are defined in the repository's test rules (unit / integration / system)
   and enforced as pytest markers with `--strict-markers`. The one-line
   version: **unit** is pure (no subprocess, no network, no clock, `tmp_path`
   only); **integration** exercises one real mechanism or seam with real OS

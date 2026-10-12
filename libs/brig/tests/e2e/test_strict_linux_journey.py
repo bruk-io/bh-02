@@ -172,7 +172,7 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
     hooks = f"{workspace}/.git/hooks"
     # In a subdirectory of the jail directory: bwrap grants a socket its whole
     # directory, and one directly in the jail directory is refused (decision-174).
-    endpoint = f"{jail_dir}/chan/agent.sock"
+    endpoint = f"{jail_dir}/chan/ctl.sock"
     os.makedirs(hooks, exist_ok=True)
     os.makedirs(os.path.dirname(endpoint), exist_ok=True)
 
@@ -183,7 +183,7 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
             write_allows=(workspace,),
             write_denies=(hooks,),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),),
     )
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
 
@@ -204,7 +204,7 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
     )
     try:
         # Claim 5a: readiness is a CONNECT, not a path check (SPEC.md sec 10).
-        handle.wait_ready("agent", _READY_TIMEOUT_S)
+        handle.wait_ready("ctl", _READY_TIMEOUT_S)
 
         # Claim 5b: the crossing carries bytes. This is the SECOND
         # connection the jail serves; `wait_ready` above made the first.

@@ -21,7 +21,7 @@ from brig.core.runtime import Capability, RuntimeKind, Scope
 from brig.run import Handle, KillOutcome, SubprocessLauncher
 from brig.run.exec_ import ExecFidelity, ExecHandle
 from brig.run.host import HostRuntime
-from brig.run.runtime import Agent, IoPolicy, JailRecord, NoAgent, Runtime
+from brig.run.runtime import IoPolicy, JailRecord, NoSupervisor, Runtime, Supervisor
 from brig.runtime.fake import FAKE_PID_BASE, Call, FakeRuntime
 from brig.stack import Stack
 
@@ -74,8 +74,8 @@ def test_both_runtimes_implement_both_protocols() -> None:
     host = HostRuntime()
     runtimes: tuple[Runtime, ...] = (fake, host)
     record = _handle(fake).record()
-    agents: tuple[Agent | None, ...] = (fake.agent(record), host.agent(record))
-    assert all(agent is not None for agent in agents)
+    supervisors: tuple[Supervisor | None, ...] = (fake.supervisor(record), host.supervisor(record))
+    assert all(supervisor is not None for supervisor in supervisors)
     assert {runtime.kind for runtime in runtimes} == {RuntimeKind.HOST}
 
 
@@ -115,7 +115,7 @@ def test_alive_and_kill_ask_the_runtime() -> None:
 
 
 @pytest.mark.unit
-def test_interrupt_signals_the_first_process_through_the_agent() -> None:
+def test_interrupt_signals_the_first_process_through_the_supervisor() -> None:
     runtime = FakeRuntime()
     handle = _handle(runtime)
 
@@ -127,15 +127,15 @@ def test_interrupt_signals_the_first_process_through_the_agent() -> None:
 
 
 @pytest.mark.unit
-def test_interrupt_without_an_agent_is_not_delivered() -> None:
-    runtime = FakeRuntime(has_agent=False)
+def test_interrupt_without_an_supervisor_is_not_delivered() -> None:
+    runtime = FakeRuntime(has_supervisor=False)
     handle = _handle(runtime)
     assert handle.interrupt() is False
-    assert _methods(runtime) == ["create", "agent"]
+    assert _methods(runtime) == ["create", "supervisor"]
 
 
 @pytest.mark.unit
-def test_wait_returns_the_agents_status() -> None:
+def test_wait_returns_the_supervisors_status() -> None:
     runtime = FakeRuntime(exit_status=7)
     handle = _handle(runtime)
     assert handle.wait(timeout=0.0) == 7
@@ -143,21 +143,21 @@ def test_wait_returns_the_agents_status() -> None:
 
 
 @pytest.mark.unit
-def test_wait_raises_timeout_when_the_agent_reaches_the_deadline() -> None:
+def test_wait_raises_timeout_when_the_supervisor_reaches_the_deadline() -> None:
     handle = _handle(FakeRuntime(exit_status=None))
     with pytest.raises(TimeoutError, match="did not exit within"):
         handle.wait(timeout=0.0)
 
 
 @pytest.mark.unit
-def test_wait_without_an_agent_refuses() -> None:
-    handle = _handle(FakeRuntime(has_agent=False))
-    with pytest.raises(NoAgent):
+def test_wait_without_an_supervisor_refuses() -> None:
+    handle = _handle(FakeRuntime(has_supervisor=False))
+    with pytest.raises(NoSupervisor):
         handle.wait(timeout=0.0)
 
 
 @pytest.mark.unit
-def test_exec_starts_a_sibling_through_the_agent() -> None:
+def test_exec_starts_a_sibling_through_the_supervisor() -> None:
     runtime = FakeRuntime(exit_status=3)
     handle = _handle(runtime)
 
@@ -176,22 +176,22 @@ def test_exec_starts_a_sibling_through_the_agent() -> None:
 
 
 @pytest.mark.unit
-def test_exec_without_an_agent_refuses() -> None:
-    handle = _handle(FakeRuntime(has_agent=False))
-    with pytest.raises(NoAgent):
+def test_exec_without_an_supervisor_refuses() -> None:
+    handle = _handle(FakeRuntime(has_supervisor=False))
+    with pytest.raises(NoSupervisor):
         handle.exec(["true"])
 
 
 @pytest.mark.unit
-def test_the_agent_stops_one_process_and_destroy_ends_the_rest() -> None:
+def test_the_supervisor_stops_one_process_and_destroy_ends_the_rest() -> None:
     runtime = FakeRuntime()
     handle = _handle(runtime)
-    agent = runtime.agent(handle.record())
-    assert agent is not None
-    one = agent.start(["a"], cwd="/work", io=IoPolicy())
-    two = agent.start(["b"], cwd="/work", io=IoPolicy())
+    supervisor = runtime.supervisor(handle.record())
+    assert supervisor is not None
+    one = supervisor.start(["a"], cwd="/work", io=IoPolicy())
+    two = supervisor.start(["b"], cwd="/work", io=IoPolicy())
 
-    stopped = agent.stop(one)
+    stopped = supervisor.stop(one)
 
     assert [(i.kind, i.outcome) for i in stopped.items] == [("exec_sibling", KillOutcome.ENDED)]
     assert runtime.running(one) is False

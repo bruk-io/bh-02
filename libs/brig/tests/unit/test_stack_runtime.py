@@ -61,7 +61,7 @@ _SHIPPED: tuple[Mechanism, ...] = (
 )
 
 _JAIL_DIR = "/run/brig/stackruntime"
-_ENDPOINT = f"{_JAIL_DIR}/chan/agent.sock"
+_ENDPOINT = f"{_JAIL_DIR}/chan/ctl.sock"
 
 #: A spec bwrap accepts (allowlist reads, the two images env_scrub's wrap
 #: execs), and its linux context; the same shape strict_linux's own test uses.
@@ -71,7 +71,7 @@ _LINUX_SPEC = Spec(
         read_allows=("/bin", "/usr"),
         write_allows=("/srv/ws",),
     ),
-    channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+    channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
 )
 _LINUX_CTX = CompileCtx(
     jail_dir=_JAIL_DIR,
