@@ -1471,7 +1471,8 @@ unreadable state is not evidence of death: it reads as not a zombie.
 (Ruled 2026-10-11, decision-171.)
 
 *Amended 2026-10-11 (implementing task: TASK-0079.19).* **An embedder can ask
-whether a group still runs.** `Handle.alive()` answers for the leader only, and
+whether a group still runs.** `Handle.alive()` answered for the leader only
+(since decision-181: for every process's leader and the jail's helpers), and
 `os.killpg(pgid, 0)` counts a zombie as running, so an embedder that sweeps dead
 jails never saw one end where PID 1 does not reap. brig
 exports `brig.run.group_alive(pgid) -> bool`: the same scan teardown's
