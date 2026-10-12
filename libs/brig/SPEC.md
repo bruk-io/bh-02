@@ -781,8 +781,8 @@ cap the Spec asked for is still the soft one — `N` is what bounds the workload
 the extra second only exists so the signal can be delivered before the kill.
 The grade does not move: `limits` stays `best_effort` (decision-061), for the
 same cpu-only reason as before. (Found by running brig's integration tier on
-Linux for the first time, in a container: `tools/linux-check.sh` in the keel
-workspace.)
+Linux for the first time, in a container: an embedder's Linux check
+script.)
 
 **`bwrap`, as built (2026-09-08, decision-159).** The roster row above is the
 plan; this is the shape, written from the built mechanism on decision-069's
@@ -947,7 +947,7 @@ be the copy decision-152 deleted the event stream for).
   below: an endpoint under a `write_denies` subpath is `ChannelInsideWriteDeny`,
   never ordered around — which makes that refusal load-bearing rather than
   defensive. (Found by running the e2e tier on Linux for the first time, in a
-  container: `tools/linux-check.sh` in the keel workspace, and
+  container: an embedder's Linux check script, and
   `tests/e2e/test_strict_linux_journey.py` is where it showed.)
 - **Source resolved, destination as the Spec wrote it.** Every mount names its
   source by the realpath'd form (so a symlinked path mounts the tree it
@@ -1329,7 +1329,7 @@ feature-detects; it is law 1's silent downgrade wearing an API's clothes.
 surface never named them.)
 
 **`interrupt` ships (2026-09-08, decision-151).** It was absent under exactly
-that law from M2 (ambiguity A10) until an embedder needed it: keel's sandbox
+that law from M2 (ambiguity A10) until an embedder needed it: its sandbox
 executor had to answer "stop that one action" and, with no interrupt, its only
 honest options were killing the whole jail — every other action in flight with
 it — or silently doing nothing. It is **`SIGINT` to the workload's process
