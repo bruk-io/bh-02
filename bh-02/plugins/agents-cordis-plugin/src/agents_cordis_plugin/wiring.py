@@ -1,7 +1,7 @@
-"""The rows: `agents`, outside, which binds `asker` and registers the `agent` tool, each call
-mounting a child in a sealed realm through its performer; and, inside each child's realm,
-`output` (the child's, over `asker`) and `child` (its type's section of the prompt, and its loop
-passed to the run that mounted it).
+"""The rows: `agents`, outside, which binds `asker` and registers the `agent` and `agent_wait`
+tools, each `agent` call mounting a child in a sealed realm through its performer; and, inside
+each child's realm, `output` (the child's, over `asker`) and `child` (its type's section of the
+prompt, and its loop passed to the run that mounted it).
 
 A child is `use(cordis.loader:loader, config=LoaderConfig(overrides=rows, watch=None),
 expose={runner, approval, host, asker})`: the realm's own loader resolves its rows by name, so
@@ -19,7 +19,7 @@ from typing import Any, Protocol, runtime_checkable
 import cordis.loader
 from agents_cordis_plugin.agents import (
     AGENT,
-    SECTION,
+    AGENT_WAIT,
     Agents,
     AgentsConfig,
     Asker,
@@ -27,9 +27,12 @@ from agents_cordis_plugin.agents import (
     Hand,
     Labelled,
     Loop,
+    Output,
     Rows,
+    section,
 )
 from agents_cordis_plugin.child import ChildRow, prefixed
+from agents_cordis_plugin.kinds import read_types, type_names
 from cordis import Effects, Fiber, Inspection, Performer, Row, acquire, bind, component, performer, use
 
 __all__ = ["ChildConfig", "OutputConfig", "agents", "child", "output"]
@@ -52,6 +55,15 @@ class _Registrar(Protocol):
         runs: str = ...,
         show: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = ...,
     ) -> Callable[[], None]: ...
+
+
+@runtime_checkable
+class _Trusted(Protocol):
+    """What the agents row needs of the `host` value (CONTRACTS.md: host): bh-02's config
+    directories, the only places a type file is read from."""
+
+    @property
+    def trusted(self) -> tuple[str, ...]: ...
 
 
 @runtime_checkable
@@ -87,31 +99,43 @@ class _Child:
         return "; ".join(said)
 
 
-async def _mount(host: Performer, name: str, rows: Sequence[ChildRow]) -> _Child:
+async def _mount(performing: Performer, name: str, rows: Sequence[ChildRow]) -> _Child:
     """Mount child `name` under the agents row's fiber: a sealed realm, its own loader over `rows`."""
     config = cordis.loader.LoaderConfig(
         overrides=tuple(Row(row.id, row.use, row.config) for row in rows), watch=None
     )
     return _Child(
-        await host.perform(use(cordis.loader.loader, config=config, expose=_EXPOSED, id=prefixed(name)))
+        await performing.perform(use(cordis.loader.loader, config=config, expose=_EXPOSED, id=prefixed(name)))
     )
 
 
 @component(provides=("asker",))
 async def agents(
-    *, tools: _Registrar, system: _Sections, output: Confirm, loader: Rows, config: AgentsConfig
+    *,
+    tools: _Registrar,
+    system: _Sections,
+    output: Output,
+    loader: Rows,
+    host: _Trusted,
+    config: AgentsConfig,
 ) -> Effects:
     """Fills an `agents` row: `use = "agents:agents"`. Binds `asker` (a confirm-only view of the
-    parent's `output`, for its children), registers the `agent` tool (`runs="harness"`: bh-02's
-    own, unasked exactly when the runner confines) and tells the model of it in the `system`
-    section `agents`. Each call mounts one child through this row's performer, from the rows
-    the parent's loader mounted (`loader.rows`, as `config.rows` names them), drives its reply
-    and retires it; unloading this row retires every child still up."""
-    host: Performer = yield performer()
+    parent's `output`, for its children), registers the `agent` and `agent_wait` tools
+    (`runs="harness"`: bh-02's own, unasked exactly when the runner confines) and tells the model
+    of them in the `system` section `agents`. Each `agent` call mounts one child through this
+    row's performer, of a type read from bh-02's config directories (`host.trusted`) or shipped,
+    from the rows the parent's loader mounted (`loader.rows`, as `config.rows` names them),
+    drives its reply and retires it; unloading this row cancels every background run and retires
+    every child still up."""
+    performing: Performer = yield performer()
     yield bind("asker", Asker(output))
-    run = Agents(loader, partial(_mount, host), config)
+    types = partial(read_types, host.trusted, config.tools)
+    run = Agents(loader, partial(_mount, performing), output, types, config)
+    yield acquire(run.held)
     yield acquire(tools.register, AGENT, run.agent, runs="harness")
-    yield acquire(system.add, "agents", lambda: SECTION)
+    yield acquire(tools.register, AGENT_WAIT, run.agent_wait, runs="harness")
+    # the section names the types there are as a conversation begins (read on the executor)
+    yield acquire(system.add, "agents", lambda: section(type_names(host.trusted, config.tools)))
 
 
 @dataclass(frozen=True, slots=True)

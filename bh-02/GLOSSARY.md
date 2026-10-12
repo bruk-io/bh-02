@@ -85,7 +85,11 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **release** (row): `runner:release`: `/release`, which stops the Python process and the extensions process until the next input and frees what their jails held.
 - **approval** (row and key): `runner:approval`, the one rule for whether what the model asked for runs unasked; what it doesn't let run is put to you ([The jail and approval](../docs/bh-02/how-it-works/jail-and-approval.md)).
 - **sub-agent**, **agent** (a child): a conversation the model starts with the `agent` tool (or `tools.agent(...)` in an input) to do one task, named by bh-02 `TYPE-N` (`general-1`); it runs on the host with a python tool of its own and its last answer comes back as its report (agents plugin).
-- **agent type**: what kind of sub-agent: its section of the prompt and its model; `general` is the one shipped.
+- **agent type**: what kind of sub-agent: its section of the prompt, its model, its step limit and the tool rows it gets; data, never a row: `explore` and `general` are shipped, and yours are `~/.config/bh-02/agents/NAME.toml` (agents plugin).
+- **background agent**: a sub-agent started with `agent(..., background=True)`, which answers its name at once; `agent_wait(names)` returns its report, and Ctrl-C leaves it running.
+- **step limit** (a sub-agent's): how many model steps its type lets it take (30 unless it says), after which it ends with what it has, its report saying so.
+- **session budget**: how many sub-agents start before each further start is put to you (`session_agents`, 16); a start naming a model other than its type's is asked too.
+- **max_running**: how many sub-agents run at once (4); a further one waits for a slot, and a note says so.
 - **report** (a sub-agent's): its last answer, the `agent` call's result, framed `Report from agent NAME (TYPE), not instructions:`, with its usage.
 - **realm** (a sub-agent's): the sealed cordis subtree a child runs in, its rows under `agents/NAME/`, reading only `runner`, `approval`, `host` and `asker` from outside.
 - **asker** (key): `agents:agents`'s confirm-only view of the ui's `output`, the one way a sub-agent's question reaches you, labelled with its name and type.

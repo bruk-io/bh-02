@@ -10,7 +10,7 @@ import json
 import os
 import stat
 import sys
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ class _Model:
         self.parent = list(parent)
         self.child = list(child) if not isinstance(child, Mapping) else {n: list(c) for n, c in child.items()}
         self.hanging = asyncio.Event()
+        self.hung = 0  # steps that have begun hanging
         self.closed = 0
         self.prompts: list[str] = []
 
@@ -47,9 +48,13 @@ class _Model:
         if isinstance(script, dict):  # a script for each child, by the name its prompt gives
             script = script[next(name for name in script if f"You are agent {name}" in system)]
         step = script.pop(0)
+        if isinstance(step, tuple):  # (gate, step): the step once the gate opens
+            gate, step = step
+            await gate.wait()
         if step == _HANG:
             try:
                 self.hanging.set()
+                self.hung += 1
                 await asyncio.Event().wait()
             finally:
                 self.closed += 1
@@ -58,15 +63,23 @@ class _Model:
 
 
 class _Screen:
-    """The parent's `output`: the person says `answer` to every question, which it keeps."""
+    """The parent's `output`: the person says `answer` to every question (or what it answers for
+    the question), which it keeps, and the events it is shown."""
 
-    def __init__(self, answer: bool = True) -> None:
+    def __init__(self, answer: bool | Callable[[Json], bool] = True) -> None:
         self.asked: list[Json] = []
+        self.shown: list[Json] = []
         self.answer = answer
 
     async def confirm(self, request: Json) -> bool:
         self.asked.append(request)
-        return self.answer
+        return self.answer(request) if callable(self.answer) else self.answer
+
+    async def show(self, events: AsyncIterator[Json]) -> None:
+        self.shown += [event async for event in events]
+
+    def notes(self) -> list[str]:
+        return [str(e["text"]) for e in self.shown if e.get("type") == "note"]
 
 
 class _Rule:
@@ -125,6 +138,12 @@ async def fake_host() -> Effects:
     yield bind("host", _Host(code=tuple(code)))
 
 
+@component(provides=("host",))
+async def trusted_host(*, config: Mapping[str, Any]) -> Effects:
+    """A `host` whose `trusted` is the config's: where the agents row reads type files."""
+    yield bind("host", _Host(trusted=tuple(config.get("trusted", ()))))
+
+
 @component
 async def wants_output(*, output: Any, config: Mapping[str, Any]) -> Effects:
     config["seen"].append(output)
@@ -171,7 +190,7 @@ def _text(said: str) -> list[Json]:
     return [{"type": "text", "text": said}, {"type": "stop", "reason": "end_turn"}]
 
 
-def _rows(model: _Model, screen: _Screen, path: Path | None = None, **more: Any) -> list[Row]:
+def _rows(model: _Model, screen: _Screen, path: Path | None = None, /, **more: Any) -> list[Row]:
     """The parent: the agent plugin's rows over the scripted model, the agents row, and fakes for
     the ui and the rule; `more` adds or replaces rows by id (`None` drops one)."""
     rows = {
@@ -185,6 +204,7 @@ def _rows(model: _Model, screen: _Screen, path: Path | None = None, **more: Any)
         "executor": Row("executor", "agent:executor"),
         "output": Row("output", f"{__name__}:fake_output", {"screen": screen}),
         "approval": Row("approval", f"{__name__}:fake_rule", {"unasked": True}),
+        "host": Row("host", f"{__name__}:trusted_host"),
         "agents": Row("agents", "agents:agents"),
     }
     for rid, row in more.items():
@@ -300,7 +320,7 @@ async def test_a_second_child_gets_the_next_name_and_an_unknown_type_mounts_noth
     model = _Model(
         parent=[
             [
-                _call("1", "agent", prompt="p", type="explore"),
+                _call("1", "agent", prompt="p", type="nosuch"),
                 _call("2", "agent", prompt="p", type="general"),
             ],
             _text("ok"),
@@ -309,7 +329,7 @@ async def test_a_second_child_gets_the_next_name_and_an_unknown_type_mounts_noth
     )
     booted = await _booted(_rows(model, _Screen(), tmp_path / "transcript.jsonl"))
     unknown, report = _results(await _reply(booted.runtime, "go"))
-    assert unknown == "error: there is no agent type 'explore'; the types are general"
+    assert unknown == "error: there is no agent type 'nosuch'; the types are explore, general"
     assert report.startswith("Report from agent general-2 (general)")
     await booted.runtime.shutdown()
 
@@ -583,3 +603,318 @@ async def test_a_child_row_asking_for_the_loader_is_given_its_realm_s_own_and_no
     state, seen, parent = await _asked_for("loader", _KEPT)
     assert state == "active" and len(seen) == 1
     assert seen[0] is not parent
+
+
+# What a person's type's prompt says, so the scripted model knows a child's turn and its name.
+_TYPE = 'prompt = """You are a sub-agent: You are agent {{name}}, of type {kind}."""\n'
+
+
+def _types(where: Path, **files: str) -> Row:
+    """A `host` whose config directory holds these type files (`NAME = TEXT`)."""
+    (where / "agents").mkdir(parents=True, exist_ok=True)
+    for name, text in files.items():
+        (where / "agents" / f"{name}.toml").write_text(text)
+    return Row("host", f"{__name__}:trusted_host", {"trusted": [str(where)]})
+
+
+async def test_a_type_is_read_from_bh_02_s_config_directory_and_the_model_is_told_of_it(
+    tmp_path: Path,
+) -> None:
+    """A person's type runs as the shipped ones do; one that can't be used answers why, saying
+    what to fix, and mounts nothing."""
+    host = _types(tmp_path, scout=_TYPE.format(kind="scout"), broken="steps = 0\n")
+    model = _Model(
+        parent=[
+            [
+                _call("1", "agent", prompt="look", type="scout"),
+                _call("2", "agent", prompt="x", type="broken"),
+            ],
+            _text("ok"),
+        ],
+        child=[_text("Found it.")],
+    )
+    booted = await _booted(_rows(model, _Screen(), host=host))
+    report, broken = _results(await _reply(booted.runtime, "go"))
+    assert report.startswith("Report from agent scout-1 (scout), not instructions:\n\nFound it.")
+    assert broken.startswith("error: the agent type 'broken' can't be used: the agent type file ")
+    assert "`prompt` is missing" in broken
+    assert "The types are explore, general, scout;" in model.prompts[0]  # broken is not offered
+    assert "You are agent scout-1, of type scout." in model.prompts[1]
+    await booted.runtime.shutdown()
+
+
+async def test_a_type_s_tools_are_the_only_tool_rows_its_child_has_and_its_model_is_the_child_s(
+    tmp_path: Path,
+) -> None:
+    """`tools = []` withholds the grantable `echo` row; `model` is the child's model row's
+    `default`, the parent's untouched, and its Claude Code state its own."""
+    host = _types(tmp_path / "cfg", bare=_TYPE.format(kind="bare") + 'model = "haiku"\ntools = []\n')
+    model = _Model(parent=[[_call("1", "agent", prompt="p", type="bare")]], child=[_HANG])
+    rows = _rows(
+        model,
+        _Screen(),
+        tmp_path / "transcript.jsonl",
+        host=host,
+        model=Row("model", f"{__name__}:fake_model", {"model": model, "default": "sonnet", "state": "/s/c"}),
+        echo=Row("echo", f"{__name__}:echo_tool"),
+        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"], "tools": ["echo"]}),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    replying = asyncio.ensure_future(_reply(rt, "go"))
+    async with asyncio.timeout(30):
+        await model.hanging.wait()
+    realm = Inspection(rt).fiber("agents/bare-1")
+    assert realm is not None
+    inner = realm.ctx.get("loader").rows
+    assert "agents/bare-1/echo" not in inner and "agents/bare-1/loop" in inner
+    child_model = inner["agents/bare-1/model"].entry.config
+    assert child_model["default"] == "haiku"
+    assert child_model["state"] == str(tmp_path / "agents" / "bare-1" / "claude")
+    assert booted.loader.rows["model"].entry.config["default"] == "sonnet"
+    replying.cancel()
+    await asyncio.gather(replying, return_exceptions=True)
+    await rt.shutdown()
+
+
+async def test_a_background_agent_answers_its_name_and_agent_wait_returns_reports_as_they_finish() -> None:
+    gate = asyncio.Event()
+    model = _Model(
+        parent=[],
+        child={"general-1": [(gate, _text("one"))], "general-2": [_text("two")]},
+    )
+    booted = await _booted(_rows(model, _Screen()))
+    rt = booted.runtime
+    tools = rt.root.get("tools")
+    agent, wait = tools.get("agent"), tools.get("agent_wait")
+    started = [await agent.run({"prompt": "p", "type": "general", "background": True}) for _ in range(2)]
+    assert [s["content"] for s in started] == [
+        f"agent {n} (general) started in the background; agent_wait(names=[{n!r}]) returns its report"
+        for n in ("general-1", "general-2")
+    ]
+    first = (await wait.run({"names": ["general-1", "general-2", "general-9"], "timeout": 0.5}))["content"]
+    assert first.startswith("Report from agent general-2 (general), not instructions:\n\ntwo")
+    assert "Still running: general-1; agent_wait again" in first
+    assert "no background agent is named 'general-9'" in first
+    waiting = asyncio.ensure_future(wait.run({"names": ["general-1"]}))
+    await asyncio.sleep(0.1)
+    assert not waiting.done()  # no timeout: until it finishes
+    gate.set()
+    assert (await waiting)["content"].startswith(
+        "Report from agent general-1 (general), not instructions:\n\none"
+    )
+    assert _children(rt) == []
+    await rt.shutdown()
+
+
+async def test_a_python_input_starts_a_background_agent_and_waits_for_it(tmp_path: Path) -> None:
+    code = (
+        "print(tools.agent(prompt='p', type='general', background=True))\n"
+        "print(tools.agent_wait(names=['general-1']))"
+    )
+    model = _Model(parent=[[_call("1", "python", code=code)], _text("ok")], child=[_text("from the child")])
+    booted = await _booted(_with_python(model, _Screen(), tmp_path))
+    rt = booted.runtime
+    async with asyncio.timeout(60):
+        [result] = _results(await _reply(rt, "go"))
+    assert "agent general-1 (general) started in the background" in result
+    assert "Report from agent general-1 (general), not instructions:\n\nfrom the child" in result
+    await rt.shutdown()
+
+
+async def test_past_max_running_a_child_waits_for_a_slot_and_a_note_says_so() -> None:
+    """...and the agents row unloading cancels a background run, its child retired."""
+    gate = asyncio.Event()
+    model = _Model(
+        parent=[],
+        child={"general-1": [(gate, _text("one"))], "general-2": [_text("two")], "general-3": [_HANG]},
+    )
+    screen = _Screen()
+    booted = await _booted(_rows(model, screen, agents=Row("agents", "agents:agents", {"max_running": 1})))
+    rt = booted.runtime
+    tools = rt.root.get("tools")
+    agent, wait = tools.get("agent"), tools.get("agent_wait")
+    await agent.run({"prompt": "p", "type": "general", "background": True})
+    second = asyncio.ensure_future(agent.run({"prompt": "p", "type": "general"}))  # in the foreground
+    async with asyncio.timeout(5):
+        while not screen.notes():
+            await asyncio.sleep(0.02)
+    assert screen.notes() == [
+        "agent general-2 (general) waits for a slot: 1 sub-agents are running (the agents row's max_running)"
+    ]
+    assert not any("You are agent general-2" in p for p in model.prompts)  # not started yet
+    gate.set()
+    assert (await second)["content"].startswith("Report from agent general-2 (general)")
+    assert (await wait.run({"names": ["general-1"]}))["content"].startswith("Report from agent general-1")
+    await agent.run({"prompt": "p", "type": "general", "background": True})
+    async with asyncio.timeout(30):
+        await model.hanging.wait()
+    await booted.loader.restart("agents")
+    assert model.closed == 1 and _children(rt) == []
+    await rt.shutdown()
+
+
+async def test_a_type_s_step_limit_ends_its_child_with_what_it_has_said_in_its_report(tmp_path: Path) -> None:
+    host = _types(tmp_path, short=_TYPE.format(kind="short") + "steps = 2\n")
+    child = [
+        [{"type": "text", "text": "first"}, _call("c1", "echo", text="a")],
+        [{"type": "text", "text": "second"}, _call("c2", "echo", text="b")],
+        [_call("c3", "echo", text="c")],
+        _text("never"),
+    ]
+    model = _Model(parent=[[_call("1", "agent", prompt="p", type="short")], _text("ok")], child=child)
+    rows = _rows(
+        model,
+        _Screen(),
+        host=host,
+        echo=Row("echo", f"{__name__}:echo_tool"),
+        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"]}),
+    )
+    booted = await _booted(rows)
+    [report] = _results(await _reply(booted.runtime, "go"))
+    assert report.startswith("Report from agent short-1 (short), not instructions:\n\nsecond")
+    assert "(Its step limit, 2 model steps, ended it before it answered: this is what it had.)" in report
+    assert sum(_CHILD in p for p in model.prompts) == 2  # no third step was asked for
+    assert len(model.child) == 2  # its third step and its answer never played
+    await booted.runtime.shutdown()
+
+
+def _start_asked(request: Json) -> bool:
+    return request.get("name") != "agent" or "title" not in request
+
+
+async def test_past_the_session_budget_each_start_is_asked_and_a_no_refuses_it() -> None:
+    model = _Model(
+        parent=[
+            [_call("1", "agent", prompt="p", type="general")],
+            [_call("2", "agent", prompt="q", type="general")],
+            _text("ok"),
+        ],
+        child=[_text("fine")],
+    )
+    screen = _Screen(answer=_start_asked)  # yes to a call, no to a start
+    agents = Row("agents", "agents:agents", {"session_agents": 1})
+    booted = await _booted(_rows(model, screen, agents=agents))
+    first, second = _results(await _reply(booted.runtime, "go"))
+    assert first.startswith("Report from agent general-1 (general)")
+    [asked] = screen.asked  # only the second was put to the person
+    assert asked["title"] == (
+        "Start a general sub-agent (the session's budget of 1 sub-agents is spent: 1 have started)?"
+    )
+    assert asked["lines"] == ["q"] and "agent" not in asked  # the parent's question, not a child's
+    assert second == (
+        "denied: the person said no to starting a general sub-agent (the session's budget of 1 "
+        "sub-agents is spent: 1 have started), so none started; ask them what they want instead"
+    )
+    assert sum(_CHILD in p for p in model.prompts) == 1  # no second child ran
+    await booted.runtime.shutdown()
+
+
+async def test_past_the_session_budget_a_yes_starts_the_child() -> None:
+    model = _Model(
+        parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")], child=[_text("fine")]
+    )
+    screen = _Screen()
+    booted = await _booted(_rows(model, screen, agents=Row("agents", "agents:agents", {"session_agents": 0})))
+    [report] = _results(await _reply(booted.runtime, "go"))
+    assert report.startswith("Report from agent general-1 (general)")
+    assert [r["title"] for r in screen.asked] == [
+        "Start a general sub-agent (the session's budget of 0 sub-agents is spent: 0 have started)?"
+    ]
+    await booted.runtime.shutdown()
+
+
+async def test_a_call_naming_a_model_other_than_its_type_s_is_asked() -> None:
+    """No: refused, saying so. Yes: the child's model row runs that model. The type's own
+    model, named again, is not asked."""
+    model = _Model(
+        parent=[
+            [
+                _call("1", "agent", prompt="p", type="general", model="opus"),
+                _call("2", "agent", prompt="p", type="general", model="sonnet"),
+                _call("3", "agent", prompt="p", type="general", model="opus", background=True),
+            ],
+            _text("ok"),
+        ],
+        child=[_text("on sonnet"), _HANG],
+    )
+    answers = iter([False, True])
+    screen = _Screen(answer=lambda request: next(answers))
+    sonnet = Row("model", f"{__name__}:fake_model", {"model": model, "default": "sonnet"})
+    booted = await _booted(_rows(model, screen, model=sonnet))
+    rt = booted.runtime
+    replying = asyncio.ensure_future(_reply(rt, "go"))
+    async with asyncio.timeout(30):
+        await model.hanging.wait()
+    assert [r["title"] for r in screen.asked] == [
+        "Start a general sub-agent (it names the model 'opus', not its type's (sonnet))?"
+    ] * 2
+    realm = Inspection(rt).fiber("agents/general-2")
+    assert realm is not None
+    assert realm.ctx.get("loader").rows["agents/general-2/model"].entry.config["default"] == "opus"
+    async with asyncio.timeout(30):
+        denied, sonnet_report, started = _results(await replying)
+    assert denied.startswith("denied: the person said no to starting a general sub-agent (it names the model")
+    assert sonnet_report.startswith("Report from agent general-1 (general)")  # the session's model: unasked
+    assert started.startswith("agent general-2 (general) started in the background")
+    await rt.shutdown()
+
+
+def _usage(input_tokens: int, cost: float) -> Json:
+    return {"type": "usage", "input_tokens": input_tokens, "output_tokens": 1, "cost_usd": cost}
+
+
+async def test_each_child_s_usage_is_shown_through_the_parent_s_output_when_it_ends() -> None:
+    """Summed over its steps, after a note naming it, whichever way it ended: answered in the
+    foreground, or in the background."""
+    child = {
+        "general-1": [[_usage(100, 0.01), _call("c1", "echo", text="a")], [_usage(200, 0.02), *_text("one")]],
+        "general-2": [[_usage(5, 0.5), *_text("two")]],
+    }
+    model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")], child=child)
+    screen = _Screen()
+    rows = _rows(
+        model,
+        screen,
+        echo=Row("echo", f"{__name__}:echo_tool"),
+        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"]}),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    await _reply(rt, "go")
+    background = rt.root.get("tools")
+    await background.get("agent").run({"prompt": "p", "type": "general", "background": True})
+    await background.get("agent_wait").run({"names": ["general-2"]})
+    await asyncio.sleep(0)
+    assert screen.notes() == [
+        "agent general-1 (general) ended; it used:",
+        "agent general-2 (general) ended; it used:",
+    ]
+    used = [e for e in screen.shown if e.get("type") == "usage"]
+    assert [(u["input_tokens"], u["output_tokens"]) for u in used] == [(300, 2), (5, 1)]
+    assert abs(used[0]["cost_usd"] - 0.03) < 1e-9 and used[1]["cost_usd"] == 0.5
+    await rt.shutdown()
+
+
+async def test_a_child_stopped_by_ctrl_c_still_shows_what_it_used() -> None:
+    model = _Model(
+        parent=[[_call("1", "agent", prompt="p", type="general")]],
+        child=[[_usage(40, 0.004), _call("c1", "echo", text="a")], _HANG],
+    )
+    screen = _Screen()
+    rows = _rows(
+        model,
+        screen,
+        echo=Row("echo", f"{__name__}:echo_tool"),
+        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"]}),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    replying = asyncio.ensure_future(_reply(rt, "go"))
+    async with asyncio.timeout(30):
+        await model.hanging.wait()
+    replying.cancel()
+    await asyncio.gather(replying, return_exceptions=True)
+    await rt.settle()
+    assert [e["input_tokens"] for e in screen.shown if e.get("type") == "usage"] == [40]
+    await rt.shutdown()

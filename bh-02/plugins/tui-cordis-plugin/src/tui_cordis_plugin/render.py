@@ -19,6 +19,7 @@ __all__ = [
     "approval_lines",
     "approval_heading",
     "approval_title",
+    "asked_by_a_sub_agent",
     "code",
     "fence_after",
     "is_quiet_stop",
@@ -292,11 +293,19 @@ def approval_title(request: Event) -> str:
     return f"Run this {request.get('name', '?')} code ({size})?"
 
 
+def asked_by_a_sub_agent(request: Event) -> bool:
+    """Whether a sub-agent asks (the request's `agent` names one: CONTRACTS.md, request). Ctrl-C
+    never answers its question: the reply it stops withdraws its foreground child's, and a
+    background child's stays queued."""
+    agent = request.get("agent")
+    return isinstance(agent, Mapping) and bool(agent.get("name"))
+
+
 def approval_heading(request: Event) -> str:
     """The question an approval asks (`approval_title`), after who asks when a sub-agent does
     (the request's `agent`, its name and type: CONTRACTS.md, request)."""
     agent = request.get("agent")
-    if isinstance(agent, Mapping) and agent.get("name"):
+    if isinstance(agent, Mapping) and asked_by_a_sub_agent(request):
         return f"Agent {agent.get('name')} ({agent.get('type', '?')}) asks:\n{approval_title(request)}"
     return approval_title(request)
 

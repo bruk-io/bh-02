@@ -238,6 +238,12 @@ exclude = [
     "agent_cordis_plugin.loop:_today",                        # the clock: the date the loop tells with a message
     # a sub-agent: its state directory made (the session's agents/NAME, 0700), in the call that runs it
     "agents_cordis_plugin.agents:Agents._claim", "agents_cordis_plugin.agents:Agents.agent",
+    # a sub-agent's run: its reply driven, its events kept for its report and for the usage shown
+    # however the run ends (a step limit, Ctrl-C, its retirement)
+    "agents_cordis_plugin.agents:Agents._run", "agents_cordis_plugin.agents:_driven",
+    "agents_cordis_plugin.agents:_driven.reply",
+    # agent types: the type files read from bh-02's config directories
+    "agents_cordis_plugin.kinds:type_files", "agents_cordis_plugin.kinds:type_names",
     "agent_cordis_plugin.transcript:MemoryTranscript.append",
     # Claude Code: one process per conversation and what it holds, saved in the session's
     # state dir; the one read of local.env; a rebuilt session file; the CLI's stderr to a log;

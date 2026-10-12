@@ -61,10 +61,14 @@ version = "0.1.0"
 source = { editable = "bh-02/plugins/agents-cordis-plugin" }
 dependencies = [
     { name = "cordis" },
+    { name = "host-paths" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cordis", editable = "libs/cordis" }]
+requires-dist = [
+    { name = "cordis", editable = "libs/cordis" },
+    { name = "host-paths", editable = "libs/host-paths" },
+]
 
 [[package]]
 name = "annotated-types"

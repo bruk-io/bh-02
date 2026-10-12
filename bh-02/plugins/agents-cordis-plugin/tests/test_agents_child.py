@@ -45,12 +45,13 @@ _KEPT = ("loop", "tools", "transcript", "model", "python")
 _PLACE = PurePath("/s/abc/agents/general-1")
 
 
-def _rows(kind: AgentType = GENERAL, place: PurePath | None = _PLACE) -> Any:
+def _rows(kind: AgentType = GENERAL, place: PurePath | None = _PLACE, kept: Any = _KEPT) -> Any:
     return child_rows(
         _PARENT,
         name="general-1",
         kind=kind,
-        kept=_KEPT,
+        kept=kept,
+        tools=("python",),
         transcript_row="transcript",
         model_row="model",
         place=place,
@@ -122,7 +123,9 @@ def test_a_report_that_did_not_end_in_an_answer_says_how_it_ended() -> None:
 
 
 def test_an_unknown_type_names_the_ones_there_are() -> None:
-    assert unknown_type("explore") == "error: there is no agent type 'explore'; the types are general"
+    assert unknown_type("nosuch", ["general", "explore"]) == (
+        "error: there is no agent type 'nosuch'; the types are explore, general"
+    )
 
 
 class _Screen:
@@ -163,6 +166,7 @@ def test_a_child_never_gets_an_agents_row_whatever_the_layer_names() -> None:
                 name="general-1",
                 kind=GENERAL,
                 kept=(*_KEPT, named),
+                tools=("python",),
                 transcript_row="transcript",
                 model_row="model",
                 place=_PLACE,

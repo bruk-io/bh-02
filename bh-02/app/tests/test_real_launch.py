@@ -558,7 +558,7 @@ def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tm
         m["content"] for m in map(json.loads, transcript.read_text().splitlines()) if m["role"] == "tool"
     ]
     assert results[0].startswith("not run: the person stopped the turn before this call started")
-    assert results[1].endswith("tools.agent; help(tools.NAME) says what one takes)\n42")  # told once
+    assert results[1].endswith("tools.agent, tools.agent_wait; help(tools.NAME) says what one takes)\n42")
 
 
 def test_a_narrow_screen_keeps_every_jail_grade_named(launch: Launch) -> None:
