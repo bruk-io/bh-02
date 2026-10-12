@@ -29,7 +29,9 @@ serves as it does the model's own calls) runs one child to its end:
    them: `transcript.path` (`agents/NAME/transcript.jsonl`), the model's Claude Code `state`
    (`agents/NAME/claude`, when the parent's model row keeps one) and the model its type names
    (`general` names none: the session's). No memory rows, no `chat`, no `input`, no `agents`
-   row: a child can't start one of its own (depth one). Then `agents:output` and `agents:child`.
+   row: a child can't start one of its own (depth one). A layer whose `rows` names the agents row
+   (by its id, or any row using `agents:agents`) gets an error from the call saying so, not a
+   child with one (decision-0002). Then `agents:output` and `agents:child`.
 3. **Its realm**: `performer.perform(use(cordis.loader:loader, config=LoaderConfig(overrides=rows,
    watch=None), expose={runner, approval, host, asker}, id="agents/NAME"))`. The realm's own
    loader resolves each row by name (this plugin imports no other), and every key its rows bind

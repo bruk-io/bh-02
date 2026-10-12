@@ -5,11 +5,17 @@ from a python input. The parent and its children are the agent plugin's rows ove
 model, named by entry point (no plugin is imported)."""
 
 import asyncio
+import importlib.util
+import json
 import os
 import stat
+import sys
 from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from cordis import Effects, Inspection, Row, Runtime, acquire, bind, component
 from cordis.loader import Booted, boot
@@ -25,8 +31,11 @@ class _Model:
     config and all): each request plays the next step of the parent's or the children's script,
     by whose prompt it carries. A `_HANG` step waits until its stream is closed, and says so."""
 
-    def __init__(self, parent: Sequence[Any], child: Sequence[Any] = ()) -> None:
-        self.parent, self.child = list(parent), list(child)
+    def __init__(
+        self, parent: Sequence[Any], child: Sequence[Any] | Mapping[str, Sequence[Any]] = ()
+    ) -> None:
+        self.parent = list(parent)
+        self.child = list(child) if not isinstance(child, Mapping) else {n: list(c) for n, c in child.items()}
         self.hanging = asyncio.Event()
         self.closed = 0
         self.prompts: list[str] = []
@@ -34,7 +43,10 @@ class _Model:
     async def complete(self, messages: Sequence[Json], tools: Sequence[Json]) -> AsyncIterator[Json]:
         system = str(messages[0].get("content", "")) if messages else ""
         self.prompts.append(system)
-        step = (self.child if _CHILD in system else self.parent).pop(0)
+        script = self.child if _CHILD in system else self.parent
+        if isinstance(script, dict):  # a script for each child, by the name its prompt gives
+            script = script[next(name for name in script if f"You are agent {name}" in system)]
+        step = script.pop(0)
         if step == _HANG:
             try:
                 self.hanging.set()
@@ -91,6 +103,57 @@ _ECHO = {
 }
 
 
+@dataclass(frozen=True)
+class _Host:
+    """The `host` value a confined runner reads: where the program's code is, which every jail reads."""
+
+    paths: tuple[str, ...] = ()
+    credentials: tuple[str, ...] = ()
+    secrets: tuple[str, ...] = ()
+    trusted: tuple[str, ...] = ()
+    code: tuple[str, ...] = ()
+    auto_memory: str = ""
+
+
+@component(provides=("host",))
+async def fake_host() -> Effects:
+    code = []
+    for name in ("cordis", "cordis_helpers", "host_paths", "brig", "python_cordis_plugin"):
+        spec = importlib.util.find_spec(name)
+        if spec is not None and spec.submodule_search_locations:
+            code += [str(Path(place).resolve()) for place in spec.submodule_search_locations]
+    yield bind("host", _Host(code=tuple(code)))
+
+
+@component
+async def wants_output(*, output: Any, config: Mapping[str, Any]) -> Effects:
+    config["seen"].append(output)
+    yield acquire(list.clear, [])
+
+
+@component
+async def wants_tools(*, tools: Any, config: Mapping[str, Any]) -> Effects:
+    config["seen"].append(tools)
+    yield acquire(list.clear, [])
+
+
+@component
+async def wants_loader(*, loader: Any, config: Mapping[str, Any]) -> Effects:
+    config["seen"].append(loader)
+    yield acquire(list.clear, [])
+
+
+@component
+async def wants_commands(*, commands: Any, config: Mapping[str, Any]) -> Effects:
+    config["seen"].append(commands)
+    yield acquire(list.clear, [])
+
+
+@component(provides=("commands",))
+async def fake_commands() -> Effects:
+    yield bind("commands", "the parent's commands")
+
+
 @component
 async def echo_tool(*, tools: Any) -> Effects:
     yield acquire(tools.register, _ECHO, _echo)
@@ -130,6 +193,59 @@ def _rows(model: _Model, screen: _Screen, path: Path | None = None, **more: Any)
         else:
             rows[rid] = row
     return list(rows.values())
+
+
+# What a child's python input says of itself: a file named for its pid, in `dir`, then it waits.
+_PID = "import os; open({dir!r} + '/pid-' + str(os.getpid()), 'w').write('up')"
+
+
+def _with_python(model: _Model, screen: _Screen, where: Path) -> list[Row]:
+    """The parent and its children with a real python row each, over the unconfined runner (each
+    program a plain process of the host's, so its pid is the host's): the loop waits for it."""
+    return _rows(
+        model,
+        screen,
+        loop=Row("loop", "agent:loop", {"requires": ["python"]}),
+        runner=Row("runner", "runner:unconfined"),
+        approval=Row("approval", "runner:approval"),
+        python=Row("python", "python:tool", {"root": str(where), "startup": []}),
+        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "python"]}),
+    )
+
+
+def _programs(where: Path) -> list[int]:
+    """The pids the children's python inputs reported."""
+    return sorted(int(f.name.removeprefix("pid-")) for f in where.glob("pid-*"))
+
+
+def _running(pid: int) -> bool:
+    """Whether the program is still running: a zombie nobody reaped has ended (this container's
+    init reaps none), and a pid the kernel has no entry for is gone."""
+    try:
+        stat_line = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    return stat_line.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+async def _all_gone(pids: Sequence[int]) -> bool:
+    """Whether every program of `pids` has exited, given the 5 seconds retiring a row may take."""
+    try:
+        async with asyncio.timeout(5):
+            while any(_running(pid) for pid in pids):
+                await asyncio.sleep(0.05)
+    except TimeoutError:
+        return False
+    return True
+
+
+async def _up(where: Path, count: int) -> list[int]:
+    """The pids of `count` children's python programs, once each has run its input and is waiting."""
+    async with asyncio.timeout(60):
+        while len(pids := _programs(where)) < count:
+            await asyncio.sleep(0.02)
+    assert all(_running(pid) for pid in pids)
+    return pids
 
 
 async def _booted(rows: list[Row]) -> Booted:
@@ -198,34 +314,44 @@ async def test_a_second_child_gets_the_next_name_and_an_unknown_type_mounts_noth
     await booted.runtime.shutdown()
 
 
-async def test_retiring_a_child_while_it_replies_ends_the_call_with_no_report() -> None:
-    model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")], child=[_HANG])
-    booted = await _booted(_rows(model, _Screen()))
+async def test_retiring_a_child_while_it_replies_ends_the_call_with_no_report(tmp_path: Path) -> None:
+    """The child's python program, running when it is retired, has exited once it is."""
+    model = _Model(
+        parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")],
+        child=[[_call("c1", "python", code=_PID.format(dir=str(tmp_path)))], _HANG],
+    )
+    booted = await _booted(_with_python(model, _Screen(), tmp_path))
     rt = booted.runtime
     replying = asyncio.ensure_future(_reply(rt, "go"))
-    await model.hanging.wait()
+    async with asyncio.timeout(60):
+        await model.hanging.wait()
+    [program] = await _up(tmp_path, 1)
     realm = Inspection(rt).fiber("agents/general-1")
     assert realm is not None
     await realm.retire()
     [result] = _results(await replying)
     assert result == "agent general-1 (general) gave no report: it was stopped before it answered"
     assert model.closed == 1 and _children(rt) == []
+    assert await _all_gone([program])  # the child's REPL program with it
     await rt.shutdown()
 
 
-async def test_unloading_the_agents_row_retires_every_child_it_holds() -> None:
-    model = _Model(parent=[], child=[_HANG, _HANG])
-    booted = await _booted(_rows(model, _Screen()))
+async def test_unloading_the_agents_row_retires_every_child_it_holds(tmp_path: Path) -> None:
+    """...and every child's python program has exited with it."""
+    code = _PID.format(dir=str(tmp_path))
+    script = [[_call("c1", "python", code=code)], _HANG]
+    model = _Model(parent=[], child={"general-1": script, "general-2": list(script)})
+    booted = await _booted(_with_python(model, _Screen(), tmp_path))
     rt = booted.runtime
     tool = rt.root.get("tools").get("agent")
     runs = [asyncio.ensure_future(tool.run({"prompt": "p", "type": "general"})) for _ in range(2)]
-    while len(model.prompts) < 2:
-        await asyncio.sleep(0.01)
+    programs = await _up(tmp_path, 2)
     assert sorted(f for f in _children(rt) if f.count("/") == 1) == ["agents/general-1", "agents/general-2"]
     await booted.loader.restart("agents")
     answers = [str((await run)["content"]) for run in runs]
     assert all(a.endswith("gave no report: it was stopped before it answered") for a in answers)
     assert model.closed == 2 and _children(rt) == []
+    assert await _all_gone(programs)
     await rt.settle()
     assert rt.root.get("tools").get("agent") is not None  # the row came back
     await rt.shutdown()
@@ -273,19 +399,27 @@ async def test_the_child_s_output_is_a_confirm_and_nothing_else() -> None:
     await rt.shutdown()
 
 
-async def test_ctrl_c_stops_the_parent_s_reply_and_the_child_it_waits_on_from_the_tool() -> None:
+async def test_ctrl_c_stops_the_parent_s_reply_and_the_child_it_waits_on_from_the_tool(
+    tmp_path: Path,
+) -> None:
     """Ctrl-C cancels the parent's reply (chat's `_interruptible`): the call waiting on the child
     closes the child's model step and retires it, and the parent's call is answered as stopped."""
-    model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")]], child=[_HANG])
-    booted = await _booted(_rows(model, _Screen()))
+    model = _Model(
+        parent=[[_call("1", "agent", prompt="p", type="general")]],
+        child=[[_call("c1", "python", code=_PID.format(dir=str(tmp_path)))], _HANG],
+    )
+    booted = await _booted(_with_python(model, _Screen(), tmp_path))
     rt = booted.runtime
     replying = asyncio.ensure_future(_reply(rt, "go"))
-    await model.hanging.wait()
+    async with asyncio.timeout(60):
+        await model.hanging.wait()
+    [program] = await _up(tmp_path, 1)
     assert _children(rt)
     replying.cancel()
     await asyncio.gather(replying, return_exceptions=True)
     await rt.settle()
     assert model.closed == 1 and _children(rt) == []
+    assert await _all_gone([program])  # the child's REPL program too
     answered = rt.root.get("transcript").messages[-1]
     assert answered["role"] == "tool" and answered["content"].startswith("interrupted:")
     await rt.shutdown()
@@ -296,25 +430,23 @@ async def test_ctrl_c_stops_the_child_a_python_input_waits_on(tmp_path: Path) ->
     reply, so Ctrl-C stopping that reply reaches the child the same way: its model step closed,
     it retired, the input interrupted."""
     code = "print(tools.agent(prompt='wait', type='general'))"
-    model = _Model(parent=[[_call("1", "python", code=code)]], child=[_HANG])
-    screen = _Screen()
-    rows = _rows(
-        model,
-        screen,
-        runner=Row("runner", "runner:unconfined"),
-        approval=Row("approval", "runner:approval"),
-        python=Row("python", "python:tool", {"root": str(tmp_path), "startup": []}),
+    model = _Model(
+        parent=[[_call("1", "python", code=code)]],
+        child=[[_call("c1", "python", code=_PID.format(dir=str(tmp_path)))], _HANG],
     )
-    booted = await _booted(rows)
+    screen = _Screen()
+    booted = await _booted(_with_python(model, screen, tmp_path))
     rt = booted.runtime
     replying = asyncio.ensure_future(_reply(rt, "go"))
     async with asyncio.timeout(60):
         await model.hanging.wait()
-    assert [r["name"] for r in screen.asked] == ["python", "agent"]  # unconfined: both asked
+    [program] = await _up(tmp_path, 1)  # the child's program; the parent's own is another
+    assert [r["name"] for r in screen.asked] == ["python", "agent", "python"]  # unconfined: all asked
     replying.cancel()
     await asyncio.gather(replying, return_exceptions=True)
     await rt.settle()
     assert model.closed == 1 and _children(rt) == []
+    assert await _all_gone([program])
     answered = rt.root.get("transcript").messages[-1]
     assert answered["role"] == "tool" and answered["content"].startswith("interrupted:")
     await rt.shutdown()
@@ -333,3 +465,117 @@ async def test_a_child_that_never_comes_up_says_which_rows_wait_on_what() -> Non
     )
     assert _children(booted.runtime) == []
     await booted.runtime.shutdown()
+
+
+async def test_a_layer_naming_the_agents_row_among_the_child_s_rows_gives_the_child_none() -> None:
+    """Depth one: `rows` naming `agents` fails the call saying so, and mounts no child (so no
+    grandchild can be started)."""
+    model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")])
+    agents = Row("agents", "agents:agents", {"rows": [*_KEPT, "agents"]})
+    booted = await _booted(_rows(model, _Screen(), agents=agents))
+    rt = booted.runtime
+    [result] = _results(await _reply(rt, "go"))
+    assert "a child has no agents row (depth one, decision-0002)" in result
+    assert _children(rt) == [] and not any(_CHILD in p for p in model.prompts)  # no child ever ran
+    await rt.shutdown()
+
+
+# What one python input says of the jail it runs in: its working directory's device and scratch
+# directory, its session and process group, and its pid inside its pid namespace.
+_WHERE = (
+    "import json, os, tempfile\n"
+    "open({path!r}, 'w').write(json.dumps({{'tmp': tempfile.gettempdir(), 'pgrp': os.getpgrp(),"
+    " 'sid': os.getsid(0), 'pid': os.getpid()}}))"
+)
+
+
+async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner(tmp_path: Path) -> None:
+    """The parent and its child each call `python` under `runner:confined`: each input runs in its
+    own bubblewrap jail (its own scratch directory, which the jail removes with it), and the
+    child's is not the parent's."""
+    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
+        pytest.skip("the confined runner's jail is bubblewrap on Linux: /usr/bin/bwrap is absent")
+    where = {who: tmp_path / f"{who}.json" for who in ("parent", "child")}
+    model = _Model(
+        parent=[
+            [_call("1", "python", code=_WHERE.format(path=str(where["parent"])))],
+            [_call("2", "agent", prompt="say where you run", type="general")],
+            _text("ok"),
+        ],
+        child=[[_call("c1", "python", code=_WHERE.format(path=str(where["child"])))], _text("said")],
+    )
+    rows = _rows(
+        model,
+        _Screen(),
+        loop=Row("loop", "agent:loop", {"requires": ["python"]}),
+        host=Row("host", f"{__name__}:fake_host"),
+        runner=Row("runner", "runner:confined"),
+        approval=Row("approval", "runner:approval"),
+        python=Row("python", "python:tool", {"root": str(tmp_path), "startup": []}),
+        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "python"]}),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    async with asyncio.timeout(120):
+        results = _results(await _reply(rt, "go"))
+    assert results[-1].startswith("Report from agent general-1 (general)"), results
+    parent, child = (json.loads(where[who].read_text()) for who in ("parent", "child"))
+    assert parent["tmp"] != child["tmp"]  # each jail's scratch directory is its own
+    assert all(Path(seen["tmp"]).parent.name.startswith("bh-j-") for seen in (parent, child))  # a jail's
+    assert child["pid"] < 100  # first in a pid namespace of its own, not a process of the host's
+    await rt.shutdown()
+
+
+async def _asked_for(key: str, kept: Sequence[str]) -> tuple[str, list[Any], Any]:
+    """One child whose `probe` row asks for the parent's `key` (and which rows it is made of),
+    left to come up: the probe's state in its realm, what the probe was given there, and the
+    parent's own value of the key."""
+    seen: list[Any] = []
+    model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")]], child=[_HANG])
+    rows = _rows(
+        model,
+        _Screen(),
+        probe=Row("probe", f"{__name__}:wants_{key}", {"seen": seen}),
+        commands=Row("commands", f"{__name__}:fake_commands"),
+        agents=Row("agents", "agents:agents", {"rows": [*kept, "probe"]}),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    replying = asyncio.ensure_future(_reply(rt, "go"))
+    realm = None
+    async with asyncio.timeout(30):
+        while realm is None or realm.ctx.get("loader") is None:
+            await asyncio.sleep(0.02)
+            realm = Inspection(rt).fiber("agents/general-1")
+    await rt.settle()
+    state = realm.ctx.get("loader").status()["agents/general-1/probe"]
+    seen.pop(0)  # the parent's own probe, up beside its keys
+    parent = rt.root.get(key)
+    replying.cancel()
+    await asyncio.gather(replying, return_exceptions=True)
+    await rt.shutdown()
+    return state, seen, parent
+
+
+async def test_a_child_row_asking_for_the_parent_s_tools_does_not_mount() -> None:
+    """The child's own `tools` row is left out, so the key is the parent's to give or not."""
+    state, seen, _ = await _asked_for("tools", [rid for rid in _KEPT if rid != "tools"])
+    assert state == "inactive" and seen == []
+
+
+async def test_a_child_row_asking_for_the_parent_s_commands_does_not_mount() -> None:
+    state, seen, parent = await _asked_for("commands", _KEPT)
+    assert parent == "the parent's commands"  # the parent has the key, so it was the seal that held
+    assert state == "inactive" and seen == []
+
+
+async def test_a_child_row_asking_for_output_is_given_the_child_s_own_and_not_the_parent_s() -> None:
+    state, seen, parent = await _asked_for("output", _KEPT)
+    assert state == "active" and len(seen) == 1
+    assert seen[0] is not parent and not hasattr(seen[0], "show")  # a labelled confirm, nothing more
+
+
+async def test_a_child_row_asking_for_the_loader_is_given_its_realm_s_own_and_not_the_parent_s() -> None:
+    state, seen, parent = await _asked_for("loader", _KEPT)
+    assert state == "active" and len(seen) == 1
+    assert seen[0] is not parent

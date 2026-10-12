@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import PurePath
 from typing import Any
 
+import pytest
+
 from agents_cordis_plugin import (
     GENERAL,
     AgentType,
@@ -146,3 +148,24 @@ async def test_the_asker_puts_only_a_labelled_request_to_the_person() -> None:
         {"name": "python", "input": {}, "agent": {"name": "general-1", "type": "general"}}
     ]
     assert not hasattr(child, "show") and not hasattr(child, "notice")
+
+
+def test_a_child_never_gets_an_agents_row_whatever_the_layer_names() -> None:
+    """Depth one (decision-0002): naming the agents row in `rows`, by its id or as any row that
+    uses `agents:agents`, is refused saying what to do; it never reaches a child."""
+    parent = [*_PARENT, _Entry("agents", "agents:agents"), _Entry("helpers", "agents:agents")]
+    for named in ("agents", "helpers"):
+        with pytest.raises(
+            ValueError, match=r"a child has no agents row \(depth one, decision-0002\)"
+        ) as why:
+            child_rows(
+                parent,
+                name="general-1",
+                kind=GENERAL,
+                kept=(*_KEPT, named),
+                transcript_row="transcript",
+                model_row="model",
+                place=_PLACE,
+                hand="the hand",
+            )
+        assert repr(named) in str(why.value) and "take it out of `rows`" in str(why.value)

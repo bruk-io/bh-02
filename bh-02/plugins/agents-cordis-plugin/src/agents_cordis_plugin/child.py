@@ -77,6 +77,15 @@ class Entry(Protocol):
     def disabled(self) -> bool: ...
 
 
+# The parent's agents row: a child is never given one, so it can start none of its own.
+_AGENTS_ROW = "agents"
+_AGENTS_USE = "agents:agents"
+
+
+def _is_agents(entry: Entry | None) -> bool:
+    return entry is not None and entry.use == _AGENTS_USE
+
+
 @dataclass(frozen=True, slots=True)
 class ChildRow:
     """One row of a child's composition: what the realm's loader mounts."""
@@ -123,8 +132,18 @@ def child_rows(
     up (in `kept`'s order), prefixed, with the child's own transcript (`place/transcript.jsonl`,
     in memory without a `place`), its model's Claude Code state beside it (when the parent's
     model row keeps one) and its type's model (when the type names one); then its `output` and
-    the row that hands its `loop` to the agents row (`hand`) and tells it its type."""
+    the row that hands its `loop` to the agents row (`hand`) and tells it its type.
+
+    Raises:
+        ValueError: `kept` names the agents row (by its id, or any row that is `agents:agents`):
+            a child has no agents row, depth one (decision-0002), whatever a layer asks.
+    """
     mounted = {e.id: e for e in entries if not e.disabled}
+    if offending := [rid for rid in kept if rid == _AGENTS_ROW or _is_agents(mounted.get(rid))]:
+        raise ValueError(
+            f"a child has no agents row (depth one, decision-0002), but the agents row's `rows` names "
+            f"{', '.join(map(repr, offending))}; take it out of `rows` (in your layer's agents row)"
+        )
     rows: list[ChildRow] = []
     for rid in kept:
         if (entry := mounted.get(rid)) is None:
