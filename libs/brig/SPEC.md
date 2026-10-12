@@ -1830,8 +1830,10 @@ workload starts, so an embedder that dies in that window takes it down.
   names another process (recycled, or a planted record naming a stranger) no
   longer holds that group, whatever `group_alive` says of its pgid; one whose
   leader is gone runs while its group has a live member (`group_alive`, the
-  reaped-leader case). So a recycled pgid can't hold the directory forever,
-  and a live jail's records are never removed. **On any doubt it refuses and
+  reaped-leader case). A recycled leader means an empty group: the kernel
+  hands out a pid again only once no process group of that number has a
+  member, and a leader's pid is its group's pgid. So a recycled pgid can't
+  hold the directory forever, and a live jail's records are never removed. **On any doubt it refuses and
   removes nothing**: a record that can't be read, has an unknown stamp
   (decision-172), or names an id out of range, a process table that can't be
   read, or anything under `procs/` that is not a directory brig made (a link,
