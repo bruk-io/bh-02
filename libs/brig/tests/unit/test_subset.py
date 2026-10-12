@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-from hypothesis import assume, given, settings
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 from brig.core.spec import (
