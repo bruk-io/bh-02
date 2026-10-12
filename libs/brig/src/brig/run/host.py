@@ -57,6 +57,7 @@ import math
 import os
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -70,8 +71,8 @@ from brig.mech import HelperLifetime
 from brig.run import _exit_status, _identity, _records, _waiters
 from brig.run._spawn_pgid import spawn_pgid
 from brig.run._tether import HeldTether
+from brig.run.dial import dial
 from brig.run.exec_ import ExecWrapNotAPrefix
-from brig.run.readiness import connects
 from brig.run.runtime import (
     ExitStatusUnobservable,
     Held,
@@ -589,10 +590,40 @@ class HostRuntime:
         return process.bound_path
 
     def ready(self, jail: JailRecord, process: ProcessRecord) -> bool:
-        """Whether a connect to `process`'s socket succeeds now, closed at
-        once; never whether the path exists (SPEC.md section 10)."""
+        """Whether `connect` to `process`'s socket succeeds now, closed at
+        once; never whether the path exists (SPEC.md section 10). `False` for
+        a process with no channel and while nothing listens.
+
+        Raises:
+            EndpointRefused: what is at its socket is not its own listener
+                (decision-185).
+        """
+        if process.bound_path is None:
+            return False
+        try:
+            self.connect(jail, process).close()
+        except OSError:
+            return False
+        return True
+
+    def connect(self, jail: JailRecord, process: ProcessRecord) -> socket.socket:
+        """A connected socket to `process`'s reserved socket (decision-185):
+        refused before connecting when its path is a link or not a socket, and
+        closed and refused after when its listener is not a process of
+        `process`'s group led by its recorded leader (`brig/run/dial.py`).
+
+        Raises:
+            ValueError: `process` was started with no channel.
+            EndpointRefused: the path is a link or not a socket, or the peer is
+                not `process`'s own.
+            OSError: nothing listens there yet.
+        """
         endpoint = self.endpoint(jail, process)
-        return endpoint is not None and connects(endpoint)
+        if endpoint is None:
+            raise ValueError(f"process {process.id} was started with no channel to connect to")
+        return dial(
+            endpoint, group=process.pgid, leader_pid=process.pid, leader_stamp=process.start_time
+        )
 
 
 def _end_unrecorded(process: ProcessRecord, jail_dir: str, error: OSError) -> None:

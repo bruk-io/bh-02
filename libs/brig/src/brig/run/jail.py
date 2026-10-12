@@ -36,6 +36,7 @@ there (TASK-0079.26's settled point 1).
 
 import dataclasses
 import signal
+import socket
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -243,10 +244,13 @@ class Process:
     def wait_ready(self, timeout: float) -> None:
         """Block until this process's channel accepts a connection, as its
         runtime observes it (`Runtime.ready`: for a host jail a connect that
-        succeeds, never a path that exists; decision-184).
+        succeeds, never a path that exists; decision-184), through the same
+        verified dial as `connect` (decision-185).
 
         Raises:
             ValueError: the process was started with no channel.
+            EndpointRefused: what is at its socket is not its own listener; at
+                once, never waited out.
             WaitReadyTimeout: no connection succeeded within `timeout`.
         """
         if self.channel is None or self.endpoint is None:
@@ -261,6 +265,26 @@ class Process:
             endpoint=self.endpoint,
             timeout=timeout,
         )
+
+    def connect(self) -> socket.socket:
+        """A connected socket to this process's channel: the only way to dial
+        it (decision-185). Its runtime checks that what answers is this
+        process's own listener, so a link a process of the jail plants at its
+        socket's path is refused, never followed; `endpoint` dialled raw skips
+        that check. One attempt: `wait_ready` first.
+
+        Raises:
+            ValueError: the process was started with no channel.
+            EndpointRefused: what is at its socket is not its own listener.
+            OSError: nothing listens there yet.
+        """
+        if self.channel is None:
+            raise ValueError(
+                f"process {self.id} was started with no channel, so there is nothing to "
+                "connect to; start it with channel=jail.channel(name)"
+            )
+        jail = self._jail
+        return jail._runtime.connect(jail._record(), self._record)
 
     def exit_events(self) -> tuple[Event, ...]:
         """What the jail's mechanism sensors made of this process's ending,

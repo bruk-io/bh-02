@@ -12,16 +12,23 @@ It mirrors the channel directory (decision-184): it reserves sockets under
 the same way, and hands out a host path apart from the bound one
 (`<jail_dir>/relay/<name>`), as a runtime that shares no socket with the host
 would, so a caller that dials the bound path instead of the endpoint is
-caught. Its readiness is a flag, `listening`, not a connect.
+caught. Its readiness is a flag, `listening`, not a connect. Its `connect`
+(decision-185) hands back one end of a socket pair while `listening` (the
+other end kept in `dialled`), and raises `EndpointRefused` with its `refusal`
+when one is set, through `ready` too, as `HostRuntime` refuses a planted
+endpoint; a call that never connects makes no socket.
 """
 
+import errno
 import os
+import socket
 from collections.abc import Sequence
 from dataclasses import dataclass
 from signal import Signals
 from typing import Final
 
 from brig.core.runtime import PROCS_DIRNAME, Capability, RuntimeKind, Scope, channel_dir
+from brig.run.dial import EndpointRefused
 from brig.run.runtime import (
     IoPolicy,
     JailRecord,
@@ -70,7 +77,9 @@ class FakeRuntime:
     has ended (`None`: they never end on their own, so a wait reaches its
     deadline). `has_supervisor` `False` makes `supervisor` return `None`, a jail
     that can only be destroyed. `listening` is what `ready` answers for a
-    running process started on a channel.
+    running process started on a channel. `refusal`, when set, is the reason
+    `connect` and `ready` refuse every channel with (`EndpointRefused`), as a
+    runtime that found a planted endpoint does.
 
     Its `kind` is `RuntimeKind.FAKE` (decision-181), whatever kind the jail was
     compiled for, so its records say `FAKE` and can't be sent to a real
@@ -83,10 +92,13 @@ class FakeRuntime:
         has_supervisor: bool = True,
         capabilities: frozenset[Capability] = frozenset(Capability),
         listening: bool = True,
+        refusal: str | None = None,
     ) -> None:
         self.exit_status = exit_status
         self.has_supervisor = has_supervisor
         self.listening = listening
+        self.refusal = refusal
+        self.dialled: list[socket.socket] = []
         self._tokens = 0
         self._capabilities = capabilities
         self.calls: list[Call] = []
@@ -226,11 +238,44 @@ class FakeRuntime:
             return None
         return _relay(jail.jail_dir, process.bound_path)
 
+    def _refuse(self, jail: JailRecord, process: ProcessRecord) -> None:
+        """Raise the runtime's `refusal` for `process`'s endpoint, if it has one.
+
+        Raises:
+            EndpointRefused: `refusal` is set.
+        """
+        endpoint = self.endpoint(jail, process)
+        if self.refusal is not None and endpoint is not None:
+            raise EndpointRefused(endpoint, self.refusal)
+
     def ready(self, jail: JailRecord, process: ProcessRecord) -> bool:
-        """`listening`, for a running process started on a channel."""
-        del jail
+        """`listening`, for a running process started on a channel.
+
+        Raises:
+            EndpointRefused: `refusal` is set.
+        """
         self.calls.append(Call("ready", Scope.PROCESS, process))
+        self._refuse(jail, process)
         return self.listening and process.bound_path is not None and self.running(process)
+
+    def connect(self, jail: JailRecord, process: ProcessRecord) -> socket.socket:
+        """One end of a fresh socket pair, the other kept in `dialled`, for a
+        running process started on a channel while `listening`.
+
+        Raises:
+            ValueError: `process` was started with no channel.
+            EndpointRefused: `refusal` is set.
+            ConnectionRefusedError: not `listening`, or the process has ended.
+        """
+        self.calls.append(Call("connect", Scope.PROCESS, process))
+        if process.bound_path is None:
+            raise ValueError(f"process {process.id} was started with no channel to connect to")
+        self._refuse(jail, process)
+        if not (self.listening and self.running(process)):
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "nothing listens", process.bound_path)
+        ours, theirs = socket.socketpair()
+        self.dialled.append(theirs)
+        return ours
 
     def first(self, jail: JailRecord) -> ProcessRecord | None:
         """The first process of `jail`, or `None` when nothing was started."""

@@ -36,7 +36,10 @@ A process listens on a socket reserved for it (decision-184): the runtime owns
 one channel directory per jail, `<jail_dir>/chan`, and `jail.channel(name)`
 reserves a socket there for a channel the `Spec` declares. Put its
 `bound_path` in the argv, start with `jail.start(argv, channel=reservation)`,
-then `process.wait_ready(timeout)` and dial `process.endpoint`.
+then `process.wait_ready(timeout)` and dial with `process.connect()`, never
+`process.endpoint` raw: the jail can write the channel directory, so the host
+connects only when the path is a socket and its own process answers
+(decision-185), and refuses with `EndpointRefused` otherwise.
 
 Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md

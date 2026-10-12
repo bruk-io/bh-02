@@ -36,7 +36,10 @@ embedder names what it catches from the public surface, never from a private
 module. Since decision-184 (TASK-0079.05) that includes the channel's:
 `Reservation` (what `Jail.channel` returns), `UnknownChannel` and
 `ReservationRefused` (what `Jail.channel` and `Jail.start` refuse with) and
-`WaitReadyTimeout` (what `Process.wait_ready` raises).
+`WaitReadyTimeout` (what `Process.wait_ready` raises), and since
+decision-185 (TASK-0079.33) `EndpointRefused`, what `Process.connect` and
+`Process.wait_ready` raise when what answers a reserved socket is not its
+process's own listener.
 
 `wait_ready` is a private delegate (`readiness.py`), intentionally NOT
 re-exported here -- `Jail.wait_ready` is the public surface, per SPEC.md §9.
@@ -75,6 +78,7 @@ from brig.run._records import JailDirInUse as JailDirInUse
 from brig.run._tether import TetherClosed as TetherClosed
 from brig.run._waiters import ExitRecord as ExitRecord
 from brig.run.compile_ctx import build_compile_ctx as build_compile_ctx
+from brig.run.dial import EndpointRefused as EndpointRefused
 from brig.run.egress import EgressRead as EgressRead
 from brig.run.egress import decisions_path as decisions_path
 from brig.run.egress import read_egress_decisions as read_egress_decisions
@@ -104,6 +108,7 @@ from brig.run.teardown import group_alive as group_alive
 __all__ = (  # noqa: RUF022
     "DataValue",
     "EgressRead",
+    "EndpointRefused",
     "ExitRecord",
     "ExecFidelity",
     "ExecWrapNotAPrefix",

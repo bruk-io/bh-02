@@ -130,6 +130,9 @@ def poll_ready(ready: Callable[[], bool], *, channel: str, endpoint: str, timeou
     a named timeout: `Process.wait_ready`'s loop, with the runtime's own
     readiness (`Runtime.ready`, decision-184) as `ready`.
 
+    Whatever `ready()` raises propagates at once, never waited out: a
+    runtime's `EndpointRefused` (decision-185) is a refusal, not "not yet".
+
     Raises:
         WaitReadyTimeout: `ready()` was still false `timeout` seconds after
             entry.

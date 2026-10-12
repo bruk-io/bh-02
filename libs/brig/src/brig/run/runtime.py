@@ -19,7 +19,8 @@ argv it starts, and `Supervisor.start(..., channel=reservation)` binds the
 process to it, refusing a reservation that is not its own
 (`reservation_refusal`). The runtime resolves a process's channel to the
 host path to dial (`Runtime.endpoint`) and says whether it accepts a
-connection (`Runtime.ready`).
+connection (`Runtime.ready`), through the one verified dial
+(`Runtime.connect`, decision-185).
 
 `IoPolicy`, `ExitStatusUnobservable`, `NoSupervisor`, `Reservation` and
 `ReservationRefused` live here because both sides of the seam name them;
@@ -28,6 +29,7 @@ connection (`Runtime.ready`).
 
 import os
 import re
+import socket
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from signal import Signals
@@ -339,5 +341,19 @@ class Runtime(Protocol):
     def ready(self, jail: JailRecord, process: ProcessRecord) -> bool:
         """Whether `process`'s channel accepts a connection now: a connect
         that succeeds, never a path that exists (SPEC.md section 10). `False`
-        for a process with no channel."""
+        for a process with no channel. It is `connect`, closed at once
+        (decision-185): a refusal raises `EndpointRefused`, never reads as "not
+        yet"."""
+        ...
+
+    def connect(self, jail: JailRecord, process: ProcessRecord) -> socket.socket:
+        """A connected socket to `process`'s channel, once the runtime has
+        checked that what answers is that process's own listener
+        (decision-185): the one dial of a reserved channel, readiness included.
+
+        Raises:
+            ValueError: `process` was started with no channel.
+            EndpointRefused: what is at its socket is not its own listener.
+            OSError: nothing listens there yet.
+        """
         ...

@@ -124,6 +124,8 @@ DEFAULT = (
     " libs/brig/tests/integration/test_bwrap_jail_dir_sealed.py"
     " libs/brig/tests/integration/test_bwrap_records_refused.py"
     " libs/brig/tests/integration/test_bwrap_channel_dir.py"
+    " libs/brig/tests/integration/test_channel_reservation_starts.py"
+    " libs/brig/tests/integration/test_channel_planted_link.py"
     " libs/brig/tests/integration/test_bwrap_network.py"
     " libs/brig/tests/e2e/test_strict_linux_journey.py"
     " libs/brig/tests/integration/test_tether.py"

@@ -1248,6 +1248,7 @@ class Runtime(Protocol):
     def reserve(self, jail: JailRecord, channel: str) -> Reservation: ...      # decision-184
     def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None: ...
     def ready(self, jail: JailRecord, process: ProcessRecord) -> bool: ...  # a connect
+    def connect(self, jail: JailRecord, process: ProcessRecord) -> socket: ...  # decision-185
 
 class Supervisor(Protocol):
     def start(self, argv, *, cwd, io: IoPolicy,
@@ -1483,11 +1484,13 @@ class Process:
     def alive(self) -> bool
     def exit_events(self) -> tuple[Event, ...]  # §11
     def wait_ready(self, timeout: float) -> None    # decision-184, §10
+    def connect(self) -> socket                     # decision-185, §10: the verified dial
     # fields: id, pid, start_time, argv, stdout_path, stderr_path, fidelity,
     #         channel, bound_path, endpoint (decision-184)
 ```
 
-`dial` (§10) and `console` (§11) stay absent. The fields an embedder reads
+`console` (§11) stays absent; §10's `dial` for a reserved channel is
+`Process.connect` (decision-185). The fields an embedder reads
 rather than calls: `compile_events`, every mechanism sensor's
 `known_at_compile()` payload stamped at `create` (§11); `report`, the
 `EnforcementReport` the stack compiled; and each process's identity pair
@@ -2234,11 +2237,85 @@ jail could not each have their own. Ruled:
   host (decision-0001), and `channel_exclusivity` stays `unenforced` (§7). A
   link a process plants in the channel directory is dialled by the host as
   found, as a link in a per-endpoint directory always was. Grades are
-  otherwise unchanged.
+  otherwise unchanged. *Amended by decision-185 (below, 2026-10-12): the host
+  no longer dials a reserved socket as found.*
 
 Implementing task: TASK-0079.05; bh-02's runner moves to it in TASK-0079.31,
 and the `Spec` stops naming paths in TASK-0079.32. (Ruled 2026-10-12,
 decision-184.)
+
+**The host dials a reserved socket only through a check of what answers
+(2026-10-12, decision-185).** decision-184 left a confused deputy named as a
+residual: the channel directory is writable from the jail, so any process of it
+(a co-tenant included, since a sibling's reserved name is in its argv) can put a
+symbolic link at a reserved socket's path pointing at a host socket outside the
+jail, and the host's readiness connect and the embedder's dial followed it,
+reaching whatever the host's user can reach (a container daemon, an agent, a
+session bus) and speaking the embedder's protocol there. A review planted one
+and `Process.wait_ready` reported ready. Ruled, superseding that residual:
+
+- **One verified dial, `Runtime.connect(jail, process)`, and readiness is it.**
+  It returns a connected `AF_UNIX` stream socket to `process`'s channel, or
+  raises: `EndpointRefused` (a `RuntimeError`; `endpoint` and `reason` are its
+  fields) when what is there is not the process's own listener, and an
+  `OSError` while nothing listens yet (`FileNotFoundError`, nothing bound;
+  `ConnectionRefusedError`, bound with no listener). `Runtime.ready` is that
+  same dial, closed at once: `False` on the `OSError`, and the refusal raised,
+  never read as "not yet", so `Process.wait_ready` fails at once on a planted
+  endpoint instead of waiting it out. `Process.connect()` is the embedder's
+  face of it, and **the only documented way to dial a reserved channel**:
+  `Process.endpoint` stays a field (for logs and errors), and dialling it raw
+  skips the check. This is §10.1's `dial` for a reserved channel; bh-02's
+  owners move to it in TASK-0079.31.
+- **Before connecting, the path is a socket and not a link.** `HostRuntime`
+  `lstat`s the endpoint and refuses a link, or anything else that is not a
+  socket, without connecting. This alone is a race (the jail can swap a link
+  in between the `lstat` and the `connect`), so it is the cheap half: it keeps
+  the host from opening a connection to a planted target at all in the common
+  case.
+- **After connecting, the peer is a process of that process's group, the
+  guarantee.** The kernel's record of who listens (`SO_PEERCRED` on Linux, the
+  pid of the process that called `listen`, as the host's pid namespace numbers
+  it) names the peer; brig reads its process group and requires it to be the
+  started process's own (`ProcessRecord.pgid`), with the group's leader still
+  holding its recorded identity, read after the peer's group, so the group's
+  number cannot have passed to a stranger in between (decision-155; an
+  `UNKNOWN` stamp is no identity and refuses, as decision-172 reads one).
+  Otherwise the socket is closed and `EndpointRefused` raised, having sent
+  nothing. The group, not the jail's processes or descent from the leader:
+  brig's control is group-shaped (§9, law 7), every host start leads a group of
+  its own (`start_new_session`), and bwrap emits no `--new-session` (§6), so a
+  workload and everything it forks stay in it; a co-tenant is another start's
+  group and is refused, which closes decision-184's co-tenant residual for the
+  host's dial (not for the co-tenants themselves, TASK-0079.07's). Descent was
+  rejected: an orphan reparents out of it on a host without a pid namespace,
+  and the process table must be walked to see it. A listener that left its
+  group (`setsid`) is refused, which is the safe direction. A nested pid
+  namespace changes nothing: the kernel numbers the peer in the reader's
+  namespace, and a peer it cannot number reads as pid 0 and is refused.
+- **A listener that has left is refused, where the kernel can say so.** A pid
+  names the process that listened, which may have exited and had its number
+  reused (a daemon that forks after `listen`). Where Linux offers
+  `SO_PEERPIDFD` (6.5 and later), brig takes the listener's pidfd and
+  requires it alive both before and after reading the group, so the pid cannot
+  name a newcomer; where it does not (an older kernel), the pid alone is read,
+  and a jail that could take a dead listener's host pid inside its own group
+  remains a residual, named here. darwin reads `LOCAL_PEERPID` and has no
+  pidfd, so the same residual holds there; that path is written from the
+  platform's headers and is unverified, since no darwin host runs brig's tiers
+  here. A platform where brig reads no peer refuses every dial
+  (`EndpointRefused`): no grade rises on it, and a channel there does not
+  connect rather than connecting unchecked.
+- **Unchanged.** Grades (no axis claims this; it is the host's own safety, not
+  the workload's confinement), `HostSupervisor.start`'s refusal of a foreign
+  reservation (decision-184), and `Jail.wait_ready(channel)` for a channel's
+  declared endpoint, which still connects as found until TASK-0079.32 retires
+  it. The fake runtime mirrors the seam: its `connect` hands back one end of a
+  socket pair while `listening`, raises `ConnectionRefusedError` otherwise, and
+  raises `EndpointRefused` with its `refusal` when one is set, through
+  `ready` too.
+
+Implementing task: TASK-0079.33. (Ruled 2026-10-12, decision-185.)
 
 **Mailbox is deleted (2026-09-08, decision-153).** It was the second kind
 here: an asynchronous, durable, ordered, many-writer-safe framed file with
