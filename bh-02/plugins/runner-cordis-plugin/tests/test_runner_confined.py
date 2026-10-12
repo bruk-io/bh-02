@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -613,20 +614,25 @@ def _needs_bwrap() -> None:
 
 
 class _Plain:
-    """What brig's launch returns, for a jail whose program runs as a plain process: there is no
-    bubblewrap, so nothing is mounted, and what is tested is the jail's own work around it (its
-    placeholders, record, lock, tripwire, facts and release). The program is in a session of its
-    own, as brig's is, so its process group is what the jail and its tripwire end."""
+    """What brig's `Jail.create` returns, for a jail whose program runs as a plain process: there
+    is no bubblewrap, so nothing is mounted, and what is tested is the jail's own work around it
+    (its placeholders, record, lock, tripwire, facts and release). Its one `start` puts the
+    program in a session of its own, as brig's is, so its process group is what the jail and its
+    tripwire end."""
 
-    def __init__(self, jail: Any, argv: Sequence[str], cwd: str) -> None:
+    def __init__(self, jail: Any) -> None:
         self._endpoint = jail.spec.channels[0].endpoint
+        self._process: subprocess.Popen[bytes] | None = None
+
+    def start(self, argv: Sequence[str], *, cwd: str, **rest: object) -> SimpleNamespace:
         self._process = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, start_new_session=True)
-        self.pgid = self._process.pid
         # reaped as it ends, however it ends (the tripwire kills its group), so a group that
         # ended is gone and not a zombie that `os.killpg(group, 0)` still finds
         threading.Thread(target=self._process.wait, daemon=True).start()
+        return SimpleNamespace(pid=self._process.pid, stderr_path="", interrupt=self._interrupt)
 
     def wait_ready(self, channel: str, timeout: float) -> None:
+        assert self._process is not None
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline and self._process.poll() is None:
             with contextlib.suppress(OSError), socket.socket(socket.AF_UNIX) as probe:
@@ -635,16 +641,18 @@ class _Plain:
             time.sleep(0.02)
         raise TimeoutError(f"{channel} never listened")
 
-    def interrupt(self) -> bool:
+    def _interrupt(self) -> bool:
+        assert self._process is not None
         with contextlib.suppress(ProcessLookupError):
-            os.killpg(self.pgid, signal.SIGINT)
+            os.killpg(self._process.pid, signal.SIGINT)
             return True
         return False
 
-    def kill(self) -> Any:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(self.pgid, signal.SIGKILL)
-        self._process.wait()
+    def destroy(self) -> Any:
+        if self._process is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self._process.pid, signal.SIGKILL)
+            self._process.wait()
         return SimpleNamespace(items=())  # every item ended
 
 
@@ -657,10 +665,10 @@ def _plain_launch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         pytest.skip("the jail's tripwire is inotify's: Linux only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
 
-    def launch(self: object, jail: Any, *, argv: Sequence[str], cwd: str, **rest: object) -> _Plain:
-        return _Plain(jail, argv, cwd)
+    def create(jail: Any, **rest: object) -> _Plain:
+        return _Plain(jail)
 
-    monkeypatch.setattr("brig.run.SubprocessLauncher.launch", launch)
+    monkeypatch.setattr("brig.run.Jail.create", create)
     # the jail refuses to start without bubblewrap installed; the package's `jail` is the row
     monkeypatch.setattr(sys.modules["runner_cordis_plugin.jail"], "DEFAULT_BWRAP_PATH", sys.executable)
 
@@ -811,12 +819,12 @@ async def test_release_waits_for_a_start_under_way_and_says_it_still_runs(
     project.mkdir()
     launched: list[_Plain] = []
 
-    def slow(self: object, jail: Any, *, argv: Sequence[str], cwd: str, **rest: object) -> _Plain:
+    def slow(jail: Any, **rest: object) -> _Plain:
         time.sleep(0.3)
-        launched.append(_Plain(jail, argv, cwd))
+        launched.append(_Plain(jail))
         return launched[-1]
 
-    monkeypatch.setattr("brig.run.SubprocessLauncher.launch", slow)
+    monkeypatch.setattr("brig.run.Jail.create", slow)
     runner = Runner(BrigJail(BrigConfig(), Host()))
     endpoint = _endpoint()
     argv = [sys.executable, "-I", "-c", _LISTEN, endpoint]
@@ -1132,16 +1140,16 @@ _CRASH_AT_LAUNCH = """
 import os, sys, tempfile
 from pathlib import Path
 import asyncio
-from brig.run import SubprocessLauncher
+from brig.run import Jail
 from runner_cordis_plugin import BrigConfig, BrigJail
 
 class Host:
     paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
 
-def crash(self, *args, **kwargs):
+def crash(*args, **kwargs):
     os._exit(9)
 
-SubprocessLauncher.launch = crash
+Jail.create = crash
 sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
 argv = [sys.executable, "-c", "pass"]
 asyncio.run(BrigJail(BrigConfig(), Host()).start(argv, cwd=sys.argv[1], endpoint=sock))
@@ -1231,10 +1239,10 @@ async def test_a_jail_that_fails_to_launch_leaves_nothing_on_the_host(
     project = tmp_path / "project"
     project.mkdir()
 
-    def refused(self: object, *args: object, **kwargs: object) -> None:
+    def refused(*args: object, **kwargs: object) -> None:
         raise RuntimeError("no launch today")
 
-    monkeypatch.setattr("brig.run.SubprocessLauncher.launch", refused)
+    monkeypatch.setattr("brig.run.Jail.create", refused)
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     with pytest.raises(RuntimeError, match="no launch today"):
         await BrigJail(BrigConfig(), Host()).start(
@@ -1242,6 +1250,138 @@ async def test_a_jail_that_fails_to_launch_leaves_nothing_on_the_host(
         )
     assert list(project.iterdir()) == []
     assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
+
+
+# A bh-02 whose jail has a helper brig's `Jail.create` starts and keeps for the jail's life (as an
+# egress proxy would be), and, for argv[3] "refused", a wrap that is not a pure argv prefix, so
+# brig refuses the jail's first start; "control": a prefix wrap, so it starts. It says
+# "refused: <why>" or "started", waits for a line, stops what started (saying "stopped"), and
+# waits for another. argv: the project, a token (the helper's command line holds "keeper-" and
+# it, which this program's own does not), "refused" or "control".
+_REFUSED_FIRST_START = """
+import asyncio, dataclasses, sys, tempfile
+from pathlib import Path
+from brig.mech import Helper, HelperLifetime
+from brig.run import Jail
+from runner_cordis_plugin import BrigConfig, BrigJail
+
+class Host:
+    paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
+
+project, token, how = sys.argv[1:4]
+helper = Helper(
+    name="keeper",
+    argv=("/bin/sh", "-c", f": keeper-{token}; sleep 100"),
+    lifetime=HelperLifetime.JAIL_LIFETIME,
+)
+real = Jail.create
+
+def create(compiled, **rest):
+    wrap = (lambda argv: (*argv, "--appended")) if how == "refused" else (lambda argv: tuple(argv))
+    return real(dataclasses.replace(compiled, wrap=wrap, helpers=(*compiled.helpers, helper)), **rest)
+
+Jail.create = create
+
+async def main():
+    sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
+    worker = (
+        "import socket, sys, time; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); "
+        "s.listen(1); time.sleep(100)"
+    )
+    started = None
+    try:
+        started = await BrigJail(BrigConfig(), Host()).start(
+            [sys.executable, "-I", "-c", worker, sock], cwd=project, endpoint=sock
+        )
+    except ValueError as error:
+        print("refused:", str(error).replace("\\n", " "), flush=True)
+    else:
+        print("started", flush=True)
+    sys.stdin.readline()
+    if started is not None:
+        await started.stop()
+        print("stopped", flush=True)
+    sys.stdin.readline()
+
+asyncio.run(main())
+"""
+
+
+def _marked_groups(marker: str) -> list[int]:
+    """The process groups of the live processes whose command line holds `marker`."""
+    table = subprocess.run(
+        ["/bin/ps", "-Ao", "pgid=,stat=,args="], capture_output=True, text=True, check=True
+    ).stdout
+    rows = [line.split(None, 2) for line in table.splitlines() if line.strip()]
+    return sorted(
+        {int(row[0]) for row in rows if len(row) == 3 and marker in row[2] and not row[1].startswith("Z")}
+    )
+
+
+async def _until(check: Any, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return True
+        await asyncio.sleep(0.05)
+    return bool(check())
+
+
+@pytest.mark.parametrize("how", ["refused", "control"])
+async def test_a_refused_first_start_destroys_the_jail_so_nothing_it_made_outlives_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    """brig's refused `Jail.start` changes nothing: the jail it was refused in is its creator's.
+    The runner creates the jail (whose helper `Jail.create` starts and keeps for the jail's
+    life), its first start is refused (a wrap that is not a pure prefix), and the runner
+    destroys the jail before it says why: the helper is gone, and so are the placeholders and
+    the record. The control (a prefix wrap): the same helper runs once the start returns, and
+    goes with the stop, so the helper does start.
+
+    Planted on 2026-10-12 (scratch copy of `jail.py`, restored by sha256): with `_launch`'s
+    `jail.destroy()` removed, the refused case failed with the helper still running."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    token = uuid.uuid4().hex[:12]
+    marker = f"keeper-{token}"  # the helper's, never the stand-in bh-02's own command line
+    bh02 = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        _REFUSED_FIRST_START,
+        str(project),
+        token,
+        how,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert bh02.stdin is not None and bh02.stdout is not None
+    seen: list[int] = []
+    try:
+        said = (await asyncio.wait_for(bh02.stdout.readline(), 30)).decode()
+        if how == "refused":
+            assert said.startswith("refused:") and "not a pure argv prefix" in said, said
+            seen = _marked_groups(marker)
+            assert seen == [], f"the helper outlived a refused first start: groups {seen}"
+            assert list(project.iterdir()) == []
+            assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
+        else:
+            assert said == "started\n", said
+            assert await _until(lambda: bool(_marked_groups(marker)), 5.0), "CONTROL failed: no helper ran"
+            seen = _marked_groups(marker)
+            bh02.stdin.write(b"\n")
+            assert (await asyncio.wait_for(bh02.stdout.readline(), 30)) == b"stopped\n"
+            assert await _until(lambda: not _marked_groups(marker), 5.0), _marked_groups(marker)
+            assert list(project.iterdir()) == []
+    finally:
+        for group in {*seen, *_marked_groups(marker)}:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(group, signal.SIGKILL)
+        bh02.stdin.write(b"\n\n")
+        with contextlib.suppress(ConnectionError):
+            await bh02.stdin.drain()
+        await asyncio.wait_for(bh02.wait(), 30)
 
 
 async def test_a_jail_start_cancelled_while_it_launches_ends_what_the_launch_started(
