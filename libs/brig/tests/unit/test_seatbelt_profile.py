@@ -51,14 +51,16 @@ _GOLDEN_SPEC = Spec(
         write_denies=("/tmp/bg1/workspace/.git/hooks",),
         read_denies=("/Users/dev/.ssh",),
     ),
-    channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint="/tmp/bg1/control.sock"),),
+    channels=(
+        Channel(name="control", kind=ChannelKind.LISTEN, endpoint="/tmp/bg1/chan/control.sock"),
+    ),
 )
 
 _GOLDEN_RESOLVED = {
     "/tmp/bg1/workspace": "/private/tmp/bg1/workspace",
     "/tmp/bg1/workspace/.git/hooks": "/private/tmp/bg1/workspace/.git/hooks",
     "/Users/dev/.ssh": "/Users/dev/.ssh",
-    "/tmp/bg1/control.sock": "/private/tmp/bg1/control.sock",
+    "/tmp/bg1/chan/control.sock": "/private/tmp/bg1/chan/control.sock",
 }
 
 _EXPECTED_GOLDEN_PROFILE = """\
@@ -73,7 +75,7 @@ _EXPECTED_GOLDEN_PROFILE = """\
 (deny file-write* (subpath "/"))
 (allow file-write* (subpath "/private/tmp/bg1/workspace"))
 (deny file-write* (subpath "/private/tmp/bg1/workspace/.git/hooks"))
-(allow file-write* (literal "/private/tmp/bg1/control.sock"))
+(allow file-write* (literal "/private/tmp/bg1/chan/control.sock"))
 (allow network-bind)
 (deny network* (with no-log))
 """
@@ -290,9 +292,11 @@ def test_control_a_private_tmp_jail_dir_does_not_refuse() -> None:
 @pytest.mark.unit
 def test_network_bind_renders_exactly_once_with_one_listen_channel() -> None:
     spec = Spec(
-        channels=(Channel(name="c", kind=ChannelKind.LISTEN, endpoint="/private/tmp/x/c.sock"),)
+        channels=(
+            Channel(name="c", kind=ChannelKind.LISTEN, endpoint="/private/tmp/x/chan/c.sock"),
+        )
     )
-    resolved = {"/private/tmp/x/c.sock": "/private/tmp/x/c.sock"}
+    resolved = {"/private/tmp/x/chan/c.sock": "/private/tmp/x/chan/c.sock"}
     rendered = render_sbpl(spec, resolved=resolved, jail_dir="/private/tmp/x")
     assert rendered.splitlines().count("(allow network-bind)") == 1
 

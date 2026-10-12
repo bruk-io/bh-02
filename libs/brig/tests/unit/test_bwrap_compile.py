@@ -237,13 +237,13 @@ def test_the_channel_directory_is_bound_before_the_write_roots() -> None:
 
 @pytest.mark.unit
 def test_a_carve_out_inside_the_channel_directory_still_wins() -> None:
-    """The defect decision-163 closed, as its own regression: a jail
+    """The defect decision-163 closed, as its own regression: a channel
     directory that HOLDS the workspace. The carve-out must be the LAST word
     on its own path, not a mount the channel bind stacks over."""
-    jail_dir = "/run/brig/jail9"
-    workspace = f"{jail_dir}/ws"
+    chan_dir = "/run/brig/chan9"
+    workspace = f"{chan_dir}/ws"
     hooks = f"{workspace}/.git/hooks"
-    endpoint = f"{jail_dir}/agent.sock"
+    endpoint = f"{chan_dir}/agent.sock"
     spec = Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
@@ -262,7 +262,7 @@ def test_a_carve_out_inside_the_channel_directory_still_wins() -> None:
 
     argv = bwrap.compile(spec, ctx).wrap(())
 
-    assert argv.index(jail_dir) < argv.index(workspace) < argv.index(hooks)
+    assert argv.index(chan_dir) < argv.index(workspace) < argv.index(hooks)
 
 
 @pytest.mark.unit
@@ -908,6 +908,9 @@ def test_a_channel_whose_lexical_parent_is_the_jail_directory_is_refused() -> No
     assert endpoint in message
     assert _JAIL_DIR in message
     assert "subdirectory" in message
+    # The remedy carries the endpoint's own (lexical) name, not the target's.
+    assert f"{_JAIL_DIR}/chan/agent.sock" in message
+    assert "elsewhere" not in message.split("for example", 1)[1]
 
 
 @pytest.mark.unit
