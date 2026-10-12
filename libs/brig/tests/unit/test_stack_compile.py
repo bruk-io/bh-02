@@ -42,6 +42,7 @@ import pytest
 import brig.core
 import brig.stack
 from brig.core import AXES, Axis, Grade, Graded, Limits, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech import CompileCtx, Step
 from brig.mech.env_scrub import env_scrub
 from brig.mech.rlimits import rlimits
@@ -66,6 +67,7 @@ class DoubleMechanism:
 
     name: str
     axes: frozenset[Axis]
+    runtime: RuntimeKind | None = None
     env: dict[str, str] = field(default_factory=dict)
     grade: Grade = Grade.ENFORCED
 
@@ -391,6 +393,7 @@ def test_step_may_not_grade_an_axis_outside_the_declared_ceiling() -> None:
     class OverclaimingStub:
         name: str = "overclaiming-stub"
         axes: frozenset[Axis] = frozenset({Axis.FS_READ})
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(
@@ -422,6 +425,7 @@ def test_step_may_not_grade_an_axis_outside_the_declared_ceiling() -> None:
     class UnderclaimingStub:
         name: str = "underclaiming-stub"
         axes: frozenset[Axis] = frozenset({Axis.FS_READ, Axis.NETWORK})
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(
@@ -460,7 +464,7 @@ def test_compiled_jail_env_is_defensively_copied() -> None:
 
 
 @pytest.mark.unit
-def test_compiled_jail_has_exactly_eleven_fields() -> None:
+def test_compiled_jail_has_exactly_twelve_fields() -> None:
     """Deliverable: CompiledJail's field set is pinned to the named fields
     -- "exactly what the launcher and the report need, and no more." A
     missing or invented field is red (same idiom as
@@ -473,7 +477,10 @@ def test_compiled_jail_has_exactly_eleven_fields() -> None:
     (2026-09-08) adds `sensors` -- every non-`None` `Step.events` from the
     same pass, because `run` is the only layer permitted to CALL a sensor
     and had no way to reach one: `Step.events` was assembled by every
-    mechanism that had one and then dropped on the floor here."""
+    mechanism that had one and then dropped on the floor here.
+    decision-179 (2026-10-12) adds `runtime` -- the one `RuntimeKind` the
+    stack resolved, whose static grades the report's `control` and
+    `channel_exclusivity` came from."""
     expected_fields = {
         "spec",
         "report",
@@ -486,6 +493,7 @@ def test_compiled_jail_has_exactly_eleven_fields() -> None:
         "matrix_version",
         "signatures",
         "sensors",
+        "runtime",
     }
     actual_fields = {f.name for f in dataclasses.fields(brig.stack.CompiledJail)}
     assert actual_fields == expected_fields, (
@@ -647,6 +655,7 @@ def test_unknown_pair_refused_naming_both_members_and_matrix_version_control_kno
     class ThirdStub:
         name: str = "third-stub"
         axes: frozenset[Axis] = frozenset({Axis.CHANNEL_EXCLUSIVITY})
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(
@@ -694,6 +703,7 @@ def test_two_mechanisms_claiming_env_axis_raise_conflict_control_real_disjoint_p
     class EnvClaimingStub:
         name: str = "env-claiming-stub"
         axes: frozenset[Axis] = frozenset({Axis.ENV})
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(
@@ -758,6 +768,7 @@ def test_compiled_jail_denial_signature_pattern_smoke() -> None:
     class WithDenial:
         name: str
         axes: frozenset[Axis]
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(

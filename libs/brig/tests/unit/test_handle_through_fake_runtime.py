@@ -81,11 +81,9 @@ def test_both_runtimes_implement_both_protocols() -> None:
 
 @pytest.mark.unit
 def test_the_host_runtime_offers_what_the_subprocess_launcher_does() -> None:
-    """`Capability` holds `LaunchFeature`'s members by value until step 2,
-    and the host runtime offers exactly the launcher's."""
-    assert {c.value for c in HostRuntime().capabilities} == {
-        f.value for f in SubprocessLauncher.capabilities
-    }
+    """The host runtime offers exactly the launcher's capabilities, in one
+    vocabulary since decision-179 retired `LaunchFeature` for `Capability`."""
+    assert HostRuntime().capabilities == SubprocessLauncher.capabilities
     assert {c.value for c in Capability} == {"NEW_PROCESS_GROUP", "PTY", "DETACH"}
 
 

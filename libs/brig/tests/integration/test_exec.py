@@ -45,7 +45,7 @@ import sys
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.mech import LaunchFeature
+from brig.core.runtime import Capability
 from brig.run import _identity as identity
 from brig.run._execs import live as live_execs
 from brig.run.exec_ import ExecFidelity, ExecRefused, exec_in_jail
@@ -78,7 +78,7 @@ def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
 def _compiled_jail(
     *,
     env: dict[str, str] | None = None,
-    requires: frozenset[LaunchFeature] = frozenset(),
+    requires: frozenset[Capability] = frozenset(),
 ) -> CompiledJail:
     """A minimal, mechanism-free `CompiledJail` -- the empty stack's shape,
     same idiom as `test_launcher.py`'s helper of the same name."""
@@ -351,7 +351,7 @@ def test_interactive_refuses_naming_pty_control_noninteractive_succeeds(run_id: 
 
         with pytest.raises(ExecRefused) as exc_info:
             exec_in_jail(handle, ["true"], interactive=True)
-        assert LaunchFeature.PTY in exc_info.value.missing
+        assert Capability.PTY in exc_info.value.missing
 
         assert _registered(handle) == []
 

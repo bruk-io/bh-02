@@ -8,11 +8,8 @@ this package's `__init__` back (that shape is an import cycle, and brig's gate r
 
 from brig.mech.bwrap import Bwrap, bwrap
 from brig.mech.contract import (
-    DETACH,
     JAIL_LIFETIME,
     LAUNCH_SCOPED,
-    NEW_PROCESS_GROUP,
-    PTY,
     ArgvTransformer,
     CompileCtx,
     EventPayload,
@@ -20,7 +17,6 @@ from brig.mech.contract import (
     ExitOutcome,
     Helper,
     HelperLifetime,
-    LaunchFeature,
     Mechanism,
     StagedFile,
     Step,
@@ -33,7 +29,6 @@ __all__ = (  # noqa: RUF022
     "ArgvTransformer",
     "Bwrap",
     "CompileCtx",
-    "DETACH",
     "EnvScrub",
     "EventPayload",
     "EventSource",
@@ -42,10 +37,7 @@ __all__ = (  # noqa: RUF022
     "HelperLifetime",
     "JAIL_LIFETIME",
     "LAUNCH_SCOPED",
-    "LaunchFeature",
     "Mechanism",
-    "NEW_PROCESS_GROUP",
-    "PTY",
     "Rlimits",
     "Seatbelt",
     "StagedFile",

@@ -30,7 +30,8 @@ import time
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.mech import Helper, HelperLifetime, LaunchFeature
+from brig.core.runtime import Capability
+from brig.mech import Helper, HelperLifetime
 from brig.run import _identity as identity
 from brig.run import host as host_mod
 from brig.run import teardown as teardown_mod
@@ -61,7 +62,7 @@ def _jail(helpers: tuple[Helper, ...]) -> CompiledJail:
         env={},
         staged=(),
         helpers=helpers,
-        requires=frozenset[LaunchFeature](),
+        requires=frozenset[Capability](),
         mechanism_names=(),
         matrix_version=1,
     )

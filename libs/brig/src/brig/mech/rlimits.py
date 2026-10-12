@@ -73,6 +73,7 @@ import signal
 import sys
 
 from brig.core import Axis, EventKind, Grade, Graded, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech.contract import ArgvTransformer, CompileCtx, EventPayload, ExitOutcome, Step
 
 _TRAMPOLINE_MODULE = "brig.mech.trampoline"
@@ -141,6 +142,7 @@ class Rlimits:
 
     name = "rlimits"
     axes: frozenset[Axis] = frozenset({Axis.LIMITS})
+    runtime: RuntimeKind | None = None
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         """Pure `spec -> argv` render; `ctx` is accepted per the `Mechanism`
@@ -161,6 +163,6 @@ class Rlimits:
 
 #: The mechanism instance embedders and later stack composition (task-037's
 #: matrix, task-039's `degraded()` preset) compose against -- same posture
-#: as `brig.mech`'s own `NEW_PROCESS_GROUP`/`JAIL_LIFETIME` module-level
+#: as `brig.mech`'s own `JAIL_LIFETIME`/`LAUNCH_SCOPED` module-level
 #: constants.
 rlimits: Rlimits = Rlimits()

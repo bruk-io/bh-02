@@ -92,7 +92,7 @@ from enum import Enum
 from typing import Any
 
 from brig.core import Spec
-from brig.mech import LaunchFeature
+from brig.core.runtime import Capability
 from brig.run.runtime import Agent, IoPolicy, NoAgent, ProcessRecord
 
 
@@ -103,7 +103,7 @@ class ExecRefused(ValueError):
     as `launcher.LaunchRefused`: a typed `missing` field, not `str(exc)`.
     """
 
-    def __init__(self, missing: frozenset[LaunchFeature]) -> None:
+    def __init__(self, missing: frozenset[Capability]) -> None:
         self.missing = missing
         super().__init__(str(self))
 
@@ -231,7 +231,7 @@ def exec_in_jail(handle: Any, argv: Sequence[str], interactive: bool = False) ->
         NoAgent: the jail's runtime has no agent to start a sibling with.
     """
     if interactive:
-        raise ExecRefused(frozenset({LaunchFeature.PTY}))
+        raise ExecRefused(frozenset({Capability.PTY}))
 
     argv_t = tuple(argv)
     wrap_prefix: tuple[str, ...] | None = handle.wrap_prefix

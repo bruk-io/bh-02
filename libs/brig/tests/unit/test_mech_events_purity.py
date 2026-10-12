@@ -146,6 +146,9 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
             "types",
             "typing",
             "brig.core",
+            # decision-179: `Capability` (Step.requires) and `RuntimeKind`
+            # (Mechanism.runtime), which `brig.core` does not export.
+            "brig.core.runtime",
         }
     ),
     # Re-exports only: the contract, then each mechanism.
@@ -169,7 +172,16 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
     # (`signal.SIGXCPU`, `sys.executable`), never syscalls, so this file
     # stays inside the banned-import scan below.
     "rlimits.py": frozenset(
-        {"__future__", "brig.core", "brig.mech.contract", "re", "signal", "sys"}
+        # `brig.core.runtime` joins at decision-179: `Mechanism.runtime`.
+        {
+            "__future__",
+            "brig.core",
+            "brig.core.runtime",
+            "brig.mech.contract",
+            "re",
+            "signal",
+            "sys",
+        }
     ),
     # task-034: the `env_scrub` mechanism. NOT a carve-out either -- its
     # `compile()` is a pure spec -> argv render (the actual environment
@@ -177,7 +189,10 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
     # module at compile time -- see `brig/mech/env_scrub.py`'s own module
     # docstring), so it stays inside the banned-import scan below too.
     # `typing` joins at decision-143: `_SCRUB_DETAIL` is a `Final` constant.
-    "env_scrub.py": frozenset({"__future__", "typing", "brig.core", "brig.mech.contract"}),
+    # `brig.core.runtime` joins at decision-179: `Mechanism.runtime`.
+    "env_scrub.py": frozenset(
+        {"__future__", "typing", "brig.core", "brig.core.runtime", "brig.mech.contract"}
+    ),
     # task-058/task-059: the `seatbelt` package. NOT a carve-out (see
     # module docstring's task-058/task-059 paragraphs) -- pure, no I/O, no
     # clock -- so both files stay inside the banned-import scan below too.
@@ -189,6 +204,8 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
             "__future__",
             "re",
             "brig.core",
+            # decision-179: `Mechanism.runtime` is `RuntimeKind.HOST`.
+            "brig.core.runtime",
             "brig.mech.contract",
             "brig.mech.seatbelt.profile",
             # task-079/decision-136: `_AXES_OWNING_NETWORK` /
@@ -216,6 +233,8 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
             "re",
             "typing",
             "brig.core",
+            # decision-179: `Mechanism.runtime` is `RuntimeKind.HOST`.
+            "brig.core.runtime",
             "brig.mech.contract",
         }
     ),
@@ -224,7 +243,10 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
     # this mechanism may not import it, which is why the denial-signature
     # constant is duplicated and pinned equal by
     # `tests/unit/test_connect_proxy_compile.py` instead.
-    "connect_proxy.py": frozenset({"__future__", "re", "brig.core", "brig.mech.contract"}),
+    # `brig.core.runtime` joins at decision-179: `Mechanism.runtime`.
+    "connect_proxy.py": frozenset(
+        {"__future__", "re", "brig.core", "brig.core.runtime", "brig.mech.contract"}
+    ),
 }
 
 #: task-031 AC#5's literal banned list. "open" is listed in the AC's prose

@@ -268,6 +268,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, ReadModel, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech.contract import ArgvTransformer, CompileCtx, Step
 
 #: Absolute, never the bare name `bwrap` (decision-026 rule 1's family, the
@@ -844,6 +845,9 @@ class Bwrap:
 
     name = "bwrap"
     axes: frozenset[Axis] = _AXES
+    #: bwrap's namespaces live and die with the host process brig starts
+    #: (decision-179).
+    runtime: RuntimeKind | None = RuntimeKind.HOST
 
     def __init__(self, bwrap_path: str = DEFAULT_BWRAP_PATH) -> None:
         self._bwrap_path = bwrap_path

@@ -2,8 +2,10 @@
 
 This module defines the contract that all mechanisms must implement:
 `Mechanism` (a protocol), `Step` (a mechanism's compiled output), and the
-supporting types: `LaunchFeature`, `HelperLifetime`, `Helper`, `StagedFile`,
-`CompileCtx`, and `ArgvTransformer`.
+supporting types: `HelperLifetime`, `Helper`, `StagedFile`, `CompileCtx`,
+and `ArgvTransformer`. A `Step` requires the runtime's `Capability`s and a
+`Mechanism` names the `RuntimeKind` it needs, both from `brig.core.runtime`
+(decision-179, which retired `LaunchFeature`).
 
 Pure module: no I/O, no clock, no randomness, no subprocess. The layer gate
 enforces the import side of that; convention enforces the rest.
@@ -49,23 +51,11 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from brig.core import Axis, DataValue, EventKind, Graded, Spec
+from brig.core.runtime import Capability, RuntimeKind
 
 # Type aliases
 ArgvTransformer = Callable[[tuple[str, ...]], tuple[str, ...]]
 """A function that transforms an argv tuple: (str, ...) -> (str, ...)."""
-
-
-class LaunchFeature(Enum):
-    """Features a launcher may support and a stack may require.
-
-    Per SPEC.md §8: "NEW_PROCESS_GROUP, PTY, DETACH, ..."
-    The trailing "..." in the spec is a promise of growth, not a licence to
-    invent members now; more arrive with the launchers that need them.
-    """
-
-    NEW_PROCESS_GROUP = "NEW_PROCESS_GROUP"
-    PTY = "PTY"
-    DETACH = "DETACH"
 
 
 class HelperLifetime(Enum):
@@ -338,7 +328,7 @@ class Step:
              construction so caller mutations don't affect the Step.
         staged: Files to write into the jail before launch (relative paths only).
         helpers: Helper processes to run, each with a declared lifetime.
-        requires: Features the launcher must provide (NEW_PROCESS_GROUP, PTY, etc).
+        requires: Capabilities the runtime must provide (NEW_PROCESS_GROUP, PTY, etc).
         grades: Per-axis enforcement grades from this mechanism, keyed by Axis.
                 Defensively copied at construction.
         denial_signatures: Regex patterns that identify this mechanism's denials
@@ -352,7 +342,7 @@ class Step:
     env: Mapping[str, str]
     staged: tuple[StagedFile, ...]
     helpers: tuple[Helper, ...]
-    requires: frozenset[LaunchFeature]
+    requires: frozenset[Capability]
     grades: Mapping[Axis, Graded]
     denial_signatures: tuple[re.Pattern[str], ...]
     events: EventSource | None = None
@@ -379,12 +369,17 @@ class Mechanism(Protocol):
         name: A short identifier for this mechanism (e.g., "bwrap", "seatbelt").
         axes: Frozenset of Axis values this mechanism claims to enforce.
               Coverage and overlap are validated by Stack during composition.
+        runtime: The one `RuntimeKind` this mechanism's enforcement needs
+                 (bwrap and seatbelt: `HOST`), or `None` for a mechanism that
+                 works under any. `Stack.compile` resolves exactly one kind
+                 per stack and refuses two (SPEC.md §6, §7, decision-179).
         compile: Compile this mechanism's slice of spec into a Step, in the
                  given context (jail directory, platform).
     """
 
     name: str
     axes: frozenset[Axis]
+    runtime: RuntimeKind | None
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         """Compile this mechanism's constraints into enforcement (Step).
@@ -406,16 +401,12 @@ class Mechanism(Protocol):
 
 # Module-level constants for common enum values (optional ergonomics, like
 # brig.core's ENFORCED, BEST_EFFORT pattern)
-NEW_PROCESS_GROUP = LaunchFeature.NEW_PROCESS_GROUP
-PTY = LaunchFeature.PTY
-DETACH = LaunchFeature.DETACH
 JAIL_LIFETIME = HelperLifetime.JAIL_LIFETIME
 LAUNCH_SCOPED = HelperLifetime.LAUNCH_SCOPED
 
 __all__ = (  # noqa: RUF022
     "ArgvTransformer",
     "CompileCtx",
-    "DETACH",
     "EventPayload",
     "EventSource",
     "ExitOutcome",
@@ -423,10 +414,7 @@ __all__ = (  # noqa: RUF022
     "HelperLifetime",
     "JAIL_LIFETIME",
     "LAUNCH_SCOPED",
-    "LaunchFeature",
     "Mechanism",
-    "NEW_PROCESS_GROUP",
-    "PTY",
     "StagedFile",
     "Step",
 )

@@ -42,6 +42,7 @@ from collections.abc import Sequence
 import pytest
 
 from brig.core import Axis, EnvMode, EnvPolicy, Limits, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech import CompileCtx, Step
 from brig.run.exec_ import ExecFidelity, ExecWrapNotAPrefix, exec_in_jail
 from brig.run.handle import Handle
@@ -148,6 +149,7 @@ class _AppendingMechanism:
 
     name = "test_appending"
     axes: frozenset[Axis] = frozenset()
+    runtime: RuntimeKind | None = None
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         del spec, ctx

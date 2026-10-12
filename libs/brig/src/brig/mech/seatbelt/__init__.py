@@ -74,6 +74,7 @@ import re
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech.contract import ArgvTransformer, CompileCtx, StagedFile, Step
 from brig.mech.seatbelt.profile import ChannelInsideWriteDeny as ChannelInsideWriteDeny
 from brig.mech.seatbelt.profile import ReadModelUnsupported as ReadModelUnsupported
@@ -187,6 +188,9 @@ class Seatbelt:
     """
 
     name = "seatbelt"
+    #: `sandbox-exec` is a host process the profile is applied to
+    #: (decision-179).
+    runtime: RuntimeKind | None = RuntimeKind.HOST
 
     def __init__(self, *, cedes_network: bool = False) -> None:
         self._cedes_network = cedes_network

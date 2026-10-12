@@ -446,6 +446,7 @@ Notes:
 class Mechanism(Protocol):
     name: str
     axes: frozenset[Axis]                 # what it claims
+    runtime: RuntimeKind | None           # the one runtime kind it needs, or None
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step: ...
 
 @dataclass(frozen=True)
@@ -454,11 +455,33 @@ class Step:
     env: Mapping[str, str]
     staged: tuple[StagedFile, ...]        # profiles, scripts — written pre-launch
     helpers: tuple[Helper, ...]           # e.g. egress proxy; declared lifetime
-    requires: frozenset[LaunchFeature]    # e.g. NEW_PROCESS_GROUP
+    requires: frozenset[Capability]       # e.g. NEW_PROCESS_GROUP
     grades: Mapping[Axis, Graded]         # grade + detail per claimed axis
     denial_signatures: tuple[Pattern, ...]  # what this mechanism's denials look like
     events: EventSource | None            # optional sensor feed (§11)
 ```
+
+**A mechanism names the runtime it needs; `LaunchFeature` is the runtime's
+`Capability` (2026-10-12, decision-179).** decision-0001 (the workspace's
+backlog, migration step 2) separates a jail's runtime from its confinement, and
+composition has to know which runtime a stack needs before anything can grade
+what that runtime alone decides. So `Mechanism` gains `runtime`: the one
+`RuntimeKind` (`core`, §3) the mechanism's enforcement depends on, or `None`
+for one that works under any. `bwrap` and `seatbelt` name `HOST`: each wraps
+the workload's argv in a host process (`bwrap`'s namespaces, `sandbox-exec`'s
+profile) that lives and dies with the host process group brig starts.
+`env_scrub`, `rlimits` and `connect_proxy` name `None`; their wraps are execs
+any runtime can run. A mechanism names at most one kind; a second runtime is a
+second mechanism, and §7 refuses a stack whose mechanisms name two.
+`LaunchFeature` is retired, as decision-0001 rules ("`LaunchFeature` becomes the
+runtime's capabilities"): `Step.requires` is a `frozenset[Capability]`, the
+same three members by value (`NEW_PROCESS_GROUP`, `PTY`, `DETACH`), so a
+mechanism states its requirements in the runtime's own vocabulary and a runtime
+checks them without translating. `brig.mech` no longer exports `LaunchFeature`
+or its three module-level aliases; `Capability` is imported from
+`brig.core.runtime`. The roster's axes, every mechanism's grades and every
+compiled argv are unchanged. Implementing task: TASK-0079.03. (Ruled
+2026-10-12, decision-179.)
 
 **`CompileCtx`** is the context `compile` is handed, and nothing more: a frozen
 dataclass carrying `jail_dir: str` (where staged files land),
@@ -990,7 +1013,8 @@ finding both parent projects hit independently).
 `Stack(mechanisms).compile(spec, floors) -> CompiledJail`
 
 **`CompiledJail`** is a frozen dataclass carrying `spec`, `report`, `wrap`,
-`env`, `staged`, `helpers`, `requires`, `mechanism_names`, `matrix_version`.
+`env`, `staged`, `helpers`, `requires`, `mechanism_names`, `matrix_version`
+(and, besides, `signatures`, `sensors` and `runtime`, the last below).
 The first seven are this section's composition outputs, in the shape §6's
 `Step` produces them. The last two are what make a compiled jail *auditable
 after the fact*: which mechanisms produced it, and under which version of the
@@ -1011,6 +1035,37 @@ Validation, in order:
    order; Seatbelt does not nest. Unknown pairs are refused.
 4. **Floors** — aggregate grades meet the caller's `require(...)` or the
    compile refuses, naming the axis and the shortfall.
+
+**The runtime, and the axes it grades (2026-10-12, decision-179).** A
+compiled jail runs in exactly one runtime, so `Stack.compile` resolves exactly
+one `RuntimeKind` from its mechanisms' `runtime` (§6): the kind they name, or
+`HOST` when none names one (the empty stack included). Two mechanisms naming
+different kinds are refused (`RuntimeConflict`, naming both mechanisms and both
+kinds), after rule 3 and before any mechanism compiles: law 2, since no jail
+can be two runtimes and picking one would be a fallback the caller did not
+write. The kind travels on `CompiledJail.runtime`. Two axes depend on the
+runtime rather than on any mechanism: `control`, at the jail scope (whether
+the jail and everything in it can be ended without cooperation; decision-0001's
+process scope travels on each process, not in this report), and
+`channel_exclusivity` (whether declared channels and enumerated shared media are
+the only ways in or out, which a relay or an exec's stdio decides). A runtime's
+grades are static per kind (`brig.core.runtime.runtime_grades`), so the
+coverage fill takes those two axes from the kind's grades instead of from
+`unenforced_report()`, and rule 4 checks a floor on them at compile like any
+other: `require(control=...)` above what the kind grades is refused at compile,
+with a note naming the runtime kind. A mechanism that declares one of the two
+axes still overlays its own grade, as on any axis; none does today
+(`tests/unit/test_stack_runtime.py` pins that), and whether one may is the
+first such mechanism's ruling. **`HOST` grades both `unenforced`, which is what
+every report said before this ruling**: a jail is ended by signalling the
+process groups brig started, and nothing yet proves that reaches everything in
+the jail (a `setsid()` child leaves its group), and nothing establishes channel
+exclusivity. No grade above that ships without decision-0001's control battery
+(TASK-0079.08: planted survivors driven from the host, and a positive control,
+law 10). What changes in a report is the two axes' `detail`, which now names
+the runtime and the gap. The matrix keeps every row and its order, and
+`MATRIX_VERSION` stays 5. Implementing task: TASK-0079.03. (Ruled 2026-10-12,
+decision-179.)
 
 **Coverage is a construction-time invariant, not a step anyone can forget.** An
 `EnforcementReport` carries a `Graded` for all seven axes of §4; constructing one
@@ -1041,7 +1096,8 @@ other mechanisms' helper processes, `seatbelt` next so the `/bin/sh` and
 `/usr/bin/env` that `env_scrub`'s wrap spawns run *inside* the profile, and
 `env_scrub` innermost so its `env -i` reaches the workload with nothing between
 them to re-add what it removed. `channel_exclusivity` is unclaimed here and
-grades `unenforced` (§6's roster note). (Ruled 2026-08-24, decision-118 for the
+grades `unenforced` (§6's roster note; since decision-179, by `HOST`'s static
+grade). (Ruled 2026-08-24, decision-118 for the
 preset and decision-119 for the ordering, from `doc-017` §3's ambiguity A4.
 Implementing task: **task-064**, with **task-059** owning the two matrix rows
 that carry the ordering rationale and **task-060** observing the ordering's
@@ -1057,7 +1113,7 @@ that name would be the silent substitution law 2 forbids. What it gives up
 against `strict()` is exactly those two mechanisms' axes — `limits` stays
 `best_effort` (`rlimits` reaches cpu only) and `network` is deny-all rather
 than filtered. `channel_exclusivity` and `control` are unclaimed and grade
-`unenforced`.
+`unenforced` (since decision-179, by `HOST`'s static grades).
 
 Membership, never composition order, like every preset here: the matrix
 composes it **outermost→innermost as `rlimits`, `bwrap`, `env_scrub`** —
@@ -1088,7 +1144,7 @@ is report dominance per axis, not a total order.
 ```python
 class Launcher(Protocol):
     name: str
-    capabilities: frozenset[LaunchFeature]   # NEW_PROCESS_GROUP, PTY, DETACH, ...
+    capabilities: frozenset[Capability]      # NEW_PROCESS_GROUP, PTY, DETACH, ... (decision-179)
     def launch(self, jail: CompiledJail, *, argv, cwd, io: IoPolicy) -> Handle: ...
 ```
 

@@ -4,7 +4,7 @@ SPEC.md §8:
 
     class Launcher(Protocol):
         name: str
-        capabilities: frozenset[LaunchFeature]
+        capabilities: frozenset[Capability]
         def launch(self, jail: CompiledJail, *, argv, cwd, io: IoPolicy) -> Handle: ...
 
     - `subprocess` -- pipes or files for stdio, detached, new process group.
@@ -57,7 +57,7 @@ exit waiter, which stamps `classify_exit()`'s answer when the workload ends
 
 from collections.abc import Sequence
 
-from brig.mech import LaunchFeature
+from brig.core.runtime import Capability
 from brig.run.events import stamp_all
 from brig.run.handle import Handle
 from brig.run.host import HelperFailed as HelperFailed
@@ -74,8 +74,8 @@ class SubprocessLauncher:
     pty."""
 
     name = "subprocess"
-    capabilities: frozenset[LaunchFeature] = frozenset(
-        {LaunchFeature.NEW_PROCESS_GROUP, LaunchFeature.DETACH}
+    capabilities: frozenset[Capability] = frozenset(
+        {Capability.NEW_PROCESS_GROUP, Capability.DETACH}
     )
 
     def launch(

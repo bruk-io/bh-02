@@ -62,7 +62,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from brig.core.runtime import Capability, RuntimeKind
-from brig.mech import HelperLifetime, LaunchFeature
+from brig.mech import HelperLifetime
 from brig.run import _execs, _exit_status, _identity, _waiters
 from brig.run._spawn_pgid import spawn_pgid
 from brig.run.exec_ import ExecWrapNotAPrefix
@@ -119,7 +119,7 @@ class LaunchRefused(ValueError):
     structured field a caller inspects instead of parsing `str(exc)`.
     """
 
-    def __init__(self, missing: frozenset[LaunchFeature], launcher_name: str) -> None:
+    def __init__(self, missing: frozenset[Capability], launcher_name: str) -> None:
         self.missing = missing
         self.launcher_name = launcher_name
         super().__init__(str(self))
@@ -323,12 +323,9 @@ def _start_helpers(
     return tuple(persistent), tuple(stamps)
 
 
-def _refused(jail: CompiledJail, capabilities: frozenset[Capability]) -> frozenset[LaunchFeature]:
-    """The features `jail` requires that `capabilities` lacks, compared by
-    value (`Capability` holds `LaunchFeature`'s members until decision-0001
-    step 2 retires it)."""
-    offered = frozenset(capability.value for capability in capabilities)
-    return frozenset(feature for feature in jail.requires if feature.value not in offered)
+def _refused(jail: CompiledJail, capabilities: frozenset[Capability]) -> frozenset[Capability]:
+    """The capabilities `jail` requires that `capabilities` lacks."""
+    return jail.requires - capabilities
 
 
 @dataclass(frozen=True, slots=True)

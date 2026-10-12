@@ -48,7 +48,8 @@ from brig.core import (
     Spec,
     unenforced_report,
 )
-from brig.mech import EventPayload, EventSource, ExitOutcome, LaunchFeature, StagedFile
+from brig.core.runtime import Capability
+from brig.mech import EventPayload, EventSource, ExitOutcome, StagedFile
 from brig.run import exec_ as exec_mod
 from brig.run import readiness as readiness_mod
 
@@ -94,7 +95,7 @@ class _FixedSensor:
 
 def _compiled_jail(
     *,
-    requires: frozenset[LaunchFeature] = frozenset(),
+    requires: frozenset[Capability] = frozenset(),
     spec: Spec | None = None,
     report: EnforcementReport | None = None,
     staged: tuple[StagedFile, ...] = (),
@@ -271,7 +272,7 @@ def test_launch_refuses_a_jail_that_requires_pty(run_id: str) -> None:
     """AC #5: `requires` including `PTY` (which `SubprocessLauncher` does
     NOT claim) raises, and the structured `missing` field -- not
     `str(exc)` -- names `PTY`. No process is spawned."""
-    jail = _compiled_jail(requires=frozenset({LaunchFeature.PTY}))
+    jail = _compiled_jail(requires=frozenset({Capability.PTY}))
     jail_dir = _new_jail_dir()
     launcher = SubprocessLauncher()
     with pytest.raises(LaunchRefused) as exc_info:
@@ -283,7 +284,7 @@ def test_launch_refuses_a_jail_that_requires_pty(run_id: str) -> None:
             jail_id="jail-refused",
             jail_dir=jail_dir,
         )
-    assert LaunchFeature.PTY in exc_info.value.missing
+    assert Capability.PTY in exc_info.value.missing
     # Nothing was ever spawned or created for a refused jail.
     assert not os.path.exists(jail_dir)
 
@@ -295,7 +296,7 @@ def test_launch_refusal_control_new_process_group_is_within_capabilities(run_id:
     launches successfully -- without this, the refusal test above cannot
     distinguish "requires exceeded capabilities" from "launch always
     refuses"."""
-    jail = _compiled_jail(requires=frozenset({LaunchFeature.NEW_PROCESS_GROUP}))
+    jail = _compiled_jail(requires=frozenset({Capability.NEW_PROCESS_GROUP}))
     argv = workload_argv(run_id, "true")
     jail_dir = _new_jail_dir()
     handle = _launch(argv, cwd=jail_dir, jail=jail, jail_dir=jail_dir)

@@ -160,6 +160,7 @@ from __future__ import annotations
 from typing import Final
 
 from brig.core import Axis, EnvMode, EnvPolicy, EventKind, Grade, Graded, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech.contract import ArgvTransformer, CompileCtx, EventPayload, ExitOutcome, Step
 
 _ENV_UTILITY = "/usr/bin/env"
@@ -313,6 +314,7 @@ class EnvScrub:
 
     name = "env_scrub"
     axes: frozenset[Axis] = frozenset({Axis.ENV})
+    runtime: RuntimeKind | None = None
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         """Pure `spec -> argv` render; `ctx` is accepted per the

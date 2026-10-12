@@ -44,7 +44,7 @@ from typing import Protocol, cast
 import pytest
 
 from brig.core import Channel, ChannelKind, Spec, unenforced_report
-from brig.mech import LaunchFeature
+from brig.core.runtime import Capability
 from brig.run.handle import Handle
 from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import CompiledJail
@@ -68,12 +68,12 @@ class _NamedTimeout(Protocol):
 
 class _NamedExecRefusal(Protocol):
     """Same idiom as `_NamedTimeout`, for the exception `Handle.exec` is
-    expected to raise on `interactive=True` -- `LaunchFeature` is imported
-    (it lives in `brig.mech`, a layer below `brig.run`, not in the module
+    expected to raise on `interactive=True` -- `Capability` is imported
+    (it lives in `brig.core.runtime`, a layer below `brig.run`, not in the module
     this file is forbidden from importing), but the exception class itself
     is still checked by name only."""
 
-    missing: frozenset[LaunchFeature]
+    missing: frozenset[Capability]
 
 
 def _new_jail_dir() -> str:
@@ -212,7 +212,7 @@ def test_handle_exec_forwards_the_interactive_keyword_through_the_bound_method(
             handle.exec(["true"], interactive=True)
         assert type(exc_info.value).__name__ == "ExecRefused"
         refusal = cast(_NamedExecRefusal, exc_info.value)
-        assert LaunchFeature.PTY in refusal.missing
+        assert Capability.PTY in refusal.missing
 
         # Control: the same bound method, interactive=False, succeeds.
         exec_handle = handle.exec(["true"], interactive=False)

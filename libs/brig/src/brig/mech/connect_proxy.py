@@ -81,6 +81,7 @@ from __future__ import annotations
 import re
 
 from brig.core import Axis, EventKind, Grade, Graded, NetworkPolicy, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech.contract import (
     ArgvTransformer,
     CompileCtx,
@@ -233,6 +234,7 @@ class ConnectProxy:
 
     name = "connect_proxy"
     axes: frozenset[Axis] = frozenset({Axis.NETWORK})
+    runtime: RuntimeKind | None = None
 
     def __init__(self, python: str) -> None:
         self._python = python

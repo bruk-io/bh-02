@@ -54,18 +54,20 @@ from brig.core import (
     AxisClaim,
     EnforcementReport,
     Floors,
+    FloorViolation,
     Grade,
     Graded,
+    Shortfall,
     SignatureBook,
     Spec,
     unenforced_report,
 )
+from brig.core.runtime import RUNTIME_AXES, Capability, RuntimeKind, runtime_grades
 from brig.mech import (
     ArgvTransformer,
     CompileCtx,
     EventSource,
     Helper,
-    LaunchFeature,
     Mechanism,
     StagedFile,
     Step,
@@ -511,6 +513,35 @@ class EnvConflict(ValueError):
         )
 
 
+class RuntimeConflict(ValueError):
+    """Two mechanisms in a Stack name different runtime kinds.
+
+    SPEC.md §7 (decision-179): a jail runs in exactly one runtime, so a
+    stack resolves exactly one kind, and two are refused (law 2).
+    """
+
+    def __init__(
+        self,
+        mechanism_a: str,
+        runtime_a: RuntimeKind,
+        mechanism_b: str,
+        runtime_b: RuntimeKind,
+    ) -> None:
+        self.mechanism_a = mechanism_a
+        self.runtime_a = runtime_a
+        self.mechanism_b = mechanism_b
+        self.runtime_b = runtime_b
+        super().__init__(str(self))
+
+    def __str__(self) -> str:
+        return (
+            f"mechanism {self.mechanism_a!r} needs the {self.runtime_a.value} "
+            f"runtime and {self.mechanism_b!r} needs {self.runtime_b.value}; a "
+            "jail runs in exactly one runtime, so no stack can hold both -- "
+            "build one stack per runtime (SPEC.md §7, decision-179)"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class CompiledJail:
     """The output of `Stack.compile`.
@@ -541,7 +572,13 @@ class CompiledJail:
     library's own composition step. A `Launcher` now stamps
     `known_at_compile()` from this tuple and hands the same tuple to the
     exit waiter for `classify_exit()`. Defaults to the empty tuple, same
-    reason `signatures` defaults to the empty book."""
+    reason `signatures` defaults to the empty book.
+
+    `runtime` (decision-179) is the one `RuntimeKind` this jail runs in,
+    resolved by `Stack.compile` from its mechanisms' `runtime`, and the kind
+    whose static grades the report's `control` and `channel_exclusivity`
+    came from. Defaults to `HOST`, the only kind there is, so a hand-built
+    `CompiledJail(...)` keeps compiling unchanged."""
 
     spec: Spec
     report: EnforcementReport
@@ -549,11 +586,12 @@ class CompiledJail:
     env: Mapping[str, str]
     staged: tuple[StagedFile, ...]
     helpers: tuple[Helper, ...]
-    requires: frozenset[LaunchFeature]
+    requires: frozenset[Capability]
     mechanism_names: tuple[str, ...]
     matrix_version: int
     signatures: SignatureBook = field(default_factory=lambda: SignatureBook(claims=()))
     sensors: tuple[EventSource, ...] = ()
+    runtime: RuntimeKind = RuntimeKind.HOST
 
     def __post_init__(self) -> None:
         # Defensive copy: prevent caller mutation of the source mapping from
@@ -610,6 +648,20 @@ class Stack:
         `compile(spec, floors)`; MILESTONES.md M2's goal writes
         `Stack([]).compile(spec)` -- ambiguity A6 in the M2 plan, resolved
         by making `floors` optional so both spellings are true).
+
+        Between 3 and compiling, the runtime (decision-179): exactly one
+        `RuntimeKind` from the mechanisms' `runtime`, `HOST` when none names
+        one, whose static grades fill `control` and `channel_exclusivity`.
+
+        Raises:
+            AxisClaimConflict: two mechanisms declare one axis (1).
+            CompatibilityRefused: a pair the matrix does not list (3).
+            RuntimeConflict: two mechanisms name different runtime kinds.
+            EnvConflict: two mechanisms set one variable to different values.
+            ValueError: a Step grades an axis outside its mechanism's
+                declared axes, or a mechanism's own compile refuses.
+            FloorViolation: the report misses a floor (4); a note names the
+                runtime when a missed axis is one only the runtime grades.
         """
         if floors is None:
             floors = Floors()
@@ -661,6 +713,11 @@ class Stack:
                     raise CompatibilityRefused(a.name, b.name, MATRIX_VERSION)
                 pair_entries[pair] = entry
 
+        # --- 3b. The runtime (decision-179) -------------------------------
+        # Exactly one kind, read from each mechanism's static `runtime`, so
+        # it is checked before any mechanism compiles, like claims.
+        runtime = _resolve_runtime(self.mechanisms)
+
         # --- Compile each mechanism's Step, then compose ----------------
         if ctx is None:
             # M2 has zero real mechanisms; this placeholder is never
@@ -698,7 +755,7 @@ class Stack:
 
         staged = tuple(sf for _, step in steps for sf in step.staged)
         helpers = tuple(h for _, step in steps for h in step.helpers)
-        requires: frozenset[LaunchFeature] = frozenset()
+        requires: frozenset[Capability] = frozenset()
         for _, step in steps:
             requires = requires | step.requires
 
@@ -733,7 +790,10 @@ class Stack:
         # tuple on a present claim is a routing fact for task-050
         # (decision-067), not a gap this task papers over with a generic
         # pattern.
-        grades: dict[Axis, Graded] = dict(unenforced_report().axes)
+        # decision-179: the runtime's own axes are filled from its kind's
+        # static grades, not from `unenforced_report()`. A mechanism that
+        # declares one still overlays it below, as on any axis.
+        grades: dict[Axis, Graded] = {**unenforced_report().axes, **runtime_grades(runtime)}
         claims: list[AxisClaim] = []
         for mechanism, step in steps:
             for axis, graded in step.grades.items():
@@ -766,7 +826,13 @@ class Stack:
         signatures = SignatureBook(claims=tuple(claims))
 
         # --- 4. Floors -----------------------------------------------
-        report.check_floors(floors)  # raises FloorViolation naming shortfalls
+        try:
+            report.check_floors(floors)  # raises FloorViolation naming shortfalls
+        except FloorViolation as violation:
+            note = _runtime_floor_note(violation.shortfalls, runtime, frozenset(axis_owner))
+            if note is not None:
+                violation.add_note(note)
+            raise
 
         return CompiledJail(
             spec=spec,
@@ -780,7 +846,46 @@ class Stack:
             matrix_version=MATRIX_VERSION,
             signatures=signatures,
             sensors=tuple(step.events for _, step in steps if step.events is not None),
+            runtime=runtime,
         )
+
+
+def _resolve_runtime(mechanisms: Sequence[Mechanism]) -> RuntimeKind:
+    """The one runtime kind `mechanisms` need: the kind they name, or `HOST`
+    when none names one (SPEC.md §7, decision-179).
+
+    Raises:
+        RuntimeConflict: two of them name different kinds, naming the first
+            mechanism that named one and the first that disagrees.
+    """
+    named = [(mechanism.name, mechanism.runtime) for mechanism in mechanisms]
+    first: tuple[str, RuntimeKind] | None = None
+    for name, kind in named:
+        if kind is None:
+            continue
+        if first is None:
+            first = (name, kind)
+        elif kind is not first[1]:
+            raise RuntimeConflict(first[0], first[1], name, kind)
+    return RuntimeKind.HOST if first is None else first[1]
+
+
+def _runtime_floor_note(
+    shortfalls: Sequence[Shortfall], runtime: RuntimeKind, claimed: frozenset[Axis]
+) -> str | None:
+    """The note a `FloorViolation` carries when a missed axis is graded by
+    the runtime alone (decision-179): which kind graded it, and what to do.
+    `None` when every missed axis is a mechanism's."""
+    missed = [s for s in shortfalls if s.axis in RUNTIME_AXES and s.axis not in claimed]
+    if not missed:
+        return None
+    graded = ", ".join(f"{s.axis.value} {s.actual.value}" for s in missed)
+    return (
+        f"graded by the jail's runtime, not by a mechanism: {runtime.value} "
+        f"grades {graded}, and no mechanism in this stack claims it, so no "
+        f"stack like it meets this floor until a battery proves a higher "
+        f"grade on {runtime.value} (decision-0001, TASK-0079.08); lower it"
+    )
 
 
 #: The grade a confined `connect_proxy` reaches, and no further. `ENFORCED`
@@ -1010,8 +1115,8 @@ def scratch_darwin() -> Stack:
     mode). `limits` stays `best_effort` because `rlimits` reaches only cpu
     (RLIMIT_CPU) and cannot enforce memory, tasks, wall-clock or output
     limits (M3's EC2, decision-061). `channel_exclusivity` and `control`
-    are unclaimed and grade `unenforced` via `unenforced_report()`'s fill
-    in `Stack.compile`.
+    are unclaimed and grade `unenforced`, the `HOST` runtime's static
+    grades (decision-179).
 
     Data, not a factory with logic: this function applies no conditional
     and computes no ordering -- it is a three-element list literal.
@@ -1050,7 +1155,7 @@ def strict_linux() -> Stack:
     `systemd_scope`'s, decision-061), and `network` is deny-ALL rather than
     filtered (`pasta` plus `connect_proxy` is what would grant a domain).
     `channel_exclusivity` and `control` are unclaimed and grade
-    `unenforced` via `unenforced_report()`'s fill in `Stack.compile`.
+    `unenforced`, the `HOST` runtime's static grades (decision-179).
 
     **Two preconditions this preset does not enforce and will not hide.**
     `bwrap` is an ALLOWLIST mechanism (SPEC.md sec 5), so:
@@ -1114,6 +1219,7 @@ __all__ = (  # noqa: RUF022
     "EnvConflict",
     "MATRIX_VERSION",
     "MatrixEntry",
+    "RuntimeConflict",
     "Stack",
     "degraded",
     "confined_egress_darwin",
