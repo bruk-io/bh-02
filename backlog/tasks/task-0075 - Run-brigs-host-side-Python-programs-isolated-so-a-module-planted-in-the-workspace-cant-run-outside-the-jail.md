@@ -3,11 +3,11 @@ id: TASK-0075
 title: >-
   Run brig's host-side Python programs isolated, so a module planted in the
   workspace can't run outside the jail
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-10 21:58'
-updated_date: '2026-10-11 17:26'
+updated_date: '2026-10-12 00:07'
 labels:
   - brig
   - runner
@@ -32,7 +32,7 @@ brig's exit wrapper runs `python -c` with its working directory set to the workl
 - [x] #1 Every Python interpreter brig starts on the host runs isolated (`-I`), and a test lists them all
 - [x] #2 A test plants `subprocess.py`, `signal.py` and a `brig/` package in the workload's working directory and shows none is imported by the exit wrapper, the trampoline or the egress proxy; the same test fails before the fix
 - [x] #3 In bh-02, a test plants a module in the project root, starts the Python process again, and nothing runs outside the jail
-- [ ] #4 brig's test tiers, `scripts/linux-jail-check` and `scripts/check` pass
+- [x] #4 brig's test tiers, `scripts/linux-jail-check` and `scripts/check` pass
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -61,4 +61,6 @@ AC4 not met here, for reasons outside this change: brig integration+e2e: 12 fail
 Review 1 (2026-10-11, a reviewer who did not do the work): criteria 1-3 met with evidence; code fit to close; criterion 4 not verifiable here yet (scripts/linux-jail-check can't build behind this container's TLS proxy, TASK-0082; scripts/check stops at collection on rumps, TASK-0081). Should-fix taken: four docstrings and comments now show the trampoline and proxy argv with -I. The task stays open until criterion 4 is re-run after TASK-0081 and TASK-0082.
 
 AC4 re-run (2026-10-11, orchestrator), after TASK-0081 and TASK-0082: scripts/linux-jail-check (unprivileged user in a container, HEAD with this task's fix) passes: 145 passed, 2 skipped, exit 0, run by TASK-0082's worker and again by its reviewer. scripts/check as root natively: format, lint, types ok; tests 27 failed, every one in a class this task doesn't touch: 19 are PID-1 zombies (TASK-0077; under tini -s the same files give 1 failure), 6 are NO_PROXY egress (TASK-0076), 2 fail only as root (TASK-0079.11). Under tini as root: 8 failed, 2151 passed, 31 skipped (the 6 egress plus the 2 root-only). AC4 is re-run once TASK-0076, TASK-0077 and TASK-0079.11 land; the task closes then, on a reviewer's verdict.
+
+Closing review (2026-10-12, a reviewer who did not do the work): CLOSE on all four criteria at HEAD d99161e. AC4: brig as root without tini 830 passed, 24 skipped (every skip darwin-only), 0 failed; as tester under tini the same; scripts/linux-jail-check exit 0, 155 passed, 2 skipped; scripts/check as root without tini exit 0, 2210 passed, 31 skipped, every step passing (tokens skipped: no ../bh-01/dist). The 27 failures earlier in these notes are gone with TASK-0076, TASK-0077, TASK-0079.11 and TASK-0079.12. AC1-3 still hold: brig starts exactly the same four host interpreters, each with -I (no launch added since a40e596); the isolation tests and bh-02's end-to-end plant test pass.
 <!-- SECTION:NOTES:END -->
