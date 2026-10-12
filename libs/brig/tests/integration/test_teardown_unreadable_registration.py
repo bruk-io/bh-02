@@ -113,6 +113,8 @@ def _record(**fields: object) -> dict[str, object]:
         "argv": [],
         "stdout_path": "",
         "stderr_path": "",
+        "channel": None,
+        "bound_path": None,
     }
     base.update(fields)
     return base

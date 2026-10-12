@@ -113,12 +113,12 @@ def test_a_wait_that_reaches_its_deadline_is_a_timeout() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_dict_is_version_6_and_round_trips_with_the_runtime_passed() -> None:
+def test_the_dict_is_version_7_and_round_trips_with_the_runtime_passed() -> None:
     runtime = FakeRuntime()
     jail = _create(runtime)
     first = jail.start(["sleep", "100"])
     d = jail.to_dict()
-    assert d["version"] == JAIL_VERSION == 6
+    assert d["version"] == JAIL_VERSION == 7
     assert d["runtime"] == "FAKE" and d["tethered"] is False
     assert [p["id"] for p in d["processes"]] == [first.id]
     assert not {"pid", "pgid", "argv", "launcher_name"} & set(d)
@@ -155,7 +155,7 @@ def test_a_runtime_passed_under_another_kind_is_refused() -> None:
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"version": 5}, "unsupported version 5, expected 6"),
+        ({"version": 6}, "unsupported version 6, expected 7"),
         ({"pid": 1}, r"unknown key\(s\) \['pid'\]"),
         ({"runtime": "DOCKER"}, "'DOCKER' is no runtime kind"),
         ({"tethered": "yes"}, "'tethered' must be a bool"),

@@ -85,6 +85,8 @@ def _forge_registration(jail_dir: str, pid: int, pgid: int) -> None:
                 "argv": [],
                 "stdout_path": "",
                 "stderr_path": "",
+                "channel": None,
+                "bound_path": None,
             },
             record,
         )

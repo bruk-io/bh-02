@@ -59,7 +59,7 @@ def _without_a_supervisor(runtime: FakeRuntime) -> tuple[Jail, ProcessRecord]:
         jail_dir=_JAIL_DIR,
     )
     first = FakeSupervisor(runtime, created._record()).start(
-        ("sleep", "100"), cwd="/work", io=IoPolicy()
+        ("sleep", "100"), cwd="/work", io=IoPolicy(), channel=None
     )
     d = {**created.to_dict(), "processes": [_records.to_json(first)]}
     return Jail.from_dict(d, runtimes={RuntimeKind.FAKE: runtime}), first

@@ -519,6 +519,10 @@ Notes:
   Widened by decision-181 (§9, 2026-10-12): every mechanism that compiles a
   LISTEN channel refuses an endpoint at or under brig's records
   (`<jail_dir>/procs`, and `<jail_dir>/execs` while it exists).
+  Amended by decision-184 (§10, 2026-10-12): when the Spec declares a channel,
+  the seal keeps a third thing writable inside the jail directory, the
+  runtime's channel directory `<jail_dir>/chan` (bwrap binds it, seatbelt
+  grants its subpath), and a `write_denies` entry at or above it is refused.
 - Serialization: `to_dict`/`from_dict`, versioned, round-trip stable.
 - **The version is `SPEC_VERSION = 1`, and an unknown key at any level is a
   refusal.** There is no migration framework and no tolerated extra field: a
@@ -874,7 +878,9 @@ be the copy decision-152 deleted the event stream for).
   own furniture, `--proc /proc`, `/proc/sys` bound read-only over it
   (decision-177) and `--dev /dev`, first among the mounts so every
   spec-derived mount stacks on top of it; (3) `read_allows` as `--ro-bind`; (4) the declared LISTEN
-  channel's endpoint DIRECTORY as `--bind`; (5) `write_allows` as `--bind`;
+  channel's endpoint DIRECTORY as `--bind`, and the channel directory
+  `<jail_dir>/chan` when the Spec declares a channel (decision-184, §10);
+  (5) `write_allows` as `--bind`;
   (5a) the pins (decision-168, below), but those in a sealed jail directory;
   (5b) when a write root or a channel directory is at or above the jail
   directory, the SEAL (decision-173, §5): the jail directory `--ro-bind` at
@@ -1239,9 +1245,13 @@ class Runtime(Protocol):
     def tethered(self, jail: JailRecord) -> bool | None: ...
     def destroy(self, jail: JailRecord) -> KillReport: ...
     def supervisor(self, jail: JailRecord) -> Supervisor | None: ...
+    def reserve(self, jail: JailRecord, channel: str) -> Reservation: ...      # decision-184
+    def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None: ...
+    def ready(self, jail: JailRecord, process: ProcessRecord) -> bool: ...  # a connect
 
 class Supervisor(Protocol):
-    def start(self, argv, *, cwd, io: IoPolicy) -> ProcessRecord: ...  # every process
+    def start(self, argv, *, cwd, io: IoPolicy,
+              channel: Reservation | None) -> ProcessRecord: ...  # every process
     def signal(self, process: ProcessRecord, sig: Signals) -> bool: ...
     def wait(self, process: ProcessRecord, timeout: float | None) -> int | None: ...
     def stop(self, process: ProcessRecord) -> KillReport: ...
@@ -1453,8 +1463,9 @@ class Jail:
     @classmethod
     def from_dict(cls, d, *, runtimes: Mapping[RuntimeKind, Runtime]) -> Jail
 
-    def start(self, argv, *, cwd: str | None = None,
-              io: IoPolicy = IoPolicy()) -> Process  # absent without a supervisor
+    def start(self, argv, *, cwd: str | None = None, io: IoPolicy = IoPolicy(),
+              channel: Reservation | None = None) -> Process  # absent without a supervisor
+    def channel(self, name: str) -> Reservation         # decision-184, §10
     def processes(self) -> tuple[Process, ...]          # start order
     def alive(self) -> bool
     def destroy(self) -> KillReport                    # tree/group teardown of EVERYTHING
@@ -1471,7 +1482,9 @@ class Process:
     def wait(self, timeout: float | None = None) -> int   # same
     def alive(self) -> bool
     def exit_events(self) -> tuple[Event, ...]  # §11
-    # fields: id, pid, start_time, argv, stdout_path, stderr_path, fidelity
+    def wait_ready(self, timeout: float) -> None    # decision-184, §10
+    # fields: id, pid, start_time, argv, stdout_path, stderr_path, fidelity,
+    #         channel, bound_path, endpoint (decision-184)
 ```
 
 `dial` (§10) and `console` (§11) stay absent. The fields an embedder reads
@@ -1882,7 +1895,7 @@ of which works is a raising stub, so it returns with a runtime that has
 `PTY`); `stat` and `JailStat` go (`alive`, `processes()` and `report` answer
 them); `dial` and `console` stay absent. `ExecFidelity` keeps its three
 values on `Process.fidelity`; a process-scope control grade beside it is
-TASK-0079.08's. A start's channel is TASK-0079.05's.
+TASK-0079.08's. A start's channel is decision-184's (§10, TASK-0079.05).
 
 **Each process has a record and an exit record of its own.** A start makes
 `<jail_dir>/procs/<id>/`, `<id>` a fresh token per start (never a pid, never
@@ -2151,6 +2164,81 @@ Three inbound kinds, each with different liveness, trust, and delivery:
    Spec's `shared_media` so `channel_exclusivity` grading covers exactly the
    real list. A read-write console attach is a channel request, policy-gated,
    not an observation feature.
+
+**A channel directory per jail, and a socket reserved before each start
+(2026-10-12, decision-184).** decision-0001's migration step 3b, its first
+part. Until now a channel's socket was a path the `Spec` names, compiled at
+launch, so a running jail could not take a new socket and two processes in one
+jail could not each have their own. Ruled:
+
+- **The runtime owns one channel directory per jail, `<jail_dir>/chan`.** Its
+  name is brig's, beside `tmp`, `procs` and `jail.json`, never a `Spec` path:
+  `core.runtime.channel_dir(jail_dir)`, which `CompileCtx.channel_dir` derives
+  from the resolved `jail_dir`, so no context names it by hand. `HostRuntime.create`
+  makes it (mode 0700) before any start and refuses an entry there that is not a
+  directory it could have made (a link, a file), since a bind follows a link.
+  When the `Spec` declares a channel, each mechanism that compiles `fs_write`
+  grants it at create, once for the jail, **beside** today's per-endpoint
+  grants, which stay (§5's channels keep their `endpoint` until
+  TASK-0079.32): bwrap binds it read-write at stage 4, deduplicated with an
+  endpoint directory that is the same, and binds it again after the seal
+  (stage 5b) as it does a channel directory inside the jail directory;
+  seatbelt emits `(allow file-write* (subpath CHAN))` after the seal and before
+  the carve-outs, so a `write_denies` under it still wins. A `write_denies`
+  entry at or above the channel directory is refused in both
+  (`ChannelInsideWriteDeny`): the channel could not work there. A `Spec` with no
+  channel gets no grant, and its compile is unchanged. seatbelt's half is
+  checked by its rendered profile only (no darwin host runs brig's tiers here);
+  the tests that pin it say so.
+- **It squares with the jail directory's rulings by construction.**
+  decision-173's seal still covers the rest of the jail directory: `chan/`
+  joins `tmp/` as what stays writable inside it, and it is a subdirectory, so
+  decision-174's refusal (no grant whose directory IS the jail directory) and
+  decision-181's (no grant at or under `procs/`) are never reached by it. Their
+  tests stand unchanged.
+- **Reserve, then start (the owner's choice, 2026-10-12).**
+  `jail.channel(name)` reserves a socket in the channel directory for a channel
+  the `Spec` declares, and returns a `Reservation`: the channel's name, the
+  path the process binds inside the jail (`bound_path`), and the host path the
+  embedder dials (`endpoint`). An undeclared name is refused
+  (`UnknownChannel`), saying to declare it in the `Spec`'s `channels`. The
+  embedder puts `bound_path` in the argv it starts and passes the reservation:
+  `jail.start(argv, channel=reservation)`. No environment variable carries it,
+  so nothing an env mechanism strips can lose it, and it works on every jail
+  type now. The reservation is the runtime's (`Runtime.reserve`):
+  `HostRuntime` names it `<chan>/<16 lowercase hex>.sock`, fresh per call, and
+  its in-jail and host paths are the same path. `Supervisor.start` takes
+  `channel: Reservation | None` and refuses (`ReservationRefused`, a
+  `ValueError`, before anything is made or spawned) a reservation that is not
+  its own: one whose path is not directly in this jail's channel directory under
+  a name it makes, whose endpoint is not the one it would hand out, or that a
+  process the jail knows already binds. A process holds one socket, so the host
+  stamps provenance by socket (law 6).
+- **The process carries its channel.** `ProcessRecord` (and `record.json`) gain
+  `channel` and `bound_path`, both `null` for a process started with none; an
+  older record lacks them and reads unreadable, a doubt like any other.
+  `Process` carries `channel`, `bound_path` and `endpoint`, and the jail's dict
+  carries the records, so `JAIL_VERSION` is 7.
+- **Readiness and the host path belong to the runtime.** `Runtime.endpoint(jail,
+  process)` resolves a process's channel to the host path to dial (`None`
+  without one), and `Runtime.ready(jail, process)` says whether it accepts a
+  connection now: for `HostRuntime` a connect that succeeds, never the path's
+  existence (§10.1). `Process.wait_ready(timeout)` polls it and raises
+  `WaitReadyTimeout`. The fake runtime mirrors it: its endpoint is a relay path
+  apart from the bound one, as a runtime that shares no socket with the host
+  would hand out, and its readiness is a flag. `Jail.wait_ready(channel)` stays
+  for a channel's declared endpoint until TASK-0079.32.
+- **Residual, named.** A socket in the channel directory is reachable by every
+  process of its jail until each has a mount namespace of its own
+  (TASK-0079.07): a co-tenant's socket is shared media, not a channel to the
+  host (decision-0001), and `channel_exclusivity` stays `unenforced` (§7). A
+  link a process plants in the channel directory is dialled by the host as
+  found, as a link in a per-endpoint directory always was. Grades are
+  otherwise unchanged.
+
+Implementing task: TASK-0079.05; bh-02's runner moves to it in TASK-0079.31,
+and the `Spec` stops naming paths in TASK-0079.32. (Ruled 2026-10-12,
+decision-184.)
 
 **Mailbox is deleted (2026-09-08, decision-153).** It was the second kind
 here: an asynchronous, durable, ordered, many-writer-safe framed file with

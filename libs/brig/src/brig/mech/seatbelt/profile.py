@@ -56,6 +56,7 @@ has a feature the parent does not:**
       [per write_allows entry, spec order]  (allow file-write* (subpath "RESOLVED"))
       [when a write root reaches jail_dir]  (deny file-write* (subpath "JAIL_DIR"))
                                             (allow file-write* (subpath "JAIL_DIR/tmp"))
+      [when any channel is declared]        (allow file-write* (subpath "JAIL_DIR/chan"))
       [per write_denies entry, spec order]  (deny file-write* (subpath "RESOLVED"))
       [per LISTEN channel, spec order]      (allow file-write* (literal "RESOLVED"))
     (allow network-bind)                    [ONLY when at least one LISTEN channel]
@@ -92,6 +93,17 @@ order every write root already relies on over the whole-tree deny. A LISTEN
 channel's literal still follows, so an endpoint in `jail_dir` stays
 creatable and nothing else there does. Only when a write root reaches it,
 so a profile with none (the ordinary one) is unchanged.
+
+**The runtime's channel directory (decision-184).** When the spec declares
+a channel, `(allow file-write* (subpath "JAIL_DIR/chan"))` follows the seal
+and precedes the carve-outs: each start's socket is reserved there, so the
+grant is the directory, once for the jail, beside each endpoint's literal.
+After the seal, so it wins over the seal's deny; before the carve-outs, so a
+`write_denies` entry under it still wins; and one at or above it is refused
+(`ChannelInsideWriteDeny`), since no channel could be bound there. This half
+is checked by its RENDERED PROFILE only (`tests/unit/test_seatbelt_profile.py`):
+no darwin host runs brig's tiers here, so nothing has yet shown the kernel
+honouring it.
 
 **Two dialect facts, carried because the parent PROBED them -- do not "fix"
 these into something that reads better and enforces less:**
@@ -157,6 +169,7 @@ from collections.abc import Mapping
 from typing import Final
 
 from brig.core import ReadModel, Spec
+from brig.core.runtime import channel_dir
 
 #: darwin's known symlinked roots (SPEC.md §6). A `jail_dir` whose leading
 #: path component is one of these is almost certainly the UNRESOLVED
@@ -292,7 +305,8 @@ def render_sbpl(
               `jail_dir` is lexically one of darwin's known symlinked
               roots.
         ChannelInsideWriteDeny: a LISTEN channel's resolved endpoint falls
-              under a resolved `write_denies` subpath.
+              under a resolved `write_denies` subpath, or the channel
+              directory does (decision-184).
     """
     if spec.fs.read_model is not ReadModel.DENY_LIST:
         raise ReadModelUnsupported(
@@ -331,6 +345,23 @@ def render_sbpl(
         lines.append(f"(deny file-write* {_sbpl_subpath(jail_dir)})")
         scratch = f"{jail_dir.rstrip('/')}/{_SCRATCH}"
         lines.append(f"(allow file-write* {_sbpl_subpath(scratch)})")
+
+    # The runtime's channel directory (decision-184), when the spec declares
+    # a channel: its subpath, after the seal (later wins over its deny) and
+    # BEFORE the carve-outs, so a write deny under it still wins. A carve-out
+    # at or above it would leave no channel bindable there: refused.
+    if spec.channels:
+        chan = channel_dir(jail_dir)
+        for path in spec.fs.write_denies:
+            deny_root = _resolve(path, resolved)
+            if _is_subpath(chan, deny_root):
+                raise ChannelInsideWriteDeny(
+                    f"the channel directory {chan!r}, where each start's socket is "
+                    f"reserved (decision-184), falls under write_denies subpath "
+                    f"{path!r} (resolved {deny_root!r}): no channel could be bound "
+                    "there. Remove that write_denies entry, or declare no channel"
+                )
+        lines.append(f"(allow file-write* {_sbpl_subpath(chan)})")
 
     # write_denies is a carve-out INSIDE write_allows (SPEC.md §5): these
     # DENY lines must be emitted AFTER every write_allows ALLOW line above

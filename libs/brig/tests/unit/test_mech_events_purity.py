@@ -215,7 +215,11 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
     ),
     # `typing` joins the pin at task-079/decision-136: `_LOOPBACK_REMOTE` is a
     # `Final` constant, the same stdlib-typing-only shape the other rows carry.
-    "seatbelt/profile.py": frozenset({"__future__", "collections.abc", "typing", "brig.core"}),
+    # `brig.core.runtime` (2026-10-12, decision-184): `channel_dir`, the pure
+    # name of the runtime's channel directory the profile grants.
+    "seatbelt/profile.py": frozenset(
+        {"__future__", "collections.abc", "typing", "brig.core", "brig.core.runtime"}
+    ),
     # `bwrap.py` (2026-09-08, decision-159): the linux mechanism. NOT a
     # carve-out either -- `Bwrap.compile` is a pure `spec -> argv` render,
     # and the two filesystem facts it needs (a path's realpath'd form, and

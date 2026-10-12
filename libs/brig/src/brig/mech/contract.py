@@ -51,7 +51,7 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from brig.core import Axis, DataValue, EventKind, Graded, Spec
-from brig.core.runtime import Capability, RuntimeKind
+from brig.core.runtime import Capability, RuntimeKind, channel_dir
 
 # Type aliases
 ArgvTransformer = Callable[[tuple[str, ...]], tuple[str, ...]]
@@ -189,6 +189,8 @@ class CompileCtx:
                   file with a file and a directory with a directory. Absent
                   paths map to `False`. Same default, same refusal on a
                   missing key, same defensive copy as `path_exists`.
+        channel_dir: (a property, not a field) `<jail_dir>/chan`, the
+                  runtime's channel directory (decision-184).
     """
 
     jail_dir: str
@@ -206,6 +208,14 @@ class CompileCtx:
         object.__setattr__(self, "path_exists", MappingProxyType(exists_copy))
         is_dir_copy = dict(self.path_is_dir)
         object.__setattr__(self, "path_is_dir", MappingProxyType(is_dir_copy))
+
+    @property
+    def channel_dir(self) -> str:
+        """The runtime's channel directory for this jail, `<jail_dir>/chan`
+        (decision-184): derived from the resolved `jail_dir`, never a `Spec`
+        path, so a mechanism that grants it grants the same directory the
+        runtime makes and reserves each start's socket in."""
+        return channel_dir(self.jail_dir)
 
 
 @dataclass(frozen=True, slots=True)

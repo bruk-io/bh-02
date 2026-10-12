@@ -53,11 +53,15 @@ restrictive".
        `fs.read_allows`                    so what is not named here does not
                                            exist inside the jail at all.
     4. `--bind SRC DEST` per declared      the LISTEN channel's own directory
-       channel's endpoint DIRECTORY        (see below), before the write
-                                           roots: it is the one mount whose
-                                           path policy did not choose, so it
+       channel's endpoint DIRECTORY,       (see below), before the write
+       then `--bind CHAN CHAN` when the    roots: it is the one mount whose
+       Spec declares any channel           path policy did not choose, so it
                                            is the one that may CONTAIN them
-                                           -- decision-163.
+                                           -- decision-163. CHAN is the
+                                           runtime's channel directory,
+                                           `<jail_dir>/chan`, where each
+                                           start's socket is reserved
+                                           (decision-184).
     5. `--bind SRC DEST` per               the writable roots, layered over
        `fs.write_allows`                   the two stages above.
     5a. `--bind DIR DIR` per existing      the PINS (decision-168): each
@@ -162,7 +166,8 @@ record `wait()` answers from (found by an embedder, TASK-0078; since
 decision-181 both live under `<jail_dir>/procs/<id>/`). The seal takes it
 back: the jail directory bound read-only over itself wherever a writable
 tree shows it, after the write roots, then `<jail_dir>/tmp`, the jail's
-scratch, writable again, and every channel directory inside it. A channel
+scratch, writable again, and every channel directory inside it (the
+runtime's `<jail_dir>/chan` among them, decision-184). A channel
 whose directory IS the jail directory cannot be sealed (the directory is the
 smallest grant a socket can have here), so it is refused at compile
 (`ChannelInsideJailDir`, decision-174), and so is one at or under the records
@@ -272,7 +277,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, ReadModel, Spec
-from brig.core.runtime import RuntimeKind, refuse_channel_on_records
+from brig.core.runtime import RuntimeKind, channel_dir, refuse_channel_on_records
 from brig.mech.contract import ArgvTransformer, CompileCtx, Step
 
 #: Absolute, never the bare name `bwrap` (decision-026 rule 1's family, the
@@ -298,7 +303,8 @@ _FS_READ_DETAIL: Final[str] = (
     "bwrap enforces fs_read as an allowlist: the jail's root is a fresh "
     "namespace containing only what this mechanism mounts into it -- "
     "spec.fs.read_allows read-only, the write roots, the declared channel's "
-    "own directory, and the jail's own /proc and /dev furniture. A path "
+    "own directory and the channel directory, and the jail's own /proc and "
+    "/dev furniture. A path "
     "outside that set is not readable because it does not exist inside the "
     "jail, so it denies by ABSENCE (ENOENT) and not by a denial message; "
     "this axis is proved by an ABSENCE probe plus the battery's positive "
@@ -320,9 +326,10 @@ _FS_WRITE_DETAIL: Final[str] = (
     "contents stay readable, which is what a write deny asks) and one that "
     "does not exist becomes an empty read-only tmpfs, so the deny holds "
     "either way and an absent denied path appears inside the jail as an "
-    "empty directory. One path is writable that no write_allows entry "
-    "named: the declared LISTEN channel's own endpoint DIRECTORY, bound "
-    "read-write because a jail cannot bind a socket into a directory it "
+    "empty directory. Paths are writable that no write_allows entry "
+    "named: the declared LISTEN channel's own endpoint DIRECTORY and, when "
+    "any channel is declared, the runtime's channel directory <jail_dir>/chan "
+    "where each start's socket is reserved, bound read-write because a jail cannot bind a socket into a directory it "
     "cannot write, and a bind mount cannot name a socket that does not "
     "exist yet the way seatbelt's path rule can. The jail directory is never "
     "writable through a write root or channel directory above it: it is "
@@ -536,16 +543,36 @@ class _Seal:
         return _overlaps(resolved_path, self.kept)
 
 
+def _channel_dirs(
+    spec: Spec, resolved: Mapping[str, str], jail_dir: str
+) -> tuple[tuple[str, str], ...]:
+    """Every directory a channel is granted, as (destination, source), once
+    each: each declared endpoint's directory, then the runtime's channel
+    directory `<jail_dir>/chan` when the `Spec` declares any channel
+    (decision-184). The channel directory is brig's, already resolved (it is
+    under the resolved `jail_dir`), so it is mounted at itself."""
+    if not spec.channels:
+        return ()
+    chan = channel_dir(jail_dir)
+    return tuple(
+        dict.fromkeys(
+            (
+                *(
+                    (_parent(c.endpoint), _parent(_resolve(c.endpoint, resolved)))
+                    for c in spec.channels
+                ),
+                (chan, chan),
+            )
+        )
+    )
+
+
 def _seal(spec: Spec, resolved: Mapping[str, str], jail_dir: str) -> _Seal:
     """Decide the seal (decision-173): where the jail directory shows through
     a write root or channel directory at or above it, and what inside it stays
     writable. A channel directory that IS the jail directory never gets here:
     `render_bwrap_prefix` refuses it (`ChannelInsideJailDir`, decision-174)."""
-    channel_dirs = tuple(
-        dict.fromkeys(
-            (_parent(c.endpoint), _parent(_resolve(c.endpoint, resolved))) for c in spec.channels
-        )
-    )
+    channel_dirs = _channel_dirs(spec, resolved, jail_dir)
     roots = tuple((path, _resolve(path, resolved)) for path in spec.fs.write_allows)
     scratch = f"{jail_dir.rstrip('/')}/{_SCRATCH}"
     inside = tuple((src, dest) for dest, src in channel_dirs if _is_subpath(src, jail_dir))
@@ -690,6 +717,24 @@ def render_bwrap_prefix(
         seen_dirs.add(dest_dir)
         args += ["--bind", _parent(resolved_endpoint), dest_dir]
 
+    # Stage 4, the runtime's channel directory (decision-184): granted once
+    # for the jail when the Spec declares a channel, beside the endpoint
+    # directories above, so each start's reserved socket is bound there. A
+    # carve-out at or above it would unmake it, so that is refused, as an
+    # endpoint under one is.
+    if spec.channels:
+        chan = channel_dir(jail_dir)
+        for path, deny_root in zip(spec.fs.write_denies, resolved_write_denies, strict=True):
+            if _is_subpath(chan, deny_root) or _is_subpath(chan, path):
+                raise ChannelInsideWriteDeny(
+                    f"the channel directory {chan!r}, where each start's socket is "
+                    f"reserved (decision-184), falls under write_denies subpath "
+                    f"{path!r} (resolved {deny_root!r}): no channel could be bound "
+                    "there. Remove that write_denies entry, or declare no channel"
+                )
+        if chan not in seen_dirs:
+            args += ["--bind", chan, chan]
+
     # Stage 5: the writable roots, layered over stages 3 and 4.
     for path in spec.fs.write_allows:
         args += ["--bind", _resolve(path, resolved), path]
@@ -702,7 +747,7 @@ def render_bwrap_prefix(
     # and mounting it would be a READ grant: its bind would put a path into
     # the jail that the allowlist left out (a layer file under a directory
     # read_denies names, say).
-    channel_dirs = (_parent(_resolve(c.endpoint, resolved)) for c in spec.channels)
+    channel_dirs = (source for _, source in _channel_dirs(spec, resolved, jail_dir))
     writable = (*channel_dirs, *(_resolve(path, resolved) for path in spec.fs.write_allows))
     seal = _seal(spec, resolved, jail_dir)
 
@@ -754,7 +799,9 @@ def render_bwrap_prefix(
     # Stage 7: the read carve-outs that exist inside a mounted root, last, so
     # no later mount can stack over them (decision-164). The absent ones are
     # `unmasked_read_denies`' business: not mounted, and graded.
-    for path in _masked_read_denies(spec, resolved=resolved, path_exists=path_exists):
+    for path in _masked_read_denies(
+        spec, resolved=resolved, path_exists=path_exists, jail_dir=jail_dir
+    ):
         if _is_dir(path, path_is_dir):
             args += ["--perms", "0000", "--tmpfs", path, "--remount-ro", path]
         else:
@@ -785,21 +832,22 @@ def pins(write_allows: tuple[str, ...], write_denies: tuple[str, ...]) -> tuple[
     return tuple(sorted(dict.fromkeys(found), key=lambda path: (path.count("/"), path)))
 
 
-def _mounted_roots(spec: Spec, resolved: Mapping[str, str]) -> tuple[str, ...]:
+def _mounted_roots(spec: Spec, resolved: Mapping[str, str], jail_dir: str) -> tuple[str, ...]:
     """Every tree this render mounts from the host, resolved: the read allows,
-    the channel directories and the write roots."""
+    the channel directories (the runtime's included, decision-184) and the
+    write roots."""
     return (
         *(_resolve(path, resolved) for path in spec.fs.read_allows),
-        *(_parent(_resolve(channel.endpoint, resolved)) for channel in spec.channels),
+        *(source for _, source in _channel_dirs(spec, resolved, jail_dir)),
         *(_resolve(path, resolved) for path in spec.fs.write_allows),
     )
 
 
-def _inside_the_jail(spec: Spec, resolved: Mapping[str, str]) -> tuple[str, ...]:
+def _inside_the_jail(spec: Spec, resolved: Mapping[str, str], jail_dir: str) -> tuple[str, ...]:
     """The `read_denies` entries a mounted root reaches: at or under one, or an
     ancestor of one. The rest are absent from the jail already, which is the
     allowlist's own enforcement, and need no mount."""
-    roots = _mounted_roots(spec, resolved)
+    roots = _mounted_roots(spec, resolved, jail_dir)
     return tuple(path for path in spec.fs.read_denies if _overlaps(_resolve(path, resolved), roots))
 
 
@@ -811,21 +859,25 @@ def _overlaps(path: str, roots: tuple[str, ...]) -> bool:
 
 
 def _masked_read_denies(
-    spec: Spec, *, resolved: Mapping[str, str], path_exists: Mapping[str, bool]
+    spec: Spec, *, resolved: Mapping[str, str], path_exists: Mapping[str, bool], jail_dir: str
 ) -> tuple[str, ...]:
     """The read carve-outs stage 7 masks: inside the jail, and existing."""
-    return tuple(path for path in _inside_the_jail(spec, resolved) if _exists(path, path_exists))
+    return tuple(
+        path for path in _inside_the_jail(spec, resolved, jail_dir) if _exists(path, path_exists)
+    )
 
 
 def unmasked_read_denies(
-    spec: Spec, *, resolved: Mapping[str, str], path_exists: Mapping[str, bool]
+    spec: Spec, *, resolved: Mapping[str, str], path_exists: Mapping[str, bool], jail_dir: str
 ) -> tuple[str, ...]:
     """The read carve-outs inside a mounted root that did NOT exist when the
     context was built, so nothing masks them: a file the host creates there
     after launch is readable in the jail. Pure; `Bwrap.compile` grades
     `fs_read` `best_effort` naming each one (decision-164)."""
     return tuple(
-        path for path in _inside_the_jail(spec, resolved) if not _exists(path, path_exists)
+        path
+        for path in _inside_the_jail(spec, resolved, jail_dir)
+        if not _exists(path, path_exists)
     )
 
 
@@ -884,7 +936,7 @@ class Bwrap:
             bwrap_path=self._bwrap_path,
         )
         unmasked = unmasked_read_denies(
-            spec, resolved=ctx.resolved_paths, path_exists=ctx.path_exists
+            spec, resolved=ctx.resolved_paths, path_exists=ctx.path_exists, jail_dir=ctx.jail_dir
         )
 
         def wrap(argv: tuple[str, ...]) -> tuple[str, ...]:

@@ -9,22 +9,31 @@ second implementation, pure, for tests.
 **`create` holds no process, and every process is a `start`** (decision-181,
 TASK-0079.25). `create` makes the instance; `Supervisor.start` is the only way
 a process enters it, the first included, and each start has a record and an
-exit record of its own (`brig/run/_records.py`). `Supervisor.start` takes no
-channel yet: a channel per process needs the channel directory
-(TASK-0079.05), and a parameter only `None` could be passed to would be a
-raising stub (SPEC.md section 9). `Jail` and `Process` (`brig/run/jail.py`,
-TASK-0079.26) are the embedder's side of it.
+exit record of its own (`brig/run/_records.py`). `Jail` and `Process`
+(`brig/run/jail.py`, TASK-0079.26) are the embedder's side of it.
 
-`IoPolicy`, `ExitStatusUnobservable` and `NoSupervisor` live here because
-both sides of the seam name them; `brig.run` re-exports them.
+**Reserve, then start** (decision-184, SPEC.md section 10). The runtime owns
+one channel directory per jail, `<jail_dir>/chan`; `Runtime.reserve` names a
+socket there for a declared channel, the embedder puts its in-jail path in the
+argv it starts, and `Supervisor.start(..., channel=reservation)` binds the
+process to it, refusing a reservation that is not its own
+(`reservation_refusal`). The runtime resolves a process's channel to the
+host path to dial (`Runtime.endpoint`) and says whether it accepts a
+connection (`Runtime.ready`).
+
+`IoPolicy`, `ExitStatusUnobservable`, `NoSupervisor`, `Reservation` and
+`ReservationRefused` live here because both sides of the seam name them;
+`brig.run` re-exports them.
 """
 
+import os
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from signal import Signals
-from typing import Protocol
+from typing import Final, Protocol
 
-from brig.core.runtime import Capability, RuntimeKind
+from brig.core.runtime import Capability, RuntimeKind, channel_dir
 from brig.mech import ArgvTransformer, EventSource
 from brig.run._records import RESERVED_NAMES
 from brig.run._records import ProcessRecord as ProcessRecord
@@ -92,6 +101,74 @@ class ExitStatusUnobservable(RuntimeError):
     """
 
 
+@dataclass(frozen=True, slots=True)
+class Reservation:
+    """A socket reserved in a jail's channel directory for one start
+    (decision-184): `channel`, the declared channel it is for; `bound_path`,
+    where the process binds it inside the jail, which the embedder puts in the
+    argv it starts; `endpoint`, the host path the embedder dials once the
+    process listens. The same path for `HostRuntime`; a runtime that shares no
+    socket with the host hands out a relay's."""
+
+    channel: str
+    bound_path: str
+    endpoint: str
+
+
+class ReservationRefused(ValueError):
+    """`start(..., channel=reservation)` was given a reservation that is not
+    its runtime's own for this jail (decision-184): its path is not directly
+    in the jail's channel directory under a name the runtime reserves, its
+    endpoint is not the one the runtime would hand out for it, or a process
+    the jail knows already binds it. Nothing was made or spawned. Reserve
+    with `jail.channel(name)`, once per start."""
+
+
+#: The name a reserved socket takes in the channel directory: 16 lowercase
+#: hex characters from `secrets`, and `.sock`.
+_SOCKET_NAME: Final = re.compile(r"[0-9a-f]{16}\.sock")
+
+
+def reservation_refusal(
+    reservation: Reservation, *, chan: str, endpoint: str, taken: frozenset[str]
+) -> str | None:
+    """Why `reservation` is not one its runtime would have made in the channel
+    directory `chan`, with `endpoint` the host path the runtime resolves its
+    `bound_path` to and `taken` the bound paths the jail's known processes
+    hold; `None` when it is. Pure and lexical: a path with `..` in it, or a
+    link's name, is not directly in `chan`."""
+    directory, name = os.path.split(reservation.bound_path)
+    if directory != chan:
+        return (
+            f"its path {reservation.bound_path!r} is not directly in the jail's channel "
+            f"directory {chan!r}"
+        )
+    if _SOCKET_NAME.fullmatch(name) is None:
+        return f"its socket name {name!r} is not one the runtime reserves (16 hex and .sock)"
+    if reservation.endpoint != endpoint:
+        return (
+            f"its endpoint {reservation.endpoint!r} is not the host path the runtime "
+            f"dials for it, {endpoint!r}"
+        )
+    if reservation.bound_path in taken:
+        return f"a process of the jail already binds {reservation.bound_path!r}"
+    return None
+
+
+def reserved_socket(chan: str, token: str) -> str:
+    """The path of the socket `token` (16 lowercase hex) names in the channel
+    directory `chan`. Pure."""
+    return f"{chan}/{token}.sock"
+
+
+def channel_dir_of(jail: JailRecord) -> str:
+    """`jail`'s channel directory as a process inside it sees it: under the
+    jail directory resolved, as every mechanism grants it
+    (`CompileCtx.channel_dir`, decision-184). Reads the filesystem to
+    resolve."""
+    return channel_dir(os.path.realpath(jail.jail_dir))
+
+
 class NoSupervisor(RuntimeError):
     """The jail's runtime has no supervisor inside it (`Runtime.supervisor` returned
     `None`), so nothing can be started in it or waited for through it: it can
@@ -153,10 +230,20 @@ class Supervisor(Protocol):
     """Inside a jail's instance: what starts, signals, waits for and stops
     its processes. Bound to one `JailRecord` (`Runtime.supervisor`)."""
 
-    def start(self, argv: Sequence[str], *, cwd: str, io: IoPolicy) -> ProcessRecord:
+    def start(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: str,
+        io: IoPolicy,
+        channel: Reservation | None = None,
+    ) -> ProcessRecord:
         """Start `argv` in the jail, under the jail's confinement, never a
         weaker one; raise rather than start it weaker. The only way a process
-        enters a jail, the first included (decision-181)."""
+        enters a jail, the first included (decision-181). `channel` is the
+        socket reserved for it (`Runtime.reserve`), recorded on the process;
+        one that is not this runtime's own for this jail raises
+        `ReservationRefused` before anything is made (decision-184)."""
         ...
 
     def signal(self, process: ProcessRecord, sig: Signals) -> bool:
@@ -236,4 +323,21 @@ class Runtime(Protocol):
 
     def supervisor(self, jail: JailRecord) -> Supervisor | None:
         """The supervisor inside `jail`, or `None` when it can only be destroyed."""
+        ...
+
+    def reserve(self, jail: JailRecord, channel: str) -> Reservation:
+        """A fresh socket in `jail`'s channel directory for `channel`, which
+        the caller has checked the jail declares (decision-184). Makes
+        nothing: the process binds it."""
+        ...
+
+    def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None:
+        """The host path to dial `process`'s channel at, or `None` when it was
+        started with none (decision-184)."""
+        ...
+
+    def ready(self, jail: JailRecord, process: ProcessRecord) -> bool:
+        """Whether `process`'s channel accepts a connection now: a connect
+        that succeeds, never a path that exists (SPEC.md section 10). `False`
+        for a process with no channel."""
         ...

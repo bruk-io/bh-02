@@ -31,6 +31,8 @@ def _raw(**fields: object) -> str:
         "argv": ["sleep", "1"],
         "stdout_path": f"{_JAIL}/procs/{_ID}/stdout.log",
         "stderr_path": f"{_JAIL}/procs/{_ID}/stderr.log",
+        "channel": None,
+        "bound_path": None,
     }
     base.update(fields)
     return json.dumps(base)
@@ -73,11 +75,25 @@ def test_a_record_reads_back_as_written() -> None:
         (_raw(order=-1), "'order'"),
         (_raw(start_time=5), "must be strs"),
         (_raw(argv="sleep"), "'argv'"),
+        # decision-184: a channel and its socket come together, or not at all.
+        (_raw(channel="ctl"), "'channel' and 'bound_path'"),
+        (_raw(bound_path=f"{_JAIL}/chan/x.sock"), "'channel' and 'bound_path'"),
+        (_raw(channel="", bound_path=""), "'channel' and 'bound_path'"),
+        (_raw(channel="ctl", bound_path=5), "'channel' and 'bound_path'"),
     ],
 )
 def test_what_is_not_a_record_brig_wrote_is_named(text: str, reason: str) -> None:
     parsed = _records.parse(text, _ID)
     assert isinstance(parsed, str) and reason in parsed, parsed
+
+
+@pytest.mark.unit
+def test_a_record_carries_its_channel_and_the_socket_it_binds() -> None:
+    """decision-184: `channel` and `bound_path` read back as written."""
+    socket_path = f"{_JAIL}/chan/0123456789abcdef.sock"
+    record = _record(channel="ctl", bound_path=socket_path)
+    assert (record.channel, record.bound_path) == ("ctl", socket_path)
+    assert _records.from_json(_records.to_json(record), _ID) == record
 
 
 @pytest.mark.unit

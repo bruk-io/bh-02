@@ -74,6 +74,7 @@ _EXPECTED_GOLDEN_PROFILE = """\
 (deny file-read* (subpath "/Users/dev/.ssh"))
 (deny file-write* (subpath "/"))
 (allow file-write* (subpath "/private/tmp/bg1/workspace"))
+(allow file-write* (subpath "/private/tmp/bg1/chan"))
 (deny file-write* (subpath "/private/tmp/bg1/workspace/.git/hooks"))
 (allow file-write* (literal "/private/tmp/bg1/chan/control.sock"))
 (allow network-bind)
@@ -342,19 +343,21 @@ def test_a_write_root_at_or_above_the_jail_directory_is_denied_it_but_its_scratc
     root: str,
 ) -> None:
     """After the write roots' allows: a deny on the jail directory, then an
-    allow on its scratch, then the carve-outs, then the channel's literal
-    (an endpoint in the jail directory stays creatable). Later wins in both
-    directions, so this order is the whole of the rule."""
+    allow on its scratch, then the runtime's channel directory (decision-184),
+    then the carve-outs, then the channel's literal (an endpoint in the jail
+    directory stays creatable). Later wins in both directions, so this order
+    is the whole of the rule."""
     profile = render_sbpl(
         _sealed_spec(root), resolved=_sealed_resolved(root), jail_dir=_SEALED_JAIL_DIR
     )
     lines = profile.splitlines()
     start = lines.index('(deny file-write* (subpath "/"))')
-    assert lines[start : start + 6] == [
+    assert lines[start : start + 7] == [
         '(deny file-write* (subpath "/"))',
         f'(allow file-write* (subpath "{root}"))',
         f'(deny file-write* (subpath "{_SEALED_JAIL_DIR}"))',
         f'(allow file-write* (subpath "{_SEALED_JAIL_DIR}/tmp"))',
+        f'(allow file-write* (subpath "{_SEALED_JAIL_DIR}/chan"))',
         '(deny file-write* (subpath "/private/tmp/.git/hooks"))',
         f'(allow file-write* (literal "{_SEALED_JAIL_DIR}/chan/k.sock"))',
     ]

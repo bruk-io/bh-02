@@ -6,6 +6,13 @@ scope the call acts at, so a test can drive `Jail` (or anything else written
 against the protocols) and check what was asked of the runtime. Its pids
 start at `FAKE_PID_BASE`, far above any real pid limit, so a fake record that
 leaked to real teardown would name no process.
+
+It mirrors the channel directory (decision-184): it reserves sockets under
+`<jail_dir>/chan` as `HostRuntime` does, refuses a reservation not its own
+the same way, and hands out a host path apart from the bound one
+(`<jail_dir>/relay/<name>`), as a runtime that shares no socket with the host
+would, so a caller that dials the bound path instead of the endpoint is
+caught. Its readiness is a flag, `listening`, not a connect.
 """
 
 import os
@@ -14,8 +21,17 @@ from dataclasses import dataclass
 from signal import Signals
 from typing import Final
 
-from brig.core.runtime import PROCS_DIRNAME, Capability, RuntimeKind, Scope
-from brig.run.runtime import IoPolicy, JailRecord, ProcessRecord, Supervisor
+from brig.core.runtime import PROCS_DIRNAME, Capability, RuntimeKind, Scope, channel_dir
+from brig.run.runtime import (
+    IoPolicy,
+    JailRecord,
+    ProcessRecord,
+    Reservation,
+    ReservationRefused,
+    Supervisor,
+    reservation_refusal,
+    reserved_socket,
+)
 from brig.run.teardown import KillItem, KillOutcome, KillReport
 from brig.stack import CompiledJail
 
@@ -25,16 +41,24 @@ FAKE_PID_BASE: Final = 10_000_000
 #: The start-time stamp every fake process carries.
 FAKE_STAMP: Final = "fake"
 
+#: Where a fake jail's host endpoints are, beside its channel directory.
+_RELAY_DIRNAME: Final = "relay"
+
+
+def _relay(jail_dir: str, bound_path: str) -> str:
+    """The host path a fake runtime hands out for the socket at `bound_path`."""
+    return f"{jail_dir.rstrip('/')}/{_RELAY_DIRNAME}/{os.path.basename(bound_path)}"
+
 
 @dataclass(frozen=True, slots=True)
 class Call:
     """One call a `FakeRuntime` or its supervisor answered: the method's name, the
     scope it acts at (`JAIL` for the runtime's, `PROCESS` for the supervisor's),
-    and the record or argv it was about."""
+    and the record, argv or channel name it was about."""
 
     method: str
     scope: Scope
-    subject: JailRecord | ProcessRecord | tuple[str, ...]
+    subject: JailRecord | ProcessRecord | tuple[str, ...] | str
 
 
 class FakeRuntime:
@@ -45,7 +69,8 @@ class FakeRuntime:
     calls. `exit_status` is what `Supervisor.wait` answers for any process that
     has ended (`None`: they never end on their own, so a wait reaches its
     deadline). `has_supervisor` `False` makes `supervisor` return `None`, a jail
-    that can only be destroyed.
+    that can only be destroyed. `listening` is what `ready` answers for a
+    running process started on a channel.
 
     Its `kind` is `RuntimeKind.FAKE` (decision-181), whatever kind the jail was
     compiled for, so its records say `FAKE` and can't be sent to a real
@@ -57,9 +82,12 @@ class FakeRuntime:
         exit_status: int | None = None,
         has_supervisor: bool = True,
         capabilities: frozenset[Capability] = frozenset(Capability),
+        listening: bool = True,
     ) -> None:
         self.exit_status = exit_status
         self.has_supervisor = has_supervisor
+        self.listening = listening
+        self._tokens = 0
         self._capabilities = capabilities
         self.calls: list[Call] = []
         self._running: set[int] = set()
@@ -75,7 +103,9 @@ class FakeRuntime:
     def capabilities(self) -> frozenset[Capability]:
         return self._capabilities
 
-    def _spawn(self, argv: Sequence[str], jail: JailRecord, io: IoPolicy) -> ProcessRecord:
+    def _spawn(
+        self, argv: Sequence[str], jail: JailRecord, io: IoPolicy, channel: Reservation | None
+    ) -> ProcessRecord:
         """A new fake process in `jail`, running until stopped or destroyed."""
         pid = self._next_pid
         self._next_pid += 1
@@ -92,6 +122,8 @@ class FakeRuntime:
             argv=tuple(argv),
             stdout_path=os.path.join(directory, io.stdout_name),
             stderr_path=os.path.join(directory, io.stderr_name),
+            channel=None if channel is None else channel.channel,
+            bound_path=None if channel is None else channel.bound_path,
         )
         started.append(process)
         return process
@@ -180,6 +212,26 @@ class FakeRuntime:
         self.calls.append(Call("supervisor", Scope.JAIL, jail))
         return FakeSupervisor(self, jail) if self.has_supervisor else None
 
+    def reserve(self, jail: JailRecord, channel: str) -> Reservation:
+        """A fresh socket under `<jail_dir>/chan`, its endpoint a relay path
+        apart from it. Lexical: the fake resolves nothing."""
+        self.calls.append(Call("reserve", Scope.JAIL, channel))
+        self._tokens += 1
+        path = reserved_socket(channel_dir(jail.jail_dir), f"{self._tokens:016x}")
+        return Reservation(channel=channel, bound_path=path, endpoint=_relay(jail.jail_dir, path))
+
+    def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None:
+        """The relay path for `process`'s socket, `None` without one."""
+        if process.bound_path is None:
+            return None
+        return _relay(jail.jail_dir, process.bound_path)
+
+    def ready(self, jail: JailRecord, process: ProcessRecord) -> bool:
+        """`listening`, for a running process started on a channel."""
+        del jail
+        self.calls.append(Call("ready", Scope.PROCESS, process))
+        return self.listening and process.bound_path is not None and self.running(process)
+
     def first(self, jail: JailRecord) -> ProcessRecord | None:
         """The first process of `jail`, or `None` when nothing was started."""
         processes = self._processes(jail)
@@ -193,8 +245,35 @@ class FakeSupervisor:
     runtime: FakeRuntime
     jail: JailRecord
 
-    def start(self, argv: Sequence[str], *, cwd: str, io: IoPolicy) -> ProcessRecord:
-        process = self.runtime._spawn((*(self.jail.wrap_prefix or ()), *argv), self.jail, io)
+    def start(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: str,
+        io: IoPolicy,
+        channel: Reservation | None = None,
+    ) -> ProcessRecord:
+        """A fake process, bound to `channel` as `HostSupervisor.start` would.
+
+        Raises:
+            ReservationRefused: `channel` is not one `FakeRuntime.reserve`
+                would hand out for this jail, or a process of it binds it.
+        """
+        if channel is not None:
+            taken = frozenset(
+                p.bound_path for p in self.runtime._processes(self.jail) if p.bound_path is not None
+            )
+            reason = reservation_refusal(
+                channel,
+                chan=channel_dir(self.jail.jail_dir),
+                endpoint=_relay(self.jail.jail_dir, channel.bound_path),
+                taken=taken,
+            )
+            if reason is not None:
+                raise ReservationRefused(f"start: the reservation is not this jail's: {reason}")
+        process = self.runtime._spawn(
+            (*(self.jail.wrap_prefix or ()), *argv), self.jail, io, channel
+        )
         self.runtime.calls.append(Call("start", Scope.PROCESS, process))
         return process
 

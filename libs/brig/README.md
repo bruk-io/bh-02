@@ -32,6 +32,12 @@ names. `start` and `probe` are absent where a jail cannot start (no
 supervisor, or created tethered in another process). Every exception
 `Jail.create` and `jail.start` raise is importable from `brig.run`.
 
+A process listens on a socket reserved for it (decision-184): the runtime owns
+one channel directory per jail, `<jail_dir>/chan`, and `jail.channel(name)`
+reserves a socket there for a channel the `Spec` declares. Put its
+`bound_path` in the argv, start with `jail.start(argv, channel=reservation)`,
+then `process.wait_ready(timeout)` and dial `process.endpoint`.
+
 Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md
 is the one describing the library.
@@ -150,7 +156,8 @@ are refusals rather than surprises:
 - **The declared LISTEN channel's endpoint DIRECTORY is bind-mounted
   writable**, because a socket cannot be bind-mounted before it exists. That
   is one writable path no `write_allows` entry named, and the `fs_write`
-  grade's own detail says so.
+  grade's own detail says so. So is the runtime's channel directory
+  `<jail_dir>/chan`, bound when the Spec declares any channel (decision-184).
 
 **Where it is verified.** The compile is pure, so its golden argv, its six
 refusals and the mount order are unit tests that run anywhere. The

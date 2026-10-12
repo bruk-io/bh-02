@@ -67,7 +67,18 @@ _ID: Final = re.compile(r"[0-9a-f]{16}")
 #: A record naming anything else is not one brig wrote.
 _PID_LIMIT: Final = 2**31
 
-_KEYS: Final = ("id", "order", "pid", "pgid", "start_time", "argv", "stdout_path", "stderr_path")
+_KEYS: Final = (
+    "id",
+    "order",
+    "pid",
+    "pgid",
+    "start_time",
+    "argv",
+    "stdout_path",
+    "stderr_path",
+    "channel",
+    "bound_path",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +94,9 @@ class ProcessRecord:
     the process's exit wrapper, which leads `pgid`. `argv` is what was
     spawned inside the wrapper (the jail's wrap included); `stdout_path` and
     `stderr_path` are where `IoPolicy` sent its output, in its records
-    directory."""
+    directory. `channel` is the declared channel it was started on and
+    `bound_path` the socket reserved for it, the path it binds inside the
+    jail (decision-184); both `None` for a process started with none."""
 
     id: str
     order: int
@@ -93,6 +106,8 @@ class ProcessRecord:
     argv: tuple[str, ...]
     stdout_path: str
     stderr_path: str
+    channel: str | None = None
+    bound_path: str | None = None
 
 
 def is_id(name: str) -> bool:
@@ -157,6 +172,8 @@ def to_json(record: ProcessRecord) -> dict[str, Any]:
         "argv": list(record.argv),
         "stdout_path": record.stdout_path,
         "stderr_path": record.stderr_path,
+        "channel": record.channel,
+        "bound_path": record.bound_path,
     }
 
 
@@ -224,6 +241,15 @@ def from_json(raw: object, expected_id: str) -> ProcessRecord | str:
     argv = raw["argv"]
     if type(argv) is not list or any(type(arg) is not str for arg in argv):
         return f"'argv' must be a list of strs, got {argv!r}"
+    channel, bound_path = raw["channel"], raw["bound_path"]
+    if not (
+        (channel is None and bound_path is None)
+        or (type(channel) is str and channel and type(bound_path) is str and bound_path)
+    ):
+        return (
+            "'channel' and 'bound_path' must both be null or both non-empty strs, got "
+            f"{channel!r}/{bound_path!r}"
+        )
     return ProcessRecord(
         id=expected_id,
         order=order,
@@ -233,6 +259,8 @@ def from_json(raw: object, expected_id: str) -> ProcessRecord | str:
         argv=tuple(argv),
         stdout_path=raw["stdout_path"],
         stderr_path=raw["stderr_path"],
+        channel=channel,
+        bound_path=bound_path,
     )
 
 

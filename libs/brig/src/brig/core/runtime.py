@@ -102,6 +102,17 @@ def runtime_grades(kind: RuntimeKind) -> Mapping[Axis, Graded]:
 #: reach it (`refuse_channel_on_records`).
 PROCS_DIRNAME: Final = "procs"
 
+#: `<jail_dir>/chan`: the runtime's channel directory, one per jail
+#: (decision-184). A name brig keeps beside `tmp`, `procs` and `jail.json`,
+#: never a `Spec` path: each start's socket is reserved there.
+CHANNELS_DIRNAME: Final = "chan"
+
+
+def channel_dir(jail_dir: str) -> str:
+    """The channel directory of the jail in `jail_dir` (decision-184). Pure:
+    lexical, so a caller that needs it resolved passes a resolved `jail_dir`."""
+    return f"{jail_dir.rstrip('/')}/{CHANNELS_DIRNAME}"
+
 
 class ChannelOnRecords(ValueError):
     """A LISTEN channel's endpoint is at or under brig's records

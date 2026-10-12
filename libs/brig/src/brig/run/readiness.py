@@ -31,21 +31,29 @@ from __future__ import annotations
 
 import socket
 import time
+from collections.abc import Callable
 from typing import Any
 
 _POLL_INTERVAL_S = 0.02
 
 
 class UnknownChannel(KeyError):
-    """Raised when `wait_ready` is asked about a channel name the handle
-    does not declare at all."""
+    """Raised when a jail is asked about a channel name its `Spec` does not
+    declare at all: by `wait_ready`, and by `Jail.channel` and `Jail.start`
+    reserving or binding a socket for it (decision-184). `where` names the
+    call."""
 
-    def __init__(self, channel: str) -> None:
+    def __init__(self, channel: str, where: str = "wait_ready") -> None:
         self.channel = channel
+        self.where = where
         super().__init__(str(self))
 
     def __str__(self) -> str:
-        return f"wait_ready: no channel named {self.channel!r} on this handle"
+        return (
+            f"{self.where}: no channel named {self.channel!r} on this jail; declare it in "
+            f"its Spec's channels (Channel(name={self.channel!r}, kind=ChannelKind.LISTEN, "
+            "endpoint=...)) and compile the jail again"
+        )
 
 
 class WaitReadyTimeout(TimeoutError):
@@ -66,7 +74,7 @@ class WaitReadyTimeout(TimeoutError):
         )
 
 
-def _connect_succeeds(endpoint: str) -> bool:
+def connects(endpoint: str) -> bool:
     """True iff a fresh `AF_UNIX`/`SOCK_STREAM` socket can `connect()` to
     `endpoint` -- closed immediately either way, so this never leaves a
     connection open on the far side. Any `OSError` (no file at all --
@@ -98,7 +106,7 @@ def wait_ready(handle: Any, channel: str, timeout: float) -> None:
     waits or polls. A wrong-KIND refusal used to sit beside it; `LISTEN` is
     the only `ChannelKind` there is since decision-153, so the check would
     be a branch nothing can reach. Otherwise polls
-    `_connect_succeeds` against the channel's endpoint every
+    `connects` against the channel's endpoint every
     `_POLL_INTERVAL_S` until it returns `True` (this function then returns
     `None`) or `timeout` seconds have elapsed since entry (this function
     then raises `WaitReadyTimeout`).
@@ -110,8 +118,24 @@ def wait_ready(handle: Any, channel: str, timeout: float) -> None:
     endpoint = channels[channel].endpoint
     deadline = time.monotonic() + timeout
     while True:
-        if _connect_succeeds(endpoint):
+        if connects(endpoint):
             return
+        if time.monotonic() >= deadline:
+            raise WaitReadyTimeout(channel, endpoint, timeout)
+        time.sleep(_POLL_INTERVAL_S)
+
+
+def poll_ready(ready: Callable[[], bool], *, channel: str, endpoint: str, timeout: float) -> None:
+    """Block until `ready()` is true, asked every `_POLL_INTERVAL_S`, or raise
+    a named timeout: `Process.wait_ready`'s loop, with the runtime's own
+    readiness (`Runtime.ready`, decision-184) as `ready`.
+
+    Raises:
+        WaitReadyTimeout: `ready()` was still false `timeout` seconds after
+            entry.
+    """
+    deadline = time.monotonic() + timeout
+    while not ready():
         if time.monotonic() >= deadline:
             raise WaitReadyTimeout(channel, endpoint, timeout)
         time.sleep(_POLL_INTERVAL_S)

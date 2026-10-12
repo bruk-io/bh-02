@@ -177,6 +177,11 @@ def test_golden_argv_for_the_reference_spec() -> None:
         "--bind",
         "/run/brig/chan0",
         "/run/brig/chan0",
+        # Stage 4, the runtime's channel directory (decision-184): once for
+        # the jail, since the Spec declares a channel, at its own path.
+        "--bind",
+        f"{_JAIL_DIR}/chan",
+        f"{_JAIL_DIR}/chan",
         # Stage 5: the writable roots, over the read-only tree and the
         # channel directory.
         "--bind",
@@ -629,7 +634,7 @@ def test_a_read_carve_out_inside_a_root_is_masked_last_by_its_kind() -> None:
     )
     step = bwrap.compile(_CARVE_OUT_SPEC, ctx)
     argv = step.wrap(("w",))
-    write_root_at = argv.index("--bind", argv.index("/run/brig/chan0") + 1)
+    write_root_at = argv.index("--bind", argv.index(f"{_JAIL_DIR}/chan") + 2)
     assert argv[write_root_at : write_root_at + 3] == ("--bind", _WORKSPACE, _WORKSPACE)
     assert argv[write_root_at + 3 :] == (
         "--ro-bind", "/dev/null", _ABSENT,
@@ -817,6 +822,10 @@ def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
         "--bind",
         f"{_JAIL_DIR}/ch",
         f"{_JAIL_DIR}/ch",
+        # The runtime's channel directory (decision-184), stage 4 too.
+        "--bind",
+        f"{_JAIL_DIR}/chan",
+        f"{_JAIL_DIR}/chan",
         "--bind",
         _ABOVE,
         _ABOVE,
@@ -835,6 +844,11 @@ def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
         "--bind",
         f"{_JAIL_DIR}/ch",
         f"{_JAIL_DIR}/ch",
+        # ... and bound again after the seal, as every channel directory
+        # inside the jail directory is (decision-184).
+        "--bind",
+        f"{_JAIL_DIR}/chan",
+        f"{_JAIL_DIR}/chan",
         "--bind",
         f"{_JAIL_DIR}/tmp",
         f"{_JAIL_DIR}/tmp",

@@ -33,7 +33,10 @@ with no alias (decision-183, TASK-0079.28).
 `ExecWrapNotAPrefix`, `TetherClosed`, `WorkloadSpawnFailed` and
 `NoSupervisor`, beside `ExitStatusUnobservable` (a process's `wait`), so an
 embedder names what it catches from the public surface, never from a private
-module.
+module. Since decision-184 (TASK-0079.05) that includes the channel's:
+`Reservation` (what `Jail.channel` returns), `UnknownChannel` and
+`ReservationRefused` (what `Jail.channel` and `Jail.start` refuse with) and
+`WaitReadyTimeout` (what `Process.wait_ready` raises).
 
 `wait_ready` is a private delegate (`readiness.py`), intentionally NOT
 re-exported here -- `Jail.wait_ready` is the public surface, per SPEC.md §9.
@@ -85,9 +88,13 @@ from brig.run.host import LaunchRefused as LaunchRefused
 from brig.run.jail import JAIL_VERSION as JAIL_VERSION
 from brig.run.jail import Jail as Jail
 from brig.run.jail import Process as Process
+from brig.run.readiness import UnknownChannel as UnknownChannel
+from brig.run.readiness import WaitReadyTimeout as WaitReadyTimeout
 from brig.run.runtime import ExitStatusUnobservable as ExitStatusUnobservable
 from brig.run.runtime import IoPolicy as IoPolicy
 from brig.run.runtime import NoSupervisor as NoSupervisor
+from brig.run.runtime import Reservation as Reservation
+from brig.run.runtime import ReservationRefused as ReservationRefused
 from brig.run.teardown import KILL_ITEM_KINDS as KILL_ITEM_KINDS
 from brig.run.teardown import KillItem as KillItem
 from brig.run.teardown import KillOutcome as KillOutcome
@@ -117,8 +124,12 @@ __all__ = (  # noqa: RUF022
     "LaunchRefused",
     "NoSupervisor",
     "Process",
+    "Reservation",
+    "ReservationRefused",
     "RuntimeKind",
     "TetherClosed",
+    "UnknownChannel",
+    "WaitReadyTimeout",
     "WorkloadSpawnFailed",
     "build_compile_ctx",
     "decisions_path",

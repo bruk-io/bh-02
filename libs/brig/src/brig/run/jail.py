@@ -47,12 +47,21 @@ from brig.run import _records, _waiters
 from brig.run._dicts import channels_from_list, channels_to_list, report_from_dict, report_to_dict
 from brig.run.events import stamp_all
 from brig.run.exec_ import ExecFidelity
+from brig.run.readiness import UnknownChannel, poll_ready
 from brig.run.readiness import wait_ready as _wait_ready
-from brig.run.runtime import IoPolicy, JailRecord, NoSupervisor, ProcessRecord, Runtime, Supervisor
+from brig.run.runtime import (
+    IoPolicy,
+    JailRecord,
+    NoSupervisor,
+    ProcessRecord,
+    Reservation,
+    Runtime,
+    Supervisor,
+)
 from brig.run.teardown import KillReport
 from brig.stack import CompiledJail
 
-JAIL_VERSION: Final = 6
+JAIL_VERSION: Final = 7
 """The version of a jail's dict (`HANDLE_VERSION` until decision-183 renamed it,
 the value unchanged). Bumped 1 -> 2 by
 task-046 (`wrap_prefix` and `jail_env` became REQUIRED top-level keys) and
@@ -75,7 +84,10 @@ older dict would be exactly the silent downgrade that posture forbids.
 Bumped 5 -> 6 by decision-181 (TASK-0079.26): a `Jail`'s dict. The first
 process's fields (`pid`, `pgid`, `start_time`, `argv`, `stdout_path`,
 `stderr_path`) and `launcher_name` are gone, and `runtime`, `tethered` and
-`processes` are new and required."""
+`processes` are new and required.
+
+Bumped 6 -> 7 by decision-184 (TASK-0079.05): each entry of `processes`
+carries `channel` and `bound_path`, required, as `record.json` does."""
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
@@ -108,7 +120,13 @@ class _Start(Protocol):
     """`Jail.start`'s signature, for the property that offers it."""
 
     def __call__(
-        self, argv: Sequence[str], /, *, cwd: str | None = None, io: IoPolicy = _DEFAULT_IO
+        self,
+        argv: Sequence[str],
+        /,
+        *,
+        cwd: str | None = None,
+        io: IoPolicy = _DEFAULT_IO,
+        channel: Reservation | None = None,
     ) -> Process: ...
 
 
@@ -133,6 +151,9 @@ class Process:
     and `start_time` are an identity, not a number (decision-155); `pid` is
     its exit wrapper, which leads its group. `argv` is what was spawned (the
     jail's wrap prefix included). `fidelity` is the jail's (decision-181).
+    `channel` is the declared channel it was started on, `bound_path` the
+    socket it binds inside the jail and `endpoint` the host path to dial it at,
+    which its runtime resolves (decision-184); all `None` without one.
     `interrupt`, `stop` and `wait` are absent when its jail has no supervisor.
     """
 
@@ -143,6 +164,9 @@ class Process:
     stdout_path: str
     stderr_path: str
     fidelity: ExecFidelity
+    channel: str | None
+    bound_path: str | None
+    endpoint: str | None
     _record: ProcessRecord = field(repr=False, compare=False)
     _jail: Jail = field(repr=False, compare=False)
 
@@ -215,6 +239,28 @@ class Process:
         `destroy` end groups."""
         jail = self._jail
         return jail._runtime.process_alive(jail._record(), self._record)
+
+    def wait_ready(self, timeout: float) -> None:
+        """Block until this process's channel accepts a connection, as its
+        runtime observes it (`Runtime.ready`: for a host jail a connect that
+        succeeds, never a path that exists; decision-184).
+
+        Raises:
+            ValueError: the process was started with no channel.
+            WaitReadyTimeout: no connection succeeded within `timeout`.
+        """
+        if self.channel is None or self.endpoint is None:
+            raise ValueError(
+                f"process {self.id} was started with no channel, so there is nothing to "
+                "wait for; start it with channel=jail.channel(name)"
+            )
+        jail = self._jail
+        poll_ready(
+            lambda: jail._runtime.ready(jail._record(), self._record),
+            channel=self.channel,
+            endpoint=self.endpoint,
+            timeout=timeout,
+        )
 
     def exit_events(self) -> tuple[Event, ...]:
         """What the jail's mechanism sensors made of this process's ending,
@@ -327,6 +373,9 @@ class Jail:
             stdout_path=record.stdout_path,
             stderr_path=record.stderr_path,
             fidelity=_fidelity(self._base.wrap_prefix),
+            channel=record.channel,
+            bound_path=record.bound_path,
+            endpoint=self._runtime.endpoint(self._record(), record),
             _record=record,
             _jail=self,
         )
@@ -349,12 +398,27 @@ class Jail:
                 )
         return None
 
+    def channel(self, name: str) -> Reservation:
+        """Reserve a socket in the jail's channel directory for the declared
+        channel `name` (decision-184): put its `bound_path` in the argv of the
+        process that will listen there, start it with `channel=` this
+        reservation, and dial its `endpoint`. One reservation per start.
+
+        Raises:
+            UnknownChannel: the jail's `Spec` declares no channel `name`.
+        """
+        if name not in self.channels:
+            raise UnknownChannel(name, "Jail.channel")
+        return self._runtime.reserve(self._record(), name)
+
     @property
     def start(self) -> _Start:
         """Start `argv` in the jail, under the jail's confinement, never a
         weaker one, and return it as a `Process`; `cwd` defaults to the
-        jail's, and `io` names its stdio files. Absent when the jail cannot
-        start (no supervisor, or created tethered in another process).
+        jail's, and `io` names its stdio files. `channel` is a socket
+        reserved with `channel(name)`, which the process binds (decision-184).
+        Absent when the jail cannot start (no supervisor, or created tethered
+        in another process).
 
         A refused start changes nothing: the jail is the caller's, to start
         again or destroy. Every exception below but `AttributeError` is
@@ -362,6 +426,11 @@ class Jail:
 
         Raises:
             AttributeError: the jail cannot start a process (on access).
+            UnknownChannel: `channel` is for a channel the jail does not
+                declare; nothing is made or spawned.
+            ReservationRefused: `channel` is not a reservation of this jail's
+                runtime, or a process of the jail already binds it; nothing is
+                made or spawned.
             ExecWrapNotAPrefix: the jail's wrap is not a pure argv prefix, or
                 does not map this argv to its prefix followed by it; nothing
                 is made or spawned.
@@ -378,17 +447,28 @@ class Jail:
         return self._start
 
     def _start(
-        self, argv: Sequence[str], /, *, cwd: str | None = None, io: IoPolicy = _DEFAULT_IO
+        self,
+        argv: Sequence[str],
+        /,
+        *,
+        cwd: str | None = None,
+        io: IoPolicy = _DEFAULT_IO,
+        channel: Reservation | None = None,
     ) -> Process:
         """`start`, once it is known to be there.
 
         Raises:
+            UnknownChannel: `channel` names a channel the jail does not declare.
             NoSupervisor: the runtime stopped offering a supervisor.
         """
+        if channel is not None and channel.channel not in self.channels:
+            raise UnknownChannel(channel.channel, "Jail.start")
         supervisor = self._supervisor()
         if supervisor is None:
             raise NoSupervisor(f"jail {self.jail_id!r} has no supervisor to start {argv!r} with")
-        record = supervisor.start(argv, cwd=self._base.cwd if cwd is None else cwd, io=io)
+        record = supervisor.start(
+            argv, cwd=self._base.cwd if cwd is None else cwd, io=io, channel=channel
+        )
         self._started.append(record)
         return self._process(record)
 
@@ -466,7 +546,7 @@ class Jail:
         invalid can be smuggled in through a hand-edited dict.
 
         Raises:
-            ValueError: `version` is missing or not 6; a key is unknown or
+            ValueError: `version` is missing or not 7; a key is unknown or
                 missing; the dict names a runtime kind `runtimes` does not
                 hold, or one whose runtime's own `kind` is another; a process
                 is not a record brig writes, or two share an id; or any

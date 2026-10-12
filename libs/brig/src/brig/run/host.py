@@ -52,10 +52,12 @@ rehydrated jail compares them too.
 """
 
 import contextlib
+import errno
 import math
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -63,19 +65,25 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from brig.core.runtime import Capability, RuntimeKind
+from brig.core.runtime import Capability, RuntimeKind, channel_dir
 from brig.mech import HelperLifetime
 from brig.run import _exit_status, _identity, _records, _waiters
 from brig.run._spawn_pgid import spawn_pgid
 from brig.run._tether import HeldTether
 from brig.run.exec_ import ExecWrapNotAPrefix
+from brig.run.readiness import connects
 from brig.run.runtime import (
     ExitStatusUnobservable,
     Held,
     IoPolicy,
     JailRecord,
     ProcessRecord,
+    Reservation,
+    ReservationRefused,
     Supervisor,
+    channel_dir_of,
+    reservation_refusal,
+    reserved_socket,
 )
 from brig.run.teardown import (
     KillOutcome,
@@ -177,6 +185,31 @@ def _write_staged_files(jail_dir: str, jail: CompiledJail) -> None:
         with open(path, "w") as f:
             f.write(staged.content)
         os.chmod(path, staged.mode)
+
+
+def _make_channel_dir(jail_dir: str) -> None:
+    """Make the jail's channel directory, `<jail_dir>/chan` (decision-184),
+    mode 0700, or keep the directory an earlier jail made there. Every
+    mechanism that grants it binds or allows it by path, and a bind follows a
+    link, so anything there that is not a directory (a link, a file) is
+    refused rather than used.
+
+    Raises:
+        FileExistsError: `chan` is there and is not a directory.
+        OSError: it could not be made or examined.
+    """
+    path = channel_dir(jail_dir)
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        if not stat.S_ISDIR(os.lstat(path).st_mode):
+            raise FileExistsError(
+                errno.EEXIST,
+                "the jail's channel directory is there and is not a directory brig made "
+                "(a link or a file), so granting it would grant whatever it names; remove "
+                "it, or choose another jail directory",
+                path,
+            ) from None
 
 
 def _spawn(
@@ -421,7 +454,8 @@ class HostRuntime:
     ) -> JailRecord:
         """Make the jail's instance, with no process in it (decision-181):
         create `jail_dir`, clear the records an earlier jail left there
-        (refused while any of it runs or is in doubt), write `jail.staged`,
+        (refused while any of it runs or is in doubt), make its channel
+        directory `<jail_dir>/chan` (decision-184), write `jail.staged`,
         then the jail's own record (`jail.json`: whether it is tethered),
         run `LAUNCH_SCOPED` helpers to completion and start `JAIL_LIFETIME`
         ones, and derive `wrap_prefix` once, from `jail.wrap` applied to a
@@ -442,7 +476,8 @@ class HostRuntime:
             HelperFailed: a `LAUNCH_SCOPED` helper exited non-zero or did not
                 finish.
             OSError: `tether` is not an open descriptor, or `jail_dir` could
-                not be made or written.
+                not be made or written, or its `chan` is there and is not a
+                directory (`FileExistsError`).
         """
         missing = _refused(jail, self.capabilities)
         if missing:
@@ -455,6 +490,7 @@ class HostRuntime:
         )
         os.makedirs(jail_dir, exist_ok=True)
         _clear_earlier_records(jail_dir)
+        _make_channel_dir(jail_dir)
         _write_staged_files(jail_dir, jail)
 
         # SPEC.md §9's exec fidelity depends on this: every start trusts
@@ -538,6 +574,26 @@ class HostRuntime:
         process is started from the record alone."""
         return HostSupervisor(jail)
 
+    def reserve(self, jail: JailRecord, channel: str) -> Reservation:
+        """A fresh socket in `jail`'s channel directory, under the jail
+        directory resolved, as the mechanisms grant it (decision-184): its
+        name 16 hex characters from `secrets` and `.sock`, never reused. The
+        host shares the jail's paths, so the host dials the path the process
+        binds."""
+        path = reserved_socket(channel_dir_of(jail), _records.new_id())
+        return Reservation(channel=channel, bound_path=path, endpoint=path)
+
+    def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None:
+        """The path `process` binds: the host shares it (decision-184)."""
+        del jail
+        return process.bound_path
+
+    def ready(self, jail: JailRecord, process: ProcessRecord) -> bool:
+        """Whether a connect to `process`'s socket succeeds now, closed at
+        once; never whether the path exists (SPEC.md section 10)."""
+        endpoint = self.endpoint(jail, process)
+        return endpoint is not None and connects(endpoint)
+
 
 def _end_unrecorded(process: ProcessRecord, jail_dir: str, error: OSError) -> None:
     """A start whose `record.json` could not be written: its process runs
@@ -570,15 +626,27 @@ class HostSupervisor:
 
     jail: JailRecord
 
-    def start(self, argv: Sequence[str], *, cwd: str, io: IoPolicy) -> ProcessRecord:
+    def start(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: str,
+        io: IoPolicy,
+        channel: Reservation | None = None,
+    ) -> ProcessRecord:
         """Start `argv` in the jail (decision-181): `(*wrap_prefix, *argv)`
         under its own exit wrapper, detached in a new process group, env
         `{**os.environ, **jail_env}`, stdin `/dev/null`, stdio per `io` in its
         own records directory `<jail_dir>/procs/<id>/`, made before the spawn;
         tethered when the jail is, by a watcher of its own started before the
-        workload; its `record.json` written once the spawn returns.
+        workload; its `record.json` written once the spawn returns, naming
+        `channel`'s socket as the one it binds (decision-184).
 
         Raises:
+            ReservationRefused: `channel` is not a socket `HostRuntime.reserve`
+                would hand out for this jail, or a process the jail knows (in
+                memory or under `procs/`) already binds it; raised before
+                anything is made or spawned.
             ExecWrapNotAPrefix: the jail's wrap is not a pure argv prefix
                 (`wrap_prefix is None`), or, where the compiled wrap is held,
                 `wrap` of this argv is not the prefix followed by it; raised
@@ -599,6 +667,21 @@ class HostSupervisor:
         if held is not None and tuple(held.wrap(argv_t)) != spawned_argv:
             raise ExecWrapNotAPrefix(wrap_prefix, argv_t)
         tether_fd = None if held is None or held.tether is None else held.tether.fd()
+        if channel is not None:
+            taken = frozenset(
+                process.bound_path
+                for process in (*jail.processes, *_records.scan(jail.jail_dir).records)
+                if process.bound_path is not None
+            )
+            reason = reservation_refusal(
+                channel, chan=channel_dir_of(jail), endpoint=channel.bound_path, taken=taken
+            )
+            if reason is not None:
+                raise ReservationRefused(
+                    f"start: the reservation for channel {channel.channel!r} is not this "
+                    f"jail's: {reason}. Reserve one with jail.channel({channel.channel!r}) "
+                    "for each start"
+                )
 
         process_id = _records.new_id()
         order = time.time_ns()
@@ -645,6 +728,8 @@ class HostSupervisor:
             argv=spawned_argv,
             stdout_path=stdout_path,
             stderr_path=stderr_path,
+            channel=None if channel is None else channel.channel,
+            bound_path=None if channel is None else channel.bound_path,
         )
         try:
             _records.write(jail.jail_dir, process)
