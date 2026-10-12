@@ -43,7 +43,7 @@ from brig.mech.seatbelt import (
     UnresolvedPath,
     seatbelt,
 )
-from brig.run.launcher import _derive_wrap_prefix
+from brig.run.host import _derive_wrap_prefix
 from brig.stack import Stack
 
 _JAIL_DIR = "/private/tmp/seatbelt-unit-test"

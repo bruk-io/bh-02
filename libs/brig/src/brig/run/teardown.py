@@ -421,12 +421,12 @@ def _guarded_ladder(
         )
 
 
-def _live_exec_siblings(handle: Any) -> _execs.Scan:
-    """The registrations of every exec sibling `handle` has registered
+def _live_exec_siblings(jail_dir: str) -> _execs.Scan:
+    """The registrations of every exec sibling a jail has registered
     (SPEC.md §9: "`exec` records the sibling ... somewhere the handle can
     read back in a later process") and whose exit status has not yet been
     observed -- read from `brig/run/_execs.py`'s registration directory
-    under `handle.jail_dir`, not from any in-memory state, which is what
+    under `jail_dir`, not from any in-memory state, which is what
     lets a handle rehydrated in a LATER process find execs it never itself
     started (task-027, decision-042; medium changed by decision-152).
     Order matches registration order.
@@ -441,7 +441,7 @@ def _live_exec_siblings(handle: Any) -> _execs.Scan:
     an exception: `kill_jail` reports it and tears down everything else
     (decision-175).
     """
-    return _execs.scan(handle.jail_dir)
+    return _execs.scan(jail_dir)
 
 
 def _unreadable_item(unreadable: _execs.Unreadable) -> KillItem:
@@ -459,36 +459,72 @@ def _unreadable_item(unreadable: _execs.Unreadable) -> KillItem:
     )
 
 
+def end_group(
+    kind: str, pgid: int, leader_pid: int, leader_stamp: str, *, grace: float = DEFAULT_GRACE_S
+) -> KillItem:
+    """One item of a `KillReport`: the ladder against one group, guarded
+    (`_guarded_ladder`), reported as `kind` with the pgid as its identity.
+    The workload group, an exec sibling and a helper are each ended through
+    this, and `HostAgent.stop` ends one process's group with it.
+
+    Raises nothing from the item; only `BaseException`s that are not
+    `Exception`s pass through."""
+    outcome, detail = _guarded_ladder(pgid, leader_pid, leader_stamp, grace)
+    return KillItem(kind=kind, identity=str(pgid), outcome=outcome, detail=detail)
+
+
 def kill_jail(handle: Any, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
-    """Tear down EVERYTHING `handle` names -- the workload group, then
+    """Tear down EVERYTHING `handle` names: `kill_named` over its fields.
+    Takes anything carrying `pgid`, `pid`, `start_time`, `jail_dir`,
+    `helper_pids` and `helper_stamps` (a `Handle`, in practice)."""
+    return kill_named(
+        pgid=handle.pgid,
+        pid=handle.pid,
+        start_time=handle.start_time,
+        jail_dir=handle.jail_dir,
+        helper_pids=handle.helper_pids,
+        helper_stamps=handle.helper_stamps,
+        grace=grace,
+    )
+
+
+def kill_named(
+    *,
+    pgid: int,
+    pid: int,
+    start_time: str,
+    jail_dir: str,
+    helper_pids: tuple[int, ...],
+    helper_stamps: tuple[str, ...],
+    grace: float = DEFAULT_GRACE_S,
+) -> KillReport:
+    """Tear down EVERYTHING a jail names -- the workload group, then
     every still-live exec sibling it registered (task-027), then every
     `JAIL_LIFETIME` helper -- through the same ladder (`_run_ladder`),
     workload first. The returned `KillReport` is the record: nothing is
-    written anywhere (decision-152).
+    written anywhere (decision-152). `HostRuntime.destroy` and `kill_jail`
+    both come here (decision-178).
 
     Total (decision-175): a registration that cannot be read is its own
     `FAILED` item, and each item's ladder runs inside `_guarded_ladder`, so no
-    exception from one item stops the next. Raises nothing from an item."""
-    items: list[KillItem] = []
+    exception from one item stops the next. Raises nothing from an item.
 
-    outcome, detail = _guarded_ladder(handle.pgid, handle.pid, handle.start_time, grace)
-    items.append(
-        KillItem(kind="workload_group", identity=str(handle.pgid), outcome=outcome, detail=detail)
+    Raises:
+        ValueError: `helper_stamps` does not have one entry per helper pid.
+    """
+    items: list[KillItem] = [end_group("workload_group", pgid, pid, start_time, grace=grace)]
+
+    siblings = _live_exec_siblings(jail_dir)
+    items.extend(
+        end_group(
+            "exec_sibling",
+            registration.pgid,
+            registration.pid,
+            registration.start_time,
+            grace=grace,
+        )
+        for registration in siblings.registrations
     )
-
-    siblings = _live_exec_siblings(handle)
-    for registration in siblings.registrations:
-        outcome, detail = _guarded_ladder(
-            registration.pgid, registration.pid, registration.start_time, grace
-        )
-        items.append(
-            KillItem(
-                kind="exec_sibling",
-                identity=str(registration.pgid),
-                outcome=outcome,
-                detail=detail,
-            )
-        )
     items.extend(_unreadable_item(unreadable) for unreadable in siblings.unreadable)
 
     # `Step.helpers` with JAIL_LIFETIME (SPEC.md §6). Each ran with
@@ -496,10 +532,9 @@ def kill_jail(handle: Any, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
     # ladder applies. "Kill leaves nothing" (§9) covers helpers: a proxy
     # that outlives the jail it filtered for is a listening socket nobody
     # owns.
-    for helper_pid, helper_stamp in zip(handle.helper_pids, handle.helper_stamps, strict=True):
-        outcome, detail = _guarded_ladder(helper_pid, helper_pid, helper_stamp, grace)
-        items.append(
-            KillItem(kind="helper", identity=str(helper_pid), outcome=outcome, detail=detail)
-        )
+    items.extend(
+        end_group("helper", helper_pid, helper_pid, helper_stamp, grace=grace)
+        for helper_pid, helper_stamp in zip(helper_pids, helper_stamps, strict=True)
+    )
 
     return KillReport(items=tuple(items))

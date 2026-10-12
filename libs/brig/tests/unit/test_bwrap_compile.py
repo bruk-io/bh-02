@@ -49,7 +49,7 @@ from brig.mech.bwrap import (
 )
 from brig.mech.env_scrub import env_scrub
 from brig.mech.rlimits import rlimits
-from brig.run.launcher import _derive_wrap_prefix
+from brig.run.host import _derive_wrap_prefix
 from brig.stack import Stack
 
 _JAIL_DIR = "/run/brig/jail0"

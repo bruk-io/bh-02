@@ -25,6 +25,13 @@ Task-019 shipped the complete M2 shape. What lands HERE:
 - `kill`, `wait_ready`, `exec` -- delegating to `teardown.kill_jail`,
   `readiness.wait_ready`, and `exec_.exec_in_jail`.
 
+**Since decision-178 (2026-10-12) every control method delegates to the
+handle's runtime** (`runtime`, `brig/run/runtime.py`'s `Runtime`):
+`alive` to `Runtime.alive`, `kill` to `Runtime.destroy`, and `interrupt`,
+`wait` and `exec` to its `Agent`. `HostRuntime` (`brig/run/host.py`) does
+what this module and the launcher did before, unchanged; `wait_ready` still
+connects to the channel itself.
+
 What is still ABSENT from the surface, under SPEC.md section 9's own law
 ("An unimplemented capability is absent from the surface, never a raising
 stub... A method that raises lies to `hasattr` and to every embedder that
@@ -56,11 +63,9 @@ value does and does not claim.
 
 from __future__ import annotations
 
-import os
 import signal
-import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Final
 
@@ -78,10 +83,12 @@ from brig.core import (
     SignatureBook,
     Spec,
 )
-from brig.run import _exit_status, _identity, _waiters
+from brig.run import _waiters
 from brig.run.exec_ import exec_in_jail as _exec_in_jail
+from brig.run.host import HostRuntime
 from brig.run.readiness import wait_ready as _wait_ready
-from brig.run.teardown import kill_jail as _kill_jail
+from brig.run.runtime import ExitStatusUnobservable as ExitStatusUnobservable
+from brig.run.runtime import JailRecord, NoAgent, ProcessRecord, Runtime
 
 HANDLE_VERSION: Final = 5
 """Bumped 1 -> 2 by task-046 (`wrap_prefix` and `jail_env` became REQUIRED
@@ -102,13 +109,6 @@ are new and REQUIRED. They are the second half of an identity a pid alone
 cannot carry -- a handle that named only pids could not tell this jail from
 whatever the OS handed those numbers to next, and defaulting them in for an
 older dict would be exactly the silent downgrade that posture forbids."""
-
-#: How often `wait()` re-asks `alive()` while polling. The two cheap
-#: sources (this process's waiter record, the exit file) are polled far
-#: more often; the liveness question exists only to turn "still running"
-#: into "gone, and nothing recorded it", and paying a `/bin/ps` fifty times
-#: a second to ask it sooner buys nothing.
-_LIVENESS_POLL_S: Final = 0.25
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
@@ -190,37 +190,6 @@ def _channels_from_list(raw: Sequence[Mapping[str, Any]]) -> dict[str, Channel]:
         )
         result[channel.name] = channel
     return result
-
-
-class ExitStatusUnobservable(RuntimeError):
-    """The workload is gone and NOTHING recorded how it ended.
-
-    Raised rather than returning a status, because every stand-in is a lie in
-    the dangerous direction. `0` reads as a clean exit -- which in a denial
-    test means the jail failed to deny, and in an allowed-case control means
-    a write was never observed at all. Five integration helpers made exactly
-    that substitution (`except ChildProcessError: return 0`) before the exit
-    status was recorded at all.
-
-    **What this no longer means (decision-156, 2026-09-08).** It used to mean
-    "you are not the launching process": the status lived only in that
-    process's memory, so a rehydrated `Handle` -- the shape an embedder uses
-    to clean up after a runtime that died holding a jail -- got this refusal
-    every time. It does not any more. The exit wrapper writes the status to
-    `<jail_dir>/exit` (`brig/run/_exit_status.py`), which any process holding
-    the handle can read, so a rehydrated handle now answers.
-
-    What is left is exactly the case where **no wrapper ever wrote**:
-
-    - the group was `SIGKILL`ed, which no process can survive long enough to
-      record anything -- the killer holds the `KillReport`, which is that
-      ending's record;
-    - the jail directory has been swept, so the file that existed is gone;
-    - the handle names a jail this launcher never wrapped.
-
-    In none of those does a status exist to be read, which is why the answer
-    is a refusal and not a number.
-    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,6 +282,13 @@ class Handle:
     #: that may not have started it, which is the same reuse window the
     #: workload's own pid has and is closed the same way.
     helper_stamps: tuple[str, ...] = ()
+    #: What every control method delegates to (decision-178): `alive`,
+    #: `interrupt`, `wait`, `kill` and `exec`. Not serialized: `to_dict`
+    #: carries data, and `from_dict` gives a rehydrated handle
+    #: `HostRuntime`, the one runtime a handle could have been launched by
+    #: until `Jail.from_dict` takes runtimes from the embedder (decision-0001
+    #: step 3).
+    runtime: Runtime = field(default_factory=HostRuntime, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "argv", tuple(self.argv))
@@ -402,6 +378,28 @@ class Handle:
             helper_stamps=tuple(str(stamp) for stamp in d["helper_stamps"]),
         )
 
+    def record(self) -> JailRecord:
+        """This jail as its runtime identifies it: what `runtime` is asked
+        about on every control call."""
+        return JailRecord(
+            kind=self.runtime.kind,
+            jail_id=self.jail_id,
+            jail_dir=self.jail_dir,
+            cwd=self.cwd,
+            jail_env=frozendict(self.jail_env),
+            wrap_prefix=self.wrap_prefix,
+            first=ProcessRecord(
+                pid=self.pid,
+                pgid=self.pgid,
+                start_time=self.start_time,
+                argv=self.argv,
+                stdout_path=self.stdout_path,
+                stderr_path=self.stderr_path,
+            ),
+            helper_pids=self.helper_pids,
+            helper_stamps=self.helper_stamps,
+        )
+
     def alive(self) -> bool:
         """True while this jail's own leader is running, false once it is
         gone -- and false for a pid the OS has since handed to something
@@ -429,8 +427,10 @@ class Handle:
         One limit remains, stated rather than left silent. A handle whose
         `start_time` is `_identity.UNKNOWN` -- the launch lost its race with a
         workload that exited within microseconds -- degrades to the pid-only
-        check, because there is nothing recorded to compare against."""
-        return _identity.identity_holds(self.pid, self.start_time)
+        check, because there is nothing recorded to compare against.
+
+        Delegates to `runtime.alive` (decision-178)."""
+        return self.runtime.alive(self.record())
 
     def interrupt(self) -> bool:
         """Deliver `SIGINT` to the workload's process **group**. Returns
@@ -470,14 +470,15 @@ class Handle:
         recycled returns `False` -- not delivered, because what this handle
         names is gone -- rather than delivering a `SIGINT` to a stranger that
         happens to lead a group with the same number.
+
+        Delegates to the runtime's agent (`Agent.signal`, decision-178); a
+        jail whose runtime has no agent was not signalled, so `False`.
         """
-        if _identity.recycled(self.pid, self.start_time):
+        record = self.record()
+        agent = self.runtime.agent(record)
+        if agent is None:
             return False
-        try:
-            os.killpg(self.pgid, signal.SIGINT)
-        except ProcessLookupError, PermissionError:
-            return False
-        return True
+        return agent.signal(record.first, signal.SIGINT)
 
     def wait(self, timeout: float = 30.0) -> int:
         """Block until the workload exits; return the status it exited with.
@@ -499,49 +500,23 @@ class Handle:
         deadline, and `ExitStatusUnobservable` once it is gone with no record
         in either place -- see that exception for the cases that remain. It
         never invents a status.
+
+        Delegates to the runtime's agent (`Agent.wait`, decision-178), whose
+        `None` at the deadline is this method's `TimeoutError`.
+
+        Raises:
+            TimeoutError: still running at the deadline.
+            ExitStatusUnobservable: gone, and nothing recorded how it ended.
+            NoAgent: the jail's runtime has no agent to wait through.
         """
-        deadline = time.monotonic() + timeout
-        next_liveness_check = 0.0
-        gone = False
-        while True:
-            record = _waiters.recorded_exit(self.pid)
-            if record is not None:
-                return record.returncode
-            recorded = _exit_status.read_exit_status(self.jail_dir)
-            if recorded is not None:
-                return recorded
-            if gone:
-                # Gone, and no record in either place. Give the wrapper and
-                # the waiter thread a moment -- ending, writing and
-                # recording are not one atomic step.
-                grace = time.monotonic() + 1.0
-                while time.monotonic() < grace:
-                    record = _waiters.recorded_exit(self.pid)
-                    if record is not None:
-                        return record.returncode
-                    recorded = _exit_status.read_exit_status(self.jail_dir)
-                    if recorded is not None:
-                        return recorded
-                    time.sleep(0.02)
-                raise ExitStatusUnobservable(
-                    f"pid {self.pid} is gone and nothing recorded how jail "
-                    f"{self.jail_id!r} ended: no exit file at "
-                    f"{_exit_status.exit_path(self.jail_dir)!r} and no observation in "
-                    "this process"
-                )
-            now = time.monotonic()
-            if now >= next_liveness_check:
-                # `alive()` costs a process-table read on every platform but
-                # Linux (`brig/run/_identity.py`), so this loop asks it on a
-                # slower cadence than it polls the two cheap sources above.
-                # The answer is the same answer, at most `_LIVENESS_POLL_S`
-                # later.
-                gone = not self.alive()
-                next_liveness_check = now + _LIVENESS_POLL_S
-                continue
-            if now > deadline:
-                raise TimeoutError(f"pid {self.pid} did not exit within {timeout}s")
-            time.sleep(0.02)
+        record = self.record()
+        agent = self.runtime.agent(record)
+        if agent is None:
+            raise NoAgent(f"jail {self.jail_id!r} has no agent to wait through")
+        status = agent.wait(record.first, timeout)
+        if status is None:
+            raise TimeoutError(f"pid {self.pid} did not exit within {timeout}s")
+        return status
 
     def exit_events(self) -> tuple[Event, ...]:
         """What this jail's mechanism sensors made of the workload's ending
@@ -566,12 +541,13 @@ class Handle:
         return JailStat(alive=self.alive(), pids=(self.pid,), report=self.report)
 
     def kill(self) -> Any:
-        """Delegates to `teardown.kill_jail` (task-020). `Any` is the
-        FINAL M2 return type here, not a placeholder: `KillReport`
-        (ambiguity A11) lives in `teardown.py`, which imports nothing from
-        here, and naming it would close a cycle. task-020 gave
-        `teardown.kill_jail` its concrete return type instead."""
-        return _kill_jail(self)
+        """Delegates to `runtime.destroy` (decision-178; before it,
+        `teardown.kill_jail`, task-020). `Any` is the FINAL M2 return type
+        here, not a placeholder: `KillReport` (ambiguity A11) lives in
+        `teardown.py`, which imports nothing from here, and naming it would
+        close a cycle. task-020 gave `teardown.kill_jail` its concrete
+        return type instead."""
+        return self.runtime.destroy(self.record())
 
     def wait_ready(self, channel: str, timeout: float) -> None:
         """Delegates to `readiness.wait_ready` (task-021). Final signature
@@ -579,7 +555,8 @@ class Handle:
         _wait_ready(self, channel, timeout)
 
     def exec(self, argv: Sequence[str], *, interactive: bool = False) -> Any:
-        """Delegates to `exec_.exec_in_jail` (task-022). `Any` is final
+        """Delegates to `exec_.exec_in_jail` (task-022), which starts the
+        sibling through the runtime's agent (`Agent.start`, decision-178). `Any` is final
         here for the same reason as `kill`'s return type: `ExecHandle`
         (ambiguity A13) lives in the module this one imports, so naming it
         here would close a cycle."""

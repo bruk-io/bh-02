@@ -105,9 +105,9 @@ def test_the_proxy_helper_is_spawned_unwrapped_by_the_launcher() -> None:
     the proxy is scrubbed of the environment it needs and the workload
     silently loses its filter.
     """
-    from brig.run import launcher
+    from brig.run import host
 
-    source = inspect.getsource(launcher._start_helpers)
+    source = inspect.getsource(host._start_helpers)
     assert "wrapped_argv" not in source, (
         "_start_helpers must never spawn the composed wrap: a helper that "
         "passes through seatbelt cannot reach upstream, and one that passes "

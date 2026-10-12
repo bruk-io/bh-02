@@ -53,7 +53,9 @@ def _allow_of(section: dict[str, object]) -> dict[str, object]:
 def test_layer_set_is_exactly_right() -> None:
     """AC #1: find brig -maxdepth 1 -type d matches expected set exactly."""
     brig_dir = _BRIG
-    expected_layers = {"core", "mech", "probe", "proxy", "run", "stack"}
+    # `runtime` joined at decision-178 (TASK-0079.02): runtimes that are not
+    # `run`'s own, `fake` first.
+    expected_layers = {"core", "mech", "probe", "proxy", "run", "runtime", "stack"}
 
     # Get actual layers (directories, excluding __pycache__)
     actual = {d.name for d in brig_dir.iterdir() if d.is_dir() and d.name != "__pycache__"}
@@ -142,6 +144,9 @@ def test_allow_table_unchanged_since_m0() -> None:
         # layer in the flow. The EMPTY value is the point: it may import
         # nothing from brig. A non-empty `proxy` row fails this test.
         "proxy": [],
+        # decision-178: runtimes that are not `run`'s own. No other row names
+        # `runtime`, so nothing in brig imports one, `run` included.
+        "runtime": ["core", "mech", "stack", "run"],
     }
     working = allow_table(working_text)
     folded = {key: value for key, value in working.items() if key not in SANCTIONED_ROWS}

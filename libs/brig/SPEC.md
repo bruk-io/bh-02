@@ -82,9 +82,9 @@ change that violates one is a spec change first, code second.
 Six nouns. Everything in brig is one of these.
 
 ```
-Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──launch──▶ Launcher ──▶ Handle
-                        │                                               │
-                        └────────── EnforcementReport ◀── probe() ──────┘
+Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──create──▶ Runtime ──▶ Handle
+                        │                                              │
+                        └────────── EnforcementReport ◀── probe() ─────┘
 ```
 
 - **Spec** — the provider-independent description of a jail: what it may
@@ -98,12 +98,45 @@ Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──launch──�
 - **Stack** — an ordered composition of mechanisms. Validates coverage and
   compatibility, composes argv wrappers, aggregates the report. The empty
   stack is valid and grades every axis `unenforced`.
-- **Launcher** — starts the final argv: plain subprocess, or pty-tee
-  subprocess. Declares capabilities; refuses stacks whose requirements it
-  cannot honor.
+- **Runtime** — creates a jail's instance and controls it: `create`,
+  `alive`, `destroy` (verified) and `agent`, the part inside the instance
+  that starts, signals, waits for and stops its processes. Declares its kind
+  and capabilities; refuses stacks whose requirements it cannot honor.
+  `HostRuntime` (`brig/run/host.py`) is today's: host process groups, the
+  exit wrapper, the tether, a sibling per exec. The `subprocess` launcher
+  (§8) is the embedder's door to it.
 - **Handle** — the running jail as the embedder holds it: serializable,
   rehydratable in a later process, owner of teardown, the anchor for
   observation and communication.
+
+**The runtime replaces the launcher noun (2026-10-12, decision-178).**
+Everything after compile had one implementation, hardwired to host process
+groups, with no seam a container, a VM or a remote sandbox could fill
+(decision-0001 in the workspace's backlog, its migration step 1). `run` now
+names that seam as two protocols (`brig/run/runtime.py`): `Runtime`, the
+instance (`kind`, `capabilities`, `create`, `alive`, `destroy -> KillReport`,
+`agent -> Agent | None`, `None` meaning the jail can only be destroyed), and
+`Agent`, inside it (`start -> ProcessRecord`, `signal -> bool`,
+`wait -> int | None`, `None` at the deadline, `stop -> KillReport`). Their
+records, `JailRecord` and `ProcessRecord`, are frozen data; `RuntimeKind`,
+`Capability` and `Scope` are enums in `core` (`brig/core/runtime.py`; not in
+`brig.core`'s exports until a caller outside brig needs one). Until a bwrap jail can hold an
+instance with nothing in it (its supervisor, decision-0001 step 4), `create`
+is launch-shaped: it takes the first process's argv and its record carries
+that process. `HostRuntime` holds what the launcher, teardown, exec and the
+tether did, unchanged; `SubprocessLauncher.launch` is its capability check,
+`create` and a `Handle`; `Handle` keeps its fields and serialization
+(`HANDLE_VERSION` unchanged) and delegates `alive`, `interrupt`, `wait`,
+`kill` and `exec` to its runtime, a field `to_dict` does not carry (a
+rehydrated handle gets `HostRuntime`). `brig.runtime.fake` is the second
+implementation, pure, which drives `Handle` in the unit tier; it is the
+first module of the `runtime` layer (§13), which nothing in brig may import,
+and the layer-set pins (`test_m4_shape`, `test_m5_shape`, `test_m6_shape`)
+record that layer as they recorded `proxy` (decision-133). No behaviour
+changes: every other existing test asserts what it asserted. `Mechanism.runtime`
+and the runtime kind in `CompiledJail` are step 2 (TASK-0079.03); `Jail`
+and `Process` in place of `Handle` are step 3 (TASK-0079.04). Implementing
+task: TASK-0079.02. (Ruled 2026-10-12, decision-178.)
 
 ## 4. Axes and grades
 
@@ -1808,8 +1841,8 @@ the new name.)
 
 ```
 core  ←  mech  ←  stack  ←  run  ←  observe
-                              ↖       ↑
-                                probe ┘
+                              ↑ ↖       ↑
+                        runtime   probe ┘
 ```
 
 | layer | contents | may import |
@@ -1817,7 +1850,8 @@ core  ←  mech  ←  stack  ←  run  ←  observe
 | `core` | Spec, axes, grades, Graded, Report, subset algebra, frames, `Event` and its serialization, threat lists, serialization | nothing (pure: no I/O, no clock, no randomness, no subprocess) |
 | `mech` | Mechanism protocol, Step, all mechanisms, denial signatures | `core` |
 | `stack` | Stack, compatibility matrix, presets, floors, aggregation | `core`, `mech` |
-| `run` | Launchers, Handle, teardown, readiness, dial, event stamping | `core`, `mech`, `stack` |
+| `run` | the `Runtime` and `Agent` protocols and their records, `HostRuntime`, Launchers, Handle, teardown, readiness, dial, event stamping | `core`, `mech`, `stack` |
+| `runtime` | runtimes that are not `run`'s own: `fake` today (decision-178); nothing in brig imports one, `run` included: an embedder picks a runtime by importing it | `core`, `mech`, `stack`, `run` |
 | `observe` | Console, stat, workspace diff | `core`, `run` |
 | `probe` | batteries, verdicts, report-vs-probe checks | `core`, `run`, `observe` |
 

@@ -32,7 +32,7 @@ import pytest
 from brig.core import Spec, unenforced_report
 from brig.mech import Helper, HelperLifetime, LaunchFeature
 from brig.run import _identity as identity
-from brig.run import launcher as launcher_mod
+from brig.run import host as host_mod
 from brig.run import teardown as teardown_mod
 from brig.run.handle import Handle
 from brig.run.launcher import HelperFailed, IoPolicy, SubprocessLauncher
@@ -292,7 +292,7 @@ def test_a_launch_scoped_helper_that_never_exits_fails_instead_of_hanging(
     really does run forever, the launcher really does hit the bound, and
     the workload really is never started.
     """
-    monkeypatch.setattr(launcher_mod, "_LAUNCH_SCOPED_TIMEOUT_S", 1.0)
+    monkeypatch.setattr(host_mod, "_LAUNCH_SCOPED_TIMEOUT_S", 1.0)
     jail_dir = _new_jail_dir()
     os.makedirs(jail_dir, exist_ok=True)
     marker = os.path.join(jail_dir, "workload-started")

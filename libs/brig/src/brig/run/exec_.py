@@ -84,7 +84,6 @@ gone and reports `ALREADY_GONE`, rather than skipping a group that is not.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import uuid
 from collections.abc import Sequence
@@ -94,8 +93,7 @@ from typing import Any
 
 from brig.core import Spec
 from brig.mech import LaunchFeature
-from brig.run import _execs, _identity
-from brig.run._spawn_pgid import spawn_pgid
+from brig.run.runtime import Agent, IoPolicy, NoAgent, ProcessRecord
 
 
 class ExecRefused(ValueError):
@@ -163,11 +161,13 @@ class ExecFidelity(Enum):
 
 @dataclass(frozen=True, slots=True)
 class ExecHandle:
-    """SPEC.md §9's per-exec handle. `_proc`/`_jail_dir`/`_ended` are this
+    """SPEC.md §9's per-exec handle. `_agent`/`_process` are this
     module's own bookkeeping for `wait()` -- not part of the SPEC-named
     shape (`pid`, `argv`, `interactive`, `fidelity`, `spec`, `stdout_path`,
     `stderr_path`, `wait`) -- so they are excluded from `repr`/`__eq__`
-    (`compare=False`)."""
+    (`compare=False`). `_agent` is the runtime's agent that started this
+    sibling (decision-178); it holds the sibling's `Popen` for as long as
+    this handle holds it."""
 
     pid: int
     argv: tuple[str, ...]
@@ -176,23 +176,26 @@ class ExecHandle:
     spec: Spec
     stdout_path: str
     stderr_path: str
-    _proc: subprocess.Popen[bytes] = field(repr=False, compare=False)
-    _jail_dir: str = field(repr=False, compare=False)
-    _ended: bool = field(default=False, repr=False, compare=False)
+    _agent: Agent = field(repr=False, compare=False)
+    _process: ProcessRecord = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "argv", tuple(self.argv))
 
     def wait(self, timeout: float | None = None) -> int:
-        """Block for the exec'd process's exit status, then DEREGISTER this
-        sibling (`brig/run/_execs.py`) -- the first `wait()` that observes a
-        status is what makes it no longer a thing teardown must reap.
-        Idempotent: a second `wait()` returns the same status and
-        deregisters nothing twice."""
-        status = self._proc.wait(timeout=timeout)
-        if not self._ended:
-            _execs.deregister(self._jail_dir, self.pid)
-            object.__setattr__(self, "_ended", True)
+        """Block for the exec'd process's exit status, through the agent
+        that started it, which then DEREGISTERS this sibling
+        (`brig/run/_execs.py`) -- the first `wait()` that observes a status
+        is what makes it no longer a thing teardown must reap. Idempotent: a
+        second `wait()` returns the same status and deregisters nothing
+        twice.
+
+        Raises:
+            subprocess.TimeoutExpired: still running after `timeout` seconds.
+        """
+        status = self._agent.wait(self._process, timeout)
+        if status is None:
+            raise subprocess.TimeoutExpired(self._process.argv, timeout or 0.0)
         return status
 
 
@@ -208,17 +211,24 @@ def exec_in_jail(handle: Any, argv: Sequence[str], interactive: bool = False) ->
     this private delegate's is looser.
 
     cwd always comes from `handle`, never from this process's own
-    `os.getcwd()`. `env` is chosen per `handle.wrap_prefix` (see this
-    module's docstring's three-case list) -- in every case SPEC.md §9's
-    "subject to the same Spec as the workload, never a weaker one" holds:
-    an exec that inherited only the *caller's* raw environment would be a
-    weaker confinement than the workload's own.
+    `os.getcwd()`. The sibling is started by `handle.runtime`'s agent
+    (`Agent.start`, decision-178): for `HostRuntime`, `(*wrap_prefix,
+    *argv)` with env `{**os.environ, **jail_env}` (see this module's
+    docstring's three-case list) -- in every case SPEC.md §9's "subject to
+    the same Spec as the workload, never a weaker one" holds: an exec that
+    inherited only the *caller's* raw environment would be a weaker
+    confinement than the workload's own.
 
     **The refusal (`wrap_prefix is None`) is raised BEFORE anything is
-    opened or spawned** -- checked first, ahead of the stdout/stderr file
-    opens below, so a refused exec creates no artifacts on disk (SPEC.md
-    §9: "A mechanism that cannot guarantee this refuses exec" -- a refusal
-    that still half-runs is not a refusal).
+    opened or spawned** -- checked first, ahead of the agent, so a refused
+    exec creates no artifacts on disk (SPEC.md §9: "A mechanism that cannot
+    guarantee this refuses exec" -- a refusal that still half-runs is not a
+    refusal).
+
+    Raises:
+        ExecRefused: `interactive=True`; no launcher here has `PTY`.
+        ExecWrapNotAPrefix: the jail's wrap is not a pure argv prefix.
+        NoAgent: the jail's runtime has no agent to start a sibling with.
     """
     if interactive:
         raise ExecRefused(frozenset({LaunchFeature.PTY}))
@@ -227,64 +237,27 @@ def exec_in_jail(handle: Any, argv: Sequence[str], interactive: bool = False) ->
     wrap_prefix: tuple[str, ...] | None = handle.wrap_prefix
     if wrap_prefix is None:
         raise ExecWrapNotAPrefix(tuple(handle.argv), argv_t)
-
-    spawned_argv = (*wrap_prefix, *argv_t)
-    # The launcher's OWN env composition (`launcher.py`'s `full_env`),
-    # evaluated fresh at exec time -- the sibling's starting environment is
-    # the workload's declared overlay over this process's environment, in
-    # both fidelity cases (decision-152; see this module's docstring).
-    spawn_env: dict[str, str] = {**os.environ, **handle.jail_env}
     fidelity = ExecFidelity.EQUIVALENT_PROFILE if wrap_prefix else ExecFidelity.PLAIN
 
+    agent = handle.runtime.agent(handle.record())
+    if agent is None:
+        raise NoAgent(f"jail {handle.jail_id!r} has no agent to start {argv_t!r} with")
+
     token = uuid.uuid4().hex[:12]
-    stdout_path = os.path.join(handle.jail_dir, f"exec-{token}-stdout.log")
-    stderr_path = os.path.join(handle.jail_dir, f"exec-{token}-stderr.log")
-
-    with (
-        open(stdout_path, "wb") as stdout_f,
-        open(stderr_path, "wb") as stderr_f,
-        open(os.devnull, "rb") as stdin_f,
-    ):
-        proc = subprocess.Popen(
-            spawned_argv,
-            cwd=handle.cwd,
-            env=spawn_env,
-            stdin=stdin_f,
-            stdout=stdout_f,
-            stderr=stderr_f,
-            start_new_session=True,
-        )
-
-    pid = proc.pid
-    # SPEC.md §9 / decision-042 (task-027): the EXEC record carries the
-    # sibling's pgid EXPLICITLY, read fresh via `os.getpgid` -- never
-    # inferred from `pid`. `start_new_session=True` makes them equal
-    # today, but an inferred identity would be a claim about a launcher
-    # detail, not a recorded fact; `teardown.kill_jail` (task-027) reads
-    # this field back from a REHYDRATED handle in a separate process, so
-    # the fact has to be on disk, not reconstructed.
-    # task-075: the read goes through `spawn_pgid`, because darwin's
-    # `getpgid()` raises ESRCH for a sibling that has ALREADY EXITED (a
-    # fast command like `/usr/bin/true` under any scheduling delay) -- a
-    # bare call here crashed `exec_in_jail` after the spawn but before the
-    # registration, leaving the sibling unregistered and its zombie to the
-    # GC. The fallback records the same fact (setsid-before-exec makes the
-    # group the pid from birth); see `brig/run/_spawn_pgid.py`.
-    pgid = spawn_pgid(proc)
-    # decision-155: the registration carries WHEN this sibling started as
-    # well as its number, so a teardown running later -- possibly in another
-    # process -- can tell it from whatever the OS handed that pid to next.
-    # Read here, while the sibling is as young as it will ever be.
-    _execs.register(handle.jail_dir, pid, pgid, _identity.start_stamp(pid))
+    process = agent.start(
+        argv_t,
+        cwd=handle.cwd,
+        io=IoPolicy(stdout_name=f"exec-{token}-stdout.log", stderr_name=f"exec-{token}-stderr.log"),
+    )
 
     return ExecHandle(
-        pid=pid,
+        pid=process.pid,
         argv=argv_t,
         interactive=interactive,
         fidelity=fidelity,
         spec=handle.spec,
-        stdout_path=stdout_path,
-        stderr_path=stderr_path,
-        _proc=proc,
-        _jail_dir=handle.jail_dir,
+        stdout_path=process.stdout_path,
+        stderr_path=process.stderr_path,
+        _agent=agent,
+        _process=process,
     )

@@ -54,7 +54,7 @@ from brig.core import (
 from brig.mech import CompileCtx
 from brig.mech.env_scrub import _SCRUB_DETAIL as _ENV_DETAIL
 from brig.run.exec_ import ExecFidelity
-from brig.run.launcher import _derive_wrap_prefix
+from brig.run.host import _derive_wrap_prefix
 from brig.stack import scratch_darwin
 
 # ---------------------------------------------------------------------------

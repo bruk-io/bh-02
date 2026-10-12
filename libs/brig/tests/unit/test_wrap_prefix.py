@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from brig.run.launcher import _derive_wrap_prefix
+from brig.run.host import _derive_wrap_prefix
 
 _ARGV: tuple[str, ...] = ("workload", "--flag", "value")
 
