@@ -265,3 +265,29 @@ def test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status() -> Non
     assert second.wait(timeout=20.0) == 0, "the second launch answered with the first's status"
     with open(second.stdout_path, encoding="utf-8") as f:
         assert "SECOND" in f.read(), "wait() returned before the second workload had run"
+
+
+@pytest.mark.integration
+def test_wait_returns_only_once_the_process_has_left_so_the_jail_dir_is_free() -> None:
+    """decision-182 (TASK-0079.30): in the process that started it, `wait()`
+    answers only after the exit wrapper has exited and been reaped.
+
+    The exit record is written just before the wrapper exits, so a `wait()` that
+    answered on the record let `create` into the same `jail_dir` meet a wrapper
+    that still ran and refuse with `JailDirInUse`, once in every few runs. Fifty
+    launches back to back, each waited and then followed by the next, refuse
+    nowhere.
+    """
+    jail_dir = _new_jail_dir()
+    os.makedirs(jail_dir, exist_ok=True)
+    compiled = Stack([]).compile(Spec())
+    for round_ in range(50):
+        handle = SubprocessLauncher().launch(
+            compiled,
+            argv=["/bin/sh", "-c", f"exit {round_ % 5}"],
+            cwd=jail_dir,
+            io=IoPolicy(),
+            jail_id=f"exitstatus-loop-{os.path.basename(jail_dir)}",
+            jail_dir=jail_dir,
+        )
+        assert handle.wait(timeout=20.0) == round_ % 5

@@ -1988,6 +1988,23 @@ record with only `HostRuntime` passed among it), `start` absent, and
 probes; TASK-0079.27 for bh-02's runner; TASK-0079.28 for retiring `Handle`
 and this section's old shape. (Ruled 2026-10-12, decision-181.)
 
+**`wait` means gone, where it can (2026-10-12, decision-182).** The exit
+wrapper writes its process's exit record just before it exits, so a `wait()`
+that answered on the record let a `create` into the same `jail_dir` meet a
+wrapper that still ran, and refuse (`JailDirInUse`, rightly by decision-181)
+in about one run in ten. Ruled: in the process that started a process,
+`wait()` answers only once its exit wrapper has exited and been reaped (that
+process's own waiter record; the exit record is not read while the waiter owns
+the reap), so the process's group has no running leader when it returns and
+`create` into the same `jail_dir` right after never refuses on it. A
+rehydrated handle's `wait()` (any process but the starter) cannot reap: it
+guarantees only that the exit record exists, and the wrapper may still be
+leaving for a moment. `create`'s refusal is not weakened for that window
+(refuse while anything recorded runs, and on doubt); it now names each held
+process's pid and group and says that a process already waited for elsewhere
+is still leaving, to wait a moment and retry, or to destroy the jail.
+Implementing task: TASK-0079.30. (Ruled 2026-10-12, decision-182.)
+
 ## 10. Communication with jails
 
 Three inbound kinds, each with different liveness, trust, and delivery:

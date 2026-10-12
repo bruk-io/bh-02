@@ -366,7 +366,9 @@ class JailDirInUse(RuntimeError):
         super().__init__(
             f"jail directory {jail_dir!r} holds the records of an earlier jail that is not "
             f"known to be gone: {reasons}. Destroy that jail (its Handle's kill(), or end "
-            "what those records name), or choose another directory; nothing was removed"
+            "what those records name), or choose another directory. If the process it names "
+            "has already been waited for in another process (an exit record exists), it is "
+            "still leaving: wait a moment and retry; nothing was removed"
         )
 
 
@@ -403,7 +405,10 @@ def held_by(
                 pass
             case Standing.RUNS:
                 held.append(
-                    Unreadable(where, f"names process group {record.pgid}, which still runs")
+                    Unreadable(
+                        where,
+                        f"names pid {record.pid} and process group {record.pgid}, which still runs",
+                    )
                 )
             case Standing.UNKNOWN_STAMP:
                 held.append(

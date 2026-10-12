@@ -657,9 +657,13 @@ class HostSupervisor:
         deadline (`timeout=None`: none). Deletes nothing: a record outlives
         its process's `wait` (decision-181).
 
-        From this process's waiter record if it holds one, else the process's
-        own exit record, written by its exit wrapper (decision-156), for every
-        process, siblings included.
+        In the process that started it, only once its exit wrapper has exited
+        and been reaped (this process's waiter record), so its jail directory
+        is free when this returns (decision-182). Anywhere else, from the
+        process's own exit record, written by its exit wrapper just before it
+        exits (decision-156): that process cannot reap it, so the wrapper may
+        still be leaving for a moment, and a `create` into the directory then
+        refuses and says so.
 
         Raises:
             ExitStatusUnobservable: `process` is gone and neither source
@@ -718,7 +722,9 @@ class HostSupervisor:
 
 def _recorded_status(process: ProcessRecord, jail_dir: str) -> int | None:
     """How `process` ended, if anything recorded it: this process's waiter, or
-    its exit record (decision-156, decision-181).
+    its exit record (decision-156, decision-181). While this process's waiter
+    still owns the reap, nothing: the exit record is written before the
+    wrapper has left, and `wait` answers once it has (decision-182).
 
     Raises:
         ValueError: its exit record does not hold an integer.
@@ -726,4 +732,6 @@ def _recorded_status(process: ProcessRecord, jail_dir: str) -> int | None:
     record = _waiters.recorded_exit(process.pid)
     if record is not None:
         return record.returncode
+    if _waiters.is_watched(process.pid):
+        return None
     return _records.read_exit(jail_dir, process.id)
