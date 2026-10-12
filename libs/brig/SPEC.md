@@ -155,6 +155,43 @@ data an embedder folds in, not a default of any preset. No behaviour changes:
 tests change by names. Implementing task: TASK-0079.24. (Ruled 2026-10-12,
 decision-180.)
 
+**A Jail and its Processes replace the Handle (2026-10-12, decision-181).**
+decision-0001's migration step 3a. The last noun becomes **Jail** (with its
+processes): the running instance as the embedder holds it, and each process
+in it a **Process**. Today's launch is `Jail.create` then `jail.start`;
+today's exec sibling is a second `start`, the same call, recorded the same
+way. brig keeps six nouns:
+
+```
+Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──create──▶ Runtime ──▶ Jail ──start──▶ Process
+```
+
+The ruling has three parts, one per section: the runtime's `create` holds no
+process and every process is a `start` (§8); each process has a record and an
+exit record of its own, out of every grant, and a jail is rehydrated with the
+embedder's runtimes (§9); and the order in which `Handle` is retired, below.
+Each part names its implementing task.
+
+**The order `Handle` goes in.** Every step leaves brig's tiers, bh-02's
+runner and `scripts/check` green:
+
+1. TASK-0079.25: the records (§9) and `create` with no process (§8) under
+   `HostRuntime`, the compile refusal that keeps every grant off the records,
+   and the fake's own kind. `Handle` stays, as an adapter over them.
+2. TASK-0079.26: `Jail` and `Process` in brig's public surface beside
+   `Handle`, rehydration with the embedder's runtimes, `HANDLE_VERSION` 6,
+   probes through `jail.start`.
+3. TASK-0079.27: bh-02's runner moves to `Jail` and `Process`, still a jail
+   per program (a jail per session is TASK-0074).
+4. TASK-0079.28: `Handle`, `ExecHandle`, `SubprocessLauncher`, `kill_jail`,
+   the launch-shaped `create`, `<jail_dir>/execs/` and `<jail_dir>/exit` are
+   deleted, brig's remaining tests move, and the code blocks of §8 and §9
+   are replaced by the shape in §9's ruling. No name is kept for
+   compatibility. Until then those blocks, and every paragraph that says
+   `Handle`, describe the code as it stands.
+
+(Ruled 2026-10-12, decision-181.)
+
 ## 4. Axes and grades
 
 The report's fixed vocabulary. Axes:
@@ -451,6 +488,9 @@ Notes:
   the resolved directory writable at the lexical parent: `<jail_dir>/ctl.sock`
   as a symlink to a socket elsewhere would otherwise lay that directory over the
   jail directory's place in the jail. The message names both paths.
+  Widened by decision-181 (§9, 2026-10-12): every mechanism that compiles a
+  LISTEN channel refuses an endpoint at or under brig's records
+  (`<jail_dir>/procs`, and `<jail_dir>/execs` while it exists).
 - Serialization: `to_dict`/`from_dict`, versioned, round-trip stable.
 - **The version is `SPEC_VERSION = 1`, and an unknown key at any level is a
   refusal.** There is no migration framework and no tolerated extra field: a
@@ -1289,6 +1329,57 @@ written — until such a launcher exists, a wider `IoPolicy` would be a
 capability claim with nothing behind it, which law 2 forbids. (Folded from the built shape by decision-044,
 discharging decision-038's A8.)
 
+**`create` holds no process, and every process is a `start` (2026-10-12,
+decision-181).** decision-178 left `Runtime.create` launch-shaped, because a
+bwrap jail cannot hold an instance with nothing in it until its supervisor
+(decision-0001 step 4). A `HOST` jail can: its instance is what `create`
+makes before the first spawn. So:
+
+- `Runtime.create(jail, *, cwd, jail_id, jail_dir, tether) -> JailRecord`
+  takes no argv and no `IoPolicy`. `HostRuntime.create` checks capabilities
+  (`LaunchRefused`, unchanged), makes `jail_dir`, clears what an earlier jail
+  there left (§9's records ruling: refused while any of it runs), writes the
+  staged files, runs `LAUNCH_SCOPED` helpers to completion and starts
+  `JAIL_LIFETIME` ones, and derives `wrap_prefix` once, from the compiled
+  `wrap` applied to a fixed sentinel argv, verified as a pure prefix as today
+  (`None`: every `start` refuses). A start in the process that created the
+  jail, which still holds the compiled `wrap`, also checks that `wrap` of its
+  own argv is that prefix followed by the argv, and refuses on a mismatch
+  (`ExecWrapNotAPrefix`); a rehydrated jail has only the prefix, as an exec
+  has today. It spawns no workload. `JailRecord.first` goes.
+- `Supervisor.start(argv, *, cwd, io) -> ProcessRecord` is the only way a
+  process enters a jail, the first included. Each start spawns
+  `(*wrap_prefix, *argv)` under **its own exit wrapper** (decision-156's
+  program, unchanged but for where it writes, §9), detached in a new process
+  group, stdio per `io` under the process's own records directory, env
+  `{**os.environ, **jail_env}`. So `Process.pid` names the wrapper for every
+  process, as it named it for the first one before, and an exec sibling
+  gains what only the first process had: an exact exit status readable from
+  another process. Fidelity is unchanged: `EQUIVALENT_PROFILE` for a
+  non-empty prefix, `PLAIN` for an empty one, decided per jail, never per
+  start.
+- **Every start is tethered when the jail is.** The tether's read end is
+  held by the jail in memory (never in a record: an fd does not serialize),
+  and each start's wrapper starts a watcher of its own on it, in that
+  process's group, before the workload, as decision-167's watcher does for
+  the first process today. So no process of a tethered jail runs untethered,
+  siblings included (decision-167's "exec siblings are groups of their own
+  and are not tethered" is superseded). `JAIL_LIFETIME` helpers stay
+  untethered, as decision-167 states; tethering them is decision-0001's
+  ("Helpers with `JAIL_LIFETIME`"), not this step's.
+- **Which process is the jail's "workload".** None is special to the
+  runtime. A `KillReport` keeps its vocabulary: the first process started is
+  reported as `workload_group` and every later one as `exec_sibling`, in
+  start order, so a report for today's shapes reads as it does now.
+- `Runtime.alive(jail)` is true while any recorded process's leader holds
+  its identity (decision-155, zombies gone, decision-171) or any
+  `JAIL_LIFETIME` helper does; a jail created with nothing started and no
+  helper reads gone.
+
+`SubprocessLauncher` stays, as `create` plus a first `start` returning a
+`Handle`, until TASK-0079.28 deletes it. Implementing task: TASK-0079.25.
+(Ruled 2026-10-12, decision-181.)
+
 ## 9. The Handle
 
 ```python
@@ -1673,6 +1764,150 @@ workload is spawned, and a non-zero exit refuses the launch rather than
 starting a workload behind a preparation step that failed. (Ruled 2026-08-29,
 decision-132.)
 
+### The Jail and its processes (2026-10-12, decision-181)
+
+decision-0001's migration step 3a; §3 has the order `Handle` is retired in,
+§8 the runtime's half. Once TASK-0079.28 lands, this is the section's shape:
+
+```python
+class Jail:
+    @classmethod
+    def create(cls, jail: CompiledJail, *, runtime: Runtime, cwd: str,
+               jail_id: str, jail_dir: str, tether: int | None = None) -> Jail
+    def to_dict(self) -> dict: ...
+    @classmethod
+    def from_dict(cls, d, *, runtimes: Mapping[RuntimeKind, Runtime]) -> Jail
+
+    def start(self, argv, *, cwd: str | None = None,
+              io: IoPolicy = IoPolicy()) -> Process  # absent without a supervisor
+    def processes(self) -> tuple[Process, ...]          # start order
+    def alive(self) -> bool
+    def destroy(self) -> KillReport                    # every process, then helpers
+    def wait_ready(self, channel: str, timeout: float) -> None
+    def probe(self, battery) -> ProbeReport            # absent when start is
+    # fields: report, spec, signatures, channels, compile_events, jail_id, jail_dir
+
+class Process:
+    def interrupt(self) -> bool         # SIGINT to its group; absent without a supervisor
+    def stop(self) -> KillReport        # the ladder, its group alone; same
+    def wait(self, timeout: float | None = None) -> int   # same
+    def alive(self) -> bool
+    def exit_events(self) -> tuple[Event, ...]
+    # fields: id, pid, start_time, argv, stdout_path, stderr_path, fidelity
+```
+
+`Handle.kill` is `Jail.destroy`; `Handle.exec` is `Jail.start` (`interactive`
+goes: it could only refuse, for want of `PTY`, and a parameter only one value
+of which works is a raising stub, so it returns with a runtime that has
+`PTY`); `stat` and `JailStat` go (`alive`, `processes()` and `report` answer
+them); `dial` and `console` stay absent. `ExecFidelity` keeps its three
+values on `Process.fidelity`; a process-scope control grade beside it is
+TASK-0079.08's. A start's channel is TASK-0079.05's.
+
+**Each process has a record and an exit record of its own.** A start makes
+`<jail_dir>/procs/<id>/`, `<id>` a fresh token per start (never a pid, never
+reused), before it spawns, and the process's stdio files go there. Once the
+spawn returns, the host writes `record.json` beside them (id, start order,
+pid, pgid, start stamp, argv, stdio paths), whole, to a temporary name
+renamed into place, as registrations are written now. The process's own exit
+wrapper writes `exit` there (decision-156, unchanged but for the path). This
+replaces `<jail_dir>/execs/` and `<jail_dir>/exit`, and settles decision-162
+for good: a status belongs to one process id and can't be read as another
+process's. Between the directory and the record a process runs unrecorded for
+the length of a spawn; in a tethered jail it is tethered from before its
+workload starts, so an embedder that dies in that window takes it down.
+
+- **A record outlives its process's `wait`.** Today the first `wait()` on a
+  sibling deletes its registration, so a teardown after it skips the
+  sibling's group, and anything the sibling left running in that group
+  escapes `kill`. Now `wait` deletes nothing: `destroy` runs the ladder for
+  every record, and one whose group is empty reports `ALREADY_GONE`. A report
+  after a waited sibling gains that item; nothing else in it changes.
+- **`create` over a used `jail_dir`.** Records left by an earlier jail are
+  removed by `create` once nothing they name runs (no live member in any
+  recorded group, `group_alive`; a record that can't be read, or has an
+  unknown stamp, counts as running). While anything does, `create` refuses,
+  naming the directory and saying to destroy that jail or choose another
+  directory. Removing a gone jail's records gives up authority over nothing.
+- **Teardown keeps every guard.** The ladder (§9 above) runs per record in
+  start order, then per helper, with decision-155 (a recycled pid is gone,
+  nothing signalled), decision-171 (a zombie is gone), decision-172 (an
+  unknown stamp is never signalled or reaped) and decision-175 (a record that
+  can't be read, or names an id out of range, is its own `FAILED` item, its
+  identity the file's path; the trusted process's own group, 0 and 1 are
+  never signalled; no item stops the next) unchanged.
+
+**Records are kill authority, so no grant reaches them.** The jail never
+writes a record: the host writes `record.json`, and the exit wrapper is a
+host-side program outside the jail's `wrap`. Where they live is the other
+half. bwrap and seatbelt seal the `jail_dir` against every write root
+(decision-173) and grant inside it only `<jail_dir>/tmp` and a LISTEN
+channel's own grant; bwrap refuses an endpoint directly in the `jail_dir`
+(decision-174). That left a gap, planted on 2026-10-12 (TASK-0079.04's
+notes): an endpoint at `<jail_dir>/execs/k.sock` compiles under
+`strict_linux()` and binds `<jail_dir>/execs` read-write into the jail, the
+directory teardown signals by. So **every mechanism that compiles a LISTEN
+channel refuses an endpoint at or under brig's records** (`<jail_dir>/procs`,
+and `<jail_dir>/execs` until TASK-0079.28 deletes it), testing the lexical
+and the resolved parent as TASK-0079.17 does, with a `ValueError` naming the
+endpoint and the records directory and saying to put the endpoint in a
+subdirectory of its own (`<jail_dir>/chan/`) or outside the `jail_dir`.
+seatbelt refuses it too: its grant is the socket's literal path, but a socket
+created at a record's path is a record the host can't read. The scratch name
+`tmp` never holds a record. Grades are unchanged (a refusal grades nothing).
+
+**A stack with no `fs_write` mechanism seals nothing**, and the ruling does
+not refuse it: the empty stack, `env_scrub` or `rlimits` alone grade
+`fs_write` `unenforced`, and their workload runs with the embedder's own uid
+and no namespace, so it can already signal every group a forged record could
+name. A forged record gives it nothing it lacks; every guard above still
+holds (an unknown stamp is never signalled, a recycled pid never, the
+embedder's own group never).
+
+**A jail is rehydrated with the embedder's runtimes.** `to_dict` carries what
+`Handle.to_dict` carries but the first process's fields, plus `runtime` (the
+`RuntimeKind` that made it), `tethered`, and `processes`, the records known
+when it was called; `HANDLE_VERSION` is 6, and an older dict is refused, as
+every bump before. `Jail.from_dict(d, runtimes=...)` takes the runtimes from
+the embedder, never from the dict: a dict naming a kind the embedder did not
+pass, or one whose runtime's own `kind` differs, is refused (law 2), naming
+the kind and saying what to pass. The dict is the authority for the processes
+it names; a record on disk for one of them that disagrees is not used, and
+`destroy` reports it as it reports an unreadable one, signalling nothing. A
+record on disk the dict does not name is a later start and is read like any
+other. A rehydrated jail reads each process's exit record, so `wait` answers
+for every process, siblings included.
+
+**`start` is absent, not raising, when a jail cannot start.** That is when
+its runtime has no supervisor (`Runtime.supervisor` returns `None`), and when
+it was created tethered in another process: the tether's fd did not cross
+`to_dict`, and a start there would run untethered. `hasattr(jail, "start")`
+is false then, and `probe` goes with it. `Process.interrupt`, `stop` and
+`wait` are absent on a process of a jail with no supervisor; `destroy` is
+always there.
+
+**Probes run as processes.** `jail.probe(battery)` is `battery.run(jail)`:
+each probe is a `jail.start`, waited with its deadline and read from its own
+stdio files, and its record stays for `destroy` like any process's. §12's
+"through `exec`" reads "through `start`".
+
+**The fake runtime has a kind of its own.** `FakeRuntime.kind` was `HOST`, so
+once records are sent to runtimes by kind a fake's record would reach
+`HostRuntime`. `RuntimeKind.FAKE` is added to `core`, with static grades
+`unenforced` on both runtime axes and a detail saying it is a test double; no
+mechanism names it, so no compiled jail has it. `Jail.create` accepts a
+runtime whose kind is the compiled jail's, or `FAKE` standing in for any
+(the report keeps the compiled kind's grades); the jail's record says `FAKE`,
+so `from_dict` sends it only to the runtime passed under `FAKE`, and a fake
+record rehydrated with only `HostRuntime` passed is refused.
+
+Implementing tasks: TASK-0079.25 for the records, `create` with no process,
+the per-start wrapper and tether (§8), the refusal that keeps every grant off
+the records, and the fake's kind with its refusal; TASK-0079.26 for `Jail` and
+`Process`, `to_dict`/`from_dict` and `HANDLE_VERSION` 6, `start` absent, and
+probes; TASK-0079.27 for bh-02's runner; TASK-0079.28 for retiring `Handle`
+and this section's old shape. (Ruled 2026-10-12, decision-181.)
+
 ## 10. Communication with jails
 
 Three inbound kinds, each with different liveness, trust, and delivery:
@@ -1813,6 +2048,9 @@ Three surfaces, all read-only (law 4):
 `handle.probe(battery)` runs canned violation attempts **inside the jail,
 through the same stack, launcher, and channel the workload uses** — a policy
 that holds for a side shell but not for the real path is not a policy.
+
+Since decision-181 (§9, 2026-10-12) each probe is a process the jail starts
+(`jail.start`), recorded like any other.
 
 Verdicts are three-way, per probe:
 
