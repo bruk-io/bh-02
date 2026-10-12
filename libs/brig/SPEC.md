@@ -2034,6 +2034,10 @@ to the implementation of `Jail` and `Process` (`brig/run/jail.py`):
    `start` only when its dict and that record both say untethered: a record
    missing, unreadable, naming another jail or saying tethered means absent,
    so a hand-edited dict can't start a process untethered in a tethered jail.
+   The residual: on a stack with no `fs_write` mechanism nothing seals the
+   jail directory, so a workload that can also edit the dict could rewrite
+   `jail.json` too, as it could every record there; that stack's `fs_write`
+   grade already says so.
    A disagreeing disk copy's `FAILED` item takes the held process's kind.
 
 Implementing task: TASK-0079.26.
