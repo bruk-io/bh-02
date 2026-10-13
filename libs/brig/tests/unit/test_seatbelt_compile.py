@@ -1,7 +1,7 @@
 """Unit tests for `brig.mech.seatbelt.Seatbelt`: the mechanism class
 task-059 adds on top of task-058's pure `render_sbpl` -- axes as pinned
 data, the four named refusals, the wrap's pure-argv-prefix property (both
-asserted directly AND proved by `launcher.py`'s own real
+asserted directly AND proved by `host.py`'s own real
 `_derive_wrap_prefix`), the load-bearing grade-detail tokens, the denial
 signature in both match directions, and the compatibility-matrix rows plus
 the resulting three-mechanism composition order.
@@ -43,7 +43,7 @@ from brig.mech.seatbelt import (
     UnresolvedPath,
     seatbelt,
 )
-from brig.run.launcher import _derive_wrap_prefix
+from brig.run.host import _derive_wrap_prefix
 from brig.stack import Stack
 
 _JAIL_DIR = "/private/tmp/seatbelt-unit-test"
@@ -75,7 +75,7 @@ def test_wrap_is_a_pure_argv_prefix_verified_by_derive_wrap_prefix() -> None:
     """Applies `Step.wrap` to a known argv and asserts the result equals
     the three-element `sandbox-exec` prefix followed by that argv
     unchanged, element by element -- AND runs the actual
-    `launcher.py::_derive_wrap_prefix` verification `handle.exec`
+    `host.py::_derive_wrap_prefix` verification `jail.start`
     (task-046) depends on, so this checks the real constraint rather than
     a proxy for it."""
     step = seatbelt.compile(Spec(), _CTX)
@@ -160,12 +160,11 @@ def test_fs_write_grade_is_enforced_with_write_denies_named_in_detail() -> None:
 @pytest.mark.unit
 def test_network_grade_with_listen_channel_names_unscoped_bind_and_file_write_confinement() -> None:
     """For a spec with a LISTEN channel, the network detail must name that
-    `network-bind` is UNSCOPED by dialect necessity and that the socket
-    path is confined by the `file-write*` literal rule instead."""
-    endpoint = f"{_JAIL_DIR}/control.sock"
-    spec = Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=endpoint),))
-    ctx = CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={endpoint: endpoint})
-    step = seatbelt.compile(spec, ctx)
+    `network-bind` is UNSCOPED by dialect necessity and that where a socket
+    may be made is confined by the `file-write*` rule on the channel
+    directory instead."""
+    spec = Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN),))
+    step = seatbelt.compile(spec, _CTX)
     graded = step.grades[Axis.NETWORK]
     assert graded.grade is Grade.ENFORCED
     assert "unscoped" in graded.detail
@@ -306,3 +305,31 @@ def test_three_mechanism_stack_composes_rlimits_outermost_then_seatbelt_then_env
     shell_idx = result.index("/bin/sh")
     assert trampoline_idx < sandbox_idx < shell_idx
     assert result[-1] == "/bin/true"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("sealed", [True, False], ids=["write root above", "no write root above"])
+def test_no_channel_grant_reaches_the_records(sealed: bool) -> None:
+    """decision-181, restated by decision-186: a channel's one grant is the
+    channel directory's subpath, a sibling of `<jail_dir>/procs`, so no write
+    allow in the profile is at, under or above the records but a write root
+    the seal then takes back. The control: the channel directory is granted.
+    Rendered profile only (no darwin host runs this suite)."""
+    root = _JAIL_DIR.rsplit("/", 1)[0]
+    spec = Spec(
+        fs=FsPolicy(write_allows=(root,) if sealed else ()),
+        channels=(Channel(name="control", kind=ChannelKind.LISTEN),),
+    )
+    ctx = CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={root: root})
+    profile = seatbelt.compile(spec, ctx).staged[0].content
+    records = f"{_JAIL_DIR}/procs"
+    allowed = re.findall(r'\(allow file-write\* \((?:subpath|literal) "([^"]*)"\)\)', profile)
+    reaching = [
+        path
+        for path in allowed
+        if path != root and (path.startswith(records) or records.startswith(path + "/"))
+    ]
+    assert reaching == [], profile
+    assert f"{_JAIL_DIR}/chan" in allowed, profile
+    if sealed:
+        assert f'(deny file-write* (subpath "{_JAIL_DIR}"))' in profile

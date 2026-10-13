@@ -345,6 +345,22 @@ def test_a_row_never_heard_binding_is_named_once_it_binds() -> None:
     assert notes == ["⧗ waiting for transcript to start; this message is sent once it is up"]
 
 
+def test_a_sub_agent_s_rows_coming_and_going_say_nothing() -> None:
+    """A child's rows (`agents/NAME/...`) are its own conversation's: their lifecycle, a failure
+    included, is no note, and no line typed meanwhile waits on them (`--trace` keeps them)."""
+    posted = Posted()
+    bridge = Bridge()
+    output = TuiOutput(posted, bridge)
+    for kind in ("bind", "active", "unloading", "inactive", "reload", "active"):
+        output.lifecycle(_Event(kind, "agents/general-1/loop"))
+    output.lifecycle(_Event("failed", "agents/general-1/model", "boom"))
+    output.lifecycle(_Event("reload", "agents/general-1"))
+    assert bridge.waiting_on == frozenset()
+    assert not [m for m in posted.messages if isinstance(m, Noted)]
+    output.lifecycle(_Event("failed", "model", "boom"))  # the session's own row still says so
+    assert [m.text for m in posted.messages if isinstance(m, Noted)] == ["✗ model failed: boom"]
+
+
 async def test_a_line_read_before_any_row_comes_up_says_nothing_later() -> None:
     posted = Posted()
     bridge = Bridge()

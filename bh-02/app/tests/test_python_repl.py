@@ -8,6 +8,7 @@ import importlib.metadata
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ import pytest
 import cordis
 import memory_cordis_plugin
 from agent_cordis_plugin import ToolBroker
+from agents_cordis_plugin import EventLog
 from bh_02.bootstrap import (
     code_directories,
     code_packages,
@@ -35,7 +37,15 @@ from cordis.loader import boot
 from extensions_cordis_plugin import Extensions, ExtensionsConfig
 from models_cordis_plugin.local_env import token_file
 from python_cordis_plugin import Kernel, KernelConfig, worker_argv
-from runner_cordis_plugin import Approval, BrigConfig, BrigJail, Runner, recorded_group, self_modify_denied
+from runner_cordis_plugin import (
+    Approval,
+    BrigConfig,
+    BrigJail,
+    Runner,
+    group_alive,
+    recorded_group,
+    self_modify_denied,
+)
 
 # darwin's jail (seatbelt) reads by denylist: everything but the secrets. Linux's (bubblewrap)
 # reads by allowlist: the system, the interpreter and the project, so a file anywhere else is
@@ -502,8 +512,7 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
             said
         )
         assert not credential.exists() and runner.released()
-        with pytest.raises(ProcessLookupError):
-            os.killpg(group, 0)  # the jail is gone, not only its worker
+        assert not group_alive(group)  # the jail is gone, not only its worker
         await kernel.run("1")
         assert credential.is_dir() and not runner.released()  # an input came first: held again
         await runner.release()
@@ -517,6 +526,60 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
         assert str(credential) in kernel.notice()
     assert credential.read_text() == "CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n"
     assert token_file(None, [str(credential)]) == credential
+
+
+# Imported, a plant records its name, then loads the real module from the path without the
+# directory it was planted in, so one that ran shows in the record, not as a start that broke.
+_PLANT = """\
+import importlib.machinery, importlib.util, os, sys
+with open({record!r}, "a") as _record:
+    _record.write(__name__ + "\\n")
+_path = [p for p in sys.path if os.path.realpath(p or ".") != {root!r}]
+_spec = importlib.machinery.PathFinder.find_spec(__name__, _path)
+_real = importlib.util.module_from_spec(_spec)
+sys.modules[__name__] = _real
+_spec.loader.exec_module(_real)
+"""
+
+
+async def test_on_linux_a_module_an_input_plants_in_the_project_runs_nowhere_outside_the_jail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Python process works in the project root, which an input may write, and brig starts
+    its own programs there, on the host: the exit wrapper, the tether's watcher, the rlimits
+    trampoline. An input plants `subprocess.py`, `signal.py` and a `brig/` package in the root;
+    the Python process starts again (`/restart python`) and runs the next input, and none of them
+    ran outside the jail (brig's decision-169: each of its interpreters runs `-I`). THE CONTROL:
+    an interpreter started in the root without `-I` runs every one."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the project-root start is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    record = tmp_path / "ran"  # outside the project, which the jail can't write
+    source = _PLANT.format(record=str(record), root=os.path.realpath(project))
+    plants = (
+        "import os\nos.mkdir('brig')\n"
+        f"for name in ('subprocess.py', 'signal.py', 'brig/__init__.py'):\n"
+        f"    open(name, 'w').write({source!r})\n"
+        "print('planted')"
+    )
+    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
+        out = await kernel.run(plants)
+        assert "planted" in out, out
+        assert all((project / name).is_file() for name in ("subprocess.py", "signal.py", "brig/__init__.py"))
+        await kernel.__aexit__(None, None, None)  # `/restart python`: stops the jail ...
+        await kernel.__aenter__()  # ... and starts the Python process again, in the project root
+        out = await kernel.run("print('started again')")
+        assert "started again" in out, out
+    assert not record.exists(), f"planted modules ran outside the jail: {record.read_text()}"
+
+    for argv in (
+        [sys.executable, "-c", "import subprocess"],
+        [sys.executable, "-m", "brig.mech.trampoline", "--", "true"],
+    ):
+        subprocess.run(argv, cwd=project, check=True)
+    assert set(record.read_text().split()) == {"brig", "signal", "subprocess"}
 
 
 # A program that listens and waits, standing in for the extensions process: the runner's
@@ -608,8 +671,7 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
                 assert not credential.exists()
                 for group in groups:
                     assert group is not None
-                    with pytest.raises(ProcessLookupError):
-                        os.killpg(group, 0)  # both jails are gone, the extensions process's too
+                    assert not group_alive(group)  # both jails are gone, the extensions process's too
                 assert runner.released()
                 await kernel.run("1")  # the next input
                 assert not runner.released() and credential.is_dir()
@@ -835,9 +897,7 @@ def _append_to(path: Path, mode: str = "a", text: str = "# planted by an input\n
 async def _ended(group: int, within: float = 2.0) -> None:
     """Wait until the process group `group` has no process left, or `within` seconds pass."""
     for _ in range(int(within / 0.02)):
-        try:
-            os.killpg(group, 0)
-        except ProcessLookupError:
+        if not group_alive(group):
             return
         await asyncio.sleep(0.02)
 
@@ -1181,6 +1241,46 @@ async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
     assert "placeholder" not in out, out
 
 
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_jailed_input_can_neither_read_nor_forge_a_sub_agent_s_event_log(
+    composition: Callable[..., Path],
+    tmp_path: Path,
+) -> None:
+    """A child's `events.jsonl` (made 0600 by the agents row's own `EventLog`) is under the sessions'
+    state directory, which is in `secrets`: an input can't read it, append a forged record to it,
+    move its directory away, or create a sibling beside it; the file is as it was after."""
+    project = tmp_path / "project"
+    state = project / ".state"  # inside the project, which an input reads and writes: only `secrets` hides it
+    project.mkdir()
+    place = state / "20261012-091500-ab12" / "agents" / "general-1"
+    place.mkdir(parents=True, mode=0o700)
+    log = place / "events.jsonl"
+    opened = EventLog.open(str(log))  # created 0600 by the row's own opener
+    await opened.write({"type": "agent_start", "name": "general-1"})
+    await opened.close()
+    assert stat.S_IMODE(log.stat().st_mode) == 0o600
+    before = log.read_bytes()
+
+    def attempt(what: str) -> str:
+        return f"try:\n    {what}; print('DONE')\nexcept OSError:\n    print('DENIED')"
+
+    patch = _inputs(
+        composition,
+        attempt(f"open({str(log)!r}).read()"),
+        attempt(f"open({str(log)!r}, 'a').write('forged')"),
+        attempt(f"__import__('os').rename({str(place)!r}, {str(place.parent / 'moved')!r})"),
+        attempt(f"open({str(place / 'events-2.jsonl')!r}, 'w').write('x')"),
+        extra=_jailed_in(project),
+    )
+    _answers()
+    secrets = unreadable([], [], [str(state.resolve())])
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})], secrets=secrets)
+    out = _shown()
+    assert all(f"[{n}] DENIED" in out for n in range(4)), out
+    assert log.read_bytes() == before and sorted(p.name for p in place.iterdir()) == ["events.jsonl"]
+    assert not (place.parent / "moved").exists()
+
+
 async def test_the_harness_owned_loop_offers_only_python_and_runs_the_input(
     composition: Callable[..., Path],
 ) -> None:
@@ -1202,7 +1302,7 @@ async def test_the_harness_owned_loop_offers_only_python_and_runs_the_input(
 async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_once(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
-    """The shipped `notes` and memory rows, booted: the first input that opens a file under src/db
+    """The shipped `asides` and memory rows, booted: the first input that opens a file under src/db
     gets its CLAUDE.md and the rule for it with its result; a later one does not, nor does one
     that reads it through a shell (a shell command's reads are not heard). The on-touch row asks
     the `memory` row, so the project and the home are set there, as a layer would."""
@@ -1320,10 +1420,10 @@ async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes
     assert [kept[0]["content"]] == fragile.SYSTEM  # the resumed run's last request began as the first did
 
 
-async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_them_afresh(
+async def test_a_resumed_conversation_is_told_its_asides_once_and_clear_tells_them_afresh(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
-    """The shipped `notes` and memory rows over a session's transcript file. The first run's input that
+    """The shipped `asides` and memory rows over a session's transcript file. The first run's input that
     opens src/db/models.py is told the guidance and the rule for src/db, and its input that reads
     the file through a shell is told nothing (a shell command's reads are not heard); a resumed
     run (the same file, read back: `--resume`) whose inputs do both again is told none of them;
@@ -1368,18 +1468,18 @@ async def test_a_resumed_conversation_is_told_its_notes_once_and_clear_tells_the
     assert afresh.startswith(told) and afresh.endswith("\n[2] 6\n[3] 0\n"), afresh  # /clear: told afresh
     assert (
         f"the conversation was cleared (the old one is kept as {history}.bak); starting afresh: loop, "
-        "transcript, python"
+        "transcript, python, agents"
     ) in fragile.NOTES
 
 
-async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_on_their_entries(
+async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_asides_on_their_entries(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
-    """The shipped loop, transcript, `notes` and memory rows, and a layer's own row adding to
-    `notes` whose note sorts after memory's, booted twice over one transcript file: a session,
-    then its resume. The loop keeps the notes it told with a result on its entry (`notes`), the
-    result and the notes still the text the model reads. The resume reads them there, not in the
-    text: the rule for src/db, which the other row's note followed, is not told again; the
+    """The shipped loop, transcript, `asides` and memory rows, and a layer's own row adding to
+    `asides` whose aside sorts after memory's, booted twice over one transcript file: a session,
+    then its resume. The loop keeps the asides it told with a result on its entry (`asides`), the
+    result and the asides still the text the model reads. The resume reads them there, not in the
+    text: the rule for src/db, which the other row's aside followed, is not told again; the
     CLAUDE.md, cut back since after a paragraph in brackets, is."""
     project, home = tmp_path / "project", tmp_path / "home"
     (project / "src" / "db").mkdir(parents=True)
@@ -1396,11 +1496,11 @@ async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
         f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
-        '[[plugin]]\nid = "another-note"\nuse = "fragile:another_note"\n'
+        '[[plugin]]\nid = "another-aside"\nuse = "fragile:another_aside"\n'
     )
     guide = "From src/db/CLAUDE.md, instructions for work under src/db/:"
     rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
-    other, trimmed = "Zebra: another row's note.", f"{guide}\n\nUse the session."
+    other, trimmed = "Zebra: another row's aside.", f"{guide}\n\nUse the session."
     _answers(True)
     await run([*layers(), _inputs(composition, opens, extra=session)], [Row("chat", config={"prompt": "go"})])
 
@@ -1414,7 +1514,7 @@ async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_notes_
     first, resumed = [
         entry for line in history.read_text().splitlines() if (entry := json.loads(line))["role"] == "tool"
     ]
-    assert first["notes"] == [f"{guide}\n\nUse the session.\n\n(Never by script.)\n\n{rule}", other]
-    assert resumed["notes"] == [trimmed, other]
+    assert first["asides"] == [f"{guide}\n\nUse the session.\n\n(Never by script.)\n\n{rule}", other]
+    assert resumed["asides"] == [trimmed, other]
     for entry in (first, resumed):
-        assert entry["content"] == "\n\n".join(["6", *entry["notes"]])  # what the model reads, as before
+        assert entry["content"] == "\n\n".join(["6", *entry["asides"]])  # what the model reads, as before

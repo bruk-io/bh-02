@@ -1,4 +1,4 @@
-"""Auto memory, as Claude Code has it: notes the model keeps for itself, across conversations,
+"""Auto memory, as Claude Code has it: memories the model keeps for itself, across conversations,
 in a directory of the project's own outside the repository (`$XDG_STATE_HOME/bh-02/projects/
 <project>/memory`, the `host` value's `auto_memory`), which the jail lets an input write. A
 `MEMORY.md` index, one line per memory, and a topic file for each; the index's first 200 lines

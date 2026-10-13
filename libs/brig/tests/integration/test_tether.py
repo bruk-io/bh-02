@@ -1,21 +1,21 @@
 """A tethered launch: the jail's process group ends when its launching process is gone.
 
-SPEC.md section 8 (decision-167). `SubprocessLauncher.launch(..., tether=fd)` takes the
+SPEC.md section 8 (decision-167, decision-183). `Jail.create(..., tether=fd)` takes the
 read end of a pipe whose write end the embedder keeps, and nothing else ever holds. The exit
 wrapper starts a watcher in the jail's process group that blocks on it; once every write end
 is closed -- the embedder closed it, or the kernel did because the embedder died, `SIGKILL`
 included -- the watcher sends `SIGKILL` to its own group. A program the workload left
-running in the background goes with it, which `Handle.kill` would have done had anyone been
+running in the background goes with it, which `Jail.destroy` would have done had anyone been
 left to call it.
 
 The claims, each against the empty stack (no mechanism: what is under test is the launcher's
-plumbing, which every stack shares):
+plumbing, which every stack shares; a launch is `create` then a first `start`):
 
 1. A launching process killed with `SIGKILL` takes the jail's whole group with it (the
    control: the same launch untethered leaves the group running).
-2. `Handle.interrupt` (SIGINT to the group) does not end the watcher: the tether still ends
+2. `Process.interrupt` (SIGINT to the group) does not end the watcher: the tether still ends
    the group after one.
-3. `Handle.kill` of a tethered jail still verifies the group empty: the watcher ends on the
+3. `Jail.destroy` of a tethered jail still verifies the group empty: the watcher ends on the
    ladder's first rung like any member.
 """
 
@@ -31,11 +31,10 @@ import time
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Jail, Process
 from brig.run.teardown import KillOutcome
 from brig.stack import CompiledJail
-from tests.conftest import workload_argv
+from tests.conftest import launch, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -88,22 +87,23 @@ def _gone_within(pgid: int, seconds: float) -> bool:
 _LAUNCHER = """
 import os, sys, time
 from brig.core import Spec, unenforced_report
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import HostRuntime, Jail
 from brig.stack import CompiledJail
 
-jail = CompiledJail(
+compiled = CompiledJail(
     spec=Spec(), report=unenforced_report(), wrap=lambda argv: argv, env={}, staged=(),
     helpers=(), requires=frozenset(), mechanism_names=(), matrix_version=1,
 )
 
 jail_dir, tethered, argv = sys.argv[1], sys.argv[2] == "1", sys.argv[3:]
 read_end, write_end = os.pipe()
-handle = SubprocessLauncher().launch(
-    jail, argv=argv, cwd=jail_dir, io=IoPolicy(), jail_id="tethered",
+jail = Jail.create(
+    compiled, runtime=HostRuntime(), cwd=jail_dir, jail_id="tethered",
     jail_dir=jail_dir, **({"tether": read_end} if tethered else {}),
 )
 os.close(read_end)
-print(handle.pgid, flush=True)
+process = jail.start(argv)
+print(process._record.pgid, flush=True)
 time.sleep(600)
 """
 
@@ -151,11 +151,11 @@ def test_an_untethered_jail_outlives_its_launching_process(run_id: str) -> None:
     assert _gone_within(pgid, 5.0)
 
 
-def _tethered(argv: list[str]) -> tuple[Handle, int]:
+def _tethered(argv: list[str]) -> tuple[Jail, Process, int]:
     jail_dir = _new_jail_dir()
     read_end, write_end = os.pipe()
     try:
-        handle = SubprocessLauncher().launch(
+        jail, process = launch(
             _compiled_jail(),
             argv=argv,
             cwd=jail_dir,
@@ -166,7 +166,7 @@ def _tethered(argv: list[str]) -> tuple[Handle, int]:
         )
     finally:
         os.close(read_end)
-    return handle, write_end
+    return jail, process, write_end
 
 
 @pytest.mark.integration
@@ -174,23 +174,23 @@ def test_an_interrupt_does_not_end_the_tether(run_id: str) -> None:
     """SIGINT to the group is for the workload. A backgrounded `sleep` ignores it (POSIX gives
     a non-interactive shell's `&` jobs SIG_IGN), so the group lives on after it; closing the
     tether then still ends it, so the watcher was not among what the interrupt ended."""
-    handle, write_end = _tethered(workload_argv(run_id, "sleep 100"))
+    jail, process, write_end = _tethered(workload_argv(run_id, "sleep 100"))
     try:
         time.sleep(0.5)  # the watcher and the job are up
-        assert handle.interrupt()
+        assert process.interrupt()
         time.sleep(0.5)
-        assert _group_lives(handle.pgid)
+        assert _group_lives(process._record.pgid)
     finally:
         os.close(write_end)
-    assert _gone_within(handle.pgid, 5.0)
+    assert _gone_within(process._record.pgid, 5.0)
 
 
 @pytest.mark.integration
 def test_kill_verifies_a_tethered_jail_s_group_empty(run_id: str) -> None:
-    handle, write_end = _tethered(workload_argv(run_id, "sleep 100"))
+    jail, process, write_end = _tethered(workload_argv(run_id, "sleep 100"))
     try:
         time.sleep(0.3)
-        report = handle.kill()
+        report = jail.destroy()
     finally:
         os.close(write_end)
     (item,) = [item for item in report.items if item.kind == "workload_group"]

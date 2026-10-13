@@ -34,6 +34,12 @@ def _step(domains: tuple[str, ...] = ("example.com",)):  # type: ignore[no-untyp
     return ConnectProxy(_PY).compile(spec, CompileCtx(jail_dir=_JAIL, platform=sys.platform))
 
 
+def test_the_workload_env_sets_no_proxy_empty_in_both_cases() -> None:
+    """An inherited NO_PROXY must not exempt anything from the filter
+    (TASK-0076): the step overlays an empty one over the launching env."""
+    assert _step().env == {"NO_PROXY": "", "no_proxy": ""}
+
+
 def test_the_duplicated_denial_prefix_has_not_drifted() -> None:
     """`mech` may not import `brig.proxy` (decision-133's empty row), so
     the signature constant is written in both places. Prevention is not
@@ -71,7 +77,7 @@ def test_helper_is_jail_lifetime_and_carries_every_allowed_domain() -> None:
         "the proxy must live as long as the jail; a LAUNCH_SCOPED proxy exits "
         "before the workload it is supposed to filter for ever starts"
     )
-    assert helper.argv[:3] == (_PY, "-m", _PROXY_MODULE)
+    assert helper.argv[:4] == (_PY, "-I", "-m", _PROXY_MODULE)
     allows = [helper.argv[i + 1] for i, tok in enumerate(helper.argv) if tok == "--allow"]
     assert allows == ["*.internal.test", "example.com"], (
         f"allow list did not survive the render: {helper.argv!r}"
@@ -122,9 +128,10 @@ def test_wrap_waits_for_the_port_and_execs_the_workload_unparsed() -> None:
     assert 'exec "$@"' in script
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
         assert f'{name}="http://127.0.0.1:$p"' in script, f"{name} is not pointed at the proxy"
-    # NO_PROXY is deliberately absent: a loopback exemption would put
-    # everything reachable on this host outside the allow list, and buys
-    # nothing, since channels are UNIX sockets no proxy variable touches.
+    # The wrap script never mentions NO_PROXY (the step's env sets it empty):
+    # a loopback exemption would put everything reachable on this host outside
+    # the allow list, and buys nothing, since channels are UNIX sockets no proxy
+    # variable touches.
     assert "NO_PROXY" not in script, script
 
 

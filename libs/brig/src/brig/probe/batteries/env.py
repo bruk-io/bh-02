@@ -29,7 +29,7 @@ well-known name both this module and a caller import: the caller (an
 integration test, or any embedder wiring this battery up) is responsible
 for setting an environment variable with this EXACT name, to any value, in
 the process that will LAUNCH the jail, before compiling/launching it --
-`brig/run/launcher.py`'s `full_env = {**os.environ, **jail.env}` is what
+`brig/run/host.py`'s `full_env = {**os.environ, **jail.env}` is what
 carries it in. `scrubbed_name_is_absent`'s `Expectation.token` is built
 from this same constant, so the probe and the caller's setup are pinned to
 one name, not two independently-typed strings that could drift.

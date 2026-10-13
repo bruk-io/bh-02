@@ -1,4 +1,4 @@
-"""Readiness for a LISTEN channel.
+"""Readiness for a LISTEN channel: the poll `Process.wait_ready` runs.
 
 SPEC.md §10.1 (folded by decision-036, ambiguity A5, verbatim): "a LISTEN
 channel is ready when its bind is observable... **Observable means a connect
@@ -7,15 +7,11 @@ process that bound it, so path existence reports ready for a jail that has
 already died. Readiness connects and closes; path-existence is never
 readiness."
 
-**The readiness definition this module resolves to, for M2's unix-socket
-LISTEN endpoint**: ready means opening an `AF_UNIX`/`SOCK_STREAM` socket,
-calling `connect(endpoint)`, and closing it immediately on success --
-`os.path.exists(endpoint)` is never consulted anywhere in this module. A
-socket FILE that exists with nothing listening behind it (a dead process's
-leftover, or a file `bind()`-then-`close()`d without ever `listen()`ing)
-fails `connect()` with `ConnectionRefusedError` -- exactly the case path
-existence cannot distinguish from a live bind, which is the whole reason
-this module never calls `os.path.exists`.
+The connect itself is the runtime's (`Runtime.ready`, decision-184), which
+for `HostRuntime` is its verified dial closed at once (decision-185). This
+module only polls it. `Jail.wait_ready(channel)` and the helper here that
+connected to a declared endpoint as found are gone (decision-186): a channel
+names no path, and every dial goes through the runtime.
 
 **Poll interval: 20ms (50Hz)**, chosen so polling granularity does not skew
 the elapsed-time assertions this task's ACs make: the positive case (a bind
@@ -29,23 +25,28 @@ case does not visibly stall past the sleep it is timing.
 
 from __future__ import annotations
 
-import socket
 import time
-from typing import Any
+from collections.abc import Callable
 
 _POLL_INTERVAL_S = 0.02
 
 
 class UnknownChannel(KeyError):
-    """Raised when `wait_ready` is asked about a channel name the handle
-    does not declare at all."""
+    """Raised when a jail is asked about a channel name its `Spec` does not
+    declare at all: by `Jail.channel` and `Jail.start` reserving or binding a
+    socket for it (decision-184). `where` names the call."""
 
-    def __init__(self, channel: str) -> None:
+    def __init__(self, channel: str, where: str) -> None:
         self.channel = channel
+        self.where = where
         super().__init__(str(self))
 
     def __str__(self) -> str:
-        return f"wait_ready: no channel named {self.channel!r} on this handle"
+        return (
+            f"{self.where}: no channel named {self.channel!r} on this jail; declare it in "
+            f"its Spec's channels (Channel(name={self.channel!r}, kind=ChannelKind.LISTEN)) "
+            "and compile the jail again"
+        )
 
 
 class WaitReadyTimeout(TimeoutError):
@@ -66,53 +67,20 @@ class WaitReadyTimeout(TimeoutError):
         )
 
 
-def _connect_succeeds(endpoint: str) -> bool:
-    """True iff a fresh `AF_UNIX`/`SOCK_STREAM` socket can `connect()` to
-    `endpoint` -- closed immediately either way, so this never leaves a
-    connection open on the far side. Any `OSError` (no file at all --
-    `FileNotFoundError`; a stale file with nothing listening --
-    `ConnectionRefusedError`; anything else the platform raises) reads as
-    "not yet ready". `os.path.exists` never appears in this function --
-    that is the entire point of it existing separately from a path check."""
-    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        probe.connect(endpoint)
-    except OSError:
-        return False
-    else:
-        return True
-    finally:
-        probe.close()
+def poll_ready(ready: Callable[[], bool], *, channel: str, endpoint: str, timeout: float) -> None:
+    """Block until `ready()` is true, asked every `_POLL_INTERVAL_S`, or raise
+    a named timeout: `Process.wait_ready`'s loop, with the runtime's own
+    readiness (`Runtime.ready`, decision-184) as `ready`.
 
+    Whatever `ready()` raises propagates at once, never waited out: a
+    runtime's `EndpointRefused` (decision-185) is a refusal, not "not yet".
 
-def wait_ready(handle: Any, channel: str, timeout: float) -> None:
-    """Block until `channel`'s bind is observable, or raise a named timeout.
-
-    `handle` is duck-typed to anything carrying a `channels: Mapping[str,
-    Channel]` attribute (in practice `brig.run.handle.Handle`) -- this
-    module never imports `Handle` itself, since `run` importing its own
-    sibling module by name would be circular (`handle.py` imports THIS
-    module to build `Handle.wait_ready`'s delegate).
-
-    Raises `UnknownChannel(channel)` immediately if `channel` names nothing
-    on the handle -- answerable from the declared `Spec` alone, so it never
-    waits or polls. A wrong-KIND refusal used to sit beside it; `LISTEN` is
-    the only `ChannelKind` there is since decision-153, so the check would
-    be a branch nothing can reach. Otherwise polls
-    `_connect_succeeds` against the channel's endpoint every
-    `_POLL_INTERVAL_S` until it returns `True` (this function then returns
-    `None`) or `timeout` seconds have elapsed since entry (this function
-    then raises `WaitReadyTimeout`).
+    Raises:
+        WaitReadyTimeout: `ready()` was still false `timeout` seconds after
+            entry.
     """
-    channels = handle.channels
-    if channel not in channels:
-        raise UnknownChannel(channel)
-
-    endpoint = channels[channel].endpoint
     deadline = time.monotonic() + timeout
-    while True:
-        if _connect_succeeds(endpoint):
-            return
+    while not ready():
         if time.monotonic() >= deadline:
             raise WaitReadyTimeout(channel, endpoint, timeout)
         time.sleep(_POLL_INTERVAL_S)

@@ -245,7 +245,7 @@ def test_bh_02_s_fakes_that_bound_completion_bind_model_under_new_names() -> Non
 def test_the_project_context_s_rows_are_the_system_prompt_s_and_memory_s() -> None:
     """`context:project` is `agent:system` and `context:on_touch` is `memory:on_touch`; a `system`
     row's `root` and `home` go to a `memory` row too, its `files` are gone; and the broker
-    `agent:memory` is `agent:notes`, under the id `notes`."""
+    `agent:memory` is `agent:asides`, under the id `asides`."""
     rows, changes = translated(
         [
             Row("system", "context:project", {"root": "/p", "home": "/h", "files": ["x.toml"]}),
@@ -257,7 +257,7 @@ def test_the_project_context_s_rows_are_the_system_prompt_s_and_memory_s() -> No
         Row("system", "agent:system", {"root": "/p"}),
         Row("memory", None, {"root": "/p", "home": "/h"}),
         Row("on-touch", "memory:on_touch"),
-        Row("notes", "agent:notes"),
+        Row("asides", "agent:asides"),
     ]
     assert any("files is gone (context files are gone" in change for change in changes)
     assert translated(rows) == (rows, [])  # once
@@ -292,7 +292,7 @@ def test_a_renamed_row_whose_new_id_is_taken_is_left_for_the_person() -> None:
     rows, changes = translated(old)
     assert rows == old
     clash = (
-        "row 'llm' is now 'loop', and this layer has a 'loop' row too: fold what 'llm' sets "
+        "row 'llm' is now 'loop', and this layer has a row 'loop' too: fold what 'llm' sets "
         "into 'loop' and delete 'llm'"
     )
     assert changes == [clash]
@@ -307,7 +307,7 @@ def test_update_layer_refuses_a_clash_and_writes_nothing(state: Path) -> None:
     assert result.exit_code == 1
     assert result.stderr.splitlines() == [
         f"error: {patch} has rows update-layer cannot fold together for you:",
-        f"  {patch}: row 'llm' is now 'loop', and this layer has a 'loop' row too: fold what "
+        f"  {patch}: row 'llm' is now 'loop', and this layer has a row 'loop' too: fold what "
         "'llm' sets into 'loop' and delete 'llm'",
         "nothing was rewritten; fix those by hand, then run it again",
     ]
@@ -659,3 +659,49 @@ def test_the_chat_row_the_ui_and_the_shell_s_own_rows_read_in_their_new_names() 
         [],
         ["row 'session' was removed: the status row shows the session's id itself; delete it"],
     )
+
+
+def test_the_notes_broker_reads_as_asides() -> None:
+    """The broker of what the model is told beside a call's result was `notes` (`agent:notes`);
+    it is `asides` (`agent:asides`), so a note is only a line shown to the person. A layer naming
+    the old row, its component or the row in a `clear` reads in today's names, each change said;
+    a layer with an `asides` row too keeps both for the person to fold."""
+    rows, changes = translated(
+        [
+            Row("notes", "agent:notes"),
+            Row("conversation", config={"clear": ["loop", "transcript", "notes"]}),
+        ]
+    )
+    assert rows == [
+        Row("asides", "agent:asides"),
+        Row("conversation", config={"clear": ["loop", "transcript", "asides"]}),
+    ]
+    assert changes == [
+        "row 'notes' is now 'asides'; rename its id",
+        "row 'asides': agent:notes is now agent:asides; make it use = \"agent:asides\"",
+        "row 'conversation': its config names a renamed row; make it "
+        'config = { clear = ["loop", "transcript", "asides"] }',
+    ]
+    assert translated(rows) == (rows, [])
+    assert translated([Row("notes", disabled=True)]) == (  # a change to the shipped row
+        [Row("asides", disabled=True)],
+        ["row 'notes' is now 'asides'; rename its id"],
+    )
+    both = [Row("notes", "agent:notes"), Row("asides", "agent:asides")]
+    assert translated(both)[1][0] == (
+        "row 'notes' is now 'asides', and this layer has a row 'asides' too: fold what 'notes' sets "
+        "into 'asides' and delete 'notes'"
+    )
+
+
+def test_update_layer_rewrites_a_layer_naming_the_notes_broker(state: Path) -> None:
+    """`bh-02 update-layer` writes the `notes` row as `asides`, using `agent:asides`."""
+    mine = state / "mine.toml"
+    mine.write_text('[[plugin]]\nid = "notes"\nuse = "agent:notes"\n')
+    result = CliRunner().invoke(main, ["update-layer", str(mine)])
+    assert result.exit_code == 0, result.output + result.stderr
+    assert result.stdout.splitlines()[:2] == [
+        f"{mine}: row 'notes' is now 'asides'; rename its id",
+        f"{mine}: row 'asides': agent:notes is now agent:asides; make it use = \"agent:asides\"",
+    ]
+    assert read_layer(mine) == [Row("asides", "agent:asides")]

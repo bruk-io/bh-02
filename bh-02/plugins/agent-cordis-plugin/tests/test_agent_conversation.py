@@ -39,7 +39,7 @@ type Json = Mapping[str, Any]
 PYTHON: Json = {"name": "python", "description": "Run Python.", "parameters": {"type": "object"}}
 
 # A conversation as the loop keeps it: the prompt it began with, a dated message, an input and
-# its result, the answer, then a later prompt (a change, told as a note on the next message).
+# its result, the answer, then a later prompt (a change, told as an aside on the next message).
 CONVERSATION: list[Json] = [
     {"role": "system", "content": "the prompt the conversation began with"},
     {"role": "user", "content": "(Today's date: 2026-10-06.)\n\nfind the answer", "today": "2026-10-06"},
@@ -210,8 +210,8 @@ async def _drain(jobs: Jobs) -> None:
 
 
 def test_the_summary_request_is_the_loop_s_request_then_the_ask() -> None:
-    """The prompt the conversation began with, the conversation (the later prompt told as a
-    note, so not sent), then bh-02 asking for the summary in plain text; what the person asks
+    """The prompt the conversation began with, the conversation (the later prompt told as an
+    aside, so not sent), then bh-02 asking for the summary in plain text; what the person asks
     the summary to keep goes with it."""
     request = asked(CONVERSATION)
     assert request[:-1] == [{"role": "system", "content": "the prompt the conversation began with"}] + [
@@ -226,9 +226,11 @@ def test_the_summary_request_is_the_loop_s_request_then_the_ask() -> None:
     )
 
 
-async def test_the_new_conversation_is_bh_02_s_note_then_the_summary_and_the_loop_starts_it_afresh() -> None:
+async def test_the_new_conversation_is_bh_02_s_message_then_the_summary_and_the_loop_starts_it_afresh() -> (
+    None
+):
     """The seed holds no prompt and no date, so the loop's first message after it keeps the
-    prompt as it reads now as the conversation's start (no note of a change) and tells the date."""
+    prompt as it reads now as the conversation's start (no aside of a change) and tells the date."""
     seed = seeded("  x holds 42.  ")
     assert [m["role"] for m in seed] == ["user", "assistant"] and seed[1]["content"] == "x holds 42."
     assert str(seed[0]["content"]).startswith("(bh-02: this conversation carries on from an earlier one")

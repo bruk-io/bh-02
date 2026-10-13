@@ -1,7 +1,7 @@
 """Resolving the process group of a child this package just spawned (task-075).
 
-Both spawn sites in this package -- `launcher.py`'s workload launch and
-`exec_.py`'s exec sibling -- call `os.getpgid(pid)` immediately after
+Every spawn site in this package -- `host.py`'s `HostSupervisor.start`
+since decision-181, the launch and the exec sibling before it -- calls `os.getpgid(pid)` immediately after
 `subprocess.Popen(..., start_new_session=True)` returns. On darwin that call
 raises ESRCH when the child has ALREADY EXITED by then: confirmed at the raw
 syscall level in task-075 (`getpgid()` refuses to resolve a zombie even
@@ -9,15 +9,15 @@ though `/bin/ps` still shows its group; Linux resolves it). A fast command
 (`/usr/bin/true`, an `echo` probe) exits within microseconds, so under any
 scheduling delay the read races the exit and crashes the spawn path at the
 worst possible moment -- after the process exists but before ANYTHING is
-recorded about it: no SPAWN/EXEC event, no `Handle`/`ExecHandle`, no exit
+recorded about it: no SPAWN/EXEC event, no record, no exit
 waiter. The orphaned `Popen`'s zombie then lingers until the GC reaps it,
 and the session-end leak sweep reports that residue as a leaked process --
 task-075's reproduced signature (a `ProcessLookupError` out of
-`exec_in_jail`, plus an unreaped `<defunct>` child of the harness at
+an exec, plus an unreaped `<defunct>` child of the harness at
 teardown).
 
 **The pid-reuse seam is ACCEPTED, not overlooked -- decision-144.** The
-integer this returns is recorded on the `Handle` and signalled by teardown
+integer this returns is recorded in the process's record and signalled by teardown
 later, possibly from another process, so in principle it could name a
 recycled pid by then. That ruling states the window precisely, why there is
 no atomic alternative at this layer (POSIX has no "signal this group if it is

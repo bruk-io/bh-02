@@ -33,10 +33,9 @@ import uuid
 import pytest
 
 from brig.core import Axis, FloorViolation, Grade, Spec, require
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Process
 from brig.stack import Stack
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _scratch_counter = itertools.count()
 
@@ -49,8 +48,8 @@ def _new_scratch_root() -> str:
     keeps this file's counter from colliding with the several sibling
     integration files that build a scratch path from the SAME
     `/tmp/bg<pid>-<n>` shape off their own independent, zero-based counter
-    (`test_launcher.py`, `test_exec.py`, `test_wait_ready.py`) -- harmless
-    for them, since only `SubprocessLauncher.launch`'s `exist_ok=True`
+    (`test_jail_launch.py`, `test_exec.py`, `test_wait_ready.py`) -- harmless
+    for them, since only `HostRuntime.create`'s `exist_ok=True`
     `os.makedirs` ever touches those paths, but this file calls
     `os.makedirs(..., exist_ok=False)` BEFORE any launch, specifically so a
     stale directory can never masquerade as "the scratch root started
@@ -71,19 +70,19 @@ def _ps_lines_matching(token: str) -> list[str]:
     return [line for line in proc.stdout.splitlines() if token in line]
 
 
-def _teardown_group(handle: Handle) -> None:
+def _teardown_group(process: Process) -> None:
     """Group-kill a workload launched WITH `start_new_session`;
-    `handle.wait()` blocks until the launcher's exit-waiter has reaped it
-    (task-073). `Handle.kill()` is task-020's real implementation, but this
-    file stays independent of it -- exactly like `test_launcher.py` -- so a
-    defect in `kill_jail` can never mask a leak this file is responsible
+    `process.wait()` blocks until the exit waiter has reaped it
+    (task-073). `Jail.destroy()` is task-020's real implementation, but this
+    file stays independent of it -- exactly like `test_jail_launch.py` -- so a
+    defect in teardown can never mask a leak this file is responsible
     for."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -104,11 +103,11 @@ def test_floor_the_empty_stack_cannot_meet_refuses_and_nothing_is_created(
       no jail directory, no events file, no stdout/stderr file (AC #2);
     - no process anywhere carries this test's marker token (AC #3).
 
-    The `launcher.launch(...)` call is written INSIDE the `pytest.raises`
+    The `launch(...)` call is written INSIDE the `pytest.raises`
     block, on the same statement sequence `compile()` sits on -- not omitted
     -- so it is genuinely on this test's code path and genuinely unreached,
     rather than an absence assertion with nothing in the test that could
-    ever have made it fail. `handle` starts `None` and is only assigned if
+    ever have made it fail. `process` starts `None` and is only assigned if
     `launch` is ever reached, so the `finally` below cannot itself create
     the very leak this test exists to rule out.
 
@@ -128,11 +127,11 @@ def test_floor_the_empty_stack_cannot_meet_refuses_and_nothing_is_created(
     marker = uuid.uuid4().hex
     argv = workload_argv(run_id, f": {marker}\nsleep 5")
 
-    handle: Handle | None = None
+    process: Process | None = None
     try:
         with pytest.raises(FloorViolation) as exc_info:
             compiled = Stack([]).compile(Spec(), require(fs_read=Grade.ENFORCED))
-            handle = SubprocessLauncher().launch(
+            jail, process = launch(
                 compiled,
                 argv=argv,
                 cwd=jail_dir,
@@ -160,10 +159,10 @@ def test_floor_the_empty_stack_cannot_meet_refuses_and_nothing_is_created(
         # Only fires if `launch` above was somehow reached (e.g. under the
         # plant-mutation this test's docstring/notes describe: temporarily
         # requiring `fs_read=UNENFORCED` here makes `compile` succeed, so
-        # `launch` genuinely runs and `handle` is assigned) -- a no-op on
-        # every real, unmutated run, where `handle` stays `None`.
-        if handle is not None:
-            _teardown_group(handle)
+        # `launch` genuinely runs and `process` is assigned) -- a no-op on
+        # every real, unmutated run, where `process` stays `None`.
+        if process is not None:
+            _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +199,7 @@ def test_ec5_control_satisfiable_floor_compiles_launches_and_spawns(run_id: str)
 
     compiled = Stack([]).compile(Spec(), require(fs_read=Grade.UNENFORCED))
 
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
+    jail, process = launch(
         compiled,
         argv=argv,
         cwd=jail_dir,
@@ -214,19 +212,19 @@ def test_ec5_control_satisfiable_floor_compiles_launches_and_spawns(run_id: str)
         # (`_ps_lines_matching` against a line-2 `workload_argv` marker) as
         # AC #3's absence assertion, now shown to find a real match.
         matches = _ps_lines_matching(marker)
-        assert any(line.split(None, 1)[0] == str(handle.pid) for line in matches), (
-            f"no /bin/ps row for pid={handle.pid} carries marker={marker!r}: {matches!r}"
+        assert any(line.split(None, 1)[0] == str(process.pid) for line in matches), (
+            f"no /bin/ps row for pid={process.pid} carries marker={marker!r}: {matches!r}"
         )
-        assert handle.alive() is True
+        assert jail.alive() is True
 
         # (b) a jail directory.
         assert os.path.isdir(jail_dir)
 
         # (c) the jail's stdout file, written by the launcher.
-        assert os.path.isfile(handle.stdout_path)
+        assert os.path.isfile(process.stdout_path)
     finally:
-        _teardown_group(handle)
-    assert handle.alive() is False
+        _teardown_group(process)
+    assert jail.alive() is False
 
 
 # ---------------------------------------------------------------------------

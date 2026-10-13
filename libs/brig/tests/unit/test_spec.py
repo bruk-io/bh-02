@@ -4,7 +4,7 @@ SPEC.md section 5. See task-003 for the normalization/validation tables this
 tests against.
 """
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, fields
 
 import pytest
 
@@ -192,8 +192,8 @@ def test_closures_normalization_dedupes_and_sorts() -> None:
 def test_channels_are_sorted_by_name() -> None:
     spec = Spec(
         channels=(
-            Channel(name="z", kind=ChannelKind.LISTEN, endpoint="e1"),
-            Channel(name="a", kind=ChannelKind.LISTEN, endpoint="e2"),
+            Channel(name="z", kind=ChannelKind.LISTEN),
+            Channel(name="a", kind=ChannelKind.LISTEN),
         )
     )
     assert [c.name for c in spec.channels] == ["a", "z"]
@@ -263,8 +263,8 @@ def test_rule4_duplicate_channel_name_raises() -> None:
     with pytest.raises(ValueError) as excinfo:
         Spec(
             channels=(
-                Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="e1"),
-                Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="e2"),
+                Channel(name="c1", kind=ChannelKind.LISTEN),
+                Channel(name="c1", kind=ChannelKind.LISTEN),
             )
         )
     assert "Spec.channels" in str(excinfo.value)
@@ -280,15 +280,19 @@ def test_rule5_empty_path_in_provisioning_files_raises() -> None:
 @pytest.mark.unit
 def test_rule6_empty_channel_name_raises() -> None:
     with pytest.raises(ValueError) as excinfo:
-        Channel(name="", kind=ChannelKind.LISTEN, endpoint="e1")
+        Channel(name="", kind=ChannelKind.LISTEN)
     assert "Channel.name" in str(excinfo.value)
 
 
 @pytest.mark.unit
-def test_rule6_empty_channel_endpoint_raises() -> None:
-    with pytest.raises(ValueError) as excinfo:
-        Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="")
-    assert "Channel.endpoint" in str(excinfo.value)
+def test_a_channel_names_no_path() -> None:
+    """decision-186: a `Channel` is a name and a kind; the runtime reserves
+    its sockets in the channel directory. There is no `endpoint` to give, so
+    one given is refused at construction (and an empty one has nothing left
+    to validate)."""
+    assert [f.name for f in fields(Channel)] == ["name", "kind"]
+    with pytest.raises(TypeError, match="endpoint"):
+        Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="/tmp/c.sock")  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +337,7 @@ def test_env_policy_is_frozen() -> None:
 
 @pytest.mark.unit
 def test_channel_is_frozen() -> None:
-    channel = Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="e1")
+    channel = Channel(name="c1", kind=ChannelKind.LISTEN)
     with pytest.raises(FrozenInstanceError):
         channel.name = "c2"  # type: ignore[misc]
 

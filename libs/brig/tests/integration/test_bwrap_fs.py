@@ -61,9 +61,10 @@ import pytest
 
 from brig.core import Channel, ChannelKind, FsPolicy, ReadModel, Spec
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH, bwrap
+from brig.run import IoPolicy
 from brig.run.compile_ctx import build_compile_ctx
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import Stack
+from tests.conftest import launch
 
 #: The skip is an AUTOUSE FIXTURE rather than a module-level
 #: `pytest.mark.skipif`, and the reason is mechanical: `skipif`'s condition
@@ -126,7 +127,7 @@ def _run_in_jail(*, jail_dir: str, spec: Spec, script: str, label: str) -> tuple
     """
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     jail = Stack([bwrap]).compile(spec, ctx=ctx)
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         jail,
         argv=["/bin/sh", "-c", script],
         cwd=spec.fs.write_allows[0],
@@ -134,10 +135,10 @@ def _run_in_jail(*, jail_dir: str, spec: Spec, script: str, label: str) -> tuple
         jail_id=f"bwrap-fs-{label}",
         jail_dir=jail_dir,
     )
-    status = handle.wait(timeout=_WAIT_TIMEOUT_S)
-    with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+    status = process.wait(timeout=_WAIT_TIMEOUT_S)
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         stdout = f.read()
-    with open(handle.stderr_path, encoding="utf-8", errors="replace") as f:
+    with open(process.stderr_path, encoding="utf-8", errors="replace") as f:
         stderr = f.read()
     return status, stdout, stderr
 
@@ -153,12 +154,8 @@ def _seed_workspace(jail_dir: str) -> tuple[str, str, str]:
     return workspace, hooks, envrc
 
 
-def _spec_for(workspace: str, hooks: str, envrc: str, *, endpoint: str | None = None) -> Spec:
-    channels = (
-        (Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),)
-        if endpoint is not None
-        else ()
-    )
+def _spec_for(workspace: str, hooks: str, envrc: str, *, channel: bool = False) -> Spec:
+    channels = (Channel(name="ctl", kind=ChannelKind.LISTEN),) if channel else ()
     return Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
@@ -306,7 +303,7 @@ def test_a_path_outside_read_allows_is_absent_rather_than_denied() -> None:
     # The control: without the jail, the same read succeeds.
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     unjailed = Stack([]).compile(spec, ctx=ctx)
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         unjailed,
         argv=["/bin/sh", "-c", f"cat {secret}"],
         cwd=workspace,
@@ -314,8 +311,8 @@ def test_a_path_outside_read_allows_is_absent_rather_than_denied() -> None:
         jail_id="bwrap-fs-read-absent-control",
         jail_dir=jail_dir,
     )
-    handle.wait(timeout=_WAIT_TIMEOUT_S)
-    with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+    process.wait(timeout=_WAIT_TIMEOUT_S)
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         assert "SECRETVALUE" in f.read()
 
 
@@ -323,9 +320,12 @@ def test_a_path_outside_read_allows_is_absent_rather_than_denied() -> None:
 def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() -> None:
     """decision-164, observed. A credential FILE and a state DIRECTORY sit
     inside the writable workspace, named in `read_denies`: the file reads
-    EACCES (the null device, bound `nodev`), the directory can be neither
-    listed, read beneath, written into, nor chmod'ed back open (an empty
-    mode-0000 read-only tmpfs), and a sibling file in the same workspace
+    EACCES (the null device, bound `nodev`), the directory hides
+    everything beneath it (an empty mode-0000 read-only tmpfs: no entry is
+    listed, the key beneath cannot be read, nothing is written into it, it
+    cannot be chmod'ed back open; the mode is observed as 0 by `stat`, and
+    where the user is unprivileged the listing is also refused, which root's
+    CAP_DAC_OVERRIDE overrides), and a sibling file in the same workspace
     reads in the same run -- the control that makes the refusals the
     carve-outs' doing. The host's files are untouched."""
     jail_dir = _new_jail_dir()
@@ -356,15 +356,24 @@ def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() 
         spec=spec,
         script=(
             f"cat {secret}; ls {state}; cat {state}/deep/key; echo x > {state}/new; "
-            f"chmod 755 {state}; cat {workspace}/notes.txt && echo CONTROL"
+            f"chmod 755 {state}; stat -c MODE%a {state}; cat {workspace}/notes.txt && echo CONTROL"
         ),
         label="read-carve-out",
     )
 
     assert "SECRETVALUE" not in stdout and "DEEPVALUE" not in stdout
     assert f"cat: {secret}: Permission denied" in stderr, stderr
-    assert f"ls: cannot open directory '{state}': Permission denied" in stderr, stderr
-    assert f"cat: {state}/deep/key: Permission denied" in stderr, stderr
+    # The directory hides its contents. What the refusal looks like depends on
+    # who runs the suite: an unprivileged user is refused (EACCES on the
+    # mode-0000 tmpfs); root's CAP_DAC_OVERRIDE ignores the mode bits and
+    # lists the tmpfs, which is empty. The property is the same for both:
+    # nothing under `state` is listed or readable, and its mode is 0000.
+    assert "deep" not in stdout, stdout  # the listing shows no entry beneath it
+    assert "MODE0\n" in stdout, stdout  # mode 0000, seen by root and user alike
+    assert any(
+        f"cat: {state}/deep/key: {reason}" in stderr
+        for reason in ("Permission denied", "No such file or directory")
+    ), stderr
     assert f"chmod: changing permissions of '{state}': Read-only file system" in stderr, stderr
     assert "fine" in stdout and "CONTROL" in stdout  # the sibling read, same run
     with open(secret) as f:

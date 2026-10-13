@@ -26,7 +26,7 @@ Three places name models, each over the last (`named.py`, pure but for reading t
 - the row's `extra`.
 
 A later one of the same name wins: `extra` over the file, and a user's model over a built-in
-(allowed, and `/model` notes it as shadowing the built-in). The file is one table per model:
+(allowed, and `/model` marks it as shadowing the built-in). The file is one table per model:
 
 ```toml
 [llama]                                   # Ollama is an OpenAI-compatible endpoint at /v1
@@ -158,8 +158,8 @@ token). Closing the step (Ctrl-C) closes the HTTP stream.
 
 ## When the tools change mid-conversation
 
-The loop keeps the list a conversation began with in its transcript and tells a change as a
-note ([why](../../../docs/bh-02/how-it-works/prompt-and-notes.md#why-the-prompt-stays-fixed-for-a-conversation)); each provider says which list a request offers (`tool_changes`), and both say
+The loop keeps the list a conversation began with in its transcript and tells a change as an
+aside ([why](../../../docs/bh-02/how-it-works/prompt-and-asides.md#why-the-prompt-stays-fixed-for-a-conversation)); each provider says which list a request offers (`tool_changes`), and both say
 `fixed`, the list the conversation began with, for its life. What each would do with a changed
 list:
 
@@ -167,7 +167,7 @@ list:
   Ollama, vLLM, LM Studio), and OpenAI's own prompt cache is a prefix of the request too. A
   changed list would make a local model process the whole conversation again (minutes on a long
   one, looking frozen) and a hosted one bill it uncached. With `fixed` a change costs nothing
-  but the note (it is part of the next message, after the cached prefix); the price is that an
+  but the aside (it is part of the next message, after the cached prefix); the price is that an
   added tool is not offered natively until the next conversation (`/clear`, `/compact`).
 - **claude-code**: Claude Code sends the tools first too. Offering a changed list means
   restarting Claude Code on its session with the new list (what a changed tool set does, above):
@@ -227,7 +227,7 @@ bh-02's loop does all of the following:
 Claude Code does none of that. It runs with no built-in tool (`tools=[]`), no settings file
 or CLAUDE.md (`setting_sources=[]`), and no connector (`strict_mcp_config`,
 `ENABLE_CLAUDEAI_MCP_SERVERS=0`). Its system prompt is the request's system message, after a
-note of the provider's own: Claude Code names the declared tool `mcp__bh__python`, so the note
+line of the provider's own: Claude Code names the declared tool `mcp__bh__python`, so the line
 says that is bh-02's `python`. It does not compact (`DISABLE_AUTO_COMPACT`).
 
 **The tools are only declared.** The loop's tools (the shipped composition's: `python`) reach
@@ -316,12 +316,12 @@ name of Claude Code's own, which bh-02 can only find once Claude Code has made i
 be named, the step fails with `path_too_long` and says to run from a shorter path or /clear,
 rather than start a fresh session that has lost the conversation.
 
-A transcript that ends in tool results, not a user line, is continued with a one-line note
+A transcript that ends in tool results, not a user line, is continued with a one-line message
 (`CONTINUE`).
 
 A changed system prompt or tool set restarts the process on its own session before the next user
 line, never while calls are parked. `agent:loop` sends a conversation the prompt and the tools
-it began with and tells later changes (the branch, an extension, a tool added) as notes, and the
+it began with and tells later changes (the branch, an extension, a tool added) as asides, and the
 date with the person's message (its `today` field is the loop's own: both providers send a user
 entry's `content` alone), so within a conversation neither changes and the process is restarted
 only for a new conversation (`/clear`, `/compact`).

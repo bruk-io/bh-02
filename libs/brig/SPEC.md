@@ -82,9 +82,9 @@ change that violates one is a spec change first, code second.
 Six nouns. Everything in brig is one of these.
 
 ```
-Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──launch──▶ Launcher ──▶ Handle
-                        │                                               │
-                        └────────── EnforcementReport ◀── probe() ──────┘
+Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──create──▶ Runtime ──▶ Handle
+                        │                                              │
+                        └────────── EnforcementReport ◀── probe() ─────┘
 ```
 
 - **Spec** — the provider-independent description of a jail: what it may
@@ -98,12 +98,127 @@ Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──launch──�
 - **Stack** — an ordered composition of mechanisms. Validates coverage and
   compatibility, composes argv wrappers, aggregates the report. The empty
   stack is valid and grades every axis `unenforced`.
-- **Launcher** — starts the final argv: plain subprocess, or pty-tee
-  subprocess. Declares capabilities; refuses stacks whose requirements it
-  cannot honor.
+- **Runtime** — creates a jail's instance and controls it: `create`,
+  `alive`, `destroy` (verified) and `supervisor`, the part inside the instance
+  that starts, signals, waits for and stops its processes. Declares its kind
+  and capabilities; refuses stacks whose requirements it cannot honor.
+  `HostRuntime` (`brig/run/host.py`) is today's: host process groups, the
+  exit wrapper, the tether, a sibling per exec. The `subprocess` launcher
+  (§8) is the embedder's door to it.
 - **Handle** — the running jail as the embedder holds it: serializable,
   rehydratable in a later process, owner of teardown, the anchor for
   observation and communication.
+
+**The runtime replaces the launcher noun (2026-10-12, decision-178).**
+Everything after compile had one implementation, hardwired to host process
+groups, with no seam a container, a VM or a remote sandbox could fill
+(decision-0001 in the workspace's backlog, its migration step 1). `run` now
+names that seam as two protocols (`brig/run/runtime.py`): `Runtime`, the
+instance (`kind`, `capabilities`, `create`, `alive`, `destroy -> KillReport`,
+`supervisor -> Supervisor | None`, `None` meaning the jail can only be destroyed), and
+`Supervisor`, inside it (`start -> ProcessRecord`, `signal -> bool`,
+`wait -> int | None`, `None` at the deadline, `stop -> KillReport`). Their
+records, `JailRecord` and `ProcessRecord`, are frozen data; `RuntimeKind`,
+`Capability` and `Scope` are enums in `core` (`brig/core/runtime.py`; not in
+`brig.core`'s exports until a caller outside brig needs one). Until a bwrap jail can hold an
+instance with nothing in it (its supervisor, decision-0001 step 4), `create`
+is launch-shaped: it takes the first process's argv and its record carries
+that process. `HostRuntime` holds what the launcher, teardown, exec and the
+tether did, unchanged; `SubprocessLauncher.launch` is its capability check,
+`create` and a `Handle`; `Handle` keeps its fields and serialization
+(`HANDLE_VERSION` unchanged) and delegates `alive`, `interrupt`, `wait`,
+`kill` and `exec` to its runtime, a field `to_dict` does not carry (a
+rehydrated handle gets `HostRuntime`). `brig.runtime.fake` is the second
+implementation, pure, which drives `Handle` in the unit tier; it is the
+first module of the `runtime` layer (§13), which nothing in brig may import,
+and the layer-set pins (`test_m4_shape`, `test_m5_shape`, `test_m6_shape`)
+record that layer as they recorded `proxy` (decision-133). No behaviour
+changes: every other existing test asserts what it asserted. `Mechanism.runtime`
+and the runtime kind in `CompiledJail` are step 2 (TASK-0079.03); `Jail`
+and `Process` in place of `Handle` are step 3 (TASK-0079.04). Implementing
+task: TASK-0079.02. (Ruled 2026-10-12, decision-178.)
+
+**The part inside a jail is the Supervisor (2026-10-12, decision-180).**
+decision-0001 and decision-178 named the protocol that starts, signals, waits
+for and stops processes inside a jail `Agent`, after the agent of Kata and
+other sandboxes. In a library whose first line says it knows nothing of
+agents, the word reads as a dependency on one kind of embedder, and the part
+is what a supervisor is: the process that holds the others. brig names it
+`Supervisor` (`run.runtime`); `HostSupervisor`, `NoSupervisor` and
+`FakeSupervisor` follow, `Runtime.agent` is `Runtime.supervisor`, and the fake
+runtime's `has_agent` is `has_supervisor`. The same ruling keeps brig's code,
+SPEC and README free of an embedder's concepts: an application (an AI agent,
+its sessions, its configuration files) is named only as an example of a class
+or as where a finding came from, never as something brig's behaviour depends
+on. The threat tuples in `core.threats` that list a coding tool's files stay
+data an embedder folds in, not a default of any preset. No behaviour changes:
+tests change by names. Implementing task: TASK-0079.24. (Ruled 2026-10-12,
+decision-180.)
+
+**A Jail and its Processes replace the Handle (2026-10-12, decision-181).**
+decision-0001's migration step 3a. The last noun becomes **Jail** (with its
+processes): the running instance as the embedder holds it, and each process
+in it a **Process**. Today's launch is `Jail.create` then `jail.start`;
+today's exec sibling is a second `start`, the same call, recorded the same
+way. brig keeps six nouns:
+
+```
+Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──create──▶ Runtime ──▶ Jail ──start──▶ Process
+```
+
+The ruling has three parts, one per section: the runtime's `create` holds no
+process and every process is a `start` (§8); each process has a record and an
+exit record of its own, out of every grant, and a jail is rehydrated with the
+embedder's runtimes (§9); and the order in which `Handle` is retired, below.
+Each part names its implementing task.
+
+**The order `Handle` goes in.** Every step leaves brig's tiers, bh-02's
+runner and `scripts/check` green:
+
+1. TASK-0079.25: the records (§9) and `create` with no process (§8) under
+   `HostRuntime`, the compile refusal that keeps every grant off the records,
+   and the fake's own kind. `Handle` stays, as an adapter over them.
+2. TASK-0079.26: `Jail` and `Process` in brig's public surface beside
+   `Handle`, rehydration with the embedder's runtimes, `HANDLE_VERSION` 6,
+   probes through `jail.start`.
+3. TASK-0079.27: bh-02's runner moves to `Jail` and `Process`, still a jail
+   per program (a jail per session is TASK-0074).
+4. TASK-0079.28: `Handle`, `ExecHandle`, `SubprocessLauncher`, `kill_jail`,
+   the launch-shaped `create`, `<jail_dir>/execs/` and `<jail_dir>/exit` are
+   deleted, brig's remaining tests move, and the code blocks of §8 and §9
+   are replaced by the shape in §9's ruling. No name is kept for
+   compatibility. Until then those blocks, and every paragraph that says
+   `Handle`, describe the code as it stands.
+
+(Ruled 2026-10-12, decision-181.)
+
+**`Handle` is gone (2026-10-12, decision-183).** Step 4 of the order above,
+done. `Handle`, its `JailStat` and `stat()`, `ExecHandle`, `ExecRefused` and
+`exec_in_jail`, `SubprocessLauncher` and its `launch`, `kill_jail`, and the
+records helper that named a `Handle`'s first process from its stdio path are
+deleted, and no code writes, reads or refuses `<jail_dir>/execs/` or
+`<jail_dir>/exit` (the records refusal covers `procs/` alone, §9). What an
+embedder calls instead: `Jail.create(compiled, runtime=HostRuntime(), ...)`
+then `jail.start(argv)` for a launch, a second `start` for an exec, `destroy`
+for `kill`, `Process.wait`/`interrupt`/`exit_events` for the first process's,
+`Jail.from_dict(d, runtimes=...)` for `Handle.from_dict`. Three things the
+launcher did now belong to the embedder, and the ruling says so rather than
+hiding them in a helper brig keeps: a launch whose first `start` is refused
+leaves a jail the caller destroys (bh-02's runner does, and so does brig's
+own test helper), the capability refusal is `HostRuntime.create`'s
+(`LaunchRefused`, unchanged), and the first process's stdio is that
+`Process`'s. The dict's version constant is renamed `JAIL_VERSION`, since it
+versions the jail's dict; its value stays 6, so the `version` a dict carries
+is unchanged and nothing persisted needs a bump (the rulings above that say
+`HANDLE_VERSION` are records of the name it had). Every exception
+`Jail.create` and `Jail.start` document is re-exported by `brig.run`
+(`LaunchRefused`, `JailDirInUse`, `HelperFailed`, `ExecWrapNotAPrefix`,
+`TetherClosed`, `WorkloadSpawnFailed`, `NoSupervisor`, beside
+`ExitStatusUnobservable`), so an embedder names them from the public surface,
+never from a private module. brig's tests assert through `Jail` and `Process`
+what they asserted through `Handle`; a test whose subject was `Handle` itself
+now holds `Jail` to the same property. Implementing task: TASK-0079.28.
+(Ruled 2026-10-12, decision-183.)
 
 ## 4. Axes and grades
 
@@ -166,7 +281,7 @@ Spec(
     limits=Limits(wall_seconds, cpu_seconds, memory_bytes, max_tasks,
                   max_output_bytes),                  # 0 = uncapped
     env=EnvPolicy(mode=SCRUB | PASS, allow_names=(...,), set=(...,)),
-    channels=(Channel(name, kind, endpoint), ...),
+    channels=(Channel(name, kind), ...),   # sockets: the runtime's channel directory (§10)
     shared_media=(...,),          # derived + declared; see §10
     provisioning=Provisioning(files=((path, digest), ...),
                               closures=(...,), env=(...,)),
@@ -177,7 +292,7 @@ Notes:
 
 - **`write_denies` is new relative to prior art in the parent project** and
   exists for the self-escalation threat: a jail that can write `.git/hooks`,
-  `.envrc`, or an agent config file inside its granted workspace executes code
+  `.envrc`, or a tool's config file inside its granted workspace executes code
   *outside* the jail later. Every mechanism must compile carve-outs
   (deny-over-allow precedence, mount ordering, submounts).
 - **Two read models, declared not layered.** Denylist (Seatbelt-native) and
@@ -188,7 +303,7 @@ Notes:
   `write_denies`, deny-over-allow. An allowlist denies by absence, but a secret
   can sit *inside* an allowed root: a credential file at the top of a
   workspace the jail may write, which is the ordinary shape for an embedder
-  that jails a coding agent in its own repository. Until this ruling that
+  that jails a program working in its own repository. Until this ruling that
   secret had no spelling in an allowlist `Spec` at all (the field was refused
   as inactive), so the only allowlist jail over such a workspace was one that
   could read it. A mechanism compiles each carve-out against the trees it
@@ -197,17 +312,18 @@ Notes:
   path that does not exist yet, §6) the `fs_read` grade drops and names it.
   The algebra is unchanged in shape: read denies union in the meet and grow
   in the denies clause under both models, and the two models stay
-  incomparable. (Ruled 2026-09-28, decision-164. First embedder: bh-02's
+  incomparable. (Ruled 2026-09-28, decision-164. First embedder: a
   jailed kernel on Linux, whose project root is a write root and whose
   `local.env` is the credential it must not read.)
 - **Threat lists ship as data, not defaults.** brig provides curated,
   documented tuples the embedder folds in explicitly:
   - `CREDENTIAL_READ_DENIES_HOME_RELATIVE` — `.ssh`, `.aws`, `.gnupg`,
     `.netrc`, `.config/gh`, `.docker`, `.kube`, `.npmrc`, `.git-credentials`,
-    `.config/gcloud`, `.claude`, `.claude.json`, …
+    `.config/gcloud`, `.claude`, `.claude.json` (the two a coding tool keeps its
+    credentials in, as examples of a class), …
   - `SELF_MODIFY_WORKSPACE_RELATIVE` — `.git/hooks`, `.git/config`,
-    `.bashrc`, `.zshrc`, `.profile`, `.envrc`, `.vscode`, `.idea`, agent
-    config files (`AGENTS.md`, `CLAUDE.md`, `.claude`), …
+    `.bashrc`, `.zshrc`, `.profile`, `.envrc`, `.vscode`, `.idea`, a tool's
+    config files that later run code (`AGENTS.md`, `CLAUDE.md`, `.claude`: examples of a class), …
   - `BARE_REPO_TOPLEVEL` — `HEAD`, `objects`, `refs` (creating these at the
     workspace root turns it into a bare git repository, silently changing
     what every later git command means).
@@ -263,8 +379,10 @@ Notes:
   each limit takes the pointwise minimum with `0` read as uncapped, channels and
   shared media intersect; `env.set` and `provisioning` are carried from the
   receiver unchanged. It refuses (`IncomparableSpecs`) on differing read models,
-  or when one channel name is bound to a different kind or endpoint in each
-  operand. Every one of those per-axis formulas already *is* the greatest lower
+  and on nothing else: a channel names no host path (decision-186, §10), so one
+  name in both operands declares the same channel and the meet keeps it. (It
+  also refused one channel name bound to a different endpoint in each operand
+  until decision-186 took the endpoint away.) Every one of those per-axis formulas already *is* the greatest lower
   bound — an intersection, not an emptying; a minimum, not a `1` — which is why
   the earlier wording ("the strongest spec that is a subset of both") was a
   defect in the sentence and not in the algebra.
@@ -310,7 +428,7 @@ Notes:
   names and pair tuples are normalized when the object is built, so "equal up to
   normalization" is plain `==` and the algebra never renormalizes. Construction
   raises on a negative or non-integer limit, a duplicate channel name, an empty
-  path/name/endpoint, and on the *inactive* read-model field being populated
+  path or name, and on the *inactive* read-model field being populated
   (denylist mode with `read_allows`; allowlist mode with `read_denies` was the
   other half until decision-164 made that field the allowlist's carve-outs) —
   ignoring that field silently is the same refusal-not-downgrade posture as
@@ -341,9 +459,80 @@ Notes:
 - **No shared `/tmp` by default.** A writable path shared between two jails is
   an unaccounted jail-to-jail channel. Temp space is per-jail, inside
   `write_allows`.
+- **No write root grants the jail directory (2026-10-11, decision-173).** The
+  `jail_dir` is brig's control state, not the workload's: the exec
+  registrations teardown signals by (`execs/`, §9), the exit record `wait()`
+  answers from (`exit`, §8), the stdio and helper logs, and the staged files an
+  exec sibling is confined by again (seatbelt's profile). A write root is a
+  subtree, so one AT or ABOVE the jail directory (a workspace that is `/tmp`,
+  an embedder run from `/`) used to hand all of that to the workload: an embedder run
+  with its working directory at `/tmp` let a jailed input write
+  `<jail_dir>/execs/1.json`, `<jail_dir>/exit` and `<jail_dir>/x`, all seen on
+  the host, and a malformed registration made the jail's own `kill()` raise
+  (found by TASK-0078). So every mechanism that compiles `fs_write` takes the
+  jail directory back out of whatever write root reaches it, and grants inside
+  it exactly two things: **`<jail_dir>/tmp`, the jail's scratch** (an embedder
+  points `TMPDIR` there, and allow tuples are an antichain, so a `Spec` with a
+  write root above the jail directory cannot name a write root inside it: the
+  scratch has to be brig's own name), and **a declared LISTEN channel's own
+  grant**, unchanged (bwrap's endpoint directory, seatbelt's socket literal;
+  §6). bwrap compiles it as mounts after the write roots (§6's stage list);
+  seatbelt as `(deny file-write* (subpath JAIL_DIR))` after the write roots'
+  allows, then `(allow file-write* (subpath JAIL_DIR/tmp))`, both before the
+  carve-outs, since a later rule wins in either direction (the parent's probed
+  order that `write_denies` already relies on). The rule is the mechanism's,
+  not the `Spec`'s: `write_allows` keeps its
+  meaning, the algebra is untouched, and the jail directory is never a `Spec`
+  path. A write root strictly inside the jail directory, with none above it,
+  is untouched: nothing reaches the control state through it. What this
+  left open, and decision-174 closed: an endpoint whose directory IS the jail
+  directory made that directory writable on bwrap, because that is the
+  smallest grant a bind mount can make for a socket (§6). `fs_write` grades
+  are unchanged: the rule takes writes away and claims nothing new. Implementing task:
+  TASK-0079.13. (Ruled 2026-10-11, decision-173.)
+- **A bwrap channel's endpoint is never directly in the jail directory
+  (2026-10-11, decision-174).** bwrap grants a LISTEN channel its endpoint's
+  DIRECTORY, bound read-write (§6), so an endpoint like `<jail_dir>/ctl.sock`
+  made the whole jail directory writable from inside the jail: the exec
+  registrations teardown signals by, the exit record `wait()` answers from and
+  the logs, which decision-173 seals against every write root but could not
+  against this grant. The compile now refuses that layout
+  (`brig.mech.bwrap.ChannelInsideJailDir`, a `ValueError` propagated by `Stack`
+  as the other bwrap refusals are), naming the resolved endpoint and the jail
+  directory and saying to put the endpoint in a subdirectory of it. An endpoint
+  in a subdirectory (`<jail_dir>/chan/ctl.sock`) needs nothing more: its
+  directory is bound read-write, decision-173's seal keeps the rest of the jail
+  directory read-only, and brig's own layout (`exit`, `execs/`, the logs) does
+  not move. An endpoint elsewhere is unchanged (an embedder's own is in a directory of its
+  own). seatbelt does not refuse it: its channel grant is the socket's own path
+  (`(allow file-write* (literal ...))`), which opens nothing else in the jail
+  directory, so the hole is bwrap's alone and a refusal there would reject a
+  layout that is safe. The cost is a layout that compiles on darwin and is
+  refused on Linux; an embedder that wants one layout puts the endpoint in a
+  subdirectory everywhere, as brig's own journey does. Grades: unchanged (a
+  refusal grades nothing). Decision-172's forged-record residual no longer
+  stands for this arrangement. Implementing task: TASK-0079.16. (Ruled
+  2026-10-11, decision-174.)
+  Amended 2026-10-12 (TASK-0079.17, no new ruling): the refusal tests the
+  endpoint's lexical parent as well as its resolved one, because bwrap binds
+  the resolved directory writable at the lexical parent: `<jail_dir>/ctl.sock`
+  as a symlink to a socket elsewhere would otherwise lay that directory over the
+  jail directory's place in the jail. The message names both paths.
+  Widened by decision-181 (§9, 2026-10-12): every mechanism that compiles a
+  LISTEN channel refuses an endpoint at or under brig's records
+  (`<jail_dir>/procs`, and `<jail_dir>/execs` while it exists).
+  Amended by decision-184 (§10, 2026-10-12): when the Spec declares a channel,
+  the seal keeps a third thing writable inside the jail directory, the
+  runtime's channel directory `<jail_dir>/chan` (bwrap binds it, seatbelt
+  grants its subpath), and a `write_denies` entry at or above it is refused.
+  Restated by decision-186 (§10, 2026-10-13): a channel has no endpoint, and
+  its one grant is the channel directory, a subdirectory brig names inside the
+  jail directory, so no channel grant is the jail directory or reaches
+  `procs/`, and `ChannelInsideJailDir` and `ChannelOnRecords` are gone.
 - Serialization: `to_dict`/`from_dict`, versioned, round-trip stable.
-- **The version is `SPEC_VERSION = 1`, and an unknown key at any level is a
-  refusal.** There is no migration framework and no tolerated extra field: a
+- **The version is `SPEC_VERSION = 2`, and an unknown key at any level is a
+  refusal.** (It was 1 until decision-186, §10, took the channel's `endpoint`
+  away; a version-1 dict is refused like any other version.) There is no migration framework and no tolerated extra field: a
   dict brig cannot account for is rejected, not partially understood.
   `from_dict` re-runs construction validation, so serialization cannot smuggle
   in a Spec that could not have been constructed directly.
@@ -354,6 +543,7 @@ Notes:
 class Mechanism(Protocol):
     name: str
     axes: frozenset[Axis]                 # what it claims
+    runtime: RuntimeKind | None           # the one runtime kind it needs, or None
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step: ...
 
 @dataclass(frozen=True)
@@ -362,11 +552,33 @@ class Step:
     env: Mapping[str, str]
     staged: tuple[StagedFile, ...]        # profiles, scripts — written pre-launch
     helpers: tuple[Helper, ...]           # e.g. egress proxy; declared lifetime
-    requires: frozenset[LaunchFeature]    # e.g. NEW_PROCESS_GROUP
+    requires: frozenset[Capability]       # e.g. NEW_PROCESS_GROUP
     grades: Mapping[Axis, Graded]         # grade + detail per claimed axis
     denial_signatures: tuple[Pattern, ...]  # what this mechanism's denials look like
     events: EventSource | None            # optional sensor feed (§11)
 ```
+
+**A mechanism names the runtime it needs; `LaunchFeature` is the runtime's
+`Capability` (2026-10-12, decision-179).** decision-0001 (the workspace's
+backlog, migration step 2) separates a jail's runtime from its confinement, and
+composition has to know which runtime a stack needs before anything can grade
+what that runtime alone decides. So `Mechanism` gains `runtime`: the one
+`RuntimeKind` (`core`, §3) the mechanism's enforcement depends on, or `None`
+for one that works under any. `bwrap` and `seatbelt` name `HOST`: each wraps
+the workload's argv in a host process (`bwrap`'s namespaces, `sandbox-exec`'s
+profile) that lives and dies with the host process group brig starts.
+`env_scrub`, `rlimits` and `connect_proxy` name `None`; their wraps are execs
+any runtime can run. A mechanism names at most one kind; a second runtime is a
+second mechanism, and §7 refuses a stack whose mechanisms name two.
+`LaunchFeature` is retired, as decision-0001 rules ("`LaunchFeature` becomes the
+runtime's capabilities"): `Step.requires` is a `frozenset[Capability]`, the
+same three members by value (`NEW_PROCESS_GROUP`, `PTY`, `DETACH`), so a
+mechanism states its requirements in the runtime's own vocabulary and a runtime
+checks them without translating. `brig.mech` no longer exports `LaunchFeature`
+or its three module-level aliases; `Capability` is imported from
+`brig.core.runtime`. The roster's axes, every mechanism's grades and every
+compiled argv are unchanged. Implementing task: TASK-0079.03. (Ruled
+2026-10-12, decision-179.)
 
 **`CompileCtx`** is the context `compile` is handed, and nothing more: a frozen
 dataclass carrying `jail_dir: str` (where staged files land),
@@ -399,8 +611,8 @@ resolution therefore live in `CompileCtx`, and the resolving is `run`'s:
   and the whole point: a missing rule is loud, a present rule that matches
   nothing is silent.
 - **`jail_dir` arrives already resolved.** It is not a `Spec` path, so the
-  mapping cannot cover it — yet the staged profile and usually the LISTEN
-  endpoint live under it, which would put the same bug in the one path the
+  mapping cannot cover it — yet the staged profile and the channel directory
+  (§10) live under it, which would put the same bug in the one path the
   first half misses. The invariant is the same `run`-layer helper's to
   establish, and it is stated here because a caller constructing a
   `CompileCtx` by hand needs to know it.
@@ -552,6 +764,14 @@ mechanism that declares a long-running process with the wrong lifetime gets
 a named failure, never the silent wedge that shape produced before it was
 bounded. (Ruled 2026-08-29, decision-134.)
 
+*Amended 2026-10-11 (implementing task: TASK-0076).* "Set to nothing" means
+SET, empty: the launcher passes the launching environment through, so a mechanism
+that leaves `NO_PROXY` unset lets an inherited one (a host exempting loopback or
+a cloud metadata range) reach the workload and put those destinations outside
+the allow list. `connect_proxy`'s step therefore carries `NO_PROXY=` and
+`no_proxy=`, both empty, which the launcher overlays on whatever it inherited.
+(Ruled 2026-10-11, decision-170.)
+
 **The egress filter is a standalone process, outside the layer DAG.**
 `connect_proxy` is the only mechanism whose enforcement is a process rather
 than a kernel configuration, and that process runs trusted-side, outside the
@@ -611,8 +831,8 @@ honestly earn):
 
 **The roster's second column is prose about a mechanism's job, and a job is not
 always a claim.** `seatbelt`'s row reads "…, channel binds", which names *work*
-the mechanism does — compiling the SBPL rules that let the jail bind its
-declared LISTEN endpoint — and **not** an axis it claims. Its declared `axes`
+the mechanism does — compiling the SBPL rules that let the jail bind a socket
+in its channel directory (§10) — and **not** an axis it claims. Its declared `axes`
 are **`{fs_read, fs_write, network}`**; `channel_exclusivity` is §4's axis
 about declared channels and enumerated shared media being the only ways in and
 out, and an SBPL profile does not establish that. So `channel_exclusivity`
@@ -640,8 +860,8 @@ cap the Spec asked for is still the soft one — `N` is what bounds the workload
 the extra second only exists so the signal can be delivered before the kill.
 The grade does not move: `limits` stays `best_effort` (decision-061), for the
 same cpu-only reason as before. (Found by running brig's integration tier on
-Linux for the first time, in a container: `tools/linux-check.sh` in the keel
-workspace.)
+Linux for the first time, in a container: an embedder's Linux check
+script.)
 
 **`bwrap`, as built (2026-09-08, decision-159).** The roster row above is the
 plan; this is the shape, written from the built mechanism on decision-069's
@@ -661,10 +881,21 @@ be the copy decision-152 deleted the event stream for).
 - **The mount order IS the policy**, because bwrap applies operations in the
   order they appear and a later mount stacks over an earlier one. One rule —
   later wins — with the stages ordered so that later means more specific:
-  (1) `--unshare-all`; (2) the jail's own furniture, `--proc /proc` and
-  `--dev /dev`, first among the mounts so every spec-derived mount stacks on
-  top of it; (3) `read_allows` as `--ro-bind`; (4) the declared LISTEN
-  channel's endpoint DIRECTORY as `--bind`; (5) `write_allows` as `--bind`;
+  (1) `--unshare-all --cap-drop ALL` (decision-177, below); (2) the jail's
+  own furniture, `--proc /proc`, `/proc/sys` bound read-only over it
+  (decision-177) and `--dev /dev`, first among the mounts so every
+  spec-derived mount stacks on top of it; (3) `read_allows` as `--ro-bind`; (4) the channel directory
+  `<jail_dir>/chan` as `--bind` when the Spec declares a channel (decision-184,
+  §10; each declared endpoint's directory too until decision-186);
+  (5) `write_allows` as `--bind`;
+  (5a) the pins (decision-168, below), but those in a sealed jail directory;
+  (5b) when a write root or a channel directory is at or above the jail
+  directory, the SEAL (decision-173, §5): the jail directory `--ro-bind` at
+  every place a writable tree shows it, then its scratch `--bind-try` (a
+  scratch that does not exist is left unwritable, failing closed), each
+  channel directory inside it again, and the pins inside those; a pin or
+  carve-out in the sealed part is not mounted, since a pin would undo the
+  seal and a tmpfs mount point cannot be made on a read-only mount;
   (6) `write_denies` as submounts *after* the write roots — which is what
   makes deny-over-allow true here, and only the ones a writable tree (a write
   root or channel directory) reaches: one outside is unwritable already, and
@@ -682,9 +913,60 @@ be the copy decision-152 deleted the event stream for).
   so it was not an escape, but it was a denial the `fs_write` grade claimed
   and the jail did not make, and a cell told "denied" by the policy was told
   "wrote" by the kernel. `--remount-ro /` after every mount fixes it; the
-  mounts keep their own flags. (Found by bh-02's jailed-kernel tests, the
+  mounts keep their own flags. (Found by an embedder's jailed-kernel tests, the
   first to write outside the workspace at a path whose parent the jail had
   made: `tests/integration/test_bwrap_fs.py` pins it now.)
+- **A jail started as root holds no capabilities, and its `/proc/sys` is
+  read-only (2026-10-12, decision-177); until then, run as root, `fs_write`'s
+  `enforced` was void.** bwrap run as root maps the jail's uid 0 to the
+  host's uid 0 (`uid_map` `0 0 1`) and, unless told otherwise, leaves the
+  workload every capability (CapEff and CapBnd full) over its own user and
+  mount namespaces. So every read-only bind was a suggestion: the workload
+  remounted one read-write (`mount -o remount,bind,rw`) and wrote through it
+  to the host (TASK-0079.01's review did it on the host's `/etc`), and
+  CAP_DAC_OVERRIDE read any root-owned file the jail could see, whatever its
+  mode. Stage 1 now emits `--cap-drop ALL`: bwrap makes its mounts and then
+  empties the workload's effective, permitted, inheritable, ambient and
+  bounding sets, and it sets no_new_privs as it always does, so an `exec` as
+  uid 0 gains nothing back and a setuid binary gains nothing. Dropping the
+  capabilities is not the whole of it: the workload is still the host's uid
+  0, and a sysctl's write check is its mode bits alone (the owner's, for the
+  host's root), while bwrap 0.9 leaves `/proc/sys` uncovered (it covers what
+  it can write to, and the `/proc/sys` directory itself is `r-xr-xr-x`). A
+  capability-less root wrote `kernel.hostname` (measured, in the jail's own
+  UTS namespace), and `kernel.core_pattern` or `kernel.modprobe` take the same
+  check and run a program as the host's root. So stage 2 binds `/proc/sys`
+  read-only over the jail's own proc (`--ro-bind /proc/sys /proc/sys`: bwrap's
+  bind sources are the host's, and `--remount-ro` refuses a path that is not
+  a mount point; the tree is the same either way, and `/proc/sys/net` answers
+  for the reader's own network namespace). Measured after: CapEff and CapBnd
+  empty, the remount `EPERM`, the write `EROFS`, a root-owned mode-000 file
+  `EACCES`, the sysctl write `EROFS`, and an unmapped nested user namespace
+  can't unlock a bind either (mapping uid 0 needs CAP_SETFCAP). The masks
+  hold without CAP_DAC_OVERRIDE: the mode-0000 tmpfs and the `/dev/null`
+  binds (`nodev`) refuse uid 0 like anyone, and the seal is a read-only
+  mount. Considered and not taken: an unprivileged `--uid`/`--gid` inside.
+  bwrap maps it to the host's uid 0 all the same, so the sysctl check is
+  unchanged, and the workload would see its own files owned by a stranger.
+  Both flags are emitted whoever runs bwrap, so the render stays pure (no
+  uid on `CompileCtx`); for an unprivileged user they change nothing (no
+  capabilities to drop, and a mapped uid that is not the host's root). No
+  grade moves: the change makes `enforced` true as root, where it had been
+  claimed and void. A host with no `/proc/sys` fails the launch, closed.
+  Seatbelt has nothing to drop: its profile is mandatory access control the
+  kernel applies to root too, and capabilities are a Linux notion; whether
+  root under its `(deny default)` profile can remount or change a sysctl is
+  unmeasured (no Mac in reach) and is carried to TASK-0079.15. Implementing
+  task: TASK-0079.20; `tests/integration/test_bwrap_root_confined.py` plants
+  the remount, the host write, the mode-000 read and the sysctl write as
+  root. What a root jail can still write by its mode bits, listed from
+  inside one by TASK-0079.20's review (`access(W_OK)` only, nothing opened):
+  `/proc/mtrr` (its write needs CAP_SYS_ADMIN), `/proc/pressure/*` (a write
+  sets a monitor on that open file and changes nothing on the host), the
+  jail's own `/proc/<pid>` files (its own pid namespace) and bwrap's own
+  `/dev` tmpfs (TASK-0079.22); `/proc/sysrq-trigger` is absent and
+  `/proc/irq` and `/proc/bus` are read-only. (Ruled 2026-10-12,
+  decision-177.)
 - **Read carve-outs: masked where they exist, graded where they do not
   (2026-09-28, decision-164).** Each `read_denies` entry is compared, resolved,
   against every tree the render mounts (read allows, channel directories,
@@ -718,7 +1000,7 @@ be the copy decision-152 deleted the event stream for).
   or removed, but the directory it is in is writable: renaming `.git` to
   `.git-moved` took the `.git/config` and `.git/hooks` mounts with it, and the
   workload then made a new `.git/config` of its own where the host's next
-  `git` reads it (`core.hooksPath`: code run on the host; measured in bh-02).
+  `git` reads it (`core.hooksPath`: code run on the host; measured by an embedder).
   Each such directory that exists is now bound over itself, read-write, before
   the carve-outs (stage 5a): a mount point, so it can't be renamed or removed,
   and as writable as before (a jailed `git commit` still works). The cost: a
@@ -726,7 +1008,7 @@ be the copy decision-152 deleted the event stream for).
   mount and fails with `EXDEV` (`mv` copies instead; `os.rename` does not). An
   absent directory there is not pinned: bwrap makes it, as the mount point's
   parent, on the host (above), and the embedder that cares holds the topmost
-  absent one instead (bh-02 does). `pins` names them lexically and `run`'s
+  absent one instead. `pins` names them lexically and `run`'s
   `build_compile_ctx` observes whether each exists; a pin with no answer is
   `UnknownPathExistence`, never a guess. darwin's seatbelt needs no pin: it
   denies the path, whatever directory ends up there.
@@ -734,7 +1016,8 @@ be the copy decision-152 deleted the event stream for).
   decision-163), and until it was, a `write_denies` carve-out inside a jail
   directory was compiled and then silently unmade.** The endpoint's directory
   is the one mount whose path policy does not choose — an embedder puts the
-  socket in the jail directory, and a jail directory that also HOLDS the
+  socket in a subdirectory of the jail directory (directly in it is refused,
+  decision-174, §5), and a jail directory that also HOLDS the
   workspace is the ordinary arrangement — so it is the one mount that can turn
   out to be an ANCESTOR of a write root or a carve-out. Emitted last it stacked
   read-write over both, and the jail could write the exact path `write_denies`
@@ -745,7 +1028,7 @@ be the copy decision-152 deleted the event stream for).
   below: an endpoint under a `write_denies` subpath is `ChannelInsideWriteDeny`,
   never ordered around — which makes that refusal load-bearing rather than
   defensive. (Found by running the e2e tier on Linux for the first time, in a
-  container: `tools/linux-check.sh` in the keel workspace, and
+  container: an embedder's Linux check script, and
   `tests/e2e/test_strict_linux_journey.py` is where it showed.)
 - **Source resolved, destination as the Spec wrote it.** Every mount names its
   source by the realpath'd form (so a symlinked path mounts the tree it
@@ -754,7 +1037,9 @@ be the copy decision-152 deleted the event stream for).
   is missing because `/bin` was normalised into `/usr/bin` is a jail that
   cannot start).
 - **The LISTEN channel costs a writable DIRECTORY, where seatbelt's costs a
-  path.** §10.1 makes each mechanism compile the crossing; seatbelt can name
+  path.** *Since decision-186 (§10) both grant the runtime's channel directory,
+  and the per-endpoint grant this bullet describes is gone; the refusal at its
+  end stands for a `write_denies` entry at or above the channel directory.* §10.1 makes each mechanism compile the crossing; seatbelt can name
   the socket's exact path because SBPL matches paths, but a bind mount needs an
   object that already exists and the socket does not exist until the jail binds
   it. So the smallest grant bwrap can make is the endpoint's directory, bound
@@ -774,15 +1059,15 @@ be the copy decision-152 deleted the event stream for).
   jail's life: renaming a file over a denied path (a host `git config` writes
   `.git/config` by rename; editors save by rename), and removing the empty
   directory an absent one is held by (the bullet on absent `write_denies`
-  above). The workload can then write that path (measured in bh-02, before its
+  above). The workload can then write that path (measured by an embedder, before its
   tripwire). A new jail holds it again. The same is true of a masked
   `read_denies` file, which is why an embedder that holds secrets that way may
-  grade `fs_read` lower (bh-02 does); nothing in this mechanism can see the host
+  grade `fs_read` lower; nothing in this mechanism can see the host
   do it, and the grade is not lowered for it: what it grades is whether the
   workload can get past a carve-out by itself, and it can't. Seeing it is the
-  embedder's: bh-02 watches each carve-out's directory with inotify and ends the
-  jail at the first such change (its runner-cordis-plugin README, "When the host
-  undoes a mount", has the window that leaves). The mount can't be put back from
+  embedder's: an embedder can watch each carve-out's directory with inotify and
+  end the jail at the first such change (the window that leaves is the
+  embedder's to document). The mount can't be put back from
   outside: the host can't enter the jail's mount namespace (`EPERM`, measured;
   bwrap nests it in a user namespace of its own).
   `network` is deny-**all**: the netns is the whole enforcement, so a spec
@@ -829,7 +1114,8 @@ finding both parent projects hit independently).
 `Stack(mechanisms).compile(spec, floors) -> CompiledJail`
 
 **`CompiledJail`** is a frozen dataclass carrying `spec`, `report`, `wrap`,
-`env`, `staged`, `helpers`, `requires`, `mechanism_names`, `matrix_version`.
+`env`, `staged`, `helpers`, `requires`, `mechanism_names`, `matrix_version`
+(and, besides, `signatures`, `sensors` and `runtime`, the last below).
 The first seven are this section's composition outputs, in the shape §6's
 `Step` produces them. The last two are what make a compiled jail *auditable
 after the fact*: which mechanisms produced it, and under which version of the
@@ -850,6 +1136,37 @@ Validation, in order:
    order; Seatbelt does not nest. Unknown pairs are refused.
 4. **Floors** — aggregate grades meet the caller's `require(...)` or the
    compile refuses, naming the axis and the shortfall.
+
+**The runtime, and the axes it grades (2026-10-12, decision-179).** A
+compiled jail runs in exactly one runtime, so `Stack.compile` resolves exactly
+one `RuntimeKind` from its mechanisms' `runtime` (§6): the kind they name, or
+`HOST` when none names one (the empty stack included). Two mechanisms naming
+different kinds are refused (`RuntimeConflict`, naming both mechanisms and both
+kinds), after rule 3 and before any mechanism compiles: law 2, since no jail
+can be two runtimes and picking one would be a fallback the caller did not
+write. The kind travels on `CompiledJail.runtime`. Two axes depend on the
+runtime rather than on any mechanism: `control`, at the jail scope (whether
+the jail and everything in it can be ended without cooperation; decision-0001's
+process scope travels on each process, not in this report), and
+`channel_exclusivity` (whether declared channels and enumerated shared media are
+the only ways in or out, which a relay or an exec's stdio decides). A runtime's
+grades are static per kind (`brig.core.runtime.runtime_grades`), so the
+coverage fill takes those two axes from the kind's grades instead of from
+`unenforced_report()`, and rule 4 checks a floor on them at compile like any
+other: `require(control=...)` above what the kind grades is refused at compile,
+with a note naming the runtime kind. A mechanism that declares one of the two
+axes still overlays its own grade, as on any axis; none does today
+(`tests/unit/test_stack_runtime.py` pins that), and whether one may is the
+first such mechanism's ruling. **`HOST` grades both `unenforced`, which is what
+every report said before this ruling**: a jail is ended by signalling the
+process groups brig started, and nothing yet proves that reaches everything in
+the jail (a `setsid()` child leaves its group), and nothing establishes channel
+exclusivity. No grade above that ships without decision-0001's control battery
+(TASK-0079.08: planted survivors driven from the host, and a positive control,
+law 10). What changes in a report is the two axes' `detail`, which now names
+the runtime and the gap. The matrix keeps every row and its order, and
+`MATRIX_VERSION` stays 5. Implementing task: TASK-0079.03. (Ruled 2026-10-12,
+decision-179.)
 
 **Coverage is a construction-time invariant, not a step anyone can forget.** An
 `EnforcementReport` carries a `Graded` for all seven axes of §4; constructing one
@@ -880,7 +1197,8 @@ other mechanisms' helper processes, `seatbelt` next so the `/bin/sh` and
 `/usr/bin/env` that `env_scrub`'s wrap spawns run *inside* the profile, and
 `env_scrub` innermost so its `env -i` reaches the workload with nothing between
 them to re-add what it removed. `channel_exclusivity` is unclaimed here and
-grades `unenforced` (§6's roster note). (Ruled 2026-08-24, decision-118 for the
+grades `unenforced` (§6's roster note; since decision-179, by `HOST`'s static
+grade). (Ruled 2026-08-24, decision-118 for the
 preset and decision-119 for the ordering, from `doc-017` §3's ambiguity A4.
 Implementing task: **task-064**, with **task-059** owning the two matrix rows
 that carry the ordering rationale and **task-060** observing the ordering's
@@ -896,7 +1214,7 @@ that name would be the silent substitution law 2 forbids. What it gives up
 against `strict()` is exactly those two mechanisms' axes — `limits` stays
 `best_effort` (`rlimits` reaches cpu only) and `network` is deny-all rather
 than filtered. `channel_exclusivity` and `control` are unclaimed and grade
-`unenforced`.
+`unenforced` (since decision-179, by `HOST`'s static grades).
 
 Membership, never composition order, like every preset here: the matrix
 composes it **outermost→innermost as `rlimits`, `bwrap`, `env_scrub`** —
@@ -922,16 +1240,35 @@ Presets keep CLI ergonomics and give
 embedders a strength vocabulary; strength comparison between arbitrary stacks
 is report dominance per axis, not a total order.
 
-## 8. Launchers
+## 8. Runtimes (launchers until decision-183)
 
 ```python
-class Launcher(Protocol):
-    name: str
-    capabilities: frozenset[LaunchFeature]   # NEW_PROCESS_GROUP, PTY, DETACH, ...
-    def launch(self, jail: CompiledJail, *, argv, cwd, io: IoPolicy) -> Handle: ...
+class Runtime(Protocol):
+    kind: RuntimeKind                        # HOST, FAKE, ... (§3)
+    capabilities: frozenset[Capability]      # NEW_PROCESS_GROUP, PTY, DETACH, ... (decision-179)
+    def create(self, jail: CompiledJail, *, cwd, jail_id, jail_dir,
+               tether: int | None) -> JailRecord: ...   # holds no process
+    def alive(self, jail: JailRecord) -> bool: ...
+    def processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]: ...
+    def process_alive(self, jail: JailRecord, process: ProcessRecord) -> bool: ...
+    def tethered(self, jail: JailRecord) -> bool | None: ...
+    def destroy(self, jail: JailRecord) -> KillReport: ...
+    def supervisor(self, jail: JailRecord) -> Supervisor | None: ...
+    def reserve(self, jail: JailRecord, channel: str) -> Reservation: ...      # decision-184
+    def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None: ...
+    def ready(self, jail: JailRecord, process: ProcessRecord) -> bool: ...  # a connect
+    def connect(self, jail: JailRecord, process: ProcessRecord) -> socket: ...  # decision-185
+
+class Supervisor(Protocol):
+    def start(self, argv, *, cwd, io: IoPolicy,
+              channel: Reservation | None) -> ProcessRecord: ...  # every process
+    def signal(self, process: ProcessRecord, sig: Signals) -> bool: ...
+    def wait(self, process: ProcessRecord, timeout: float | None) -> int | None: ...
+    def stop(self, process: ProcessRecord) -> KillReport: ...
 ```
 
-- `subprocess` — pipes or files for stdio, detached, new process group.
+- `HostRuntime` — host process groups: each start detached, in a new process
+  group, stdio to files. (The `subprocess` launcher until decision-183.)
 
 **One launcher, and the roster is exactly what exists (2026-09-08,
 decision-158).** This list held three entries at various times and never held
@@ -981,7 +1318,11 @@ integration tier ran on Linux — by `tests/integration/test_bwrap_fs.py`, whose
 allowlist control is the only test that launches twice into one directory — but
 the defect was never platform-specific, and its regression test
 (`test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status`) runs on
-the empty stack, everywhere.
+the empty stack, everywhere. *Settled 2026-10-12 by decision-181
+(TASK-0079.25):* each process writes its own exit record under a fresh id
+(`<jail_dir>/procs/<id>/exit`), so there is no shared record to clear; `create`
+removes an earlier jail's records, once they are gone, as §9's records ruling
+says, and the regression test still runs.
 
 **A launch may be tethered to the process that made it (2026-09-30,
 decision-167).** `launch(..., tether=fd)` takes the read end of a pipe whose
@@ -994,7 +1335,7 @@ taken because nobody is left to run the others or read a `KillReport`. It
 exists because a detached jail (`start_new_session=True`, the launcher's whole
 shape) outlives an embedder that dies without calling `kill`, and a program the
 workload left running in the background kept its grants with nobody holding
-the handle (measured in bh-02: a killed harness's background program kept
+the handle (measured by an embedder: a killed host process's background program kept
 writing the project). Five things about it are constraints, not description:
 
 - **It is a pipe, not `PR_SET_PDEATHSIG`.** bwrap's `--die-with-parent` is
@@ -1005,7 +1346,9 @@ writing the project). Five things about it are constraints, not description:
 - **The watcher is a member of the group it ends**, so the group's number can't
   be handed to a stranger while it waits, and it outlives the wrapper: on darwin
   the workload is the wrapper's direct child and may exit by itself the moment
-  its embedder goes, leaving a background program in a leaderless group.
+  its embedder goes, leaving a background program in a leaderless group. Since
+  decision-181 every start has a group and a watcher of its own, each a member
+  of the group it ends.
 - **It ignores `SIGINT` and nothing else.** `interrupt` is for the workload;
   `SIGTERM` keeps its default, so `kill`'s first rung ends the watcher like any
   member and the verification rung still sees the group empty.
@@ -1014,12 +1357,44 @@ writing the project). Five things about it are constraints, not description:
   ends every process in the namespace, one that called `setsid()` included.
   Under seatbelt, which has no namespace, a process that left the group (a
   `setsid()`, a double-fork daemon) is out of reach — of `kill`'s ladder too,
-  which is group-shaped. Exec siblings and `JAIL_LIFETIME` helpers are groups of
-  their own and are not tethered.
+  which is group-shaped. `JAIL_LIFETIME` helpers are groups of their own and
+  are not tethered. *Amended 2026-10-12 (decision-181, TASK-0079.25):* exec
+  siblings are tethered: every start's exit wrapper starts a watcher of its
+  own on the jail's tether, so no process of a tethered jail runs untethered.
 - **It does not serialize.** An fd can't cross `to_dict`; a rehydrated `Handle`
   has no tether and needs none, since the process that held the write end is
   the one whose death it watched. `tether=None`, the default, launches exactly
   as before.
+
+*Amended 2026-10-12 (decision-183, TASK-0079.28):* the tether is
+`Jail.create(..., tether=fd)`'s, held by the jail in memory, and every
+`jail.start` is tethered to it; what this paragraph calls `launch` is
+`create` plus a first `start`, `kill` is `Jail.destroy`, and the rehydrated
+`Handle` is a rehydrated `Jail`, which has no `start` when it was created
+tethered (§9). Each process's group has its watcher, and its exit wrapper
+writes the process's own exit record, `<jail_dir>/procs/<id>/exit`.
+
+**Every interpreter brig starts on the host runs isolated (2026-10-11,
+decision-169).** brig starts four Python programs of its own outside any jail:
+the exit wrapper (`python -c`), the tether's watcher the wrapper starts
+(`python -c`), the `rlimits` trampoline (`python -m brig.mech.trampoline`,
+outermost in every stack that has it, so on the host) and `connect_proxy`'s
+egress proxy (`python -m brig.proxy`, a `JAIL_LIFETIME` helper). Each runs in
+the workload's working directory, and `-c` and `-m` both put that directory
+first on the import path — a directory the workload can write. Until this
+ruling a `subprocess.py` the workload left there ran inside the next launch's
+exit wrapper, unconfined (reproduced 2026-10-10 on the empty stack), and a
+`signal.py` or a `brig/` package would have run in the watcher, the trampoline
+or the proxy. So all four run with `-I`: no working or script directory on the
+path, no `PYTHON*` variable from the environment the jail hands them, no user
+site directory. Two constraints follow. **brig must be importable from the
+interpreter's own `site-packages`** (an installed or editable install, whose
+`.pth` `-I` still reads), never from `PYTHONPATH` or a working directory; that
+is how every embedder already gets it. **A new host-side interpreter is added
+with `-I` and to the list `tests/unit/test_host_interpreters.py` keeps**, which
+finds every `sys.executable`/`python` argv in brig's source and fails on one it
+does not name. Workloads, a probe's `python3 -c` among them, are the jail's
+argv and are not brig's to isolate. (Implementing task: TASK-0075.)
 
 A launcher refuses a `CompiledJail` whose `requires` exceed its
 `capabilities`. Refusal names the missing feature.
@@ -1032,36 +1407,104 @@ written — until such a launcher exists, a wider `IoPolicy` would be a
 capability claim with nothing behind it, which law 2 forbids. (Folded from the built shape by decision-044,
 discharging decision-038's A8.)
 
-## 9. The Handle
+**`create` holds no process, and every process is a `start` (2026-10-12,
+decision-181).** decision-178 left `Runtime.create` launch-shaped, because a
+bwrap jail cannot hold an instance with nothing in it until its supervisor
+(decision-0001 step 4). A `HOST` jail can: its instance is what `create`
+makes before the first spawn. So:
+
+- `Runtime.create(jail, *, cwd, jail_id, jail_dir, tether) -> JailRecord`
+  takes no argv and no `IoPolicy`. `HostRuntime.create` checks capabilities
+  (`LaunchRefused`, unchanged), makes `jail_dir`, clears what an earlier jail
+  there left (§9's records ruling: refused while any of it runs), writes the
+  staged files, runs `LAUNCH_SCOPED` helpers to completion and starts
+  `JAIL_LIFETIME` ones, and derives `wrap_prefix` once, from the compiled
+  `wrap` applied to a fixed sentinel argv, verified as a pure prefix as today
+  (`None`: every `start` refuses). A start in the process that created the
+  jail, which still holds the compiled `wrap`, also checks that `wrap` of its
+  own argv is that prefix followed by the argv, and refuses on a mismatch
+  (`ExecWrapNotAPrefix`); a rehydrated jail has only the prefix, as an exec
+  has today. It spawns no workload. `JailRecord.first` goes.
+- `Supervisor.start(argv, *, cwd, io) -> ProcessRecord` is the only way a
+  process enters a jail, the first included. Each start spawns
+  `(*wrap_prefix, *argv)` under **its own exit wrapper** (decision-156's
+  program, unchanged but for where it writes, §9), detached in a new process
+  group, stdio per `io` under the process's own records directory, env
+  `{**os.environ, **jail_env}`. So `Process.pid` names the wrapper for every
+  process, as it named it for the first one before, and an exec sibling
+  gains what only the first process had: an exact exit status readable from
+  another process. Fidelity is unchanged: `EQUIVALENT_PROFILE` for a
+  non-empty prefix, `PLAIN` for an empty one, decided per jail, never per
+  start.
+- **Every start is tethered when the jail is.** The tether's read end is
+  held by the jail in memory (never in a record: an fd does not serialize),
+  and each start's wrapper starts a watcher of its own on it, in that
+  process's group, before the workload, as decision-167's watcher does for
+  the first process today. So no process of a tethered jail runs untethered,
+  siblings included (decision-167's "exec siblings are groups of their own
+  and are not tethered" is superseded). `JAIL_LIFETIME` helpers stay
+  untethered, as decision-167 states; tethering them is decision-0001's
+  ("Helpers with `JAIL_LIFETIME`"), not this step's.
+- **Which process is the jail's "workload".** None is special to the
+  runtime. A `KillReport` keeps its vocabulary: the first process started is
+  reported as `workload_group` and every later one as `exec_sibling`, in
+  start order, so a report for today's shapes reads as it does now.
+- `Runtime.alive(jail)` is true while any recorded process's leader holds
+  its identity (decision-155, zombies gone, decision-171) or any
+  `JAIL_LIFETIME` helper does; a jail created with nothing started and no
+  helper reads gone.
+
+`SubprocessLauncher` stays, as `create` plus a first `start` returning a
+`Handle`, until TASK-0079.28 deletes it. Implementing task: TASK-0079.25.
+(Ruled 2026-10-12, decision-181.) *(It is deleted: decision-183, §3.)*
+
+## 9. The Jail (the Handle until decision-183)
+
+The shape since decision-183 (§3); "the handle" in the rulings below, which
+are kept as written, is this `Jail`, and its `kill` is `destroy`, its `exec`
+a `start`:
 
 ```python
-class Handle:
-    def to_dict(self) -> dict: ...            # everything teardown/observe needs
+class Jail:
     @classmethod
-    def from_dict(cls, d) -> Handle: ...      # rehydrate in a later process
+    def create(cls, jail: CompiledJail, *, runtime: Runtime, cwd: str,
+               jail_id: str, jail_dir: str, tether: int | None = None) -> Jail
+    def to_dict(self) -> dict: ...                   # everything teardown/observe needs
+    @classmethod
+    def from_dict(cls, d, *, runtimes: Mapping[RuntimeKind, Runtime]) -> Jail
 
-    def wait_ready(self, channel: str, timeout: float) -> None
+    def start(self, argv, *, cwd: str | None = None, io: IoPolicy = IoPolicy(),
+              channel: Reservation | None = None) -> Process  # absent without a supervisor
+    def channel(self, name: str) -> Reservation         # decision-184, §10
+    def processes(self) -> tuple[Process, ...]          # start order
     def alive(self) -> bool
-    def stat(self) -> JailStat                # pids, rusage, current grades
-    def interrupt(self) -> bool               # mechanism-delivered
-    def kill(self) -> KillReport              # tree/group teardown of EVERYTHING
-                                              # the handle names: workload group,
-                                              # exec siblings (this section's
-                                              # `exec`, below), then
-                                              # helpers, containers
-    def dial(self, channel: str) -> Connection
-    def exec(self, argv, *, interactive=False) -> ExecHandle   # see below
-    def console(self) -> Console | None       # §11
+    def destroy(self) -> KillReport                    # tree/group teardown of EVERYTHING
+                                                       # the jail names: every process's
+                                                       # group in start order, then
+                                                       # helpers, containers
+    def probe(self, battery) -> ProbeReport            # §12; absent when start is
+    # fields: report, spec, signatures, channels, compile_events, jail_id, jail_dir
+
+class Process:
+    def interrupt(self) -> bool         # SIGINT to its group; absent without a supervisor
+    def stop(self) -> KillReport        # the ladder, its group alone; same
+    def wait(self, timeout: float | None = None) -> int   # same
+    def alive(self) -> bool
     def exit_events(self) -> tuple[Event, ...]  # §11
-    def probe(self, battery) -> ProbeReport   # §12
+    def wait_ready(self, timeout: float) -> None    # decision-184, §10
+    def connect(self) -> socket                     # decision-185, §10: the verified dial
+    # fields: id, pid, start_time, argv, stdout_path, stderr_path, fidelity,
+    #         channel, bound_path, endpoint (decision-184)
 ```
 
-plus the fields an embedder reads rather than calls: `compile_events`, every
-mechanism sensor's `known_at_compile()` payload stamped at launch (§11);
-`report`, the `EnforcementReport` the stack compiled; and the identity pair
-`pid`/`start_time` (with `helper_pids`/`helper_stamps` beside it), which is
-what makes a recycled pid read as gone rather than as this jail — see "A pid
-is not an identity" below.
+`console` (§11) stays absent; §10's `dial` for a reserved channel is
+`Process.connect` (decision-185). The fields an embedder reads
+rather than calls: `compile_events`, every mechanism sensor's
+`known_at_compile()` payload stamped at `create` (§11); `report`, the
+`EnforcementReport` the stack compiled; and each process's identity pair
+`pid`/`start_time` (with the jail's `helper_pids`/`helper_stamps` in its
+dict), which is what makes a recycled pid read as gone rather than as this
+jail — see "A pid is not an identity" below.
 
 **An unimplemented capability is absent from the surface, never a raising stub.**
 The block above is the finished shape. A milestone that cannot yet honour one of
@@ -1072,7 +1515,7 @@ feature-detects; it is law 1's silent downgrade wearing an API's clothes.
 surface never named them.)
 
 **`interrupt` ships (2026-09-08, decision-151).** It was absent under exactly
-that law from M2 (ambiguity A10) until an embedder needed it: keel's sandbox
+that law from M2 (ambiguity A10) until an embedder needed it: its sandbox
 executor had to answer "stop that one action" and, with no interrupt, its only
 honest options were killing the whole jail — every other action in flight with
 it — or silently doing nothing. It is **`SIGINT` to the workload's process
@@ -1099,6 +1542,41 @@ implementation and not a description of it:
   terms: the pgid was read at spawn, and the blast radius is a signal.
 
 (Implementing task: this phase.)
+
+*Amended 2026-10-11 (implementing task: TASK-0077).* **A zombie is gone.** A
+process that has exited and awaits only its parent's `wait` (state `Z`, on Linux
+and darwin alike) runs nothing, but it stays in the process table, and
+`os.kill(pid, 0)` still succeeds on it. Where PID 1 does not reap (a container
+without an init, Docker without `--init`), a killed jail's orphans stay zombies
+for good, so a verification that counted them would read a dead jail as
+surviving, and `kill()` would report `FAILED` for a jail that ended. Both
+observations therefore skip zombies: the group-membership scan that verifies the
+ladder's last rung (`/bin/ps -Ao pid=,pgid=,stat=`, rows whose state starts with
+`Z` left out), and `alive()` (`identity_holds`, which reads the leader's state
+from `/proc/<pid>/stat` on Linux and `/bin/ps -o stat=` elsewhere). An
+unreadable state is not evidence of death: it reads as not a zombie.
+(Ruled 2026-10-11, decision-171.)
+
+*Amended 2026-10-11 (implementing task: TASK-0079.19).* **An embedder can ask
+whether a group still runs.** `Handle.alive()` answered for the leader only
+(since decision-181: for every process's leader and the jail's helpers), and
+`os.killpg(pgid, 0)` counts a zombie as running, so an embedder that sweeps dead
+jails never saw one end where PID 1 does not reap. brig
+exports `brig.run.group_alive(pgid) -> bool`: the same scan teardown's
+verification rung uses (`/bin/ps -Ao pid=,pgid=,stat=`, one function deciding
+membership, so the two cannot drift). A group with at least one member not in
+state `Z` reads alive; a group with no rows, or only `Z` rows, reads gone; when
+the process table cannot be read (`/bin/ps` missing or failing) it reads alive,
+so a sweep keeps what it cannot prove dead. The scan is injectable
+(`read_table=`) so that failure is testable. (Ruled 2026-10-11, decision-176.)
+
+*Amended 2026-10-11 after review (decision-176, TASK-0079.19).* "Cannot be
+read" includes a row that does not parse. Any non-blank row of the scan that is
+not exactly an integer pid, an integer pgid and a non-empty state (a header, a
+missing or an extra column) makes the table unreadable, because skipping it
+could read a live group as gone. `group_alive` reads that as alive; teardown's
+verification rung lets it reach the per-item boundary, so the item is `FAILED`
+(the group's end cannot be confirmed), never `ENDED`. Blank lines are skipped.
 
 **`exec` — a sibling process inside the same confinement** (the
 `docker exec -it` experience, for every stack). Semantics:
@@ -1137,6 +1615,12 @@ implementation and not a description of it:
   close. (decision-042: §9's teardown enumeration is illustrative, not
   exhaustive. decision-049: the clause is durability, not a named field, and the
   event-stream mechanism is compliant with it.)
+  *Amended 2026-10-12 (decision-181, TASK-0079.25):* the record is now a
+  directory per process, `<jail_dir>/procs/<id>/` (the first process's too),
+  written before `exec` returns and **never removed by `wait()`**: a record
+  outlives its process's wait, so `kill` still ends what a waited sibling left
+  in its group, and reports an empty one `ALREADY_GONE`. Nothing writes or
+  reads `execs/` any more.
 - Probes (§12) run *through* `exec`, which is what makes them exercise the
   real path — probe and exec are the same machinery, one canned and judged,
   one free-form.
@@ -1209,9 +1693,73 @@ that fast, but the claim is *narrowed by orders of magnitude*, not eliminated.
 And a launch that could not take the reading at all — the workload had already
 exited, microseconds in — records the stamp as unknown and degrades to exactly
 the pid-only behaviour that preceded this, which is no worse than before and
-says so at every call site. A pidfd (Linux) would close both; it is a future
+says so at every call site. (Teardown no longer degrades: decision-172, below.)
+A pidfd (Linux) would close both; it is a future
 mechanism decision, not an assumption this section makes. (decision-051,
 superseded here; decision-144's acceptance ends by its own terms.)
+
+*Amended 2026-10-11 (implementing task: TASK-0078).* **A record brig cannot
+verify is not kill authority.** An exec registration is a file under
+`<jail_dir>/execs/`, and a `jail_dir` writable from inside the jail is an
+arrangement this specification allows (the channel directory paragraph of §6
+calls a jail directory holding the workspace the ordinary one). A registration
+with an unknown stamp names a pid and a pgid and nothing that shows either is
+this jail's: `recycled()` has no stamp to compare, so it reads "not recycled",
+and the ladder used to run against whatever group the record named. A forged
+one could aim `SIGTERM` and `SIGKILL` at any group the trusted process may
+signal. So teardown's ladder now asks the record before it asks the group: an
+item whose stamp is unknown is **never signalled, and never reaped** (its pid
+may be some other child of the trusted process, whose exit status is not
+teardown's to take). It reports `ALREADY_GONE` when a fresh group scan finds no
+live member, and otherwise `FAILED`, with a detail saying no start time was
+recorded and nothing was signalled: something may still run that teardown would
+not touch, and the report says so rather than reading as ended. This holds for
+every item alike (the workload group, an exec sibling, a helper), so a workload
+whose leader exited before its stamp could be read, leaving children in its
+group, is now reported `FAILED` rather than ended by a signal brig could not
+justify. `alive()` and `interrupt()` keep decision-155's degraded pid check.
+What this does not close: a record whose stamp is present but whose pid names
+nothing still lets the ladder signal its pgid (the reaped-leader case above
+needs that), so a jail that can write its `jail_dir` can still forge one; that
+is a question of where records live, not of how they are read. (Ruled
+2026-10-11, decision-172.) (A write root at or above the `jail_dir` no longer
+makes it writable: decision-173, §5. Nor does a channel endpoint placed
+directly in it, on bwrap: that layout is refused, decision-174, §5.)
+
+*Amended 2026-10-11 (implementing task: TASK-0079.14).* **Teardown is total: a
+registration brig cannot read is an item, not a stop.** `kill_jail` used to read
+the registration directory with a function that raised on a file it could not
+parse, so one such file ended the call after the workload group and left every
+exec sibling and every helper running. No jail can write its `jail_dir` any more
+(decision-173, decision-174), so a registration is the launcher's own and the
+unreadable one is what tampering on the host or a broken disk leaves; teardown
+still must not stop on it. A registration file that is not valid UTF-8 JSON, is
+not an object, lacks `pid`, `pgid` or `start_time`, or holds the wrong type for
+one, becomes its own `exec_sibling` item: `FAILED`, its identity the file's
+path, its detail naming the file and what was wrong with it, saying nothing it
+names was signalled, and telling the reader to inspect it (and end any process
+of the jail it names, by hand). Nothing a file like that names is ever
+signalled. Every other sibling, the workload group and the helpers are torn down
+as before, and the unreadable items follow the readable ones in the report. A
+file that vanishes between the listing and the read was deregistered meanwhile
+and is skipped. Registrations are written whole and renamed into place, so a
+crash mid-write leaves a `.partial` file teardown never lists, not a truncated
+registration; only tampering or a disk fault yields an unreadable one. The
+residual decision-172 states (a stamp present, a pid naming nothing) is closed
+by where records live now: such a registration is genuine, its leader reaped,
+and teardown ends its group. (Ruled 2026-10-11, decision-175.)
+
+*Amended 2026-10-11 after review (decision-175, TASK-0079.14).* The paragraph
+above promised more than it did: "torn down as before" held for an unparseable
+file but not for a well-formed one that lied. Now (1) a pid or pgid outside the
+range a process id can hold (2 up to 2**31 - 1) makes the file unreadable, so
+`0`, `1`, negative and huge ids never reach a signal call; (2) teardown never
+signals the trusted process's own group or a pgid of 0 or 1, for any item
+(workload, sibling, helper): such an item is `FAILED` with a detail saying
+nothing was signalled; and (3) each item's ladder runs inside one boundary that
+turns an unexpected `Exception` (a `ps` that failed, a pid the OS rejects) into
+that item's `FAILED` outcome, its detail naming the exception and what to do, so
+`kill_jail` raises nothing from an item and one item never stops the next.
 
 The handle is the fix for two documented failure classes in prior art: kill
 paths that lose a container's identity when a relay pid dies (identity lives
@@ -1234,7 +1782,7 @@ and `exec` composes `{**os.environ, **jail_env}` fresh at exec time in every
 fidelity case, which is what it already did whenever the wrap prefix was
 non-empty. **A serialized handle is now plain enough to live in the embedder's
 own log**, which is where handle persistence belongs: the log is already the
-durable record of the session, and a handle in it is a handle a later process
+durable record of the embedder's work, and a handle in it is a handle a later process
 can rehydrate and kill with nothing else. (Implementing task: this phase.)
 
 **The exit status is readable again, and it is not a log (2026-09-08,
@@ -1246,6 +1794,8 @@ handle, the shape an embedder uses to clean up after a runtime that died
 holding a jail, could tear that jail down but never say how it ended. That is
 given back here, without the stream: **the launcher runs the workload under a
 tiny wrapper that writes the status to `<jail_dir>/exit`, once, atomically**
+(since decision-181 every process, siblings included, runs under one of its own,
+writing `<jail_dir>/procs/<id>/exit`)
 (written to a temporary name and renamed, so a reader sees a complete status
 or no file). One line, one write, no appender, no tail, nothing to rotate —
 the objections that killed the stream do not apply to a file whose entire
@@ -1318,14 +1868,303 @@ workload is spawned, and a non-zero exit refuses the launch rather than
 starting a workload behind a preparation step that failed. (Ruled 2026-08-29,
 decision-132.)
 
+### The Jail and its processes (2026-10-12, decision-181)
+
+decision-0001's migration step 3a; §3 has the order `Handle` is retired in,
+§8 the runtime's half. Once TASK-0079.28 lands, this is the section's shape:
+
+```python
+class Jail:
+    @classmethod
+    def create(cls, jail: CompiledJail, *, runtime: Runtime, cwd: str,
+               jail_id: str, jail_dir: str, tether: int | None = None) -> Jail
+    def to_dict(self) -> dict: ...
+    @classmethod
+    def from_dict(cls, d, *, runtimes: Mapping[RuntimeKind, Runtime]) -> Jail
+
+    def start(self, argv, *, cwd: str | None = None,
+              io: IoPolicy = IoPolicy()) -> Process  # absent without a supervisor
+    def processes(self) -> tuple[Process, ...]          # start order
+    def alive(self) -> bool
+    def destroy(self) -> KillReport                    # every process, then helpers
+    def wait_ready(self, channel: str, timeout: float) -> None
+    def probe(self, battery) -> ProbeReport            # absent when start is
+    # fields: report, spec, signatures, channels, compile_events, jail_id, jail_dir
+
+class Process:
+    def interrupt(self) -> bool         # SIGINT to its group; absent without a supervisor
+    def stop(self) -> KillReport        # the ladder, its group alone; same
+    def wait(self, timeout: float | None = None) -> int   # same
+    def alive(self) -> bool
+    def exit_events(self) -> tuple[Event, ...]
+    # fields: id, pid, start_time, argv, stdout_path, stderr_path, fidelity
+```
+
+`Handle.kill` is `Jail.destroy`; `Handle.exec` is `Jail.start` (`interactive`
+goes: it could only refuse, for want of `PTY`, and a parameter only one value
+of which works is a raising stub, so it returns with a runtime that has
+`PTY`); `stat` and `JailStat` go (`alive`, `processes()` and `report` answer
+them); `dial` and `console` stay absent. `ExecFidelity` keeps its three
+values on `Process.fidelity`; a process-scope control grade beside it is
+TASK-0079.08's. A start's channel is decision-184's (§10, TASK-0079.05).
+
+**Each process has a record and an exit record of its own.** A start makes
+`<jail_dir>/procs/<id>/`, `<id>` a fresh token per start (never a pid, never
+reused), before it spawns, and the process's stdio files go there. Once the
+spawn returns, the host writes `record.json` beside them (id, start order,
+pid, pgid, start stamp, argv, stdio paths), whole, to a temporary name
+renamed into place, as registrations are written now. The process's own exit
+wrapper writes `exit` there (decision-156, unchanged but for the path). This
+replaces `<jail_dir>/execs/` and `<jail_dir>/exit`, and settles decision-162
+for good: a status belongs to one process id and can't be read as another
+process's. Between the directory and the record a process runs unrecorded for
+the length of a spawn; in a tethered jail it is tethered from before its
+workload starts, so an embedder that dies in that window takes it down.
+
+- **A record outlives its process's `wait`.** Today the first `wait()` on a
+  sibling deletes its registration, so a teardown after it skips the
+  sibling's group, and anything the sibling left running in that group
+  escapes `kill`. Now `wait` deletes nothing: `destroy` runs the ladder for
+  every record, and one whose group is empty reports `ALREADY_GONE`. A report
+  after a waited sibling gains that item; nothing else in it changes.
+- **`create` over a used `jail_dir`.** Records left by an earlier jail are
+  removed by `create` only once nothing they name runs, and it decides that
+  per record as teardown does, the stamp before the group: a record whose
+  leader holds its identity (decision-155) runs; one whose leader's pid now
+  names another process (recycled, or a planted record naming a stranger) no
+  longer holds that group, whatever `group_alive` says of its pgid; one whose
+  leader is gone runs while its group has a live member (`group_alive`, the
+  reaped-leader case). A recycled leader means an empty group: the kernel
+  hands out a pid again only once no process group of that number has a
+  member, and a leader's pid is its group's pgid. So a recycled pgid can't
+  hold the directory forever, and a live jail's records are never removed. **On any doubt it refuses and
+  removes nothing**: a record that can't be read, has an unknown stamp
+  (decision-172), or names an id out of range, a process table that can't be
+  read, or anything under `procs/` that is not a directory brig made (a link,
+  a file). While anything runs or is in doubt, `create` refuses, naming the
+  directory and what holds it, and saying to destroy that jail or choose
+  another directory. The removal follows no links: it opens each entry
+  beneath `procs/` without following a symlink (`O_NOFOLLOW`, directory file
+  descriptors), because on a stack without an `fs_write` mechanism the jail
+  could write that directory. Removing a gone jail's records gives up
+  authority over nothing.
+- **Teardown keeps every guard.** The ladder (§9 above) runs per record in
+  start order, then per helper, with decision-155 (a recycled pid is gone,
+  nothing signalled), decision-171 (a zombie is gone), decision-172 (an
+  unknown stamp is never signalled or reaped) and decision-175 (a record that
+  can't be read, or names an id out of range, is its own `FAILED` item, its
+  identity the file's path; the trusted process's own group, 0 and 1 are
+  never signalled; no item stops the next) unchanged.
+
+**Records are kill authority, so no grant reaches them.** The jail never
+writes a record: the host writes `record.json`, and the exit wrapper is a
+host-side program outside the jail's `wrap`. Where they live is the other
+half. bwrap and seatbelt seal the `jail_dir` against every write root
+(decision-173) and grant inside it only `<jail_dir>/tmp` and a LISTEN
+channel's own grant; bwrap refuses an endpoint directly in the `jail_dir`
+(decision-174). That left a gap, planted on 2026-10-12 (TASK-0079.04's
+notes): an endpoint at `<jail_dir>/execs/k.sock` compiles under
+`strict_linux()` and binds `<jail_dir>/execs` read-write into the jail, the
+directory teardown signals by. So **every mechanism that compiles a LISTEN
+channel refuses an endpoint at or under brig's records** (`<jail_dir>/procs`;
+`<jail_dir>/execs` too until decision-183 deleted it), testing the lexical
+and the resolved parent as TASK-0079.17 does, with a `ValueError` naming the
+endpoint and the records directory and saying to put the endpoint in a
+subdirectory of its own (`<jail_dir>/chan/`) or outside the `jail_dir`.
+seatbelt refuses it too: its grant is the socket's literal path, but a socket
+created at a record's path is a record the host can't read. The scratch name
+`tmp` never holds a record. Grades are unchanged (a refusal grades nothing).
+
+**A stack with no `fs_write` mechanism seals nothing**, and the ruling does
+not refuse it: the empty stack, `env_scrub` or `rlimits` alone grade
+`fs_write` `unenforced`, and their workload runs with the embedder's own uid
+and no namespace, so it can already signal every group a forged record could
+name. A forged record gives it nothing it lacks; every guard above still
+holds (an unknown stamp is never signalled, a recycled pid never, the
+embedder's own group never).
+
+**A jail is rehydrated with the embedder's runtimes.** `to_dict` carries what
+`Handle.to_dict` carries but the first process's fields, plus `runtime` (the
+`RuntimeKind` that made it), `tethered`, and `processes`, the records known
+when it was called; `HANDLE_VERSION` is 6, and an older dict is refused, as
+every bump before. `Jail.from_dict(d, runtimes=...)` takes the runtimes from
+the embedder, never from the dict: a dict naming a kind the embedder did not
+pass, or one whose runtime's own `kind` differs, is refused (law 2), naming
+the kind and saying what to pass. The dict is the authority for the processes
+it names; a record on disk for one of them that disagrees is not used.
+`destroy` still runs the ladder for the identity the dict names, under the
+same stamp guards (a recycled pid is gone and nothing is signalled,
+decision-155; an unknown stamp is never signalled, decision-172), so the
+process the dict names is ended, as teardown-total requires (decision-175);
+only the disk copy becomes its own `FAILED` item, its identity the file's
+path, signalling nothing it names. A
+record on disk the dict does not name is a later start and is read like any
+other. A rehydrated jail reads each process's exit record, so `wait` answers
+for every process, siblings included.
+
+**`start` is absent, not raising, when a jail cannot start.** That is when
+its runtime has no supervisor (`Runtime.supervisor` returns `None`), and when
+it was created tethered in another process: the tether's fd did not cross
+`to_dict`, and a start there would run untethered. `hasattr(jail, "start")`
+is false then, and `probe` goes with it. `Process.interrupt`, `stop` and
+`wait` are absent on a process of a jail with no supervisor; `destroy` is
+always there.
+
+**Probes run as processes.** `jail.probe(battery)` is `battery.run(jail)`:
+each probe is a `jail.start`, waited with its deadline and read from its own
+stdio files, and its record stays for `destroy` like any process's. §12's
+"through `exec`" reads "through `start`".
+
+**The fake runtime has a kind of its own.** `FakeRuntime.kind` was `HOST`, so
+once records are sent to runtimes by kind a fake's record would reach
+`HostRuntime`. `RuntimeKind.FAKE` is added to `core`, with static grades
+`unenforced` on both runtime axes and a detail saying it is a test double; no
+mechanism names it, so no compiled jail has it. `Jail.create` accepts a
+runtime whose kind is the compiled jail's, or `FAKE` standing in for any
+(the report keeps the compiled kind's grades); the jail's record says `FAKE`,
+so `from_dict` sends it only to the runtime passed under `FAKE`, and a fake
+record rehydrated with only `HostRuntime` passed is refused. The kind is
+TASK-0079.25's; the refusal, and its test, are TASK-0079.26's, since
+`from_dict(runtimes=)` arrives there.
+
+**Settled by TASK-0079.25 (2026-10-12, no new ruling).** Seven points the
+review left to the implementation, and three edges it found:
+
+1. **The sentinel.** `create` derives `wrap_prefix` from `wrap` applied to two
+   tokens that each hold a NUL (`"\0brig-wrap-sentinel-argv0"`, `"…argv1"`).
+   No argv `execve` takes can hold a NUL, so it never equals an argv a start is
+   asked for; a wrap that rewrites either token (or appends, or drops) derives
+   no prefix and every start refuses; in the creating process each start also
+   checks `wrap` of its own argv.
+2. **A start on a tether that has ended is refused** (`TetherClosed`), before
+   anything is made: a process started then would be killed at once by its own
+   watcher. A tether that ends after the check is the watcher's to act on.
+3. **The jail's tether fd.** `create` duplicates the read end (not
+   inheritable) and the creating process holds the duplicate in memory, so the
+   embedder may close its own once `create` returns, as after `launch` before.
+   Each start passes it to its own wrapper alone (`pass_fds`); the wrapper hands
+   it to its watcher and closes its copy. The duplicate is closed when the
+   last in-memory holder is collected, never by `destroy`.
+4. **The id** is 16 lowercase hex characters (64 bits from `secrets`). Read
+   back, only a name that is exactly that is an id, and a record's own `id`
+   must equal its directory's name; anything else under `procs/` is an
+   unreadable entry (teardown: a `FAILED` item; `create`: a doubt).
+5. **A `record.json` that can't be written** after the spawn: the start ends
+   the process's group through the ladder (every guard), removes its records
+   directory once it is gone, and re-raises the error with a note saying so.
+6. **What `create` removes** of an earlier jail: the whole `procs/` tree
+   (records, exit records, stdio), all or nothing. The jail directory's
+   top-level files (staged files, helper logs) are overwritten as before; the
+   old layout's `exit` and `execs/` are read by nothing and left alone.
+7. **bh-02's runner tests** assert no `KillReport` item beyond "every item
+   ended or already gone", and the runner never starts a sibling, so a waited
+   sibling's new `ALREADY_GONE` item changes none of them.
+
+And: **a stdio name may not be a record's** (`IoPolicy` refuses a name that is
+not one plain file name, is `record.json`, `exit` or their `.partial`, or
+names both streams the same); **a start whose argv can't be spawned** ends its
+wrapper's group (its watcher with it) and removes its records directory, so
+nothing is left to hold the jail directory; and **a launch whose first start
+fails** destroys what `create` started (its `JAIL_LIFETIME` helpers).
+
+Implementing tasks: TASK-0079.25 for the records, `create` with no process,
+the per-start wrapper and tether (§8), the refusal that keeps every grant off
+the records, and the fake's own kind; TASK-0079.26 for `Jail` and
+`Process`, `to_dict`/`from_dict` and `HANDLE_VERSION` 6 (the refusal of a fake
+record with only `HostRuntime` passed among it), `start` absent, and
+probes; TASK-0079.27 for bh-02's runner; TASK-0079.28 for retiring `Handle`
+and this section's old shape. (Ruled 2026-10-12, decision-181.)
+
+**Settled by TASK-0079.26 (2026-10-12, no new ruling).** What the ruling left
+to the implementation of `Jail` and `Process` (`brig/run/jail.py`):
+
+1. **Absent is an attribute that is not there.** `Jail.start` and
+   `Jail.probe`, and `Process.interrupt`, `stop` and `wait`, are properties
+   that raise `AttributeError` when the call is absent, so `hasattr` is false
+   and `getattr(jail, "start", None)` is `None`, while a type checker still
+   knows the call's signature where it is present. One class each, no
+   subclass per case.
+2. **The runtime answers for processes.** `Runtime` gains `processes(jail)`
+   (the ones the record holds, then every other one the runtime finds, in
+   start order; a disk copy of a held process is never used in its place) and
+   `process_alive(jail, process)` (its leader holds its identity), which
+   `Jail.processes()` and `Process.alive()` delegate to, as every other call
+   does.
+3. **What a jail holds in memory.** The processes its dict named, then every
+   process it started itself, in start order: these are what it "knows", and
+   `destroy` ends them by the identity it holds. A disk record **disagrees**
+   when any field but `order` differs (`order` only sorts; a `Handle`, which
+   carries no order, names its first process with 0).
+4. **The dict.** `version` (6), `runtime`, `tethered`, `jail_id`, `jail_dir`,
+   `cwd`, `jail_env`, `wrap_prefix`, `spec`, `report`, `signatures`,
+   `channels`, `compile_events`, `helper_pids`, `helper_stamps` and
+   `processes` (each a record's own fields, checked as a `record.json` is: an
+   id brig makes, ids unique). `launcher_name` gives way to `runtime`: a jail
+   has no launcher. `Handle`'s dict is unchanged in shape and is written as 6
+   too, until TASK-0079.28 deletes it; nothing persists one across the bump
+   (bh-02 never calls `Handle.from_dict`).
+5. **`Jail.create` refuses a runtime of another kind** (`ValueError`, naming
+   both kinds), unless it is `FAKE`, as the ruling says.
+6. **A refused start changes nothing** (`ExecWrapNotAPrefix`, `TetherClosed`):
+   the jail is the embedder's, to start again or destroy. The launcher, which
+   creates and starts in one call and hands nobody a jail when the start is
+   refused, destroys what `create` started, as TASK-0079.25 settled; a test
+   now shows the helper ended.
+7. **`Handle.probe` runs through `jail.start` too**: it builds the `Jail` its
+   handle describes (its runtime, its first process known, its tether hold)
+   and probes that, so every battery runs as processes until
+   TASK-0079.28 deletes `Handle`.
+8. **The dict alone can't say untethered** (review 1). `create` writes the
+   jail's own record, `<jail_dir>/jail.json` (its id and whether it is
+   tethered; sealed from the jail as the rest of the jail directory is,
+   decision-173), and `Runtime.tethered` reads it. A rehydrated jail has
+   `start` only when its dict and that record both say untethered: a record
+   missing, unreadable, naming another jail or saying tethered means absent,
+   so a hand-edited dict can't start a process untethered in a tethered jail.
+   The residual: on a stack with no `fs_write` mechanism nothing seals the
+   jail directory, so a workload that can also edit the dict could rewrite
+   `jail.json` too, as it could every record there; that stack's `fs_write`
+   grade already says so.
+   A disagreeing disk copy's `FAILED` item takes the held process's kind.
+
+Implementing task: TASK-0079.26.
+
+**`wait` means gone, where it can (2026-10-12, decision-182).** The exit
+wrapper writes its process's exit record just before it exits, so a `wait()`
+that answered on the record let a `create` into the same `jail_dir` meet a
+wrapper that still ran, and refuse (`JailDirInUse`, rightly by decision-181)
+in about one run in ten. Ruled: in the process that started a process,
+`wait()` answers only once its exit wrapper has exited and been reaped (that
+process's own waiter record; the exit record is not read while the waiter owns
+the reap), so the process's group has no running leader when it returns and
+`create` into the same `jail_dir` right after never refuses on it. A
+rehydrated handle's `wait()` (any process but the starter) cannot reap: it
+guarantees only that the exit record exists, and the wrapper may still be
+leaving for a moment. `create`'s refusal is not weakened for that window
+(refuse while anything recorded runs, and on doubt); it now names each held
+process's pid and group and says that a process already waited for elsewhere
+is still leaving, to wait a moment and retry, or to destroy the jail.
+Implementing task: TASK-0079.30. (Ruled 2026-10-12, decision-182.)
+
+*Amended 2026-10-12 (decision-182, TASK-0079.30 review):* once the waiter has
+reaped, an exit record that exists wins over the waiter's status, and the
+waiter's is used only where there is none. The record is the workload's own
+status ("recorded, not invented"); the waiter's is the wrapper's, which differs
+when teardown kills the wrapper after it wrote. `wait()` returning means the
+process's leader has left; a workload that left children in its group still
+holds the jail directory, and `create` rightly refuses until they are gone.
+
 ## 10. Communication with jails
 
 Three inbound kinds, each with different liveness, trust, and delivery:
 
 1. **Request channel** — synchronous, duplex, framed (length-prefix, CRC,
-   resynchronizable). The jail LISTENs on a declared endpoint; the trusted
-   side dials via `handle.dial()`. Each mechanism compiles the crossing
-   (Seatbelt bind rules, bwrap socket-dir bind, container relay). Readiness
+   resynchronizable). The `Spec` declares the channel by name; the jail
+   LISTENs on a socket the runtime reserves for it in the jail's channel
+   directory, and the trusted side dials it via `process.connect()`
+   (decision-184, decision-185, decision-186). Each mechanism compiles the
+   crossing (Seatbelt's grant on the channel directory, bwrap's bind of it,
+   a container relay). Readiness
    is generic: a LISTEN channel is ready when its bind is observable.
    **Observable means a connect succeeds** — not that the endpoint path
    exists. A socket file outlives the process that bound it, so path existence
@@ -1340,6 +2179,236 @@ Three inbound kinds, each with different liveness, trust, and delivery:
    real list. A read-write console attach is a channel request, policy-gated,
    not an observation feature.
 
+**A channel directory per jail, and a socket reserved before each start
+(2026-10-12, decision-184).** decision-0001's migration step 3b, its first
+part. Until now a channel's socket was a path the `Spec` names, compiled at
+launch, so a running jail could not take a new socket and two processes in one
+jail could not each have their own. Ruled:
+
+- **The runtime owns one channel directory per jail, `<jail_dir>/chan`.** Its
+  name is brig's, beside `tmp`, `procs` and `jail.json`, never a `Spec` path:
+  `core.runtime.channel_dir(jail_dir)`, which `CompileCtx.channel_dir` derives
+  from the resolved `jail_dir`, so no context names it by hand. `HostRuntime.create`
+  makes it (mode 0700) before any start and refuses an entry there that is not a
+  directory it could have made (a link, a file), since a bind follows a link.
+  When the `Spec` declares a channel, each mechanism that compiles `fs_write`
+  grants it at create, once for the jail, **beside** today's per-endpoint
+  grants, which stay (§5's channels keep their `endpoint` until
+  TASK-0079.32): bwrap binds it read-write at stage 4, deduplicated with an
+  endpoint directory that is the same, and binds it again after the seal
+  (stage 5b) as it does a channel directory inside the jail directory;
+  seatbelt emits `(allow file-write* (subpath CHAN))` after the seal and before
+  the carve-outs, so a `write_denies` under it still wins. A `write_denies`
+  entry at or above the channel directory is refused in both
+  (`ChannelInsideWriteDeny`): the channel could not work there. A `Spec` with no
+  channel gets no grant, and its compile is unchanged. seatbelt's half is
+  checked by its rendered profile only (no darwin host runs brig's tiers here);
+  the tests that pin it say so.
+- **It squares with the jail directory's rulings by construction.**
+  decision-173's seal still covers the rest of the jail directory: `chan/`
+  joins `tmp/` as what stays writable inside it, and it is a subdirectory, so
+  decision-174's refusal (no grant whose directory IS the jail directory) and
+  decision-181's (no grant at or under `procs/`) are never reached by it. Their
+  tests stand unchanged.
+- **Reserve, then start (the owner's choice, 2026-10-12).**
+  `jail.channel(name)` reserves a socket in the channel directory for a channel
+  the `Spec` declares, and returns a `Reservation`: the channel's name, the
+  path the process binds inside the jail (`bound_path`), and the host path the
+  embedder dials (`endpoint`). An undeclared name is refused
+  (`UnknownChannel`), saying to declare it in the `Spec`'s `channels`. The
+  embedder puts `bound_path` in the argv it starts and passes the reservation:
+  `jail.start(argv, channel=reservation)`. No environment variable carries it,
+  so nothing an env mechanism strips can lose it, and it works on every jail
+  type now. The reservation is the runtime's (`Runtime.reserve`):
+  `HostRuntime` names it `<chan>/<16 lowercase hex>.sock`, fresh per call, and
+  its in-jail and host paths are the same path. `Supervisor.start` takes
+  `channel: Reservation | None` and refuses (`ReservationRefused`, a
+  `ValueError`, before anything is made or spawned) a reservation that is not
+  its own: one whose path is not directly in this jail's channel directory under
+  a name it makes, whose endpoint is not the one it would hand out, or that a
+  process the jail knows already binds. A process holds one socket, so the host
+  stamps provenance by socket (law 6).
+- **The process carries its channel.** `ProcessRecord` (and `record.json`) gain
+  `channel` and `bound_path`, both `null` for a process started with none; an
+  older record lacks them and reads unreadable, a doubt like any other.
+  `Process` carries `channel`, `bound_path` and `endpoint`, and the jail's dict
+  carries the records, so `JAIL_VERSION` is 7.
+- **Readiness and the host path belong to the runtime.** `Runtime.endpoint(jail,
+  process)` resolves a process's channel to the host path to dial (`None`
+  without one), and `Runtime.ready(jail, process)` says whether it accepts a
+  connection now: for `HostRuntime` a connect that succeeds, never the path's
+  existence (§10.1). `Process.wait_ready(timeout)` polls it and raises
+  `WaitReadyTimeout`. The fake runtime mirrors it: its endpoint is a relay path
+  apart from the bound one, as a runtime that shares no socket with the host
+  would hand out, and its readiness is a flag. `Jail.wait_ready(channel)` stays
+  for a channel's declared endpoint until TASK-0079.32.
+- **Residual, named.** A socket in the channel directory is reachable by every
+  process of its jail until each has a mount namespace of its own
+  (TASK-0079.07): a co-tenant's socket is shared media, not a channel to the
+  host (decision-0001), and `channel_exclusivity` stays `unenforced` (§7). A
+  link a process plants in the channel directory is dialled by the host as
+  found, as a link in a per-endpoint directory always was. Grades are
+  otherwise unchanged. *Amended by decision-185 (below, 2026-10-12): the host
+  no longer dials a reserved socket as found.*
+
+Implementing task: TASK-0079.05; bh-02's runner moves to it in TASK-0079.31,
+and the `Spec` stops naming paths in TASK-0079.32. (Ruled 2026-10-12,
+decision-184.) *Amended by decision-186 (below, 2026-10-13): the per-endpoint
+grants and `Jail.wait_ready(channel)` are gone, and the channel directory is
+every channel's one grant.*
+
+**The host dials a reserved socket only through a check of what answers
+(2026-10-12, decision-185).** decision-184 left a confused deputy named as a
+residual: the channel directory is writable from the jail, so any process of it
+(a co-tenant included, since a sibling's reserved name is in its argv) can put a
+symbolic link at a reserved socket's path pointing at a host socket outside the
+jail, and the host's readiness connect and the embedder's dial followed it,
+reaching whatever the host's user can reach (a container daemon, an agent, a
+session bus) and speaking the embedder's protocol there. A review planted one
+and `Process.wait_ready` reported ready. Ruled, superseding that residual:
+
+- **One verified dial, `Runtime.connect(jail, process)`, and readiness is it.**
+  It returns a connected `AF_UNIX` stream socket to `process`'s channel, or
+  raises: `EndpointRefused` (a `RuntimeError`; `endpoint` and `reason` are its
+  fields) when what is there is not the process's own listener, and an
+  `OSError` while nothing listens yet (`FileNotFoundError`, nothing bound;
+  `ConnectionRefusedError`, bound with no listener). `Runtime.ready` is that
+  same dial, closed at once: `False` on the `OSError`, and the refusal raised,
+  never read as "not yet", so `Process.wait_ready` fails at once on a planted
+  endpoint instead of waiting it out. `Process.connect()` is the embedder's
+  face of it, and **the only documented way to dial a reserved channel**:
+  `Process.endpoint` stays a field (for logs and errors), and dialling it raw
+  skips the check. This is §10.1's `dial` for a reserved channel; bh-02's
+  owners move to it in TASK-0079.31.
+- **Before connecting, the path is a socket and not a link.** `HostRuntime`
+  `lstat`s the endpoint and refuses a link, or anything else that is not a
+  socket, without connecting. This alone is a race (the jail can swap a link
+  in between the `lstat` and the `connect`), so it is the cheap half: it keeps
+  the host from opening a connection to a planted target at all in the common
+  case.
+- **After connecting, the peer is a process of that process's group, the
+  guarantee.** The kernel's record of who listens (`SO_PEERCRED` on Linux, the
+  pid of the process that called `listen`, as the host's pid namespace numbers
+  it) names the peer; brig reads its process group and requires it to be the
+  started process's own (`ProcessRecord.pgid`), with the group's leader still
+  holding its recorded identity, read after the peer's group, so the group's
+  number cannot have passed to a stranger in between (decision-155; an
+  `UNKNOWN` stamp is no identity and refuses, as decision-172 reads one).
+  Otherwise the socket is closed and `EndpointRefused` raised, having sent
+  nothing. The group, not the jail's processes or descent from the leader:
+  brig's control is group-shaped (§9, law 7), every host start leads a group of
+  its own (`start_new_session`), and bwrap emits no `--new-session` (§6), so a
+  workload and everything it forks stay in it; with a pid namespace a
+  co-tenant is another start's group and is refused, which closes
+  decision-184's co-tenant residual for the host's dial (not for the
+  co-tenants themselves, TASK-0079.07's). Without one (the empty stack, all
+  host starts in one session) a co-tenant could setpgid into a sibling's
+  group and pass as it: never a host socket, but the residual stands there.
+  Descent was
+  rejected: an orphan reparents out of it on a host without a pid namespace,
+  and the process table must be walked to see it. A listener that left its
+  group (`setsid`) is refused, which is the safe direction. A nested pid
+  namespace changes nothing: the kernel numbers the peer in the reader's
+  namespace, and a peer it cannot number reads as pid 0 and is refused.
+- **A listener that has left is refused, where the kernel can say so.** A pid
+  names the process that listened, which may have exited and had its number
+  reused (a daemon that forks after `listen`). Where Linux offers
+  `SO_PEERPIDFD` (6.5 and later), brig takes the listener's pidfd and
+  requires it alive both before and after reading the group, so the pid cannot
+  name a newcomer; where it does not (an older kernel), the pid alone is read,
+  and a jail that could take a dead listener's host pid inside its own group
+  remains a residual, named here. darwin reads `LOCAL_PEERPID` and has no
+  pidfd, so the same residual holds there; that path is written from the
+  platform's headers and is unverified, since no darwin host runs brig's tiers
+  here. A platform where brig reads no peer refuses every dial
+  (`EndpointRefused`): no grade rises on it, and a channel there does not
+  connect rather than connecting unchecked.
+- **Unchanged.** Grades (no axis claims this; it is the host's own safety, not
+  the workload's confinement), `HostSupervisor.start`'s refusal of a foreign
+  reservation (decision-184), and `Jail.wait_ready(channel)` for a channel's
+  declared endpoint, which still connects as found until TASK-0079.32 retires
+  it. The fake runtime mirrors the seam: its `connect` hands back one end of a
+  socket pair while `listening`, raises `ConnectionRefusedError` otherwise, and
+  raises `EndpointRefused` with its `refusal` when one is set, through
+  `ready` too.
+
+Implementing task: TASK-0079.33. (Ruled 2026-10-12, decision-185.)
+*Amended by decision-186 (below, 2026-10-13): `Jail.wait_ready(channel)` is
+gone, and a peer the kernel can't report is a refusal, not "not yet".*
+
+**The Spec names channels, not host paths (2026-10-13, decision-186).**
+decision-0001's migration step 3b, its third part. decision-184 gave each jail
+a channel directory and kept, beside it, the path each `Channel` declared
+(`endpoint`): a grant per endpoint in every mechanism, three refusals about
+where an endpoint may sit, and `Jail.wait_ready(channel)`, which dialled it as
+found. A `Spec` is policy, and where a socket lives is the runtime's (a
+container or a remote sandbox shares no host path with it). Ruled:
+
+- **`Channel(name, kind)`.** A channel is a name the `Spec` declares and its
+  kind (`LISTEN`, §5); it names no path. Every socket is one the runtime
+  reserves in the jail's channel directory (`jail.channel(name)`, decision-184),
+  and only a declared name can be reserved (`UnknownChannel`). `SPEC_VERSION`
+  is 2 (a version-1 dict, whose channels carry `endpoint`, is refused as any
+  other version is), and `JAIL_VERSION` is 8, since a jail's dict carries its
+  channels.
+- **The channel directory is every channel's one grant.** When the `Spec`
+  declares a channel, each mechanism that compiles `fs_write` grants
+  `<jail_dir>/chan` as decision-184 ruled (bwrap: bound read-write at stage 4,
+  and again after the seal when there is one; seatbelt: its subpath after the
+  seal and before the carve-outs), and nothing else for channels: bwrap's
+  endpoint directory and seatbelt's socket literal are gone. seatbelt's
+  unscoped `(allow network-bind)` still follows a declared channel and nothing
+  else. A `Spec` with no channel compiles as before.
+- **The three refusals about where an endpoint may sit, restated for the
+  channel directory.** Each guarded a grant that a path chosen by the `Spec`
+  could aim; the grant is now one brig names, so each holds by construction and
+  its test asserts the positive, with a plant that aims the grant elsewhere:
+  - *decision-174 (no channel grant is the jail directory):* the channel
+    directory is a subdirectory brig derives from the jail directory
+    (`channel_dir`), never the jail directory, so a channel never makes the
+    jail directory writable; decision-173's seal is unchanged.
+    `ChannelInsideJailDir` goes with the endpoints.
+  - *decision-181 (no grant at or under the records):* `chan` and `procs` are
+    siblings in the jail directory, so no channel grant reaches a record.
+    `ChannelOnRecords` and `refuse_channel_on_records` go with the endpoints.
+    A reservation is still refused unless its path is directly in the channel
+    directory under a name the runtime makes (decision-184).
+  - *The write-deny refusal (`ChannelInsideWriteDeny`):* a socket cannot be
+    bound under a carve-out, so what is refused is a `write_denies` entry at or
+    above the channel directory, in both mechanisms (decision-184's half). The
+    half that refused an endpoint under a carve-out goes with the endpoints. A
+    `write_denies` entry strictly inside the channel directory still wins over
+    it (bwrap mounts it after, seatbelt emits it after).
+- **`narrowed_to` meets channels by name.** Its refusal of one channel name
+  bound to a different endpoint in each operand had nothing left to compare: a
+  name in both operands declares the same channel, so the meet keeps the names
+  both declare and `IncomparableSpecs` is raised for differing read models only
+  (§5). The channels clause of `is_subset_of` is unchanged: a child's channel
+  names are among its parent's.
+- **The network battery binds a reserved socket.** Its positive control for a
+  `Spec` that declares a channel binds a socket the jail reserved for it
+  (`network_battery(spec, denied_address=..., channel=jail.channel(name))`),
+  the one action every mechanism grants for a channel, and it is named
+  `bind_a_reserved_channel_socket`. Construction refuses a `Spec` that
+  declares a channel without a reservation, or with one for a channel it does
+  not declare, as it refuses a `Spec` with no network action (decision-117).
+- **`Jail.wait_ready(channel)` is gone**, with the readiness helper that
+  connected to a declared endpoint as found (decision-185 named it the one dial
+  left unchecked). Readiness is `Process.wait_ready`, and the dial
+  `Process.connect`, both through the runtime's verified dial.
+- **A peer the kernel can't report is a refusal.** `HostRuntime.ready` read any
+  `OSError` from the dial as "nothing listens yet", and a failed read of the
+  peer after a connect succeeded is one, so `Process.wait_ready` waited out its
+  timeout on a socket that answered (found in TASK-0079.33's review). `dial`
+  now closes the connection and raises `EndpointRefused` naming the error when
+  the peer can't be read; only the path's `lstat` and the `connect` (nothing
+  bound, nothing listening) read "not yet".
+- **Unchanged.** Grades; decision-184's reservations and the records' fields;
+  decision-185's verified dial; the residuals both name (a co-tenant's socket
+  is shared media until each process has a mount namespace, TASK-0079.07).
+
+Implementing task: TASK-0079.32. (Ruled 2026-10-13, decision-186.)
+
 **Mailbox is deleted (2026-09-08, decision-153).** It was the second kind
 here: an asynchronous, durable, ordered, many-writer-safe framed file with
 deliverer-stamped provenance, consumed by the embedder's trusted driver and
@@ -1349,8 +2418,7 @@ from the other kinds. Every sentence of that description is a sentence about
 the primitive's own contract said the jail never touches it. A queue that only
 trusted code writes and only trusted code reads is not a way into a jail; it
 is the embedder's own steering surface, and brig has no business shipping one.
-keel's Session Interface is that surface for this embedder, and any other
-embedder already has its own. What brig keeps is the part that genuinely
+Every embedder already has its own such surface. What brig keeps is the part that genuinely
 crosses the boundary: the LISTEN channel above, on which steering arrives
 re-encoded as work — which is what mailbox's own text said had to happen
 anyway. `ChannelKind.MAILBOX` goes with it (§5); the framed-file primitive was
@@ -1391,7 +2459,8 @@ Three surfaces, all read-only (law 4):
   and `jail_id`, the two fields only it may supply; and the stamped `Event`s
   come back to the embedder on `Handle.compile_events` (what a sensor knew the
   instant it compiled) and from `Handle.exit_events()` (what a sensor makes of
-  how the workload ended). **brig writes no log.**
+  how the workload ended) -- since decision-183 `Jail.compile_events` and
+  `Process.exit_events()`, per process. **brig writes no log.**
 
   The deleted design was one append-only JSONL stream per jail, tailed by
   observers, carrying five lifecycle kinds — `SPAWN`, `EXEC`, `EXEC_END`,
@@ -1459,6 +2528,9 @@ Three surfaces, all read-only (law 4):
 `handle.probe(battery)` runs canned violation attempts **inside the jail,
 through the same stack, launcher, and channel the workload uses** — a policy
 that holds for a side shell but not for the real path is not a policy.
+
+Since decision-181 (§9, 2026-10-12) each probe is a process the jail starts
+(`jail.start`), recorded like any other.
 
 Verdicts are three-way, per probe:
 
@@ -1560,8 +2632,8 @@ the new name.)
 
 ```
 core  ←  mech  ←  stack  ←  run  ←  observe
-                              ↖       ↑
-                                probe ┘
+                              ↑ ↖       ↑
+                        runtime   probe ┘
 ```
 
 | layer | contents | may import |
@@ -1569,7 +2641,8 @@ core  ←  mech  ←  stack  ←  run  ←  observe
 | `core` | Spec, axes, grades, Graded, Report, subset algebra, frames, `Event` and its serialization, threat lists, serialization | nothing (pure: no I/O, no clock, no randomness, no subprocess) |
 | `mech` | Mechanism protocol, Step, all mechanisms, denial signatures | `core` |
 | `stack` | Stack, compatibility matrix, presets, floors, aggregation | `core`, `mech` |
-| `run` | Launchers, Handle, teardown, readiness, dial, event stamping | `core`, `mech`, `stack` |
+| `run` | the `Runtime` and `Supervisor` protocols and their records, `HostRuntime`, `Jail` and `Process`, teardown, readiness, dial, event stamping | `core`, `mech`, `stack` |
+| `runtime` | runtimes that are not `run`'s own: `fake` today (decision-178); nothing in brig imports one, `run` included: an embedder picks a runtime by importing it | `core`, `mech`, `stack`, `run` |
 | `observe` | Console, stat, workspace diff | `core`, `run` |
 | `probe` | batteries, verdicts, report-vs-probe checks | `core`, `run`, `observe` |
 
@@ -1590,8 +2663,8 @@ the spec module and trip the builtin `no-import-cycles`.
 
 - Python ≥ 3.14, `uv` for everything, `ruff` (format + lint), `mypy --strict`,
   `pypeeker` strict as the architecture gate. `scripts/verify.sh` is the one
-  definition of "the tree is good"; the Claude commit hook runs its fast tier.
-- Test tiers are defined in `.claude/rules/` (unit / integration / system)
+  definition of "the tree is good"; a commit hook runs its fast tier.
+- Test tiers are defined in the repository's test rules (unit / integration / system)
   and enforced as pytest markers with `--strict-markers`. The one-line
   version: **unit** is pure (no subprocess, no network, no clock, `tmp_path`
   only); **integration** exercises one real mechanism or seam with real OS

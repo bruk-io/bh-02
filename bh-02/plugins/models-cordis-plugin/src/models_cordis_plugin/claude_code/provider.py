@@ -40,7 +40,7 @@ exactly one model step:
   start another model request on that answer.
 
 One Claude Code process holds the conversation, started on the first step with the request's
-system message as its system prompt (after a note naming which of Claude Code's `mcp__bh__`
+system message as its system prompt (after a line naming which of Claude Code's `mcp__bh__`
 names is which of bh-02's tools) and the offered tools; a changed system prompt or tool set
 restarts it (resuming its own session) before the next user line, never while calls are parked.
 What its session holds is checked against every request (`reconcile.py`); when the two differ,
@@ -305,7 +305,7 @@ class ClaudeCodeModel:
     the process. `open` builds the session from its options (the SDK's client; a test's fake).
 
     `tool_changes` is `fixed` (CONTRACTS.md: model): a conversation is offered the tools it began
-    with for its life, and a change is told as a note. Claude Code sends the tool list before
+    with for its life, and a change is told as an aside. Claude Code sends the tool list before
     everything else in a request, so a changed list would cost the whole conversation's cache,
     and the in-process MCP server has no way to tell Claude Code its tools changed (the Agent
     SDK drops a server's `notifications/tools/list_changed`): the models README has what Claude

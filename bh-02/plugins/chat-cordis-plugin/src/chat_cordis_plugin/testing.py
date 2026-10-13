@@ -100,6 +100,7 @@ class Noted:
     def __init__(self, *claimed: str) -> None:
         self.ran: list[str] = []
         self.held: list[str] = []
+        self.stops: list[str] = []  # the lines rows have for the stop notice (`stop_notes`)
         self._claimed = claimed
 
     def claims(self, line: str) -> bool:
@@ -121,6 +122,9 @@ class Noted:
     def take_for_model(self) -> list[str]:
         taken, self.held = self.held, []
         return taken
+
+    def stop_notes(self) -> list[str]:
+        return list(self.stops)
 
 
 class Queued:

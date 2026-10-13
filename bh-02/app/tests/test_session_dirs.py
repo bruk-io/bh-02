@@ -394,7 +394,7 @@ def test_a_session_layer_with_both_an_old_row_and_its_new_name_is_refused_unchan
     assert resumed.exit_code == 1
     lines = resumed.stderr.splitlines()
     assert lines[0] == f"error: can't resume {old.id}: {old.layer} has rows it cannot fold together for you:"
-    assert "row 'llm' is now 'loop', and this layer has a 'loop' row too" in lines[1]
+    assert "row 'llm' is now 'loop', and this layer has a row 'loop' too" in lines[1]
     assert lines[-1] == "fix that file by hand, then resume again"
     assert old.layer.read_text() == text  # nothing rewritten
 

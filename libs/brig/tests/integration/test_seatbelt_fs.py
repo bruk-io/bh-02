@@ -6,7 +6,7 @@ verbatim in this task's own Spec anchor.
 
 Four paired observations, each pair a denial and its own control, every one
 made by a JAILED process reporting its own outcome through the launcher's
-captured stdio (`handle.stdout_path` / `handle.stderr_path` -- never the
+captured stdio (`process.stdout_path` / `process.stderr_path` -- never the
 compiled `Step` or the argv passed to `Popen`):
 
 1. write outside every `write_allows` fails / write inside the workspace
@@ -79,9 +79,10 @@ import pytest
 from brig.core import FsPolicy, Spec
 from brig.mech import Mechanism
 from brig.mech.seatbelt import seatbelt
+from brig.run import IoPolicy
 from brig.run.compile_ctx import build_compile_ctx
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import Stack
+from tests.conftest import launch
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
@@ -122,7 +123,7 @@ def _run_and_capture(
     mechanisms: tuple[Mechanism, ...] = (seatbelt,),
 ) -> tuple[int, str, str]:
     """Compile `spec` through a real `Stack(mechanisms)` (default: just
-    `seatbelt`), launch `argv` through the real `SubprocessLauncher`, wait
+    `seatbelt`), launch `argv` through the real `Jail.create` and `jail.start`, wait
     for it to exit, and return `(exit_status, stdout_text, stderr_text)`
     read from the jail's own log files -- SPEC.md's "observe from inside
     the jail, not from the outside." `mechanisms=()` is what
@@ -130,8 +131,7 @@ def _run_and_capture(
     (MUTATION CHECK 2) passes to run the identical probe unconfined."""
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="darwin")
     jail = Stack(mechanisms).compile(spec, ctx=ctx)
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
+    jail, process = launch(
         jail,
         argv=argv,
         cwd=jail_dir,
@@ -139,10 +139,10 @@ def _run_and_capture(
         jail_id=f"seatbelt-fs-{label}",
         jail_dir=jail_dir,
     )
-    status = handle.wait()
-    with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+    status = process.wait()
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         stdout_text = f.read()
-    with open(handle.stderr_path, encoding="utf-8", errors="replace") as f:
+    with open(process.stderr_path, encoding="utf-8", errors="replace") as f:
         stderr_text = f.read()
     return status, stdout_text, stderr_text
 

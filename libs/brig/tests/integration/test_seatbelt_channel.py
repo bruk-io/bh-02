@@ -6,6 +6,13 @@ task-061, MILESTONES.md M5-lite exit criterion 2, verbatim:
     with no channel declared, a bind attempt is denied -- the control that
     keeps `network: enforced` from covering an unscoped bind permission.
 
+**Restated by decision-186 (TASK-0079.32).** A channel names no path, so "the
+declared endpoint" is a socket the jail reserved in its channel directory
+(`jail.channel(name)`, decision-184), the grant is that directory's subpath,
+and "any other path" is one outside it. Readiness is `process.wait_ready`.
+Not run here (no darwin host runs brig's tiers); edited to the new surface
+and left for the owner's Mac run.
+
 SPEC.md §10.1, readiness, verbatim:
 
     Observable means a connect succeeds -- not that the endpoint path
@@ -18,7 +25,7 @@ and reporting the outcome** (`.claude/rules/integration-tests.md`'s "observe
 from inside the jail, not from the outside"):
 
 1. `test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied`
-   -- the declared endpoint binds (readiness proved by `handle.wait_ready`'s
+   -- the declared endpoint binds (readiness proved by `process.wait_ready`'s
    own trusted-side `connect`, never `os.path.exists`), and, in the SAME
    jailed process's SAME run, a bind at a second, undeclared path is denied,
    matching seatbelt's own declared denial signature.
@@ -34,8 +41,8 @@ from inside the jail, not from the outside"):
    proving those two denials are the jail's doing, not the filesystem's.
 
 Plus one mutation check
-(`test_mutation_check_removing_endpoint_write_rule_denies_the_declared_bind`):
-strip the `(allow file-write* (literal "<endpoint>"))` line from THIS
+(`test_mutation_check_removing_the_channel_directory_rule_denies_the_reserved_bind`):
+strip the `(allow file-write* (subpath "<channel directory>"))` line from THIS
 TEST's own already-compiled profile (an in-memory `CompiledJail.staged`
 mutation, `dataclasses.replace` -- `brig/mech/seatbelt/` itself is never
 opened for writing, and its module file's `sha256` is asserted identical
@@ -72,17 +79,17 @@ import os
 import pathlib
 import shutil
 import sys
+from collections.abc import Callable
 
 import pytest
 
 from brig.core import Channel, ChannelKind, Spec
 from brig.mech import StagedFile
 from brig.mech.seatbelt import seatbelt
+from brig.run import HostRuntime, IoPolicy, Jail, Process
 from brig.run.compile_ctx import build_compile_ctx
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import CompiledJail, Stack
-from tests.conftest import teardown_group
+from tests.conftest import launch, teardown_group
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
@@ -134,7 +141,7 @@ else:
     print("BIND2_OK", flush=True)
     s2.close()
 
-# The trusted-side connect (this test's own handle.wait_ready call) queues
+# The trusted-side connect (this test's own process.wait_ready call) queues
 # in the kernel backlog the instant listen() above runs -- accept() here
 # only has to complete it, never block waiting on the jail's own doing.
 conn, _addr = s1.accept()
@@ -174,21 +181,52 @@ def _single_bind_script(ep: str) -> str:
     return _SINGLE_BIND_SCRIPT_TEMPLATE.format(ep=ep)
 
 
-def _teardown(handle: Handle, jail_dir: str) -> None:
+def _teardown(process: Process, jail_dir: str) -> None:
     """Group-kill the workload regardless of how the test above fared, then
     remove the whole jail directory -- AC #8's "every socket the test binds
     is unlinked by the test's own teardown". The kill is deliberately
     hand-rolled (`killpg`), same posture as `test_wait_ready.py`'s own
     `_teardown`: a test's cleanup path must not be the code under test.
-    `handle.wait()` blocks until the launcher's exit-waiter has reaped it
+    `process.wait()` blocks until the launcher's exit-waiter has reaped it
     (task-073)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
     shutil.rmtree(jail_dir, ignore_errors=True)
+
+
+def _start_on_a_reserved_socket(
+    compiled: CompiledJail, script_for: Callable[[str], str], *, jail_dir: str, jail_id: str
+) -> tuple[Jail, Process, str]:
+    """A jail whose one process is started on a socket reserved for `ch`
+    (decision-184); `script_for` gets the in-jail path it binds. Returns that
+    path too."""
+    os.makedirs(jail_dir, exist_ok=True)
+    jail = Jail.create(
+        compiled, runtime=HostRuntime(), cwd=jail_dir, jail_id=jail_id, jail_dir=jail_dir
+    )
+    reservation = jail.channel("ch")
+    try:
+        process = jail.start(
+            [sys.executable, "-c", script_for(reservation.bound_path)],
+            cwd=jail_dir,
+            io=IoPolicy(),
+            channel=reservation,
+        )
+    except BaseException:
+        jail.destroy()
+        raise
+    return jail, process, reservation.bound_path
+
+
+def _outside_the_channel_directory(jail_dir: str) -> str:
+    """An undeclared path in the jail directory but outside its channel
+    directory: no grant reaches it."""
+    os.makedirs(f"{jail_dir}/other", exist_ok=True)
+    return f"{jail_dir}/other/ep2.sock"
 
 
 def _staged_profile(jail: CompiledJail) -> StagedFile:
@@ -212,7 +250,7 @@ def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -
     `accept()`s the trusted-side connect and exits.
 
     Observation 1's readiness is proved by THIS test's own
-    `handle.wait_ready` call -- SPEC.md §10.1's own connect, never
+    `process.wait_ready` call -- SPEC.md §10.1's own connect, never
     `os.path.exists(ep1)`, which this test never calls on `ep1` at all.
     Observation 2's denial is read from the jailed process's OWN captured
     stdout (never from argv), and matched against seatbelt's declared
@@ -220,22 +258,18 @@ def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -
     control-bearing assertion below (`pattern.search` on the BIND2 line
     only, never on the BIND1_OK / DONE lines)."""
     jail_dir = _new_jail_dir()
-    ep1 = f"{jail_dir}/ep1.sock"
-    ep2 = f"{jail_dir}/ep2.sock"
-    channel = Channel(name="ch", kind=ChannelKind.LISTEN, endpoint=ep1)
+    ep2 = _outside_the_channel_directory(jail_dir)
+    channel = Channel(name="ch", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="darwin")
-    jail = Stack([seatbelt]).compile(spec, ctx=ctx)
+    compiled = Stack([seatbelt]).compile(spec, ctx=ctx)
     pattern = seatbelt.compile(spec, ctx).denial_signatures[0]
 
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
-        jail,
-        argv=[sys.executable, "-c", _pair_bind_script(ep1, ep2)],
-        cwd=jail_dir,
-        io=IoPolicy(),
-        jail_id="seatbelt-channel-pair",
+    _jail, process, _ep1 = _start_on_a_reserved_socket(
+        compiled,
+        lambda ep1: _pair_bind_script(ep1, ep2),
         jail_dir=jail_dir,
+        jail_id="seatbelt-channel-pair",
     )
     try:
         # Observation 1: readiness proved by a trusted-side CONNECT that
@@ -243,10 +277,10 @@ def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -
         # raises WaitReadyTimeout instead of returning -- there is no path
         # through this test that reads "ready" from the socket FILE merely
         # existing.
-        handle.wait_ready("ch", timeout=_WAIT_TIMEOUT_S)
+        process.wait_ready(timeout=_WAIT_TIMEOUT_S)
 
-        status = handle.wait()
-        with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+        status = process.wait()
+        with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
             stdout_text = f.read()
 
         assert status == 0, (
@@ -275,7 +309,7 @@ def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -
         # declared endpoint's own successful bind line.
         assert pattern.search("BIND1_OK") is None
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -306,8 +340,7 @@ def test_no_channel_declared_denies_bind_and_profile_carries_no_network_bind_all
         f"allows, but the compiled profile carries one:\n{profile_text}"
     )
 
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
+    jail, process = launch(
         jail,
         argv=[sys.executable, "-c", _single_bind_script(ep)],
         cwd=jail_dir,
@@ -316,8 +349,8 @@ def test_no_channel_declared_denies_bind_and_profile_carries_no_network_bind_all
         jail_dir=jail_dir,
     )
     try:
-        status = handle.wait()
-        with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+        status = process.wait()
+        with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
             stdout_text = f.read()
 
         assert status == 0, (
@@ -331,7 +364,7 @@ def test_no_channel_declared_denies_bind_and_profile_carries_no_network_bind_all
             f"signature {pattern.pattern!r}: {stdout_text!r}"
         )
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -351,28 +384,23 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
     what proves those two denials were the JAIL's doing (SBPL) and not, say,
     ordinary POSIX permissions on a scratch `/tmp` directory this test's own
     user already owns."""
-    launcher = SubprocessLauncher()
 
     # --- the pair probe, unconfined: BOTH binds succeed -----------------
     jail_dir = _new_jail_dir()
-    ep1 = f"{jail_dir}/ep1.sock"
-    ep2 = f"{jail_dir}/ep2.sock"
-    channel = Channel(name="ch", kind=ChannelKind.LISTEN, endpoint=ep1)
+    ep2 = _outside_the_channel_directory(jail_dir)
+    channel = Channel(name="ch", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
-    jail = Stack([]).compile(spec)
 
-    handle = launcher.launch(
-        jail,
-        argv=[sys.executable, "-c", _pair_bind_script(ep1, ep2)],
-        cwd=jail_dir,
-        io=IoPolicy(),
-        jail_id="seatbelt-channel-control-pair",
+    _jail, process, _ep1 = _start_on_a_reserved_socket(
+        Stack([]).compile(spec),
+        lambda ep1: _pair_bind_script(ep1, ep2),
         jail_dir=jail_dir,
+        jail_id="seatbelt-channel-control-pair",
     )
     try:
-        handle.wait_ready("ch", timeout=_WAIT_TIMEOUT_S)
-        status = handle.wait()
-        with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+        process.wait_ready(timeout=_WAIT_TIMEOUT_S)
+        status = process.wait()
+        with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
             stdout_text = f.read()
         assert status == 0, (
             f"control probe did not exit cleanly: status={status} out={stdout_text!r}"
@@ -384,7 +412,7 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
             f"jail's doing, not the filesystem's: {stdout_text!r}"
         )
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
     # --- the no-channel probe, unconfined: still succeeds ----------------
     jail_dir2 = _new_jail_dir()
@@ -392,7 +420,7 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
     spec2 = Spec()
     jail2 = Stack([]).compile(spec2)
 
-    handle2 = launcher.launch(
+    jail2, process2 = launch(
         jail2,
         argv=[sys.executable, "-c", _single_bind_script(ep3)],
         cwd=jail_dir2,
@@ -401,8 +429,8 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
         jail_dir=jail_dir2,
     )
     try:
-        status2 = handle2.wait()
-        with open(handle2.stdout_path, encoding="utf-8", errors="replace") as f:
+        status2 = process2.wait()
+        with open(process2.stdout_path, encoding="utf-8", errors="replace") as f:
             stdout_text2 = f.read()
         assert status2 == 0, (
             f"control probe did not exit cleanly: status={status2} out={stdout_text2!r}"
@@ -413,18 +441,18 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
             f"the filesystem's: {stdout_text2!r}"
         )
     finally:
-        _teardown(handle2, jail_dir2)
+        _teardown(process2, jail_dir2)
 
 
 # ---------------------------------------------------------------------------
-# AC #6: mutation check. Strip the endpoint's own file-write literal rule
+# AC #6: mutation check. Strip the channel directory's file-write rule
 # from THIS TEST's already-compiled profile (in-memory only) and re-run
 # observation 1's own bind -- it must go red (denied).
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-def test_mutation_check_removing_endpoint_write_rule_denies_the_declared_bind() -> None:
+def test_mutation_check_removing_the_channel_directory_rule_denies_the_reserved_bind() -> None:
     """AC #6. Never edits `brig/mech/seatbelt/` (this task's Out-of-scope
     section forbids it outright) -- mutates only an in-memory
     `CompiledJail.staged` copy this test itself built, via
@@ -435,24 +463,21 @@ def test_mutation_check_removing_endpoint_write_rule_denies_the_declared_bind() 
     tracked file -- there is nothing on disk to copy back because nothing
     on disk was ever opened for writing.
 
-    With the LISTEN channel's own `(allow file-write* (literal "..."))`
-    line gone, `render_sbpl`'s docstring says plainly what must happen:
-    "the channel's own bind rule would compile as text but the child could
-    never actually create its socket file there." This test proves exactly
-    that clause, for real, against the real kernel."""
+    With the channel directory's `(allow file-write* (subpath "..."))` line
+    gone (since decision-186 a channel's one grant), no child can create its
+    socket file there. This test proves exactly that, for real, against the
+    real kernel."""
     digest_before = hashlib.sha256(_PROFILE_PY_PATH.read_bytes()).hexdigest()
 
     jail_dir = _new_jail_dir()
-    ep1 = f"{jail_dir}/ep1.sock"
-    channel = Channel(name="ch", kind=ChannelKind.LISTEN, endpoint=ep1)
+    channel = Channel(name="ch", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="darwin")
     jail = Stack([seatbelt]).compile(spec, ctx=ctx)
     pattern = seatbelt.compile(spec, ctx).denial_signatures[0]
 
     original = _staged_profile(jail)
-    resolved_ep1 = ctx.resolved_paths[ep1]
-    victim_line = f'(allow file-write* (literal "{resolved_ep1}"))'
+    victim_line = f'(allow file-write* (subpath "{ctx.channel_dir}"))'
     assert victim_line in original.content, (
         f"expected line {victim_line!r} not found in the compiled profile "
         f"-- this test's own fixture has drifted from profile.py's render:\n"
@@ -463,32 +488,26 @@ def test_mutation_check_removing_endpoint_write_rule_denies_the_declared_bind() 
     mutated_staged = StagedFile(relpath="seatbelt.sb", content=mutated_content, mode=original.mode)
     mutated_jail = dataclasses.replace(jail, staged=(mutated_staged,))
 
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
-        mutated_jail,
-        argv=[sys.executable, "-c", _single_bind_script(ep1)],
-        cwd=jail_dir,
-        io=IoPolicy(),
-        jail_id="seatbelt-channel-mutation",
-        jail_dir=jail_dir,
+    _jail, process, _ep1 = _start_on_a_reserved_socket(
+        mutated_jail, _single_bind_script, jail_dir=jail_dir, jail_id="seatbelt-channel-mutation"
     )
     try:
-        status = handle.wait()
-        with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+        status = process.wait()
+        with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
             stdout_text = f.read()
         assert status == 0, (
             f"mutated probe did not exit cleanly: status={status} out={stdout_text!r}"
         )
         assert "BIND_FAIL:" in stdout_text, (
-            "MUTATION CHECK FAILED TO GO RED -- removing the endpoint's own "
-            f"file-write literal rule did not deny the bind: {stdout_text!r}"
+            "MUTATION CHECK FAILED TO GO RED -- removing the channel directory's "
+            f"file-write rule did not deny the bind: {stdout_text!r}"
         )
         assert pattern.search(stdout_text) is not None, (
             f"mutated-profile denial text did not match seatbelt's declared "
             f"signature {pattern.pattern!r}: {stdout_text!r}"
         )
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
     digest_after = hashlib.sha256(_PROFILE_PY_PATH.read_bytes()).hexdigest()
     assert digest_after == digest_before, (

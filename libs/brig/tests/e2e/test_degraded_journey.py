@@ -2,7 +2,7 @@
 only, per `.claude/rules/system-tests.md`:
 
     Full stacks through the public API only: `Spec` -> preset `Stack` ->
-    `Launcher` -> `Handle` -> probe battery, exactly as an embedder would
+    `Jail.create` -> `jail.start` -> probe battery, exactly as an embedder would
     drive them. No internal imports below the public surface
 
 and:
@@ -10,9 +10,9 @@ and:
     Volume: this tier stays small -- a handful of journeys per preset.
 
 This file drives exactly one journey against `degraded()`: `Spec ->
-degraded() -> SubprocessLauncher -> Handle -> handle.probe(...)` for each of
+degraded() -> Jail.create -> jail.start -> jail.probe(...)` for each of
 the FOUR batteries `degraded()`'s spec here can honestly stand up a battery
-for -> `handle.kill()`. `test_probe_forgery.py`, this file's sibling, owns
+for -> `jail.destroy()`. `test_probe_forgery.py`, this file's sibling, owns
 EC3 and its controls; this file owns the end-to-end shape and `kill()`'s own
 honesty, neither of which EC3's forgery needs to also carry.
 
@@ -69,10 +69,10 @@ from brig.probe.batteries.env import CANARY_ENV_NAME, env_battery  # batteries: 
 from brig.probe.batteries.fs import fs_read_battery, fs_write_battery
 from brig.probe.batteries.limits import limits_battery
 from brig.probe.batteries.network import network_battery
-from brig.run import Handle, IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Jail, Process, Reservation
 from brig.run.teardown import KillOutcome  # not barrel-exported; same shape, justified in AC #6
 from brig.stack import degraded
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -84,14 +84,13 @@ def _new_root(run_id: str, tag: str) -> str:
     return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
 
 
-def _launch(spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str) -> Handle:
-    """`Spec -> degraded() -> SubprocessLauncher -> Handle`, through public
+def _launch(spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str) -> tuple[Jail, Process]:
+    """`Spec -> degraded() -> Jail.create -> jail.start`, through public
     methods on public types only -- the exact chain this file's own AC
     names."""
     jail_dir = _new_root(run_id, "dj")
     jail = degraded().compile(spec)
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         jail,
         argv=list(argv),
         cwd=jail_dir,
@@ -101,16 +100,16 @@ def _launch(spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str) -> Ha
     )
 
 
-def _probe(handle: Handle, battery: object) -> ProbeReport:
+def _probe(jail: Jail, battery: object) -> ProbeReport:
     """Same cast idiom as `test_probe_forgery.py`'s own `_probe` -- see
     that module's docstring for why the cast, not the Protocol mismatch
     itself, is what mypy --strict needs silenced here."""
-    return handle.probe(cast(CoreBattery, battery))
+    return jail.probe(cast(CoreBattery, battery))
 
 
-def _teardown_group(handle: Handle) -> None:
+def _teardown_group(process: Process) -> None:
     """A defensive, idempotent fallback -- `os.killpg` on an already-gone
-    group raises `ProcessLookupError`, suppressed. `handle.kill()` is what
+    group raises `ProcessLookupError`, suppressed. `jail.destroy()` is what
     this test actually asserts about; this exists only so a failed
     assertion AFTER `kill()` still leaves the machine clean for the
     conftest leak-check (AC #10), not as the teardown path under test."""
@@ -119,7 +118,7 @@ def _teardown_group(handle: Handle) -> None:
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
 
 
 @pytest.mark.e2e
@@ -128,7 +127,7 @@ def test_degraded_journey_through_the_public_api_only(
 ) -> None:
     """AC #5. One `degraded()` jail, probed by the FOUR batteries this
     journey's `spec` can honestly stand one up for, then torn down through
-    `handle.kill()` -- the whole public surface `.claude/rules/system-tests.md`
+    `jail.destroy()` -- the whole public surface `.claude/rules/system-tests.md`
     names, in one journey.
 
     **task-070 (decision-125): the fifth row, `network`, is GONE, not merely
@@ -175,8 +174,8 @@ def test_degraded_journey_through_the_public_api_only(
       because this is host-conditioned per axis, not a fixed fact of the
       preset.
 
-    **Teardown.** `handle.kill()` tears down the workload group and every
-    exec sibling `handle.probe(...)` registered while running the four
+    **Teardown.** `jail.destroy()` tears down the workload group and every
+    exec sibling `jail.probe(...)` registered while running the four
     batteries' own DENIAL/CONTROL/ABSENCE probes above -- every item's
     outcome must be `ENDED` or `ALREADY_GONE`, never `FAILED` (SPEC.md
     sec 9's fixed ladder: verification is the last, non-optional rung).
@@ -205,16 +204,18 @@ def test_degraded_journey_through_the_public_api_only(
         limits=Limits(cpu_seconds=1),
         fs=FsPolicy(write_allows=(workspace,)),
     )
-    handle = _launch(spec, workload_argv(run_id, "sleep 100"), jail_id="dj-journey", run_id=run_id)
+    jail, process = _launch(
+        spec, workload_argv(run_id, "sleep 100"), jail_id="dj-journey", run_id=run_id
+    )
     try:
         verdicts: dict[str, BatteryVerdict] = {
-            "env": _probe(handle, env_battery(spec)).battery_verdict,
-            "limits": _probe(handle, limits_battery(spec)).battery_verdict,
+            "env": _probe(jail, env_battery(spec)).battery_verdict,
+            "limits": _probe(jail, limits_battery(spec)).battery_verdict,
             "fs_write": _probe(
-                handle, fs_write_battery(spec, outside_writable=outside_writable)
+                jail, fs_write_battery(spec, outside_writable=outside_writable)
             ).battery_verdict,
             "fs_read": _probe(
-                handle,
+                jail,
                 fs_read_battery(
                     spec,
                     credential_canary=credential_canary,
@@ -239,7 +240,7 @@ def test_degraded_journey_through_the_public_api_only(
         assert verdicts["fs_write"] in honest_unclaimed, verdicts
         assert verdicts["fs_read"] in honest_unclaimed, verdicts
 
-        kill_report = handle.kill()
+        kill_report = jail.destroy()
         assert kill_report.items, "kill() must report at least the workload group item"
         for item in kill_report.items:
             assert item.outcome is not KillOutcome.FAILED, (
@@ -247,7 +248,7 @@ def test_degraded_journey_through_the_public_api_only(
             )
             assert item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE), item.outcome
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.e2e
@@ -290,14 +291,20 @@ def test_network_battery_permits_a_spec_declaring_a_listen_channel() -> None:
     `test_network_battery_refuses_a_spec_with_no_network_action` above is
     mechanical, not a claim this docstring has to argue. `network_battery` is
     pure (its own module docstring: "no I/O, no clock, no randomness, no
-    child processes") -- the endpoint below is never bound or dialed at
-    construction, so it need not resolve to anything real on this host.
+    child processes") -- the reserved socket below is never bound or dialed
+    at construction, so it need not resolve to anything real on this host
+    (decision-186: the control binds a socket the jail reserved).
     """
     no_network_spec = Spec()
     listen_spec = replace(
         no_network_spec,
-        channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint="/tmp/unused.sock"),),
+        channels=(Channel(name="control", kind=ChannelKind.LISTEN),),
     )
-    battery = network_battery(listen_spec, denied_address="192.0.2.1:80")
+    reserved = Reservation(
+        channel="control",
+        bound_path="/tmp/unused/chan/0123456789abcdef.sock",
+        endpoint="/tmp/unused/chan/0123456789abcdef.sock",
+    )
+    battery = network_battery(listen_spec, denied_address="192.0.2.1:80", channel=reserved)
     assert battery.name == "network"
     assert len(battery.probes) == 2

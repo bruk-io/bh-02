@@ -31,9 +31,9 @@ import pytest
 from brig.core import Axis, EnvMode, EnvPolicy, Spec
 from brig.mech import CompileCtx, Mechanism
 from brig.mech.env_scrub import env_scrub
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy
 from brig.stack import Stack
-from tests.conftest import workload_argv
+from tests.conftest import launch, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -57,7 +57,7 @@ _WAIT_TIMEOUT_S = 10.0
 def _new_jail_dir() -> str:
     """A short scratch root, `/tmp/bg<pid>es<n>` -- never `tmp_path`. The
     `es` infix (matching `test_kill_group.py`'s `kg`,
-    `test_teardown_exec.py`'s `te`, `test_handle_rehydration.py`'s `rh`)
+    `test_teardown_exec.py`'s `te`, `test_jail_rehydration.py`'s `rh`)
     keeps this file's jail dirs from colliding with another integration
     file's plain `bg<pid>-<n>` counter when both run in the same session:
     several sibling files never clean up their own jail dirs, and a
@@ -96,8 +96,7 @@ def _launch_and_collect_stdout(
     not from the outside")."""
     ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
     jail = Stack(mechanisms).compile(spec, ctx=ctx)
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
+    jail, process = launch(
         jail,
         argv=argv,
         cwd=jail_dir,
@@ -105,8 +104,8 @@ def _launch_and_collect_stdout(
         jail_id="env-scrub-under-test",
         jail_dir=jail_dir,
     )
-    handle.wait()
-    with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+    process.wait()
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         return f.read()
 
 

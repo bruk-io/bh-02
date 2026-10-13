@@ -59,6 +59,7 @@ class Commands(Protocol):
     def claims(self, line: str) -> bool: ...
     async def run(self, line: str) -> str | Sequence[Event]: ...
     def take_for_model(self) -> Sequence[str]: ...
+    def stop_notes(self) -> Sequence[str]: ...
 
 
 @runtime_checkable
@@ -124,7 +125,7 @@ async def converse(
             continue
         told = _told(commands.take_for_model() if commands is not None else (), message)
         try:
-            await _interruptible(_show(loop.reply(told), output), input, output)
+            await _interruptible(_show(loop.reply(told), output), input, output, commands)
         except Exception as error:
             if not isinstance(error, Recoverable):
                 raise
@@ -147,9 +148,12 @@ async def _unless_closed[T](work: Awaitable[T], input: Input) -> T | None:
     return None if run.cancelled() else run.result()
 
 
-async def _interruptible(turn: Awaitable[None], input: Input, output: Output) -> None:
+async def _interruptible(
+    turn: Awaitable[None], input: Input, output: Output, commands: Commands | None = None
+) -> None:
     """Run a turn until it ends or the person interrupts it; an interrupted turn is cancelled
-    (its reply closed, so a provider can stop its own work) and shown as stopped."""
+    (its reply closed, so a provider can stop its own work) and shown as stopped, then the notes
+    rows have for a stop (`commands.stop_notes`: background agents still running) as notes."""
     work = asyncio.ensure_future(turn)
     stop = asyncio.ensure_future(input.interrupted())
     try:
@@ -160,6 +164,8 @@ async def _interruptible(turn: Awaitable[None], input: Input, output: Output) ->
             work.cancel()
             await asyncio.gather(work, return_exceptions=True)
             await output.show(_once({"type": "stop", "reason": "interrupted"}))
+            for note in commands.stop_notes() if commands is not None else ():
+                await output.show(_once({"type": "note", "text": note}))
     if not work.cancelled():
         work.result()
 

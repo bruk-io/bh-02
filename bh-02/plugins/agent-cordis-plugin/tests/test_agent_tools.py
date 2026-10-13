@@ -15,10 +15,10 @@ from agent_cordis_plugin import (
     MemoryTranscript,
     ToolBroker,
     Unstarted,
+    asides,
     called,
     executor,
     loop,
-    notes,
     shown,
     tools,
     transcript,
@@ -129,11 +129,14 @@ def test_a_registration_says_its_name_and_where_its_calls_run() -> None:
     broker = ToolBroker()
     with pytest.raises(ValueError, match="a tool's spec needs a `name`"):
         broker.register({"description": "nameless"}, _echo)
-    with pytest.raises(ValueError, match="say 'jail' .* or 'host'"):
+    with pytest.raises(ValueError, match="say 'jail' .* 'harness' .* or 'host'"):
         broker.register(ECHO, _echo, runs="cloud")
     broker.register(ECHO, _echo, runs="host")
     tool = broker.get("echo")
     assert tool is not None and tool.runs == "host" and tool.spec is ECHO
+    broker.register({**ECHO, "name": "own"}, _echo, runs="harness")
+    own = broker.get("own")
+    assert own is not None and own.runs == "harness"
 
 
 async def test_ready_waits_for_a_tool_to_register_and_names_those_that_never_do() -> None:
@@ -225,7 +228,7 @@ def _composition(
     rt = Runtime()
     rt.mount(around, id="around")
     rt.mount(transcript, id="transcript")
-    rt.mount(notes, id="notes")
+    rt.mount(asides, id="asides")
     rt.mount(executor, id="executor")
     rt.mount(tools, id="tools")
     rt.mount(loop, id="loop", config=LoopConfig(requires=requires, wait=wait))
@@ -447,9 +450,11 @@ async def test_a_call_a_tool_makes_with_no_loop_serving_fails_saying_so() -> Non
     }
 
 
-async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_notes_told_with_the_call_it_came_from() -> None:
+async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_asides_told_with_the_call_it_came_from() -> (
+    None
+):
     """An input's `tools.echo(...)` (here a tool `outer` whose run calls `echo` through the
-    broker): put to `approval` and asked of `notes` as the model's own call is, its notes told
+    broker): put to `approval` and asked of `asides` as the model's own call is, its asides told
     with the call it was made from; a declined, unknown or malformed one is why it did not run."""
     broker, approval, history = ToolBroker(), _Approval(), MemoryTranscript()
     answers: list[Any] = []
@@ -464,10 +469,10 @@ async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_notes_told_with_th
     broker.register(_spec("outer"), outer)
 
     def said(call: Any) -> str:
-        return f"noted {call['name']}: {call['result']}" if call["touched"] else ""
+        return f"aside of {call['name']}: {call['result']}" if call["touched"] else ""
 
     model = _Scripted([_call("c1", "outer")], [_text("done")])
-    looped = LoopModel(model, broker, history, approval, notes=[said])
+    looped = LoopModel(model, broker, history, approval, asides=[said])
     broker.serve(looped.nested)
     await _said(looped, "go")
     assert answers == [
@@ -477,7 +482,7 @@ async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_notes_told_with_th
     ]
     assert [request["name"] for request in approval.asked] == ["outer", "echo"]  # each put to approval
     (answer,) = [m for m in history.messages if m["role"] == "tool"]
-    assert answer["notes"] == ["noted echo: echo: inside"]  # told with the call it came from
-    assert answer["content"] == "outer done\n\nnoted echo: echo: inside"
+    assert answer["asides"] == ["aside of echo: echo: inside"]  # told with the call it came from
+    assert answer["content"] == "outer done\n\naside of echo: echo: inside"
     refused = LoopModel(_Scripted(), broker, MemoryTranscript(), _Approval(answer=False))
     assert await refused.nested("echo", {"text": "hi"}) == {"content": DECLINED, "failed": True}

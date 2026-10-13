@@ -91,14 +91,33 @@ _LIMITS_DETAIL = (
     "exec trampoline); uncovered: memory, tasks, wall, output"
 )
 
+# decision-179 (2026-10-12): `control` and `channel_exclusivity` are no
+# longer the coverage fill's empty detail; the stack's runtime kind (HOST:
+# no mechanism here names another) grades them from its static grades. The
+# GRADES are unchanged (unenforced); only the detail is new, copied by hand
+# from brig/core/runtime.py at review time like every detail here.
+_HOST_CONTROL_DETAIL = (
+    "graded by the HOST runtime: a jail is ended by signalling the process "
+    "groups brig started and verifying them gone, and nothing yet proves that "
+    "reaches every process in the jail (a setsid() child leaves its group). "
+    "No grade above unenforced until a control battery driven from the host "
+    "plants survivors (decision-0001, TASK-0079.08)"
+)
+
+_HOST_CHANNEL_EXCLUSIVITY_DETAIL = (
+    "graded by the HOST runtime: nothing establishes that the declared "
+    "channels and the enumerated shared media are the only ways in or out "
+    "of the jail"
+)
+
 GOLDEN: dict[Axis, Graded] = {
     Axis.FS_READ: Graded(Grade.UNENFORCED, ""),
     Axis.FS_WRITE: Graded(Grade.UNENFORCED, ""),
     Axis.NETWORK: Graded(Grade.UNENFORCED, ""),
     Axis.LIMITS: Graded(Grade.BEST_EFFORT, _LIMITS_DETAIL),
     Axis.ENV: Graded(Grade.ENFORCED, _ENV_DETAIL),
-    Axis.CHANNEL_EXCLUSIVITY: Graded(Grade.UNENFORCED, ""),
-    Axis.CONTROL: Graded(Grade.UNENFORCED, ""),
+    Axis.CHANNEL_EXCLUSIVITY: Graded(Grade.UNENFORCED, _HOST_CHANNEL_EXCLUSIVITY_DETAIL),
+    Axis.CONTROL: Graded(Grade.UNENFORCED, _HOST_CONTROL_DETAIL),
 }
 
 

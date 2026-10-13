@@ -27,7 +27,7 @@ Six things happen in one run, and each is a claim:
    bind by CONNECTING (not by looking for the path), and the trusted side
    exchanges a line over it -- the channel crossing bwrap's stage-6
    directory bind exists for.
-6. `handle.kill()` ends the process group and its `KillReport` says
+6. `jail.destroy()` ends the process group and its `KillReport` says
    `ENDED` after the verification rung, not merely "signal sent".
 
 **Skips visibly by name.** bubblewrap is linux-only and installed by no
@@ -54,7 +54,6 @@ here).
 from __future__ import annotations
 
 import os
-import socket
 import sys
 
 import pytest
@@ -69,8 +68,8 @@ from brig.core import (
     require,
 )
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH
+from brig.run import HostRuntime, IoPolicy, Jail
 from brig.run.compile_ctx import build_compile_ctx
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import strict_linux
 
 _PYTHON = "/usr/bin/python3"
@@ -170,7 +169,8 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
     jail_dir = f"/tmp/bg{os.getpid()}sl0"
     workspace = f"{jail_dir}/ws"
     hooks = f"{workspace}/.git/hooks"
-    endpoint = f"{jail_dir}/agent.sock"
+    # The socket is one the jail reserves in its channel directory
+    # (decision-184): the Spec names the channel, not its path (decision-186).
     os.makedirs(hooks, exist_ok=True)
 
     spec = Spec(
@@ -180,41 +180,47 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
             write_allows=(workspace,),
             write_denies=(hooks,),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
 
     # Claim 1: the preset's own report admits it, against real floors.
-    jail = strict_linux().compile(
+    compiled = strict_linux().compile(
         spec,
         require(fs_read=Grade.ENFORCED, fs_write=Grade.ENFORCED, network=Grade.ENFORCED),
         ctx=ctx,
     )
 
-    handle = SubprocessLauncher().launch(
-        jail,
-        argv=[_PYTHON, "-c", _WORKLOAD, endpoint, workspace, hooks],
+    jail = Jail.create(
+        compiled,
+        runtime=HostRuntime(),
         cwd=workspace,
-        io=IoPolicy(),
         jail_id="strict-linux-journey",
         jail_dir=jail_dir,
     )
+    reservation = jail.channel("ctl")
+    process = jail.start(
+        [_PYTHON, "-c", _WORKLOAD, reservation.bound_path, workspace, hooks],
+        cwd=workspace,
+        io=IoPolicy(),
+        channel=reservation,
+    )
     try:
         # Claim 5a: readiness is a CONNECT, not a path check (SPEC.md sec 10).
-        handle.wait_ready("agent", _READY_TIMEOUT_S)
+        process.wait_ready(_READY_TIMEOUT_S)
 
-        # Claim 5b: the crossing carries bytes. This is the SECOND
-        # connection the jail serves; `wait_ready` above made the first.
-        client = socket.socket(socket.AF_UNIX)
+        # Claim 5b: the crossing carries bytes, through the host's verified
+        # dial (decision-185). This is the SECOND connection the jail serves;
+        # `wait_ready` above made the first.
+        client = process.connect()
         client.settimeout(_READY_TIMEOUT_S)
-        client.connect(endpoint)
         greeting = client.recv(64)
         client.close()
         assert greeting == b"hello from the jail\n"
 
-        with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+        with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
             stdout = f.read()
-        with open(handle.stderr_path, encoding="utf-8", errors="replace") as f:
+        with open(process.stderr_path, encoding="utf-8", errors="replace") as f:
             stderr = f.read()
 
         # Claims 2 and 4: it started (so /bin/sh and /usr/bin/env were
@@ -241,7 +247,7 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
             f"the jail carries a name neither env_scrub nor the interpreter accounts for: {names}"
         )
     finally:
-        report = handle.kill()
+        report = jail.destroy()
 
     # Claim 6: the ladder's last rung is verification, per item.
     outcomes = {item.kind: item.outcome.value for item in report.items}
@@ -250,4 +256,4 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
     # is accepted only because a jail that died on its own is not this
     # claim's business.
     assert outcomes["workload_group"] in {"ENDED", "ALREADY_GONE"}
-    assert not handle.alive()
+    assert not jail.alive()

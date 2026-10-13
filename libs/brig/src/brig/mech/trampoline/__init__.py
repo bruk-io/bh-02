@@ -1,4 +1,4 @@
-"""The rlimits exec trampoline: `python -m brig.mech.trampoline --cpu N -- argv...`.
+"""The rlimits exec trampoline: `python -I -m brig.mech.trampoline --cpu N -- argv...`.
 
 Per MILESTONES.md M3's scope bullet, this program is how the `rlimits`
 mechanism (a later task) puts a kernel limit under a workload: it sets the

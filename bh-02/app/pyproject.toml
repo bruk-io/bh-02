@@ -17,6 +17,7 @@ dependencies = [
     "memory-cordis-plugin",
     "commands-cordis-plugin",
     "extensions-cordis-plugin",
+    "agents-cordis-plugin",
 ]
 
 [project.scripts]
@@ -34,6 +35,7 @@ runner-cordis-plugin = { workspace = true }
 memory-cordis-plugin = { workspace = true }
 commands-cordis-plugin = { workspace = true }
 extensions-cordis-plugin = { workspace = true }
+agents-cordis-plugin = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -1,4 +1,4 @@
-"""Entry point for `python -m brig.mech.trampoline`.
+"""Entry point for `python -I -m brig.mech.trampoline`.
 
 Kept separate from `brig/mech/trampoline/__init__.py` so that importing the
 package -- which the unit tests do directly, for `parse_trampoline_argv` and

@@ -39,11 +39,11 @@ type Json = Mapping[str, Any]
 _DATED = re.compile(r"\(Today's date: [0-9-]+\.\)\n\n")
 
 
-_CHANGED = "(End of what changed.)\n\n"  # how the loop's note on changed instructions ends
+_CHANGED = "(End of what changed.)\n\n"  # how the loop's aside on changed instructions ends
 
 
 def _said(message: Json) -> str:
-    """A message's text, without what the loop may put first: the date, and a note that the
+    """A message's text, without what the loop may put first: the date, and an aside that the
     model's instructions changed."""
     content = str(message.get("content") or "")
     content = content[dated.end() :] if (dated := _DATED.match(content)) else content
@@ -71,11 +71,15 @@ def _events(body: Json) -> Iterator[dict[str, Any] | str]:
     said = _said(last)
     yield _chunk(model, {"role": "assistant", "content": ""})
     if last.get("role") == "tool":
-        for part in ("the input ", f"said: {said.strip()}"):
+        # what the input printed, without the python tool's note of bh-02's other tools, told
+        # with the first input
+        printed = "\n".join(line for line in said.strip().splitlines() if not line.startswith("(bh-02's "))
+        for part in ("the input ", f"said: {printed}"):
             yield _chunk(model, {"content": part})
         finish = "stop"
     elif said.startswith("call ") or said == "broken call":
-        tool = str((body.get("tools") or [{}])[0].get("function", {}).get("name", "python"))
+        offered = [str(t.get("function", {}).get("name")) for t in body.get("tools") or []]
+        tool = "python" if "python" in offered or not offered else offered[0]
         arguments = (
             json.dumps({"code": said.removeprefix("call ")}) if said != "broken call" else '{"code": "x'
         )

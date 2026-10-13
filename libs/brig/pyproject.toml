@@ -1,7 +1,7 @@
 [project]
 name = "brig"
 version = "0.0.1"
-description = "Composable, honestly-graded sandboxes: spec -> mechanisms -> stack -> launcher -> handle."
+description = "Composable, honestly-graded sandboxes: spec -> mechanisms -> stack -> runtime -> jail."
 readme = "README.md"
 requires-python = ">=3.15"
 license = "MIT"
@@ -70,6 +70,9 @@ stack   = ["core", "mech"]
 run     = ["core", "mech", "stack"]
 observe = ["core", "run"]
 probe   = ["core", "run", "observe"]
+# Runtimes that are not `run`'s own (decision-178): no row names `runtime`, so nothing in brig
+# imports one, `run` included; an embedder picks a runtime by importing it.
+runtime = ["core", "mech", "stack", "run"]
 # `proxy` is a standalone PROCESS, not a layer in the flow: the egress filter runs trusted-side,
 # outside the jail. The empty row is the enforcement of that - it may import nothing from brig.
 proxy   = []

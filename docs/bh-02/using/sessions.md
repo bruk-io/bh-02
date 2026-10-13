@@ -37,6 +37,11 @@ says what is wrong if you name it).
 The status bar shows the running session's id. When the bar is narrow it shows the id's last
 part, such as `07f8`, and `--resume` takes that too.
 
+A session's sub-agents keep their conversation and an event log beside it
+(`<id>/agents/NAME/transcript.jsonl` and `events.jsonl`, the log readable by you alone and, like the
+rest of the session's state, not by the model's code). `bh-02 watch ID NAME` follows one; the
+[command line](../reference/command-line.md#bh-02-watch) says how.
+
 ## Resuming
 
 ```sh

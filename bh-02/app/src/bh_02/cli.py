@@ -4,7 +4,7 @@ While the app runs it owns the terminal, so this module says nothing then: lifec
 (`--trace FILE`) go to a file, and a layer file that could not be reloaded is kept and printed
 once the app has exited and the terminal is restored. Besides the app it is the only module
 that touches the terminal, and only for what has no `output` to go through: option parsing,
-a fatal error, and those notes after the run.
+a fatal error, and those reports after the run.
 """
 
 import asyncio
@@ -20,7 +20,7 @@ from typing import TextIO
 
 import click
 
-from bh_02 import sessions
+from bh_02 import sessions, watching
 from bh_02.bootstrap import (
     CREDENTIAL_FILE,
     CompositionError,
@@ -207,6 +207,25 @@ def sessions_command() -> None:
         click.echo(f"warning: skipped {record.message}", err=True)
 
 
+@main.command("watch")
+@click.argument("session")
+@click.argument("agent")
+@click.option("--once", is_flag=True, help="Print what the log holds now and stop, instead of following it.")
+def watch_command(session: str, agent: str, once: bool) -> None:
+    """Follow one sub-agent's event log, read-only: SESSION is a session's id (`bh-02 sessions`)
+    and AGENT the agent's name (`/agents` in the session says the command, such as
+    `bh-02 watch 20261012-091500-ab12 general-1`). Stops when the agent ends; Ctrl-C leaves it
+    sooner. Nothing is written, and only names bh-02 made are accepted."""
+    try:
+        for chunk in watching.watched(sessions.state_root(), session, agent, follow=not once):
+            click.echo(chunk, nl=False)
+    except watching.Refused as error:
+        click.echo(f"error: {error.message}", err=True)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        click.echo(err=True)
+
+
 def _session(
     resume: str | None, *, model: str | None, no_jail: bool, patches: Sequence[Path]
 ) -> sessions.Session:
@@ -257,12 +276,12 @@ def _run(
     with contextlib.ExitStack() as stack:
         traced = stack.enter_context(trace.open("a")) if trace is not None else None
         listen = _writer(traced, "") if traced is not None else None
-        noted = _writer(traced, "report: ") if traced is not None else None
+        reported = _writer(traced, "report: ") if traced is not None else None
 
         def report(line: str) -> None:
             reports.append(line)
-            if noted is not None:
-                noted(line)
+            if reported is not None:
+                reported(line)
 
         code, started = _launch(layers, listen, report, listing)
     for line in reports:

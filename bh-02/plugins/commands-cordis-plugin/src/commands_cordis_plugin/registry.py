@@ -20,7 +20,7 @@ import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, NotRequired, TypedDict
 
-from cordis_helpers import Registry
+from cordis_helpers import Hooks, Registry
 
 __all__ = ["Answer", "Choice", "CommandSpec", "Commands", "Run", "parse"]
 
@@ -123,6 +123,7 @@ class Commands:
         self._commands: Registry[tuple[CommandSpec, Run]] = Registry("command")
         self._prefixes: Registry[tuple[CommandSpec, Run]] = Registry("prefix")
         self._for_model: list[str] = []  # what commands left for the person's next message
+        self._stop_notes: Hooks[Callable[[], str]] = Hooks()
 
     def register(self, spec: CommandSpec, run: Run) -> Callable[[], None]:
         """Offer `/NAME` (`spec`: name, help, usage) until the remover is called."""
@@ -135,6 +136,25 @@ class Commands:
         if (problem := _prefix_problem(prefix)) is not None:
             raise ValueError(problem)
         return self._prefixes.register(prefix, (spec, run))
+
+    def on_stop(self, note: Callable[[], str]) -> Callable[[], None]:
+        """Add what a row has to say after the person stops a reply (Ctrl-C): `note()` returns
+        a line, or '' for none, when `stop_notes` asks. The remover takes only this one."""
+        return self._stop_notes.add(note)
+
+    def stop_notes(self) -> list[str]:
+        """The lines rows have for the stop notice (the chat row shows them after a stopped
+        reply), sorted so the order rows were added in means nothing; a note that raises says so
+        in one line and the rest still say theirs."""
+        notes: list[str] = []
+        for note in self._stop_notes:
+            try:
+                said = note()
+            except Exception as error:  # one row's note failing must not cost the rest theirs
+                said = f"(a stop note failed: {type(error).__name__}: {error})"
+            if said.strip():
+                notes.append(said.strip())
+        return sorted(notes)
 
     def specs(self) -> list[CommandSpec]:
         """The slash commands (the palette's): a prefix is typed, not chosen."""

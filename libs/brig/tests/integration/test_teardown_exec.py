@@ -1,6 +1,7 @@
-"""Exec-sibling teardown: `kill()` reaps every exec sibling `handle` has
-registered, through the SAME ladder the workload group uses, and reports
-each as its own `KillReport` item.
+"""Exec-sibling teardown: `destroy()` (`kill()` until decision-183) reaps
+every exec sibling -- every `jail.start` after the first -- the jail has
+recorded, through the SAME ladder the workload group uses, and reports each
+as its own `KillReport` item.
 
 task-027's spec anchor, SPEC.md §9 (as amended by decision-042), verbatim:
 
@@ -14,16 +15,16 @@ task-027's spec anchor, SPEC.md §9 (as amended by decision-042), verbatim:
       to close.
 
 **The design pin (task-027, chosen: derived from a durable registration;
-medium changed by decision-152, 2026-09-08).** `exec_in_jail`
-(`brig/run/exec_.py`) writes the sibling's pid and pgid into a file under
-`<jail_dir>/execs/` (`brig/run/_execs.py`), and `ExecHandle.wait` removes
-it; `teardown.kill_jail` (`brig/run/teardown.py`) finds every live sibling
-by listing that directory. This is what makes AC #3 below work: the handle
-serialized BEFORE the exec still names it, because the naming lives on the
-filesystem under the `jail_dir` the handle points at, not in any in-memory
-state on the `Handle` object itself (which is frozen and holds none). It
-was an `EXEC`-without-`EXEC_END` pairing in the per-jail event stream until
-that stream was deleted; the clause it satisfies is unchanged.
+medium changed by decision-152 and decision-181).** A start writes the
+sibling's record (pid, pgid, start stamp) under `<jail_dir>/procs/<id>/`
+(`brig/run/_records.py`), and nothing deletes it on `wait`; teardown
+(`teardown.kill_named`, behind `Jail.destroy`) finds every sibling by
+listing that directory. This is what makes AC #3 below work: the jail
+serialized BEFORE the exec still reaps it, because the naming lives on the
+filesystem under the `jail_dir` the dict points at, not in any in-memory
+state on the object. It was an `EXEC`-without-`EXEC_END` pairing in the
+per-jail event stream, then a registration file per sibling; the clause it
+satisfies is unchanged.
 
 Every long-lived sibling here is built through `tests.conftest.workload_argv`
 so a broken reap is caught by the suite-wide leak-check, per this task's
@@ -54,14 +55,10 @@ import time
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.run import teardown as teardown_mod
-from brig.run._execs import live as live_execs
-from brig.run.exec_ import ExecHandle, exec_in_jail
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Jail, Process, _records
 from brig.run.teardown import DEFAULT_GRACE_S, KillOutcome
 from brig.stack import CompiledJail
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import destroy_with_grace, launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -94,10 +91,9 @@ def _compiled_jail() -> CompiledJail:
     )
 
 
-def _launch(argv: list[str], *, jail_id: str) -> Handle:
+def _launch(argv: list[str], *, jail_id: str) -> tuple[Jail, Process]:
     jail_dir = _new_jail_dir()
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         _compiled_jail(),
         argv=argv,
         cwd=jail_dir,
@@ -107,37 +103,37 @@ def _launch(argv: list[str], *, jail_id: str) -> Handle:
     )
 
 
-def _new_handle(run_id: str, *, jail_id: str) -> Handle:
-    """A handle whose workload is a `sleep 100` -- long-lived enough to
+def _new_jail(run_id: str, *, jail_id: str) -> tuple[Jail, Process]:
+    """A jail whose first process is a `sleep 100` -- long-lived enough to
     outlive every test below, `run_id`-tagged so the leak sweep catches it
     if this test's own teardown ever fails."""
     return _launch(workload_argv(run_id, "sleep 100"), jail_id=jail_id)
 
 
-def _teardown_group(handle: Handle) -> None:
+def _teardown_group(process: Process) -> None:
     """Group-kill the workload directly -- belt-and-suspenders cleanup for a
     test whose own `kill()` call is itself under test (a failing assertion
-    mid-test must not leak the workload). `handle.wait()` blocks until the
+    mid-test must not leak the workload). `process.wait()` blocks until the
     launcher's exit-waiter has reaped it (task-073)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
 
 
-def _reap_and_kill_sibling(exec_handle: ExecHandle | None) -> None:
-    """Belt-and-suspenders cleanup for an `ExecHandle` this process itself
-    created: signal its group (idempotent if `kill()` already ended it)
-    and reap it (this process IS its real parent, since `exec_in_jail` was
+def _reap_and_kill_sibling(sibling: Process | None) -> None:
+    """Belt-and-suspenders cleanup for a sibling this process itself
+    started: signal its group (idempotent if `destroy()` already ended it)
+    and reap it (this process IS its real parent, since `jail.start` was
     called here)."""
-    if exec_handle is None:
+    if sibling is None:
         return
     with contextlib.suppress(ProcessLookupError):
-        os.killpg(exec_handle.pid, signal.SIGKILL)
+        os.killpg(sibling.pid, signal.SIGKILL)
     with contextlib.suppress(ChildProcessError, ProcessLookupError):
-        os.waitpid(exec_handle.pid, 0)
+        os.waitpid(sibling.pid, 0)
 
 
 def _group_members(pgid: int) -> list[int]:
@@ -147,15 +143,16 @@ def _group_members(pgid: int) -> list[int]:
     reimplemented here so this file observes from OUTSIDE the module under
     test, not through it."""
     proc = subprocess.run(
-        ["/bin/ps", "-Ao", "pid=,pgid="], capture_output=True, text=True, check=True
+        ["/bin/ps", "-Ao", "pid=,pgid=,stat="], capture_output=True, text=True, check=True
     )
     members: list[int] = []
     for line in proc.stdout.splitlines():
         parts = line.split()
-        if len(parts) != 2:
+        if len(parts) != 3:
             continue
-        pid_s, pgid_s = parts
-        if int(pgid_s) == pgid:
+        pid_s, pgid_s, state = parts
+        # A zombie has exited; where PID 1 does not reap it stays (decision-171).
+        if int(pgid_s) == pgid and not state.startswith("Z"):
             members.append(int(pid_s))
     return members
 
@@ -177,40 +174,44 @@ def _ps_state(pid: int) -> str:
     `""` if `pid` has no row at all. A `Z`-prefixed state means the
     process has already exited but is not yet reaped -- this is how AC #5
     below observes a sibling exit on its own from OUTSIDE, without calling
-    `ExecHandle.wait()` (which would reap it itself and deregister it,
-    making the already-exited scenario indistinguishable from "never
-    exec'd")."""
+    the sibling's `wait()`."""
     proc = subprocess.run(
         ["/bin/ps", "-o", "state=", "-p", str(pid)], capture_output=True, text=True
     )
     return proc.stdout.strip()
 
 
-def _registered(handle: Handle) -> list[tuple[int, int, str]]:
-    """`(pid, pgid, start_time)` for every sibling still registered against
-    this jail, read off disk the way a rehydrated handle would read it. The
-    third field is decision-155's start-time stamp -- what makes the pid an
-    identity rather than a number teardown might find pointing at a
+def _registered(jail: Jail, first_process: Process) -> list[tuple[int, int, str]]:
+    """`(pid, pgid, start_time)` for every sibling recorded in this jail (every
+    record under `<jail_dir>/procs` but its first process's, decision-181),
+    read off disk the way a rehydrated jail would read it.
+    The third field is decision-155's start-time stamp -- what makes the pid
+    an identity rather than a number teardown might find pointing at a
     stranger."""
-    return live_execs(handle.jail_dir)
+    first = first_process.id
+    return [
+        (record.pid, record.pgid, record.start_time)
+        for record in _records.scan(jail.jail_dir).records
+        if record.id != first
+    ]
 
 
 # ---------------------------------------------------------------------------
-# AC #2 -- live handle, unwaited sibling, gone after kill(), with control.
+# AC #2 -- live jail, unwaited sibling, gone after destroy(), with control.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-def test_live_handle_kill_reaps_the_unwaited_exec_sibling(run_id: str) -> None:
+def test_live_jail_destroy_reaps_the_unwaited_exec_sibling(run_id: str) -> None:
     """AC #2: an exec sibling that is never waited on is gone after
-    `handle.kill()`, observed from OUTSIDE via `/bin/ps`. CONTROL, the
+    `jail.destroy()`, observed from OUTSIDE via `/bin/ps`. CONTROL, the
     same probe run BEFORE the kill: the sibling's pgid has at least one
     member -- without this, "gone" is also satisfied by a sibling that
     never started."""
-    handle = _new_handle(run_id, jail_id="jail-ac2")
-    sibling: ExecHandle | None = None
+    jail, process = _new_jail(run_id, jail_id="jail-ac2")
+    sibling: Process | None = None
     try:
-        sibling = exec_in_jail(handle, workload_argv(run_id, "sleep 100"))
+        sibling = jail.start(workload_argv(run_id, "sleep 100"))
         sibling_pgid = _ps_pgid(sibling.pid)
 
         before = _group_members(sibling_pgid)
@@ -219,12 +220,12 @@ def test_live_handle_kill_reaps_the_unwaited_exec_sibling(run_id: str) -> None:
             f"member(s) before kill(), got {before}"
         )
 
-        handle.kill()
+        jail.destroy()
 
         after = _group_members(sibling_pgid)
         assert after == []
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
         _reap_and_kill_sibling(sibling)
 
 
@@ -235,41 +236,42 @@ def test_live_handle_kill_reaps_the_unwaited_exec_sibling(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_prekill_handle_serialized_before_exec_reaps_sibling_in_separate_interpreter(
+def test_a_jail_serialized_before_exec_reaps_the_sibling_in_a_separate_interpreter(
     run_id: str,
 ) -> None:
-    """AC #3: `to_dict()` the handle BEFORE any exec; exec an unwaited
-    long-lived sibling from the live handle; rehydrate that PRE-EXEC dict
+    """AC #3: `to_dict()` the jail BEFORE any exec; start an unwaited
+    long-lived sibling from the live jail; rehydrate that PRE-EXEC dict
     in a genuinely separate interpreter (a `sys.executable` subprocess,
-    not a second `Handle` object in this process) and call `kill_jail()`
-    there. Assert from the parent that the sibling pgid has zero members.
-    Also assert the child interpreter pid differs from `os.getpid()` and
-    that it exited 0.
+    not a second `Jail` object in this process) and tear it down there, the
+    ladder `destroy` runs with a short grace. Assert from the parent that the
+    sibling pgid has zero members. Also assert the child interpreter pid
+    differs from `os.getpid()` and that it exited 0.
 
-    An in-memory-only registration on `Handle` would pass every other
+    An in-memory-only registration on the jail would pass every other
     criterion in this file and fail only this one -- there is no live
-    `Handle` object shared between this process and the child interpreter,
+    `Jail` object shared between this process and the child interpreter,
     only a dict written before the exec ever happened."""
-    handle = _new_handle(run_id, jail_id="jail-ac3")
-    sibling: ExecHandle | None = None
+    jail, process = _new_jail(run_id, jail_id="jail-ac3")
+    sibling: Process | None = None
     try:
-        pre_exec_dict = handle.to_dict()
+        pre_exec_dict = jail.to_dict()
 
-        sibling = exec_in_jail(handle, workload_argv(run_id, "sleep 100"))
+        sibling = jail.start(workload_argv(run_id, "sleep 100"))
         sibling_pgid = _ps_pgid(sibling.pid)
         assert _group_members(sibling_pgid), "sibling should be alive before the child kills it"
 
-        dict_path = os.path.join(handle.jail_dir, "pre-exec-handle.json")
+        dict_path = os.path.join(jail.jail_dir, "pre-exec-jail.json")
         with open(dict_path, "w") as f:
             json.dump(pre_exec_dict, f)
 
         script = (
             "import json\n"
-            "from brig.run.handle import Handle\n"
-            "from brig.run.teardown import kill_jail\n"
+            "from brig.run import HostRuntime, Jail, RuntimeKind\n"
+            "from brig.run.teardown import kill_named\n"
             f"with open({dict_path!r}) as f:\n"
             "    d = json.load(f)\n"
-            "handle = Handle.from_dict(d)\n"
+            "jail = Jail.from_dict(d, runtimes={RuntimeKind.HOST: HostRuntime()})\n"
+            "record = jail._record()\n"
             # A short grace: this child interpreter is not the real
             # parent of EITHER group it tears down (workload or sibling),
             # so it cannot reap what it signals -- the ladder still
@@ -277,7 +279,9 @@ def test_prekill_handle_serialized_before_exec_reaps_sibling_in_separate_interpr
             # observe them gone until the real parent (the test process)
             # reaps them after this subprocess returns. A short grace
             # keeps this test fast without changing that fact.
-            "kill_jail(handle, grace=0.3)\n"
+            "kill_named(known=record.processes, jail_dir=record.jail_dir,\n"
+            "           helper_pids=record.helper_pids, helper_stamps=record.helper_stamps,\n"
+            "           grace=0.3)\n"
         )
         child = subprocess.Popen(
             [sys.executable, "-c", script],
@@ -307,7 +311,7 @@ def test_prekill_handle_serialized_before_exec_reaps_sibling_in_separate_interpr
 
         assert _group_members(sibling_pgid) == []
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
         _reap_and_kill_sibling(sibling)
 
 
@@ -323,19 +327,19 @@ def test_kill_report_shape_workload_then_one_exec_sibling_item(run_id: str) -> N
     substring/startswith); `identity` equals that sibling's pgid rendered
     as text; `outcome` is `KillOutcome.ENDED` as the enum member, not its
     value."""
-    handle = _new_handle(run_id, jail_id="jail-ac4")
-    sibling: ExecHandle | None = None
+    jail, process = _new_jail(run_id, jail_id="jail-ac4")
+    sibling: Process | None = None
     try:
-        sibling = exec_in_jail(handle, workload_argv(run_id, "sleep 100"))
+        sibling = jail.start(workload_argv(run_id, "sleep 100"))
         sibling_pgid = _ps_pgid(sibling.pid)
 
-        report = handle.kill()
+        report = jail.destroy()
 
         assert len(report.items) == 2
         workload_item, sibling_item = report.items
 
         assert workload_item.kind == "workload_group"
-        assert workload_item.identity == str(handle.pgid)
+        assert workload_item.identity == str(process._record.pgid)
         assert workload_item.outcome is KillOutcome.ENDED
 
         assert sibling_item.kind == "exec_sibling"
@@ -344,7 +348,7 @@ def test_kill_report_shape_workload_then_one_exec_sibling_item(run_id: str) -> N
         assert sibling_item.outcome is KillOutcome.ENDED
         assert isinstance(sibling_item.outcome, KillOutcome)
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
         _reap_and_kill_sibling(sibling)
 
 
@@ -363,27 +367,27 @@ def test_already_exited_sibling_reports_already_gone_fast(run_id: str) -> None:
     skips the sibling reap cannot conclude ANYTHING about that sibling in
     less than a full grace window (it would see a lingering zombie and
     burn the whole ladder before reporting `FAILED`)."""
-    handle = _new_handle(run_id, jail_id="jail-ac5")
-    sibling: ExecHandle | None = None
+    jail, process = _new_jail(run_id, jail_id="jail-ac5")
+    sibling: Process | None = None
     try:
-        sibling = exec_in_jail(handle, workload_argv(run_id, "true"))
+        sibling = jail.start(workload_argv(run_id, "true"))
         # Let the sibling actually exit on its own, WITHOUT calling
-        # `.wait()` -- calling it here would append EXEC_END ourselves and
-        # make this scenario indistinguishable from "never happened".
-        # Observed from OUTSIDE via `/bin/ps`'s STAT field (`Z` = exited,
-        # not yet reaped), not by touching `ExecHandle`'s own internals.
+        # `.wait()`. Observed from OUTSIDE via `/bin/ps`'s STAT field: no row
+        # (its exit waiter reaped it, as every start's is since decision-181)
+        # or `Z` (exited, not yet reaped), never by touching the `Process`'s
+        # own internals.
         deadline = time.monotonic() + 5.0
         state = _ps_state(sibling.pid)
-        while time.monotonic() < deadline and not state.startswith("Z"):
+        while time.monotonic() < deadline and state and not state.startswith("Z"):
             time.sleep(0.01)
             state = _ps_state(sibling.pid)
-        assert state.startswith("Z"), (
-            f"expected sibling pid={sibling.pid} to be a zombie (exited, unreaped) "
-            f"before kill() runs; last observed state={state!r}"
+        assert not state or state.startswith("Z"), (
+            f"expected sibling pid={sibling.pid} to have exited before kill() runs; "
+            f"last observed state={state!r}"
         )
 
         started = time.monotonic()
-        report = handle.kill()
+        report = jail.destroy()
         elapsed = time.monotonic() - started
 
         assert len(report.items) == 2
@@ -397,7 +401,7 @@ def test_already_exited_sibling_reports_already_gone_fast(run_id: str) -> None:
             f"({DEFAULT_GRACE_S}s) -- looks like the sibling reap was skipped"
         )
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
         _reap_and_kill_sibling(sibling)
 
 
@@ -409,7 +413,7 @@ def test_already_exited_sibling_reports_already_gone_fast(run_id: str) -> None:
 
 @pytest.mark.integration
 def test_every_registered_sibling_reaches_its_own_kill_report_item(run_id: str) -> None:
-    """AC #6: the returned `KillReport` names every group the handle owns,
+    """AC #6: the returned `KillReport` names every group the jail owns,
     each as its own item with its own identity -- the workload group and
     the registered sibling, distinct, not a collapsed set.
 
@@ -417,26 +421,26 @@ def test_every_registered_sibling_reaches_its_own_kill_report_item(run_id: str) 
     checked by decoding the events file. decision-152 (2026-09-08) deleted
     both the file and the `KILL` kind: the report IS the record now, so
     what there is to check is the report against the durable registration
-    that produced it. MUTATION PAIRING (deterministic): make `kill_jail`
-    tear down only `_live_exec_siblings(...)[:0]` and this test fails on
-    every run."""
-    handle = _new_handle(run_id, jail_id="jail-ac6")
-    sibling: ExecHandle | None = None
+    that produced it. MUTATION PAIRING (deterministic): make
+    `teardown.kill_named` tear down only `known` and none of the records it
+    scans, and this test fails on every run."""
+    jail, process = _new_jail(run_id, jail_id="jail-ac6")
+    sibling: Process | None = None
     try:
-        sibling = exec_in_jail(handle, workload_argv(run_id, "sleep 100"))
-        registered = _registered(handle)
+        sibling = jail.start(workload_argv(run_id, "sleep 100"))
+        registered = _registered(jail, process)
         assert [pid for pid, _pgid, _stamp in registered] == [sibling.pid]
 
-        report = handle.kill()
+        report = jail.destroy()
         assert len(report.items) == 2
 
         report_pairs = {(item.kind, item.identity) for item in report.items}
         assert report_pairs == {
-            ("workload_group", str(handle.pgid)),
+            ("workload_group", str(process._record.pgid)),
             ("exec_sibling", str(registered[0][1])),
         }
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
         _reap_and_kill_sibling(sibling)
 
 
@@ -455,17 +459,17 @@ def test_sigterm_ignoring_sibling_still_ends_via_sigkill_escalation(run_id: str)
     period -- without this control, the escalation case cannot distinguish
     "the SIGKILL rung actually ran" from "this always reports ENDED no
     matter what". Both asserted as the `KillOutcome` enum member."""
-    handle = _new_handle(run_id, jail_id="jail-ac7")
-    ignoring: ExecHandle | None = None
-    cooperative: ExecHandle | None = None
+    jail, process = _new_jail(run_id, jail_id="jail-ac7")
+    ignoring: Process | None = None
+    cooperative: Process | None = None
     try:
-        ignoring = exec_in_jail(handle, workload_argv(run_id, "trap '' TERM; sleep 100"))
+        ignoring = jail.start(workload_argv(run_id, "trap '' TERM; sleep 100"))
         ignoring_pgid = _ps_pgid(ignoring.pid)
-        cooperative = exec_in_jail(handle, workload_argv(run_id, "sleep 100"))
+        cooperative = jail.start(workload_argv(run_id, "sleep 100"))
         cooperative_pgid = _ps_pgid(cooperative.pid)
 
         started = time.monotonic()
-        report = teardown_mod.kill_jail(handle, grace=0.3)
+        report = destroy_with_grace(jail, 0.3)
         elapsed = time.monotonic() - started
 
         assert len(report.items) == 3  # workload + two siblings
@@ -476,9 +480,9 @@ def test_sigterm_ignoring_sibling_still_ends_via_sigkill_escalation(run_id: str)
 
         assert ignoring_item.outcome is KillOutcome.ENDED
         assert cooperative_item.outcome is KillOutcome.ENDED
-        print(f"AC #7: kill_jail(grace=0.3) elapsed={elapsed:.3f}s")
+        print(f"AC #7: destroy (grace=0.3) elapsed={elapsed:.3f}s")
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
         _reap_and_kill_sibling(ignoring)
         _reap_and_kill_sibling(cooperative)
 
@@ -491,10 +495,10 @@ def test_sigterm_ignoring_sibling_still_ends_via_sigkill_escalation(run_id: str)
 @pytest.mark.integration
 def test_unwaited_exec_then_kill_leaks_nothing_task022_ac11(run_id: str) -> None:
     """AC #14: task-022's own AC #11 reproduction (its verifier's exact
-    plant: `exec_in_jail(handle, ["sleep", "45"])`, never `wait()`-ed, then
+    plant: `jail.start(["sleep", "45"])`, never `wait()`-ed, then
     `kill()`), run under the fully-armed suite-wide sweep. task-022 could
-    not close this because its `kill_jail` only ever tore down the
-    workload group; this task's `kill_jail` reaps every exec sibling too,
+    not close this because its `kill()` only ever tore down the
+    workload group; teardown reaps every exec sibling too,
     so nothing survives to leak -- the criterion holds because the product
     is right (decision-042), not because the check was loosened.
 
@@ -502,18 +506,18 @@ def test_unwaited_exec_then_kill_leaks_nothing_task022_ac11(run_id: str) -> None
     reproduction exactly -- proving the product itself leaks nothing here,
     independent of which `tests/conftest.py` arm would or would not have
     seen it."""
-    handle = _new_handle(run_id, jail_id="jail-ac14")
-    sibling: ExecHandle | None = None
+    jail, process = _new_jail(run_id, jail_id="jail-ac14")
+    sibling: Process | None = None
     try:
-        sibling = exec_in_jail(handle, ["sleep", "45"])
+        sibling = jail.start(["sleep", "45"])
         sibling_pgid = _ps_pgid(sibling.pid)
         assert _group_members(sibling_pgid)  # alive before kill()
 
-        handle.kill()
+        jail.destroy()
 
         assert _group_members(sibling_pgid) == []
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
         _reap_and_kill_sibling(sibling)
 
 
@@ -545,20 +549,20 @@ def test_unwaited_bare_argv_sibling_is_reaped_by_kill(run_id: str) -> None:
 
     Deliberately NO defensive `_reap_and_kill_sibling` in `finally` here,
     unlike every other test in this file: this test's entire point is to
-    depend on `handle.kill()` alone for the sibling's hygiene. Cleaning it
+    depend on `jail.destroy()` alone for the sibling's hygiene. Cleaning it
     up defensively would silently erase a real leak before the session's
     leak-check ever got to see it, on the one test this task's mutation
     check needs that leak to survive to. The workload group is still torn
     down defensively (`_teardown_group`) -- only the exec-sibling rung is
     what AC #8's plant disables."""
-    handle = _new_handle(run_id, jail_id="jail-ac8")
+    jail, process = _new_jail(run_id, jail_id="jail-ac8")
     try:
-        sibling = exec_in_jail(handle, ["sleep", "100"])
+        sibling = jail.start(["sleep", "100"])
         sibling_pgid = _ps_pgid(sibling.pid)
         assert _group_members(sibling_pgid)
 
-        handle.kill()
+        jail.destroy()
 
         assert _group_members(sibling_pgid) == []
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)

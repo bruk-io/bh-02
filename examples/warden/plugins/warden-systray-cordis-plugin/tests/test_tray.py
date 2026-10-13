@@ -1,6 +1,11 @@
 """menu_labels on its own: the only pure, AppKit-free piece of this plugin."""
 
-from warden_systray_cordis_plugin import menu_labels
+import pytest
+
+# rumps installs only on darwin; the package imports it, so without it these tests skip by name.
+pytest.importorskip("rumps")
+
+from warden_systray_cordis_plugin import menu_labels  # noqa: E402
 
 
 def test_names_come_back_sorted() -> None:

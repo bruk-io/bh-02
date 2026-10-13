@@ -46,7 +46,7 @@ What an extension reaches of bh-02, each only to add to it, each returning its r
 - `frame.status(field, text, *shorter)`: a status-bar field, pushed as `NAME:field`, so it
   can't cover another row's.
 - `system.add(text)`: text in the model's own prompt, told with the next message the model reads
-  (the loop keeps the prompt a conversation began with and tells a change as a note).
+  (the loop keeps the prompt a conversation began with and tells a change as an aside).
 - `tools.register(spec, run)`: a tool offered to the model (`spec`: `name`, `description`,
   `parameters`, a JSON Schema object; `run`: async, the call's arguments as a dict in, the text
   the model reads out, anything else sent as JSON). The host does not trust what the extensions
@@ -54,7 +54,7 @@ What an extension reaches of bh-02, each only to add to it, each returning its r
   `problem`, a name that is not lowercase letters, digits and `_` (48 at most), one of bh-02's
   own (`python`, and every name a layer row has registered, kept even while that row restarts),
   parameters that are no object schema, or a spec over 16 KiB. It registers the tool with
-  `runs = "jail"`, so the `approval` rule decides each call as it does an input, and `show`
+  `runs = "jail"` whatever the extension says (`"harness"` is a layer row's claim alone), so the `approval` rule decides each call as it does an input, and `show`
   (`offered.shown_tool_call`): unjailed, the person is asked, shown the tool's name, its
   extension and the arguments as JSON. A call goes to the extensions process (`call`) and its answer, or the
   error `run` raised, is the result; a redefined extension offers its new spec, a deleted one
@@ -78,13 +78,13 @@ workspace (an editable install), and `help(cordis.background)` and the like.
 
 The model's prompt (`watch.instructions`) says how to extend bh-02 and names the extensions
 there are, nothing more: how each one is lives in `.bh-02/plugins/status.json`, so a load ending
-or failing never changes the prompt (each change is a note the loop sends the model, so only an
+or failing never changes the prompt (each change is an aside the loop sends the model, so only an
 extension appearing or going is one). The file is written as each load ends, so an input can read
 it at once: per extension, `state` (`active`, `partly up`, `failed`, `loading`), each
 component's state (`active`, `waiting on: KEY`, `failed:` and the traceback from the
 extension's own frames), the module's `error`, its `commands`, and `problems` (a registration
 bh-02 refused). The status bar's `extensions` field shows the same to the person
-(`ext: todo ✓ notes ✗`).
+(`ext: todo ✓ keep ✗`).
 
 ## Where it runs, and who is asked
 

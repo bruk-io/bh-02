@@ -60,7 +60,7 @@ def test_the_file_adds_models_a_user_s_shadows_a_built_in_and_extra_wins_over_th
     )
     by_name = {m.name: m for m in models}
     assert list(by_name) == ["sonnet", "opus", "haiku", "llama", "router"]  # a replacement keeps its place
-    assert by_name["opus"].provider == "openai" and by_name["opus"].shadows  # allowed, and noted
+    assert by_name["opus"].provider == "openai" and by_name["opus"].shadows  # allowed, and marked
     assert by_name["opus"].source == "/c/models.toml"
     assert by_name["llama"].id == "qwen3" and by_name["llama"].source == "the model row's extra"
     assert by_name["router"].table["key"] == "OPENROUTER_API_KEY" and problem(by_name["router"]) is None

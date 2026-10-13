@@ -12,6 +12,14 @@ import pytest
 # Linux with bubblewrap, and a test of a model or a chat row should not depend on the platform.
 UNJAILED = '[[plugin]]\nid = "runner"\nuse = "runner:unconfined"\n'
 
+# These tests read the python tool's output and the tool list exactly; the agents row's `agent`
+# would be told as a function in the namespace with the first input and offered beside `python`.
+# Its own tests are the agents plugin's and the real launch's.
+NO_AGENTS = (
+    '[[plugin]]\nid = "agents"\nuse = "agents:agents"\ndisabled = true\n'
+    '[[plugin]]\nid = "agents_status"\nuse = "agents:status"\ndisabled = true\n'
+)
+
 # bh-02 has no one-shot chat row, but many of its tests want one: the reply to one prompt (the
 # `chat` override's config), recorded rather than drawn, with a failure left to reach `done`.
 ONE_REPLY = (
@@ -64,7 +72,7 @@ FIELDS: dict[str, str] = {}
 
 
 class Pushed:
-    """A `frame` (CONTRACTS.md) that notes the status fields rows push, in FIELDS, and keeps
+    """A `frame` (CONTRACTS.md) that records the status fields rows push, in FIELDS, and keeps
     them after their rows leave (so a test can read them once the run is over)."""
 
     def status(self, field: str, text: str, *shorter: str) -> Any:
@@ -428,14 +436,14 @@ async def one_input_model() -> Effects:
 
 
 def zebra(input: Mapping[str, Any]) -> str:
-    """A `memory` function's note that sorts after the context files' (`From ...`)."""
-    return "Zebra: another row's note." if input.get("touched") else ""
+    """An `asides` function's aside that sorts after memory's (`From ...`)."""
+    return "Zebra: another row's aside." if input.get("touched") else ""
 
 
 @component
-async def another_note(*, notes: Any) -> Effects:
-    """A layer's own row adding to `notes`: `zebra`'s note with each input that opened a file."""
-    yield acquire(notes.add, zebra)
+async def another_aside(*, asides: Any) -> Effects:
+    """A layer's own row adding to `asides`: `zebra`'s aside with each input that opened a file."""
+    yield acquire(asides.add, zebra)
 
 
 # What the compacting model was sent: each request's messages and the names of the tools offered.
@@ -571,12 +579,13 @@ def composition(tmp_path: Path) -> Iterator[Composition]:
     written = 0
 
     def layer(text: str, *, one_reply: bool = False) -> Path:
-        """A layer file; every one also puts the kernel in no jail (see UNJAILED), and
+        """A layer file; every one also puts the kernel in no jail (see UNJAILED) and drops the
+        agents row (NO_AGENTS), and
         `one_reply` makes the chat row a one-shot whose reply is recorded (see ONE_REPLY)."""
         nonlocal written
         written += 1
         path = tmp_path / f"layer{written}.toml"
-        path.write_text(UNJAILED + (ONE_REPLY if one_reply else "") + text)
+        path.write_text(UNJAILED + NO_AGENTS + (ONE_REPLY if one_reply else "") + text)
         return path
 
     try:

@@ -1,7 +1,7 @@
 # Command line
 
-`bh-02` starts a session in the current directory. Its two subcommands list sessions and bring old
-layer files up to date. Each block below is the command's own `--help`.
+`bh-02` starts a session in the current directory. Its subcommands list sessions, bring old
+layer files up to date and follow a sub-agent's event log. Each block below is the command's own `--help`.
 
 ## `bh-02`
 
@@ -33,6 +33,7 @@ Options:
 Commands:
   sessions      List this directory's sessions, newest first: each one's...
   update-layer  Rewrite a layer file (a --patch file) that names rows...
+  watch         Follow one sub-agent's event log, read-only: SESSION is a...
 ```
 
 - `--model` with a `--patch` that sets the model row's config is refused: the patch chooses the
@@ -78,6 +79,30 @@ Options:
 ```
 
 [Layers](../using/layers.md#layers-from-an-earlier-bh-02) shows it at work.
+
+## `bh-02 watch`
+
+```text
+Usage: bh-02 watch [OPTIONS] SESSION AGENT
+
+  Follow one sub-agent's event log, read-only: SESSION is a session's id
+  (`bh-02 sessions`) and AGENT the agent's name (`/agents` in the session says
+  the command, such as `bh-02 watch 20261012-091500-ab12 general-1`). Stops
+  when the agent ends; Ctrl-C leaves it sooner. Nothing is written, and only
+  names bh-02 made are accepted.
+
+Options:
+  --once  Print what the log holds now and stop, instead of following it.
+  --help  Show this message and exit.
+```
+
+Run it in a second terminal while the sub-agent works: `/agents watch NAME` in the session says
+the exact command. It reads the child's `events.jsonl` (the asked prompt, what it said, each
+tool call and result, its usage, and the report it ended with), one line an event, with streamed
+text run together. It opens the file read-only, follows no link, and refuses a SESSION or AGENT
+that is not a name bh-02 made (a session id such as `20261012-091500-ab12`, an agent such as
+`general-1`), so neither can name a path. Anything the model wrote is shown as plain text, with
+no escape sequence. It works the same inside tmux or outside it.
 
 ## Exit codes
 

@@ -81,6 +81,7 @@ from __future__ import annotations
 import re
 
 from brig.core import Axis, EventKind, Grade, Graded, NetworkPolicy, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech.contract import (
     ArgvTransformer,
     CompileCtx,
@@ -122,7 +123,7 @@ _WAIT_SECONDS = 30
 #: uppercase -- and setting only one silently leaves the other tool
 #: unrouted.
 #:
-#: **`NO_PROXY` is deliberately NOT set, not even for loopback.** The
+#: **`NO_PROXY` is deliberately EMPTY, not even loopback exempt.** The
 #: obvious default -- exempting `localhost,127.0.0.1,::1` so a jail's own
 #: channels are not dialled through their own egress filter -- turns out to
 #: buy nothing and cost the policy: SPEC.md §10's channels are UNIX sockets,
@@ -130,8 +131,12 @@ _WAIT_SECONDS = 30
 #: protect; while a loopback exemption means anything the workload can
 #: reach on this host over TCP is outside the allow list entirely. An empty
 #: `NO_PROXY` is the stricter and the simpler reading, so it is the one
-#: taken; a spec that genuinely needs loopback egress names it in
-#: `allowed_domains` like any other destination.
+#: taken. It is set EMPTY (`_NO_PROXY_VARS`), not left unset: the launcher
+#: passes the launching environment through, and an unset variable lets an
+#: inherited exemption reach the workload (SPEC.md §10, decision-170). A
+#: spec that genuinely needs loopback egress names it in `allowed_domains`
+#: like any other destination.
+_NO_PROXY_VARS = ("NO_PROXY", "no_proxy")
 _PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
 
 
@@ -174,8 +179,12 @@ def _render_wrap(port_path: str) -> ArgvTransformer:
 def _render_helper_argv(
     python: str, port_path: str, log_path: str, policy: NetworkPolicy
 ) -> tuple[str, ...]:
+    """`python -I -m brig.proxy ...`: isolated (decision-169), since the launcher starts the
+    proxy on the host in the workload's working directory, which `-m` alone would put first on
+    its import path."""
     argv: list[str] = [
         python,
+        "-I",
         "-m",
         _PROXY_MODULE,
         "--port-file",
@@ -225,6 +234,7 @@ class ConnectProxy:
 
     name = "connect_proxy"
     axes: frozenset[Axis] = frozenset({Axis.NETWORK})
+    runtime: RuntimeKind | None = None
 
     def __init__(self, python: str) -> None:
         self._python = python
@@ -248,7 +258,7 @@ class ConnectProxy:
         )
         return Step(
             wrap=_render_wrap(port_path),
-            env={},
+            env=dict.fromkeys(_NO_PROXY_VARS, ""),
             staged=(),
             helpers=(
                 Helper(

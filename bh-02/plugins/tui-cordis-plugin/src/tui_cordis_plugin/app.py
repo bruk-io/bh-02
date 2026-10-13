@@ -12,7 +12,9 @@ leave, and while a command runs (a `!` one may take minutes) that Ctrl-C doesn't
 Ctrl-P opens the command palette.
 
 Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
-withdraws its own (shown or queued), and Ctrl-C with one up answers every open question no.
+withdraws its own (shown or queued), and Ctrl-C with one up answers no to every open question
+but a sub-agent's: the reply it stops withdraws its foreground child's, and a background
+child's stays queued.
 
 A session's history is drawn again when the app starts (`replay`, what `history.replayable`
 chose from the file), and everything the transcript shows after that is appended to `history`,
@@ -305,7 +307,9 @@ class BhApp(App[None]):
 
     def action_interrupt(self) -> None:
         """Ctrl-C: stop the running turn and take its questions down as a no; with nothing
-        running, say how to leave; while a command runs, say that Ctrl-C doesn't stop it.
+        running, say how to leave; while a command runs, say that Ctrl-C doesn't stop it. A
+        sub-agent's question is never answered here: the stopped reply withdraws its foreground
+        child's, and a background child's stays queued (the reply it stops is not its own).
 
         A turn that hears Ctrl-C is cancelled, which cancels the questions it is waiting on,
         and those come down as withdrawn: answering them no first would let the turn carry on
@@ -332,9 +336,14 @@ class BhApp(App[None]):
             self.query_one(Transcript).note(_COMMAND_RUNS)
 
     def _open_questions(self) -> list[asyncio.Future[bool]]:
-        """Every question not yet answered: the one up, then the queued ones."""
-        shown = [self._asking[1]] if self._asking is not None else []
-        return [answer for answer in [*shown, *(a for _, a in self._queued)] if not answer.done()]
+        """Every question not yet answered that Ctrl-C answers no: the one up, then the queued
+        ones, but a sub-agent's."""
+        shown = [(self._asking[0].request, self._asking[1])] if self._asking is not None else []
+        return [
+            answer
+            for request, answer in [*shown, *self._queued]
+            if not answer.done() and not render.asked_by_a_sub_agent(request)
+        ]
 
     def _decline(self, answers: Sequence[asyncio.Future[bool]]) -> None:
         """Answer each of `answers` still open no, and take the one up down if it is among them."""

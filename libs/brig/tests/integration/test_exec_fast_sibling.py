@@ -1,4 +1,4 @@
-"""Fast exec siblings must not crash `exec_in_jail` (task-075).
+"""Fast exec siblings must not crash a sibling `jail.start` (task-075).
 
 task-075's reproduced signature, verbatim from two independent loaded runs:
 
@@ -8,15 +8,15 @@ task-075's reproduced signature, verbatim from two independent loaded runs:
 
 The root cause, confirmed at the raw-syscall level in task-075: darwin's
 `getpgid()` raises ESRCH for a child that has ALREADY EXITED (a zombie),
-even though `/bin/ps` still shows its group. `exec_in_jail` read the
+even though `/bin/ps` still shows its group. The exec read the
 sibling's pgid with a bare `os.getpgid(pid)` immediately after `Popen`
 returned, so a fast command (`/usr/bin/true`, an `echo` probe) that exits
 within microseconds -- under any scheduling delay -- crashed the spawn path
 AFTER the process existed but BEFORE the sibling was registered: it was
-registered nowhere (no `ExecHandle`, nothing for `kill_jail`'s
+registered nowhere (no `Process`, nothing for `Jail.destroy`'s
 `_live_exec_siblings` to find), and its zombie lingered until
 the GC reaped it, which the session-end leak sweep then reported as a
-leaked process. `launcher.py`'s workload launch had the identical race one
+leaked process. `host.py`'s workload launch had the identical race one
 line earlier in the same file pair.
 
 The fix is `brig/run/_spawn_pgid.spawn_pgid`: read via `os.getpgid` while
@@ -31,13 +31,13 @@ pid itself -- not a guess about launcher details, but the same fact
 - AC #2 (positive control): a LIVE child reads its real pgid through the
   same helper -- the fallback must not mask a working read.
 - AC #3 / AC #4: the original crash shape end to end -- many fast siblings
-  through the real `exec_in_jail`, and a fast workload through the real
+  through real sibling starts, and a fast workload through the real
   launcher, each recording `pgid == pid` for a child that was already gone.
 
 The recorded facts used to be read back out of the per-jail event stream's
 `EXEC`/`SPAWN` records; decision-152 (2026-09-08) deleted that stream, so
-AC #3 reads the sibling registration (`brig/run/_execs.py`) and AC #4 reads
-the `Handle` the launch returned and the exit status the waiter recorded.
+AC #3 reads the siblings' records (`brig/run/_records.py`, decision-181) and AC #4 reads
+the `Process` the launch returned and the exit status the waiter recorded.
 """
 
 from __future__ import annotations
@@ -52,13 +52,10 @@ import subprocess
 import pytest
 
 from brig.core import Spec, unenforced_report
-from brig.run._execs import live as live_execs
+from brig.run import IoPolicy, Process, _records
 from brig.run._spawn_pgid import spawn_pgid
-from brig.run.exec_ import exec_in_jail
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import CompiledJail
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _counter = itertools.count()
 
@@ -87,17 +84,17 @@ def _compiled_jail() -> CompiledJail:
     )
 
 
-def _teardown_group(handle: Handle, jail_dir: str) -> None:
+def _teardown_group(process: Process, jail_dir: str) -> None:
     """Group-kill the workload and remove its jail directory. Hand-rolled
-    (`killpg`) rather than `kill_jail`: a test's cleanup path must not be
-    the code under test. `handle.wait()` blocks until the launcher's
+    (`killpg`) rather than `Jail.destroy`: a test's cleanup path must not be
+    the code under test. `process.wait()` blocks until the launcher's
     exit-waiter has reaped it (task-073)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
     shutil.rmtree(jail_dir, ignore_errors=True)
 
 
@@ -143,21 +140,20 @@ def test_spawn_pgid_of_a_live_child_reads_the_real_group() -> None:
 
 
 # ---------------------------------------------------------------------------
-# AC #3 -- the original crash shape, end to end through `exec_in_jail`.
+# AC #3 -- the original crash shape, end to end through a sibling `jail.start`.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 def test_hundred_fast_exec_siblings_all_record_and_end(run_id: str) -> None:
-    """AC #3: one hundred `/usr/bin/true` siblings through the REAL
-    `exec_in_jail` -- each `wait()`s to 0, and the events file ends with
+    """AC #3: one hundred `/usr/bin/true` siblings through REAL
+    sibling `jail.start`s -- each `wait()`s to 0, and the events file ends with
     exactly one EXEC (carrying `pgid == pid`) and one EXEC_END per sibling.
     Pre-fix, a single sibling exiting before its pgid read crashed the whole
     test (task-075's runs 13 and 23 each caught it on the FIRST loaded run);
     post-fix the fast path is exercised a hundred times per run."""
     jail_dir = _new_jail_dir()
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
+    jail, process = launch(
         _compiled_jail(),
         argv=workload_argv(run_id, "sleep 100"),
         cwd=jail_dir,
@@ -167,15 +163,18 @@ def test_hundred_fast_exec_siblings_all_record_and_end(run_id: str) -> None:
     )
     try:
         for _ in range(100):
-            exec_handle = exec_in_jail(handle, ["/usr/bin/true"])
-            assert exec_handle.wait(timeout=5.0) == 0
+            sibling = jail.start(["/usr/bin/true"])
+            assert sibling.wait(timeout=5.0) == 0
 
-        # Every one of the 100 siblings registered and then deregistered on
-        # its own `wait()` -- a crash in the pgid read would have left an
-        # unregistered zombie instead.
-        assert live_execs(handle.jail_dir) == []
+        # Every one of the 100 siblings recorded `pgid == pid`, and its record
+        # outlived its own `wait()` (decision-181) -- a crash in the pgid read
+        # would have left an unrecorded zombie instead.
+        records = _records.scan(jail.jail_dir).records
+        siblings = [record for record in records if record.id != process.id]
+        assert len(siblings) == 100
+        assert all(record.pgid == record.pid for record in siblings)
     finally:
-        _teardown_group(handle, jail_dir)
+        _teardown_group(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -185,14 +184,13 @@ def test_hundred_fast_exec_siblings_all_record_and_end(run_id: str) -> None:
 
 @pytest.mark.integration
 def test_fast_workload_command_launches_and_records_exit_zero(run_id: str) -> None:
-    """AC #4: the identical race one line earlier in `launcher.py` -- a
+    """AC #4: the identical race one line earlier in `host.py` -- a
     workload command that exits before the launch's pgid read must still
-    produce a `Handle` carrying `pgid == pid`, and an honest exit status of
+    produce a `Process` whose record carries `pgid == pid`, and an honest exit status of
     0 (the exit-waiter reaps what already exited). Pre-fix, this crashed
     `launch()` with a bare `ProcessLookupError` under load."""
     jail_dir = _new_jail_dir()
-    launcher = SubprocessLauncher()
-    handle = launcher.launch(
+    jail, process = launch(
         _compiled_jail(),
         argv=workload_argv(run_id, "true"),
         cwd=jail_dir,
@@ -201,7 +199,7 @@ def test_fast_workload_command_launches_and_records_exit_zero(run_id: str) -> No
         jail_dir=jail_dir,
     )
     try:
-        assert handle.wait(timeout=10.0) == 0
-        assert handle.pgid == handle.pid
+        assert process.wait(timeout=10.0) == 0
+        assert process._record.pgid == process.pid
     finally:
-        _teardown_group(handle, jail_dir)
+        _teardown_group(process, jail_dir)

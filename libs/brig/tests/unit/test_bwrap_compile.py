@@ -48,7 +48,7 @@ from brig.mech.bwrap import (
 )
 from brig.mech.env_scrub import env_scrub
 from brig.mech.rlimits import rlimits
-from brig.run.launcher import _derive_wrap_prefix
+from brig.run.host import _derive_wrap_prefix
 from brig.stack import Stack
 
 _JAIL_DIR = "/run/brig/jail0"
@@ -84,7 +84,6 @@ _WORKSPACE = "/srv/ws"
 _GIT = "/srv/ws/.git"
 _HOOKS = "/srv/ws/.git/hooks"
 _ENVRC = "/srv/ws/.envrc"
-_ENDPOINT = "/run/brig/jail0/agent.sock"
 
 _SPEC = Spec(
     fs=FsPolicy(
@@ -93,9 +92,9 @@ _SPEC = Spec(
         write_allows=(_WORKSPACE,),
         write_denies=(_HOOKS, _ENVRC),
     ),
-    channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+    channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
 )
-_SPEC_RESOLVED = _identity_resolved("/bin", "/usr", _WORKSPACE, _GIT, _HOOKS, _ENVRC, _ENDPOINT)
+_SPEC_RESOLVED = _identity_resolved("/bin", "/usr", _WORKSPACE, _GIT, _HOOKS, _ENVRC)
 _SPEC_EXISTS = {
     "/bin": True,
     "/usr": True,
@@ -103,7 +102,6 @@ _SPEC_EXISTS = {
     _GIT: True,
     _HOOKS: True,
     _ENVRC: False,
-    _ENDPOINT: False,
 }
 
 
@@ -148,9 +146,16 @@ def test_golden_argv_for_the_reference_spec() -> None:
     assert step.wrap(("/bin/true", "arg")) == (
         DEFAULT_BWRAP_PATH,
         "--unshare-all",
-        # Stage 2: the jail's own furniture, before anything spec-derived.
+        # No capability for the workload, whoever runs bwrap (decision-177).
+        "--cap-drop",
+        "ALL",
+        # Stage 2: the jail's own furniture, before anything spec-derived;
+        # its sysctls read-only (decision-177).
         "--proc",
         "/proc",
+        "--ro-bind",
+        "/proc/sys",
+        "/proc/sys",
         "--dev",
         "/dev",
         # Stage 3: the readable tree (allowlist), in the Spec's own sorted
@@ -161,13 +166,15 @@ def test_golden_argv_for_the_reference_spec() -> None:
         "--ro-bind",
         "/usr",
         "/usr",
-        # Stage 4: the declared LISTEN channel's own DIRECTORY, read-write,
-        # BEFORE the write roots -- decision-163. It is the one mount whose
-        # path policy did not choose, so it is the one that may contain
-        # them; last, it stacked over the carve-outs and unmade them.
+        # Stage 4: the runtime's channel directory (decision-184), read-write,
+        # once for the jail since the Spec declares a channel, at its own
+        # path, and every channel's one grant (decision-186). BEFORE the
+        # write roots -- decision-163: it is the one mount whose path policy
+        # did not choose, so it is the one that may contain them; last, it
+        # stacked over the carve-outs and unmade them.
         "--bind",
-        "/run/brig/jail0",
-        "/run/brig/jail0",
+        f"{_JAIL_DIR}/chan",
+        f"{_JAIL_DIR}/chan",
         # Stage 5: the writable roots, over the read-only tree and the
         # channel directory.
         "--bind",
@@ -223,12 +230,12 @@ def test_the_channel_directory_is_bound_before_the_write_roots() -> None:
 
     Asserted on INDEX, not membership: moving the channel loop back below
     the write roots fails here as well as in the golden above. The pairing
-    that would reverse the channel in the other direction -- an endpoint
-    UNDER a `write_denies` subpath -- is refused outright rather than
-    ordered around; see the refusal test."""
+    that would reverse the channel in the other direction -- the channel
+    directory UNDER a `write_denies` subpath -- is refused outright rather
+    than ordered around; see the refusal test."""
     argv = bwrap.compile(_SPEC, _spec_ctx()).wrap(())
 
-    channel_at = argv.index("/run/brig/jail0")
+    channel_at = argv.index(f"{_JAIL_DIR}/chan")
     assert channel_at < argv.index(_WORKSPACE)
     assert channel_at < argv.index(_HOOKS)
     assert channel_at < argv.index(_ENVRC)
@@ -236,13 +243,12 @@ def test_the_channel_directory_is_bound_before_the_write_roots() -> None:
 
 @pytest.mark.unit
 def test_a_carve_out_inside_the_channel_directory_still_wins() -> None:
-    """The defect decision-163 closed, as its own regression: a jail
+    """The defect decision-163 closed, as its own regression: a channel
     directory that HOLDS the workspace. The carve-out must be the LAST word
     on its own path, not a mount the channel bind stacks over."""
-    jail_dir = "/run/brig/jail9"
-    workspace = f"{jail_dir}/ws"
+    chan_dir = f"{_JAIL_DIR}/chan"
+    workspace = f"{chan_dir}/ws"
     hooks = f"{workspace}/.git/hooks"
-    endpoint = f"{jail_dir}/agent.sock"
     spec = Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
@@ -250,40 +256,37 @@ def test_a_carve_out_inside_the_channel_directory_still_wins() -> None:
             write_allows=(workspace,),
             write_denies=(hooks,),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
     git = f"{workspace}/.git"
     ctx = _ctx(
-        resolved=_identity_resolved("/usr", workspace, git, hooks, endpoint),
-        exists={"/usr": True, workspace: True, git: True, hooks: True, endpoint: False},
+        resolved=_identity_resolved("/usr", workspace, git, hooks),
+        exists={"/usr": True, workspace: True, git: True, hooks: True},
         is_dir={git: True},
     )
 
     argv = bwrap.compile(spec, ctx).wrap(())
 
-    assert argv.index(jail_dir) < argv.index(workspace) < argv.index(hooks)
+    assert argv.index(chan_dir) < argv.index(workspace) < argv.index(hooks)
 
 
 @pytest.mark.unit
-def test_two_channels_in_one_directory_bind_that_directory_once() -> None:
-    """Deduped on the DESTINATION directory: two channels beside each other
-    in the jail dir are one mount, not two identical ones."""
-    endpoint_b = "/run/brig/jail0/second.sock"
+def test_two_channels_bind_the_channel_directory_once() -> None:
+    """Two channels are one grant: the runtime's channel directory, where
+    each start's socket is reserved, is one mount, not two identical ones
+    (decision-186)."""
     spec = Spec(
         fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)),
         channels=(
-            Channel(name="a", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),
-            Channel(name="b", kind=ChannelKind.LISTEN, endpoint=endpoint_b),
+            Channel(name="a", kind=ChannelKind.LISTEN),
+            Channel(name="b", kind=ChannelKind.LISTEN),
         ),
     )
-    ctx = _ctx(
-        resolved=_identity_resolved("/usr", _ENDPOINT, endpoint_b),
-        exists={"/usr": True, _ENDPOINT: False, endpoint_b: False},
-    )
+    ctx = _ctx(resolved=_identity_resolved("/usr"), exists={"/usr": True})
 
     argv = bwrap.compile(spec, ctx).wrap(())
 
-    assert argv.count("/run/brig/jail0") == 2  # one `--bind SRC DEST` pair
+    assert argv.count(f"{_JAIL_DIR}/chan") == 2  # one `--bind SRC DEST` pair
 
 
 @pytest.mark.unit
@@ -298,12 +301,12 @@ def test_a_symlinked_path_mounts_the_resolved_source_at_the_spec_s_own_path() ->
 
     argv = bwrap.compile(spec, ctx).wrap(())
 
-    assert argv[argv.index("--ro-bind") :][:3] == ("--ro-bind", "/usr/bin", "/bin")
+    assert ("--ro-bind", "/usr/bin", "/bin") in zip(argv, argv[1:], argv[2:], strict=False)
 
 
 @pytest.mark.unit
 def test_wrap_is_a_pure_argv_prefix_verified_by_derive_wrap_prefix() -> None:
-    """`handle.exec` (SPEC.md §9) reproduces a stack's confinement on a
+    """`jail.start` (SPEC.md §9) reproduces a stack's confinement on a
     sibling by prepending the derived prefix, and refuses outright when the
     wrap is not one. Every probe runs through `exec`, so this is not a
     stylistic property. Checked with the launcher's own real
@@ -395,31 +398,35 @@ def test_a_write_deny_missing_from_path_exists_is_refused_naming_it() -> None:
 
 
 @pytest.mark.unit
-def test_a_channel_endpoint_under_a_write_deny_is_refused() -> None:
-    """Compiling the pair would put the socket under a read-only carve-out
+def test_a_channel_directory_under_a_write_deny_is_refused() -> None:
+    """Compiling the pair would put every socket under a read-only carve-out
     (the carve-outs are stage 6, the channel directory stage 4); compiling
-    it the other way round would hand the jail a socket path it can never
-    create. Refused by name, both paths named -- the same refusal seatbelt
-    makes on its own side."""
-    endpoint = "/srv/ws/.git/hooks/agent.sock"
+    it the other way round would hand the jail a channel directory it can
+    never bind in. Refused by name, both paths named -- the same refusal
+    seatbelt makes on its own side. Since decision-186 the channel directory
+    is the one place a socket can be, so it is the one refused; a carve-out
+    elsewhere (the control) refuses nothing."""
+    workspace = _JAIL_DIR
     spec = Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
-            write_allows=(_WORKSPACE,),
-            write_denies=(_HOOKS,),
+            write_allows=(workspace,),
+            write_denies=(f"{_JAIL_DIR}/chan",),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
     ctx = _ctx(
-        resolved=_identity_resolved(_WORKSPACE, _HOOKS, endpoint),
-        exists={_WORKSPACE: True, _HOOKS: True, endpoint: False},
+        resolved=_identity_resolved(workspace, f"{_JAIL_DIR}/chan"),
+        exists={workspace: True, f"{_JAIL_DIR}/chan": True},
     )
 
     with pytest.raises(ChannelInsideWriteDeny) as refusal:
         bwrap.compile(spec, ctx)
 
-    assert endpoint in str(refusal.value)
-    assert _HOOKS in str(refusal.value)
+    assert f"{_JAIL_DIR}/chan" in str(refusal.value)
+    assert "write_denies" in str(refusal.value)
+    # The control: the reference spec's carve-outs are elsewhere, and it compiles.
+    bwrap.compile(_SPEC, _spec_ctx())
 
 
 @pytest.mark.unit
@@ -435,11 +442,11 @@ def test_a_write_deny_of_the_whole_tree_swallows_every_channel() -> None:
             write_allows=(_WORKSPACE,),
             write_denies=("/",),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
     ctx = _ctx(
-        resolved=_identity_resolved(_WORKSPACE, "/", _ENDPOINT),
-        exists={_WORKSPACE: True, "/": True, _ENDPOINT: False},
+        resolved=_identity_resolved(_WORKSPACE, "/"),
+        exists={_WORKSPACE: True, "/": True},
     )
 
     with pytest.raises(ChannelInsideWriteDeny):
@@ -504,7 +511,7 @@ def test_the_step_stages_nothing_starts_nothing_and_requires_nothing() -> None:
     """The whole mechanism is an argv prefix: no staged profile (unlike
     seatbelt), no helper process (unlike connect_proxy), no launch feature,
     and no sensor -- what it knows at compile time is its own argv, which
-    the `Handle` already carries verbatim (decision-152's own reason for
+    the `Jail` already carries verbatim (decision-152's own reason for
     deleting copies)."""
     step = bwrap.compile(_SPEC, _spec_ctx())
 
@@ -593,17 +600,17 @@ _CARVE_OUT_SPEC = Spec(
         write_allows=(_WORKSPACE,),
         read_denies=(_SECRET, _STATE, _ABSENT, _ELSEWHERE),
     ),
-    channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+    channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
 )
 
 
 def _carve_out_ctx(*, exists: dict[str, bool], is_dir: dict[str, bool]) -> CompileCtx:
-    paths = ("/usr", _WORKSPACE, _ENDPOINT, _SECRET, _STATE, _ABSENT, _ELSEWHERE)
+    paths = ("/usr", _WORKSPACE, _SECRET, _STATE, _ABSENT, _ELSEWHERE)
     return CompileCtx(
         jail_dir=_JAIL_DIR,
         platform="linux",
         resolved_paths=_identity_resolved(*paths),
-        path_exists={"/usr": True, _WORKSPACE: True, _ENDPOINT: False, **exists},
+        path_exists={"/usr": True, _WORKSPACE: True, **exists},
         path_is_dir=is_dir or {},
     )
 
@@ -620,7 +627,7 @@ def test_a_read_carve_out_inside_a_root_is_masked_last_by_its_kind() -> None:
     )
     step = bwrap.compile(_CARVE_OUT_SPEC, ctx)
     argv = step.wrap(("w",))
-    write_root_at = argv.index("--bind", argv.index("/run/brig/jail0") + 1)
+    write_root_at = argv.index("--bind", argv.index(f"{_JAIL_DIR}/chan") + 2)
     assert argv[write_root_at : write_root_at + 3] == ("--bind", _WORKSPACE, _WORKSPACE)
     assert argv[write_root_at + 3 :] == (
         "--ro-bind", "/dev/null", _ABSENT,
@@ -692,10 +699,10 @@ def test_a_write_carve_out_no_writable_tree_reaches_is_not_mounted() -> None:
             write_allows=(_WORKSPACE,),
             write_denies=(layer, _HOOKS),
         ),
-        channels=(Channel(name="agent", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
     ctx = _ctx(
-        resolved=_identity_resolved("/usr", _WORKSPACE, layer, _GIT, _HOOKS, _ENDPOINT),
+        resolved=_identity_resolved("/usr", _WORKSPACE, layer, _GIT, _HOOKS),
         exists={_GIT: True, _HOOKS: True},  # the outside one is never asked about
         is_dir={_GIT: True},
     )
@@ -735,3 +742,210 @@ def test_an_absent_directory_between_a_root_and_a_carve_out_is_not_pinned() -> N
     assert _GIT not in bwrap.compile(spec, absent).wrap(())
     with pytest.raises(UnknownPathExistence, match=re.escape(_GIT)):
         bwrap.compile(spec, _ctx(resolved=resolved, exists={_HOOKS: True}))
+
+
+# --------------------------------------------------------------------------
+# The seal (decision-173): no write root grants the jail directory.
+# --------------------------------------------------------------------------
+
+#: A write root ABOVE the jail directory, the shape an embedder run from `/tmp`
+#: has: a workspace carve-out (pinned outside the jail directory), the channel
+#: directory inside it, a carve-out in its scratch and one in the sealed part.
+_ABOVE = "/run/brig"
+_ABOVE_HOOKS = f"{_ABOVE}/ws/.git/hooks"
+_SEALED_DENY = f"{_JAIL_DIR}/logs/x"
+_SCRATCH_DENY = f"{_JAIL_DIR}/tmp/a/.envrc"
+_ABOVE_PINS = (
+    _JAIL_DIR,
+    f"{_ABOVE}/ws",
+    f"{_JAIL_DIR}/logs",
+    f"{_JAIL_DIR}/tmp",
+    f"{_ABOVE}/ws/.git",
+    f"{_JAIL_DIR}/tmp/a",
+)
+
+
+def _above_spec() -> Spec:
+    return Spec(
+        fs=FsPolicy(
+            read_model=ReadModel.ALLOW_LIST,
+            read_allows=("/usr",),
+            write_allows=(_ABOVE,),
+            write_denies=(_ABOVE_HOOKS, _SEALED_DENY, _SCRATCH_DENY),
+        ),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
+    )
+
+
+def _above_ctx() -> CompileCtx:
+    paths = ("/usr", _ABOVE, _ABOVE_HOOKS, _SEALED_DENY, _SCRATCH_DENY, *_ABOVE_PINS)
+    return _ctx(
+        resolved=_identity_resolved(*paths),
+        exists={**dict.fromkeys(paths, True), _SCRATCH_DENY: False},
+        is_dir=dict.fromkeys(_ABOVE_PINS, True),
+    )
+
+
+@pytest.mark.unit
+def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
+    """decision-173, the whole argv. After the write root and the pins
+    outside the jail directory: the jail directory read-only, its scratch
+    writable again (`--bind-try`), the channel directory inside it bound
+    again, then only the pins inside the scratch. The pins at the jail
+    directory and in `logs/` are not bound (either would undo the seal),
+    and the carve-out in the sealed part is not mounted (its tmpfs could not
+    be made there, and nothing could write it anyway)."""
+    argv = bwrap.compile(_above_spec(), _above_ctx()).wrap(("w",))
+    assert argv == (
+        DEFAULT_BWRAP_PATH,
+        "--unshare-all",
+        "--cap-drop",
+        "ALL",
+        "--proc",
+        "/proc",
+        "--ro-bind",
+        "/proc/sys",
+        "/proc/sys",
+        "--dev",
+        "/dev",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        # The runtime's channel directory (decision-184), stage 4.
+        "--bind",
+        f"{_JAIL_DIR}/chan",
+        f"{_JAIL_DIR}/chan",
+        "--bind",
+        _ABOVE,
+        _ABOVE,
+        "--bind",
+        f"{_ABOVE}/ws",
+        f"{_ABOVE}/ws",
+        "--bind",
+        f"{_ABOVE}/ws/.git",
+        f"{_ABOVE}/ws/.git",
+        "--ro-bind",
+        _JAIL_DIR,
+        _JAIL_DIR,
+        "--bind-try",
+        f"{_JAIL_DIR}/tmp",
+        f"{_JAIL_DIR}/tmp",
+        # ... and bound again after the seal, which hides it (decision-184).
+        "--bind",
+        f"{_JAIL_DIR}/chan",
+        f"{_JAIL_DIR}/chan",
+        "--bind",
+        f"{_JAIL_DIR}/tmp",
+        f"{_JAIL_DIR}/tmp",
+        "--bind",
+        f"{_JAIL_DIR}/tmp/a",
+        f"{_JAIL_DIR}/tmp/a",
+        "--tmpfs",
+        _SCRATCH_DENY,
+        "--remount-ro",
+        _SCRATCH_DENY,
+        "--ro-bind",
+        _ABOVE_HOOKS,
+        _ABOVE_HOOKS,
+        "--remount-ro",
+        "/",
+        "--",
+        "w",
+    )
+
+
+@pytest.mark.unit
+def test_the_seal_is_shown_where_each_writable_tree_puts_the_jail_directory() -> None:
+    """A write root spelled through a link mounts the jail directory at the
+    spec's spelling, so that is where it is sealed; `/` reaches it at its own
+    path. The source is always the resolved jail directory."""
+    for root, resolved_root, dest in (("/r", _ABOVE, "/r/jail0"), ("/", "/", _JAIL_DIR)):
+        spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, write_allows=(root,)))
+        argv = bwrap.compile(spec, _ctx(resolved={root: resolved_root})).wrap(())
+        seal = ("--ro-bind", _JAIL_DIR, dest, "--bind-try", f"{_JAIL_DIR}/tmp", f"{dest}/tmp")
+        assert argv[-9:-3] == seal, argv
+
+
+@pytest.mark.unit
+def test_no_seal_without_a_writable_tree_above_the_jail_directory() -> None:
+    """The control: the reference spec's write root is beside the jail
+    directory and its channel directory is inside it, so nothing is sealed
+    and the golden above holds unchanged. A write root strictly
+    inside the jail directory reaches none of its control state either."""
+    assert "--bind-try" not in bwrap.compile(_SPEC, _spec_ctx()).wrap(())
+    inside = f"{_JAIL_DIR}/ws"
+    spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, write_allows=(inside,)))
+    argv = bwrap.compile(spec, _ctx(resolved={inside: inside})).wrap(())
+    assert _JAIL_DIR not in argv
+    assert "--bind-try" not in argv
+
+
+def _channel_only_spec() -> Spec:
+    return Spec(
+        fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
+    )
+
+
+def _binds(argv: tuple[str, ...]) -> list[tuple[str, str]]:
+    """Every read-write `--bind SRC DEST` pair in `argv`, `--bind-try` too."""
+    return [
+        (argv[i + 1], argv[i + 2]) for i, arg in enumerate(argv) if arg in ("--bind", "--bind-try")
+    ]
+
+
+def _at_or_under(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + "/")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("sealed", [True, False], ids=["write root above", "no write root above"])
+def test_a_channel_never_makes_the_jail_directory_writable(sealed: bool) -> None:
+    """decision-174, restated by decision-186: a channel's one grant is the
+    runtime's channel directory, a subdirectory brig names, so no channel can
+    make the jail directory itself writable. Inside the jail directory only
+    the channel directory and the scratch (and pins inside the scratch) are
+    ever bound read-write, whether or not a write root above it is there too;
+    and the channel directory is (the control: the grant is made)."""
+    spec = _above_spec() if sealed else _channel_only_spec()
+    ctx = _above_ctx() if sealed else _ctx(resolved=_identity_resolved("/usr"))
+    binds = _binds(bwrap.compile(spec, ctx).wrap(()))
+    chan, scratch = f"{_JAIL_DIR}/chan", f"{_JAIL_DIR}/tmp"
+    inside = {path for pair in binds for path in pair if _at_or_under(path, _JAIL_DIR)}
+    assert (chan, chan) in binds
+    assert _JAIL_DIR not in inside, binds
+    assert all(_at_or_under(path, chan) or _at_or_under(path, scratch) for path in inside), binds
+
+
+@pytest.mark.unit
+def test_a_channel_is_granted_the_channel_directory_and_nothing_else() -> None:
+    """decision-186: with no write root, the one read-write mount a channel
+    adds is the channel directory at its own path; a spec without a channel
+    has none (the control)."""
+    ctx = _ctx(resolved=_identity_resolved("/usr"))
+    chan = f"{_JAIL_DIR}/chan"
+    assert _binds(bwrap.compile(_channel_only_spec(), ctx).wrap(())) == [(chan, chan)]
+    no_channel = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)))
+    assert _binds(bwrap.compile(no_channel, ctx).wrap(())) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("sealed", [True, False], ids=["write root above", "no write root above"])
+def test_no_channel_grant_reaches_the_records(sealed: bool) -> None:
+    """decision-181, restated by decision-186: the records teardown signals by
+    live under `<jail_dir>/procs`, a sibling of the channel directory, so no
+    read-write mount a channel brings is at, under or above them (an
+    ancestor bound writable would reach them too). The integration twin
+    (`test_bwrap_records_refused.py`) writes at them through a real jail."""
+    spec = _above_spec() if sealed else _channel_only_spec()
+    ctx = _above_ctx() if sealed else _ctx(resolved=_identity_resolved("/usr"))
+    records = f"{_JAIL_DIR}/procs"
+    binds = _binds(bwrap.compile(spec, ctx).wrap(()))
+    reaching = [
+        (source, dest)
+        for source, dest in binds
+        if _at_or_under(source, _JAIL_DIR) or _at_or_under(dest, _JAIL_DIR)
+        if _at_or_under(dest, records) or _at_or_under(records, dest)
+    ]
+    assert reaching == [], binds
+    assert (f"{_JAIL_DIR}/chan", f"{_JAIL_DIR}/chan") in binds

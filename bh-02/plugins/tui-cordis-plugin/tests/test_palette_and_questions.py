@@ -286,6 +286,47 @@ async def test_ctrl_c_answers_no_to_questions_no_turn_withdraws() -> None:
         assert not any(text.startswith("Nothing is running") for text in _said(app))
 
 
+async def test_ctrl_c_refuses_only_the_stopped_reply_s_questions_and_a_background_child_s_stays() -> None:
+    """The reply Ctrl-C stops asked its own question and waits on a foreground child that asked
+    one: the child's is withdrawn with the reply, the parent's is answered no, and a background
+    child's question, up on the screen before either, is neither: it stays until it is answered."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE) as pilot:
+        background = _ask(
+            app, {"name": "python", "input": {"code": "3"}, "agent": {"name": "general-2", "type": "general"}}
+        )
+        answered: list[bool] = []
+
+        async def foreground_child() -> None:
+            child = {
+                "name": "python",
+                "input": {"code": "1"},
+                "agent": {"name": "general-1", "type": "general"},
+            }
+            answered.append(await _ask(app, child))
+
+        async def turn() -> None:
+            doing = asyncio.ensure_future(foreground_child())
+            stop = asyncio.ensure_future(app.bridge.interrupted())
+            await asyncio.wait({doing, stop}, return_when=asyncio.FIRST_COMPLETED)
+            doing.cancel()
+
+        running_turn = asyncio.ensure_future(turn())
+        parent = _ask(app, {"name": "python", "input": {"code": "2"}})
+        await _settle(pilot)
+        assert isinstance(app.screen, ApprovalScreen) and app.screen.request["agent"]["name"] == "general-2"
+        await pilot.press("ctrl+c")
+        await asyncio.wait_for(running_turn, 1)
+        assert await asyncio.wait_for(parent, 2) is False  # the parent's own: no
+        await _settle(pilot, 6)
+        assert answered == []  # the foreground child's: withdrawn, not answered
+        assert not background.done()  # the background child's: still open, still up
+        assert isinstance(app.screen, ApprovalScreen) and app.screen.request["agent"]["name"] == "general-2"
+        await _armed(pilot)
+        await pilot.press("y")
+        assert await asyncio.wait_for(background, 2) is True
+
+
 async def test_ctrl_c_with_only_questions_open_answers_them_no_at_once() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:

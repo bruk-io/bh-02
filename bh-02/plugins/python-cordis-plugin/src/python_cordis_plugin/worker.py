@@ -19,7 +19,7 @@ so the model is told of it even when the input's code caught the error. `tools` 
 bh-02's tools other than `python`, as their specs: the namespace's `tools` is rebuilt from them
 (`_Offered`), each a function that sends ``{"op": "call", "id", "name", "input"}`` and waits for
 ``{"op": "answer", "id", "content", "failed"}``, the host running it as the model's own call runs
-(asked about, noted), and returns `content`, or raises `tools.Error` with it when `failed`. A
+(asked about, its asides told), and returns `content`, or raises `tools.Error` with it when `failed`. A
 worker nobody says hello to
 (its host was killed while starting it) exits once its parent is gone, or after `_HELLO_S` (a
 second argument overrides it), rather than wait in `accept` for ever; one whose host disconnects

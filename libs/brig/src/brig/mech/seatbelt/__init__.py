@@ -55,12 +55,16 @@ its subject:**
    `profile.py`'s own `UnresolvedPath`, propagated UNCHANGED, never
    swallowed.
 
+A fifth, a LISTEN endpoint at or under brig's records (decision-181), went
+with the endpoints (decision-186): a channel's one grant is the runtime's
+channel directory, a sibling of `procs/`.
+
 **`wrap` is a PURE argv prefix**: `("/usr/bin/sandbox-exec", "-f",
 f"{ctx.jail_dir}/seatbelt.sb", *argv)` -- absolute path, never the bare
 name (decision-026 rule 1's family). It MUST stay a pure prefix:
-`brig/run/launcher.py`'s `_derive_wrap_prefix` refuses `handle.exec` for a
+`brig/run/host.py`'s `_derive_wrap_prefix` refuses every `jail.start` for a
 wrap that turns out not to be one, and every probe in this milestone runs
-through `handle.exec`.
+through `jail.start`.
 
 **Grade details are load-bearing text, not free prose** -- see
 `_FS_READ_DETAIL` / `_FS_WRITE_DETAIL` / `_network_detail` below for the
@@ -74,6 +78,7 @@ import re
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech.contract import ArgvTransformer, CompileCtx, StagedFile, Step
 from brig.mech.seatbelt.profile import ChannelInsideWriteDeny as ChannelInsideWriteDeny
 from brig.mech.seatbelt.profile import ReadModelUnsupported as ReadModelUnsupported
@@ -106,7 +111,9 @@ _FS_READ_DETAIL = (
 _FS_WRITE_DETAIL = (
     "seatbelt enforces fs_write by denying by default and allowing only "
     "spec.fs.write_allows; write_denies carve-outs are compiled deny-over-"
-    "allow -- inside the granted write_allows, never as a separate policy."
+    "allow -- inside the granted write_allows, never as a separate policy. "
+    "The jail directory is never writable through a write root above it: "
+    "it is denied after them, but for its scratch tmp/."
 )
 
 _NETWORK_DETAIL_BASE = (
@@ -134,8 +141,8 @@ def _network_detail(*, has_listen_channel: bool) -> str:
     `network-bind` is allowed UNSCOPED by dialect necessity -- a `(literal
     ...)` or `(subpath ...)` filter on `network-bind` denies the bind
     outright on this dialect, no matter how permissive the surrounding
-    rules are -- and the LISTEN endpoint's own socket path is instead
-    confined by the `(allow file-write* (literal ...))` rule
+    rules are -- and where a socket may be made is instead confined by the
+    `(allow file-write* (subpath ...))` rule on the channel directory
     (`profile.py`'s own module docstring names both dialect facts)."""
     if not has_listen_channel:
         return (
@@ -147,9 +154,9 @@ def _network_detail(*, has_listen_channel: bool) -> str:
         "declared, network-bind is allowed unscoped by dialect necessity: "
         "this dialect denies the bind outright if the allow rule carries a "
         "(literal ...) or (subpath ...) filter, no matter how permissive "
-        "the surrounding rules are -- so the LISTEN endpoint's own socket "
-        "path is confined instead by the (allow file-write* (literal ...)) "
-        "rule, not by network-bind itself."
+        "the surrounding rules are -- so where a socket may be made is "
+        "confined instead by the (allow file-write* (subpath ...)) rule on "
+        "the channel directory, not by network-bind itself."
     )
 
 
@@ -185,6 +192,9 @@ class Seatbelt:
     """
 
     name = "seatbelt"
+    #: `sandbox-exec` is a host process the profile is applied to
+    #: (decision-179).
+    runtime: RuntimeKind | None = RuntimeKind.HOST
 
     def __init__(self, *, cedes_network: bool = False) -> None:
         self._cedes_network = cedes_network

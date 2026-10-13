@@ -41,6 +41,7 @@ def test_render_cpu_seconds_one_exact_argv() -> None:
     result = step.wrap(("/bin/echo", "hi"))
     assert result == (
         sys.executable,
+        "-I",
         "-m",
         "brig.mech.trampoline",
         "--cpu",
@@ -62,6 +63,7 @@ def test_render_cpu_seconds_zero_emits_no_cpu_flag() -> None:
     result = step.wrap(("/bin/echo", "hi"))
     assert result == (
         sys.executable,
+        "-I",
         "-m",
         "brig.mech.trampoline",
         "--",
@@ -80,6 +82,7 @@ def test_render_multiword_workload_argv_exact_tuple() -> None:
     result = step.wrap(workload)
     assert result == (
         sys.executable,
+        "-I",
         "-m",
         "brig.mech.trampoline",
         "--cpu",

@@ -8,7 +8,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 | Row | Binds | Consumes |
 |---|---|---|
 | `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (default `["local.env"]`), `env` (the names that survive the scrub) | `host` |
-| `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them) or `ANTHROPIC_*` | |
+| `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(request) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
 
@@ -44,10 +44,11 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 `approval.py` is the rule, written once: `is_confined(report)` (the runner enforces `fs_write`
 and `network`), and `Approval`, the `approval` value over the runner: `confined` (read from its
 `report()` each time) and `unasked(request)` (it runs in the runner, `runs` `"jail"` when the
-request says nothing, and the runner confines it). Asking is not the rule's: the loop puts each
+request says nothing, or is bh-02's own tool bounded to the session's jail and bh-02's own
+state, `runs` `"harness"`, and the runner confines it). Asking is not the rule's: the loop puts each
 call the rule does not let run unasked to the person (`{"name", "input", "runs", "title",
 "lines", ...}`: a call to a tool that runs in bh-02's own process, `runs = "host"`, is put to
-the person however confined the runner), and the extensions row each extension it loads, each
+the person however confined the runner; a `"harness"` one only when the runner does not confine), and the extensions row each extension it loads, each
 through `output.confirm`; the python row's `confined`, what the model is told, is the rule's.
 Its row depends on `runner` alone, so `/clear` (a new Python process) and a new ui leave it up,
 and the rows that depend on it. It is a capability, bound by one row: two rows' answers could
@@ -61,7 +62,7 @@ policy seam, not this).
 
 - **writes**: the project root, a scratch directory of the jail's own (`TMPDIR`), and the
   project's auto memory directory (`host.auto_memory`, outside the project: the model keeps its
-  notes there across sessions, and only the memory rows read it, through no link), except
+  memories there across sessions, and only the memory rows read it, through no link), except
   the composition's layer files (`host.paths`), every path the host imports code from that sits
   under a writable root (`sys.path` entries, the interpreter's prefix), brig's
   self-modification list (`.git/hooks`, `.git/config`, `.claude`, shell rc files, editor
@@ -100,7 +101,11 @@ policy seam, not this).
   (`$XDG_STATE_HOME/bh-02/sessions`) and the default one (`~/.local/state/bh-02/sessions`),
   where each session's `claude/` holds its Claude Code child's config and messaging peer token.
   A third, of a run with another `XDG_STATE_HOME`, is not known to this one and is not hidden;
-- **network**: none; the program's own LISTEN socket is the one way in or out. The runner
+- **network**: none; the program's own LISTEN socket is the one way in or out. brig's Spec
+  names the channel, not its path (brig's decision-186), so the directory the owner chose for
+  the socket is a write root of the policy's own, as brig granted it per channel until then,
+  and the runner waits for it to accept a connection itself (TASK-0079.31 moves the owners to a
+  socket brig reserves and dials with its check). The runner
   starts two programs, each with a jail of its own compiled from this one policy: the Python
   process (`python:tool`), and the extensions process (`extensions:extensions`), where the
   model's own plugins run;

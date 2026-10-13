@@ -28,7 +28,7 @@ falling back to the lexical form, which is the exact `/tmp` vs
 `/private/tmp` bug this whole arrangement exists to prevent (law 2's
 refusal-not-downgrade posture). The keys this render requires: every
 `spec.fs.write_allows`, every `spec.fs.write_denies`, every
-`spec.fs.read_denies`, and every LISTEN `Channel.endpoint`.
+and `spec.fs.read_denies`.
 
 **The `jail_dir` guard is LEXICAL, not a proof of resolution.** A pure
 render cannot `lstat` to prove a path is actually resolved. So
@@ -54,10 +54,16 @@ has a feature the parent does not:**
       [per read_denies entry, spec order]   (deny file-read* (subpath "RESOLVED"))
     (deny file-write* (subpath "/"))
       [per write_allows entry, spec order]  (allow file-write* (subpath "RESOLVED"))
+      [when a write root reaches jail_dir]  (deny file-write* (subpath "JAIL_DIR"))
+                                            (allow file-write* (subpath "JAIL_DIR/tmp"))
+      [when any channel is declared]        (allow file-write* (subpath "JAIL_DIR/chan"))
       [per write_denies entry, spec order]  (deny file-write* (subpath "RESOLVED"))
-      [per LISTEN channel, spec order]      (allow file-write* (literal "RESOLVED"))
     (allow network-bind)                    [ONLY when at least one LISTEN channel]
     (deny network* (with no-log))
+
+The jail_dir seal (decision-173) is emitted only when a write ROOT reaches
+the jail_dir. A channel's grant is the channel directory inside it, so it can
+never open the rest of the jail_dir.
 
 "Spec order" needs no separate sort here: `FsPolicy.__post_init__` already
 normalizes `write_allows`/`write_denies`/`read_denies` to a sorted tuple,
@@ -71,15 +77,42 @@ render `tests/unit/test_seatbelt_profile.py`'s mutation check (AC #8) is
 about: move the write_denies loop above the write_allows loop and both the
 ORDERING test and the GOLDEN test go red.
 
+**The jail directory is sealed against the write roots (decision-173).** A
+write root at or above `jail_dir` (an embedder run from `/private/tmp`, or
+from `/`) would otherwise let the workload write brig's control state there:
+the process records under `procs/` teardown signals by (decision-181), and this
+mechanism's own staged profile, which every exec sibling is confined by
+again. So when one reaches it, a deny on `jail_dir` follows the write
+roots' allows, then an allow on its scratch `tmp/`, both before the
+carve-outs. Later wins in both directions: the deny over the allow is the
+order `write_denies` already relies on, and the allow over the deny is the
+order every write root already relies on over the whole-tree deny. The
+channel directory's subpath follows (below), so a socket reserved there stays
+creatable and nothing else there does. Only when a write root reaches it,
+so a profile with none (the ordinary one) is unchanged.
+
+**The runtime's channel directory (decision-184).** When the spec declares
+a channel, `(allow file-write* (subpath "JAIL_DIR/chan"))` follows the seal
+and precedes the carve-outs: each start's socket is reserved there, so the
+grant is the directory, once for the jail: since decision-186 a channel names
+no path, so it is every channel's one grant (the per-endpoint `literal` is
+gone, and with it the refusal of an endpoint under a carve-out). After the
+seal, so it wins over the seal's deny; before the carve-outs, so a
+`write_denies` entry under it still wins; and one at or above it is refused
+(`ChannelInsideWriteDeny`), since no channel could be bound there. This half
+is checked by its RENDERED PROFILE only (`tests/unit/test_seatbelt_profile.py`):
+no darwin host runs brig's tiers here, so nothing has yet shown the kernel
+honouring it.
+
 **Two dialect facts, carried because the parent PROBED them -- do not "fix"
 these into something that reads better and enforces less:**
 
 - **`network-bind` must be UNSCOPED.** A `(literal ...)` or `(subpath ...)`
   filter on `network-bind` denies the bind outright on this dialect no
-  matter how permissive the surrounding rules are. The socket path is
-  confined by the `(allow file-write* (literal ...))` rule instead, which
-  the kernel DOES check for the path a new AF_UNIX socket file is created
-  at.
+  matter how permissive the surrounding rules are. Where a socket may be
+  made is confined by the `(allow file-write* (subpath ...))` rule on the
+  channel directory instead, which the kernel DOES check for the path a new
+  AF_UNIX socket file is created at.
 - **`(import "system.sb")` comes first**, right after `(deny default)`.
   `(deny default)` alone SIGABRTs even `/bin/echo`; basic process startup
   needs Apple's shipped baseline. Note this means `(deny default)` itself
@@ -106,15 +139,14 @@ the condition is simply "does this spec declare a channel".
 mechanism is a refusal here, never a silent, wrong-shaped denylist render.
 
 **`ChannelInsideWriteDeny`.** `write_denies` is a carve-out INSIDE
-`write_allows` for the self-escalation threat (SPEC.md §5): if a LISTEN
-channel's own resolved endpoint fell under a resolved `write_denies`
-subpath, the deny-over-allow ordering above would make the DENY win for
-that exact path, and the channel's own `(allow file-write* (literal ...))`
-rule would compile as text but the child could never actually create its
-socket file there -- a rule that is present and matches nothing is the
-exact failure this library exists to refuse (SPEC.md §6). Refused here by
-name, both paths, rather than left to a silent, confusing runtime bind
-failure.
+`write_allows` for the self-escalation threat (SPEC.md §5): if the channel
+directory fell under a resolved `write_denies` subpath, the deny-over-allow
+ordering above would make the DENY win there, and the channel directory's
+`(allow file-write* (subpath ...))` rule would compile as text but no child
+could ever create its socket file there -- a rule that is present and
+matches nothing is the exact failure this library exists to refuse (SPEC.md
+§6). Refused here by name, both paths, rather than left to a silent,
+confusing runtime bind failure.
 
 **String escaping and the `"*"`-means-everywhere wildcard are carried from
 the parent's `_sbpl_str` / `_sbpl_subpath`.** `_sbpl_str` escapes a
@@ -135,6 +167,7 @@ from collections.abc import Mapping
 from typing import Final
 
 from brig.core import ReadModel, Spec
+from brig.core.runtime import channel_dir
 
 #: darwin's known symlinked roots (SPEC.md §6). A `jail_dir` whose leading
 #: path component is one of these is almost certainly the UNRESOLVED
@@ -149,11 +182,14 @@ _SYMLINKED_ROOTS: tuple[str, ...] = ("/tmp", "/var", "/etc")
 #: for this render's own two whole-tree default rules only.
 _WHOLE_TREE = "*"
 
+#: The jail's scratch, under `jail_dir`: the one part of it a write root
+#: reaching it still grants (decision-173).
+_SCRATCH: Final[str] = "tmp"
+
 
 class UnresolvedPath(ValueError):
     """Raised when a path this render needs is missing from `resolved` --
-    a `write_allows`/`write_denies`/`read_denies` entry or a LISTEN
-    `Channel.endpoint` -- or when `jail_dir` itself is lexically one of
+    a `write_allows`/`write_denies`/`read_denies` entry -- or when `jail_dir` itself is lexically one of
     darwin's known symlinked roots. Names the offending path in every
     case; this render never falls back to the lexical form (SPEC.md §6,
     law 2's refusal-not-downgrade posture)."""
@@ -168,12 +204,11 @@ class ReadModelUnsupported(ValueError):
 
 
 class ChannelInsideWriteDeny(ValueError):
-    """Raised when a LISTEN `Channel`'s resolved endpoint falls under a
-    resolved `write_denies` subpath: the deny-over-allow ordering this
-    render emits would make the DENY win for that exact path, so the
-    channel's own bind rule would compile as text but the child could
-    never actually create its socket file there. Names both the channel's
-    resolved endpoint and the write_denies subpath it falls under."""
+    """Raised when the spec declares a channel and a resolved
+    `write_denies` subpath is at or above the channel directory
+    (decision-184, restated by decision-186): the deny-over-allow ordering
+    this render emits would make the DENY win there, so no socket could be
+    made in it. Names the channel directory and the write_denies entry."""
 
 
 #: The `remote ip` filter for the loopback allowance decision-136 (4)
@@ -196,13 +231,6 @@ def _sbpl_subpath(path: str) -> str:
     Carried from the parent project's own `_sbpl_subpath`."""
     rendered = "/" if path == _WHOLE_TREE else path
     return f'(subpath "{_sbpl_str(rendered)}")'
-
-
-def _sbpl_literal(path: str) -> str:
-    """Render an SBPL `(literal "...")` clause -- a LISTEN channel's exact
-    socket path is one file, not a tree, so it is a literal, never a
-    subpath."""
-    return f'(literal "{_sbpl_str(path)}")'
 
 
 def _resolve(path: str, resolved: Mapping[str, str]) -> str:
@@ -246,14 +274,16 @@ def render_sbpl(
               `spec.fs.read_model is ReadModel.DENY_LIST` (seatbelt is a
               denylist-only mechanism).
         resolved: Maps each `Spec` path this render needs -- every
-              `write_allows`/`write_denies`/`read_denies` entry, every
-              LISTEN `Channel.endpoint` -- to its realpath'd form, exactly
+              `write_allows`/`write_denies`/`read_denies` entry -- to its
+              realpath'd form, exactly
               as the `Spec` carries the key. Built by a `run`-layer
               helper; this render performs no resolution of its own.
         jail_dir: The jail directory, already realpath'd by the caller
               (see `CompileCtx`'s own docstring for the invariant). This
               render only LEXICALLY guards it (see module docstring); it
-              never resolves it and never proves resolution.
+              never resolves it and never proves resolution. It is
+              sealed against any write root at or above it, but for its
+              scratch `tmp/` (decision-173).
 
     Returns:
         The full SBPL profile text, newline-terminated.
@@ -263,8 +293,8 @@ def render_sbpl(
         UnresolvedPath: a needed `Spec` path is absent from `resolved`, or
               `jail_dir` is lexically one of darwin's known symlinked
               roots.
-        ChannelInsideWriteDeny: a LISTEN channel's resolved endpoint falls
-              under a resolved `write_denies` subpath.
+        ChannelInsideWriteDeny: the channel directory falls under a
+              resolved `write_denies` subpath (decision-184).
     """
     if spec.fs.read_model is not ReadModel.DENY_LIST:
         raise ReadModelUnsupported(
@@ -293,8 +323,33 @@ def render_sbpl(
 
     lines.append(f"(deny file-write* {_sbpl_subpath(_WHOLE_TREE)})")
 
-    for path in spec.fs.write_allows:
-        lines.append(f"(allow file-write* {_sbpl_subpath(_resolve(path, resolved))})")
+    resolved_write_allows = tuple(_resolve(path, resolved) for path in spec.fs.write_allows)
+    for resolved_allow in resolved_write_allows:
+        lines.append(f"(allow file-write* {_sbpl_subpath(resolved_allow)})")
+
+    # The seal (decision-173): no write root grants the jail directory, only
+    # its scratch. After the allows, before the carve-outs; later wins.
+    if any(_is_subpath(jail_dir, root) for root in resolved_write_allows):
+        lines.append(f"(deny file-write* {_sbpl_subpath(jail_dir)})")
+        scratch = f"{jail_dir.rstrip('/')}/{_SCRATCH}"
+        lines.append(f"(allow file-write* {_sbpl_subpath(scratch)})")
+
+    # The runtime's channel directory (decision-184), when the spec declares
+    # a channel: its subpath, after the seal (later wins over its deny) and
+    # BEFORE the carve-outs, so a write deny under it still wins. A carve-out
+    # at or above it would leave no channel bindable there: refused.
+    if spec.channels:
+        chan = channel_dir(jail_dir)
+        for path in spec.fs.write_denies:
+            deny_root = _resolve(path, resolved)
+            if _is_subpath(chan, deny_root):
+                raise ChannelInsideWriteDeny(
+                    f"the channel directory {chan!r}, where each start's socket is "
+                    f"reserved (decision-184), falls under write_denies subpath "
+                    f"{path!r} (resolved {deny_root!r}): no channel could be bound "
+                    "there. Remove that write_denies entry, or declare no channel"
+                )
+        lines.append(f"(allow file-write* {_sbpl_subpath(chan)})")
 
     # write_denies is a carve-out INSIDE write_allows (SPEC.md §5): these
     # DENY lines must be emitted AFTER every write_allows ALLOW line above
@@ -303,28 +358,13 @@ def render_sbpl(
     # independently movable (see this module's docstring's mutation-check
     # paragraph, AC #8: moving this loop above the write_allows loop must
     # be a clean, single-line-range edit).
-    resolved_write_denies: list[str] = []
     for path in spec.fs.write_denies:
-        resolved_deny = _resolve(path, resolved)
-        resolved_write_denies.append(resolved_deny)
-        lines.append(f"(deny file-write* {_sbpl_subpath(resolved_deny)})")
-
-    listen_channels = spec.channels
-    for channel in listen_channels:
-        resolved_endpoint = _resolve(channel.endpoint, resolved)
-        for deny_root in resolved_write_denies:
-            if _is_subpath(resolved_endpoint, deny_root):
-                raise ChannelInsideWriteDeny(
-                    f"LISTEN channel {channel.name!r} resolved endpoint "
-                    f"{resolved_endpoint!r} falls under write_denies subpath "
-                    f"{deny_root!r}"
-                )
-        lines.append(f"(allow file-write* {_sbpl_literal(resolved_endpoint)})")
+        lines.append(f"(deny file-write* {_sbpl_subpath(_resolve(path, resolved))})")
 
     # Brig's own call, not the parent's (plan ambiguity A2, this module's
     # docstring): network-bind is emitted ONLY when the spec declares at
     # least one LISTEN channel, never unconditionally.
-    if listen_channels:
+    if spec.channels:
         lines.append("(allow network-bind)")
 
     lines.append("(deny network* (with no-log))")

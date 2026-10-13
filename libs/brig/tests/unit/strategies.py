@@ -170,8 +170,7 @@ def env_policies(draw: DrawFn) -> EnvPolicy:
 def channels(draw: DrawFn) -> Channel:
     name = draw(_name())
     kind = draw(st.sampled_from(ChannelKind))
-    endpoint = draw(_name())
-    return Channel(name=name, kind=kind, endpoint=endpoint)
+    return Channel(name=name, kind=kind)
 
 
 @st.composite
@@ -418,8 +417,7 @@ def _widen_channels(spec: Spec, draw: Draw) -> Spec | None:
         existing_names = {c.name for c in spec.channels}
         fresh_name = _fresh(draw, _name(), existing_names)
         kind = draw(st.sampled_from(ChannelKind))
-        endpoint = draw(_name())
-        new_channel = Channel(name=fresh_name, kind=kind, endpoint=endpoint)
+        new_channel = Channel(name=fresh_name, kind=kind)
         return dataclasses.replace(spec, channels=(*spec.channels, new_channel))
     fresh_media = _fresh(draw, paths(), spec.shared_media)
     return dataclasses.replace(spec, shared_media=(*spec.shared_media, fresh_media))

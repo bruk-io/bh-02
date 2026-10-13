@@ -1,6 +1,6 @@
 """The exit record: a workload's status is observed, or the read refuses.
 
-The defect this pins, in the shape it shipped: `SubprocessLauncher` read
+The defect this pins, in the shape it shipped: `Jail.create` and `jail.start` read
 `proc.pid` and dropped the `Popen`, so `subprocess._cleanup()` -- which runs
 inside every `Popen.__init__` anywhere in the process -- reaped the workload.
 Five integration helpers hand-rolled `os.waitpid(pid)`, caught the resulting
@@ -16,7 +16,7 @@ becomes vacuous itself.
 decision-152 (2026-09-08) deleted that stream, and lived only in the
 launching process's memory until decision-156 (2026-09-08) gave the durable
 half back.** It is now two agreeing sources: the launching process's own
-waiter thread (`brig/run/_waiters.py`), and `<jail_dir>/exit`, written once
+waiter thread (`brig/run/_waiters.py`), and the process's exit record (`<jail_dir>/procs/<id>/exit` since decision-181), written once
 by the tiny wrapper the launcher runs every workload under
 (`brig/run/_exit_status.py`). The wrapper ends the same way its child did, so
 the number the waiter thread observes and the number on disk are the same
@@ -45,13 +45,30 @@ import time
 import pytest
 
 from brig.core import Spec
-from brig.run import ExitStatusUnobservable, Handle, IoPolicy, SubprocessLauncher, _waiters
-from brig.run._exit_status import exit_path
+from brig.run import (
+    ExitStatusUnobservable,
+    HostRuntime,
+    IoPolicy,
+    Jail,
+    Process,
+    RuntimeKind,
+    _records,
+    _waiters,
+)
 from brig.stack import Stack
+from tests.conftest import launch
+
+_RUNTIMES = {RuntimeKind.HOST: HostRuntime()}
 
 _jail_counter = itertools.count()
 
 _HELPER = str(pathlib.Path(__file__).parent / "_rehydrate_and_kill_helper.py")
+
+
+def _exit_file(jail: Jail, process: Process) -> str:
+    """`process`'s own exit record, `<jail_dir>/procs/<id>/exit`
+    (decision-181)."""
+    return _records.exit_path(jail.jail_dir, process.id)
 
 
 def _new_jail_dir() -> str:
@@ -60,10 +77,10 @@ def _new_jail_dir() -> str:
     return f"/tmp/bg{os.getpid()}xr{next(_jail_counter)}"
 
 
-def _launch(argv: list[str]) -> Handle:
+def _launch(argv: list[str]) -> tuple[Jail, Process]:
     jail_dir = _new_jail_dir()
     os.makedirs(jail_dir, exist_ok=True)
-    return SubprocessLauncher().launch(
+    return launch(
         Stack([]).compile(Spec()),
         argv=argv,
         cwd=jail_dir,
@@ -73,33 +90,33 @@ def _launch(argv: list[str]) -> Handle:
     )
 
 
-def _forget_the_in_process_record(handle: Handle) -> None:
+def _forget_the_in_process_record(process: Process) -> None:
     """Drop this process's own observation of how the workload ended.
 
     It WAITS for that observation first, and the wait is not caution: the
-    wrapper writes `<jail_dir>/exit` and only then exits, so the file is
+    wrapper writes its exit record and only then exits, so the file is
     readable a moment BEFORE the launching process's waiter thread reaps and
     records. `wait()` can therefore answer from the file while no record
     exists yet, and a `forget` fired at that instant would forget nothing --
     leaving the record to appear afterwards and quietly answer the very
     question the test is trying to ask off disk."""
     deadline = time.monotonic() + 10.0
-    while _waiters.recorded_exit(handle.pid) is None and time.monotonic() < deadline:
+    while _waiters.recorded_exit(process.pid) is None and time.monotonic() < deadline:
         time.sleep(0.02)
-    assert _waiters.recorded_exit(handle.pid) is not None, (
+    assert _waiters.recorded_exit(process.pid) is not None, (
         "the launching process never recorded this workload's exit, so there is "
         "nothing to drop and the control below would be vacuous"
     )
-    _waiters.forget(handle.pid)
+    _waiters.forget(process.pid)
 
 
-def _in_a_second_process(handle: Handle, tmp_path: pathlib.Path) -> dict[str, object]:
-    """Rehydrate `handle` in a FRESH INTERPRETER and ask it how the workload
+def _in_a_second_process(jail: Jail, tmp_path: pathlib.Path) -> dict[str, object]:
+    """Rehydrate `jail` in a FRESH INTERPRETER and ask it how the workload
     ended. The serialized dict is that process's sole input: it never
     parented the workload, holds no waiter record, and shares no memory with
     this one, so any status it reports came off disk."""
-    json_path = tmp_path / "handle.json"
-    json_path.write_text(json.dumps(handle.to_dict()))
+    json_path = tmp_path / "jail.dict.json"
+    json_path.write_text(json.dumps(jail.to_dict()))
     done = subprocess.run(
         [sys.executable, _HELPER, str(json_path), "--wait"],
         capture_output=True,
@@ -116,28 +133,29 @@ def _in_a_second_process(handle: Handle, tmp_path: pathlib.Path) -> dict[str, ob
 def test_a_failing_status_survives_concurrent_popen_churn() -> None:
     """THE REGRESSION. Other spawns run `subprocess._cleanup()`, the exact
     interleaving that used to reap the workload out from under `waitpid`."""
-    handle = _launch(["/bin/sh", "-c", "exit 3"])
+    jail, process = _launch(["/bin/sh", "-c", "exit 3"])
     for _ in range(5):
         subprocess.run(["/bin/echo", "churn"], capture_output=True, check=True)
-    assert handle.wait(timeout=20.0) == 3, "the real status must survive the churn"
-    assert handle.wait(timeout=20.0) == 3, "and must be idempotent, read from the record"
+    assert process.wait(timeout=20.0) == 3, "the real status must survive the churn"
+    assert process.wait(timeout=20.0) == 3, "and must be idempotent, read from the record"
 
 
 @pytest.mark.integration
 def test_a_clean_exit_is_observed_not_assumed() -> None:
     """THE CONTROL for the assertion above: the 0 case must be a real
     observation, reached by the same path, not a default."""
-    handle = _launch(["/bin/sh", "-c", "exit 0"])
-    assert handle.wait(timeout=20.0) == 0
+    jail, process = _launch(["/bin/sh", "-c", "exit 0"])
+    assert process.wait(timeout=20.0) == 0
 
 
 @pytest.mark.integration
-def test_a_rehydrated_handle_in_this_process_still_reads_the_record() -> None:
-    """A handle that never parented the workload can still read how it
-    ended."""
-    handle = _launch(["/bin/sh", "-c", "exit 7"])
-    assert handle.wait(timeout=20.0) == 7
-    assert Handle.from_dict(handle.to_dict()).wait(timeout=20.0) == 7
+def test_a_rehydrated_jail_in_this_process_still_reads_the_record() -> None:
+    """A jail object that never parented the workload can still read how
+    it ended."""
+    jail, process = _launch(["/bin/sh", "-c", "exit 7"])
+    assert process.wait(timeout=20.0) == 7
+    rehydrated = Jail.from_dict(jail.to_dict(), runtimes=_RUNTIMES)
+    assert rehydrated.processes()[0].wait(timeout=20.0) == 7
 
 
 @pytest.mark.integration
@@ -154,18 +172,18 @@ def test_death_by_signal_is_recorded_as_a_signal_not_as_128_plus_n(
     which; the wrapper is a Python program precisely so it does not. Asserted
     in BOTH places, because a file that disagreed with the launching process
     would be worse than no file at all."""
-    handle = _launch(["/bin/sh", "-c", "kill -TERM $$"])
-    assert handle.wait(timeout=20.0) == -signal.SIGTERM
+    jail, process = _launch(["/bin/sh", "-c", "kill -TERM $$"])
+    assert process.wait(timeout=20.0) == -signal.SIGTERM
 
-    with open(exit_path(handle.jail_dir), encoding="utf-8") as recorded:
+    with open(_exit_file(jail, process), encoding="utf-8") as recorded:
         assert recorded.read().strip() == str(-signal.SIGTERM)
 
-    result = _in_a_second_process(handle, tmp_path)
+    result = _in_a_second_process(jail, tmp_path)
     assert result["exit_status"] == -signal.SIGTERM, result
 
 
 @pytest.mark.integration
-def test_a_rehydrated_handle_in_a_second_process_reads_the_exit_file(
+def test_a_rehydrated_jail_in_a_second_process_reads_the_exit_file(
     tmp_path: pathlib.Path,
 ) -> None:
     """decision-156's whole point: the status crosses a process boundary
@@ -175,13 +193,13 @@ def test_a_rehydrated_handle_in_a_second_process_reads_the_exit_file(
     process DROPS its own waiter record (`_waiters.forget`) before the second
     process runs. Nothing in this interpreter can answer the question any
     more, and the fresh one -- which never parented the workload -- answers
-    it anyway, from `<jail_dir>/exit` and nothing else."""
-    handle = _launch(["/bin/sh", "-c", "exit 9"])
-    assert handle.wait(timeout=20.0) == 9
+    it anyway, from the exit record and nothing else."""
+    jail, process = _launch(["/bin/sh", "-c", "exit 9"])
+    assert process.wait(timeout=20.0) == 9
 
-    _forget_the_in_process_record(handle)
+    _forget_the_in_process_record(process)
 
-    result = _in_a_second_process(handle, tmp_path)
+    result = _in_a_second_process(jail, tmp_path)
     assert "exit_error" not in result, result
     assert result["exit_status"] == 9, result
     assert result["pid"] != os.getpid(), "the helper did not run as its own process"
@@ -202,14 +220,14 @@ def test_an_unrecorded_exit_refuses_instead_of_reporting_success() -> None:
     THE CONTROL is the first assertion: the same handle answers `0` while
     both records are in place, so the refusal below is attributable to their
     removal and not to `wait()` being broken outright."""
-    handle = _launch(["/bin/sh", "-c", "exit 0"])
-    assert handle.wait(timeout=20.0) == 0
+    jail, process = _launch(["/bin/sh", "-c", "exit 0"])
+    assert process.wait(timeout=20.0) == 0
 
-    _forget_the_in_process_record(handle)
-    os.remove(exit_path(handle.jail_dir))
+    _forget_the_in_process_record(process)
+    os.remove(_exit_file(jail, process))
 
     with pytest.raises(ExitStatusUnobservable):
-        handle.wait(timeout=5.0)
+        process.wait(timeout=5.0)
 
 
 @pytest.mark.integration
@@ -217,7 +235,7 @@ def test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status() -> Non
     """decision-162 (2026-09-08): a stale record is cleared at launch.
 
     The defect, in the shape it was found: two launches into the SAME jail
-    directory. `wait()` prefers whatever `<jail_dir>/exit` holds, so the
+    directory. `wait()` preferred whatever the jail directory's one exit file held, so the
     second launch returned the FIRST workload's status the instant it was
     asked -- before its own workload had finished, which also meant its
     stdio was read empty. It was found on Linux, by the one test that
@@ -232,8 +250,8 @@ def test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status() -> Non
     jail_dir = _new_jail_dir()
     os.makedirs(jail_dir, exist_ok=True)
 
-    def launch_in(argv: list[str], io: IoPolicy) -> Handle:
-        return SubprocessLauncher().launch(
+    def launch_in(argv: list[str], io: IoPolicy) -> tuple[Jail, Process]:
+        return launch(
             Stack([]).compile(Spec()),
             argv=argv,
             cwd=jail_dir,
@@ -242,14 +260,40 @@ def test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status() -> Non
             jail_dir=jail_dir,
         )
 
-    first = launch_in(["/bin/sh", "-c", "exit 7"], IoPolicy())
+    first_jail, first = launch_in(["/bin/sh", "-c", "exit 7"], IoPolicy())
     assert first.wait(timeout=20.0) == 7
-    assert os.path.exists(exit_path(jail_dir))
+    assert os.path.exists(_exit_file(first_jail, first))
 
-    second = launch_in(
+    _second_jail, second = launch_in(
         ["/bin/sh", "-c", "sleep 0.3; echo SECOND; exit 0"],
         IoPolicy(stdout_name="second-stdout.log", stderr_name="second-stderr.log"),
     )
     assert second.wait(timeout=20.0) == 0, "the second launch answered with the first's status"
     with open(second.stdout_path, encoding="utf-8") as f:
         assert "SECOND" in f.read(), "wait() returned before the second workload had run"
+
+
+@pytest.mark.integration
+def test_wait_returns_only_once_the_process_has_left_so_the_jail_dir_is_free() -> None:
+    """decision-182 (TASK-0079.30): in the process that started it, `wait()`
+    answers only after the exit wrapper has exited and been reaped.
+
+    The exit record is written just before the wrapper exits, so a `wait()` that
+    answered on the record let `create` into the same `jail_dir` meet a wrapper
+    that still ran and refuse with `JailDirInUse`, once in every few runs. Fifty
+    launches back to back, each waited and then followed by the next, refuse
+    nowhere.
+    """
+    jail_dir = _new_jail_dir()
+    os.makedirs(jail_dir, exist_ok=True)
+    compiled = Stack([]).compile(Spec())
+    for round_ in range(50):
+        jail, process = launch(
+            compiled,
+            argv=["/bin/sh", "-c", f"exit {round_ % 5}"],
+            cwd=jail_dir,
+            io=IoPolicy(),
+            jail_id=f"exitstatus-loop-{os.path.basename(jail_dir)}",
+            jail_dir=jail_dir,
+        )
+        assert process.wait(timeout=20.0) == round_ % 5

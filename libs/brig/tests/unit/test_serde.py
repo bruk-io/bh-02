@@ -59,7 +59,7 @@ def _populated_spec() -> Spec:
         # every-leaf-populated purpose; mode's own non-default reachability
         # is pinned separately in test_to_dict_enums_serialize_as_value_strings_*.
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH",), set=(("KEY", "value"),)),
-        channels=(Channel(name="ch1", kind=ChannelKind.LISTEN, endpoint="ep1"),),
+        channels=(Channel(name="ch1", kind=ChannelKind.LISTEN),),
         shared_media=("/shared",),
         provisioning=Provisioning(
             files=(("/f", "deadbeef"),), closures=("clo",), env=(("E", "v"),)
@@ -168,7 +168,7 @@ def test_to_dict_exact_key_sets() -> None:
     assert set(d["provisioning"].keys()) == {"files", "closures", "env"}
 
     assert len(d["channels"]) == 1
-    assert set(d["channels"][0].keys()) == {"name", "kind", "endpoint"}
+    assert set(d["channels"][0].keys()) == {"name", "kind"}  # no path (decision-186)
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +186,7 @@ def test_to_dict_enums_serialize_as_value_strings_default_members() -> None:
     spec = Spec(
         fs=FsPolicy(read_model=ReadModel.DENY_LIST),
         env=EnvPolicy(mode=EnvMode.SCRUB),
-        channels=(Channel(name="ch", kind=ChannelKind.LISTEN, endpoint="ep"),),
+        channels=(Channel(name="ch", kind=ChannelKind.LISTEN),),
     )
     d = spec.to_dict()
 
@@ -203,7 +203,7 @@ def test_to_dict_enums_serialize_as_value_strings_other_members() -> None:
     spec = Spec(
         fs=FsPolicy(read_model=ReadModel.ALLOW_LIST),
         env=EnvPolicy(mode=EnvMode.PASS),
-        channels=(Channel(name="ch", kind=ChannelKind.LISTEN, endpoint="ep"),),
+        channels=(Channel(name="ch", kind=ChannelKind.LISTEN),),
     )
     d = spec.to_dict()
 
@@ -240,10 +240,12 @@ def test_from_dict_missing_version_raises_plain_value_error() -> None:
 
 @pytest.mark.unit
 def test_from_dict_wrong_version_raises_unsupported_spec_version() -> None:
+    """Version 1 is the one before decision-186 took the channel's endpoint
+    away: refused like any other version."""
     d = Spec().to_dict()
-    d["version"] = 2
+    d["version"] = 1
 
-    with pytest.raises(UnsupportedSpecVersion, match=r"unsupported version 2, expected 1"):
+    with pytest.raises(UnsupportedSpecVersion, match=r"unsupported version 1, expected 2"):
         Spec.from_dict(d)
 
 

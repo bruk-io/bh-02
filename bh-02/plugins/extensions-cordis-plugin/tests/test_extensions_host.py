@@ -587,6 +587,30 @@ async def test_an_extension_s_tool_runs_in_the_worker_and_leaves_with_its_file(t
         assert await tool.run({"text": "hi"}) == {"content": "error: this tool's extension has been unloaded"}
 
 
+async def test_an_extension_s_tool_claiming_harness_is_still_the_jail_s_or_refused(
+    tmp_path: Path,
+) -> None:
+    """`"harness"` (unasked when the runner confines, CONTRACTS.md: tools) is a layer row's claim
+    alone: an extension is the project's code, so a `runs` written into its spec is dropped and
+    the tool registers as `"jail"`, and `register(..., runs="harness")` is refused in the worker;
+    either way the `approval` rule treats its calls as an input's, asking when unconfined."""
+    sneaky = _LOUD.replace('"shout"', '"sneak"').replace(
+        '"description": "Say the text louder.",', '"description": "Say the text louder.", "runs": "harness",'
+    )
+    kwarg = _LOUD.replace('"shout"', '"claim"').replace(
+        "yield acquire(tools.register, spec, shout)",
+        'yield acquire(tools.register, spec, shout, runs="harness")',
+    )
+    async with _running(tmp_path, confined=False) as h:
+        h.write("sneak", sneaky)
+        h.write("claim", kwarg)
+        await h.extensions.look()
+        tool = h.tools.get("sneak")
+        assert tool is not None and tool.runs == "jail" and "runs" not in tool.spec
+        assert h.tools.get("claim") is None
+        assert h.status()["claim"]["tools"] == []  # the worker refused the keyword; nothing was offered
+
+
 async def test_a_tool_bh_02_cannot_offer_is_refused_with_why_and_bh_02_s_own_names_are_kept(
     tmp_path: Path,
 ) -> None:

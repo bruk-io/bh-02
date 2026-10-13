@@ -8,9 +8,10 @@ battery structurally cannot get wrong:
   so no probe can fail for a DNS reason and be mistaken for a policy denial
   (`decision-108`).
 - Defect B: the CONTROL probe is an action the Spec provably PERMITS --
-  binding the declared LISTEN endpoint (`decision-116`), or reaching a
-  granted domain -- never a caller-supplied endpoint that may or may not be
-  reachable under a deny-all spec. A Spec permitting neither makes this
+  binding a socket the jail reserved for a declared LISTEN channel in its
+  channel directory (`decision-116`, decision-186), or reaching a granted
+  domain -- never an address that may or may not be reachable under a
+  deny-all spec. A Spec permitting neither makes this
   battery refuse to construct (SPEC.md §6's no-work-to-do rule), rather than
   being permanently VACUOUS against the preset it exists for.
 """
@@ -28,16 +29,30 @@ from brig.core.probes import ProbeShape
 from brig.core.spec import Channel, ChannelKind, NetworkPolicy, Spec
 from brig.probe.batteries.network import network_battery
 from brig.probe.battery import Probe
+from brig.run import Reservation
 
 _NETWORK_MODULE_PATH = (
     Path(__file__).resolve().parents[2] / "src" / "brig" / "probe" / "batteries" / "network.py"
 )
 
-_LISTEN_SPEC = Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint="ctl.sock"),))
+_LISTEN_SPEC = Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),))
 _DOMAIN_SPEC = Spec(network=NetworkPolicy(allowed_domains=("example.com",)))
 _NO_WORK_SPEC = Spec()
 
 _DENIED_ADDRESS = "192.0.2.1:80"
+
+#: A socket a jail reserved for `ctl` in its channel directory (decision-184):
+#: what the LISTEN-shape control binds (decision-186).
+_RESERVED = Reservation(
+    channel="ctl",
+    bound_path="/run/brig/jail0/chan/0123456789abcdef.sock",
+    endpoint="/run/brig/jail0/chan/0123456789abcdef.sock",
+)
+
+
+def _reserved(spec: Spec) -> Reservation | None:
+    return _RESERVED if spec.channels else None
+
 
 #: A naive "label.tld" hostname shape -- letters, then a dot, then two-or-more
 #: letters. Matches "brig-probe-denied.invalid"; does NOT match a dotted
@@ -72,7 +87,7 @@ def test_a_spec_with_no_listen_channel_and_no_granted_domain_refuses() -> None:
 def test_a_listen_channel_alone_is_sufficient_to_construct() -> None:
     """The control on the refusal above: a Spec with a LISTEN channel and NO
     granted domains constructs cleanly."""
-    battery = network_battery(_LISTEN_SPEC, denied_address=_DENIED_ADDRESS)
+    battery = network_battery(_LISTEN_SPEC, channel=_RESERVED, denied_address=_DENIED_ADDRESS)
     assert battery.axis is Axis.NETWORK
 
 
@@ -103,7 +118,7 @@ def test_denied_address_empty_string_raises_value_error_naming_the_argument() ->
     distinct from the no-work-to-do refusal, isolated here by using a Spec
     (_LISTEN_SPEC) that already has a valid positive control."""
     with pytest.raises(ValueError, match="denied_address"):
-        network_battery(_LISTEN_SPEC, denied_address="")
+        network_battery(_LISTEN_SPEC, channel=_RESERVED, denied_address="")
 
 
 @pytest.mark.unit
@@ -111,7 +126,7 @@ def test_denied_address_without_a_colon_also_raises() -> None:
     """A denied_address with no ':' separator (so no host/port split is
     possible) raises the same named ValueError."""
     with pytest.raises(ValueError, match="denied_address"):
-        network_battery(_LISTEN_SPEC, denied_address="192.0.2.1")
+        network_battery(_LISTEN_SPEC, channel=_RESERVED, denied_address="192.0.2.1")
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +143,7 @@ def test_every_denial_probe_carries_the_literal_address_and_no_hostname(spec: Sp
     battery can fail for a name-resolution reason (decision-117 Defect A).
     Parametrized over both control shapes: the claim is about the DENIAL
     probe, which is unchanged by which CONTROL shape the Spec selects."""
-    battery = network_battery(spec, denied_address=_DENIED_ADDRESS)
+    battery = network_battery(spec, denied_address=_DENIED_ADDRESS, channel=_reserved(spec))
     denial_probes = [p for p in battery.probes if p.shape is ProbeShape.DENIAL]
     assert denial_probes, "expected at least one DENIAL probe"
     for probe in denial_probes:
@@ -146,8 +161,8 @@ def test_every_denial_probe_carries_the_literal_address_and_no_hostname(spec: Sp
 def test_a_different_denied_address_is_interpolated_not_hardcoded() -> None:
     """Changing denied_address changes the DENIAL probe's argv -- catches a
     hardcoded literal masquerading as the caller-supplied one."""
-    battery1 = network_battery(_LISTEN_SPEC, denied_address="192.0.2.1:80")
-    battery2 = network_battery(_LISTEN_SPEC, denied_address="198.51.100.7:443")
+    battery1 = network_battery(_LISTEN_SPEC, channel=_RESERVED, denied_address="192.0.2.1:80")
+    battery2 = network_battery(_LISTEN_SPEC, channel=_RESERVED, denied_address="198.51.100.7:443")
 
     denial1 = next(p for p in battery1.probes if p.shape is ProbeShape.DENIAL)
     denial2 = next(p for p in battery2.probes if p.shape is ProbeShape.DENIAL)
@@ -164,16 +179,30 @@ def test_a_different_denied_address_is_interpolated_not_hardcoded() -> None:
 
 
 @pytest.mark.unit
-def test_with_a_listen_channel_the_control_binds_that_declared_endpoint() -> None:
+def test_with_a_listen_channel_the_control_binds_the_reserved_socket() -> None:
     """With a LISTEN channel declared, the CONTROL probe performs a network
-    action against THAT DECLARED ENDPOINT: the endpoint's own value
-    ('ctl.sock') appears in the probe's argv. Not a no-op -- it carries a
-    real stdout token the runner must observe (Expectation(token='brig-ok'))."""
-    battery = network_battery(_LISTEN_SPEC, denied_address=_DENIED_ADDRESS)
+    action against THE RESERVED SOCKET: its in-jail path, in the channel
+    directory, appears in the probe's argv (decision-186). Not a no-op -- it
+    carries a real stdout token the runner must observe
+    (Expectation(token='brig-ok'))."""
+    battery = network_battery(_LISTEN_SPEC, channel=_RESERVED, denied_address=_DENIED_ADDRESS)
     control = next(p for p in battery.probes if p.shape is ProbeShape.CONTROL)
-    assert control.name == "bind_the_declared_listen_endpoint"
-    assert "ctl.sock" in _argv_text(control)
+    assert control.name == "bind_a_reserved_channel_socket"
+    assert repr(_RESERVED.bound_path) in _argv_text(control)
     assert control.expect.token == "brig-ok"
+
+
+@pytest.mark.unit
+def test_a_declared_channel_needs_a_reservation_for_it() -> None:
+    """decision-186: a channel names no path, so the battery (pure) can't
+    bind one without a socket the jail reserved: refused without one, and
+    with one for a channel the Spec does not declare, each saying what to
+    pass. The control is the test above: the right reservation constructs."""
+    with pytest.raises(ValueError, match=r"channel=jail\.channel\('ctl'\)"):
+        network_battery(_LISTEN_SPEC, denied_address=_DENIED_ADDRESS)
+    other = Reservation(channel="aux", bound_path=_RESERVED.bound_path, endpoint="e")
+    with pytest.raises(ValueError, match="'aux', which spec"):
+        network_battery(_LISTEN_SPEC, denied_address=_DENIED_ADDRESS, channel=other)
 
 
 @pytest.mark.unit
@@ -212,7 +241,7 @@ def test_the_control_prints_success_only_after_the_network_action(
     direct socket connect can never succeed under a confined egress stack
     and would report a correctly-confined jail as broken. The PROPERTY
     under test is unchanged -- the token still must follow the action."""
-    battery = network_battery(spec, denied_address=_DENIED_ADDRESS)
+    battery = network_battery(spec, denied_address=_DENIED_ADDRESS, channel=_reserved(spec))
     control = next(p for p in battery.probes if p.shape is ProbeShape.CONTROL)
     script = control.argv[2]
     assert action_marker in script
@@ -226,7 +255,9 @@ def test_the_two_control_shapes_have_different_names() -> None:
     egress control."""
     listen_control = next(
         p
-        for p in network_battery(_LISTEN_SPEC, denied_address=_DENIED_ADDRESS).probes
+        for p in network_battery(
+            _LISTEN_SPEC, channel=_RESERVED, denied_address=_DENIED_ADDRESS
+        ).probes
         if p.shape is ProbeShape.CONTROL
     )
     domain_control = next(
@@ -235,7 +266,7 @@ def test_the_two_control_shapes_have_different_names() -> None:
         if p.shape is ProbeShape.CONTROL
     )
     assert listen_control.name != domain_control.name
-    assert listen_control.name == "bind_the_declared_listen_endpoint"
+    assert listen_control.name == "bind_a_reserved_channel_socket"
     assert domain_control.name == "connect_to_a_granted_domain"
 
 
@@ -251,7 +282,7 @@ def test_the_battery_always_carries_at_least_one_control_probe(spec: Spec) -> No
     """task-048's structural rule (Battery.__post_init__) is not weakened
     here: a Battery built from this module, in either spec shape, carries at
     least one CONTROL-shaped probe."""
-    battery = network_battery(spec, denied_address=_DENIED_ADDRESS)
+    battery = network_battery(spec, denied_address=_DENIED_ADDRESS, channel=_reserved(spec))
     assert any(p.shape is ProbeShape.CONTROL for p in battery.probes)
 
 
@@ -263,7 +294,7 @@ def test_the_battery_always_carries_at_least_one_control_probe(spec: Spec) -> No
 @pytest.mark.unit
 @pytest.mark.parametrize("spec", [_LISTEN_SPEC, _DOMAIN_SPEC], ids=["listen-shape", "domain-shape"])
 def test_the_battery_has_axis_network_and_two_probes(spec: Spec) -> None:
-    battery = network_battery(spec, denied_address=_DENIED_ADDRESS)
+    battery = network_battery(spec, denied_address=_DENIED_ADDRESS, channel=_reserved(spec))
     assert battery.name == "network"
     assert battery.axis is Axis.NETWORK
     assert len(battery.probes) == 2

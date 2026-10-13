@@ -7,7 +7,7 @@ task-080 / decision-135. Two claims that look alike and are not:
   that asserted the matrix contains what the matrix contains would pass for
   a stack that composed in the opposite order.
 - The HELPER's exemption from wrapping is NOT an ordering property at all.
-  It belongs to `run.launcher._start_helpers`, which spawns `helper.argv`
+  It belongs to `run.host._start_helpers`, which spawns `helper.argv`
   directly while only the workload becomes `wrapped_argv`. No matrix entry
   can protect it, so it is pinned separately, at the launcher.
 """
@@ -105,9 +105,9 @@ def test_the_proxy_helper_is_spawned_unwrapped_by_the_launcher() -> None:
     the proxy is scrubbed of the environment it needs and the workload
     silently loses its filter.
     """
-    from brig.run import launcher
+    from brig.run import host
 
-    source = inspect.getsource(launcher._start_helpers)
+    source = inspect.getsource(host._start_helpers)
     assert "wrapped_argv" not in source, (
         "_start_helpers must never spawn the composed wrap: a helper that "
         "passes through seatbelt cannot reach upstream, and one that passes "

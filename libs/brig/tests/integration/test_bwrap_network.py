@@ -46,9 +46,10 @@ import pytest
 
 from brig.core import FsPolicy, ReadModel, Spec
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH, bwrap
+from brig.run import IoPolicy
 from brig.run.compile_ctx import build_compile_ctx
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import Stack
+from tests.conftest import launch
 
 _PYTHON = "/usr/bin/python3"
 
@@ -126,7 +127,7 @@ def _run(*, jailed: bool) -> tuple[str, str]:
     spec = _spec(workspace)
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     stack = Stack([bwrap]) if jailed else Stack([])
-    handle = SubprocessLauncher().launch(
+    jail, process = launch(
         stack.compile(spec, ctx=ctx),
         argv=[_PYTHON, "-c", _PROBE],
         cwd=workspace,
@@ -134,10 +135,10 @@ def _run(*, jailed: bool) -> tuple[str, str]:
         jail_id=f"bwrap-net-{'jailed' if jailed else 'control'}",
         jail_dir=jail_dir,
     )
-    handle.wait(timeout=_WAIT_TIMEOUT_S)
-    with open(handle.stdout_path, encoding="utf-8", errors="replace") as f:
+    process.wait(timeout=_WAIT_TIMEOUT_S)
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
         stdout = f.read()
-    with open(handle.stderr_path, encoding="utf-8", errors="replace") as f:
+    with open(process.stderr_path, encoding="utf-8", errors="replace") as f:
         stderr = f.read()
     return stdout, stderr
 

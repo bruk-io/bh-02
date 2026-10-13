@@ -21,7 +21,8 @@ __all__ = ["clashes", "translated"]
 # row the runner, which starts the python tool's process and the extensions process, and the jail
 # field's row, `jail_status`, the runner's grades (`grades`). The shell's own rows: `harness` is
 # `shell`, `layers` (what the host is, not only its layer files) is `host`, and `sessions` (the
-# one running) is `session`.
+# one running) is `session`. The broker of what the model is told beside a call's result, `notes`,
+# is `asides`: a note is only a line shown to the person.
 _RENAMED = {
     "llm": "loop",
     "mode": "chat",
@@ -32,6 +33,7 @@ _RENAMED = {
     "harness": "shell",
     "layers": "host",
     "sessions": "session",
+    "notes": "asides",
 }
 # A row a config names for its model (`model_row`, an old `model_status`'s `row`): before the
 # completion row, the model was the `llm` row's; then the completion row's; it is the model
@@ -67,10 +69,11 @@ _RENAMED_USES = {
     "bh_02.bootstrap:harness": "bh_02.bootstrap:shell",
     "bh_02.bootstrap:layer_files": "bh_02.bootstrap:host",
     "bh_02.bootstrap:session_list": "bh_02.bootstrap:session",
+    "agent:notes": "agent:asides",
 }
-# The broker of what an input's result is told was `memory` (`agent:memory`); it is `notes` now,
-# and `memory` is Claude Code's memory, the memory plugin's row.
-_OLD_NOTES_USE, _NOTES, _NOTES_USE = "agent:memory", "notes", "agent:notes"
+# The broker of what an input's result is told was `memory` (`agent:memory`), then `notes`; it is
+# `asides` now, and `memory` is Claude Code's memory, the memory plugin's row.
+_OLD_ASIDES_USE, _ASIDES, _ASIDES_USE = "agent:memory", "asides", "agent:asides"
 # The project context's row (`system`) read the context files; the system prompt takes only its
 # `root`, and memory (CLAUDE.md, where Claude Code reads it) takes its `root` and `home`. Context
 # files are gone: memory reads Claude Code's files, from Claude Code's places.
@@ -170,8 +173,8 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
     - The project context's rows are the system prompt's and memory's (`context:project` is
       `agent:system`, `context:on_touch` is `memory:on_touch`), and a `system` row's config of
       more than `root` is split (`_split_system`): its `root` and `home` go to a `memory` row
-      too, its `files` and `max_chars` are gone. The broker `agent:memory` is `agent:notes`,
-      under the id `notes`.
+      too, its `files` and `max_chars` are gone. The broker `agent:memory` is `agent:asides`,
+      under the id `asides`.
     - The model row's providers are `models:model`'s now (`_model_row`): `claude-code:completion`
       (or a model row naming no plugin, which was it) names its model as `default`, an id that
       is no built-in name as an `extra` model of its own; `ollama:completion` is an `extra`
@@ -184,6 +187,8 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
     - The chat row is `chat:converse` (was `chat:session`, which named it after something
       else), the ui's `tui:ui` (was `tui:app`), and the shell's own rows `shell`, `host` and
       `session` (were `harness`, `layers` and `sessions`, each `bh_02.bootstrap:` the same).
+    - The broker of what the model is told beside a call's result is `asides` (was `notes`), its
+      component `agent:asides` (was `agent:notes`).
 
     - `/model` is the models plugin's `switch` row (`models:switch`): an operator's `layer` and
       `model_row` move to it (added after the operator, unless the layer has one, when the
@@ -204,14 +209,14 @@ def translated(rows: Sequence[Row]) -> tuple[list[Row], list[str]]:
     merged: list[Row] = []
     at = None  # where the status row goes: where the first of its parts was
     taken = {row.id for row in rows}
-    memory_taken = any(row.id == _MEMORY_ROW and row.use != _OLD_NOTES_USE for row in rows)
+    memory_taken = any(row.id == _MEMORY_ROW and row.use != _OLD_ASIDES_USE for row in rows)
     for row in rows:
-        if row.use == _OLD_NOTES_USE:
+        if row.use == _OLD_ASIDES_USE:
             changes.append(
-                f"row {row.id!r} (agent:memory) is now {_NOTES!r}, using agent:notes; "
-                f'make it id = "{_NOTES}" and use = "{_NOTES_USE}"'
+                f"row {row.id!r} (agent:memory) is now {_ASIDES!r}, using {_ASIDES_USE}; "
+                f'make it id = "{_ASIDES}" and use = "{_ASIDES_USE}"'
             )
-            row = Row(_NOTES if row.id == _MEMORY_ROW else row.id, _NOTES_USE, row.config, row.disabled)
+            row = Row(_ASIDES if row.id == _MEMORY_ROW else row.id, _ASIDES_USE, row.config, row.disabled)
         if row.id == _SYSTEM and row.use in _OLD_SYSTEM_USES and set(row.config or {}) - {"root"}:
             system, memory, said = _split_system(row, memory_taken)
             changes += said
@@ -490,7 +495,7 @@ def _clash(row: Row, taken: set[str]) -> str | None:
     if new is None or new not in taken:
         return None
     return (
-        f"row {row.id!r} is now {new!r}, and this layer has a {new!r} row too: fold what "
+        f"row {row.id!r} is now {new!r}, and this layer has a row {new!r} too: fold what "
         f"{row.id!r} sets into {new!r} and delete {row.id!r}"
     )
 

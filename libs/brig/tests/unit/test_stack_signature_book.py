@@ -1,6 +1,6 @@
 """`Stack.compile` assembles a `core.signatures.SignatureBook` alongside the
 aggregate report, so `CompiledJail.signatures` (and, through it, a
-rehydrated `Handle`) can still answer "which mechanism claims this axis,
+rehydrated `Jail`) can still answer "which mechanism claims this axis,
 and what does its denial look like?" (task-047).
 
 ## THE GAP THIS TASK CLOSES

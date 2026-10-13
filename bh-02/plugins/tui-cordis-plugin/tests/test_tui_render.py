@@ -132,6 +132,17 @@ def test_an_approval_names_the_input_and_shows_its_code_whole() -> None:
     assert render.approval_lines(asked) == ["x = 1"]
 
 
+def test_a_sub_agent_s_approval_says_who_asks_and_a_session_row_is_not_one() -> None:
+    call = {"name": "python", "input": {"code": "1"}, "agent": {"name": "general-1", "type": "general"}}
+    assert render.approval_heading(call) == "Agent general-1 (general) asks:\nRun this python code (1 line)?"
+    assert (
+        render.approval_heading({"name": "python", "input": {"code": "1"}})
+        == "Run this python code (1 line)?"
+    )
+    assert render.of_a_sub_agent("agents/general-1/loop") and render.of_a_sub_agent("agents/general-1")
+    assert not render.of_a_sub_agent("agents") and not render.of_a_sub_agent("loop")
+
+
 def test_an_approval_shows_a_call_as_its_tool_shows_it() -> None:
     """A tool's call carries how it is put to the person (`title`, `lines`, `language`), not
     necessarily any code: the modal shows those lines, highlighted in that language."""

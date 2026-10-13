@@ -42,6 +42,19 @@ def test_a_call_that_runs_in_bh_02_s_own_process_is_asked_about_however_confined
     assert granted.unasked({**_REQUEST, "runs": "jail"})
 
 
+def test_bh_02_s_own_harness_tool_is_unasked_when_the_runner_confines_and_asked_under_no_jail() -> None:
+    """A tool declaring `runs = "harness"` acts only on the session's jail and bh-02's own state
+    (CONTRACTS.md: tools): it goes ahead where the jail's own calls do, and is asked where they
+    are, while `"host"` is asked either way."""
+    request = {**_REQUEST, "name": "agents", "runs": "harness"}
+    granted = Approval(_Runner(_CONFINED))
+    assert granted.unasked(request)
+    assert not granted.unasked({**request, "runs": "host"})
+    loose = Approval(_Runner(UNENFORCED))
+    assert not loose.unasked(request)
+    assert not loose.unasked({**request, "runs": "host"})
+
+
 def test_confined_is_read_from_the_runner_each_time() -> None:
     """The runner's grades are its last start's: a Python process started again under a looser
     jail makes the next call asked about, with no new rule."""

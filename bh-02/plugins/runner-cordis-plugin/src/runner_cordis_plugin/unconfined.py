@@ -31,6 +31,20 @@ _STOP_GRACE_S = 2.0
 # not out of reach: the input can still read local.env itself, or the environment of any process
 # of the same user (`ps eww`), the Claude Code child's included.
 _HOST_ONLY = ("ANTHROPIC_", "CLAUDE")
+# tmux's: `TMUX` names the server's socket and `TMUX_PANE` the pane bh-02 runs in (decision-0002,
+# Watching). The confined runner's allowlist never passes them; this one passes everything else, so
+# it drops them by name. Hygiene, not a boundary: an input without a jail can find the socket itself.
+_TMUX = ("TMUX", "TMUX_PANE")
+
+
+def _program_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """The environment of a program the unconfined runner starts: the host's, less the Claude
+    credentials and anything Claude's (`_HOST_ONLY`) and tmux's (`_TMUX`)."""
+    return {
+        name: value
+        for name, value in environ.items()
+        if not name.startswith(_HOST_ONLY) and name not in _TMUX
+    }
 
 
 class _Process:
@@ -100,7 +114,7 @@ class Unjailed:
             process = await asyncio.create_subprocess_exec(
                 *argv,
                 cwd=cwd,
-                env={name: value for name, value in os.environ.items() if not name.startswith(_HOST_ONLY)},
+                env=_program_env(os.environ),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=stderr,

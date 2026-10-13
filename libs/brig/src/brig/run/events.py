@@ -11,8 +11,8 @@ reads a clock in the event path, and it is still the only layer permitted to
 stamp `ts` and `jail_id`. What it no longer does is WRITE. decision-152
 (2026-09-08) deleted `EventLog` and the per-jail `events.jsonl` file it
 appended to; `stamp`/`stamp_all` below are what replaced it, and the stamped
-`Event`s are RETURNED to the embedder -- on `Handle.compile_events` for the
-facts a sensor knows at compile time, and from `Handle.exit_events()` for the
+`Event`s are RETURNED to the embedder -- on `Jail.compile_events` for the
+facts a sensor knows at compile time, and from `Process.exit_events()` for the
 ones a sensor can only make of an ending.
 
 The atomicity claim this module's docstring used to carry went with the file:

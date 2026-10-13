@@ -40,6 +40,22 @@ async def test_the_broker_runs_what_is_registered_and_help_lists_it() -> None:
     assert await commands.run("/echo hi") == "unknown command /echo; /help lists them"
 
 
+def test_rows_add_notes_for_the_stop_notice_and_a_failing_one_costs_the_rest_nothing() -> None:
+    commands = Commands()
+    assert commands.stop_notes() == []
+    remove = commands.on_stop(lambda: "b note")
+    commands.on_stop(lambda: "")  # nothing to say
+    commands.on_stop(lambda: "a note")
+
+    def broken() -> str:
+        raise RuntimeError("boom")
+
+    commands.on_stop(broken)
+    assert commands.stop_notes() == ["(a stop note failed: RuntimeError: boom)", "a note", "b note"]
+    remove()
+    assert "b note" not in commands.stop_notes()
+
+
 def test_the_broker_says_which_lines_are_the_harness_s() -> None:
     """`claims` is how the chat row tells a command from a message: a slash command, known or
     not (so a typo never reaches the model), or a line starting with a claimed prefix."""

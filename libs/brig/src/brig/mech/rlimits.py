@@ -12,7 +12,7 @@ grade that resists a hostile process *with a named gap* is `best_effort` --
 "limits-cpu `enforced`" (MILESTONES.md M3 EC2's wording) is a statement about
 the *field*, and EC2's own trailing clause ("with the uncovered limit fields
 named in detail") already spells `best_effort`'s defining signature. Grading
-the axis `enforced` here would be CLAUDE.md's never-grade-up trap landing on
+the axis `enforced` here would be the never-grade-up trap landing on
 M3's golden snapshot artifact (`degraded()`, task-039). `memory`, `tasks`,
 `wall` and `output` are named in `detail`, parseable as an exact token set
 after the `"uncovered:"` marker (see `_BEST_EFFORT_DETAIL` and
@@ -21,8 +21,11 @@ this task's (`RLIMIT_NPROC`/task count is SPEC.md §6's "Deliberately absent",
 never attempted by this or any mechanism).
 
 `compile` is a pure `spec -> argv` render, no I/O: it renders `Step.wrap` as
-the trampoline invocation task-035 ships, `python -m brig.mech.trampoline
---cpu N -- <argv>` (using `sys.executable` rather than the bare string
+the trampoline invocation task-035 ships, `python -I -m brig.mech.trampoline
+--cpu N -- <argv>` (isolated, decision-169: it is outermost, so it runs on
+the host in the workload's working directory, which `-m` alone would put
+first on its import path; brig is found in the interpreter's own
+site-packages) (using `sys.executable` rather than the bare string
 `"python"` -- a plain attribute read of an already-resolved interpreter path,
 not I/O, and the only invocation that reliably has `brig` importable when run
 under `uv run`, matching `tests/integration/test_trampoline.py`'s own
@@ -70,6 +73,7 @@ import signal
 import sys
 
 from brig.core import Axis, EventKind, Grade, Graded, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech.contract import ArgvTransformer, CompileCtx, EventPayload, ExitOutcome, Step
 
 _TRAMPOLINE_MODULE = "brig.mech.trampoline"
@@ -105,6 +109,7 @@ def _render_wrap(cpu_seconds: int) -> ArgvTransformer:
         cpu_flags: tuple[str, ...] = (_CPU_FLAG, str(cpu_seconds)) if cpu_seconds else ()
         return (
             sys.executable,
+            "-I",
             "-m",
             _TRAMPOLINE_MODULE,
             *cpu_flags,
@@ -137,6 +142,7 @@ class Rlimits:
 
     name = "rlimits"
     axes: frozenset[Axis] = frozenset({Axis.LIMITS})
+    runtime: RuntimeKind | None = None
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         """Pure `spec -> argv` render; `ctx` is accepted per the `Mechanism`
@@ -157,6 +163,6 @@ class Rlimits:
 
 #: The mechanism instance embedders and later stack composition (task-037's
 #: matrix, task-039's `degraded()` preset) compose against -- same posture
-#: as `brig.mech`'s own `NEW_PROCESS_GROUP`/`JAIL_LIFETIME` module-level
+#: as `brig.mech`'s own `JAIL_LIFETIME`/`LAUNCH_SCOPED` module-level
 #: constants.
 rlimits: Rlimits = Rlimits()

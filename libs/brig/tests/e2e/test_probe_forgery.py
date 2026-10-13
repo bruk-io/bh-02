@@ -8,7 +8,7 @@
 `.claude/rules/system-tests.md`, verbatim:
 
     Full stacks through the public API only: `Spec` -> preset `Stack` ->
-    `Launcher` -> `Handle` -> probe battery, exactly as an embedder would
+    `Jail.create` -> `jail.start` -> probe battery, exactly as an embedder would
     drive them. No internal imports below the public surface
 
 and:
@@ -27,10 +27,10 @@ every assertion below uses the vocabulary that ruling left in force
 `Verdict.PASS` / `FAIL` per probe) -- see task-053's own notes for the full
 rename history this file inherits rather than re-derives.
 
-**The forgery, built with no brig-internal hook.** `Handle` is a frozen
-`dataclass` (`brig/run/handle.py`); `dataclasses.replace` (stdlib) is the
+**The forgery, built with no brig-internal hook.** `Jail` is a frozen
+`dataclass` (`brig/run/jail.py`); `dataclasses.replace` (stdlib) is the
 ordinary way to build a new immutable value from an old one with named
-fields swapped -- exactly what an embedder holding a real `Handle` would
+fields swapped -- exactly what an embedder holding a real `Jail` would
 also have to reach for. Nothing here imports a private constructor or a
 test-only seam.
 
@@ -47,7 +47,7 @@ integration test that names it already imports it the identical way
 system test needs a private hook, the public API is missing something;
 file that instead" -- filed as a finding in this task's own closing notes,
 not routed around: neither gap blocks building or observing the forgery
-through `Handle`'s real public surface, so nothing here reaches for a hook
+through `Jail`'s real public surface, so nothing here reaches for a hook
 to compensate. `env_battery` and `CANARY_ENV_NAME` are a *different* case,
 not a gap: `brig/probe/batteries/__init__.py`'s own docstring states the
 package is "deliberately not a barrel... each battery is imported by its
@@ -67,7 +67,7 @@ env_scrub])` -- `scratch_darwin()` minus its one darwin-only mechanism,
 same "drop one mechanism" shape as the M4 trio's `Stack([rlimits])`), and
 the forged claim is copied from a REAL `scratch_darwin().compile(spec,
 ctx=...)` -- never hand-built -- for the identical reason the M4 trio's own
-docstring states it. `BatteryVerdict`, `Handle`, `SubprocessLauncher`,
+docstring states it. `BatteryVerdict`, `Jail`, `Jail.create` and `jail.start`,
 `Stack`, `degraded`, `_new_root`, `_teardown_group`, and `_probe` above are
 all reused UNCHANGED, not reimplemented -- this is one file extended, not
 two files sharing a shape by accident (this task's own Deliverable: "M4's
@@ -104,9 +104,9 @@ from brig.core.probes import BatteryVerdict  # not barrel-exported; justified ab
 from brig.mech import env_scrub, rlimits
 from brig.probe.batteries.env import CANARY_ENV_NAME, env_battery  # batteries: no barrel, by design
 from brig.probe.batteries.fs import fs_write_battery
-from brig.run import Handle, IoPolicy, SubprocessLauncher, build_compile_ctx
+from brig.run import IoPolicy, Jail, Process, build_compile_ctx
 from brig.stack import Stack, degraded, scratch_darwin
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -119,15 +119,16 @@ def _new_root(run_id: str, tag: str) -> str:
     return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
 
 
-def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str) -> Handle:
-    """`Spec -> preset/weakened Stack -> Launcher -> Handle`, exactly the
+def _launch(
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+) -> tuple[Jail, Process]:
+    """`Spec -> preset/weakened Stack -> Jail.create -> jail.start`, exactly the
     public chain `.claude/rules/system-tests.md` names -- `stack.compile`
-    and `SubprocessLauncher().launch` are both public methods on public
+    and `Jail.create` are both public methods on public
     types, never an internal helper."""
     jail_dir = _new_root(run_id, "pf")
     jail = stack.compile(spec)
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         jail,
         argv=list(argv),
         cwd=jail_dir,
@@ -137,23 +138,23 @@ def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_
     )
 
 
-def _teardown_group(handle: Handle) -> None:
+def _teardown_group(process: Process) -> None:
     """Group-kill the long-lived workload. The kill is hand-rolled rather
-    than `Handle.kill()`, same reasoning as the integration tier's own
+    than `Jail.destroy()`, same reasoning as the integration tier's own
     `_teardown_group` helpers: a test's cleanup path must not be the code
-    under test (`handle.probe(...)` is what these tests exist to exercise,
-    not what tears them down afterward). `handle.wait()` blocks until the
+    under test (`jail.probe(...)` is what these tests exist to exercise,
+    not what tears them down afterward). `process.wait()` blocks until the
     launcher's exit-waiter has reaped it (task-073)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
 
 
-def _probe(handle: Handle, battery: object) -> ProbeReport:
-    """`handle.probe(battery)` through a `cast` to `core.probes.Battery` --
+def _probe(jail: Jail, battery: object) -> ProbeReport:
+    """`jail.probe(battery)` through a `cast` to `core.probes.Battery` --
     the same idiom the integration tier's own `_probe` helpers use: a
     concrete `brig.probe.battery.Battery` satisfies that `@runtime_
     checkable` `Protocol` at runtime, but mypy --strict flags it statically
@@ -161,7 +162,7 @@ def _probe(handle: Handle, battery: object) -> ProbeReport:
     read-only attribute` -- a frozen dataclass field read against a
     Protocol's default read-write attribute check), so the mismatch is
     silenced with an explicit cast rather than left unresolved."""
-    return handle.probe(cast(CoreBattery, battery))
+    return jail.probe(cast(CoreBattery, battery))
 
 
 def _env_spec() -> Spec:
@@ -178,7 +179,7 @@ def test_a_weakened_stack_with_an_unchanged_claimed_report_is_caught(
     run_id: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """AC #1 / #2 (EC3). Build a jail from `Stack([rlimits])` -- `degraded()`
-    with `env_scrub` REMOVED -- then forge a `Handle` whose `report` and
+    with `env_scrub` REMOVED -- then forge a `Jail` whose `report` and
     `signatures` still carry `env_scrub`'s claim exactly as `degraded()`
     would have produced it (`Axis.ENV` graded `ENFORCED`, with the empty
     `denial_signatures` tuple `env_scrub` declares under SCRUB). Everything
@@ -209,35 +210,33 @@ def test_a_weakened_stack_with_an_unchanged_claimed_report_is_caught(
     )
 
     weakened = Stack([rlimits])  # degraded() with env_scrub dropped
-    handle = _launch(
+    jail, process = _launch(
         weakened, spec, workload_argv(run_id, "sleep 100"), jail_id="pf-forgery", run_id=run_id
     )
     try:
-        assert handle.report.axes[Axis.ENV].grade is Grade.UNENFORCED, (
+        assert jail.report.axes[Axis.ENV].grade is Grade.UNENFORCED, (
             "sanity: the weakened stack's OWN report must honestly grade ENV "
             "unenforced -- nothing here claims it"
         )
-        assert handle.signatures.for_axis(Axis.ENV) is None, (
+        assert jail.signatures.for_axis(Axis.ENV) is None, (
             "sanity: the weakened stack's OWN signature book must carry no ENV "
             "claim -- nothing here claims it either"
         )
 
-        forged_axes = dict(handle.report.axes)
+        forged_axes = dict(jail.report.axes)
         forged_axes[Axis.ENV] = genuine_env_graded
         forged_report = EnforcementReport(axes=forged_axes)
-        forged_signatures = SignatureBook(claims=(*handle.signatures.claims, genuine_env_claim))
-        forged_handle = dataclasses.replace(
-            handle, report=forged_report, signatures=forged_signatures
-        )
+        forged_signatures = SignatureBook(claims=(*jail.signatures.claims, genuine_env_claim))
+        forged_jail = dataclasses.replace(jail, report=forged_report, signatures=forged_signatures)
 
         # AC #2: the forgery keeps the SignatureBook claim, BEFORE the
         # battery ever runs -- so a CONTRADICTED verdict below cannot be
         # explained by "the claim was simply missing".
-        forged_claim = forged_handle.signatures.for_axis(Axis.ENV)
+        forged_claim = forged_jail.signatures.for_axis(Axis.ENV)
         assert forged_claim is not None
         assert forged_claim.signatures == ()
 
-        report = _probe(forged_handle, env_battery(spec))
+        report = _probe(forged_jail, env_battery(spec))
 
         # AC #1: caught, and CAUGHT BY AXIS -- not merely "not CONSISTENT".
         assert report.battery_verdict is BatteryVerdict.CONTRADICTED
@@ -247,7 +246,7 @@ def test_a_weakened_stack_with_an_unchanged_claimed_report_is_caught(
             f"expected a contradiction naming {axis_marker!r}, got {report.contradictions!r}"
         )
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +266,7 @@ def test_control_the_unforged_degraded_jail_is_consistent_on_the_same_battery(
     """
     monkeypatch.setenv(CANARY_ENV_NAME, "topsecret-should-not-leak")
     spec = _env_spec()
-    handle = _launch(
+    jail, process = _launch(
         degraded(),
         spec,
         workload_argv(run_id, "sleep 100"),
@@ -275,13 +274,13 @@ def test_control_the_unforged_degraded_jail_is_consistent_on_the_same_battery(
         run_id=run_id,
     )
     try:
-        report = _probe(handle, env_battery(spec))
+        report = _probe(jail, env_battery(spec))
         assert report.battery_verdict is BatteryVerdict.CONSISTENT
         assert report.contradictions == ()
         absence = next(o for o in report.outcomes if o.probe_name == "scrubbed_name_is_absent")
         assert absence.verdict is Verdict.PASS
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +314,7 @@ def test_control_the_weakened_stack_with_an_HONEST_report_does_not_contradict(
     monkeypatch.setenv(CANARY_ENV_NAME, "topsecret-should-leak-here")
     spec = _env_spec()
     weakened = Stack([rlimits])
-    handle = _launch(
+    jail, process = _launch(
         weakened,
         spec,
         workload_argv(run_id, "sleep 100"),
@@ -323,7 +322,7 @@ def test_control_the_weakened_stack_with_an_HONEST_report_does_not_contradict(
         run_id=run_id,
     )
     try:
-        report = _probe(handle, env_battery(spec))
+        report = _probe(jail, env_battery(spec))
         assert report.contradictions == ()
         absence = next(o for o in report.outcomes if o.probe_name == "scrubbed_name_is_absent")
         assert absence.verdict is Verdict.FAIL, (
@@ -332,7 +331,7 @@ def test_control_the_weakened_stack_with_an_HONEST_report_does_not_contradict(
         )
         assert report.battery_verdict is BatteryVerdict.CONSISTENT
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +378,7 @@ def _seed_scratch_fs_targets(run_id: str) -> tuple[str, str, str]:
 
 def _launch_scratch(
     stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
-) -> Handle:
+) -> tuple[Jail, Process]:
     """Same public chain as this file's own `_launch`, but through
     `build_compile_ctx` (`platform=sys.platform`, i.e. `"darwin"` under this
     module's own skip gate) rather than a bare `stack.compile(spec)` --
@@ -391,8 +390,7 @@ def _launch_scratch(
     jail_dir = _new_root(run_id, "pfsf")
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
     jail = stack.compile(spec, ctx=ctx)
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         jail, argv=list(argv), cwd=jail_dir, io=IoPolicy(), jail_id=jail_id, jail_dir=jail_dir
     )
 
@@ -403,7 +401,7 @@ def test_a_weakened_scratch_darwin_stack_with_an_unchanged_claimed_fs_write_repo
     run_id: str,
 ) -> None:
     """task-065 AC #5. Build a jail from `Stack([rlimits, env_scrub])` --
-    `scratch_darwin()` with `seatbelt` REMOVED -- then forge a `Handle`
+    `scratch_darwin()` with `seatbelt` REMOVED -- then forge a `Jail`
     whose `report` and `signatures` still carry `seatbelt`'s claim exactly
     as `scratch_darwin()` would have produced it for THIS spec
     (`Axis.FS_WRITE` graded `ENFORCED`, with seatbelt's own real declared
@@ -436,37 +434,33 @@ def test_a_weakened_scratch_darwin_stack_with_an_unchanged_claimed_fs_write_repo
     )
 
     weakened = Stack([rlimits, env_scrub])  # scratch_darwin() with seatbelt dropped
-    handle = _launch_scratch(
+    jail, process = _launch_scratch(
         weakened, spec, workload_argv(run_id, "sleep 100"), jail_id="pfsf-forgery", run_id=run_id
     )
     try:
-        assert handle.report.axes[Axis.FS_WRITE].grade is Grade.UNENFORCED, (
+        assert jail.report.axes[Axis.FS_WRITE].grade is Grade.UNENFORCED, (
             "sanity: the weakened stack's OWN report must honestly grade FS_WRITE "
             "unenforced -- nothing here claims it"
         )
-        assert handle.signatures.for_axis(Axis.FS_WRITE) is None, (
+        assert jail.signatures.for_axis(Axis.FS_WRITE) is None, (
             "sanity: the weakened stack's OWN signature book must carry no "
             "FS_WRITE claim -- nothing here claims it either"
         )
 
-        forged_axes = dict(handle.report.axes)
+        forged_axes = dict(jail.report.axes)
         forged_axes[Axis.FS_WRITE] = genuine_fs_write_graded
         forged_report = EnforcementReport(axes=forged_axes)
-        forged_signatures = SignatureBook(
-            claims=(*handle.signatures.claims, genuine_fs_write_claim)
-        )
-        forged_handle = dataclasses.replace(
-            handle, report=forged_report, signatures=forged_signatures
-        )
+        forged_signatures = SignatureBook(claims=(*jail.signatures.claims, genuine_fs_write_claim))
+        forged_jail = dataclasses.replace(jail, report=forged_report, signatures=forged_signatures)
 
         # Before the battery ever runs: the forgery keeps the SignatureBook
         # claim, so a CONTRADICTED verdict below cannot be explained by "the
         # claim was simply missing".
-        forged_claim = forged_handle.signatures.for_axis(Axis.FS_WRITE)
+        forged_claim = forged_jail.signatures.for_axis(Axis.FS_WRITE)
         assert forged_claim is not None
         assert forged_claim.signatures != ()
 
-        report = _probe(forged_handle, fs_write_battery(spec, outside_writable=outside_writable))
+        report = _probe(forged_jail, fs_write_battery(spec, outside_writable=outside_writable))
         print(
             "\n[AC #5 forgery] battery_verdict:",
             report.battery_verdict,
@@ -482,7 +476,7 @@ def test_a_weakened_scratch_darwin_stack_with_an_unchanged_claimed_fs_write_repo
             f"expected a contradiction naming {axis_marker!r}, got {report.contradictions!r}"
         )
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.e2e
@@ -497,7 +491,7 @@ def test_control_the_unforged_scratch_darwin_jail_is_consistent_on_the_same_batt
     """
     workspace, hooks_dir, outside_writable = _seed_scratch_fs_targets(run_id)
     spec = _scratch_fs_spec(workspace, hooks_dir)
-    handle = _launch_scratch(
+    jail, process = _launch_scratch(
         scratch_darwin(),
         spec,
         workload_argv(run_id, "sleep 100"),
@@ -505,7 +499,7 @@ def test_control_the_unforged_scratch_darwin_jail_is_consistent_on_the_same_batt
         run_id=run_id,
     )
     try:
-        report = _probe(handle, fs_write_battery(spec, outside_writable=outside_writable))
+        report = _probe(jail, fs_write_battery(spec, outside_writable=outside_writable))
         print(
             "\n[AC #5 control 1: unforged scratch_darwin()] battery_verdict:",
             report.battery_verdict,
@@ -518,7 +512,7 @@ def test_control_the_unforged_scratch_darwin_jail_is_consistent_on_the_same_batt
             if outcome.shape is ProbeShape.DENIAL:
                 assert outcome.verdict is Verdict.PASS, (outcome.probe_name, outcome.verdict)
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.e2e
@@ -538,7 +532,7 @@ def test_control_the_weakened_scratch_darwin_stack_with_an_HONEST_report_does_no
     workspace, hooks_dir, outside_writable = _seed_scratch_fs_targets(run_id)
     spec = _scratch_fs_spec(workspace, hooks_dir)
     weakened = Stack([rlimits, env_scrub])
-    handle = _launch_scratch(
+    jail, process = _launch_scratch(
         weakened,
         spec,
         workload_argv(run_id, "sleep 100"),
@@ -546,7 +540,7 @@ def test_control_the_weakened_scratch_darwin_stack_with_an_HONEST_report_does_no
         run_id=run_id,
     )
     try:
-        report = _probe(handle, fs_write_battery(spec, outside_writable=outside_writable))
+        report = _probe(jail, fs_write_battery(spec, outside_writable=outside_writable))
         print(
             "\n[AC #5 control 2: weakened, honest report] battery_verdict:",
             report.battery_verdict,
@@ -563,4 +557,4 @@ def test_control_the_weakened_scratch_darwin_stack_with_an_HONEST_report_does_no
             )
         assert report.battery_verdict is BatteryVerdict.CONSISTENT
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)

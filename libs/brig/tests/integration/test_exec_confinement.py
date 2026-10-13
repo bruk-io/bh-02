@@ -1,17 +1,17 @@
-"""`handle.exec` places the sibling inside the SAME confinement as the
+"""`jail.start` places the sibling inside the SAME confinement as the
 workload -- task-046's spec anchor, SPEC.md §9, verbatim:
 
     - The exec'd process is subject to the same Spec as the workload --
       never a weaker one. A mechanism that cannot guarantee this refuses
       exec.
 
-Before this task, `exec_in_jail` (`brig/run/exec_.py`) spawned the caller's
+Before this task, an exec (a sibling `jail.start` since decision-183) spawned the caller's
 raw `argv` through `subprocess.Popen` directly -- neither the compiled
 stack's argv wrap NOR its env overlay ever reached an exec sibling, so an
 exec under `degraded()` ran BARE: no env scrubbing, no cpu cap. This file
 is the measured claim, run for real, against the REAL `degraded()` preset
 (`env_scrub` + `rlimits`, matrix-ordered `rlimits` outermost) launched
-through the REAL `SubprocessLauncher` -- same "observe from inside the
+through the REAL `Jail.create` and `jail.start` -- same "observe from inside the
 jail" posture as `tests/integration/test_stack_matrix_ordering.py`, applied
 here to the exec path instead of the workload path.
 
@@ -42,12 +42,11 @@ from collections.abc import Sequence
 import pytest
 
 from brig.core import Axis, EnvMode, EnvPolicy, Limits, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech import CompileCtx, Step
-from brig.run.exec_ import ExecFidelity, ExecWrapNotAPrefix, exec_in_jail
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import ExecFidelity, ExecWrapNotAPrefix, IoPolicy, Jail, Process, _records
 from brig.stack import Stack, degraded
-from tests.conftest import teardown_group, workload_argv
+from tests.conftest import launch, teardown_group, workload_argv
 
 _jail_counter = itertools.count()
 
@@ -76,7 +75,7 @@ def _new_jail_dir(run_id: str) -> str:
     merely reasoned): pre-seeding a jail_dir's `events.jsonl` with a stale,
     unmatched `EXEC` record under the SAME `jail_id` a later `_launch`
     call also uses, then launching a real handle into that same directory
-    and calling `kill()`, makes `teardown.kill_jail`'s own
+    and calling `kill()`, makes `teardown.kill_named`'s own
     `_live_exec_siblings` count the phantom record as one more live
     sibling -- inflating `len(KillReport.items)` by one. The `run_id`
     salt makes that specific collision structurally unreachable for this
@@ -99,17 +98,18 @@ def _parse_env_lines(text: str) -> dict[str, str]:
     return result
 
 
-def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str) -> Handle:
+def _launch(
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+) -> tuple[Jail, Process]:
     """Compile `stack` against `spec` and launch `argv` through the REAL
-    `SubprocessLauncher` -- no monkeypatching, no hand-built `CompiledJail`,
+    `Jail.create` and `jail.start` -- no monkeypatching, no hand-built `CompiledJail`,
     the same real-mechanism posture `test_stack_matrix_ordering.py`
     establishes for the workload path, applied here to the path this task
-    changes: `handle.exec`."""
+    changes: `jail.start`."""
     jail_dir = _new_jail_dir(run_id)
     ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
     jail = stack.compile(spec, ctx=ctx)
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+    return launch(
         jail,
         argv=list(argv),
         cwd=jail_dir,
@@ -119,18 +119,18 @@ def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_
     )
 
 
-def _teardown_group(handle: Handle) -> None:
+def _teardown_group(process: Process) -> None:
     """Group-kill the long-lived workload -- the kill is hand-rolled, not
-    `Handle.kill()`, same reasoning as `test_exec.py`'s own
+    `Jail.destroy()`, same reasoning as `test_exec.py`'s own
     `_teardown_group`: a test's cleanup path must not be the code under
-    test. `handle.wait()` blocks until the launcher's exit-waiter has reaped
+    test. `process.wait()` blocks until the launcher's exit-waiter has reaped
     it (task-073)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
 
 
 def _sleep_workload(run_id: str) -> list[str]:
@@ -148,6 +148,7 @@ class _AppendingMechanism:
 
     name = "test_appending"
     axes: frozenset[Axis] = frozenset()
+    runtime: RuntimeKind | None = None
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         del spec, ctx
@@ -189,13 +190,13 @@ def test_exec_sibling_does_not_see_the_scrubbed_canary(
         limits=Limits(cpu_seconds=60),
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH", "HOME")),
     )
-    handle = _launch(
+    jail, process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="jail-t046-ac1", run_id=run_id
     )
     try:
-        exec_handle = exec_in_jail(handle, ["/usr/bin/env"])
-        assert exec_handle.wait(timeout=_WAIT_TIMEOUT_S) == 0
-        with open(exec_handle.stdout_path, encoding="utf-8", errors="replace") as f:
+        sibling = jail.start(["/usr/bin/env"])
+        assert sibling.wait(timeout=_WAIT_TIMEOUT_S) == 0
+        with open(sibling.stdout_path, encoding="utf-8", errors="replace") as f:
             names = _parse_env_lines(f.read())
 
         assert canary_name not in names, (
@@ -207,7 +208,7 @@ def test_exec_sibling_does_not_see_the_scrubbed_canary(
         # failed to launch or print anything at all.
         assert "PATH" in names
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
@@ -221,20 +222,20 @@ def test_control_exec_sibling_under_the_empty_stack_does_see_the_canary(
     canary_name = f"BRIG_T046_CANARY_{run_id}"
     monkeypatch.setenv(canary_name, "should-be-visible")
 
-    handle = _launch(
+    jail, process = _launch(
         Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t046-ac1-control", run_id=run_id
     )
     try:
-        assert handle.wrap_prefix == ()
-        exec_handle = exec_in_jail(handle, ["/usr/bin/env"])
-        assert exec_handle.wait(timeout=_WAIT_TIMEOUT_S) == 0
-        with open(exec_handle.stdout_path, encoding="utf-8", errors="replace") as f:
+        assert jail._base.wrap_prefix == ()
+        sibling = jail.start(["/usr/bin/env"])
+        assert sibling.wait(timeout=_WAIT_TIMEOUT_S) == 0
+        with open(sibling.stdout_path, encoding="utf-8", errors="replace") as f:
             names = _parse_env_lines(f.read())
 
         assert canary_name in names
         assert names[canary_name] == "should-be-visible"
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -253,18 +254,18 @@ def test_exec_sibling_is_subject_to_the_cpu_limit(run_id: str) -> None:
     on a runaway)."""
     assert int(signal.SIGXCPU) == 24  # platform pin, asserted not assumed
     spec = Spec(limits=Limits(cpu_seconds=1))
-    handle = _launch(
+    jail, process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="jail-t046-ac2", run_id=run_id
     )
     try:
-        exec_handle = exec_in_jail(handle, [sys.executable, "-c", _SPIN_LOOP])
-        status = exec_handle.wait(timeout=_WAIT_TIMEOUT_S)
+        sibling = jail.start([sys.executable, "-c", _SPIN_LOOP])
+        status = sibling.wait(timeout=_WAIT_TIMEOUT_S)
         assert status == -int(signal.SIGXCPU), (
             f"expected the exec sibling to die on SIGXCPU under the SAME "
             f"cpu_seconds=1 limit as the workload; got wait()={status!r}"
         )
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
@@ -277,14 +278,14 @@ def test_control_exec_sibling_short_command_exits_zero_under_the_same_limit(
     killed everything under this stack (e.g. a broken trampoline
     invocation) could not pass this half."""
     spec = Spec(limits=Limits(cpu_seconds=1))
-    handle = _launch(
+    jail, process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="jail-t046-ac2-control", run_id=run_id
     )
     try:
-        exec_handle = exec_in_jail(handle, ["/usr/bin/true"])
-        assert exec_handle.wait(timeout=_WAIT_TIMEOUT_S) == 0
+        sibling = jail.start(["/usr/bin/true"])
+        assert sibling.wait(timeout=_WAIT_TIMEOUT_S) == 0
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -294,60 +295,50 @@ def test_control_exec_sibling_short_command_exits_zero_under_the_same_limit(
 
 
 @pytest.mark.integration
-def test_exec_refuses_when_the_composed_wrap_is_not_a_pure_prefix(run_id: str) -> None:
-    """AC #3: a REAL `Stack` containing `_AppendingMechanism` (its `wrap`
-    APPENDS a trailing token, so the suffix check fails) compiles and
-    launches normally -- the refusal is `handle.exec`'s to make, not the
-    launcher's. `handle.exec(...)` raises `ExecWrapNotAPrefix`, naming that
-    the composed wrap is not a pure argv prefix; NO process is spawned --
-    no new `exec-*` file appears under `jail_dir` at all (the refusal is
-    checked before either exec stdio file is even opened).
+def test_every_start_refuses_when_the_composed_wrap_is_not_a_pure_prefix(run_id: str) -> None:
+    """AC #3, as decision-181 (2026-10-12) moved it: a REAL `Stack` containing
+    `_AppendingMechanism` (its `wrap` APPENDS a trailing token, so the suffix
+    check fails) compiles, and `create` derives no prefix (`None`), so EVERY
+    start refuses, the first included: the launch raises `ExecWrapNotAPrefix`
+    and NO process is spawned -- no records directory appears under
+    `<jail_dir>/procs` at all (the refusal is checked before one is made).
+    Before decision-181 the first process ran and only a later `exec`
+    refused; now the first process is a start like any other.
 
-    THE CONTROL, in the same test: the identical `exec-*` scan, against a
-    SECOND (empty-stack) handle where the exec actually succeeds, DOES
-    find a new file -- without this, `after == before` on the refused
-    handle would pass just as happily if the scan pattern could never
-    match anything at all (a scan that never finds anything cannot tell
-    "refused" apart from "broken probe")."""
-    handle = _launch(
-        Stack([_AppendingMechanism()]),
-        Spec(),
-        _sleep_workload(run_id),
-        jail_id="jail-t046-ac3",
-        run_id=run_id,
-    )
-    control_handle = _launch(
+    THE CONTROL, in the same test: the identical `procs/` scan, against a
+    SECOND (empty-stack) launch where the start succeeds, DOES find a new
+    entry -- without this, an empty scan on the refused jail would pass just
+    as happily if the scan could never match anything at all."""
+    jail_dir = _new_jail_dir(run_id)
+    ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
+    compiled = Stack([_AppendingMechanism()]).compile(Spec(), ctx=ctx)
+
+    with pytest.raises(ExecWrapNotAPrefix) as exc_info:
+        launch(
+            compiled,
+            argv=_sleep_workload(run_id),
+            cwd=jail_dir,
+            io=IoPolicy(),
+            jail_id="jail-t046-ac3",
+            jail_dir=jail_dir,
+        )
+    assert "is not a pure argv prefix" in str(exc_info.value)
+    assert exc_info.value.wrap_prefix is None
+    assert not os.path.exists(_records.procs_dir(jail_dir))
+
+    control_jail, control_process = _launch(
         Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t046-ac3-control", run_id=run_id
     )
     try:
-        assert handle.wrap_prefix is None
-
-        before = {name for name in os.listdir(handle.jail_dir) if name.startswith("exec-")}
-
-        with pytest.raises(ExecWrapNotAPrefix) as exc_info:
-            handle.exec(["true"])
-        assert "is not a pure argv prefix" in str(exc_info.value)
-
-        after = {name for name in os.listdir(handle.jail_dir) if name.startswith("exec-")}
-        assert after == before  # no exec-*-{stdout,stderr}.log file was ever created
-
-        # THE CONTROL: the SAME scan, on a handle whose exec is allowed
-        # to succeed, DOES see a new exec-* file -- proving the scan
-        # pattern can positively detect an exec artifact at all.
-        control_before = {
-            name for name in os.listdir(control_handle.jail_dir) if name.startswith("exec-")
-        }
-        assert control_before == set()
-        control_exec = exec_in_jail(control_handle, ["true"])
+        assert control_jail._base.wrap_prefix == ()
+        before = os.listdir(_records.procs_dir(control_jail.jail_dir))
+        assert len(before) == 1  # the control's own first process
+        control_exec = control_jail.start(["true"])
         assert control_exec.wait(timeout=_WAIT_TIMEOUT_S) == 0
-        control_after = {
-            name for name in os.listdir(control_handle.jail_dir) if name.startswith("exec-")
-        }
-        assert control_after != control_before
-        assert len(control_after) == 2  # exec-<token>-stdout.log, exec-<token>-stderr.log
+        after = os.listdir(_records.procs_dir(control_jail.jail_dir))
+        assert len(after) == 2
     finally:
-        _teardown_group(handle)
-        _teardown_group(control_handle)
+        _teardown_group(control_process)
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +347,7 @@ def test_exec_refuses_when_the_composed_wrap_is_not_a_pure_prefix(run_id: str) -
 # event stream it read. The claim was about a RECORD ("the `EXEC` event's
 # argv is `wrap_prefix + requested`, not the raw request"), and with the
 # record gone there is nothing left to assert that is not either a
-# restatement of `handle.wrap_prefix` (already pinned above) or a weaker
+# restatement of `jail._base.wrap_prefix` (already pinned above) or a weaker
 # proxy for it. The property the record stood in for -- the sibling really
 # does run under the workload's own wrap -- is observed FROM INSIDE THE
 # JAIL by AC #1 and AC #2 above, each with its own empty-stack control,
@@ -381,12 +372,12 @@ def test_fidelity_is_equivalent_profile_under_a_composed_stack(run_id: str) -> N
     with no mechanisms grades PLAIN" -- the composed `degraded()` stack is
     not that case, and must not silently read as if it were)."""
     spec = Spec(limits=Limits(cpu_seconds=60))
-    handle = _launch(
+    jail, process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="jail-t046-fidelity", run_id=run_id
     )
     try:
-        exec_handle = exec_in_jail(handle, ["/usr/bin/true"])
-        assert exec_handle.wait(timeout=_WAIT_TIMEOUT_S) == 0
-        assert exec_handle.fidelity is ExecFidelity.EQUIVALENT_PROFILE
+        sibling = jail.start(["/usr/bin/true"])
+        assert sibling.wait(timeout=_WAIT_TIMEOUT_S) == 0
+        assert sibling.fidelity is ExecFidelity.EQUIVALENT_PROFILE
     finally:
-        _teardown_group(handle)
+        _teardown_group(process)

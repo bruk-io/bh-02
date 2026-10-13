@@ -143,7 +143,7 @@ def test_signature_book_refuses_a_duplicate_axis() -> None:
 @pytest.mark.unit
 def test_signature_book_from_list_refuses_malformed_entries() -> None:
     """from_list is a deserialization boundary (task-047 feeds it rehydrated
-    Handle data), so it refuses with a named ValueError rather than an
+    Jail data), so it refuses with a named ValueError rather than an
     assert -- the same posture Event.from_json_line takes in
     brig/core/events.py, and one an assert loses under `python -O`."""
     with pytest.raises(ValueError, match="axis"):

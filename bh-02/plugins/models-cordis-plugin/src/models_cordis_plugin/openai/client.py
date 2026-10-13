@@ -107,7 +107,7 @@ class OpenAIModel:
     manager: its HTTP client is closed when the row leaves.
 
     `tool_changes` is `fixed` (CONTRACTS.md: model): a conversation is offered the tools it began
-    with for its life, and a change is told as a note. A chat template renders the tool list at
+    with for its life, and a change is told as an aside. A chat template renders the tool list at
     the start of the prompt (llama.cpp, Ollama, vLLM), and OpenAI's prompt cache is a prefix
     too, so a changed list would make the whole conversation new to the server again."""
 

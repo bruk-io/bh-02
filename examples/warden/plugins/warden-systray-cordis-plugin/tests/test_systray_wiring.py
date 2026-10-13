@@ -1,7 +1,12 @@
 """The row driven by hand: it binds a factory, not a constructed (AppKit-backed) app."""
 
-from cordis.testing import drive
-from warden_systray_cordis_plugin import TrayConfig, tray
+import pytest
+
+# rumps installs only on darwin; the package imports it, so without it these tests skip by name.
+pytest.importorskip("rumps")
+
+from cordis.testing import drive  # noqa: E402
+from warden_systray_cordis_plugin import TrayConfig, tray  # noqa: E402
 
 
 class FakeSnapshot:

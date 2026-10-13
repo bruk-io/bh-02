@@ -17,26 +17,26 @@ two-line shell script that `exec`s the rest of its argv in place (never forks)
 and applies it as a PREFIX to the REAL `Stack([rlimits])`'s already-composed
 argv, via `dataclasses.replace(jail, wrap=...)` -- swapping only the
 `CompiledJail.wrap` callable a test holds locally, after the real `Stack`
-compiled it and before the real `SubprocessLauncher` ever sees it. Nothing
+compiled it and before the real `Jail.create` and `jail.start` ever sees it. Nothing
 under `brig/` is touched by this file (AC #6): no `Mechanism` is added, the
-compatibility matrix gains no row, and `Stack`/`SubprocessLauncher` run
+compatibility matrix gains no row, and `Stack`/`Jail` run
 completely unmodified, exercising the identical code path
-`tests/integration/test_launcher.py` and `tests/integration/test_rlimits.py`
+`tests/integration/test_jail_launch.py` and `tests/integration/test_rlimits.py`
 already exercise.
 
-**Why this uses the REAL `Stack` and the REAL `SubprocessLauncher`, not a
+**Why this uses the REAL `Stack` and the REAL `Jail.create` and `jail.start`, not a
 hand-rolled `subprocess.Popen` stand-in.** `tests/integration/test_rlimits.py`'s
 own docstring is explicit that its direct-`Popen` shape is "a stand-in for
 [the launcher] wiring, not a claim that it exists" -- true there because that
 file also needs `Step.events`, which `run` does not yet consume. This file
 needs no event wiring, so nothing stands between it and the real
-`Stack.compile` / `SubprocessLauncher.launch` path EC3's own wording ("the
+`Stack.compile` / `Jail.create` plus a first `jail.start` path EC3's own wording ("the
 same behavior under the subprocess launcher") names directly.
 
 **Why no subprocess here needs `tests.conftest.workload_argv`'s run-id
 token.** Every subprocess this file starts is reaped synchronously within its
 own test -- the workload's reap belongs to the launcher's exit-waiter, and
-`_teardown` blocks on `handle.wait()` until that reap has landed (task-073) --
+`_teardown` blocks on `process.wait()` until that reap has landed (task-073) --
 exactly the posture
 `tests/integration/test_trampoline.py` and `tests/integration/test_rlimits.py`
 already establish and document: by the time a test returns, nothing it
@@ -51,7 +51,7 @@ exactly the shape task-035 added that arm to see if it ever escaped teardown.
 
 `sun_path` is 104 bytes on darwin: every scratch path here is a short
 `/tmp/bg<pid>-t038-<n>` root, never `tmp_path` (CLAUDE.md's trap list;
-`tests/integration/test_launcher.py`'s own `_new_jail_dir` convention).
+`tests/integration/test_jail_launch.py`'s own `_new_jail_dir` convention).
 """
 
 from __future__ import annotations
@@ -71,10 +71,9 @@ import pytest
 from brig.core import Limits, Spec
 from brig.mech import CompileCtx
 from brig.mech.rlimits import rlimits
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
+from brig.run import IoPolicy, Process
 from brig.stack import CompiledJail, Stack
-from tests.conftest import teardown_group
+from tests.conftest import launch, teardown_group
 
 _CTX = CompileCtx(jail_dir="/unused/trampoline-composition-test", platform=sys.platform)
 
@@ -198,11 +197,11 @@ def _poll_command_for_pid(pid: int, marker: str, deadline: float = _POLL_DEADLIN
         time.sleep(_POLL_INTERVAL_SECONDS)
 
 
-def _teardown(handle: Handle, scratch_dirs: list[str]) -> None:
-    """Hand-rolled group-kill, same posture as `test_launcher.py`'s
-    `_teardown_group`: the KILL is not the code under test (`Handle.kill()`),
+def _teardown(process: Process, scratch_dirs: list[str]) -> None:
+    """Hand-rolled group-kill, same posture as `test_jail_launch.py`'s
+    `_teardown_group`: the KILL is not the code under test (`Jail.destroy()`),
     so a teardown bug here cannot hide behind that helper. The reap itself
-    belongs to the launcher's exit-waiter (task-073); `handle.wait()` blocks
+    belongs to the launcher's exit-waiter (task-073); `process.wait()` blocks
     until that waiter has reaped and recorded the `EXIT` -- which is what
     makes this call return only once the process table entry is gone. Also
     removes every scratch directory this test staged, so nothing under
@@ -212,7 +211,7 @@ def _teardown(handle: Handle, scratch_dirs: list[str]) -> None:
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
     for scratch_dir in scratch_dirs:
         shutil.rmtree(scratch_dir, ignore_errors=True)
 
@@ -226,15 +225,14 @@ def _teardown(handle: Handle, scratch_dirs: list[str]) -> None:
 def test_baseline_unwrapped_spin_loop_dies_with_sigxcpu() -> None:
     """AC #1: the reference behaviour EC3's "the same behavior" points at --
     a `cpu_seconds=1` spin loop, launched through the REAL `Stack([rlimits])`
-    under the REAL `SubprocessLauncher`, with NO wrapper at all, dies on
+    under the REAL `Jail.create` and `jail.start`, with NO wrapper at all, dies on
     `SIGXCPU` (signal 24)."""
     assert int(signal.SIGXCPU) == 24  # platform pin, asserted not assumed
     scratch_dir = _new_scratch_dir()
     jail = Stack([rlimits]).compile(Spec(limits=Limits(cpu_seconds=1)), ctx=_CTX)
-    launcher = SubprocessLauncher()
 
     start = time.monotonic()
-    handle = launcher.launch(
+    jail, process = launch(
         jail,
         argv=[sys.executable, "-c", _SPIN_LOOP],
         cwd=scratch_dir,
@@ -243,14 +241,14 @@ def test_baseline_unwrapped_spin_loop_dies_with_sigxcpu() -> None:
         jail_dir=scratch_dir,
     )
     try:
-        status = handle.wait(timeout=10.0)
+        status = process.wait(timeout=10.0)
         wall_time = time.monotonic() - start
         assert status == -signal.SIGXCPU, (
             f"expected death by SIGXCPU ({-signal.SIGXCPU}), got {status}"
         )
         assert wall_time < 10.0
     finally:
-        _teardown(handle, [scratch_dir])
+        _teardown(process, [scratch_dir])
 
 
 # ---------------------------------------------------------------------------
@@ -268,13 +266,12 @@ def test_wrapped_spin_loop_still_dies_with_sigxcpu() -> None:
     jail = Stack([rlimits]).compile(Spec(limits=Limits(cpu_seconds=1)), ctx=_CTX)
     wrapper_prefix = _stage_transparent_wrapper(scratch_dir)
     wrapped_jail = _outer_wrap(jail, wrapper_prefix)
-    launcher = SubprocessLauncher()
 
     workload = (sys.executable, "-c", _SPIN_LOOP)
     full_composed_argv = wrapped_jail.wrap(workload)
 
     start = time.monotonic()
-    handle = launcher.launch(
+    jail, process = launch(
         wrapped_jail,
         argv=list(workload),
         cwd=scratch_dir,
@@ -283,15 +280,15 @@ def test_wrapped_spin_loop_still_dies_with_sigxcpu() -> None:
         jail_dir=scratch_dir,
     )
     try:
-        assert handle.argv == full_composed_argv
-        status = handle.wait(timeout=10.0)
+        assert process.argv == full_composed_argv
+        status = process.wait(timeout=10.0)
         wall_time = time.monotonic() - start
         assert status == -signal.SIGXCPU, (
             f"expected death by SIGXCPU ({-signal.SIGXCPU}), got {status}"
         )
         assert wall_time < 10.0
     finally:
-        _teardown(handle, [scratch_dir])
+        _teardown(process, [scratch_dir])
 
 
 # ---------------------------------------------------------------------------
@@ -315,10 +312,10 @@ def test_wrapper_is_transparent_and_actually_ran() -> None:
     argv itself. It now spawns that argv under the exit wrapper
     (`brig/run/_exit_status.py`), which is the one process in the chain that
     deliberately forks rather than execs -- something has to outlive the
-    workload by the microseconds it takes to write `<jail_dir>/exit`. So the
+    workload by the microseconds it takes to write its exit record. So the
     invariant moves down exactly one generation and loses none of its
     discrimination: everything from the mechanism wrapper inward must still
-    exec, and a `ppid` other than `handle.pid` says one of them forked.
+    exec, and a `ppid` other than `process.pid` says one of them forked.
 
     Mutation pairing (AC #3, deterministic): swap `_WRAPPER_STAGER` for
     `_stage_forking_wrapper` and re-run this exact test -- the parentage
@@ -333,7 +330,6 @@ def test_wrapper_is_transparent_and_actually_ran() -> None:
     jail = Stack([rlimits]).compile(Spec(limits=Limits(cpu_seconds=60)), ctx=_CTX)
     wrapper_prefix = _WRAPPER_STAGER(scratch_dir)
     wrapped_jail = _outer_wrap(jail, wrapper_prefix)
-    launcher = SubprocessLauncher()
 
     marker_workload_src = (
         "import os, sys\n"
@@ -341,7 +337,7 @@ def test_wrapper_is_transparent_and_actually_ran() -> None:
         "sys.stdout.write(str(os.getppid()) + ' ' + marker)\n"
     )
     workload = (sys.executable, "-c", marker_workload_src)
-    handle = launcher.launch(
+    jail, process = launch(
         wrapped_jail,
         argv=list(workload),
         cwd=scratch_dir,
@@ -350,16 +346,16 @@ def test_wrapper_is_transparent_and_actually_ran() -> None:
         jail_dir=scratch_dir,
     )
     try:
-        status = handle.wait(timeout=10.0)
+        status = process.wait(timeout=10.0)
         assert status == 0, f"workload did not exit cleanly, status={status}"
-        stdout_text = Path(handle.stdout_path).read_text()
+        stdout_text = Path(process.stdout_path).read_text()
         ppid_field, _, marker_field = stdout_text.partition(" ")
 
         # AC #3: transparency, exact parentage -- the workload is the exit
         # wrapper's own child, with nothing in between.
-        assert int(ppid_field) == handle.pid, (
+        assert int(ppid_field) == process.pid, (
             f"workload observed its parent as pid {ppid_field}, but the "
-            f"launcher started pid {handle.pid} -- an intermediate process "
+            f"launcher started pid {process.pid} -- an intermediate process "
             "survived the wrapper, which means it forked instead of exec-ing"
         )
         # AC #5: the wrapper really ran (a no-op that silently did nothing
@@ -370,7 +366,7 @@ def test_wrapper_is_transparent_and_actually_ran() -> None:
             "the wrapper did not actually run"
         )
     finally:
-        _teardown(handle, [scratch_dir])
+        _teardown(process, [scratch_dir])
 
 
 # ---------------------------------------------------------------------------
@@ -390,9 +386,8 @@ def test_control_wrapped_generous_limit_stays_alive_then_torn_down() -> None:
     jail = Stack([rlimits]).compile(Spec(limits=Limits(cpu_seconds=60)), ctx=_CTX)
     wrapper_prefix = _stage_transparent_wrapper(scratch_dir)
     wrapped_jail = _outer_wrap(jail, wrapper_prefix)
-    launcher = SubprocessLauncher()
 
-    handle = launcher.launch(
+    jail, process = launch(
         wrapped_jail,
         argv=[sys.executable, "-c", _SPIN_LOOP],
         cwd=scratch_dir,
@@ -405,18 +400,18 @@ def test_control_wrapped_generous_limit_stays_alive_then_torn_down() -> None:
         # TWO execs (wrapper -> trampoline -> workload), so the `os.execvp`
         # race `_poll_command_for_pid` guards against (see its docstring) is
         # if anything wider here than in `test_rlimits.py`'s control.
-        alive_command = _poll_command_for_pid(handle.pid, _SPIN_LOOP_MARKER)
+        alive_command = _poll_command_for_pid(process.pid, _SPIN_LOOP_MARKER)
         assert _SPIN_LOOP_MARKER in alive_command
-        assert handle.alive() is True
+        assert jail.alive() is True
     finally:
-        _teardown(handle, [scratch_dir])
+        _teardown(process, [scratch_dir])
 
     # "Gone" half: no /bin/ps row for this pid survives teardown, and
-    # Handle.alive() agrees. Genuinely synchronized already, not raced
+    # Jail.alive() agrees. Genuinely synchronized already, not raced
     # (task-042 notes, task-073 conversion): `_teardown` above blocks on
-    # `handle.wait()` (after `os.killpg`) until the launcher's exit-waiter
+    # `process.wait()` (after `os.killpg`) until the launcher's exit-waiter
     # has reaped the workload and recorded its `EXIT` -- by which point the
     # process table entry is gone. There is no window analogous to the exec
     # race the "alive" half polls for, so no poll is added here.
-    assert _command_for_pid(handle.pid) is None
-    assert handle.alive() is False
+    assert _command_for_pid(process.pid) is None
+    assert jail.alive() is False

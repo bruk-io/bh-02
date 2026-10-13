@@ -32,8 +32,9 @@ import brig.stack
 
 pytestmark = pytest.mark.unit
 
-#: SPEC.md §13's layer set, as of M6. `proxy` joined at decision-133.
-_LAYERS = {"core", "mech", "probe", "proxy", "run", "stack"}
+#: SPEC.md §13's layer set, as of M6. `proxy` joined at decision-133,
+#: `runtime` at decision-178.
+_LAYERS = {"core", "mech", "probe", "proxy", "run", "runtime", "stack"}
 
 #: The mechanisms that exist. `connect_proxy` joined at M6; `bwrap`
 #: joined 2026-09-08 (decision-159), which is what takes the square below
@@ -60,11 +61,11 @@ def _pyproject() -> dict[str, Any]:
     return parsed
 
 
-def test_the_layer_set_is_exactly_the_six_that_exist() -> None:
+def test_the_layer_set_is_exactly_the_seven_that_exist() -> None:
     """AC #1a. Directories under `brig/`, compared as a SET -- so a new one
     fails here, and a deleted one fails too. M6 added `proxy` and nothing
     else; no `observe` layer was ever created despite the allow table
-    carrying a row for it (see the next test)."""
+    carrying a row for it (see the next test). decision-178 added `runtime`."""
     root = _brig_root()
     found = {
         entry.name

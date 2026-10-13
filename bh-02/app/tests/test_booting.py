@@ -49,7 +49,7 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     assert rows["model"].use == "models:model" and rows["models"].use == "models:catalog"
     assert "completion" not in rows
     assert rows["transcript"].use == "agent:transcript"
-    # the loop reads the prompt and asks `notes` on `executor`, a row that depends on nothing,
+    # the loop reads the prompt and asks `asides` on `executor`, a row that depends on nothing,
     # so /clear and /model, which reload the loop, keep the call a stopped reply left running
     assert rows["executor"].use == "agent:executor"
     assert resolve(rows["executor"].use or "").inject == set()
@@ -291,7 +291,7 @@ async def test_slash_commands_act_on_the_running_session(composition: Callable[.
     await asyncio.wait_for(run([*layers(), patch]), 10)
     rows, cleared, model, unknown = fragile.NOTES
     assert "python" in rows and "python:tool" in rows and "active" in rows
-    assert cleared == "the conversation was cleared; starting afresh: loop, transcript, python"
+    assert cleared == "the conversation was cleared; starting afresh: loop, transcript, python, agents"
     assert model.startswith("● sonnet  claude-code  sonnet\n  opus") and "/model NAME switches" in model
     assert unknown == "unknown command /nope; /help lists them"
     assert fragile.SHOWN == ["after"]  # only the message reached the model, after the restart

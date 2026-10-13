@@ -11,6 +11,17 @@ config = { requires = ["python"] }
 id = "tools"
 use = "agent:tools"
 
+# Sub-agents: the `agent` tool, each child a conversation of its own in a sealed realm, its rows
+# copied from these (`rows`), its questions labelled; `start`: how long a child has to come up (30 s).
+[[plugin]]
+id = "agents"
+use = "agents:agents"
+
+# The status bar's agents field, `agents: N running`, while a sub-agent runs (absent at none).
+[[plugin]]
+id = "agents_status"
+use = "agents:status"
+
 # The model, by name: `default` (`sonnet`), which `--model` and `/model` set in the session's layer.
 [[plugin]]
 id = "model"
@@ -26,15 +37,15 @@ use = "models:catalog"
 id = "transcript"
 use = "agent:transcript"
 
-# Where the loop reads the prompt and asks `notes`, off the event loop; it depends on nothing.
+# Where the loop reads the prompt and asks `asides`, off the event loop; it depends on nothing.
 [[plugin]]
 id = "executor"
 use = "agent:executor"
 
-# The broker of what the model is told with a call's result; only rows in a layer add to it.
+# The broker of what the model is told beside a call's result; only rows in a layer add to it.
 [[plugin]]
-id = "notes"
-use = "agent:notes"
+id = "asides"
+use = "agent:asides"
 
 # The broker asked before a tool opens a file; the on-touch row refuses a first write.
 [[plugin]]
@@ -46,12 +57,12 @@ use = "agent:access"
 id = "memory"
 use = "memory:files"
 
-# Memory that loads on demand, told with the first input that opens a file it covers.
+# Memory that loads on demand, told as an aside to the first input that opens a file it covers.
 [[plugin]]
 id = "on-touch"
 use = "memory:on_touch"
 
-# Auto memory, the notes the model keeps for itself; `disabled = true` turns it off.
+# Auto memory, the memories the model keeps for itself; `disabled = true` turns it off.
 [[plugin]]
 id = "memory-auto"
 use = "memory:auto"
@@ -121,10 +132,13 @@ use = "commands:jobs"
 id = "switch"
 use = "models:switch"
 
-# `/clear` and `/compact`; config `timeout`: the seconds `/compact`'s summary may take (300).
+# `/clear` and `/compact`; config `timeout`: the seconds `/compact`'s summary may take (300);
+# `clear`: the rows `/clear` restarts, `agents` among them so a new conversation ends the sub-agents
+# running for the old one (`/compact` keeps them).
 [[plugin]]
 id = "conversation"
 use = "agent:conversation"
+config = { clear = ["loop", "transcript", "python", "agents"] }
 
 # `!COMMAND`: your shell, as you, unjailed; config `timeout` (120 s), `prefix`, `cwd`, `shell`.
 [[plugin]]

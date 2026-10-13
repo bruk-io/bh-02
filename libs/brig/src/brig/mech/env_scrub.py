@@ -130,7 +130,7 @@ FORWARDING (`EnvPolicy.allow_names`) and which literal names it is SETTING
 (`EnvPolicy.set`'s keys) -- not which names get scrubbed AWAY, because a pure
 compile with no environment read cannot enumerate a vocabulary it never
 looked at (claiming to name "scrubbed" variables would be exactly the
-CLAUDE.md "true-as-tested but weaker than it reads" trap: sounding like a
+"true-as-tested but weaker than it reads" trap: sounding like a
 census of what was removed while only ever having seen what was kept).
 `classify_exit` always returns `None`: scrubbing is a compile-time decision,
 not something a mechanism recognizes retroactively from how the workload
@@ -139,7 +139,7 @@ exited (the mirror image of `rlimits`, whose interesting case is
 
 **This payload reuses `EventKind.SPAWN` rather than contributing a new
 kind, a DELIBERATE in-layer choice, named here so M3's closeout can rule on
-it rather than discover it.** `brig/run/launcher.py` already appends its
+it rather than discover it.** `brig/run/host.py` already appends its
 own `SPAWN` record (`argv`/`pid`/`pgid`/`cwd`) for every launch; this
 mechanism's `known_at_compile` payload is a SECOND, disjoint-schema
 `SPAWN`-kind payload, whereas `core/events.py`'s own precedent for a
@@ -160,6 +160,7 @@ from __future__ import annotations
 from typing import Final
 
 from brig.core import Axis, EnvMode, EnvPolicy, EventKind, Grade, Graded, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech.contract import ArgvTransformer, CompileCtx, EventPayload, ExitOutcome, Step
 
 _ENV_UTILITY = "/usr/bin/env"
@@ -313,6 +314,7 @@ class EnvScrub:
 
     name = "env_scrub"
     axes: frozenset[Axis] = frozenset({Axis.ENV})
+    runtime: RuntimeKind | None = None
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         """Pure `spec -> argv` render; `ctx` is accepted per the

@@ -4,7 +4,7 @@ Three places name models, each over the last: the built-ins (`sonnet`, `opus`, `
 Claude through Claude Code), the models file (`$XDG_CONFIG_HOME/bh-02/models.toml`, else
 `~/.config/bh-02/models.toml`, or the row's `models`), and the row's own `extra` (a table
 like the file's, which a migrated layer writes). A later place wins: an `extra` model over
-the file's of the same name, and a user's model over a built-in (allowed, and noted as
+the file's of the same name, and a user's model over a built-in (allowed, and marked as
 shadowing it). The file is one table per model:
 
     [llama]

@@ -3,15 +3,15 @@
 Claude Code's memory in bh-02, as [Claude Code's docs](https://code.claude.com/docs/en/memory)
 describe it: the CLAUDE.md and AGENTS.md files, the files they import and the rules, found where
 Claude Code finds them and told as a section of the system prompt; the ones for a subdirectory
-or some files told with the result of the first input that opens a file they cover; auto
-memory, the notes the model keeps for itself; and `/memory`, which lists them. The system prompt itself is agent's (`agent:system`); this adds a
+or some files told as an aside to the result of the first input that opens a file they cover;
+auto memory, the memories the model keeps for itself; and `/memory`, which lists them. The system prompt itself is agent's (`agent:system`); this adds a
 section to it.
 
 | Row | Binds | Consumes |
 |---|---|---|
 | `memory:files` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `host` (`auto_memory`: for `/memory`) |
 | `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index | `system` (`add`), `host` (`auto_memory`), `transcript` (its lifetime) |
-| `memory:on_touch` | adds `OnTouch` to `notes`, and its `before_write` to `access`; no config: the memory files are `memory`'s | `memory` (`touched`), `notes` (`add`), `transcript` (`messages`), `access` (`before_write`) |
+| `memory:on_touch` | adds `OnTouch` to `asides`, and its `before_write` to `access`; no config: the memory files are `memory`'s | `memory` (`touched`), `asides` (`add`), `transcript` (`messages`), `access` (`before_write`) |
 
 ## What loads at launch
 
@@ -56,7 +56,7 @@ match. A pattern is from the project's root (`src/api/**/*.ts`), with no `/` at 
 
 **Before a write, too.** The row also answers `access` (`agent:access`) before a file is written
 (`OnTouch.before_write`): the first write to a file whose on-demand instructions this
-conversation has not been told is refused, naming them, and they follow as that call's note (the
+conversation has not been told is refused, naming them, and they follow as that call's aside (the
 refused file is among what it touched), so the next write goes ahead. That is Claude Code's
 read-before-edit, in bh-02's terms: the instructions arrive before the file changes. It sees only
 what the tool asks about (the python tool: Python's own `open()` of a project file, not a program
@@ -65,20 +65,20 @@ input runs on, or ends at the PermissionError, so it may be half done, and the m
 refusal with the result even when the code caught it. A memory file itself is never refused (its
 own text is what the model is changing), and no read is.
 
-`memory:on_touch` tells each with that input's result as `From <file>, ...:` and the text, once a
+`memory:on_touch` tells each as an aside to that input's result, `From <file>, ...:` and the text, once a
 conversation (again when its text changes), at most 20,000 characters with one result (a file
 the cap cut is told whole with a later input that opens a file it covers). A memory file the
 model opened itself is in the conversation already and is not told after that, as Claude Code
 does not load one its own tools read. It depends on `transcript`, so a new conversation
 (`/clear`, `/compact`) is told afresh, and a resumed one is not told again what its transcript's
-`tool` entries hold: the notes the loop keeps on each (`notes`), where a text of this row's ends
-where the note does, where it was cut short, or where the next text begins (`From FILE,
+`tool` entries hold: the asides the loop keeps on each (`asides`), where a text of this row's ends
+where the aside does, where it was cut short, or where the next text begins (`From FILE,
 instructions ...` or `From FILE, a rule for ...`; a file a text imports is part of it, so a text
-whose imports changed reads as changed, and is told again). Every note there was told before the
+whose imports changed reads as changed, and is told again). Every aside there was told before the
 row began (a resumed session's, or before a reload), wherever it sorted among the others and
-whatever the result printed. It reads them once, at the first input that opens a file. An entry from before the loop kept them
-is searched instead: a text told whole after a blank line, up to the entry's end or the next
-note, though not one the entry starts with; where the result ends is not marked there, so a
+whatever the result printed. It reads them once, at the first input that opens a file. An entry without them (from before the
+loop kept them, or from when it called them `notes`) is searched instead: a text told whole after a
+blank line, up to the entry's end or the next aside, though not one the entry starts with; where the result ends is not marked there, so a
 text an input printed that way counts too.
 
 ## What bh-02 does differently, and why
@@ -98,14 +98,14 @@ text an input printed that way counts too.
 - **`/memory` lists, it doesn't open.** bh-02's app owns the terminal, so `/memory` names each
   file, marked by how it loads (✓ at launch, … on demand, · not there, ✗ excluded or not read),
   and you open one in your own editor.
-- **Auto memory adds no tool.** The model writes its notes with whatever tools the
+- **Auto memory adds no tool.** The model writes its memories with whatever tools the
   composition gives it, as it writes any file, and this plugin names none: bh-02 is not CodeAct
   only. A tool that can write the directory says so itself (the python tool names the
   directories its jail lets it write).
 
 ## Auto memory
 
-`memory:auto` is Claude Code's auto memory: notes the model keeps for itself across
+`memory:auto` is Claude Code's auto memory: memories the model keeps for itself across
 conversations. Each project has a directory of its own outside the repository,
 `$XDG_STATE_HOME/bh-02/projects/<project>/memory` (else under `~/.local/state`), where
 `<project>` is the git repository's root (a worktree's main repository, so its worktrees share

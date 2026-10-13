@@ -76,7 +76,7 @@ process that won't, or that died, is started again on the next input, which is t
 and why when its jail ended it (`started.ended()`: a Linux `runner:confined` jail ends itself
 when the host undoes one of its mounts). A process that died between inputs is noticed before the next input
 is sent, so that input runs in the new one. After each input, `touched()` is the files under
-`root` it opened, which `call` answers with (what the loop gives `notes`' functions).
+`root` it opened, which `call` answers with (what the loop gives `asides`' functions).
 
 Before the input's own Python opens one of those files, the same audit hook can ask bh-02 about
 it (`access`, `agent:access`): each input's `exec` names the kinds some row asks about
@@ -95,7 +95,7 @@ Every other tool there is is a function in each input's namespace, `tools.NAME(a
 rebuilt before each input from `tools.specs()` (sent with its `exec`; `help(tools.NAME)` says
 what one takes). A call goes back to bh-02 (`{"op": "call", "id", "name", "input"}`, answered
 `{"op": "answer", "id", "content", "failed"}`) and to `tools.call`, so it runs as the model's
-own call to that tool would: put to the `approval` rule, then to `notes`, whose notes go with the
+own call to that tool would: put to the `approval` rule, then to `asides`, whose asides go with the
 result of the input that made it. It returns the tool's `content`, and raises `tools.Error` with
 it when the call did not run or failed. What changed in them since the model was last told is
 told before the input's own output. An input that binds `tools` itself keeps its own: the
@@ -141,7 +141,7 @@ model, and nothing needs keeping from it. Where each is read is the point:
   passes through one (a config directory linked into a dotfiles repository being worked on) is
   read as the project's is: the model could have written it, or chosen where it leads, so the
   Python process reads it, at its resolved place when that is in such a root. If that fails (the jail
-  can't see where it leads), the note says why bh-02 did not read it.
+  can't see where it leads), the aside says why bh-02 did not read it.
 - Across sessions, the walk can't know what an earlier session's jail let its inputs write, so
   the jail itself keeps them out: `runner:confined` denies writing bh-02's config directory wherever
   it is under a writable root (`host.trusted`, the runner plugin's README). A session run from

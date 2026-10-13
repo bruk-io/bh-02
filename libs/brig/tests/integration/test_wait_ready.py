@@ -1,5 +1,11 @@
-"""`wait_ready` against a real Unix-socket bind, a real timeout, and a real
-stale-socket control.
+"""`Process.wait_ready` against a real Unix-socket bind, a real timeout, and a
+real stale-socket control.
+
+Until decision-186 (TASK-0079.32) these drove `Jail.wait_ready(channel)` over
+a path the `Spec` declared; that is gone with the path. They now drive the
+process's own readiness, through the runtime's dial, on a socket the jail
+reserved in its channel directory, and assert what they did: the same
+timings, the same stale-socket control, the same refusal of an unknown name.
 
 SPEC.md §10.1 (folded by decision-036, ambiguity A5, verbatim): "Observable
 means a connect succeeds -- not that the endpoint path exists... Readiness
@@ -40,13 +46,20 @@ import shutil
 import socket
 import sys
 import time
+from collections.abc import Callable
 
 import pytest
 
 from brig.core import Channel, ChannelKind, Spec, unenforced_report
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
-from brig.run.readiness import UnknownChannel, WaitReadyTimeout, wait_ready
+from brig.run import (
+    HostRuntime,
+    IoPolicy,
+    Jail,
+    Process,
+    Reservation,
+    UnknownChannel,
+    WaitReadyTimeout,
+)
 from brig.stack import CompiledJail
 from tests.conftest import teardown_group, workload_argv
 
@@ -68,7 +81,7 @@ def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
 def _compiled_jail(*, spec: Spec) -> CompiledJail:
     """A minimal, mechanism-free `CompiledJail` carrying the given `Spec`
     (which is where the declared channels live) -- same empty-stack shape
-    `test_launcher.py` uses, with only `spec` ever varied in this file."""
+    `test_jail_launch.py` uses, with only `spec` ever varied in this file."""
     return CompiledJail(
         spec=spec,
         report=unenforced_report(),
@@ -82,33 +95,45 @@ def _compiled_jail(*, spec: Spec) -> CompiledJail:
     )
 
 
-def _launch(argv: list[str], *, jail_dir: str, spec: Spec) -> Handle:
-    launcher = SubprocessLauncher()
-    return launcher.launch(
+def _launch(
+    argv_for: Callable[[str], list[str]], *, jail_dir: str, spec: Spec
+) -> tuple[Jail, Process, Reservation]:
+    """A jail whose first process is started on a socket reserved for `ctl`:
+    `argv_for` gets the path it binds (decision-184)."""
+    os.makedirs(jail_dir, exist_ok=True)
+    jail = Jail.create(
         _compiled_jail(spec=spec),
-        argv=argv,
+        runtime=HostRuntime(),
         cwd=jail_dir,
-        io=IoPolicy(),
         jail_id="jail-wait-ready",
         jail_dir=jail_dir,
     )
+    reservation = jail.channel("ctl")
+    try:
+        process = jail.start(
+            argv_for(reservation.bound_path), cwd=jail_dir, io=IoPolicy(), channel=reservation
+        )
+    except BaseException:
+        jail.destroy()
+        raise
+    return jail, process, reservation
 
 
-def _teardown(handle: Handle, jail_dir: str) -> None:
+def _teardown(process: Process, jail_dir: str) -> None:
     """Group-kill the workload, then remove the whole jail directory -- AC
     #9's "no socket file survives" requires deleting the file itself, not
     merely ending the process that created it. The kill is deliberately
-    hand-rolled (`killpg`) rather than `kill_jail`: a test's cleanup path
+    hand-rolled (`killpg`) rather than `Jail.destroy`: a test's cleanup path
     must not be the code under test, so a teardown bug cannot hide behind its
-    own helper. `kill_jail` has been functional since task-020; this is a
-    choice, not a gap. `handle.wait()` blocks until the launcher's exit-waiter
+    own helper. `Jail.destroy` has been functional since task-020; this is a
+    choice, not a gap. `process.wait()` blocks until the launcher's exit-waiter
     has reaped it (task-073)."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
-    teardown_group(handle)
+    teardown_group(process)
     shutil.rmtree(jail_dir, ignore_errors=True)
 
 
@@ -153,19 +178,21 @@ def test_wait_ready_returns_after_a_real_bind_appears(run_id: str) -> None:
     positive) and well under the timeout (it noticed promptly, not merely
     eventually)."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
-    channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
+    channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
-    argv = workload_argv(run_id, _bind_script(endpoint, delay=0.5))
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    jail, process, _ = _launch(
+        lambda path: workload_argv(run_id, _bind_script(path, delay=0.5)),
+        jail_dir=jail_dir,
+        spec=spec,
+    )
     try:
         start = time.monotonic()
-        wait_ready(handle, "ctl", timeout=10.0)
+        process.wait_ready(timeout=10.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 0.5, f"returned before the bind could have appeared: elapsed={elapsed}"
         assert elapsed < 5.0, f"returned suspiciously close to the 10s timeout: elapsed={elapsed}"
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -180,23 +207,24 @@ def test_wait_ready_times_out_cleanly_when_the_bind_never_appears(run_id: str) -
     1.0 as structured fields (not just a message). Elapsed is at least 1.0
     (it wasn't a premature give-up) and under 3.0 (clean means promptly)."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
-    channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
+    channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
-    argv = workload_argv(run_id, "sleep 30")  # never touches the endpoint
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    # never touches its socket
+    jail, process, reservation = _launch(
+        lambda _path: workload_argv(run_id, "sleep 30"), jail_dir=jail_dir, spec=spec
+    )
     try:
         start = time.monotonic()
         with pytest.raises(WaitReadyTimeout) as exc_info:
-            wait_ready(handle, "ctl", timeout=1.0)
+            process.wait_ready(timeout=1.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 1.0, f"raised before the deadline: elapsed={elapsed}"
         assert elapsed < 3.0, f"raised long after the deadline, not promptly: elapsed={elapsed}"
         assert exc_info.value.channel == "ctl"
-        assert exc_info.value.endpoint == endpoint
+        assert exc_info.value.endpoint == reservation.endpoint
         assert exc_info.value.timeout == 1.0
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -214,11 +242,13 @@ def test_stale_socket_file_still_times_out(run_id: str) -> None:
     test above would also pass for an implementation that only stats the
     path -- a stat sees this stale file too."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
-    channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
+    channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
-    argv = workload_argv(run_id, "sleep 30")  # never touches the endpoint either
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    # never touches its socket either
+    jail, process, reservation = _launch(
+        lambda _path: workload_argv(run_id, "sleep 30"), jail_dir=jail_dir, spec=spec
+    )
+    endpoint = reservation.endpoint
     try:
         # The stale socket file: bind, then close without unlinking, then
         # confirm the workload above (which never binds) hasn't raced us.
@@ -233,14 +263,14 @@ def test_stale_socket_file_still_times_out(run_id: str) -> None:
 
         start = time.monotonic()
         with pytest.raises(WaitReadyTimeout):
-            wait_ready(handle, "ctl", timeout=1.0)
+            process.wait_ready(timeout=1.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 1.0, (
             f"a path-exists implementation would return here instantly: elapsed={elapsed}"
         )
         assert elapsed < 3.0
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -258,9 +288,11 @@ _SUN_PATH_MAX = {"darwin": 104}.get(sys.platform, 108)
 @pytest.mark.integration
 def test_endpoint_fits_sun_path() -> None:
     """AC #5, the half that holds on every platform: this suite's actual
-    scratch-root endpoint fits `sun_path` with room to spare."""
+    scratch-root endpoint fits `sun_path` with room to spare: a reserved
+    socket, `<jail_dir>/chan/<16 hex>.sock` (decision-184), the longest name
+    the runtime makes there."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
+    endpoint = os.path.join(jail_dir, "chan", f"{'0' * 16}.sock")
     real_len = len(os.fsencode(endpoint))
     print(f"AC#5: scratch-root endpoint = {endpoint!r}, byte length = {real_len}")
     assert real_len < _SUN_PATH_MAX
@@ -318,14 +350,16 @@ def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str) -> None
     reading the child's own `os.getcwd()` back and comparing it against
     `os.path.realpath(jail_dir)`."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
     cwd_file = os.path.join(jail_dir, "cwd.txt")
-    channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
+    channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
-    argv = workload_argv(run_id, _bind_and_record_cwd_script(endpoint, cwd_file))
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    jail, process, _ = _launch(
+        lambda path: workload_argv(run_id, _bind_and_record_cwd_script(path, cwd_file)),
+        jail_dir=jail_dir,
+        spec=spec,
+    )
     try:
-        wait_ready(handle, "ctl", timeout=5.0)
+        process.wait_ready(timeout=5.0)
         with open(cwd_file) as f:
             child_reported_cwd = f.read()
 
@@ -337,7 +371,7 @@ def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str) -> None
                 f"{child_reported_cwd!r} -- os.path.realpath() reconciles them"
             )
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -358,17 +392,20 @@ def test_wait_ready_on_unknown_channel_name_raises_and_names_it(run_id: str) -> 
     """AC #8: an unknown channel name raises `UnknownChannel`, naming it as
     a structured field. Control: the declared name does not raise."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "ctl.sock")
-    channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
+    channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
-    argv = workload_argv(run_id, _bind_script(endpoint, delay=0.0))
-    handle = _launch(argv, jail_dir=jail_dir, spec=spec)
+    jail, process, _ = _launch(
+        lambda path: workload_argv(run_id, _bind_script(path, delay=0.0)),
+        jail_dir=jail_dir,
+        spec=spec,
+    )
     try:
         with pytest.raises(UnknownChannel) as exc_info:
-            wait_ready(handle, "does-not-exist", timeout=1.0)
+            jail.channel("does-not-exist")
         assert exc_info.value.channel == "does-not-exist"
 
-        # Control: the declared name does not raise.
-        wait_ready(handle, "ctl", timeout=5.0)
+        # Control: the declared name does not raise, and its process is ready.
+        jail.channel("ctl")
+        process.wait_ready(timeout=5.0)
     finally:
-        _teardown(handle, jail_dir)
+        _teardown(process, jail_dir)

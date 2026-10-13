@@ -5,21 +5,43 @@ Composable, honestly-graded sandboxes for running untrusted processes.
 A `Spec` describes the jail (filesystem, network, limits, env, channels).
 `Mechanism`s — Seatbelt, bubblewrap, cgroup scopes, an egress proxy, rlimits,
 env scrubbing, containers, Nix closures — each compile a slice of it and
-compose into a `Stack`. The `subprocess` `Launcher` starts the result and
-hands back a serializable `Handle` for teardown, exec-into-jail, observation,
-and probes. Every axis of enforcement is graded — `enforced`, `best_effort`,
+compose into a `Stack`. A `Runtime` creates the result as a `Jail` (host
+process groups, `HostRuntime`, is brig's own), and every process in it is a
+`jail.start`, handed back as a `Process`; the jail serializes for teardown,
+observation and probes in another process. Every axis of enforcement is graded — `enforced`, `best_effort`,
 `cooperative`, `unenforced` — against what the stack can actually deliver, and
 `probe()` proves the grades by attempting violations from inside.
 
 brig keeps no log and no state of its own. A mechanism's sensors return
 their records as data, `run` stamps them, and they come back on the
-`Handle` — `compile_events` for what a mechanism knew when it compiled,
-`exit_events()` for what it makes of how the workload ended — plus
+`Jail` — `compile_events` for what a mechanism knew when it compiled,
+a `Process`'s `exit_events()` for what it makes of how that process ended — plus
 `run.read_egress_decisions`, the cursored reader for what the egress filter,
 which is a separate process, decided on the wire. The embedder decides where
-they all go. The one thing brig does write is `<jail_dir>/exit`: the
-workload's exit status, once, so a `Handle` rehydrated in another process can
-still say how the jail ended.
+they all go. The one thing brig does write is a record per process under
+`<jail_dir>/procs/<id>/` (decision-181): who it is, so teardown in any process
+can end it, and its exit status, once, so a `Jail` rehydrated in another
+process can still say how each process ended.
+
+`Jail` and `Process` (`brig.run`, decision-181) replaced `Handle`
+(decision-183, the old name gone with no alias): `Jail.create(compiled, runtime=HostRuntime(), ...)` makes the
+jail with nothing in it, and every process, the first included, is a
+`jail.start`. `Jail.from_dict(d, runtimes={RuntimeKind.HOST: HostRuntime()})`
+rehydrates one with the runtimes the embedder passes, never one the dict
+names. `start` and `probe` are absent where a jail cannot start (no
+supervisor, or created tethered in another process). Every exception
+`Jail.create` and `jail.start` raise is importable from `brig.run`.
+
+A process listens on a socket reserved for it (decision-184): the runtime owns
+one channel directory per jail, `<jail_dir>/chan`, and `jail.channel(name)`
+reserves a socket there for a channel the `Spec` declares. A `Spec` names a
+channel by name and kind only, `Channel(name, kind)`, never by a host path
+(decision-186). Put its
+`bound_path` in the argv, start with `jail.start(argv, channel=reservation)`,
+then `process.wait_ready(timeout)` and dial with `process.connect()`, never
+`process.endpoint` raw: the jail can write the channel directory, so the host
+connects only when the path is a socket and its own process answers
+(decision-185), and refuses with `EndpointRefused` otherwise.
 
 Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md
@@ -57,7 +79,8 @@ decision paragraph in the section it belongs to.
   a log, so brig was keeping a second, worse one; and four of the five
   lifecycle kinds were copies of something the caller already held. What
   replaced each reader: exec-sibling registration is a file per live
-  sibling under `<jail_dir>/execs/`, teardown's record is the `KillReport`
+  sibling under `<jail_dir>/execs/` (a records directory per process,
+  `<jail_dir>/procs/<id>/`, since decision-181), teardown's record is the `KillReport`
   it returns, and the exit status lives in the launching process
   (`Handle.wait()` refuses honestly anywhere else — superseded four rulings
   later by decision-156, below). `Handle.env` — the
@@ -96,7 +119,8 @@ a gap this library had been *naming* rather than closing.
   decision-152 deleted the event stream and admitted it cost exactly one
   capability: a status readable by a process that never parented the workload.
   The launcher now runs the workload under a tiny wrapper that writes the
-  status to `<jail_dir>/exit`, once, atomically. Not a log — one line, one
+  status to `<jail_dir>/exit` (each process's own `procs/<id>/exit` since
+  decision-181), once, atomically. Not a log — one line, one
   write, nothing to tail or rotate. `ExitStatusUnobservable` remains for the
   jail whose wrapper never wrote, which is the `SIGKILL`ed group.
 - **The egress proxy's decisions have a reader** (decision-157). The filter is
@@ -122,7 +146,7 @@ workload, not the host: a carve-out is a mount on a host directory entry, so a
 file the host renames over a denied path (`git config` rewrites `.git/config`
 that way) or a held directory the host removes is writable inside the jail
 until a new one starts (`SPEC.md` §6, bwrap's grades). Ending the jail when
-that happens is the embedder's to do (bh-02's runner-cordis-plugin does).
+that happens is the embedder's to do.
 
 Three things about it are worth knowing before you compose it, and all three
 are refusals rather than surprises:
@@ -134,12 +158,13 @@ are refusals rather than surprises:
 - **`read_allows` has to cover the system tree the workload needs**,
   including `/bin/sh` and `/usr/bin/env` if `env_scrub` is in the stack —
   it composes *inside* the jail, which is the whole point of the ordering.
-- **The declared LISTEN channel's endpoint DIRECTORY is bind-mounted
-  writable**, because a socket cannot be bind-mounted before it exists. That
-  is one writable path no `write_allows` entry named, and the `fs_write`
-  grade's own detail says so.
+- **The runtime's channel directory `<jail_dir>/chan` is bind-mounted
+  writable** when the Spec declares any channel (decision-184, decision-186),
+  because a socket cannot be bind-mounted before it exists. That is the one
+  writable path no `write_allows` entry named, and the `fs_write` grade's own
+  detail says so.
 
-**Where it is verified.** The compile is pure, so its golden argv, its six
+**Where it is verified.** The compile is pure, so its golden argv, its
 refusals and the mount order are unit tests that run anywhere. The
 enforcement is not: `tests/integration/test_bwrap_fs.py`,
 `tests/integration/test_bwrap_network.py` and
@@ -175,7 +200,7 @@ workspace's container run of the bwrap tiers.
 **A jail can end with its embedder, 2026-09-30 (decision-167).** A launch is
 detached, so a jail outlived an embedder that died without calling `kill`, and
 a program its workload left in the background kept running with its grants.
-`launch(..., tether=fd)` takes the read end of a pipe the embedder keeps the
+`launch(..., tether=fd)` (since decision-183, `Jail.create(..., tether=fd)`) takes the read end of a pipe the embedder keeps the
 write end of: when that closes (the embedder closed it, or died, `SIGKILL`
 included), a watcher in the jail's process group sends the group `SIGKILL`.
 Under `bwrap` that ends the whole pid namespace; under seatbelt a process that

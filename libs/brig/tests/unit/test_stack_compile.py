@@ -42,6 +42,7 @@ import pytest
 import brig.core
 import brig.stack
 from brig.core import AXES, Axis, Grade, Graded, Limits, Spec
+from brig.core.runtime import RuntimeKind
 from brig.mech import CompileCtx, Step
 from brig.mech.env_scrub import env_scrub
 from brig.mech.rlimits import rlimits
@@ -66,6 +67,7 @@ class DoubleMechanism:
 
     name: str
     axes: frozenset[Axis]
+    runtime: RuntimeKind | None = None
     env: dict[str, str] = field(default_factory=dict)
     grade: Grade = Grade.ENFORCED
 
@@ -391,6 +393,7 @@ def test_step_may_not_grade_an_axis_outside_the_declared_ceiling() -> None:
     class OverclaimingStub:
         name: str = "overclaiming-stub"
         axes: frozenset[Axis] = frozenset({Axis.FS_READ})
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(
@@ -422,6 +425,7 @@ def test_step_may_not_grade_an_axis_outside_the_declared_ceiling() -> None:
     class UnderclaimingStub:
         name: str = "underclaiming-stub"
         axes: frozenset[Axis] = frozenset({Axis.FS_READ, Axis.NETWORK})
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(
@@ -460,7 +464,7 @@ def test_compiled_jail_env_is_defensively_copied() -> None:
 
 
 @pytest.mark.unit
-def test_compiled_jail_has_exactly_eleven_fields() -> None:
+def test_compiled_jail_has_exactly_twelve_fields() -> None:
     """Deliverable: CompiledJail's field set is pinned to the named fields
     -- "exactly what the launcher and the report need, and no more." A
     missing or invented field is red (same idiom as
@@ -468,12 +472,15 @@ def test_compiled_jail_has_exactly_eleven_fields() -> None:
 
     Nine fields through M3; task-047 (M4) adds `signatures` -- the
     `SignatureBook` assembled alongside `report` in the same pass over
-    `steps`, so a rehydrated `Handle` can still name which mechanism claims
+    `steps`, so a rehydrated `Jail` can still name which mechanism claims
     an axis and what its denial looks like (SPEC.md §6, §12). decision-152
     (2026-09-08) adds `sensors` -- every non-`None` `Step.events` from the
     same pass, because `run` is the only layer permitted to CALL a sensor
     and had no way to reach one: `Step.events` was assembled by every
-    mechanism that had one and then dropped on the floor here."""
+    mechanism that had one and then dropped on the floor here.
+    decision-179 (2026-10-12) adds `runtime` -- the one `RuntimeKind` the
+    stack resolved, whose static grades the report's `control` and
+    `channel_exclusivity` came from."""
     expected_fields = {
         "spec",
         "report",
@@ -486,6 +493,7 @@ def test_compiled_jail_has_exactly_eleven_fields() -> None:
         "matrix_version",
         "signatures",
         "sensors",
+        "runtime",
     }
     actual_fields = {f.name for f in dataclasses.fields(brig.stack.CompiledJail)}
     assert actual_fields == expected_fields, (
@@ -618,7 +626,7 @@ def test_ordering_rlimits_outermost_regardless_of_construction_order() -> None:
     # uncapped (`cpu_seconds=0`, Spec()'s default) limit -- see
     # `brig/mech/rlimits.py::_render_wrap`. Asserted as an exact tuple
     # slice, never a substring: `rlimits` (the trampoline) is OUTERMOST.
-    expected_prefix = (sys.executable, "-m", "brig.mech.trampoline", "--")
+    expected_prefix = (sys.executable, "-I", "-m", "brig.mech.trampoline", "--")
     assert forward_argv[: len(expected_prefix)] == expected_prefix
     assert reverse_argv[: len(expected_prefix)] == expected_prefix
 
@@ -647,6 +655,7 @@ def test_unknown_pair_refused_naming_both_members_and_matrix_version_control_kno
     class ThirdStub:
         name: str = "third-stub"
         axes: frozenset[Axis] = frozenset({Axis.CHANNEL_EXCLUSIVITY})
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(
@@ -694,6 +703,7 @@ def test_two_mechanisms_claiming_env_axis_raise_conflict_control_real_disjoint_p
     class EnvClaimingStub:
         name: str = "env-claiming-stub"
         axes: frozenset[Axis] = frozenset({Axis.ENV})
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(
@@ -734,16 +744,17 @@ def test_real_pair_compiles_with_a_cpu_limit_and_scrub_env() -> None:
     )
     compiled = brig.stack.Stack([env_scrub, rlimits]).compile(spec, ctx=_CTX)
     argv = compiled.wrap(("true",))
-    assert argv[:6] == (
+    assert argv[:7] == (
         sys.executable,
+        "-I",
         "-m",
         "brig.mech.trampoline",
         "--cpu",
         "5",
         "--",
     )
-    assert argv[6:10] == ("/bin/sh", "-c", 'exec /usr/bin/env -i ${PATH:+"PATH=$PATH"} "$@"', "sh")
-    assert argv[10:] == ("true",)
+    assert argv[7:11] == ("/bin/sh", "-c", 'exec /usr/bin/env -i ${PATH:+"PATH=$PATH"} "$@"', "sh")
+    assert argv[11:] == ("true",)
 
 
 @pytest.mark.unit
@@ -757,6 +768,7 @@ def test_compiled_jail_denial_signature_pattern_smoke() -> None:
     class WithDenial:
         name: str
         axes: frozenset[Axis]
+        runtime: RuntimeKind | None = None
 
         def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
             return Step(

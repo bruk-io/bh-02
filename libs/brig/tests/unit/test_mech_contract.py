@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import typing
 
 import pytest
 
 import brig.core
 import brig.mech
 import brig.mech.contract
+from brig.core.runtime import Capability
 
 
 def _identity(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -50,17 +52,25 @@ def test_step_has_exactly_eight_fields() -> None:
 
 
 @pytest.mark.unit
-def test_launch_feature_enum_exactly_three_members() -> None:
-    """AC#2: LaunchFeature enum has exactly the three named members.
+def test_step_requires_the_runtimes_three_capabilities() -> None:
+    """AC#2's `LaunchFeature` pin, retired by decision-179 under
+    decision-041's rule 4: `LaunchFeature` became the runtime's
+    `Capability` (decision-0001), so its subject is gone. The replacement
+    asserts the positive: `Step.requires` is typed by `Capability`, which
+    has exactly the three members `LaunchFeature` had, and `brig.mech`
+    exports no `LaunchFeature` any more.
 
     Use set equality against literal name tuples.
     """
     expected_names = {"NEW_PROCESS_GROUP", "PTY", "DETACH"}
-    actual_names = {m.name for m in brig.mech.LaunchFeature}
+    actual_names = {m.name for m in Capability}
     assert actual_names == expected_names, (
-        f"LaunchFeature member mismatch. Missing: {expected_names - actual_names}. "
+        f"Capability member mismatch. Missing: {expected_names - actual_names}. "
         f"Extra: {actual_names - expected_names}."
     )
+    hints = typing.get_type_hints(brig.mech.Step)
+    assert hints["requires"] == frozenset[Capability]
+    assert not hasattr(brig.mech, "LaunchFeature")
 
 
 @pytest.mark.unit
@@ -196,7 +206,9 @@ def test_zero_mechanisms() -> None:
     # The test ensures the package exists and is importable.
     assert hasattr(brig.mech, "Step")
     assert hasattr(brig.mech, "Mechanism")
-    assert hasattr(brig.mech, "LaunchFeature")
+    # `LaunchFeature` was here; decision-179 retired it for the runtime's
+    # `Capability` (test_step_requires_the_runtimes_three_capabilities).
+    assert not hasattr(brig.mech, "LaunchFeature")
 
 
 @pytest.mark.unit
@@ -252,11 +264,23 @@ def test_mechanism_is_runtime_checkable_via_isinstance() -> None:
     class ConcreteMechanism:
         name = "fake"
         axes: frozenset[brig.core.Axis] = frozenset()
+        runtime = None
 
         def compile(self, spec: object, ctx: object) -> object:
             raise NotImplementedError
 
     assert isinstance(ConcreteMechanism(), brig.mech.Mechanism)
+
+    # decision-179: `runtime` is part of the protocol, so a mechanism that
+    # does not say which runtime it needs (even `None`) is not one.
+    class NoRuntime:
+        name = "fake"
+        axes: frozenset[brig.core.Axis] = frozenset()
+
+        def compile(self, spec: object, ctx: object) -> object:
+            raise NotImplementedError
+
+    assert not isinstance(NoRuntime(), brig.mech.Mechanism)
     # Control: something that does NOT structurally match is rejected.
     assert not isinstance(object(), brig.mech.Mechanism)
 

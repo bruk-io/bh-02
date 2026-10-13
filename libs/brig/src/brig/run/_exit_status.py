@@ -3,7 +3,7 @@
 **What this restores, and what it deliberately does not bring back.**
 decision-152 (2026-09-08) deleted the per-jail event stream, and SPEC.md
 section 11 named the one capability that genuinely went with it: an exit
-status readable by a process that never parented the workload. `Handle.wait`
+status readable by a process that never parented the workload. `wait`
 answered in the launching process and raised `ExitStatusUnobservable`
 everywhere else, so a rehydrated handle -- the shape an embedder uses to
 clean up after a runtime that died holding a jail -- could tear a jail down
@@ -11,10 +11,12 @@ but never say how it ended. decision-156 (2026-09-08) gives that back
 WITHOUT the stream: not a log, not an appender, not a tail. One file, one
 line, written once.
 
-**The wrapper.** `SubprocessLauncher` no longer spawns the compiled jail's
-argv directly. It spawns this module's `WRAPPER_SOURCE` under the launching
+**The wrapper.** A start (`HostSupervisor.start`) never spawns the compiled
+jail's argv directly. It spawns this module's `WRAPPER_SOURCE` under the launching
 interpreter, and *that* spawns the jail's argv as its own child, waits for
-it, and writes the status to `<jail_dir>/exit` -- written to a `.partial`
+it, and writes the status to its exit record -- one per jail directory until
+decision-181, `<jail_dir>/procs/<id>/exit` since, one per process, siblings
+included (`brig/run/_records.py`) -- written to a `.partial`
 name and renamed, so a reader sees a complete status or no file at all,
 never a half-written one. The wrapper is the workload's parent, which is
 what makes the status exact: `Popen.wait()` distinguishes "exited 143" from
@@ -26,14 +28,14 @@ rather than four lines of shell.
 jail's own `wrap` (seatbelt, env scrub, the rlimits trampoline) is applied to
 the wrapper's CHILD, exactly as before -- the wrapper prepends nothing to the
 compiled argv and changes nothing about it, so what the jail runs is
-unchanged, and `Handle.argv` still reports the jail's own compiled argv
+unchanged, and `Process.argv` still reports the jail's own compiled argv
 rather than this plumbing. What the wrapper adds is one trusted-side process
-per jail, the same shape as a `JAIL_LIFETIME` helper, whose only job is to
+per process started (per jail until decision-181), the same shape as a `JAIL_LIFETIME` helper, whose only job is to
 outlive its child by the microseconds it takes to write a number.
 
-Three consequences, stated rather than left to be discovered:
+Four consequences, stated rather than left to be discovered:
 
-- **`Handle.pid` is the wrapper's pid**, and the jail's own process is its
+- **`Process.pid` is the wrapper's pid**, and the jail's own process is its
   child in the same process group. Teardown is group-shaped at every rung
   (SPEC.md section 9), so nothing about kill changes; `alive()` tracks the
   wrapper, which lives exactly as long as the workload plus the write.
@@ -44,37 +46,33 @@ Three consequences, stated rather than left to be discovered:
   `SIGTERM`/`SIGINT`/`SIGHUP`/`SIGQUIT` -- with a handler, never `SIG_IGN`,
   because `SIG_IGN` survives `exec` and would hand the workload an immunity
   the Spec never granted it -- so the ordinary teardown rung and
-  `Handle.interrupt` both still end with a status on disk.
-- **The record belongs to ONE launch** (decision-162, 2026-09-08). `wait`
-  prefers this file over any live observation, so a stale record left by an
-  earlier launch into the same directory would be returned as the new jail's
-  status the instant it was asked. `clear_exit_status` -- called by the
-  launcher before it stages or spawns anything -- is what makes "the file is
-  there" mean "this workload ended".
-- **A jail that may write its own `jail_dir` may write this file.** The
-  wrapper's own write is the last one, so the status a reader finds after the
-  jail is gone is the wrapper's; a workload can only forge one while it is
-  still running, which is a window in which the real status does not exist
-  yet anyway. brig grades enforcement, not a workload's honesty about
-  itself, and this file makes no claim it cannot keep.
+  `Process.interrupt` both still end with a status on disk.
+- **The record belongs to ONE process** (decision-162, 2026-09-08, settled
+  by decision-181). `wait` prefers this file over any live observation, so a
+  stale record left by an earlier launch into the same directory was once
+  returned as the new jail's status the instant it was asked, and the
+  launcher cleared it before each launch. Each process now writes its own
+  record under a fresh id, never reused, so a status can't be read as another
+  process's.
+- **A jail that may write its own `jail_dir` may write this file** (a stack
+  with no `fs_write` mechanism; bwrap and seatbelt seal it, decision-173, and
+  no LISTEN grant reaches `procs/`, decision-181). The wrapper's own write is
+  the last one, so the status a reader finds after the jail is gone is the
+  wrapper's; a workload can only forge one while it is still running, which
+  is a window in which the real status does not exist yet anyway. brig grades
+  enforcement, not a workload's honesty about itself, and this file makes no
+  claim it cannot keep.
 """
 
 from __future__ import annotations
 
-import contextlib
-import os
 from collections.abc import Sequence
 from typing import Final
 
-#: `<jail_dir>/exit`. SPEC.md section 9 names the path, so it is a constant
-#: rather than a parameter: a rehydrated handle finds the file from
-#: `jail_dir` alone, with nothing else to be told.
-EXIT_FILENAME: Final = "exit"
-
-_PARTIAL_SUFFIX: Final = ".partial"
-
-#: The wrapper program, run as `python -c WRAPPER_SOURCE <exit file>
-#: <ready fd> <argv...>`. Kept as a string rather than a module so that
+#: The wrapper program, run as `python -I -c WRAPPER_SOURCE <exit file>
+#: <ready fd> <argv...>`: isolated, because it runs in the workload's working
+#: directory, which `-c` would put first on its import path (decision-169;
+#: the watcher it starts runs the same way). Kept as a string rather than a module so that
 #: running it needs no importable `brig` inside the launched environment and
 #: no `if __name__` guard for pypeeker's `import-time-side-effects` rule to
 #: find. It is pure text here and executable only when a launcher passes it
@@ -130,7 +128,7 @@ try:
         # group (no new session): its `killpg(0, ...)` is the jail's group, and while it lives
         # that group's number can't be handed to anyone else.
         subprocess.Popen(
-            [sys.executable, "-c", TETHER, str(tether_fd)],
+            [sys.executable, "-I", "-c", TETHER, str(tether_fd)],
             pass_fds=(tether_fd,),
             stdin=subprocess.DEVNULL,
         )
@@ -170,79 +168,28 @@ sys.exit(code if code >= 0 else 128 - code)
 class WorkloadSpawnFailed(OSError):
     """The wrapper started but could not spawn the jail's own argv.
 
-    Raised out of `launch()` so a workload that cannot be exec'd is a LAUNCH
-    failure, exactly as it was when the launcher spawned the argv itself.
-    Without this the wrapper would swallow it: `launch()` would return a
-    `Handle` for a jail that was already dead, and the mistake would surface
-    later and somewhere else as a readiness timeout.
+    Raised out of `jail.start` so a workload that cannot be exec'd is a
+    START failure, exactly as it was when the launcher spawned the argv
+    itself. Without this the wrapper would swallow it: `start` would return
+    a `Process` that was already dead, and the mistake would surface later
+    and somewhere else as a readiness timeout.
     """
-
-
-def exit_path(jail_dir: str) -> str:
-    """Where this jail's exit status is written."""
-    return os.path.join(jail_dir, EXIT_FILENAME)
-
-
-def partial_path(jail_dir: str) -> str:
-    """The name the status is written to before being renamed into place."""
-    return exit_path(jail_dir) + _PARTIAL_SUFFIX
 
 
 def wrapper_argv(
-    python: str, jail_dir: str, ready_fd: int, argv: Sequence[str], tether_fd: int | None = None
+    python: str, exit_file: str, ready_fd: int, argv: Sequence[str], tether_fd: int | None = None
 ) -> tuple[str, ...]:
-    """`python -c WRAPPER_SOURCE <exit file> <ready fd> <tether fd or -> <argv...>`.
+    """`python -I -c WRAPPER_SOURCE <exit file> <ready fd> <tether fd or -> <argv...>`.
 
-    `tether_fd` (decision-167) is the read end of the launch's tether, inherited by the
-    wrapper, which hands it to the watcher it starts before the workload; `-` when the launch
-    is not tethered.
+    `exit_file` is the process's own exit record, `<jail_dir>/procs/<id>/exit`
+    (`brig/run/_records.py`, decision-181). `tether_fd` (decision-167) is the
+    read end of the jail's tether, inherited by this wrapper alone, which hands
+    it to the watcher it starts before the workload; `-` when the jail is not
+    tethered.
 
-    `argv` is the jail's already-compiled argv and is passed through
+    `argv` is the process's already-wrapped argv and is passed through
     untouched -- the wrapper prepends nothing to it, which is what keeps
-    `handle.wrap_prefix` (derived from the jail's own `wrap`) a faithful
-    prefix for `exec` to reproduce.
+    the jail's `wrap_prefix` a faithful prefix for every start to reproduce.
     """
     tether = "-" if tether_fd is None else str(tether_fd)
-    return (python, "-c", WRAPPER_SOURCE, exit_path(jail_dir), str(ready_fd), tether, *argv)
-
-
-def clear_exit_status(jail_dir: str) -> None:
-    """Remove any exit record left in `jail_dir` by an EARLIER launch.
-
-    Called by the launcher before it spawns, and load-bearing rather than
-    tidy (decision-162, 2026-09-08): `Handle.wait` answers from this file
-    whenever it is there, so a second jail launched into a directory that
-    still holds the first jail's status returns that stale number
-    IMMEDIATELY -- before its own workload has run, let alone finished. The
-    caller then reads empty stdio and believes it. Both names go: `exit`,
-    and the `.partial` a wrapper killed mid-write may have left beside it.
-
-    Missing files are not an error -- the ordinary case is a fresh jail
-    directory with neither name in it.
-    """
-    for path in (exit_path(jail_dir), partial_path(jail_dir)):
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(path)
-
-
-def read_exit_status(jail_dir: str) -> int | None:
-    """The recorded status for this jail, or `None` if the file is not there.
-
-    `None` means the wrapper never got as far as writing -- the jail is
-    still running, or it was `SIGKILL`ed, or no wrapper ever ran (a handle
-    pointed at a swept jail directory). It never means zero.
-
-    A file that exists but does not hold an integer is a corrupted record,
-    and it raises rather than being read as any particular status: this is
-    the one file whose whole job is to not invent a number.
-    """
-    path = exit_path(jail_dir)
-    try:
-        with open(path, encoding="utf-8") as recorded:
-            text = recorded.read()
-    except OSError:
-        return None
-    try:
-        return int(text.strip())
-    except ValueError as exc:
-        raise ValueError(f"exit record {path!r} does not hold an integer: {text!r}") from exc
+    return (python, "-I", "-c", WRAPPER_SOURCE, exit_file, str(ready_fd), tether, *argv)

@@ -24,9 +24,10 @@ and records the status **in this process's memory**, together with the
 
 **In memory, and the limit that follows, stated rather than left silent.**
 Until decision-152 (2026-09-08) the status went into a per-jail JSONL file, so
-a `Handle` rehydrated in another process could read it back. That file is
-gone, and with it that capability: `Handle.wait()` answers in the process that
-launched the workload and raises `ExitStatusUnobservable` anywhere else. The
+a handle rehydrated in another process could read it back. That file is
+gone, and with it that capability: `wait()` answered in the process that
+launched the workload and raised `ExitStatusUnobservable` anywhere else (each
+process's exit record gives it back, decision-156 and decision-181). The
 trade is deliberate. The file bought exactly one reader -- a rehydrated
 handle asking "how did it end?" -- at the cost of a second, worse log beside
 every embedder's real one; a rehydrated handle's actual job is teardown
@@ -39,7 +40,7 @@ where a durable record belongs.
 lifetime is exactly the workload's, it is created by a launch and ends when
 that workload ends, and it holds no state beyond the one `Popen`. The other
 stated limit: if the launching process dies before the workload does, nothing
-observes the status at all -- and `Handle.wait()` reports that honestly rather
+observes the status at all -- and `Process.wait()` reports that honestly rather
 than inventing one.
 """
 

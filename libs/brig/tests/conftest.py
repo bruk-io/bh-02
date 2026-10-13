@@ -12,7 +12,7 @@ launches is required to carry a per-run token in its argv (see
 sweep look for that token -- and for the process groups it was ever seen
 tagging -- with no cooperation required from the test that leaked.
 
-**task-027's third arm: a leaked exec sibling.** `handle.exec()`'s argv is
+**task-027's third arm: a leaked exec sibling.** A sibling `jail.start()`'s argv is
 CALLER-supplied, not built by any brig code, so the two arms above are
 structurally blind to a leaked exec sibling whose caller never bothered to
 route it through `workload_argv`: no run-id token then ever lands in its
@@ -84,10 +84,15 @@ import subprocess
 import threading
 import time
 import uuid
-from collections.abc import Iterator
-from typing import Any, Final
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any, Final, Literal, assert_never
 
 import pytest
+
+from brig.run import HostRuntime, IoPolicy, Jail, KillReport, Process
+from brig.run.runtime import Runtime
+from brig.run.teardown import kill_named
+from brig.stack import CompiledJail
 
 # How often the background poller samples `/bin/ps` for the run-id token,
 # in seconds. This exists because the token can live only in the argv of
@@ -203,12 +208,74 @@ def workload_argv(run_id: str, body: str) -> list[str]:
 # ============================================================================
 
 
-def teardown_group(handle: object, *, timeout: float = 20.0) -> None:
+def launch(
+    compiled: CompiledJail,
+    argv: Sequence[str],
+    *,
+    cwd: str,
+    jail_id: str,
+    jail_dir: str,
+    io: IoPolicy | None = None,
+    tether: int | None = None,
+    runtime: Runtime | None = None,
+) -> tuple[Jail, Process]:
+    """A jail with one process: `Jail.create` (through `HostRuntime` unless
+    `runtime` says otherwise) and its first `jail.start`, returned together.
+
+    What the launcher did until decision-183 (TASK-0079.28) deleted it, kept
+    here so brig's tests keep asserting what they asserted
+    then, through `Jail` and `Process`. A first start that raises destroys
+    what `create` started (its `JAIL_LIFETIME` helpers) before the error
+    propagates, as the launcher did and as an embedder must, so a refused
+    launch leaves nothing running.
+
+    Raises:
+        Whatever `Jail.create` or `jail.start` raise.
+    """
+    jail = Jail.create(
+        compiled,
+        runtime=HostRuntime() if runtime is None else runtime,
+        cwd=cwd,
+        jail_id=jail_id,
+        jail_dir=jail_dir,
+        tether=tether,
+    )
+    try:
+        return jail, jail.start(argv, cwd=cwd, io=IoPolicy() if io is None else io)
+    except BaseException:
+        jail.destroy()
+        raise
+
+
+def destroy_with_grace(jail: Jail, grace: float) -> KillReport:
+    """`jail.destroy()` with the ladder's grace period shortened: the same
+    `teardown.kill_named` over the record `destroy` passes its runtime, for
+    tests that time the ladder's escalation (the handle-era teardown took
+    `grace=` until decision-183)."""
+    record = jail._record()
+    return kill_named(
+        known=record.processes,
+        jail_dir=record.jail_dir,
+        helper_pids=record.helper_pids,
+        helper_stamps=record.helper_stamps,
+        grace=grace,
+    )
+
+
+def teardown_group(process: Process, *, timeout: float = 20.0) -> None:
+    """`teardown_pgid` for a process's group, waiting on the process between
+    passes so this process's exit waiter reaps its leader."""
+    teardown_pgid(process._record.pgid, wait=process.wait, timeout=timeout)
+
+
+def teardown_pgid(
+    pgid: int, *, wait: Callable[[float], object] | None = None, timeout: float = 20.0
+) -> None:
     """Group-kill a launched workload, RE-SIGNALLING until the group clears.
 
     task-086, and the root cause it closes. Fifteen test modules had each
     grown their own `_teardown_group` with the same body: one
-    `killpg(pgid, SIGKILL)`, then `handle.wait()` for the LEADER. That body
+    `killpg(pgid, SIGKILL)`, then a wait for the LEADER. That body
     leaks, intermittently, and here is the mechanism.
 
     A `workload_argv` workload is `<body> & wait` -- the leader forks a
@@ -243,24 +310,24 @@ def teardown_group(handle: object, *, timeout: float = 20.0) -> None:
     alive. Demonstrated with a control: the old body raises PermissionError
     on that shape; this one does not.
 
-    Deliberately NOT `Handle.kill()` / `kill_jail`: those are the code under
-    test in several callers, and a test's cleanup path must not be the thing
+    Deliberately NOT `Jail.destroy()` / `Process.stop()`: those are the code
+    under test in several callers, and a test's cleanup path must not be the thing
     it is testing (the reasoning every copied helper already carried).
     """
     import signal as _signal
 
-    pgid = handle.pgid  # type: ignore[attr-defined]
     deadline = time.monotonic() + timeout
     survivors: list[tuple[int, int, int, str, str]] = []
     while True:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, _signal.SIGKILL)
-        with contextlib.suppress(Exception):
-            handle.wait(timeout=0.5)  # type: ignore[attr-defined]
+        if wait is not None:
+            with contextlib.suppress(Exception):
+                wait(0.5)
 
         # Zombies are excluded: an exited-but-unreaped member is not a leak,
         # and its own parent owns reaping it (`_reap_leader`'s documented
-        # no-op case for a handle rehydrated in another process).
+        # no-op case for a jail rehydrated in another process).
         survivors = [row for row in _ps_rows() if row[2] == pgid and not row[3].startswith("Z")]
         if not survivors:
             return
@@ -310,12 +377,42 @@ def _is_ps_probe(args: object) -> bool:
     return isinstance(argv, str) and os.path.basename(argv) == "ps"
 
 
+#: What one observation of a pid or group says: `exiting` is "the kernel still
+#: answers `kill(.., 0)` but `ps` has no live row" -- a process caught between
+#: its last write and its disappearance, which a later look settles.
+type _Verdict = Literal["gone", "alive", "exiting"]
+
+#: How long `_sweep_registry` waits before it looks once more at something
+#: that read `exiting`. A process mid-exit is gone within milliseconds.
+_EXITING_GRACE_SECONDS: Final = 0.25
+
+
+def _pid_verdict(signalable: bool, state: str) -> _Verdict:
+    """Pure: a pid that `kill(pid, 0)` finds (`signalable`) and whose `ps` state
+    letters are `state` (`""` for no row). A zombie has exited. No row for a pid
+    the kernel still signals is a process mid-exit, not a live one."""
+    if not signalable or state.startswith("Z"):
+        return "gone"
+    return "exiting" if not state else "alive"
+
+
+def _group_verdict(signalable: bool, states: tuple[str, ...]) -> _Verdict:
+    """Pure: as `_pid_verdict`, for a group's members' `ps` states. Only zombies
+    has ended; no rows at all is a group caught mid-exit; any other state is a
+    live member."""
+    if not signalable:
+        return "gone"
+    if not states:
+        return "exiting"
+    return "gone" if all(state.startswith("Z") for state in states) else "alive"
+
+
 def _pid_liveness(pid: int) -> tuple[bool | None, str]:
-    """Classify whether `pid` is alive using `os.kill(pid, 0)` alone --
-    no argv is ever read. `True` means alive, `False` means confirmed
-    gone (`ProcessLookupError`), `None` means liveness could not be
-    determined (e.g. permission denied) -- a pid this cannot classify is
-    reported by `_sweep_registry`, never silently treated as gone
+    """Classify whether `pid` is alive using `os.kill(pid, 0)` and the pid's own
+    `ps` row -- no argv is ever read. `True` means alive (or still exiting: the
+    caller re-checks it), `False` means confirmed gone, `None` means liveness
+    could not be determined (e.g. permission denied) -- a pid this cannot
+    classify is reported by `_sweep_registry`, never silently treated as gone
     (task-049 AC #6).
     """
     try:
@@ -326,7 +423,26 @@ def _pid_liveness(pid: int) -> tuple[bool | None, str]:
         return None, f"permission denied ({exc})"
     except OSError as exc:
         return None, f"os error ({exc})"
-    return True, "alive"
+    match _pid_verdict(True, _ps_state(pid)):
+        case "gone":
+            return False, "exited, unreaped (zombie)"
+        case "exiting":
+            return True, "exiting"
+        case "alive":
+            return True, "alive"
+        case never:
+            assert_never(never)
+
+
+def _ps_state(pid: int) -> str:
+    """`/bin/ps`'s state letters for `pid`, `""` when it has no row. A
+    zombie (`Z`) has exited: where PID 1 does not reap (this container's
+    `process_api`, Docker without `--init`) it stays in the table for good,
+    and the sweeps count it as gone, as `teardown_group` already does."""
+    proc = subprocess.run(
+        ["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+    )
+    return proc.stdout.strip()
 
 
 def _pgid_liveness(pgid: int) -> tuple[bool | None, str]:
@@ -338,15 +454,58 @@ def _pgid_liveness(pgid: int) -> tuple[bool | None, str]:
     immediate parent already exited is still caught here even though only
     the leader's `(pid, pgid)` was ever recorded.
     """
+    denied: PermissionError | None = None
     try:
         os.killpg(pgid, 0)
     except ProcessLookupError:
         return False, "no such process group"
     except PermissionError as exc:
-        return None, f"permission denied ({exc})"
+        denied = exc
     except OSError as exc:
         return None, f"os error ({exc})"
-    return True, "alive"
+    states = tuple(row[3] for row in _ps_rows() if row[2] == pgid)
+    match _group_verdict(True, states):
+        case "gone":
+            return False, "only exited, unreaped members (zombies)"
+        case "exiting":
+            if denied is not None:
+                return None, f"permission denied ({denied})"
+            return True, "exiting"
+        case "alive":
+            if denied is not None:
+                return None, f"permission denied ({denied})"
+            return True, "alive"
+        case never:
+            assert_never(never)
+
+
+def _only_zombies_in(pgid: int) -> bool:
+    """True when `/bin/ps` shows at least one row in `pgid` and every one is
+    a zombie (so a group whose `killpg(pgid, 0)` still succeeds has, in fact,
+    ended). No rows at all is NOT this: `killpg` finding a group that `ps`
+    cannot see is unexplained, and the sweep must not call it gone."""
+    states = tuple(row[3] for row in _ps_rows() if row[2] == pgid)
+    return _group_verdict(True, states) == "gone"
+
+
+def _caught_mid_exit(
+    pid_alive: bool | None, pid_reason: str, pgid_alive: bool | None, pgid_reason: str
+) -> bool:
+    """Pure: does one look at a registry entry read as a process leaving? Either
+    side says `exiting`, or the pid answers while its own group is already gone
+    (a leader leaves its group before its pid; a live leader never does)."""
+    if "exiting" in (pid_reason, pgid_reason):
+        return True
+    return pid_alive is True and pgid_alive is False and pgid_reason.startswith("no such")
+
+
+def _observe(pid: int, pgid: int, harness_pgid: int) -> tuple[bool | None, str, bool | None, str]:
+    """One look at a registry entry: (pid alive, why, pgid alive, why)."""
+    pid_alive, pid_reason = _pid_liveness(pid)
+    if pgid == harness_pgid:
+        return pid_alive, pid_reason, False, "skipped (shares harness pgid)"
+    pgid_alive, pgid_reason = _pgid_liveness(pgid)
+    return pid_alive, pid_reason, pgid_alive, pgid_reason
 
 
 def _sweep_registry(
@@ -378,12 +537,13 @@ def _sweep_registry(
     leaked: list[str] = []
     unclassifiable: list[str] = []
     for pid, pgid, spawned_by in registry:
-        pid_alive, pid_reason = _pid_liveness(pid)
-        if pgid == harness_pgid:
-            pgid_alive: bool | None = False
-            pgid_reason = "skipped (shares harness pgid)"
-        else:
-            pgid_alive, pgid_reason = _pgid_liveness(pgid)
+        pid_alive, pid_reason, pgid_alive, pgid_reason = _observe(pid, pgid, harness_pgid)
+        if _caught_mid_exit(pid_alive, pid_reason, pgid_alive, pgid_reason):
+            # Caught mid-exit (kill() still answers, /proc and ps no longer show a live
+            # process, or the group is gone under a pid that still answers): look once
+            # more after a grace before calling it a leak.
+            time.sleep(_EXITING_GRACE_SECONDS)
+            pid_alive, pid_reason, pgid_alive, pgid_reason = _observe(pid, pgid, harness_pgid)
         if pid_alive or pgid_alive:
             leaked.append(
                 f"  pid={pid} pgid={pgid} arm=registry "
@@ -522,6 +682,8 @@ def _sweep_for_leaks(run_id: str, seen_pgids: set[int], harness_pid: int) -> Non
     grandchildren = _harness_grandchild_pids(harness_pid)
     labeled: list[tuple[int, int, int, str, str, list[str]]] = []
     for pid, ppid, pgid, stat, command in _ps_rows():
+        if stat.startswith("Z"):
+            continue  # exited; a PID 1 that does not reap leaves it for good
         arms: list[str] = []
         if run_id in command:
             arms.append("token")
@@ -659,7 +821,7 @@ def run_id() -> Iterator[str]:
     # from the POLLER thread instead (`_flush_registry`, called each poll
     # cycle and once more at teardown), never synchronously inside
     # `__init__`: a file `open`/`write`/`close` there measurably shifts
-    # spawn/reap timing for every caller in the process, `handle.pid`'s
+    # spawn/reap timing for every caller in the process, `process.pid`'s
     # own launcher included, and this file exists for crash durability
     # only -- THIS session's own sweep never reads it back.
     registry: list[tuple[int, int, str]] = []

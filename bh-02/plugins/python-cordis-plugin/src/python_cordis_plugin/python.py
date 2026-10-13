@@ -90,9 +90,9 @@ _USE = (
     "- Several calls in one message run in order, one input each. The person sees every input "
     "and its output as it runs, so say what a result means rather than repeat it.",
     "- bh-02's other tools are functions here too: `tools.NAME(arg=...)` calls one as your own "
-    "call to it would (asked about, noted), returns its result as text, and raises tools.Error "
+    "call to it would (asked about, with bh-02's asides), returns its result as text, and raises tools.Error "
     "when it did not run or failed; `tools` lists them, help(tools.NAME) shows what one takes, "
-    "and a note before an input's output says when they change. A function you define here is "
+    "and an aside before an input's output says when they change. A function you define here is "
     "yours alone and goes with the REPL; a tool is bh-02's. Don't bind `tools` yourself.",
 )
 

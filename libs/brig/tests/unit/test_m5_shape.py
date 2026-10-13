@@ -48,7 +48,8 @@ def test_layer_set_is_exactly_right() -> None:
     """AC #1b: find brig -maxdepth 1 -type d matches expected set exactly.
     No new layers have been added; the set is still core, mech, stack, run, probe."""
     brig_dir = _BRIG
-    expected_layers = {"core", "mech", "probe", "proxy", "run", "stack"}
+    # `runtime` joined at decision-178 (TASK-0079.02), recorded as `proxy` was.
+    expected_layers = {"core", "mech", "probe", "proxy", "run", "runtime", "stack"}
 
     # Get actual layers (directories, excluding __pycache__)
     actual = {d.name for d in brig_dir.iterdir() if d.is_dir() and d.name != "__pycache__"}
@@ -85,7 +86,9 @@ def test_allow_table_unchanged_since_m0() -> None:
     flow -- it runs trusted-side, outside the jail, and its allow row is
     EMPTY, so the gate refuses any import of brig from it. The pin is
     updated rather than relaxed: a new directory under `brig/` still fails
-    this test until someone writes down what it is.
+    this test until someone writes down what it is. `runtime` joined the same
+    way (decision-178, 2026-10-12): runtimes that are not `run`'s own, which
+    nothing in brig may import.
 
     unchanged except for rows recorded as decisions. The comparison is SCOPED
     to the ALLOW TABLE only -- not to `[tool.pypeeker]` as a whole, and never
@@ -135,6 +138,7 @@ run     = ["core", "mech", "stack"]
 observe = ["core", "run"]
 probe   = ["core", "run", "observe"]
 proxy   = []
+runtime = ["core", "mech", "stack", "run"]
 """
 
     working_text = _PYPROJECT.read_text()

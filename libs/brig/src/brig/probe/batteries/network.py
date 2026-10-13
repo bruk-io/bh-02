@@ -21,10 +21,13 @@ itself can be read to permit:
 1. **A declared LISTEN channel** -- `decision-116` records that
    `(allow network-bind)` is emitted, unscoped, ONLY when a LISTEN channel is
    declared: it is the one network action a deny-all Seatbelt profile is
-   compiled to allow. The control therefore BINDS an AF_UNIX socket at the
-   channel's own declared endpoint (never dialing it -- nothing is listening
-   there, and binding is the permitted action decision-116 names). Its name,
-   `bind_the_declared_listen_endpoint`, says exactly that.
+   compiled to allow. The control therefore BINDS an AF_UNIX socket at a path
+   the jail reserved for that channel in its channel directory (never dialing
+   it -- nothing is listening there, and binding is the permitted action
+   decision-116 names). A channel names no path (decision-186), so the caller
+   passes the reservation (`jail.channel(name)`): the socket is bound where
+   every mechanism grants a channel, inside the channel directory. Its name,
+   `bind_a_reserved_channel_socket`, says exactly that.
 2. **A granted domain** -- the control reaches that domain, as SPEC.md §12's
    own "dial the declared channel" example anticipates for egress. Its name,
    `connect_to_a_granted_domain`, says exactly that -- distinct from the
@@ -50,6 +53,7 @@ from brig.core.grades import Axis
 from brig.core.probes import ProbeShape
 from brig.core.spec import Spec
 from brig.probe.battery import Battery, Expectation, Probe
+from brig.run import Reservation
 
 #: The port the CONTROL probe dials for a granted-domain Spec. A brig Spec
 #: grants a domain, not a domain+port pair (SPEC.md §5's NetworkPolicy), and
@@ -63,7 +67,13 @@ from brig.probe.battery import Battery, Expectation, Probe
 _GRANTED_DOMAIN_CONTROL_URL = "https://HOST/"
 
 
-def network_battery(spec: Spec, *, denied_address: str, control_url: str | None = None) -> Battery:
+def network_battery(
+    spec: Spec,
+    *,
+    denied_address: str,
+    control_url: str | None = None,
+    channel: Reservation | None = None,
+) -> Battery:
     """Factory for the network enforcement battery.
 
     Args:
@@ -84,6 +94,10 @@ def network_battery(spec: Spec, *, denied_address: str, control_url: str | None 
             so no name resolution happens and only policy can stop it
             (Defect A above). Must be non-empty and contain a ':', or
             ValueError is raised naming this parameter.
+        channel: A socket the jail reserved for one of `spec`'s channels
+            (`jail.channel(name)`), whose `bound_path` the CONTROL binds.
+            Required when `spec` declares a channel (decision-186): the
+            battery is pure and can't reserve one itself.
 
     Returns:
         A Battery with axis=Axis.NETWORK and exactly two probes: one
@@ -97,7 +111,9 @@ def network_battery(spec: Spec, *, denied_address: str, control_url: str | None 
             before this function's body ever runs.
         ValueError: `spec` declares no LISTEN channel and grants no domains
             (no network action the Spec provably permits for a positive
-            control); or `denied_address` is empty or has no ':' separator.
+            control); or it declares a channel and `channel` is `None` or
+            reserved for a channel it doesn't declare; or `denied_address` is
+            empty or has no ':' separator.
     """
     # Every declared channel is a LISTEN channel: `LISTEN` is the only
     # `ChannelKind` there is since decision-153, so this no longer filters.
@@ -122,19 +138,20 @@ def network_battery(spec: Spec, *, denied_address: str, control_url: str | None 
 
     if listen_channels:
         # The one network action decision-116 records as permitted on a
-        # deny-all Seatbelt profile: binding the jail's own declared LISTEN
-        # endpoint. Nothing need be listening there -- a successful bind is
-        # itself the permitted action, and this control never connects.
-        endpoint = listen_channels[0].endpoint
+        # deny-all Seatbelt profile: binding a socket the jail reserved for
+        # a declared LISTEN channel, in its channel directory (decision-186).
+        # Nothing need be listening there -- a successful bind is itself the
+        # permitted action, and this control never connects.
+        bound_path = _reserved_path(spec, channel)
         bind_code = (
             "import socket;"
             "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM);"
-            f"s.bind({endpoint!r});"
+            f"s.bind({bound_path!r});"
             "s.close();"
             "print('brig-ok')"
         )
         control_probe = Probe(
-            name="bind_the_declared_listen_endpoint",
+            name="bind_a_reserved_channel_socket",
             shape=ProbeShape.CONTROL,
             axis=Axis.NETWORK,
             argv=("python3", "-c", bind_code),
@@ -208,6 +225,30 @@ def network_battery(spec: Spec, *, denied_address: str, control_url: str | None 
         axis=Axis.NETWORK,
         probes=(control_probe, denial_probe),
     )
+
+
+def _reserved_path(spec: Spec, channel: Reservation | None) -> str:
+    """The in-jail path the CONTROL binds: `channel`'s, a socket reserved
+    for one of `spec`'s channels. Pure.
+
+    Raises:
+        ValueError: `channel` is `None`, or names a channel `spec` doesn't
+            declare.
+    """
+    declared = tuple(c.name for c in spec.channels)
+    if channel is None:
+        raise ValueError(
+            f"network_battery: spec declares channel(s) {declared!r}, and a channel names "
+            "no path (decision-186), so the control needs a socket the jail reserved: pass "
+            f"channel=jail.channel({declared[0]!r})"
+        )
+    if channel.channel not in declared:
+        raise ValueError(
+            f"network_battery: channel is a reservation for {channel.channel!r}, which spec "
+            f"does not declare (it declares {declared!r}); reserve one of those with "
+            "jail.channel(name)"
+        )
+    return channel.bound_path
 
 
 __all__ = ("network_battery",)

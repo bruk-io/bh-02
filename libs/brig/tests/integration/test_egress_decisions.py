@@ -38,12 +38,10 @@ import pytest
 from brig.core import EventKind, NetworkPolicy, Spec
 from brig.mech import CompileCtx
 from brig.mech.connect_proxy import ConnectProxy
-from brig.run import teardown as teardown_mod
+from brig.run import IoPolicy, Jail, Process
 from brig.run.egress import decisions_path, read_egress_decisions
-from brig.run.handle import Handle
-from brig.run.launcher import IoPolicy, SubprocessLauncher
 from brig.stack import CompiledJail
-from tests.conftest import workload_argv
+from tests.conftest import launch, workload_argv
 
 pytestmark = pytest.mark.integration
 
@@ -92,6 +90,15 @@ class _Origin:
         self._stop.set()
         with contextlib.suppress(OSError):
             self._sock.close()
+
+
+@pytest.fixture(autouse=True)
+def _launching_environment_exempts_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TASK-0076: the launching environment holds a NO_PROXY naming loopback, as
+    many hosts' do. The jail must not inherit it: a workload that did would
+    reach the origin directly, outside the egress filter."""
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "localhost,127.0.0.1,::1,169.254.0.0/16")
 
 
 @pytest.fixture
@@ -144,8 +151,8 @@ def _fetch(url: str, out: str) -> str:
     )
 
 
-def _run(jail_dir: str, domains: tuple[str, ...], body: str, run_id: str) -> Handle:
-    return SubprocessLauncher().launch(
+def _run(jail_dir: str, domains: tuple[str, ...], body: str, run_id: str) -> tuple[Jail, Process]:
+    return launch(
         _jail(jail_dir, domains),
         argv=workload_argv(run_id, body),
         cwd=jail_dir,
@@ -182,7 +189,7 @@ def test_the_reader_returns_the_proxys_own_allow_decision(run_id: str, origin: _
     `run` may supply (SPEC.md section 6), and a reader that returned raw
     lines would push that job onto the embedder."""
     jail_dir = _new_jail_dir()
-    handle = _run(
+    jail, process = _run(
         jail_dir,
         ("localhost",),
         _fetch(f"http://localhost:{origin.port}/x", os.path.join(jail_dir, "got")),
@@ -190,7 +197,7 @@ def test_the_reader_returns_the_proxys_own_allow_decision(run_id: str, origin: _
     )
     try:
         _wait_for_the_proxy_to_record(jail_dir)
-        read = read_egress_decisions(handle.jail_dir, handle.jail_id)
+        read = read_egress_decisions(jail.jail_dir, jail.jail_id)
 
         assert read.events, f"nothing read from {decisions_path(jail_dir)!r}"
         allows = [e for e in read.events if e.data["egress_decision"] == "allow"]
@@ -199,10 +206,10 @@ def test_the_reader_returns_the_proxys_own_allow_decision(run_id: str, origin: _
         assert allows[0].data["port"] == origin.port, dict(allows[0].data)
 
         assert allows[0].kind is EventKind.EGRESS
-        assert allows[0].jail_id == handle.jail_id
+        assert allows[0].jail_id == jail.jail_id
         assert allows[0].ts > 0.0
     finally:
-        teardown_mod.kill_jail(handle)
+        jail.destroy()
 
 
 def test_the_reader_returns_a_deny_for_a_destination_outside_the_allow_list(
@@ -213,7 +220,7 @@ def test_the_reader_returns_a_deny_for_a_destination_outside_the_allow_list(
     it, "the reader returned a decision" would be satisfied by a reader that
     hard-coded one."""
     jail_dir = _new_jail_dir()
-    handle = _run(
+    jail, process = _run(
         jail_dir,
         ("localhost",),
         _fetch(f"http://127.0.0.1:{origin.port}/x", os.path.join(jail_dir, "got")),
@@ -221,14 +228,14 @@ def test_the_reader_returns_a_deny_for_a_destination_outside_the_allow_list(
     )
     try:
         _wait_for_the_proxy_to_record(jail_dir)
-        read = read_egress_decisions(handle.jail_dir, handle.jail_id)
+        read = read_egress_decisions(jail.jail_dir, jail.jail_id)
 
         denies = [e for e in read.events if e.data["egress_decision"] == "deny"]
         assert denies, [dict(e.data) for e in read.events]
         assert denies[0].data["host"] == "127.0.0.1", dict(denies[0].data)
         assert denies[0].data["detail"] == "not in allow list", dict(denies[0].data)
     finally:
-        teardown_mod.kill_jail(handle)
+        jail.destroy()
 
 
 def test_the_cursor_returns_what_is_new_and_never_the_same_line_twice(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
@@ -242,7 +249,7 @@ def test_the_cursor_returns_what_is_new_and_never_the_same_line_twice(run_id: st
     second read's emptiness is the cursor working rather than the file
     having been consumed or the reader having broken."""
     jail_dir = _new_jail_dir()
-    handle = _run(
+    jail, process = _run(
         jail_dir,
         ("localhost",),
         _fetch(f"http://localhost:{origin.port}/x", os.path.join(jail_dir, "got")),
@@ -250,18 +257,18 @@ def test_the_cursor_returns_what_is_new_and_never_the_same_line_twice(run_id: st
     )
     try:
         _wait_for_the_proxy_to_record(jail_dir)
-        first = read_egress_decisions(handle.jail_dir, handle.jail_id)
+        first = read_egress_decisions(jail.jail_dir, jail.jail_id)
         assert first.events
         assert first.cursor > 0
 
-        again = read_egress_decisions(handle.jail_dir, handle.jail_id, cursor=first.cursor)
+        again = read_egress_decisions(jail.jail_dir, jail.jail_id, cursor=first.cursor)
         assert again.events == (), [dict(e.data) for e in again.events]
         assert again.cursor == first.cursor
 
-        from_the_start = read_egress_decisions(handle.jail_dir, handle.jail_id)
+        from_the_start = read_egress_decisions(jail.jail_dir, jail.jail_id)
         assert len(from_the_start.events) == len(first.events)
     finally:
-        teardown_mod.kill_jail(handle)
+        jail.destroy()
 
 
 def test_a_jail_with_no_proxy_reads_nothing_rather_than_failing(run_id: str) -> None:

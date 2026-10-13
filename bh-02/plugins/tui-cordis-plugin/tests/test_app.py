@@ -6,6 +6,7 @@ import re
 
 import pytest
 from textual.pilot import Pilot
+from textual.widgets import Static
 
 from tui_cordis_plugin import AppCrashed, BhApp, running, theme
 from tui_cordis_plugin.messages import Asked, Noted, Shown, TurnEnded
@@ -145,6 +146,27 @@ async def test_a_question_is_a_modal_and_its_answer_goes_back() -> None:
         assert await asyncio.wait_for(answer, 1) is True
         await pilot.pause()
         assert not isinstance(app.screen, ApprovalScreen)
+
+
+async def test_a_sub_agent_s_question_says_which_agent_asks() -> None:
+    """A child's question comes through the parent's `output` labelled (CONTRACTS.md: request,
+    `agent`): the modal says who asks above the question."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE) as pilot:
+        answer = app.bridge.question()
+        assert answer is not None
+        request = {
+            "name": "python",
+            "input": {"code": "1"},
+            "agent": {"name": "general-1", "type": "general"},
+        }
+        app.post_message(Asked(request, answer))
+        await pilot.pause()
+        assert isinstance(app.screen, ApprovalScreen)
+        title = str(app.screen.query_one("#approval-title", Static).content)
+        assert title == "Agent general-1 (general) asks:\nRun this python code (1 line)?"
+        answer.cancel()
+        await pilot.pause()
 
 
 async def test_a_question_nobody_waits_for_is_taken_down() -> None:

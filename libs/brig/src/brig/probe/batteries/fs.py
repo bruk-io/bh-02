@@ -1,7 +1,7 @@
 """Probe batteries for filesystem write and read axes (SPEC.md §5, §12).
 
 SPEC.md §5 defines write_denies threat (a jail that can write .git/hooks,
-.envrc, or an agent config file inside its granted workspace executes code
+.envrc, or a tool's config file inside its granted workspace executes code
 outside the jail later). These batteries probe that threat and the read
 confinement.
 
