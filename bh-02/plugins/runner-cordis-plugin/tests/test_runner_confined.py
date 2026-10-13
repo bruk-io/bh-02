@@ -137,6 +137,12 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
     assert [c.name for c in spec.channels] == ["kernel"]
 
 
+#: The made-up home, resolved the way `spec_for` resolves a root (`Path.resolve`): on macOS
+#: `/home/me` is `/System/Volumes/Data/home/me`, and `spec_for` compares the `trusted` and `code`
+#: paths it is handed, which the program supplies already resolved, with its resolved roots.
+_HOME = str(Path("/home/me").resolve())
+
+
 def _denied(spec: Any, path: str) -> bool:
     """Whether `spec` denies writing `path`: it is a write deny, or under one."""
     return any(path == d or path.startswith(d + "/") for d in spec.fs.write_denies)
@@ -150,36 +156,36 @@ def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> 
     (`$XDG_CONFIG_HOME/bh-02`) and the default one alike; one outside every writable root needs
     no deny, and one the project is in (bh-02 run in its own config) is not denied, or the
     project would be read-only."""
-    trusted = ("/home/me/xdg/bh-02", "/home/me/.config/bh-02", "/elsewhere/bh-02")
+    trusted = (f"{_HOME}/xdg/bh-02", f"{_HOME}/.config/bh-02", "/elsewhere/bh-02")
 
     def home_rooted(root: str, write: Sequence[str] = (".",)) -> Any:
         return spec_for(
             root=root,
             endpoint="/tmp/k/k.sock",
             scratch="/tmp/j/tmp",
-            home="/home/me",
+            home=_HOME,
             config=BrigConfig(write=write),
             layers=(),
             host=(),
             trusted=trusted,
         )
 
-    spec = home_rooted("/home/me")
+    spec = home_rooted(_HOME)
     for name in ("kernel.py", "models.toml", "context.toml"):
-        assert _denied(spec, f"/home/me/.config/bh-02/{name}"), name
-        assert _denied(spec, f"/home/me/xdg/bh-02/{name}"), name  # $XDG_CONFIG_HOME/bh-02
-    assert _denied(spec, "/home/me/.config/bh-02")  # the directory itself: no link swapped in
-    assert not _denied(spec, "/home/me/.config/gh/hosts.yml") and not _denied(spec, "/home/me/notes.md")
+        assert _denied(spec, f"{_HOME}/.config/bh-02/{name}"), name
+        assert _denied(spec, f"{_HOME}/xdg/bh-02/{name}"), name  # $XDG_CONFIG_HOME/bh-02
+    assert _denied(spec, f"{_HOME}/.config/bh-02")  # the directory itself: no link swapped in
+    assert not _denied(spec, f"{_HOME}/.config/gh/hosts.yml") and not _denied(spec, f"{_HOME}/notes.md")
     assert "/elsewhere/bh-02" not in spec.fs.write_denies  # outside every writable root
-    project = home_rooted("/home/me/src/app")  # the usual case: the home is not writable at all
+    project = home_rooted(f"{_HOME}/src/app")  # the usual case: the home is not writable at all
     assert not set(trusted) & set(project.fs.write_denies)
-    extra = home_rooted("/home/me/src/app", write=(".", "/home/me"))  # a root `write` adds
-    assert _denied(extra, "/home/me/.config/bh-02/kernel.py")
-    inside = home_rooted("/home/me/.config/bh-02")  # bh-02 run in its own config directory
-    assert not _denied(inside, "/home/me/.config/bh-02/notes.md")
+    extra = home_rooted(f"{_HOME}/src/app", write=(".", _HOME))  # a root `write` adds
+    assert _denied(extra, f"{_HOME}/.config/bh-02/kernel.py")
+    inside = home_rooted(f"{_HOME}/.config/bh-02")  # bh-02 run in its own config directory
+    assert not _denied(inside, f"{_HOME}/.config/bh-02/notes.md")
 
 
-_CHECKOUT = "/home/me/src/bh-02"  # bh-02's own workspace, installed editable
+_CHECKOUT = f"{_HOME}/src/bh-02"  # bh-02's own workspace, installed editable
 _CODE = (  # the directory of every package bh-02 runs code from (`host.code`)
     f"{_CHECKOUT}/bh-02/plugins/memory-cordis-plugin/src/memory_cordis_plugin",
     f"{_CHECKOUT}/bh-02/plugins/python-cordis-plugin/src/python_cordis_plugin",
@@ -204,21 +210,21 @@ def test_bh_02_s_own_code_under_a_writable_root_is_denied_as_its_layer_files_are
             root=root,
             endpoint="/tmp/k/k.sock",
             scratch="/tmp/j/tmp",
-            home="/home/me",
+            home=_HOME,
             config=BrigConfig(),
             layers=(),
             host=(),
             code=_CODE,
         )
 
-    for root in (_CHECKOUT, "/home/me"):  # checkout-rooted, home-rooted
+    for root in (_CHECKOUT, _HOME):  # checkout-rooted, home-rooted
         spec = rooted(root)
         assert _denied(spec, shipped), root
         assert _denied(spec, f"{_CODE[0]}/planted.py"), root  # a module bh-02 could import
         assert all(_denied(spec, code) for code in _CODE[:3]), root  # every plugin's, and cordis's
         assert _CODE[3] not in spec.fs.write_denies  # outside every writable root
         assert not _denied(spec, f"{_CHECKOUT}/README.md")  # the rest of the checkout is the project's
-    elsewhere = rooted("/home/me/work/app")  # the usual case: none is under the project
+    elsewhere = rooted(f"{_HOME}/work/app")  # the usual case: none is under the project
     assert not set(_CODE) & set(elsewhere.fs.write_denies)
     inside = rooted(_CODE[0])  # bh-02 run in a package's own directory
     assert not _denied(inside, f"{_CODE[0]}/notes.md")
@@ -1063,6 +1069,8 @@ def non_reaping_init() -> Iterator[list[int]]:
     """Make this process the init of every orphan beneath it and never reap them: the shape of a
     container whose PID 1 does not reap, under any real PID 1 (`PR_SET_CHILD_SUBREAPER`). The test
     adds the pids it planted to the yielded list; only those are reaped at the end."""
+    if sys.platform != "linux":
+        pytest.skip("PR_SET_CHILD_SUBREAPER is Linux's prctl; no other kernel has it")
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
         pytest.skip("PR_SET_CHILD_SUBREAPER is unavailable here")
