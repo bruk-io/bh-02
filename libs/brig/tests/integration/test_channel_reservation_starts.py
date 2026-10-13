@@ -2,8 +2,8 @@
 
 Two starts in ONE jail, each on a socket reserved in the runtime's channel
 directory `<jail_dir>/chan`, each dialled from the host at its own endpoint:
-in a real bubblewrap jail (where the directory is the mechanism's grant, the
-endpoint's own directory beside it), and with the empty stack. Readiness is a
+in a real bubblewrap jail (where the directory is the mechanism's one grant,
+decision-186), and with the empty stack. Readiness is a
 connect, never the path's existence: a socket file bound and left with
 nothing listening is not ready. And `create` refuses a `chan` that is a link,
 since a bind follows one.
@@ -66,8 +66,6 @@ def _python(run_id: str, code: str, *args: str) -> list[str]:
 
 
 def _spec(jail_dir: str, *, confined: bool) -> Spec:
-    own = os.path.join(jail_dir, "own")
-    os.makedirs(own)
     fs = (
         FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
@@ -76,8 +74,7 @@ def _spec(jail_dir: str, *, confined: bool) -> Spec:
         if confined
         else FsPolicy()
     )
-    endpoint = os.path.join(own, "ctl.sock")
-    return Spec(fs=fs, channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),))
+    return Spec(fs=fs, channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),))
 
 
 def _create(jail_dir: str, *, confined: bool) -> Jail:
@@ -171,7 +168,6 @@ def test_create_refuses_a_channel_directory_that_is_a_link(jail_dir: str) -> Non
         # The control: a real directory there is kept and used.
         os.unlink(os.path.join(jail_dir, "chan"))
         os.mkdir(os.path.join(jail_dir, "chan"))
-        shutil.rmtree(os.path.join(jail_dir, "own"))
         assert _create(jail_dir, confined=False).channel("ctl").bound_path
     finally:
         shutil.rmtree(elsewhere)

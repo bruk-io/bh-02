@@ -31,12 +31,11 @@ pytestmark = pytest.mark.unit
 
 _JAIL_DIR = "/run/brig/jail0"
 _CHAN = f"{_JAIL_DIR}/chan"
-_ENDPOINT = "/run/brig/own/ctl.sock"
 _TOKEN = "0123456789abcdef"
 
 
 def _spec(*, channels: bool = True) -> Spec:
-    declared = (Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),)
+    declared = (Channel(name="ctl", kind=ChannelKind.LISTEN),)
     return Spec(channels=declared if channels else ())
 
 
@@ -111,7 +110,7 @@ def test_a_process_carries_its_channel_bound_path_and_endpoint_across_to_dict() 
     assert (plain.channel, plain.bound_path, plain.endpoint) == (None, None, None)
 
     d = json.loads(json.dumps(jail.to_dict()))
-    assert d["version"] == 7
+    assert d["version"] == 8
     assert [(p["channel"], p["bound_path"]) for p in d["processes"]] == [
         ("ctl", reservation.bound_path),
         (None, None),
@@ -235,7 +234,7 @@ def _bwrap_spec(*, channels: bool = True, write_denies: tuple[str, ...] = ()) ->
 
 
 def _bwrap_ctx(*paths: str) -> CompileCtx:
-    every = ("/usr", "/srv/ws", _ENDPOINT, *paths)
+    every = ("/usr", "/srv/ws", *paths)
     return CompileCtx(
         jail_dir=_JAIL_DIR,
         platform="linux",
@@ -255,13 +254,17 @@ def test_bwrap_binds_the_channel_directory_once_only_when_a_channel_is_declared(
     assert CompileCtx(jail_dir=_JAIL_DIR, platform="linux").channel_dir == _CHAN
 
 
-def test_bwrap_does_not_bind_the_channel_directory_twice_for_an_endpoint_in_it() -> None:
-    endpoint = f"{_CHAN}/ctl.sock"
+def test_bwrap_binds_the_channel_directory_once_for_every_channel() -> None:
+    """decision-186: two declared channels are one grant, the channel
+    directory, where each start's socket is reserved."""
     spec = Spec(
         fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)),
-        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(
+            Channel(name="ctl", kind=ChannelKind.LISTEN),
+            Channel(name="aux", kind=ChannelKind.LISTEN),
+        ),
     )
-    argv = bwrap.compile(spec, _bwrap_ctx(endpoint)).wrap(())
+    argv = bwrap.compile(spec, _bwrap_ctx()).wrap(())
     assert _runs(argv, _CHAN_BIND) == 1, argv
 
 
@@ -282,7 +285,7 @@ def test_a_write_deny_at_or_above_the_channel_directory_is_refused(deny: str) ->
         bwrap.compile(_bwrap_spec(write_denies=(deny,)), _bwrap_ctx(deny))
     sb_spec = Spec(fs=FsPolicy(write_denies=(deny,)), channels=_spec().channels)
     with pytest.raises(SeatbeltChannelInsideWriteDeny, match="channel directory"):
-        render_sbpl(sb_spec, resolved={deny: deny, _ENDPOINT: _ENDPOINT}, jail_dir=_JAIL_DIR)
+        render_sbpl(sb_spec, resolved={deny: deny}, jail_dir=_JAIL_DIR)
     # The control: without a channel, the same deny compiles in both.
     bwrap.compile(_bwrap_spec(channels=False, write_denies=(deny,)), _bwrap_ctx(deny))
     render_sbpl(Spec(fs=FsPolicy(write_denies=(deny,))), resolved={deny: deny}, jail_dir=_JAIL_DIR)
@@ -293,9 +296,7 @@ def test_seatbelt_grants_the_channel_directory_before_the_carve_outs() -> None:
     before a write deny under it, so the deny wins; none without a channel."""
     deny = f"{_CHAN}/held"
     spec = Spec(fs=FsPolicy(write_denies=(deny,)), channels=_spec().channels)
-    lines = render_sbpl(
-        spec, resolved={deny: deny, _ENDPOINT: _ENDPOINT}, jail_dir=_JAIL_DIR
-    ).splitlines()
+    lines = render_sbpl(spec, resolved={deny: deny}, jail_dir=_JAIL_DIR).splitlines()
     grant = f'(allow file-write* (subpath "{_CHAN}"))'
     assert lines.index(grant) < lines.index(f'(deny file-write* (subpath "{deny}"))')
     plain = render_sbpl(Spec(), resolved={}, jail_dir=_JAIL_DIR)

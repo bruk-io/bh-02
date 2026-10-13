@@ -129,8 +129,8 @@ class CompileCtx:
 
     **`jail_dir` arrives already resolved -- THE CALLER SUPPLIES A
     REALPATH'D `jail_dir`.** It is not a `Spec` path, so `resolved_paths`
-    below cannot cover it, yet the staged profile and, usually, a LISTEN
-    endpoint live under it. On darwin, `jail_dir` given as e.g. `/tmp/bgNNN`
+    below cannot cover it, yet the staged profile and the channel directory
+    (decision-184) live under it. On darwin, `jail_dir` given as e.g. `/tmp/bgNNN`
     is the SYMLINKED form (`/tmp` -> `/private/tmp`), and a mechanism that
     writes a rule against the symlinked form silently matches nothing --
     the parent project's own documented `/tmp` vs `/private/tmp` lesson.

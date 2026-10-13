@@ -281,7 +281,7 @@ Spec(
     limits=Limits(wall_seconds, cpu_seconds, memory_bytes, max_tasks,
                   max_output_bytes),                  # 0 = uncapped
     env=EnvPolicy(mode=SCRUB | PASS, allow_names=(...,), set=(...,)),
-    channels=(Channel(name, kind, endpoint), ...),
+    channels=(Channel(name, kind), ...),   # sockets: the runtime's channel directory (§10)
     shared_media=(...,),          # derived + declared; see §10
     provisioning=Provisioning(files=((path, digest), ...),
                               closures=(...,), env=(...,)),
@@ -379,8 +379,10 @@ Notes:
   each limit takes the pointwise minimum with `0` read as uncapped, channels and
   shared media intersect; `env.set` and `provisioning` are carried from the
   receiver unchanged. It refuses (`IncomparableSpecs`) on differing read models,
-  or when one channel name is bound to a different kind or endpoint in each
-  operand. Every one of those per-axis formulas already *is* the greatest lower
+  and on nothing else: a channel names no host path (decision-186, §10), so one
+  name in both operands declares the same channel and the meet keeps it. (It
+  also refused one channel name bound to a different endpoint in each operand
+  until decision-186 took the endpoint away.) Every one of those per-axis formulas already *is* the greatest lower
   bound — an intersection, not an emptying; a minimum, not a `1` — which is why
   the earlier wording ("the strongest spec that is a subset of both") was a
   defect in the sentence and not in the algebra.
@@ -426,7 +428,7 @@ Notes:
   names and pair tuples are normalized when the object is built, so "equal up to
   normalization" is plain `==` and the algebra never renormalizes. Construction
   raises on a negative or non-integer limit, a duplicate channel name, an empty
-  path/name/endpoint, and on the *inactive* read-model field being populated
+  path or name, and on the *inactive* read-model field being populated
   (denylist mode with `read_allows`; allowlist mode with `read_denies` was the
   other half until decision-164 made that field the allowlist's carve-outs) —
   ignoring that field silently is the same refusal-not-downgrade posture as
@@ -523,9 +525,14 @@ Notes:
   the seal keeps a third thing writable inside the jail directory, the
   runtime's channel directory `<jail_dir>/chan` (bwrap binds it, seatbelt
   grants its subpath), and a `write_denies` entry at or above it is refused.
+  Restated by decision-186 (§10, 2026-10-13): a channel has no endpoint, and
+  its one grant is the channel directory, a subdirectory brig names inside the
+  jail directory, so no channel grant is the jail directory or reaches
+  `procs/`, and `ChannelInsideJailDir` and `ChannelOnRecords` are gone.
 - Serialization: `to_dict`/`from_dict`, versioned, round-trip stable.
-- **The version is `SPEC_VERSION = 1`, and an unknown key at any level is a
-  refusal.** There is no migration framework and no tolerated extra field: a
+- **The version is `SPEC_VERSION = 2`, and an unknown key at any level is a
+  refusal.** (It was 1 until decision-186, §10, took the channel's `endpoint`
+  away; a version-1 dict is refused like any other version.) There is no migration framework and no tolerated extra field: a
   dict brig cannot account for is rejected, not partially understood.
   `from_dict` re-runs construction validation, so serialization cannot smuggle
   in a Spec that could not have been constructed directly.
@@ -604,8 +611,8 @@ resolution therefore live in `CompileCtx`, and the resolving is `run`'s:
   and the whole point: a missing rule is loud, a present rule that matches
   nothing is silent.
 - **`jail_dir` arrives already resolved.** It is not a `Spec` path, so the
-  mapping cannot cover it — yet the staged profile and usually the LISTEN
-  endpoint live under it, which would put the same bug in the one path the
+  mapping cannot cover it — yet the staged profile and the channel directory
+  (§10) live under it, which would put the same bug in the one path the
   first half misses. The invariant is the same `run`-layer helper's to
   establish, and it is stated here because a caller constructing a
   `CompileCtx` by hand needs to know it.
@@ -824,8 +831,8 @@ honestly earn):
 
 **The roster's second column is prose about a mechanism's job, and a job is not
 always a claim.** `seatbelt`'s row reads "…, channel binds", which names *work*
-the mechanism does — compiling the SBPL rules that let the jail bind its
-declared LISTEN endpoint — and **not** an axis it claims. Its declared `axes`
+the mechanism does — compiling the SBPL rules that let the jail bind a socket
+in its channel directory (§10) — and **not** an axis it claims. Its declared `axes`
 are **`{fs_read, fs_write, network}`**; `channel_exclusivity` is §4's axis
 about declared channels and enumerated shared media being the only ways in and
 out, and an SBPL profile does not establish that. So `channel_exclusivity`
@@ -877,9 +884,9 @@ be the copy decision-152 deleted the event stream for).
   (1) `--unshare-all --cap-drop ALL` (decision-177, below); (2) the jail's
   own furniture, `--proc /proc`, `/proc/sys` bound read-only over it
   (decision-177) and `--dev /dev`, first among the mounts so every
-  spec-derived mount stacks on top of it; (3) `read_allows` as `--ro-bind`; (4) the declared LISTEN
-  channel's endpoint DIRECTORY as `--bind`, and the channel directory
-  `<jail_dir>/chan` when the Spec declares a channel (decision-184, §10);
+  spec-derived mount stacks on top of it; (3) `read_allows` as `--ro-bind`; (4) the channel directory
+  `<jail_dir>/chan` as `--bind` when the Spec declares a channel (decision-184,
+  §10; each declared endpoint's directory too until decision-186);
   (5) `write_allows` as `--bind`;
   (5a) the pins (decision-168, below), but those in a sealed jail directory;
   (5b) when a write root or a channel directory is at or above the jail
@@ -1030,7 +1037,9 @@ be the copy decision-152 deleted the event stream for).
   is missing because `/bin` was normalised into `/usr/bin` is a jail that
   cannot start).
 - **The LISTEN channel costs a writable DIRECTORY, where seatbelt's costs a
-  path.** §10.1 makes each mechanism compile the crossing; seatbelt can name
+  path.** *Since decision-186 (§10) both grant the runtime's channel directory,
+  and the per-endpoint grant this bullet describes is gone; the refusal at its
+  end stands for a `write_denies` entry at or above the channel directory.* §10.1 makes each mechanism compile the crossing; seatbelt can name
   the socket's exact path because SBPL matches paths, but a bind mount needs an
   object that already exists and the socket does not exist until the jail binds
   it. So the smallest grant bwrap can make is the endpoint's directory, bound
@@ -1473,7 +1482,6 @@ class Jail:
                                                        # the jail names: every process's
                                                        # group in start order, then
                                                        # helpers, containers
-    def wait_ready(self, channel: str, timeout: float) -> None
     def probe(self, battery) -> ProbeReport            # §12; absent when start is
     # fields: report, spec, signatures, channels, compile_events, jail_id, jail_dir
 
@@ -2151,9 +2159,12 @@ holds the jail directory, and `create` rightly refuses until they are gone.
 Three inbound kinds, each with different liveness, trust, and delivery:
 
 1. **Request channel** — synchronous, duplex, framed (length-prefix, CRC,
-   resynchronizable). The jail LISTENs on a declared endpoint; the trusted
-   side dials via `handle.dial()`. Each mechanism compiles the crossing
-   (Seatbelt bind rules, bwrap socket-dir bind, container relay). Readiness
+   resynchronizable). The `Spec` declares the channel by name; the jail
+   LISTENs on a socket the runtime reserves for it in the jail's channel
+   directory, and the trusted side dials it via `process.connect()`
+   (decision-184, decision-185, decision-186). Each mechanism compiles the
+   crossing (Seatbelt's grant on the channel directory, bwrap's bind of it,
+   a container relay). Readiness
    is generic: a LISTEN channel is ready when its bind is observable.
    **Observable means a connect succeeds** — not that the endpoint path
    exists. A socket file outlives the process that bound it, so path existence
@@ -2242,7 +2253,9 @@ jail could not each have their own. Ruled:
 
 Implementing task: TASK-0079.05; bh-02's runner moves to it in TASK-0079.31,
 and the `Spec` stops naming paths in TASK-0079.32. (Ruled 2026-10-12,
-decision-184.)
+decision-184.) *Amended by decision-186 (below, 2026-10-13): the per-endpoint
+grants and `Jail.wait_ready(channel)` are gone, and the channel directory is
+every channel's one grant.*
 
 **The host dials a reserved socket only through a check of what answers
 (2026-10-12, decision-185).** decision-184 left a confused deputy named as a
@@ -2320,6 +2333,81 @@ and `Process.wait_ready` reported ready. Ruled, superseding that residual:
   `ready` too.
 
 Implementing task: TASK-0079.33. (Ruled 2026-10-12, decision-185.)
+*Amended by decision-186 (below, 2026-10-13): `Jail.wait_ready(channel)` is
+gone, and a peer the kernel can't report is a refusal, not "not yet".*
+
+**The Spec names channels, not host paths (2026-10-13, decision-186).**
+decision-0001's migration step 3b, its third part. decision-184 gave each jail
+a channel directory and kept, beside it, the path each `Channel` declared
+(`endpoint`): a grant per endpoint in every mechanism, three refusals about
+where an endpoint may sit, and `Jail.wait_ready(channel)`, which dialled it as
+found. A `Spec` is policy, and where a socket lives is the runtime's (a
+container or a remote sandbox shares no host path with it). Ruled:
+
+- **`Channel(name, kind)`.** A channel is a name the `Spec` declares and its
+  kind (`LISTEN`, §5); it names no path. Every socket is one the runtime
+  reserves in the jail's channel directory (`jail.channel(name)`, decision-184),
+  and only a declared name can be reserved (`UnknownChannel`). `SPEC_VERSION`
+  is 2 (a version-1 dict, whose channels carry `endpoint`, is refused as any
+  other version is), and `JAIL_VERSION` is 8, since a jail's dict carries its
+  channels.
+- **The channel directory is every channel's one grant.** When the `Spec`
+  declares a channel, each mechanism that compiles `fs_write` grants
+  `<jail_dir>/chan` as decision-184 ruled (bwrap: bound read-write at stage 4,
+  and again after the seal when there is one; seatbelt: its subpath after the
+  seal and before the carve-outs), and nothing else for channels: bwrap's
+  endpoint directory and seatbelt's socket literal are gone. seatbelt's
+  unscoped `(allow network-bind)` still follows a declared channel and nothing
+  else. A `Spec` with no channel compiles as before.
+- **The three refusals about where an endpoint may sit, restated for the
+  channel directory.** Each guarded a grant that a path chosen by the `Spec`
+  could aim; the grant is now one brig names, so each holds by construction and
+  its test asserts the positive, with a plant that aims the grant elsewhere:
+  - *decision-174 (no channel grant is the jail directory):* the channel
+    directory is a subdirectory brig derives from the jail directory
+    (`channel_dir`), never the jail directory, so a channel never makes the
+    jail directory writable; decision-173's seal is unchanged.
+    `ChannelInsideJailDir` goes with the endpoints.
+  - *decision-181 (no grant at or under the records):* `chan` and `procs` are
+    siblings in the jail directory, so no channel grant reaches a record.
+    `ChannelOnRecords` and `refuse_channel_on_records` go with the endpoints.
+    A reservation is still refused unless its path is directly in the channel
+    directory under a name the runtime makes (decision-184).
+  - *The write-deny refusal (`ChannelInsideWriteDeny`):* a socket cannot be
+    bound under a carve-out, so what is refused is a `write_denies` entry at or
+    above the channel directory, in both mechanisms (decision-184's half). The
+    half that refused an endpoint under a carve-out goes with the endpoints. A
+    `write_denies` entry strictly inside the channel directory still wins over
+    it (bwrap mounts it after, seatbelt emits it after).
+- **`narrowed_to` meets channels by name.** Its refusal of one channel name
+  bound to a different endpoint in each operand had nothing left to compare: a
+  name in both operands declares the same channel, so the meet keeps the names
+  both declare and `IncomparableSpecs` is raised for differing read models only
+  (§5). The channels clause of `is_subset_of` is unchanged: a child's channel
+  names are among its parent's.
+- **The network battery binds a reserved socket.** Its positive control for a
+  `Spec` that declares a channel binds a socket the jail reserved for it
+  (`network_battery(spec, denied_address=..., channel=jail.channel(name))`),
+  the one action every mechanism grants for a channel, and it is named
+  `bind_a_reserved_channel_socket`. Construction refuses a `Spec` that
+  declares a channel without a reservation, or with one for a channel it does
+  not declare, as it refuses a `Spec` with no network action (decision-117).
+- **`Jail.wait_ready(channel)` is gone**, with the readiness helper that
+  connected to a declared endpoint as found (decision-185 named it the one dial
+  left unchecked). Readiness is `Process.wait_ready`, and the dial
+  `Process.connect`, both through the runtime's verified dial.
+- **A peer the kernel can't report is a refusal.** `HostRuntime.ready` read any
+  `OSError` from the dial as "nothing listens yet", and a failed read of the
+  peer after a connect succeeded is one, so `Process.wait_ready` waited out its
+  timeout on a socket that answered (found in TASK-0079.33's review). `dial`
+  now closes the connection and raises `EndpointRefused` naming the error when
+  the peer can't be read; only the path's `lstat` and the `connect` (nothing
+  bound, nothing listening) read "not yet".
+- **Unchanged.** Grades; decision-184's reservations and the records' fields;
+  decision-185's verified dial; the residuals both name (a co-tenant's socket
+  is shared media until each process has a mount namespace, TASK-0079.07).
+
+Implementing task: TASK-0079.32. (Ruled 2026-10-13, decision-186.)
 
 **Mailbox is deleted (2026-09-08, decision-153).** It was the second kind
 here: an asynchronous, durable, ordered, many-writer-safe framed file with

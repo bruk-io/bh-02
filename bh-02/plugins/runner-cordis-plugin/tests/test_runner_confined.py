@@ -6,7 +6,6 @@ import contextlib
 import ctypes
 import os
 import signal
-import socket
 import struct
 import subprocess
 import sys
@@ -87,6 +86,7 @@ def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> N
     assert spec.fs.write_allows == (
         "/Users/me/.local/state/bh-02/projects/-w-app/memory",
         "/tmp/j/tmp",
+        "/tmp/k",  # the socket's directory (brig's decision-186; TASK-0079.31 replaces it)
         "/w/app",
     )
     assert not any(d.startswith("/Users/me/.local/state") for d in spec.fs.write_denies)
@@ -98,7 +98,7 @@ def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> N
         config=BrigConfig(),
         layers=(),
         host=(),
-    ).fs.write_allows == ("/tmp/j/tmp", "/w/app")
+    ).fs.write_allows == ("/tmp/j/tmp", "/tmp/k", "/w/app")
 
 
 def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
@@ -112,7 +112,7 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
         host=("/w/app/src", "/usr/lib/python3.15", "/w/app/.venv", "/w/app"),
         secrets=("/src/bh/local.env",),
     )
-    assert spec.fs.write_allows == ("/tmp/j/tmp", "/w/app")
+    assert spec.fs.write_allows == ("/tmp/j/tmp", "/tmp/k", "/w/app")
     denies = set(spec.fs.write_denies)
     assert {"/w/app/mine.toml", "/elsewhere/chat.toml"} <= denies  # the composition's own files
     assert {
@@ -132,7 +132,9 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
     assert "/w/app/local.env" in denies  # one it may not read it may not overwrite either
     assert "/src/bh/local.env" not in denies  # outside every writable root: nothing to deny
     assert dict(spec.env.set) == {"TMPDIR": "/tmp/j/tmp"} and "PATH" in spec.env.allow_names
-    assert [c.endpoint for c in spec.channels] == ["/tmp/k/k.sock"]
+    # The channel by name; its socket's directory is a write root (above), as brig granted it
+    # per channel until its decision-186.
+    assert [c.name for c in spec.channels] == ["kernel"]
 
 
 def _denied(spec: Any, path: str) -> bool:
@@ -621,7 +623,7 @@ class _Plain:
     tripwire end."""
 
     def __init__(self, jail: Any) -> None:
-        self._endpoint = jail.spec.channels[0].endpoint
+        del jail
         self._process: subprocess.Popen[bytes] | None = None
 
     def start(self, argv: Sequence[str], *, cwd: str, **rest: object) -> SimpleNamespace:
@@ -630,16 +632,6 @@ class _Plain:
         # ended is gone and not a zombie that `os.killpg(group, 0)` still finds
         threading.Thread(target=self._process.wait, daemon=True).start()
         return SimpleNamespace(pid=self._process.pid, stderr_path="", interrupt=self._interrupt)
-
-    def wait_ready(self, channel: str, timeout: float) -> None:
-        assert self._process is not None
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline and self._process.poll() is None:
-            with contextlib.suppress(OSError), socket.socket(socket.AF_UNIX) as probe:
-                probe.connect(self._endpoint)  # connect, then leave without a word (a probe)
-                return
-            time.sleep(0.02)
-        raise TimeoutError(f"{channel} never listened")
 
     def _interrupt(self) -> bool:
         assert self._process is not None

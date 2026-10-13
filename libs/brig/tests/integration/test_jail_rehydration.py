@@ -364,7 +364,7 @@ def test_rehydrated_round_trip_carries_a_channel_and_a_non_empty_detail(run_id: 
     reuses THE CONTROL's mode rather than tearing the workload down), and
     asserts full dict equality on a dict that is not vacuously equal to
     itself by construction."""
-    channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint="ctl.sock")
+    channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     report = unenforced_report("m2: no mechanisms enforce anything yet")
 
@@ -397,7 +397,7 @@ def test_rehydrated_round_trip_carries_a_channel_and_a_non_empty_detail(run_id: 
         # actually carries a channel and a non-empty detail.
         assert result["to_dict"] == original_dict
         rehydrated_channels = result["to_dict"]["channels"]
-        assert rehydrated_channels == [{"name": "ctl", "kind": "listen", "endpoint": "ctl.sock"}]
+        assert rehydrated_channels == [{"name": "ctl", "kind": "listen"}]  # no path, decision-186
         rehydrated_report = result["to_dict"]["report"]
         assert rehydrated_report["fs_read"]["detail"] == "m2: no mechanisms enforce anything yet"
     finally:
@@ -437,7 +437,7 @@ def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
     try:
         d = jail.to_dict()
         # 6 since decision-181 (TASK-0079.26), 7 since decision-184 (TASK-0079.05).
-        assert d["version"] == JAIL_VERSION == 7
+        assert d["version"] == JAIL_VERSION == 8
 
         stale = dict(d)
         stale["version"] = 1

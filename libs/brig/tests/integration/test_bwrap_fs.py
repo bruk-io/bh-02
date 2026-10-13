@@ -154,12 +154,8 @@ def _seed_workspace(jail_dir: str) -> tuple[str, str, str]:
     return workspace, hooks, envrc
 
 
-def _spec_for(workspace: str, hooks: str, envrc: str, *, endpoint: str | None = None) -> Spec:
-    channels = (
-        (Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),)
-        if endpoint is not None
-        else ()
-    )
+def _spec_for(workspace: str, hooks: str, envrc: str, *, channel: bool = False) -> Spec:
+    channels = (Channel(name="ctl", kind=ChannelKind.LISTEN),) if channel else ()
     return Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,

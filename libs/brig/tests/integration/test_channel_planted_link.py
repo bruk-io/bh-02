@@ -122,8 +122,7 @@ def _create(jail_dir: str, *, confined: bool) -> Jail:
         if confined
         else FsPolicy()
     )
-    endpoint = os.path.join(own, "ctl.sock")
-    spec = Spec(fs=fs, channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),))
+    spec = Spec(fs=fs, channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),))
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
     return Jail.create(
         Stack([bwrap] if confined else []).compile(spec, ctx=ctx),
@@ -286,6 +285,53 @@ def test_a_listener_that_left_after_listening_is_refused(run_id: str, jail_dir: 
 
 
 @pytest.mark.integration
+def test_a_peer_the_kernel_cannot_report_is_refused_not_waited_out(
+    run_id: str, jail_dir: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """decision-186 (TASK-0079.33's review): `HostRuntime.ready` read any
+    `OSError` from the dial as "nothing listens yet", and a failed read of
+    the peer after the connect succeeded is one, so `wait_ready` waited out
+    its whole timeout on a socket that answered. The peer read is made to
+    fail (`getsockopt` refusing, as a kernel can): `wait_ready` and `connect`
+    raise `EndpointRefused` naming the error at once. The control, same
+    jail, same process: with the read restored, it is ready and answers."""
+    jail = _create(jail_dir, confined=False)
+    reservation = jail.channel("ctl")
+    process = jail.start(
+        _python(run_id, _SERVE, reservation.bound_path, "genuine"), channel=reservation
+    )
+
+    def unreadable(sock: socket.socket) -> None:
+        raise OSError(22, "Invalid argument")
+
+    try:
+        with monkeypatch.context() as patched:
+            patched.setattr("brig.run.dial._read_peer", unreadable)
+            # Only once something listens can the peer read be reached.
+            deadline = time.monotonic() + _READY_S
+            while True:
+                try:
+                    with socket.socket(socket.AF_UNIX) as probe:
+                        probe.connect(reservation.bound_path)
+                    break
+                except OSError:
+                    assert time.monotonic() < deadline, "the genuine listener never listened"
+                    time.sleep(0.02)
+            start = time.monotonic()
+            with pytest.raises(EndpointRefused, match="could not report who listens"):
+                process.wait_ready(_READY_S)
+            assert time.monotonic() - start < _READY_S / 3, "the refusal was waited out"
+            with pytest.raises(EndpointRefused, match="Invalid argument"):
+                process.connect()
+        process.wait_ready(_READY_S)
+        with process.connect() as dialled:
+            assert dialled.recv(64) == b"genuine"
+    finally:
+        jail.destroy()
+        teardown_group(process)
+
+
+@pytest.mark.integration
 def test_host_supervisor_start_refuses_a_forged_reservation(run_id: str, jail_dir: str) -> None:
     """decision-184's refusal by `HostSupervisor.start` itself, against
     `HostRuntime` (not the fake): each forgery refused before anything is
@@ -326,9 +372,7 @@ def test_host_supervisor_start_refuses_a_forged_reservation(run_id: str, jail_di
 def test_the_fake_runtime_connect_hands_back_one_end_of_a_pair() -> None:
     runtime = FakeRuntime()
     jail = Jail.create(
-        Stack([]).compile(
-            Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint="/o/c.sock"),))
-        ),
+        Stack([]).compile(Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),))),
         runtime=runtime,
         cwd="/work",
         jail_id="fake-jail",

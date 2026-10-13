@@ -412,7 +412,7 @@ def test_launch_writes_staged_files_and_jail_round_trips_channels_and_detail(
     proves `_write_staged_files` (Deliverable step 2) actually lands a
     staged file with its content and mode, which no other test in this
     file exercises either (all use `staged=()`)."""
-    channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint="ctl.sock")
+    channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     report = unenforced_report("m2: no mechanisms enforce anything yet")
     staged = (StagedFile(relpath="profile.txt", content="staged-content-xyz", mode=0o640),)
@@ -451,7 +451,7 @@ def test_launch_writes_staged_files_and_jail_round_trips_channels_and_detail(
         assert [p.id for p in rehydrated.processes()] == [process.id]
         assert rehydrated.channels["ctl"] == channel
         assert rehydrated.channels["ctl"].kind is ChannelKind.LISTEN
-        assert rehydrated.channels["ctl"].endpoint == "ctl.sock"
+        assert rehydrated.channels["ctl"].name == "ctl"  # and no path (decision-186)
 
         # The unknown-key refusal inside channel decoding actually fires
         # (dead code in AC #8's test above, which never has a channel).
@@ -545,11 +545,7 @@ def test_filled_seams_are_functional_not_stubs(run_id: str) -> None:
     - `Jail.destroy` (`kill()` until decision-183) returns a
       `KillReport` whose workload item outcome is `ENDED`.
     """
-    never_binds = Channel(
-        name="never-binds",
-        kind=ChannelKind.LISTEN,
-        endpoint=f"/tmp/bg{os.getpid()}-ac10-nobind.sock",
-    )
+    never_binds = Channel(name="never-binds", kind=ChannelKind.LISTEN)
     compiled = _compiled_jail(spec=Spec(channels=(never_binds,)))
     argv = workload_argv(run_id, "sleep 5")
     jail_dir = _new_jail_dir()
@@ -566,8 +562,12 @@ def test_filled_seams_are_functional_not_stubs(run_id: str) -> None:
         # pass it -- that is the whole discharge of "not the stub's
         # error". The identity check (not `isinstance`) then excludes a
         # stand-in subclass too.
+        # Since decision-186 readiness is a process's, on a socket the jail
+        # reserved: a sibling started on one it never binds.
+        reservation = jail.channel("never-binds")
+        quiet = jail.start(workload_argv(run_id, "sleep 5"), channel=reservation)
         with pytest.raises(readiness_mod.WaitReadyTimeout) as exc_info:
-            readiness_mod.wait_ready(jail, "never-binds", 0.2)
+            quiet.wait_ready(0.2)
         assert exc_info.type is readiness_mod.WaitReadyTimeout
 
         # destroy: functional, not a raising stub.

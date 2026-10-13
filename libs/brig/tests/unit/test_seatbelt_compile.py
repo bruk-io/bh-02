@@ -33,7 +33,6 @@ from brig.core import (
     ReadModel,
     Spec,
 )
-from brig.core.runtime import ChannelOnRecords
 from brig.mech import CompileCtx
 from brig.mech.env_scrub import env_scrub
 from brig.mech.rlimits import rlimits
@@ -161,12 +160,11 @@ def test_fs_write_grade_is_enforced_with_write_denies_named_in_detail() -> None:
 @pytest.mark.unit
 def test_network_grade_with_listen_channel_names_unscoped_bind_and_file_write_confinement() -> None:
     """For a spec with a LISTEN channel, the network detail must name that
-    `network-bind` is UNSCOPED by dialect necessity and that the socket
-    path is confined by the `file-write*` literal rule instead."""
-    endpoint = f"{_JAIL_DIR}/chan/control.sock"
-    spec = Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=endpoint),))
-    ctx = CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={endpoint: endpoint})
-    step = seatbelt.compile(spec, ctx)
+    `network-bind` is UNSCOPED by dialect necessity and that where a socket
+    may be made is confined by the `file-write*` rule on the channel
+    directory instead."""
+    spec = Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN),))
+    step = seatbelt.compile(spec, _CTX)
     graded = step.grades[Axis.NETWORK]
     assert graded.grade is Grade.ENFORCED
     assert "unscoped" in graded.detail
@@ -310,29 +308,28 @@ def test_three_mechanism_stack_composes_rlimits_outermost_then_seatbelt_then_env
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("records", ["procs", "execs"])
-def test_a_channel_at_or_under_the_records_is_refused(records: str) -> None:
-    """decision-181: seatbelt grants a socket its literal path, but a socket
-    made at a record's path is a record the host can't read; refused like
-    bwrap's, naming the endpoint and the records directory. The control: the
-    same channel in a directory of its own compiles. `execs/` is no records
-    directory since decision-183 (nothing brig keeps lives there), so its
-    case is the second control: it compiles."""
-    endpoint = f"{_JAIL_DIR}/{records}/control.sock"
-    if records == "execs":
-        seatbelt.compile(
-            Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=endpoint),)),
-            CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={endpoint: endpoint}),
-        )
-        return
-    spec = Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=endpoint),))
-    ctx = CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={endpoint: endpoint})
-    with pytest.raises(ChannelOnRecords) as refusal:
-        seatbelt.compile(spec, ctx)
-    assert endpoint in str(refusal.value)
-    assert f"{_JAIL_DIR}/{records}" in str(refusal.value)
-    own = f"{_JAIL_DIR}/chan/control.sock"
-    seatbelt.compile(
-        Spec(channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint=own),)),
-        CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={own: own}),
+@pytest.mark.parametrize("sealed", [True, False], ids=["write root above", "no write root above"])
+def test_no_channel_grant_reaches_the_records(sealed: bool) -> None:
+    """decision-181, restated by decision-186: a channel's one grant is the
+    channel directory's subpath, a sibling of `<jail_dir>/procs`, so no write
+    allow in the profile is at, under or above the records but a write root
+    the seal then takes back. The control: the channel directory is granted.
+    Rendered profile only (no darwin host runs this suite)."""
+    root = _JAIL_DIR.rsplit("/", 1)[0]
+    spec = Spec(
+        fs=FsPolicy(write_allows=(root,) if sealed else ()),
+        channels=(Channel(name="control", kind=ChannelKind.LISTEN),),
     )
+    ctx = CompileCtx(jail_dir=_JAIL_DIR, platform="darwin", resolved_paths={root: root})
+    profile = seatbelt.compile(spec, ctx).staged[0].content
+    records = f"{_JAIL_DIR}/procs"
+    allowed = re.findall(r'\(allow file-write\* \((?:subpath|literal) "([^"]*)"\)\)', profile)
+    reaching = [
+        path
+        for path in allowed
+        if path != root and (path.startswith(records) or records.startswith(path + "/"))
+    ]
+    assert reaching == [], profile
+    assert f"{_JAIL_DIR}/chan" in allowed, profile
+    if sealed:
+        assert f'(deny file-write* (subpath "{_JAIL_DIR}"))' in profile

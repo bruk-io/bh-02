@@ -1,17 +1,21 @@
-"""decision-174 in a real bubblewrap jail: where a LISTEN endpoint may sit.
+"""decision-174, restated by decision-186, in a real bubblewrap jail: a channel
+never makes the jail directory writable.
 
-bwrap grants a channel its endpoint's whole directory, read-write. Directly in
-the jail directory that made brig's own control state (its exec
+bwrap granted a channel its endpoint's whole directory, read-write, and
+directly in the jail directory that made brig's own control state (its exec
 registrations and exit file then, its process records since decision-181, the
-logs) writable from inside the jail: planted before the fix, a registration
-directory, the exit file and `x` all landed on the host. The compile now refuses that layout,
-and this checks both halves against a real mechanism:
+logs) writable from inside the jail: planted before decision-174, a
+registration directory, the exit file and `x` all landed on the host. Since
+decision-186 a channel names no path, and its one grant is the runtime's
+channel directory `<jail_dir>/chan`, so this checks both halves against a real
+mechanism:
 
-- the refusal, from `build_compile_ctx` through `Stack.compile`, with nothing
-  launched (so the forgery cannot happen);
-- the remedy: an endpoint in a subdirectory still gets its own directory
-  writable, while the jail still cannot write a record under `procs/` or its
-  own exit record, and the exit status `wait()` reads is the workload's.
+- the grant, from `build_compile_ctx` through `bwrap.compile`, with nothing
+  launched: the channel directory is the one read-write mount, never the jail
+  directory;
+- in a running jail: the channel directory is writable, while the jail still
+  cannot write a record under `procs/` or its own exit record, and the exit
+  status `wait()` reads is the workload's.
 
 Observed on the host with `os.path`, never through brig.
 """
@@ -27,7 +31,7 @@ from collections.abc import Iterator
 import pytest
 
 from brig.core import Channel, ChannelKind, FsPolicy, ReadModel, Spec
-from brig.mech.bwrap import DEFAULT_BWRAP_PATH, ChannelInsideJailDir, bwrap
+from brig.mech.bwrap import DEFAULT_BWRAP_PATH, bwrap
 from brig.run import IoPolicy, _records
 from brig.run.compile_ctx import build_compile_ctx
 from brig.stack import Stack
@@ -55,25 +59,30 @@ def jail_dir() -> Iterator[str]:
         shutil.rmtree(path)
 
 
-def _spec(endpoint: str) -> Spec:
+def _spec() -> Spec:
     return Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
             read_allows=tuple(path for path in _SYSTEM_ROOTS if os.path.exists(path)),
         ),
-        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
 
 
 @pytest.mark.integration
-def test_an_endpoint_directly_in_the_jail_directory_is_refused(jail_dir: str) -> None:
-    endpoint = os.path.join(jail_dir, "ctl.sock")
-    spec = _spec(endpoint)
+def test_a_channel_is_granted_the_channel_directory_never_the_jail_directory(
+    jail_dir: str,
+) -> None:
+    """The grant as compiled from a real context: one read-write bind, the
+    channel directory at itself, and nothing at the jail directory. Nothing is
+    launched, so nothing is made in the jail directory either."""
+    spec = _spec()
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
-    with pytest.raises(ChannelInsideJailDir) as refusal:
-        Stack([bwrap]).compile(spec, ctx=ctx)
-    assert os.path.realpath(endpoint) in str(refusal.value)
-    assert os.path.realpath(jail_dir) in str(refusal.value)
+    argv = bwrap.compile(spec, ctx).wrap(("/bin/true",))
+    binds = [(argv[i + 1], argv[i + 2]) for i, arg in enumerate(argv) if arg == "--bind"]
+    chan = os.path.join(ctx.jail_dir, "chan")
+    assert binds == [(chan, chan)], argv
+    assert ctx.jail_dir not in {path for pair in binds for path in pair}
     assert os.listdir(jail_dir) == []
 
 
@@ -91,13 +100,12 @@ _FORGED = ("MADE_RECORD", "WROTE_EXIT", "WROTE_X")
 
 
 @pytest.mark.integration
-def test_an_endpoint_in_a_subdirectory_works_and_the_rest_of_the_jail_directory_is_sealed(
+def test_the_channel_directory_works_and_the_rest_of_the_jail_directory_is_sealed(
     run_id: str,
     jail_dir: str,
 ) -> None:
     chan = os.path.join(jail_dir, "chan")
-    os.makedirs(chan)
-    spec = _spec(os.path.join(chan, "ctl.sock"))
+    spec = _spec()
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     signature = bwrap.compile(spec, ctx).denial_signatures[0]
     compiled = Stack([bwrap]).compile(spec, ctx=ctx)

@@ -41,8 +41,9 @@ decision-185 (TASK-0079.33) `EndpointRefused`, what `Process.connect` and
 `Process.wait_ready` raise when what answers a reserved socket is not its
 process's own listener.
 
-`wait_ready` is a private delegate (`readiness.py`), intentionally NOT
-re-exported here -- `Jail.wait_ready` is the public surface, per SPEC.md §9.
+Readiness is `Process.wait_ready`, through the runtime's own dial
+(`readiness.py` holds its poll); `Jail.wait_ready(channel)` is gone
+(decision-186).
 
 Teardown's full report vocabulary -- `KillReport`, `KillItem`,
 `KillOutcome`, `KILL_ITEM_KINDS` -- IS re-exported here (task-072,

@@ -66,9 +66,7 @@ def test_the_refusal_names_the_endpoint_and_why() -> None:
 
 def _started_on_a_channel(runtime: FakeRuntime) -> Jail:
     return Jail.create(
-        Stack([]).compile(
-            Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint="/o/c.sock"),))
-        ),
+        Stack([]).compile(Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),))),
         runtime=runtime,
         cwd="/work",
         jail_id="fake-jail",

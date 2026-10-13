@@ -431,14 +431,11 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
         f.write("canary\n")
     # task-063 (decision-117): the CONTROL is derived from the Spec, so a
     # LISTEN channel must be declared for network_battery to have a
-    # spec-permitted action to control for -- the endpoint is a plain path
-    # under this test's own scratch root, nothing pre-bound.
-    channel_root = _new_root(run_id, "fnc")
-    os.makedirs(channel_root, exist_ok=True)
-    channel_endpoint = os.path.join(channel_root, "ctl.sock")
+    # spec-permitted action to control for -- a socket the jail reserves in
+    # its channel directory (decision-186), nothing pre-bound.
     spec = Spec(
         fs=FsPolicy(write_allows=(workspace,)),
-        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=channel_endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
     jail, process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="ec1-fs-net", run_id=run_id
@@ -451,7 +448,7 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
                 credential_canary=credential_canary,
                 ssh_directory_canary=ssh_directory_canary,
             ),
-            network_battery(spec, denied_address="192.0.2.1:80"),
+            network_battery(spec, denied_address="192.0.2.1:80", channel=jail.channel("ctl")),
         )
         for battery in batteries:
             report = _probe(jail, battery)
@@ -475,7 +472,7 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
 
 
 @pytest.mark.integration
-def test_the_network_control_fails_when_the_declared_endpoint_cannot_be_bound(
+def test_the_network_control_fails_when_the_reserved_socket_cannot_be_bound(
     run_id: str,
 ) -> None:
     """AC #12, the control on the control (task-053's own name for this
@@ -498,18 +495,19 @@ def test_the_network_control_fails_when_the_declared_endpoint_cannot_be_bound(
     reported CONTROL-PASS unconditionally, endpoint bindable or not, would
     sail through AC #11 undetected. MUTATION-CHECKED (see task-063's own
     notes): removing the occupying seed below makes `control.verdict is
-    Verdict.FAIL` go red, because the bind then genuinely succeeds."""
-    channel_root = _new_root(run_id, "ncf")
-    os.makedirs(channel_root, exist_ok=True)
-    channel_endpoint = os.path.join(channel_root, "ctl.sock")
-    with open(channel_endpoint, "w", encoding="utf-8") as f:
-        f.write("occupied\n")
-    spec = Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=channel_endpoint),))
+    Verdict.FAIL` go red, because the bind then genuinely succeeds.
+    **Updated by decision-186:** a channel names no path, so the CONTROL
+    binds a socket the jail reserved in its channel directory, and the seed
+    occupies that reserved path."""
+    spec = Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),))
     jail, process = _launch(
         degraded(), spec, _sleep_workload(run_id), jail_id="ec1-net-control-fail", run_id=run_id
     )
     try:
-        battery = network_battery(spec, denied_address="192.0.2.1:80")
+        reservation = jail.channel("ctl")
+        with open(reservation.bound_path, "w", encoding="utf-8") as f:
+            f.write("occupied\n")
+        battery = network_battery(spec, denied_address="192.0.2.1:80", channel=reservation)
         report = _probe(jail, battery)
         control = next(o for o in report.outcomes if o.shape is ProbeShape.CONTROL)
         assert control.verdict is Verdict.FAIL

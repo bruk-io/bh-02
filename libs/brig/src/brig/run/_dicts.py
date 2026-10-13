@@ -7,7 +7,7 @@ from typing import Any, Final
 
 from brig.core import AXES, Axis, Channel, ChannelKind, EnforcementReport, Grade, Graded
 
-_CHANNEL_KEYS: Final = frozenset({"name", "kind", "endpoint"})
+_CHANNEL_KEYS: Final = frozenset({"name", "kind"})
 _REPORT_AXIS_KEYS: Final = frozenset({"grade", "detail"})
 
 
@@ -48,9 +48,7 @@ def report_from_dict(d: Mapping[str, Any], *, who: str) -> EnforcementReport:
 
 def channels_to_list(channels: Mapping[str, Channel]) -> list[dict[str, str]]:
     """`channels` as JSON-native data, one entry per channel."""
-    return [
-        {"name": c.name, "kind": c.kind.value, "endpoint": c.endpoint} for c in channels.values()
-    ]
+    return [{"name": c.name, "kind": c.kind.value} for c in channels.values()]
 
 
 def channels_from_list(raw: Sequence[Mapping[str, Any]], *, who: str) -> dict[str, Channel]:
@@ -65,10 +63,6 @@ def channels_from_list(raw: Sequence[Mapping[str, Any]], *, who: str) -> dict[st
         unknown = set(entry) - _CHANNEL_KEYS
         if unknown:
             raise ValueError(f"{who}: unknown key(s) {sorted(unknown)!r} in channels[]")
-        channel = Channel(
-            name=entry["name"],
-            kind=ChannelKind(entry["kind"]),
-            endpoint=entry["endpoint"],
-        )
+        channel = Channel(name=entry["name"], kind=ChannelKind(entry["kind"]))
         result[channel.name] = channel
     return result

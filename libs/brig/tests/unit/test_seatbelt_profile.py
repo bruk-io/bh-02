@@ -51,16 +51,13 @@ _GOLDEN_SPEC = Spec(
         write_denies=("/tmp/bg1/workspace/.git/hooks",),
         read_denies=("/Users/dev/.ssh",),
     ),
-    channels=(
-        Channel(name="control", kind=ChannelKind.LISTEN, endpoint="/tmp/bg1/chan/control.sock"),
-    ),
+    channels=(Channel(name="control", kind=ChannelKind.LISTEN),),
 )
 
 _GOLDEN_RESOLVED = {
     "/tmp/bg1/workspace": "/private/tmp/bg1/workspace",
     "/tmp/bg1/workspace/.git/hooks": "/private/tmp/bg1/workspace/.git/hooks",
     "/Users/dev/.ssh": "/Users/dev/.ssh",
-    "/tmp/bg1/chan/control.sock": "/private/tmp/bg1/chan/control.sock",
 }
 
 _EXPECTED_GOLDEN_PROFILE = """\
@@ -76,7 +73,6 @@ _EXPECTED_GOLDEN_PROFILE = """\
 (allow file-write* (subpath "/private/tmp/bg1/workspace"))
 (allow file-write* (subpath "/private/tmp/bg1/chan"))
 (deny file-write* (subpath "/private/tmp/bg1/workspace/.git/hooks"))
-(allow file-write* (literal "/private/tmp/bg1/chan/control.sock"))
 (allow network-bind)
 (deny network* (with no-log))
 """
@@ -212,44 +208,29 @@ def test_refuses_unresolved_write_allow_naming_that_path() -> None:
 
 
 @pytest.mark.unit
-def test_refuses_channel_inside_write_deny_naming_both_paths() -> None:
+def test_refuses_a_write_deny_over_the_channel_directory_naming_both_paths() -> None:
+    """decision-186: a channel names no path, so the one place a socket can
+    be made is the channel directory, and a write deny at or above it is
+    what is refused (an endpoint under a deny was, until then)."""
+    jail_dir = "/private/tmp/x"
     spec = Spec(
-        fs=FsPolicy(
-            write_allows=("/private/tmp/x/workspace",),
-            write_denies=("/private/tmp/x/workspace/.git",),
-        ),
-        channels=(
-            Channel(
-                name="control",
-                kind=ChannelKind.LISTEN,
-                endpoint="/private/tmp/x/workspace/.git/control.sock",
-            ),
-        ),
+        fs=FsPolicy(write_allows=("/private/tmp/w",), write_denies=(jail_dir,)),
+        channels=(Channel(name="control", kind=ChannelKind.LISTEN),),
     )
-    resolved = {
-        "/private/tmp/x/workspace": "/private/tmp/x/workspace",
-        "/private/tmp/x/workspace/.git": "/private/tmp/x/workspace/.git",
-        "/private/tmp/x/workspace/.git/control.sock": (
-            "/private/tmp/x/workspace/.git/control.sock"
-        ),
-    }
+    resolved = {"/private/tmp/w": "/private/tmp/w", jail_dir: jail_dir}
     with pytest.raises(ChannelInsideWriteDeny) as exc_info:
-        render_sbpl(spec, resolved=resolved, jail_dir="/private/tmp/x")
+        render_sbpl(spec, resolved=resolved, jail_dir=jail_dir)
     message = str(exc_info.value)
-    resolved_endpoint = "/private/tmp/x/workspace/.git/control.sock"
-    deny_root = "/private/tmp/x/workspace/.git"
-    # deny_root is a literal substring of resolved_endpoint in this fixture
-    # (that's the point being tested), so a plain `path in message` check on
-    # deny_root is vacuous -- it would still pass a mutant that dropped
-    # deny_root from the message entirely, since resolved_endpoint's own text
-    # contains it. repr() disambiguates: repr(deny_root) closes its quote
-    # immediately after ".git", so it is NOT a substring of
-    # repr(resolved_endpoint), where ".git" is followed by "/control.sock"
-    # before the closing quote. Each assertion below is independently
-    # falsifiable by a mutant that drops that one path from the message.
-    assert repr(deny_root) not in repr(resolved_endpoint)
-    assert repr(resolved_endpoint) in message
-    assert repr(deny_root) in message
+    chan = f"{jail_dir}/chan"
+    # deny_root is a literal substring of chan in this fixture, so a plain
+    # `path in message` check on it is vacuous; repr() disambiguates, since
+    # repr(jail_dir) closes its quote where repr(chan) goes on to "/chan".
+    assert repr(jail_dir) not in repr(chan)
+    assert repr(chan) in message
+    assert repr(jail_dir) in message
+    # The control: a deny beside the channel directory compiles.
+    beside = Spec(fs=FsPolicy(write_denies=(f"{jail_dir}/w",)), channels=spec.channels)
+    render_sbpl(beside, resolved={f"{jail_dir}/w": f"{jail_dir}/w"}, jail_dir=jail_dir)
 
 
 # --------------------------------------------------------------------------
@@ -292,13 +273,8 @@ def test_control_a_private_tmp_jail_dir_does_not_refuse() -> None:
 
 @pytest.mark.unit
 def test_network_bind_renders_exactly_once_with_one_listen_channel() -> None:
-    spec = Spec(
-        channels=(
-            Channel(name="c", kind=ChannelKind.LISTEN, endpoint="/private/tmp/x/chan/c.sock"),
-        )
-    )
-    resolved = {"/private/tmp/x/chan/c.sock": "/private/tmp/x/chan/c.sock"}
-    rendered = render_sbpl(spec, resolved=resolved, jail_dir="/private/tmp/x")
+    spec = Spec(channels=(Channel(name="c", kind=ChannelKind.LISTEN),))
+    rendered = render_sbpl(spec, resolved={}, jail_dir="/private/tmp/x")
     assert rendered.splitlines().count("(allow network-bind)") == 1
 
 
@@ -314,18 +290,14 @@ def test_network_bind_renders_exactly_zero_times_with_no_channels() -> None:
 
 #: An embedder's shape when run from `/tmp` on darwin: the project is
 #: `/private/tmp`, the jail directory `/private/tmp/bh-j-1` (its scratch
-#: `tmp/` beneath it), the endpoint in a subdirectory of it (`chan/`).
+#: `tmp/` beneath it), its channel directory `chan/` too.
 _SEALED_JAIL_DIR = "/private/tmp/bh-j-1"
 
 
 def _sealed_spec(root: str) -> Spec:
     return Spec(
         fs=FsPolicy(write_allows=(root,), write_denies=("/private/tmp/.git/hooks",)),
-        channels=(
-            Channel(
-                name="kernel", kind=ChannelKind.LISTEN, endpoint=f"{_SEALED_JAIL_DIR}/chan/k.sock"
-            ),
-        ),
+        channels=(Channel(name="kernel", kind=ChannelKind.LISTEN),),
     )
 
 
@@ -333,7 +305,6 @@ def _sealed_resolved(root: str) -> dict[str, str]:
     return {
         root: root,
         "/private/tmp/.git/hooks": "/private/tmp/.git/hooks",
-        f"{_SEALED_JAIL_DIR}/chan/k.sock": f"{_SEALED_JAIL_DIR}/chan/k.sock",
     }
 
 
@@ -344,9 +315,8 @@ def test_a_write_root_at_or_above_the_jail_directory_is_denied_it_but_its_scratc
 ) -> None:
     """After the write roots' allows: a deny on the jail directory, then an
     allow on its scratch, then the runtime's channel directory (decision-184),
-    then the carve-outs, then the channel's literal (an endpoint in the jail
-    directory stays creatable). Later wins in both directions, so this order
-    is the whole of the rule."""
+    then the carve-outs; no per-channel literal since decision-186. Later wins
+    in both directions, so this order is the whole of the rule."""
     profile = render_sbpl(
         _sealed_spec(root), resolved=_sealed_resolved(root), jail_dir=_SEALED_JAIL_DIR
     )
@@ -359,7 +329,7 @@ def test_a_write_root_at_or_above_the_jail_directory_is_denied_it_but_its_scratc
         f'(allow file-write* (subpath "{_SEALED_JAIL_DIR}/tmp"))',
         f'(allow file-write* (subpath "{_SEALED_JAIL_DIR}/chan"))',
         '(deny file-write* (subpath "/private/tmp/.git/hooks"))',
-        f'(allow file-write* (literal "{_SEALED_JAIL_DIR}/chan/k.sock"))',
+        "(allow network-bind)",
     ]
 
 

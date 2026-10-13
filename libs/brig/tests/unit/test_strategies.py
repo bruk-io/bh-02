@@ -268,7 +268,7 @@ def test_every_drawn_spec_validation_pinned_example() -> None:
             wall_seconds=1, cpu_seconds=1, memory_bytes=1, max_tasks=1, max_output_bytes=1
         ),
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("FOO",), set=(("A", "1"),)),
-        channels=(Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="e1"),),
+        channels=(Channel(name="c1", kind=ChannelKind.LISTEN),),
         shared_media=("/d",),
         provisioning=Provisioning(files=(("/e", "0" * 8),), closures=("/f",), env=(("G", "1"),)),
     )

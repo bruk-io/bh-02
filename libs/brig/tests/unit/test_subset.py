@@ -258,18 +258,6 @@ def test_provisioning_only_difference_is_mutual_subset() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _channels_incompatible(a: Spec, b: Spec) -> bool:
-    a_by_name = {c.name: c for c in a.channels}
-    b_by_name = {c.name: c for c in b.channels}
-    for name, ca in a_by_name.items():
-        cb = b_by_name.get(name)
-        # Endpoint only: `LISTEN` is the only `ChannelKind` there is
-        # (decision-153), matching `Spec.narrowed_to`'s own check.
-        if cb is not None and ca.endpoint != cb.endpoint:
-            return True
-    return False
-
-
 @pytest.mark.unit
 # too_slow is drawing the pairs under a loaded machine (seen failing once in
 # three runs beside the full suite); it says nothing about the property.
@@ -288,7 +276,6 @@ def test_ec1_narrowed_to_is_subset_of_both(data: st.DataObject) -> None:
     s = data.draw(specs())
     t = data.draw(specs())
     assume(s.fs.read_model == t.fs.read_model)
-    assume(not _channels_incompatible(s, t))
     meet = s.narrowed_to(t)
     assert meet.is_subset_of(t)
     assert meet.is_subset_of(s)
@@ -309,7 +296,7 @@ def test_ec1_narrowed_to_is_subset_of_both_pinned_example() -> None:
         network=NetworkPolicy(allowed_domains=("a.example", "b.example")),
         limits=Limits(wall_seconds=10, cpu_seconds=5),
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("FOO", "BAR")),
-        channels=(Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="e1"),),
+        channels=(Channel(name="c1", kind=ChannelKind.LISTEN),),
         shared_media=("/m1",),
     )
     t = Spec(
@@ -323,8 +310,8 @@ def test_ec1_narrowed_to_is_subset_of_both_pinned_example() -> None:
         limits=Limits(wall_seconds=20, cpu_seconds=0),
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("BAR", "BAZ")),
         channels=(
-            Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="e1"),
-            Channel(name="c2", kind=ChannelKind.LISTEN, endpoint="e2"),
+            Channel(name="c1", kind=ChannelKind.LISTEN),
+            Channel(name="c2", kind=ChannelKind.LISTEN),
         ),
         shared_media=("/m2",),
     )
@@ -393,7 +380,6 @@ def test_ec1_narrowed_to_is_greatest_lower_bound() -> None:
         a = data.draw(specs())
         b = data.draw(specs())
         assume(a.fs.read_model == b.fs.read_model)
-        assume(not _channels_incompatible(a, b))
         stats["invocations"] += 1
 
         meet = a.narrowed_to(b)
@@ -470,14 +456,27 @@ def test_narrowed_to_raises_incomparable_on_read_model_mismatch() -> None:
 
 
 @pytest.mark.unit
-def test_narrowed_to_raises_incomparable_on_conflicting_channel_binding() -> None:
-    """One name bound to two different ENDPOINTS. The kind half of this
-    refusal went with `MAILBOX` (decision-153): `LISTEN` is the only kind
-    there is, so a name cannot be bound to two kinds."""
-    a = Spec(channels=(Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="e1"),))
-    b = Spec(channels=(Channel(name="c1", kind=ChannelKind.LISTEN, endpoint="e2"),))
-    with pytest.raises(IncomparableSpecs):
-        a.narrowed_to(b)
+def test_narrowed_to_keeps_a_channel_both_operands_declare() -> None:
+    """decision-186: a channel names no path, so one name in both operands is
+    one channel, and the meet keeps it; it refused a name bound to two
+    endpoints until then (the kind half went with `MAILBOX`, decision-153).
+    A name only one operand declares is dropped (the control: the meet still
+    intersects)."""
+    a = Spec(
+        channels=(
+            Channel(name="c1", kind=ChannelKind.LISTEN),
+            Channel(name="a", kind=ChannelKind.LISTEN),
+        )
+    )
+    b = Spec(
+        channels=(
+            Channel(name="c1", kind=ChannelKind.LISTEN),
+            Channel(name="b", kind=ChannelKind.LISTEN),
+        )
+    )
+    for meet in (a.narrowed_to(b), b.narrowed_to(a)):
+        assert meet.channels == (Channel(name="c1", kind=ChannelKind.LISTEN),)
+        assert meet.is_subset_of(a) and meet.is_subset_of(b)
 
 
 @pytest.mark.unit

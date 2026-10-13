@@ -192,9 +192,11 @@ def dial(
     Raises:
         EndpointRefused: the path is a link or not a socket, or the peer is
             not a process of `group` (or its leader's identity can't vouch for
-            it, or brig reads no peer here).
+            it, or brig reads no peer here, or the kernel could not report the
+            peer of a connection that succeeded: decision-186).
         OSError: nothing listens there yet (`FileNotFoundError`,
-            `ConnectionRefusedError`), or the kernel could not report the peer.
+            `ConnectionRefusedError`): only the `lstat` and the `connect`
+            raise one.
     """
     reason = _path_refusal(lstat(endpoint).st_mode)
     if reason is not None:
@@ -202,7 +204,18 @@ def dial(
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         sock.connect(endpoint)
-        peer = _read_peer(sock)
+    except BaseException:
+        sock.close()
+        raise
+    try:
+        try:
+            peer = _read_peer(sock)
+        except OSError as error:
+            # Something answered; who, the kernel would not say. Not "not
+            # yet": a caller polling readiness would wait it out (decision-186).
+            raise EndpointRefused(
+                endpoint, f"the kernel could not report who listens there ({error})"
+            ) from error
         # Asked after the peer's group was read: while the leader holds its
         # identity, its group's number has named this group throughout.
         holds = leader_stamp != _identity.UNKNOWN and _identity.identity_holds(

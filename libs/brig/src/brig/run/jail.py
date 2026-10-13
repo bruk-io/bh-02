@@ -49,7 +49,6 @@ from brig.run._dicts import channels_from_list, channels_to_list, report_from_di
 from brig.run.events import stamp_all
 from brig.run.exec_ import ExecFidelity
 from brig.run.readiness import UnknownChannel, poll_ready
-from brig.run.readiness import wait_ready as _wait_ready
 from brig.run.runtime import (
     IoPolicy,
     JailRecord,
@@ -62,7 +61,7 @@ from brig.run.runtime import (
 from brig.run.teardown import KillReport
 from brig.stack import CompiledJail
 
-JAIL_VERSION: Final = 7
+JAIL_VERSION: Final = 8
 """The version of a jail's dict (`HANDLE_VERSION` until decision-183 renamed it,
 the value unchanged). Bumped 1 -> 2 by
 task-046 (`wrap_prefix` and `jail_env` became REQUIRED top-level keys) and
@@ -527,15 +526,6 @@ class Jail:
         (SPEC.md section 9's ladder): the first process `workload_group`,
         every later one `exec_sibling`. Always there."""
         return self._runtime.destroy(self._record())
-
-    def wait_ready(self, channel: str, timeout: float) -> None:
-        """Block until `channel` accepts a connection (SPEC.md section 10).
-
-        Raises:
-            UnknownChannel: the jail declares no such channel.
-            WaitReadyTimeout: no connection succeeded within `timeout`.
-        """
-        _wait_ready(self, channel, timeout)
 
     def to_dict(self) -> dict[str, Any]:
         """Versioned, JSON-native: everything `destroy`, `alive` and a

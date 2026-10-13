@@ -242,7 +242,11 @@ def spec_for(
     ]
     return Spec(
         fs=FsPolicy(
-            write_allows=tuple(writable),
+            # The program's socket directory too: brig's Spec names a channel, not its path
+            # (brig's decision-186), so the directory the owner chose for its socket is granted
+            # here, as brig granted it per channel until then. TASK-0079.31 moves the owners to a
+            # socket brig reserves, and this goes.
+            write_allows=(*writable, str(Path(endpoint).parent)),
             write_denies=tuple(dict.fromkeys(denies)),
             read_denies=(
                 *(str(Path(home, name)) for name in CREDENTIAL_READ_DENIES_HOME_RELATIVE),
@@ -250,7 +254,7 @@ def spec_for(
             ),
         ),
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=tuple(config.env), set=(("TMPDIR", scratch),)),
-        channels=(Channel(name="kernel", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="kernel", kind=ChannelKind.LISTEN),),
     )
 
 
@@ -719,6 +723,24 @@ def _mark_of(path: str) -> str | None:
         return None
 
 
+async def _until_listening(endpoint: str, timeout: float) -> None:
+    """Wait until something accepts on `endpoint` (connect, then leave without a word), as
+    brig's `Jail.wait_ready` did until its decision-186 took it away with the path a channel
+    named. The owner dials the same path as found; TASK-0079.31 moves both to brig's verified
+    dial (`Process.connect`).
+
+    Raises:
+        TimeoutError: nothing accepted within `timeout` seconds.
+    """
+    async with asyncio.timeout(timeout):
+        while True:
+            with contextlib.suppress(OSError):
+                _, writer = await asyncio.open_unix_connection(endpoint)
+                writer.close()
+                return
+            await asyncio.sleep(0.02)
+
+
 def _launch(
     compiled: CompiledJail, *, argv: Sequence[str], cwd: str, jail_id: str, jail_dir: str, tether: int
 ) -> tuple[Jail, Process]:
@@ -909,7 +931,7 @@ class BrigJail:
             wire.arm(process.pid)  # brig's process leads its own group
         started = _Jailed(running, process, facts, jail_dir, placed, lock, record, tether, wire)
         try:
-            await asyncio.to_thread(running.wait_ready, "kernel", _READY_TIMEOUT_S)
+            await _until_listening(endpoint, _READY_TIMEOUT_S)
         except BaseException as error:
             log = Path(process.stderr_path)
             detail = log.read_text(errors="replace")[-2000:] if log.is_file() else ""
@@ -965,14 +987,17 @@ class BrigJail:
         """What a start compiled to `spec` (in `jail_dir`, listening on `endpoint`; `absent`, the
         read denies that are not there) is, for whoever started it: its grades, its notice, the
         trees it reads (Linux) and the roots it may write but its scratch."""
-        writes = tuple(w for w in spec.fs.write_allows if not Path(w).is_relative_to(jail_dir))
+        socket_dir = str(Path(endpoint).parent)
+        writes = tuple(
+            w for w in spec.fs.write_allows if not Path(w).is_relative_to(jail_dir) and w != socket_dir
+        )
         if self._platform != "linux":
             return _Facts(report, writes=writes)
         trees = (*spec.fs.read_allows, *spec.fs.write_allows)
         return _Facts(
             report,
             notice_for(self._platform, held(spec, absent)),
-            told_reads(trees, (jail_dir, str(Path(endpoint).parent))),
+            told_reads(trees, (jail_dir, socket_dir)),
             writes,
         )
 

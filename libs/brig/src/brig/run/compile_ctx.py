@@ -8,7 +8,7 @@ filesystem, `mech` may not go and get one, and `run` is the layer that may.
 
 1. `resolved_paths` -- every `Spec` path a mechanism's render might need
    resolved (`fs.write_allows`, `fs.write_denies`, `fs.read_denies`,
-   `fs.read_allows`, every channel's `endpoint`, and every directory between
+   `fs.read_allows`, and every directory between
    a write root and a write deny, which `bwrap` pins), mapped to its
    `os.path.realpath` form, keyed EXACTLY as the `Spec` carries the path
    (never the resolved form as the key -- a mechanism's render looks up by
@@ -54,8 +54,7 @@ of the helper sees it, as well as in the mechanism that consumes it.
 `os.path.realpath` never requires its target to exist: it resolves
 symlinks in whatever existing path PREFIX it finds and appends the rest of
 the path unchanged, so this works whether or not `jail_dir` (or a
-not-yet-created path inside it, e.g. a LISTEN channel's own socket file)
-has actually been created on disk yet.
+not-yet-created path inside it) has actually been created on disk yet.
 """
 
 from __future__ import annotations
@@ -77,8 +76,6 @@ def _spec_paths(spec: Spec) -> Iterator[str]:
     yield from spec.fs.write_denies
     yield from spec.fs.read_denies
     yield from spec.fs.read_allows
-    for channel in spec.channels:
-        yield channel.endpoint
     yield from pins(spec.fs.write_allows, spec.fs.write_denies)
 
 

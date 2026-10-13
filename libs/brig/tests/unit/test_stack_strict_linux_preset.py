@@ -37,7 +37,6 @@ from brig.stack import MATRIX_VERSION, strict_linux
 
 _JAIL_DIR = "/run/brig/strictlinux"
 _WORKSPACE = "/srv/ws"
-_ENDPOINT = "/run/brig/strictlinux/chan/ctl.sock"
 
 _SPEC = Spec(
     fs=FsPolicy(
@@ -51,12 +50,12 @@ _SPEC = Spec(
         write_allows=(_WORKSPACE,),
         write_denies=("/srv/ws/.envrc",),
     ),
-    channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=_ENDPOINT),),
+    channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
 )
 
 
 def _ctx() -> CompileCtx:
-    paths = ("/bin", "/usr", _WORKSPACE, "/srv/ws/.envrc", _ENDPOINT)
+    paths = ("/bin", "/usr", _WORKSPACE, "/srv/ws/.envrc")
     return CompileCtx(
         jail_dir=_JAIL_DIR,
         platform="linux",
@@ -66,7 +65,6 @@ def _ctx() -> CompileCtx:
             "/usr": True,
             _WORKSPACE: True,
             "/srv/ws/.envrc": False,
-            _ENDPOINT: False,
         },
     )
 

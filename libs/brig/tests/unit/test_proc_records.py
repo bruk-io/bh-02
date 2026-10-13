@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from brig.core.runtime import ChannelOnRecords, refuse_channel_on_records
+from brig.core.runtime import PROCS_DIRNAME, channel_dir
 from brig.run import _records
 from brig.run._identity import UNKNOWN
 from brig.run.host import _WRAP_SENTINEL, _chosen_status, _derive_wrap_prefix
@@ -179,27 +179,21 @@ def test_stdio_may_not_take_a_records_name_or_leave_its_directory(name: str) -> 
 
 
 @pytest.mark.unit
-def test_the_records_refusal_reads_both_forms_of_the_endpoint() -> None:
-    def refused(endpoint: str, resolved: str) -> bool:
-        try:
-            refuse_channel_on_records(
-                name="ctl", endpoint=endpoint, resolved_endpoint=resolved, jail_dir=_JAIL
-            )
-        except ChannelOnRecords:
-            return True
-        return False
+def test_the_channel_directory_is_a_sibling_of_the_records() -> None:
+    """decision-181, restated by decision-186: a channel's one grant is the
+    channel directory, so no grant reaches the records only while the two are
+    siblings in the jail directory, neither at, under or above the other, and
+    neither the jail directory itself. Pure: the names brig keeps."""
 
-    assert refused(f"{_JAIL}/procs/k.sock", f"{_JAIL}/procs/k.sock")
-    assert refused(f"{_JAIL}/procs", f"{_JAIL}/procs")
-    assert refused(f"{_JAIL}/chan/k.sock", f"{_JAIL}/procs/k.sock")
-    assert refused(f"{_JAIL}/procs/k.sock", "/elsewhere/k.sock")
-    # Controls: a directory of its own, a name that only starts like `procs`,
-    # a socket outside the jail directory, and `execs/`, which holds nothing
-    # brig keeps since decision-183 (refused until then).
-    assert not refused(f"{_JAIL}/chan/k.sock", f"{_JAIL}/chan/k.sock")
-    assert not refused(f"{_JAIL}/execs/a/k.sock", f"{_JAIL}/execs/a/k.sock")
-    assert not refused(f"{_JAIL}/procs2/k.sock", f"{_JAIL}/procs2/k.sock")
-    assert not refused("/elsewhere/k.sock", "/elsewhere/k.sock")
+    def at_or_under(path: str, root: str) -> bool:
+        return path == root or path.startswith(root + "/")
+
+    for jail in (_JAIL, f"{_JAIL}/"):
+        chan = channel_dir(jail)
+        records = f"{jail.rstrip('/')}/{PROCS_DIRNAME}"
+        assert chan.rsplit("/", 1)[0] == records.rsplit("/", 1)[0] == jail.rstrip("/")
+        assert not at_or_under(chan, records) and not at_or_under(records, chan)
+        assert chan != jail.rstrip("/")
 
 
 @pytest.mark.unit

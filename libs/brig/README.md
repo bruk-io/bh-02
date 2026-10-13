@@ -34,7 +34,9 @@ supervisor, or created tethered in another process). Every exception
 
 A process listens on a socket reserved for it (decision-184): the runtime owns
 one channel directory per jail, `<jail_dir>/chan`, and `jail.channel(name)`
-reserves a socket there for a channel the `Spec` declares. Put its
+reserves a socket there for a channel the `Spec` declares. A `Spec` names a
+channel by name and kind only, `Channel(name, kind)`, never by a host path
+(decision-186). Put its
 `bound_path` in the argv, start with `jail.start(argv, channel=reservation)`,
 then `process.wait_ready(timeout)` and dial with `process.connect()`, never
 `process.endpoint` raw: the jail can write the channel directory, so the host
@@ -156,13 +158,13 @@ are refusals rather than surprises:
 - **`read_allows` has to cover the system tree the workload needs**,
   including `/bin/sh` and `/usr/bin/env` if `env_scrub` is in the stack —
   it composes *inside* the jail, which is the whole point of the ordering.
-- **The declared LISTEN channel's endpoint DIRECTORY is bind-mounted
-  writable**, because a socket cannot be bind-mounted before it exists. That
-  is one writable path no `write_allows` entry named, and the `fs_write`
-  grade's own detail says so. So is the runtime's channel directory
-  `<jail_dir>/chan`, bound when the Spec declares any channel (decision-184).
+- **The runtime's channel directory `<jail_dir>/chan` is bind-mounted
+  writable** when the Spec declares any channel (decision-184, decision-186),
+  because a socket cannot be bind-mounted before it exists. That is the one
+  writable path no `write_allows` entry named, and the `fs_write` grade's own
+  detail says so.
 
-**Where it is verified.** The compile is pure, so its golden argv, its six
+**Where it is verified.** The compile is pure, so its golden argv, its
 refusals and the mount order are unit tests that run anywhere. The
 enforcement is not: `tests/integration/test_bwrap_fs.py`,
 `tests/integration/test_bwrap_network.py` and

@@ -19,9 +19,8 @@ record's own `id` must be its directory's name.
 
 **Records are kill authority.** The jail never writes one: the host writes
 `record.json`, and the exit wrapper is a host-side program outside the jail's
-`wrap`. Every mechanism that compiles a LISTEN channel refuses an endpoint at
-or under `procs/` (`core.runtime.refuse_channel_on_records`), and bwrap and
-seatbelt seal the jail directory against every write root (decision-173). A
+`wrap`. A channel's one grant is the channel directory, a sibling of `procs/`
+(decision-186), and bwrap and seatbelt seal the jail directory against every write root (decision-173). A
 stack with no `fs_write` mechanism seals nothing, which is why every reader
 here treats what it finds as data to check, never as a fact.
 """

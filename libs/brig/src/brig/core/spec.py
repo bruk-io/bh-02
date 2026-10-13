@@ -8,7 +8,7 @@ are canonicalized one step further, to an antichain -- an entry another entry
 already covers is dropped, because an allow entry is a subtree (SPEC.md
 section 5, decision-160). Construction raises
 `ValueError` on a negative/non-integer limit, a duplicate channel name, an
-empty path/name/endpoint, `read_allows` populated under DENY_LIST (its
+empty path or name, `read_allows` populated under DENY_LIST (its
 inactive model; `read_denies` is active under both, decision-164), or
 `EnvPolicy(mode=PASS, allow_names=(...))` -- PASS's `allow_names` is inert,
 and populating it is refused rather than silently ignored (SPEC.md section 5,
@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Final
 
-SPEC_VERSION: Final = 1
+#: 2 since decision-186 (SPEC.md section 10): a `Channel` names no path.
+SPEC_VERSION: Final = 2
 
 
 class ReadModel(Enum):
@@ -202,15 +203,16 @@ class EnvPolicy:
 
 @dataclass(frozen=True, slots=True)
 class Channel:
+    """A channel the jail may LISTEN on, by name (SPEC.md section 10,
+    decision-186). It names no path: each socket is reserved in the jail's
+    channel directory by its runtime (`jail.channel(name)`)."""
+
     name: str
     kind: ChannelKind
-    endpoint: str
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("Channel.name must be non-empty")
-        if not self.endpoint:
-            raise ValueError("Channel.endpoint must be non-empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,8 +275,9 @@ class Spec:
         bound whatever the nesting.
 
         Raises IncomparableSpecs when self.fs.read_model != other.fs.read_model,
-        or when self and other declare the same channel NAME with a different
-        kind or endpoint. self.env.set and self.provisioning are carried
+        and for nothing else: a channel names no path (decision-186), so one
+        name in both operands is one channel, and the meet keeps the names
+        both declare. self.env.set and self.provisioning are carried
         through unchanged from self (the receiver).
 
         The env meet, three cases exactly: PASS is the identity (meet(PASS,
@@ -287,18 +290,6 @@ class Spec:
             raise IncomparableSpecs(
                 f"read models differ: {self.fs.read_model!r} vs {other.fs.read_model!r}"
             )
-
-        other_channels_by_name = {c.name: c for c in other.channels}
-        for channel in self.channels:
-            conflict = other_channels_by_name.get(channel.name)
-            # Only the endpoint is compared: `LISTEN` is the only
-            # `ChannelKind` there is since decision-153, so a kind
-            # comparison beside this one is a branch nothing can reach.
-            if conflict is not None and conflict.endpoint != channel.endpoint:
-                raise IncomparableSpecs(
-                    f"channel {channel.name!r} bound differently in each operand: "
-                    f"{channel!r} vs {conflict!r}"
-                )
 
         new_fs = FsPolicy(
             write_allows=_allows_meet(self.fs.write_allows, other.fs.write_allows),
@@ -337,7 +328,8 @@ class Spec:
             ),
             set=self.env.set,
         )
-        new_channels = tuple(c for c in self.channels if c.name in other_channels_by_name)
+        other_names = {c.name for c in other.channels}
+        new_channels = tuple(c for c in self.channels if c.name in other_names)
         new_shared_media = tuple(set(self.shared_media) & set(other.shared_media))
 
         return Spec(
@@ -356,7 +348,7 @@ class Spec:
         format: top-level keys exactly `version`, `fs`, `network`,
         `limits`, `env`, `channels`, `shared_media`, `provisioning`; enums
         as their `.value` string; pair tuples as two-element lists;
-        `channels` as a list of `{name, kind, endpoint}` dicts. No tuples,
+        `channels` as a list of `{name, kind}` dicts. No tuples,
         no enum objects, no sets survive into the result.
         """
         return {
@@ -377,10 +369,7 @@ class Spec:
                 "allow_names": list(self.env.allow_names),
                 "set": [[k, v] for k, v in self.env.set],
             },
-            "channels": [
-                {"name": c.name, "kind": c.kind.value, "endpoint": c.endpoint}
-                for c in self.channels
-            ],
+            "channels": [{"name": c.name, "kind": c.kind.value} for c in self.channels],
             "shared_media": list(self.shared_media),
             "provisioning": {
                 "files": [[path, digest] for path, digest in self.provisioning.files],
@@ -455,7 +444,6 @@ class Spec:
                 Channel(
                     name=entry["name"],
                     kind=_enum_from_str(ChannelKind, entry["kind"], "channels[].kind"),
-                    endpoint=entry["endpoint"],
                 )
             )
 
@@ -493,7 +481,7 @@ _FS_KEYS: Final = frozenset(
 _NETWORK_KEYS: Final = frozenset({"allowed_domains"})
 _LIMITS_KEYS: Final = frozenset(_LIMIT_FIELDS)
 _ENV_KEYS: Final = frozenset({"mode", "allow_names", "set"})
-_CHANNEL_KEYS: Final = frozenset({"name", "kind", "endpoint"})
+_CHANNEL_KEYS: Final = frozenset({"name", "kind"})
 _PROVISIONING_KEYS: Final = frozenset({"files", "closures", "env"})
 
 
@@ -514,8 +502,7 @@ def _enum_from_str[E: Enum](enum_cls: type[E], raw: Any, where: str) -> E:
 
 class IncomparableSpecs(ValueError):
     """Raised by Spec.narrowed_to when the two operands have no meet: their
-    read models differ, or they bind the same channel name to a different
-    kind or endpoint."""
+    read models differ."""
 
 
 def _write_allows_shrink(child: Spec, parent: Spec) -> bool:

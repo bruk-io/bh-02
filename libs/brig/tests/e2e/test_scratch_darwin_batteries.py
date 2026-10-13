@@ -102,7 +102,7 @@ from brig.core.probes import (
 )
 from brig.probe.batteries.fs import fs_read_battery, fs_write_battery
 from brig.probe.batteries.network import network_battery
-from brig.run import IoPolicy, Jail, Process, build_compile_ctx
+from brig.run import IoPolicy, Jail, Process, Reservation, build_compile_ctx
 from brig.stack import CompiledJail, Stack, scratch_darwin
 from tests.conftest import launch, teardown_group, workload_argv
 
@@ -132,9 +132,8 @@ def _launch_at(
     """`Spec -> Stack.compile(ctx=build_compile_ctx(...)) -> Jail.create ->
     jail.start`, through public methods on public types only -- the exact
     chain `.claude/rules/system-tests.md` names. `jail_dir` is a caller-
-    supplied argument, not generated here, because a LISTEN channel's own
-    endpoint must be built from it BEFORE the Spec exists (same ordering
-    `tests/integration/test_seatbelt_channel.py` uses)."""
+    supplied argument, not generated here, so a caller names where the jail
+    lives (its channel directory, decision-184, is under it)."""
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
     compiled = stack.compile(spec, ctx=ctx)
     jail, process = launch(
@@ -197,7 +196,6 @@ def _journey_spec(
     hooks_dir: str,
     credential_canary: str,
     ssh_directory_canary: str,
-    listen_endpoint: str,
 ) -> Spec:
     """The one Spec this file's headline journey drives, and the one AC #11
     is about. `write_denies` carries the `.git/hooks` carve-out (SELF_MODIFY
@@ -215,7 +213,7 @@ def _journey_spec(
             read_denies=(credential_canary, ssh_directory_canary),
         ),
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH",)),
-        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=listen_endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
 
 
@@ -261,14 +259,11 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
         _seed_fs_targets(run_id)
     )
     jail_dir = _new_root(run_id, "sdj")
-    listen_endpoint = f"{jail_dir}/chan/ctl.sock"
-    os.makedirs(f"{jail_dir}/chan", exist_ok=True)
     spec = _journey_spec(
         workspace=workspace,
         hooks_dir=hooks_dir,
         credential_canary=credential_canary,
         ssh_directory_canary=ssh_directory_canary,
-        listen_endpoint=listen_endpoint,
     )
 
     jail, process, _compiled = _launch_at(
@@ -297,7 +292,12 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
                     ssh_directory_canary=ssh_directory_canary,
                 ),
             ),
-            "network": _probe(jail, network_battery(spec, denied_address=_DENIED_NETWORK_ADDRESS)),
+            "network": _probe(
+                jail,
+                network_battery(
+                    spec, denied_address=_DENIED_NETWORK_ADDRESS, channel=jail.channel("ctl")
+                ),
+            ),
         }
 
         # --- the per-probe table (AC #2's own pasted evidence) -- grade
@@ -356,7 +356,7 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
         network_control_names = {
             o.probe_name for o in reports["network"].outcomes if o.shape is ProbeShape.CONTROL
         }
-        assert network_control_names == {"bind_the_declared_listen_endpoint"}, network_control_names
+        assert network_control_names == {"bind_a_reserved_channel_socket"}, network_control_names
 
         # --- AC #4: fs DENIAL probes' matched_signature, by IDENTITY. The
         # signature compared against comes from `jail.signatures` -- the
@@ -455,14 +455,11 @@ def test_control_against_the_environment_stack_of_no_mechanisms_denies_nothing(
         _seed_fs_targets(run_id)
     )
     jail_dir = _new_root(run_id, "sde")
-    listen_endpoint = f"{jail_dir}/chan/ctl.sock"
-    os.makedirs(f"{jail_dir}/chan", exist_ok=True)
     spec = _journey_spec(
         workspace=workspace,
         hooks_dir=hooks_dir,
         credential_canary=credential_canary,
         ssh_directory_canary=ssh_directory_canary,
-        listen_endpoint=listen_endpoint,
     )
 
     jail, process, _compiled = _launch_at(
@@ -479,7 +476,12 @@ def test_control_against_the_environment_stack_of_no_mechanisms_denies_nothing(
                     ssh_directory_canary=ssh_directory_canary,
                 ),
             ),
-            "network": _probe(jail, network_battery(spec, denied_address=_DENIED_NETWORK_ADDRESS)),
+            "network": _probe(
+                jail,
+                network_battery(
+                    spec, denied_address=_DENIED_NETWORK_ADDRESS, channel=jail.channel("ctl")
+                ),
+            ),
         }
         print("\n[AC #8 environment control] battery.probe | verdict")
         for name, report in reports.items():
@@ -520,8 +522,6 @@ def test_journey_spec_declares_a_listen_channel_and_its_removal_makes_the_batter
        naming both missing declarations), pasted below.
     """
     jail_dir = _new_root(run_id, "sdn")
-    listen_endpoint = f"{jail_dir}/chan/ctl.sock"
-    os.makedirs(f"{jail_dir}/chan", exist_ok=True)
     # network_battery reads only spec.channels and spec.network.allowed_domains
     # (this file's own imported source, `brig/probe/batteries/network.py`) --
     # the fs-shaped placeholders below need not exist on disk for this
@@ -532,14 +532,19 @@ def test_journey_spec_declares_a_listen_channel_and_its_removal_makes_the_batter
         hooks_dir=os.path.join(placeholder, ".git", "hooks"),
         credential_canary=os.path.join(placeholder, "credentials"),
         ssh_directory_canary=placeholder,
-        listen_endpoint=listen_endpoint,
     )
 
     # Every declared channel is a LISTEN channel (decision-153: `LISTEN` is
     # the only `ChannelKind` there is), so declaring one is the assertion.
     assert spec.channels, "this file's journey Spec must declare a LISTEN channel (AC #11)"
 
-    battery = network_battery(spec, denied_address=_DENIED_NETWORK_ADDRESS)
+    # A socket the jail would reserve (decision-186); no jail runs here.
+    reserved = Reservation(
+        channel="ctl",
+        bound_path=f"{jail_dir}/chan/0123456789abcdef.sock",
+        endpoint=f"{jail_dir}/chan/0123456789abcdef.sock",
+    )
+    battery = network_battery(spec, denied_address=_DENIED_NETWORK_ADDRESS, channel=reserved)
     assert battery.name == "network"
     assert len(battery.probes) == 2
 

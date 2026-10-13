@@ -1,4 +1,9 @@
-"""`Jail.start` and `Jail.wait_ready`, exercised as BOUND methods.
+"""`Jail.start`, `Jail.channel` and `Process.wait_ready`, exercised as BOUND methods.
+
+`Jail.wait_ready(channel)` was the second subject here until decision-186
+(TASK-0079.32) deleted it with the path a channel declared; its two tests now
+drive readiness where it went, `jail.channel` then `process.wait_ready`, and
+assert what they did.
 
 task-030 / decision-053, on doc-007 §6 D-7's finding: SPEC.md §9's `exec`
 criterion (MILESTONES.md M2 EC4) reads `handle.exec(["pwd"])` -- a sibling
@@ -40,7 +45,7 @@ from typing import Protocol, cast
 import pytest
 
 from brig.core import Channel, ChannelKind, Spec, unenforced_report
-from brig.run import Jail, Process
+from brig.run import HostRuntime, IoPolicy, Jail, Process
 from brig.stack import CompiledJail
 from tests.conftest import launch, teardown_group, workload_argv
 
@@ -103,6 +108,34 @@ def _launch(
     jail_id: str = "jail-under-test",
 ) -> tuple[Jail, Process]:
     return launch(_compiled_jail(spec=spec), argv, cwd=cwd, jail_id=jail_id, jail_dir=jail_dir)
+
+
+def _launch_on_a_reserved_socket(
+    body: str, *, run_id: str, jail_dir: str, spec: Spec
+) -> tuple[Jail, Process, str]:
+    """A jail whose one process is started on a socket `jail.channel("ctl")`
+    reserved; `body` is a format string given the socket's path as `{path}`.
+    Returns the reservation's endpoint too."""
+    os.makedirs(jail_dir, exist_ok=True)
+    jail = Jail.create(
+        _compiled_jail(spec=spec),
+        runtime=HostRuntime(),
+        cwd=jail_dir,
+        jail_id="jail-under-test",
+        jail_dir=jail_dir,
+    )
+    reservation = jail.channel("ctl")
+    try:
+        process = jail.start(
+            workload_argv(run_id, body.format(path=reservation.bound_path)),
+            cwd=jail_dir,
+            io=IoPolicy(),
+            channel=reservation,
+        )
+    except BaseException:
+        jail.destroy()
+        raise
+    return jail, process, reservation.endpoint
 
 
 def _teardown_group(process: Process, jail_dir: str | None = None) -> None:
@@ -199,8 +232,9 @@ def test_jail_start_forwards_the_cwd_keyword_through_the_bound_method(run_id: st
 
 
 # ---------------------------------------------------------------------------
-# AC #2 / AC #5 -- Jail.wait_ready, called as a bound method: positive
-# control (the bind DOES appear) and the negative (it never does).
+# AC #2 / AC #5 -- readiness, called as bound methods (`jail.channel`, then
+# `process.wait_ready`, since decision-186): positive control (the bind DOES
+# appear) and the negative (it never does).
 # ---------------------------------------------------------------------------
 
 
@@ -209,7 +243,7 @@ def test_handle_wait_ready_returns_after_a_real_bind_appears_through_the_bound_m
     run_id: str,
 ) -> None:
     """Positive control (AC #5): a workload that sleeps ~0.5s and then
-    binds+listens on the declared endpoint makes `jail.wait_ready` --
+    binds+listens on its reserved socket makes `process.wait_ready` --
     the BOUND method -- RETURN, with elapsed time consistent with having
     actually waited for the bind rather than an instant false positive.
     Without this case, the timeout test below could pass for a probe that
@@ -217,15 +251,14 @@ def test_handle_wait_ready_returns_after_a_real_bind_appears_through_the_bound_m
     timeout unless something in the same suite proves the non-timeout path
     genuinely returns."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
-    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
-    channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
+    channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
-    argv = workload_argv(run_id, _bind_script(endpoint, delay=0.5))
-    jail, process = _launch(argv, cwd=jail_dir, jail_dir=jail_dir, spec=spec)
+    _jail, process, _ = _launch_on_a_reserved_socket(
+        _bind_script("{path}", delay=0.5), run_id=run_id, jail_dir=jail_dir, spec=spec
+    )
     try:
         start = time.monotonic()
-        jail.wait_ready("ctl", timeout=10.0)
+        process.wait_ready(timeout=10.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 0.5, f"returned before the bind could have appeared: elapsed={elapsed}"
         assert elapsed < 5.0, f"returned suspiciously close to the 10s timeout: elapsed={elapsed}"
@@ -237,24 +270,24 @@ def test_handle_wait_ready_returns_after_a_real_bind_appears_through_the_bound_m
 def test_handle_wait_ready_raises_the_named_timeout_type_through_the_bound_method(
     run_id: str,
 ) -> None:
-    """Negative half: a workload that never binds makes `jail.wait_ready`
+    """Negative half: a workload that never binds makes `process.wait_ready`
     -- the BOUND method -- raise the named timeout type, carrying the
     channel, endpoint and timeout as structured fields, within the expected
     window (not premature, not silently swallowed past the deadline). The
     exact class is checked by name rather than by importing it, so this
-    file never has a reason to import the module `Jail.wait_ready`
+    file never has a reason to import the module `Process.wait_ready`
     delegates to."""
     jail_dir = _new_jail_dir()
-    endpoint = os.path.join(jail_dir, "chan", "ctl.sock")
-    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
-    channel = Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint)
+    channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
-    argv = workload_argv(run_id, "sleep 30")  # never touches the endpoint
-    jail, process = _launch(argv, cwd=jail_dir, jail_dir=jail_dir, spec=spec)
+    # never touches its socket
+    _jail, process, endpoint = _launch_on_a_reserved_socket(
+        "sleep 30", run_id=run_id, jail_dir=jail_dir, spec=spec
+    )
     try:
         start = time.monotonic()
         with pytest.raises(TimeoutError) as exc_info:
-            jail.wait_ready("ctl", timeout=1.0)
+            process.wait_ready(timeout=1.0)
         elapsed = time.monotonic() - start
         assert elapsed >= 1.0, f"raised before the deadline: elapsed={elapsed}"
         assert elapsed < 3.0, f"raised long after the deadline, not promptly: elapsed={elapsed}"

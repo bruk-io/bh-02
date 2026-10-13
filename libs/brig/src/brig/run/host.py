@@ -596,7 +596,8 @@ class HostRuntime:
 
         Raises:
             EndpointRefused: what is at its socket is not its own listener
-                (decision-185).
+                (decision-185), or the kernel could not say who listens there
+                (decision-186): only "nothing listens yet" reads `False`.
         """
         if process.bound_path is None:
             return False

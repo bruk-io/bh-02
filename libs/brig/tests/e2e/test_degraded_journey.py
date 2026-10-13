@@ -69,7 +69,7 @@ from brig.probe.batteries.env import CANARY_ENV_NAME, env_battery  # batteries: 
 from brig.probe.batteries.fs import fs_read_battery, fs_write_battery
 from brig.probe.batteries.limits import limits_battery
 from brig.probe.batteries.network import network_battery
-from brig.run import IoPolicy, Jail, Process
+from brig.run import IoPolicy, Jail, Process, Reservation
 from brig.run.teardown import KillOutcome  # not barrel-exported; same shape, justified in AC #6
 from brig.stack import degraded
 from tests.conftest import launch, teardown_group, workload_argv
@@ -291,14 +291,20 @@ def test_network_battery_permits_a_spec_declaring_a_listen_channel() -> None:
     `test_network_battery_refuses_a_spec_with_no_network_action` above is
     mechanical, not a claim this docstring has to argue. `network_battery` is
     pure (its own module docstring: "no I/O, no clock, no randomness, no
-    child processes") -- the endpoint below is never bound or dialed at
-    construction, so it need not resolve to anything real on this host.
+    child processes") -- the reserved socket below is never bound or dialed
+    at construction, so it need not resolve to anything real on this host
+    (decision-186: the control binds a socket the jail reserved).
     """
     no_network_spec = Spec()
     listen_spec = replace(
         no_network_spec,
-        channels=(Channel(name="control", kind=ChannelKind.LISTEN, endpoint="/tmp/unused.sock"),),
+        channels=(Channel(name="control", kind=ChannelKind.LISTEN),),
     )
-    battery = network_battery(listen_spec, denied_address="192.0.2.1:80")
+    reserved = Reservation(
+        channel="control",
+        bound_path="/tmp/unused/chan/0123456789abcdef.sock",
+        endpoint="/tmp/unused/chan/0123456789abcdef.sock",
+    )
+    battery = network_battery(listen_spec, denied_address="192.0.2.1:80", channel=reserved)
     assert battery.name == "network"
     assert len(battery.probes) == 2

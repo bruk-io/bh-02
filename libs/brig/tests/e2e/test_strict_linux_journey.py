@@ -54,7 +54,6 @@ here).
 from __future__ import annotations
 
 import os
-import socket
 import sys
 
 import pytest
@@ -69,10 +68,9 @@ from brig.core import (
     require,
 )
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH
-from brig.run import IoPolicy
+from brig.run import HostRuntime, IoPolicy, Jail
 from brig.run.compile_ctx import build_compile_ctx
 from brig.stack import strict_linux
-from tests.conftest import launch
 
 _PYTHON = "/usr/bin/python3"
 
@@ -171,11 +169,9 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
     jail_dir = f"/tmp/bg{os.getpid()}sl0"
     workspace = f"{jail_dir}/ws"
     hooks = f"{workspace}/.git/hooks"
-    # In a subdirectory of the jail directory: bwrap grants a socket its whole
-    # directory, and one directly in the jail directory is refused (decision-174).
-    endpoint = f"{jail_dir}/chan/ctl.sock"
+    # The socket is one the jail reserves in its channel directory
+    # (decision-184): the Spec names the channel, not its path (decision-186).
     os.makedirs(hooks, exist_ok=True)
-    os.makedirs(os.path.dirname(endpoint), exist_ok=True)
 
     spec = Spec(
         fs=FsPolicy(
@@ -184,34 +180,40 @@ def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
             write_allows=(workspace,),
             write_denies=(hooks,),
         ),
-        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN, endpoint=endpoint),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
 
     # Claim 1: the preset's own report admits it, against real floors.
-    jail = strict_linux().compile(
+    compiled = strict_linux().compile(
         spec,
         require(fs_read=Grade.ENFORCED, fs_write=Grade.ENFORCED, network=Grade.ENFORCED),
         ctx=ctx,
     )
 
-    jail, process = launch(
-        jail,
-        argv=[_PYTHON, "-c", _WORKLOAD, endpoint, workspace, hooks],
+    jail = Jail.create(
+        compiled,
+        runtime=HostRuntime(),
         cwd=workspace,
-        io=IoPolicy(),
         jail_id="strict-linux-journey",
         jail_dir=jail_dir,
     )
+    reservation = jail.channel("ctl")
+    process = jail.start(
+        [_PYTHON, "-c", _WORKLOAD, reservation.bound_path, workspace, hooks],
+        cwd=workspace,
+        io=IoPolicy(),
+        channel=reservation,
+    )
     try:
         # Claim 5a: readiness is a CONNECT, not a path check (SPEC.md sec 10).
-        jail.wait_ready("ctl", _READY_TIMEOUT_S)
+        process.wait_ready(_READY_TIMEOUT_S)
 
-        # Claim 5b: the crossing carries bytes. This is the SECOND
-        # connection the jail serves; `wait_ready` above made the first.
-        client = socket.socket(socket.AF_UNIX)
+        # Claim 5b: the crossing carries bytes, through the host's verified
+        # dial (decision-185). This is the SECOND connection the jail serves;
+        # `wait_ready` above made the first.
+        client = process.connect()
         client.settimeout(_READY_TIMEOUT_S)
-        client.connect(endpoint)
         greeting = client.recv(64)
         client.close()
         assert greeting == b"hello from the jail\n"
