@@ -144,7 +144,11 @@ else:
 # The trusted-side connect (this test's own process.wait_ready call) queues
 # in the kernel backlog the instant listen() above runs -- accept() here
 # only has to complete it, never block waiting on the jail's own doing.
+# It then HOLDS that connection until the host closes its end (TASK-0079.35):
+# the verified dial (decision-185) checks the group leader's identity after
+# connecting, so a leader that exits at once would be refused as gone.
 conn, _addr = s1.accept()
+conn.recv(1)
 conn.close()
 s1.close()
 print("DONE", flush=True)
@@ -247,7 +251,7 @@ def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -
     """AC #2 and #3. One jailed `python3 -c` process: binds+listens at the
     declared LISTEN channel's own endpoint (`ep1`), then attempts a second
     bind at an undeclared path (`ep2`) inside the same scratch root, then
-    `accept()`s the trusted-side connect and exits.
+    `accept()`s the trusted-side connect, holds it until the host closes, and exits.
 
     Observation 1's readiness is proved by THIS test's own
     `process.wait_ready` call -- SPEC.md §10.1's own connect, never

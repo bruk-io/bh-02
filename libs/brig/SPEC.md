@@ -2621,6 +2621,22 @@ A `ProbeReport` therefore carries **per-axis observed outcomes** as data
 alongside its battery verdict, so *what actually resisted* is a field to read
 rather than an inference from a summary word.
 
+**A probe has a deadline, and one that is still running at it is an outcome, never
+an exception out of the battery.** The engine waits for each probe a bounded time
+(15 s). A probe still running then is stopped through brig's own teardown for one
+process (`Process.stop`: its group, verified, nothing of it left running) and
+recorded as `unfinished`: a `DENIAL` or `ABSENCE` probe is `VACUOUS`, its detail
+saying it did not finish in that many seconds, because a connect that never
+completes is unreachability, not a refusal, and so no denial signature was seen
+(an `ABSENCE` that did not run observed nothing, as its non-zero exit already
+reads); a `CONTROL` probe is `FAIL` (the action did not succeed, which is what a
+control that does not succeed already is), so its battery is `VACUOUS` by the
+rule above. The battery therefore always returns a `ProbeReport`; a `TimeoutError`
+out of `run_battery` was the defect (a Mac with a default route, where
+`exec 3<>/dev/tcp/192.0.2.1/80` waits out a ~75 s connect timeout, crashed four
+batteries instead of grading them). The deadline's length and the probes' argv
+are unchanged. Implementing task: TASK-0079.35. (Ruled 2026-10-13, decision-187.)
+
 (Ruled 2026-08-24, operator ruling round 15, decision-104, on `doc-015` §5 —
 direction (c): the vocabulary was the defect, not the algorithm and not the
 criteria. **Implementing task: `task-053`**, whose rework round renames the

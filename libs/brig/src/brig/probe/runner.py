@@ -94,7 +94,9 @@ _PROBE_WAIT_TIMEOUT_S: Final = 15.0
 _UNDERCLAIM_GRADES: Final = (Grade.UNENFORCED, Grade.COOPERATIVE)
 
 
-def run_battery(handle: Any, battery: Battery) -> ProbeReport:
+def run_battery(
+    handle: Any, battery: Battery, *, deadline_s: float = _PROBE_WAIT_TIMEOUT_S
+) -> ProbeReport:
     """Run every probe in `battery` against `handle` (a `Jail`), each a
     `handle.start`, and decide the battery's own verdict.
 
@@ -106,11 +108,14 @@ def run_battery(handle: Any, battery: Battery) -> ProbeReport:
     any contradiction -> `BatteryVerdict.CONTRADICTED`; else any non-control
     probe's own `Verdict` `VACUOUS` -> `BatteryVerdict.VACUOUS`; else
     `BatteryVerdict.CONSISTENT`.
+
+    A probe still running after `deadline_s` seconds is stopped and recorded
+    (`_unfinished`, SPEC.md §12, decision-187), never raised.
     """
     controls = [probe for probe in battery.probes if probe.shape is ProbeShape.CONTROL]
     others = [probe for probe in battery.probes if probe.shape is not ProbeShape.CONTROL]
 
-    raw_outcomes = [_run_one(handle, probe) for probe in (*controls, *others)]
+    raw_outcomes = [_run_one(handle, probe, deadline_s) for probe in (*controls, *others)]
 
     contradictions: list[str] = []
     outcomes: list[ProbeOutcome] = []
@@ -159,7 +164,7 @@ def run_battery(handle: Any, battery: Battery) -> ProbeReport:
     )
 
 
-def _run_one(handle: Any, probe: Probe) -> ProbeOutcome:
+def _run_one(handle: Any, probe: Probe, deadline_s: float) -> ProbeOutcome:
     """Run one probe as a process of the jail (`handle.start`, decision-181:
     a probe is a `Jail.start`, its record kept for `destroy` like any
     process's), wait for it with a bounded deadline, and classify it against `handle.signatures.for_axis(probe.axis)`
@@ -168,13 +173,36 @@ def _run_one(handle: Any, probe: Probe) -> ProbeOutcome:
     Reads `stdout`/`stderr` back from the process's own files on disk, exactly
     as its start wrote them (SPEC.md §12: probes run through the same
     stack, launcher, and channel the workload uses; this reads what that
-    real path actually produced, not an in-process capture)."""
+    real path actually produced, not an in-process capture).
+
+    A probe still running at `deadline_s` is stopped (`Process.stop`: its group,
+    through the jail's own teardown) and recorded by `_unfinished`."""
     process = handle.start(list(probe.argv))
-    returncode = process.wait(timeout=_PROBE_WAIT_TIMEOUT_S)
+    try:
+        returncode = process.wait(timeout=deadline_s)
+    except TimeoutError:
+        process.stop()
+        return _unfinished(probe, deadline_s)
     stdout = _read_text(process.stdout_path)
     stderr = _read_text(process.stderr_path)
     claim = handle.signatures.for_axis(probe.axis)
     return classify(probe, returncode, stdout, stderr, claim)
+
+
+def _unfinished(probe: Probe, deadline_s: float) -> ProbeOutcome:
+    """The outcome of a probe that did not finish by its deadline (SPEC.md §12,
+    decision-187): `FAIL` for a `CONTROL` (the action did not succeed), `VACUOUS`
+    for the other shapes (no denial or absence was observed; a connect that never
+    completes is unreachability, not refusal)."""
+    verdict = Verdict.FAIL if probe.shape is ProbeShape.CONTROL else Verdict.VACUOUS
+    return ProbeOutcome(
+        probe_name=probe.name,
+        axis=probe.axis,
+        shape=probe.shape,
+        verdict=verdict,
+        subject="",
+        detail=f"the probe did not finish in {deadline_s:g} s and was stopped",
+    )
 
 
 def _read_text(path: str) -> str:

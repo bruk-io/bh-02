@@ -69,6 +69,7 @@ from brig.core import (
 from brig.core.probes import Battery as CoreBattery
 from brig.core.probes import BatteryVerdict
 from brig.probe.battery import Battery, Expectation, Probe
+from brig.probe.runner import run_battery
 from brig.run import IoPolicy, Jail, Process
 from brig.stack import Stack, degraded
 from tests.conftest import launch, teardown_group, workload_argv
@@ -572,3 +573,88 @@ def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
             _teardown_group(process)
     finally:
         shutil.rmtree(workspace)
+
+
+# ---------------------------------------------------------------------------
+# TASK-0079.35 / decision-187 -- a probe still running at its deadline is
+# stopped and recorded, never a TimeoutError out of the battery.
+# ---------------------------------------------------------------------------
+
+
+def _gone(pid: int) -> bool:
+    """Whether `pid` runs nothing: absent, or a zombie nothing has reaped."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] == "Z"
+    except FileNotFoundError:
+        return True
+
+
+@pytest.mark.integration
+def test_a_probe_still_running_at_its_deadline_is_stopped_and_recorded(run_id: str) -> None:
+    """A DENIAL probe that never finishes (a connect that waits out the OS's timeout) is
+    `VACUOUS` saying it did not finish; a CONTROL that never finishes is `FAIL` and so its
+    battery is `VACUOUS`; the sleeping process is gone afterwards. The deadline is injected
+    (0.5 s), not waited out."""
+    scratch = _new_root(run_id, "dl")
+    os.makedirs(scratch)
+    pidfile = f"{scratch}/pid"
+    hang = workload_argv(run_id, f"echo $$ > {pidfile}; sleep 100")
+    denial = Probe(
+        name="hangs-denial",
+        shape=ProbeShape.DENIAL,
+        axis=Axis.NETWORK,
+        argv=tuple(hang),
+        expect=Expectation(),
+    )
+    control = Probe(
+        name="hangs-control",
+        shape=ProbeShape.CONTROL,
+        axis=Axis.NETWORK,
+        argv=tuple(hang),
+        expect=Expectation(token="never"),
+    )
+    fine = Probe(
+        name="finishes-control",
+        shape=ProbeShape.CONTROL,
+        axis=Axis.NETWORK,
+        argv=("/bin/sh", "-c", "echo t079ok"),
+        expect=Expectation(token="t079ok"),
+    )
+    try:
+        jail, process = _launch(
+            Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t079-35", run_id=run_id
+        )
+        try:
+            alone = run_battery(
+                jail,
+                Battery(name="t079-35-denial", axis=Axis.NETWORK, probes=(fine, denial)),
+                deadline_s=0.5,
+            )
+            outcome = next(o for o in alone.outcomes if o.probe_name == "hangs-denial")
+            assert outcome.verdict is Verdict.VACUOUS
+            assert (
+                next(o for o in alone.outcomes if o.probe_name == "finishes-control").verdict
+                is Verdict.PASS
+            )
+            assert "did not finish in 0.5 s" in outcome.detail
+            assert alone.battery_verdict is BatteryVerdict.VACUOUS  # a non-control asserted nothing
+            with open(pidfile, encoding="utf-8") as f:
+                pid = int(f.read())
+            assert _gone(pid), "the probe that missed its deadline still runs"
+
+            both = run_battery(
+                jail,
+                Battery(name="t079-35-both", axis=Axis.NETWORK, probes=(denial, control)),
+                deadline_s=0.5,
+            )
+            verdicts = {o.probe_name: o.verdict for o in both.outcomes}
+            assert verdicts == {
+                "hangs-control": Verdict.FAIL,
+                "hangs-denial": Verdict.VACUOUS,
+            }
+            assert both.battery_verdict is BatteryVerdict.VACUOUS
+        finally:
+            _teardown_group(process)
+    finally:
+        shutil.rmtree(scratch)
