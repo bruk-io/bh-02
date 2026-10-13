@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-13 22:33'
+updated_date: '2026-10-13 23:49'
 labels:
   - models
   - size-3
@@ -27,4 +28,5 @@ Asked by the owner (2026-10-13), who runs a local OpenAI-compatible server. Toda
 - [ ] #3 Ids from the server are shown with control characters stripped and never used as a path or an argument; the key is sent only in the request's header; endpoints are read only from the trusted models file; a test of each
 - [ ] #4 An optional include filter narrows what is listed; the status bar never triggers discovery
 - [ ] #5 docs/bh-02/using/models.md, the models plugin's README and CONTRACTS.md (if the models value's shape changes) describe it; scripts/check passes
+- [ ] #6 /model's choices (models switch.py _choices), which the palette calls on every key and the composer's completion list once per opening, on the TUI's event loop, never trigger discovery: they read a cached list of discovered models, filled off the loop (decision-0003)
 <!-- AC:END -->
