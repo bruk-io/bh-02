@@ -8,7 +8,8 @@ foreground or, with `background`, to `agent_wait`. The design is decision-0002
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agents:agents` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `executor`, `python`), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
+| `agents:agents` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `executor`, `python`), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
+| `agents:status` | the status bar's `agents` field: `agents: N running` while a sub-agent runs, absent at none; config: none | `roster` (`running`, `watch`), `frame` (`status`) |
 | `agents:output` | a child's `output`, inside its realm: `confirm(request)` through `asker`, the request labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
 | `agents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system`, `asides` (`add`: what `agent_send` left) |
 
@@ -178,6 +179,31 @@ After Ctrl-C the chat row shows the notes rows have for a stop (`commands.stop_n
 row's is `2 background agents still run; /agents stop ends them`, none when no background child
 runs.
 
-Later (decision-0002's split): watching a child: its event log, `bh-02 watch`, tmux panes, a
-status field and `/agents watch` (TASK-0080.06), and the project's guidance in a child
-(TASK-0080.07).
+## Watching a child
+
+- **Its event log.** Each child's events go to `<session>/agents/NAME/events.jsonl` (`eventlog.py`),
+  beside its transcript and under the same state directory, which `host.secrets` keeps from every
+  jail: an input can neither read it nor append a forged record (`test_a_jailed_input_can_neither_read_nor_forge_a_sub_agent_s_event_log`).
+  The file is made by the agents row alone, in one `open` with `O_CREAT | O_EXCL | O_NOFOLLOW` and mode
+  0600 (not the umask's: a test runs with umask 0), so there is no moment it is wider. A line is
+  `{"at": TIME, "event": ...}`: first `agent_start` (name, type, prompt, background), then every
+  event of the child's reply as it came, then `agent_end` with the report (or why it gave none),
+  whatever ended the child. Writes run on a thread, so the event loop never waits on a disk; one
+  that fails (a full disk) stops the log and the child goes on. A session kept in memory has no log;
+  a log that can't be made is said in a note, and the child runs without one.
+- **`bh-02 watch SESSION AGENT`** (the app's, `bh_02.watching`) renders one log read-only, follows it
+  until `agent_end` (`--once` stops after what is there), and refuses names bh-02 did not make before
+  it builds a path: it reads through `host_paths.read_beneath` (no link, a descriptor opened
+  read-only). Terminal control characters in what the model wrote are dropped.
+- **The status field.** `agents:status` shows `agents: N running` while any child runs and takes the
+  field down at none, following the agents row's `roster`. A layer with no ui has no `frame`, and so
+  no field.
+- **`/agents watch NAME`** answers with the command to run in another terminal, `bh-02 watch SESSION NAME`,
+  for any child this row has started in this run, running or ended (its log is kept). That is the
+  choice for showing a child's log: the TUI does not render it itself; it works the same inside tmux
+  or outside it. A child of a session kept in memory is answered as having no log.
+- **No tmux panes yet.** Opening a pane per child, and darwin's check that Seatbelt stops a connection
+  to the tmux socket, are TASK-0080.10. `TMUX` and `TMUX_PANE` are in the environment of no program
+  the runner starts (`runner-cordis-plugin`).
+
+Later (decision-0002's split): the project's guidance in a child (TASK-0080.07).

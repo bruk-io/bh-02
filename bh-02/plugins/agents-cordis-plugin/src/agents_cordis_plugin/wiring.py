@@ -26,10 +26,12 @@ from agents_cordis_plugin.agents import (
     AgentsConfig,
     Asker,
     Confirm,
+    Field,
     Hand,
     Labelled,
     Loop,
     Output,
+    Roster,
     Rows,
     section,
 )
@@ -37,7 +39,7 @@ from agents_cordis_plugin.child import ChildRow, prefixed
 from agents_cordis_plugin.kinds import read_types, type_names
 from cordis import Effects, Fiber, Inspection, Performer, Row, acquire, bind, component, performer, use
 
-__all__ = ["ChildConfig", "OutputConfig", "agents", "child", "output"]
+__all__ = ["ChildConfig", "OutputConfig", "agents", "child", "output", "status"]
 
 # What a child's realm reads from outside (decision-0002): its python tool's runner, the one
 # approval rule, what the jail keeps from the model, and the asker over the parent's output.
@@ -95,8 +97,8 @@ class _Asides(Protocol):
 
 _AGENTS: Mapping[str, str] = {
     "name": "agents",
-    "help": "list the running sub-agents, or end them",
-    "usage": "[stop [NAME]]",
+    "help": "list the running sub-agents, end them, or say how to watch one",
+    "usage": "[stop [NAME] | watch NAME]",
 }
 
 
@@ -136,7 +138,14 @@ async def _mount(performing: Performer, name: str, rows: Sequence[ChildRow]) -> 
     )
 
 
-@component(provides=("asker",))
+@runtime_checkable
+class _StatusSink(Protocol):
+    """What the agents status row needs of the `frame` value (CONTRACTS.md: frame)."""
+
+    def status(self, field: str, text: str, *shorter: str) -> Callable[[], None]: ...
+
+
+@component(provides=("asker", "roster"))
 async def agents(
     *,
     tools: _Registrar,
@@ -149,8 +158,8 @@ async def agents(
     config: AgentsConfig,
 ) -> Effects:
     """Fills an `agents` row: `use = "agents:agents"`. Binds `asker` (a confirm-only view of the
-    parent's `output`, for its children), registers the `agent`, `agent_wait`, `agent_send` and
-    `agent_stop` tools
+    parent's `output`, for its children) and `roster` (how many children run, for the status bar),
+    registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools
     (`runs="harness"`: bh-02's own, unasked exactly when the runner confines) and tells the model
     of them in the `system` section `agents`. Each `agent` call mounts one child through this
     row's performer, of a type read from bh-02's config directories (`host.trusted`) or shipped,
@@ -162,6 +171,7 @@ async def agents(
     yield bind("asker", Asker(output))
     types = partial(read_types, host.trusted, config.tools)
     run = Agents(loader, partial(_mount, performing), output, types, config)
+    yield bind("roster", run.roster())
     yield acquire(run.held)
     yield acquire(tools.register, AGENT, run.agent, runs="harness")
     yield acquire(tools.register, AGENT_WAIT, run.agent_wait, runs="harness")
@@ -171,6 +181,17 @@ async def agents(
     yield acquire(commands.on_stop, run.stop_note)
     # the section names the types there are as a conversation begins (read on the executor)
     yield acquire(system.add, "agents", lambda: section(type_names(host.trusted, config.tools)))
+
+
+@component
+async def status(*, roster: Roster, frame: _StatusSink) -> Effects:
+    """Fills an `agents_status` row: `use = "agents:status"`. Shows the status bar's `agents`
+    field, `agents: N running`, while a sub-agent runs (absent at none), following the agents
+    row's `roster`. A layer with no ui (no `frame`) leaves it out, as it does the other status
+    rows."""
+    field = Field(roster, frame.status)
+    yield acquire(field.show)
+    yield acquire(roster.watch, field.refresh)
 
 
 @dataclass(frozen=True, slots=True)

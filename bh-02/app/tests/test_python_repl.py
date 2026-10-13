@@ -8,6 +8,7 @@ import importlib.metadata
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ import pytest
 import cordis
 import memory_cordis_plugin
 from agent_cordis_plugin import ToolBroker
+from agents_cordis_plugin import EventLog
 from bh_02.bootstrap import (
     code_directories,
     code_packages,
@@ -1237,6 +1239,46 @@ async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
     assert "[0] DENIED" in out and "[1] DENIED" in out and "[3] DENIED" in out, out
     assert f"[2] {'READ' if _READS_EVERYWHERE_ELSE else 'DENIED'}" in out, out  # Linux: not allowlisted
     assert "placeholder" not in out, out
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_jailed_input_can_neither_read_nor_forge_a_sub_agent_s_event_log(
+    composition: Callable[..., Path],
+    tmp_path: Path,
+) -> None:
+    """A child's `events.jsonl` (made 0600 by the agents row's own `EventLog`) is under the sessions'
+    state directory, which is in `secrets`: an input can't read it, append a forged record to it,
+    move its directory away, or create a sibling beside it; the file is as it was after."""
+    project = tmp_path / "project"
+    state = project / ".state"  # inside the project, which an input reads and writes: only `secrets` hides it
+    project.mkdir()
+    place = state / "20261012-091500-ab12" / "agents" / "general-1"
+    place.mkdir(parents=True, mode=0o700)
+    log = place / "events.jsonl"
+    opened = EventLog.open(str(log))  # created 0600 by the row's own opener
+    await opened.write({"type": "agent_start", "name": "general-1"})
+    await opened.close()
+    assert stat.S_IMODE(log.stat().st_mode) == 0o600
+    before = log.read_bytes()
+
+    def attempt(what: str) -> str:
+        return f"try:\n    {what}; print('DONE')\nexcept OSError:\n    print('DENIED')"
+
+    patch = _inputs(
+        composition,
+        attempt(f"open({str(log)!r}).read()"),
+        attempt(f"open({str(log)!r}, 'a').write('forged')"),
+        attempt(f"__import__('os').rename({str(place)!r}, {str(place.parent / 'moved')!r})"),
+        attempt(f"open({str(place / 'events-2.jsonl')!r}, 'w').write('x')"),
+        extra=_jailed_in(project),
+    )
+    _answers()
+    secrets = unreadable([], [], [str(state.resolve())])
+    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})], secrets=secrets)
+    out = _shown()
+    assert all(f"[{n}] DENIED" in out for n in range(4)), out
+    assert log.read_bytes() == before and sorted(p.name for p in place.iterdir()) == ["events.jsonl"]
+    assert not (place.parent / "moved").exists()
 
 
 async def test_the_harness_owned_loop_offers_only_python_and_runs_the_input(

@@ -20,7 +20,7 @@ from typing import TextIO
 
 import click
 
-from bh_02 import sessions
+from bh_02 import sessions, watching
 from bh_02.bootstrap import (
     CREDENTIAL_FILE,
     CompositionError,
@@ -205,6 +205,25 @@ def sessions_command() -> None:
         click.echo(f"{session.id}  {session.created[:19]}  {session.stack}{patched}")  # to the second
     for record in broken:
         click.echo(f"warning: skipped {record.message}", err=True)
+
+
+@main.command("watch")
+@click.argument("session")
+@click.argument("agent")
+@click.option("--once", is_flag=True, help="Print what the log holds now and stop, instead of following it.")
+def watch_command(session: str, agent: str, once: bool) -> None:
+    """Follow one sub-agent's event log, read-only: SESSION is a session's id (`bh-02 sessions`)
+    and AGENT the agent's name (`/agents` in the session says the command, such as
+    `bh-02 watch 20261012-091500-ab12 general-1`). Stops when the agent ends; Ctrl-C leaves it
+    sooner. Nothing is written, and only names bh-02 made are accepted."""
+    try:
+        for chunk in watching.watched(sessions.state_root(), session, agent, follow=not once):
+            click.echo(chunk, nl=False)
+    except watching.Refused as error:
+        click.echo(f"error: {error.message}", err=True)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        click.echo(err=True)
 
 
 def _session(

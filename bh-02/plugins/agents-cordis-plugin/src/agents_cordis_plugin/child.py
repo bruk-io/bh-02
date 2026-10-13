@@ -34,6 +34,9 @@ __all__ = [
     "denied",
     "doing",
     "ended",
+    "ended_record",
+    "no_such_agent",
+    "field_forms",
     "framed",
     "label",
     "labelled",
@@ -48,12 +51,14 @@ __all__ = [
     "report_of",
     "session_model",
     "start_request",
+    "started_record",
     "stepped",
     "stop_note",
     "stopped",
     "unknown_type",
     "usage_event",
     "waited",
+    "watch_command",
 ]
 
 # Every row of a child, and the child's realm itself, is named under this, so its lifecycle
@@ -416,7 +421,47 @@ def parsed_command(args: str) -> tuple[str, str] | str:
             return ("stop", "")
         case ["stop", name]:
             return ("stop", name)
-    return f"/agents takes nothing (it lists) or `stop [NAME]`, not {args!r}"
+        case ["watch", name]:
+            return ("watch", name)
+    return f"/agents takes nothing (it lists), `stop [NAME]` or `watch NAME`, not {args!r}"
+
+
+def field_forms(running: int) -> tuple[str, ...]:
+    """The status bar's `agents` field for `running` sub-agents (the bar shows `agents: 2 running`):
+    its text, then a shorter form; none at 0, so the field is absent."""
+    return (f"{running} running", str(running)) if running > 0 else ()
+
+
+def watch_command(session: str, name: str, *, running: bool) -> str:
+    """`/agents watch NAME`'s answer: the command that follows the child's event log in another
+    terminal (read-only; `session` and `name` are bh-02's own)."""
+    state = "is running" if running else "has ended; its log is kept"
+    return (
+        f"agent {name} {state}. To follow its events, run this in another terminal:\n"
+        f"  bh-02 watch {session} {name}"
+    )
+
+
+def no_such_agent(name: str, known: Iterable[str]) -> str:
+    """`/agents watch`'s answer for a name this session's agents row gave no sub-agent."""
+    return f"error: this run started no sub-agent named {name!r}; it started {', '.join(known) or 'none'}"
+
+
+def started_record(name: str, kind: str, prompt: str, background: bool) -> dict[str, Any]:
+    """The first record of a child's event log: who it is and what it was asked."""
+    return {
+        "type": "agent_start",
+        "name": name,
+        "agent_type": kind,
+        "prompt": prompt,
+        "background": background,
+    }
+
+
+def ended_record(report: str) -> dict[str, Any]:
+    """The last record of a child's event log: what the `agent` call answered (its report, or why
+    it gave none). `bh-02 watch` stops following at it."""
+    return {"type": "agent_end", "report": report}
 
 
 def stopped(names: Sequence[str], running: Iterable[str]) -> str:

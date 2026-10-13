@@ -37,6 +37,13 @@ unenforced. On a narrow terminal the field shortens to initials (`w✓ n✓ r~ e
 marks alone. It is never cut. What a start says you should know (on Linux, the paths its jail
 holds with a mount the host can undo) is shown once, as a note in the conversation.
 
+The `agents:` field appears while sub-agents run (`agents: 2 running`) and is absent at none.
+
+tmux's `TMUX` and `TMUX_PANE` are not in the environment of any program the runner starts: the
+confined runner passes an allowlist that leaves them out, and under `--no-jail` they are taken out
+of the rest of bh-02's environment. (Without the jail that is hygiene, not a boundary: an input
+can find the tmux socket itself.)
+
 ## Without the jail: `--no-jail`
 
 ```sh

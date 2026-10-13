@@ -30,7 +30,7 @@ A line is a command when it starts with `/name` followed by a space or nothing. 
 | `/compact [WHAT TO KEEP]` | asks the model to summarise the conversation, then carries on in a new one that starts from the summary. The Python process keeps its namespace, and running sub-agents carry on. |
 | `/model [NAME]` | lists the models, or switches to `NAME` for this session ([Models](models.md)); running sub-agents end, each with a note |
 | `/memory` | lists the memory files the model is told and how each loads ([Memory](memory.md)) |
-| `/agents [stop [NAME]]` | lists the sub-agents running (name, type, what each is doing, its transcript's path), or ends one or all of them ([Sub-agents](#sub-agents)) |
+| `/agents [stop [NAME] \| watch NAME]` | lists the sub-agents running (name, type, what each is doing, its transcript's path), ends one or all of them, or says the command that follows one's events ([Sub-agents](#sub-agents)) |
 | `/release` | stops what runs in the jail (the Python process, the extensions' process, each running sub-agent's Python process) until the next input ([The jail](jail.md)); sub-agents' conversations go on |
 | `/rows` | shows the running composition: each row, the component that fills it, and its state |
 | `/explain ROW` | says what cordis knows about a row |
@@ -59,7 +59,10 @@ explains what a row is.
 The model can start sub-agents (`agent`), tell a running one something (`agent_send`, which the
 child reads framed as from its parent agent) and end one (`agent_stop`). `/agents` lists those
 running: name, type, foreground or background, what each is doing, and the path of its
-transcript. `/agents stop NAME` ends one, `/agents stop` all of them; each conversation ends with
+transcript. `/agents watch NAME` says the command to run in another terminal, `bh-02 watch SESSION NAME`,
+which follows that sub-agent's event log read-only ([`bh-02 watch`](../reference/command-line.md#bh-02-watch)); it
+works for a sub-agent that has ended too. While any run, the status bar shows `agents: N running`
+(absent at none). `/agents stop NAME` ends one, `/agents stop` all of them; each conversation ends with
 its Python process. Ctrl-C stops the reply and the sub-agent it waits on, but not the background
 ones: its notice says how many still run and that `/agents stop` ends them. `/clear`, `/model`
 and `/restart agents` end the running ones too, each with a note; `/compact` keeps them, and

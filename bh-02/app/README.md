@@ -110,7 +110,8 @@ tui:grades              pushes the jail field              depends on Runner, Ap
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:converse           runs the chat, binds Done          depends on Loop, Input, Output, Commands, Jobs
 extensions:extensions   loads the model's own plugins      depends on Runner, Commands, Frame, System, Tools, Approval, Output
-agents:agents           binds Asker, registers agent tools depends on Tools, System, Output, Loader, Host, Commands, Model (each call mounts a child; /agents; a Model reload ends them; see below)
+agents:status           pushes the agents field            depends on Roster, Frame
+agents:agents           binds Asker, Roster, registers agent tools depends on Tools, System, Output, Loader, Host, Commands, Model (each call mounts a child; /agents; a Model reload ends them; see below)
 ```
 
 A sub-agent (`agent`, the agents row) is not a row of these layers: each call mounts one child
@@ -125,7 +126,7 @@ bh-02's config directory (`host.trusted`). From outside it reads only `runner`, 
 `max_running` at once, until its type's step limit; past `session_agents`, or naming a model
 other than its type's, its start is asked first. It is retired when it answers, when the call is
 stopped (Ctrl-C; a background child is not), by `agent_stop` or `/agents stop`, or with the agents row (a `/clear`, a `/model` switch or a restart of it), and what it used joins
-the session's totals; the ui shows none of its rows' lifecycle, and `--trace` keeps them ([agents-cordis-plugin](../plugins/agents-cordis-plugin/README.md)).
+the session's totals; the ui shows none of its rows' lifecycle, and `--trace` keeps them. Its events go to the session's `agents/NAME/events.jsonl` (0600, under `host.secrets`), which `bh-02 watch SESSION NAME` follows read-only and `/agents watch NAME` names the command for; the status bar's `agents: N running` field is the `agents:status` row's ([agents-cordis-plugin](../plugins/agents-cordis-plugin/README.md)).
 
 So a new model or ui keeps the Python process and its namespace (the python row depends on the
 runner and brokers that never reload), a new runner starts a new one, and a `/model` switch

@@ -1199,3 +1199,135 @@ async def test_release_stops_the_children_s_programs_and_their_conversations_go_
     assert (await rt.root.get("commands").run("/agents")).count("general-1") == 1  # ...it still runs
     await rt.root.get("commands").run("/agents stop")
     await rt.shutdown()
+
+
+def _records(place: Path) -> list[Json]:
+    return [json.loads(line) for line in (place / "events.jsonl").read_text().splitlines()]
+
+
+async def test_a_child_s_events_go_to_its_own_log_created_0600_and_ended_with_its_report(
+    tmp_path: Path,
+) -> None:
+    """`<session>/agents/NAME/events.jsonl`: the start, every event of the reply, the end with
+    the report. The file is made with mode 0600 whatever the umask (it is never wider, not even
+    for the moment before a chmod), in the 0700 directory."""
+    model = _Model(
+        parent=[[_call("1", "agent", prompt="count the files", type="general")], _text("done")],
+        child=[_text("There are three.")],
+    )
+    booted = await _booted(_rows(model, _Screen(), tmp_path / "transcript.jsonl"))
+    rt = booted.runtime
+    before = os.umask(0)  # the widest a process can ask for: the mode is not the umask's
+    try:
+        await _reply(rt, "delegate")
+    finally:
+        os.umask(before)
+    place = tmp_path / "agents" / "general-1"
+    assert stat.S_IMODE(os.stat(place / "events.jsonl").st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(place).st_mode) == 0o700
+    records = _records(place)
+    kinds = [r["event"]["type"] for r in records]
+    assert kinds[0] == "agent_start" and kinds[-1] == "agent_end"
+    assert {"text", "stop"} <= set(kinds)
+    assert records[0]["event"]["prompt"] == "count the files" and records[0]["event"]["name"] == "general-1"
+    assert "There are three." in records[-1]["event"]["report"]
+    assert all(r["at"] for r in records)
+    await rt.shutdown()
+
+
+async def test_a_background_child_s_log_is_written_while_it_runs_and_ends_when_it_is_stopped(
+    tmp_path: Path,
+) -> None:
+    model = _Model(parent=[], child=[_HANG])
+    booted = await _booted(_rows(model, _Screen(), tmp_path / "transcript.jsonl"))
+    rt = booted.runtime
+    await _background(rt, background=True)
+    await _until(lambda: model.hung == 1)
+    place = tmp_path / "agents" / "general-1"
+    assert [r["event"]["type"] for r in _records(place)] == ["agent_start"]  # written as it runs
+    await rt.root.get("commands").run("/agents stop general-1")
+    await _until(lambda: _records(place)[-1]["event"]["type"] == "agent_end")
+    assert "stopped before it answered" in _records(place)[-1]["event"]["report"]
+    await rt.shutdown()
+
+
+async def test_a_session_kept_in_memory_has_children_with_no_log() -> None:
+    model = _Model(
+        parent=[[_call("1", "agent", prompt="p", type="general")], _text("done")], child=[_text("ok")]
+    )
+    booted = await _booted(_rows(model, _Screen()))
+    rt = booted.runtime
+    [result] = _results(await _reply(rt, "delegate"))
+    assert result.startswith("Report from agent general-1")
+    assert "has no event log: this session keeps its conversation in memory" in await rt.root.get(
+        "commands"
+    ).run("/agents watch general-1")
+    await rt.shutdown()
+
+
+class _Frame:
+    """The ui's `frame`, as far as the agents status row uses it: the fields pushed, as the bar shows them."""
+
+    def __init__(self) -> None:
+        self.fields: dict[str, tuple[str, ...]] = {}
+
+    def status(self, field: str, text: str, *shorter: str) -> Callable[[], None]:
+        self.fields[field] = (text, *shorter)
+        return lambda: self.fields.pop(field, None) and None
+
+
+@component(provides=("frame",))
+async def fake_frame(*, config: Mapping[str, Any]) -> Effects:
+    yield bind("frame", config["frame"])
+
+
+async def test_the_status_bar_shows_how_many_sub_agents_run_and_nothing_at_none(tmp_path: Path) -> None:
+    frame = _Frame()
+    model = _Model(parent=[], child={"general-1": [_HANG], "general-2": [_HANG]})
+    rows = _rows(
+        model,
+        _Screen(),
+        tmp_path / "transcript.jsonl",
+        frame=Row("frame", f"{__name__}:fake_frame", {"frame": frame}),
+        agents_status=Row("agents_status", "agents:status"),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    assert "agents" not in frame.fields  # absent at 0
+    await _background(rt, background=True)
+    await _until(lambda: model.hung == 1)
+    assert frame.fields["agents"] == ("1 running", "1")
+    await _background(rt, background=True)
+    await _until(lambda: model.hung == 2)
+    assert frame.fields["agents"] == ("2 running", "2")
+    await rt.root.get("commands").run("/agents stop general-1")
+    assert frame.fields["agents"] == ("1 running", "1")  # a stopped child no longer counts
+    await rt.root.get("commands").run("/agents stop")
+    await _until(lambda: "agents" not in frame.fields)
+    await rt.shutdown()
+
+
+async def test_agents_watch_says_the_command_that_follows_a_child_s_log_running_or_ended(
+    tmp_path: Path,
+) -> None:
+    model = _Model(parent=[], child={"general-1": [_text("done")], "general-2": [_HANG]})
+    booted = await _booted(
+        _rows(model, _Screen(), tmp_path / "state" / "20261012-091500-ab12" / "transcript.jsonl")
+    )
+    rt = booted.runtime
+    commands = rt.root.get("commands")
+    await _background(rt, background=True)
+    await _background(rt, background=True)
+    await _until(lambda: model.hung == 1)
+    state = tmp_path / "state" / "20261012-091500-ab12" / "agents"
+    await _until(lambda: _records(state / "general-1")[-1]["event"]["type"] == "agent_end")
+    ended = await commands.run("/agents watch general-1")
+    assert "has ended; its log is kept" in ended
+    assert ended.endswith("bh-02 watch 20261012-091500-ab12 general-1")
+    running = await commands.run("/agents watch general-2")
+    assert "is running" in running and running.endswith("bh-02 watch 20261012-091500-ab12 general-2")
+    for bad in ("../x", "general-9", "general-1/../.."):
+        assert (await commands.run(f"/agents watch {bad}")).startswith("error: this run started no sub-agent")
+    assert "takes nothing" in await commands.run("/agents watch")
+    await commands.run("/agents stop")
+    await rt.shutdown()

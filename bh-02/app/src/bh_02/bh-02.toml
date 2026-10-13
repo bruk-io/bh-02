@@ -17,6 +17,11 @@ use = "agent:tools"
 id = "agents"
 use = "agents:agents"
 
+# The status bar's agents field, `agents: N running`, while a sub-agent runs (absent at none).
+[[plugin]]
+id = "agents_status"
+use = "agents:status"
+
 # The model, by name: `default` (`sonnet`), which `--model` and `/model` set in the session's layer.
 [[plugin]]
 id = "model"

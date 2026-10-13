@@ -41,6 +41,8 @@ from agents_cordis_plugin.child import (
     denied,
     doing,
     ended,
+    ended_record,
+    field_forms,
     framed,
     label,
     labelled,
@@ -48,19 +50,23 @@ from agents_cordis_plugin.child import (
     listing,
     lost,
     next_name,
+    no_such_agent,
     not_running,
     parent_message,
     parsed_command,
     report_of,
     session_model,
     start_request,
+    started_record,
     stepped,
     stop_note,
     stopped,
     unknown_type,
     usage_event,
     waited,
+    watch_command,
 )
+from agents_cordis_plugin.eventlog import LOG, EventLog
 from agents_cordis_plugin.kinds import AgentType
 
 __all__ = [
@@ -72,11 +78,13 @@ __all__ = [
     "AgentsConfig",
     "Asker",
     "Confirm",
+    "Field",
     "Hand",
     "Labelled",
     "Loop",
     "Mount",
     "Output",
+    "Roster",
     "Rows",
     "Types",
     "section",
@@ -237,6 +245,43 @@ class Labelled:
         return await self.asker.confirm({**request, "agent": label(self.name, self.type)})
 
 
+@dataclass(frozen=True, slots=True)
+class Roster:
+    """The `roster` key: how many sub-agents run now (`running`), and a way to hear when that
+    changes (`watch(fn)`: `fn()` is called on the event loop after each start, stop and end; the
+    remover stops it). Read-only: it starts and stops nothing. The status bar's `agents` field
+    is made from it."""
+
+    running: Callable[[], int]
+    watch: Callable[[Callable[[], None]], Callable[[], None]]
+
+
+class Field:
+    """The status bar's `agents` field: `agents: N running`, pushed through the frame's `status`
+    while a sub-agent runs and taken down at 0. `refresh` is what the roster calls after a change."""
+
+    def __init__(self, roster: Roster, push: Callable[..., Callable[[], None]]) -> None:
+        self._roster = roster
+        self._push = push
+        self._shown: Callable[[], None] | None = None
+
+    def refresh(self) -> None:
+        """Show the field for the children running now, or take it down at none."""
+        self.hide()
+        if forms := field_forms(self._roster.running()):
+            self._shown = self._push("agents", *forms)
+
+    def show(self) -> Callable[[], None]:
+        """Show the field as it stands; the remover takes it down (the row leaving)."""
+        self.refresh()
+        return self.hide
+
+    def hide(self) -> None:
+        if self._shown is not None:
+            self._shown()
+            self._shown = None
+
+
 class Hand:
     """Where a child's `agents:child` row passes its `loop` to the run that mounted it, and says
     when it is gone (the row unloading: the child retired). Gone is for good."""
@@ -351,8 +396,17 @@ class AgentsConfig:
 class _Live:
     """A child that is running: what `/agents` lists, `agent_send` leaves mail for and a stop ends."""
 
-    def __init__(self, name: str, kind: str, background: bool, place: PurePath | None, hand: Hand) -> None:
+    def __init__(
+        self,
+        name: str,
+        kind: str,
+        background: bool,
+        place: PurePath | None,
+        hand: Hand,
+        changed: Callable[[], None],
+    ) -> None:
         self.name, self.kind, self.background, self.place, self.hand = name, kind, background, place, hand
+        self._changed = changed
         self.doing = "waiting to start"
         self.child: _Child | None = None
         self.stopped = False
@@ -363,6 +417,7 @@ class _Live:
     async def stop(self) -> None:
         """End it: its realm retired (its python program with it); one not yet mounted never is."""
         self.stopped = True
+        self._changed()
         if self.child is not None:
             await self.child.retire()
 
@@ -390,6 +445,25 @@ class Agents:
         self._slots = asyncio.Semaphore(config.max_running)
         self._background: dict[str, asyncio.Task[str]] = {}
         self._live: dict[str, _Live] = {}
+        self._places: dict[str, PurePath | None] = {}  # every child this row started: where its state is
+        self._heard: list[Callable[[], None]] = []
+
+    def running(self) -> int:
+        """How many sub-agents run now (one waiting for a slot counts; one being stopped does not)."""
+        return sum(not live.stopped for live in self._live.values())
+
+    def watch(self, hear: Callable[[], None]) -> Callable[[], None]:
+        """Call `hear()` after each start, stop and end of a child; the remover stops it."""
+        self._heard.append(hear)
+        return lambda: self._heard.remove(hear) if hear in self._heard else None
+
+    def roster(self) -> Roster:
+        """The `roster` key's value."""
+        return Roster(self.running, self.watch)
+
+    def _changed(self) -> None:
+        for hear in tuple(self._heard):
+            hear()
 
     async def agent(self, input: Json) -> dict[str, Any]:
         """Start one child on `input["prompt"]` and answer with its report, framed
@@ -433,7 +507,9 @@ class Agents:
         )
         self._started += 1
         background = input.get("background") is True
-        live = self._live[name] = _Live(name, kind.name, background, place, hand)
+        live = self._live[name] = _Live(name, kind.name, background, place, hand, self._changed)
+        self._places[name] = place
+        self._changed()
         run = self._run(live, kind, str(input.get("prompt", "")), rows)
         if not background:
             return {"content": await run}
@@ -495,12 +571,27 @@ class Agents:
         verb, name = parsed
         if verb == "list":
             return listing([live.listed() for live in self._live.values() if not live.stopped])
+        if verb == "watch":
+            return self._watch_command(name)
         if name and name not in self._names():
             return not_running(name, self._names())
         names = [name] if name else self._names()
         for each in names:
             await self._live[each].stop()
         return stopped(names, self._names())
+
+    def _watch_command(self, name: str) -> str:
+        """`/agents watch NAME`: the command that follows the child's event log in another
+        terminal. Only a name this row gave (never text from the model or a file) reaches it."""
+        if name not in self._places:
+            return no_such_agent(name, self._places)
+        place = self._places[name]
+        if place is None:
+            return (
+                f"agent {name} has no event log: this session keeps its conversation in memory, "
+                "so its sub-agents keep nothing on disk"
+            )
+        return watch_command(place.parent.parent.name, name, running=name in self._live)
 
     def stop_note(self) -> str:
         """The stop notice's addition after Ctrl-C: how many background agents still run."""
@@ -522,34 +613,64 @@ class Agents:
 
     async def _run(self, live: _Live, kind: AgentType, prompt: str, rows: Sequence[ChildRow]) -> str:
         """Run child `live` in a slot to its end, retire it, and show what it used, however it
-        ends; a note says so when its realm was retired from outside (the row restarting).
+        ends; a note says so when its realm was retired from outside (the row restarting). Its
+        events go to its event log, which says how it began and how it ended.
 
         Raises:
             Exception: what the child's reply raised that is not a recoverable failure (a bug).
         """
         name = live.name
         events: list[Json] = []
+        log = await self._opened(live)
+        report = "(no report: the run was cancelled)"
         try:
+            await log.write(started_record(name, kind.name, prompt, live.background))
             async with self._slot(name, kind.name):
                 if live.stopped:
-                    return ended(name, kind.name, "it was stopped before it started")
+                    return (report := ended(name, kind.name, "it was stopped before it started"))
                 live.doing = "starting"
                 child = await self._mount(name, rows)
                 live.child = child
                 try:
                     if live.stopped:
-                        return ended(name, kind.name, "it was stopped before it started")
-                    return await _driven(live, kind, prompt, child, self._config.start, events)
+                        return (report := ended(name, kind.name, "it was stopped before it started"))
+                    return (
+                        report := await _driven(live, kind, prompt, child, self._config.start, events, log)
+                    )
+                except Exception as error:  # a bug: the log says so, and it propagates
+                    report = f"(failed: {type(error).__name__}: {error})"
+                    raise
                 finally:
                     if live.hand.is_gone() and not live.stopped:
                         await self._output.show(_shown({"type": "note", "text": lost(name, kind.name)}))
                     await child.retire()
         finally:
             self._live.pop(name, None)
+            self._changed()
+            try:
+                await log.write(ended_record(report))
+            finally:
+                await log.close()
             if (used := usage_event(report_of(events))) is not None:
                 await self._output.show(
                     _shown({"type": "note", "text": f"agent {name} ({kind.name}) ended; it used:"}, used)
                 )
+
+    async def _opened(self, live: _Live) -> EventLog:
+        """The child's event log, created 0600 in its state directory (off the event loop); a log
+        that can't be made is said in a note and the child runs without one."""
+        if live.place is None:
+            return EventLog.none()
+        path = str(live.place / LOG)
+        try:
+            return await asyncio.to_thread(EventLog.open, path)
+        except OSError as error:
+            said = (
+                f"agent {live.name} ({live.kind}) has no event log, so `bh-02 watch` "
+                f"shows nothing of it: {error}"
+            )
+            await self._output.show(_shown({"type": "note", "text": said}))
+            return EventLog.none()
 
     @contextlib.asynccontextmanager
     async def _slot(self, name: str, kind: str) -> AsyncIterator[None]:
@@ -596,7 +717,13 @@ def _outcome(name: str, run: asyncio.Task[str]) -> str:
 
 
 async def _driven(
-    live: _Live, kind: AgentType, prompt: str, child: _Child, start: float, events: list[Json]
+    live: _Live,
+    kind: AgentType,
+    prompt: str,
+    child: _Child,
+    start: float,
+    events: list[Json],
+    log: EventLog,
 ) -> str:
     """Drive the child's reply to its end, to its step limit, or until it is retired, keeping
     its events in `events`, and say what it came to.
@@ -620,6 +747,7 @@ async def _driven(
             try:
                 async for event in stream:
                     events.append(event)
+                    await log.write(event)
                     live.seen(event)
                     steps = stepped(steps, event)
                     if limited(steps, event, kind.steps):
