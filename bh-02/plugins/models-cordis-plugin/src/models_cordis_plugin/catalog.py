@@ -11,7 +11,7 @@ import dataclasses
 from collections.abc import Mapping, Sequence
 from typing import Any, Final, Protocol, runtime_checkable
 
-from models_cordis_plugin.named import OPENAI, ModelConfig, ModelsError, Named, problem
+from models_cordis_plugin.named import OPENAI, ModelConfig, ModelsError, Named, intended, problem, standing
 from models_cordis_plugin.openai import missing_key
 from models_cordis_plugin.providers import known, refused
 
@@ -52,7 +52,7 @@ class Catalog:
     @property
     def path(self) -> str:
         """The models file the model row reads (whether or not it exists)."""
-        return known(self._config() or ModelConfig())[1]
+        return known(self._config() or ModelConfig()).source
 
     @property
     def problem(self) -> str | None:
@@ -63,13 +63,22 @@ class Catalog:
 
     def listed(self) -> list[dict[str, Any]]:
         """Every model, in order (the built-ins, the file's, the row's `extra`): `name`,
-        `provider`, `id`, `current` (the one the model row names), `where` (an openai model's
-        base_url), and `problem` or `shadows` when there is one. A models file that can't be
-        read raises its `ModelsError`; one in the project is not read (`problem` says why)."""
+        `provider`, `id`, `current` (the one the model row names), `default` (on the model a new
+        session starts on when no layer names one: where that came from, `built in` or `the models
+        file`), `where` (an openai model's base_url), and `problem` or `shadows` when there is
+        one. A models file that can't be read raises its `ModelsError`; one in the project is not
+        read (`problem` says why)."""
         config = self._config() or ModelConfig()
-        models = known(config)[0]
+        found = known(config)
         current = self.current()["name"]
-        return [_listed(named, named.name == current) for named in models]
+        return [
+            _listed(
+                named,
+                named.name == current,
+                found.standing.origin if named.name == found.standing.name else None,
+            )
+            for named in found.models
+        ]
 
     def current(self) -> dict[str, str]:
         """The model the row names now: `name` and `provider` (empty when it names no model
@@ -79,14 +88,12 @@ class Catalog:
         if config is None:
             return {"name": str(getattr(entry, "use", "") or "none"), "provider": ""}
         try:
-            models = known(config)[0]
-        except ModelsError:
-            return {"name": str(config.default), "provider": ""}
-        found = next((n for n in models if n.name == config.default), None)
-        return {
-            "name": str(config.default),
-            "provider": found.provider if found and not problem(found) else "",
-        }
+            options = known(config)
+        except ModelsError:  # the models file can't be read: its default is unknown, a layer's is not
+            return {"name": str(intended(config.default, standing(None)).name), "provider": ""}
+        name = intended(config.default, options.standing).name
+        found = next((n for n in options.models if n.name == name), None)
+        return {"name": str(name), "provider": found.provider if found and not problem(found) else ""}
 
     def check(self, name: str) -> str | None:
         """Why the model row can't switch to `name`, said so the person can fix it; None when
@@ -100,7 +107,7 @@ class Catalog:
                 f"{_MODELS}, so it has no models to switch between"
             )
         try:
-            models, source, why = known(config)
+            models, source, why, _ = known(config)
         except ModelsError as error:
             return error.message
         found = next((n for n in models if n.name == name), None)
@@ -117,8 +124,10 @@ class Catalog:
         return missing_key(found, config.env_file, self._searched) if found.provider == OPENAI else None
 
 
-def _listed(named: Named, current: bool) -> dict[str, Any]:
+def _listed(named: Named, current: bool, default: str | None) -> dict[str, Any]:
     out: dict[str, Any] = {"name": named.name, "provider": named.provider, "id": named.id, "current": current}
+    if default is not None:
+        out["default"] = default
     if isinstance(url := named.table.get("base_url"), str):
         out["where"] = url
     if (why := problem(named)) is not None:

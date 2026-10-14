@@ -15,6 +15,13 @@ shadowing it). The file is one table per model:
     max_tokens = 4096                          # optional
     temperature = 0.2                          # optional
 
+A top-level `default = "NAME"` above the tables names the model a new session starts on. The
+model a session starts on is chosen, lowest first, by the built-in `sonnet`, the file's `default`,
+a layer's model row `default` (the session's own layer, which `/model` and `--model` write; so a
+resumed session keeps the model it was on), `--model` (which writes that layer). A layer that
+names no model leaves `ModelConfig.default` None, so the file's counts; one that names `sonnet`
+chooses it (`intended`).
+
 A provider can also be `module:attribute`, a factory the model's table is passed to (bh-02's
 fakes are one); its table is its own.
 
@@ -44,6 +51,7 @@ __all__ = [
     "BUILT_IN",
     "CLAUDE_CODE",
     "OPENAI",
+    "Intended",
     "ModelConfig",
     "ModelsError",
     "Named",
@@ -51,11 +59,13 @@ __all__ = [
     "chosen",
     "environ",
     "in_project",
+    "intended",
     "key_name",
     "models_file",
     "parsed",
     "problem",
     "read_models",
+    "standing",
     "withheld",
 ]
 
@@ -67,7 +77,11 @@ BUILT_IN: Final[Mapping[str, Mapping[str, Any]]] = {
     "opus": {"provider": CLAUDE_CODE, "id": "opus"},
     "haiku": {"provider": CLAUDE_CODE, "id": "haiku"},
 }
+_BUILT_IN_DEFAULT: Final = "sonnet"
 _BUILT_IN_SOURCE: Final = "built in"
+_FILE_SOURCE: Final = "the models file"
+_LAYER_SOURCE: Final = "the model row"
+_DEFAULT_KEY: Final = "default"
 _EXTRA_SOURCE: Final = "the model row's extra"
 # The keys a model's table may have, per provider (a factory's table is its own).
 _KEYS: Final[Mapping[str, frozenset[str]]] = {
@@ -96,7 +110,9 @@ class ModelsError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
-    """The `model` row's config. `default`: the model's name (`/model` and `--model` set it).
+    """The `model` row's config. `default`: the model's name (`/model` and `--model` set it);
+    None when no layer names one, which is not the same as naming `sonnet` (`intended`: the
+    models file's `default` counts then).
     `models`: the models file, when not the default one. `extra`: models of the row's own, one
     table per name, as in the file. For the claude-code provider: `state`, the directory its
     Claude Code state lives in (the session's `claude/`, which the session layer sets);
@@ -105,12 +121,31 @@ class ModelConfig:
     working directory when unset), which, like the working directory, a models file must be
     outside of (`in_project`)."""
 
-    default: str = "sonnet"
+    default: str | None = None
     models: str | None = None
     extra: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     state: str | None = None
     env_file: str | None = None
     cwd: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ModelsFile:
+    """What a models file says: its model tables by name, and its top-level `default` as written
+    (None when it has none; TOML has no null, so None is never a value; not checked here: said
+    by `chosen` when it is the one in effect)."""
+
+    models: Mapping[str, Mapping[str, Any]]
+    default: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class Intended:
+    """The model name a session starts on, as written (`name`: not yet checked to be a name), and
+    where it was written: `origin`, the built-in default, the models file, or a layer."""
+
+    name: object
+    origin: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,22 +213,44 @@ def environ() -> Mapping[str, str]:
     return os.environ
 
 
-def parsed(text: str | None, source: str) -> dict[str, Mapping[str, Any]]:
-    """The models file's tables, by name: `{}` for no file. A file that is not TOML, or holds
-    something other than one table per model, is a `ModelsError` naming it."""
+def parsed(text: str | None, source: str) -> _ModelsFile:
+    """The models file's tables, by name, and its `default`: empty for no file. A file that is not
+    TOML, or holds something other than one table per model (and a `default`), is a
+    `ModelsError` naming it. A `[default]` table is a model named `default`."""
     if text is None:
-        return {}
+        return _ModelsFile({})
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         raise ModelsError("models_file", f"the models file {source} is not TOML ({error}); fix it") from None
+    default = None
+    tables: dict[str, Mapping[str, Any]] = {}
     for name, table in data.items():
-        if not isinstance(table, dict):
+        if isinstance(table, dict):
+            tables[name] = table
+        elif name == _DEFAULT_KEY:
+            default = table
+        else:
             raise ModelsError(
                 "models_file",
                 f"the models file {source}: {name!r} is not a table; each model is one, e.g.\n{_EXAMPLE}",
             )
-    return data
+    return _ModelsFile(tables, default)
+
+
+def standing(from_file: object) -> Intended:
+    """The default below any layer: the models file's `default` when it has one, else `sonnet`."""
+    if from_file is None:
+        return Intended(_BUILT_IN_DEFAULT, _BUILT_IN_SOURCE)
+    return Intended(from_file, _FILE_SOURCE)
+
+
+def intended(layer: object, below: Intended) -> Intended:
+    """The model a session starts on: a layer's model row `default` when it has one (None when no
+    layer names a model, which `sonnet` named in a layer is not), else `below` (`standing`)."""
+    if layer is None:
+        return below
+    return Intended(layer, _LAYER_SOURCE)
 
 
 def combined(
@@ -319,15 +376,23 @@ def key_name(key: object) -> str | None:
     return key if isinstance(key, str) and _KEY_NAME.fullmatch(key) else None
 
 
-def chosen(name: object, models: Sequence[Named], source: str, refused: str | None = None) -> Named:
+def chosen(
+    name: object,
+    models: Sequence[Named],
+    source: str,
+    refused: str | None = None,
+    origin: str = _LAYER_SOURCE,
+) -> Named:
     """The model `name` means, or a `ModelsError` saying what to do: no such name (the models
     there are, and where to add one, or why the models file is not read: `refused`, which
-    `in_project` says), or a table with a problem."""
+    `in_project` says), or a table with a problem. `origin`: where `name` was written
+    (`Intended.origin`), said when it is the models file's `default`."""
+    from_file = origin == _FILE_SOURCE
     if not isinstance(name, str) or not name:
+        who = f"the default in the models file {source}" if from_file else "the model row's default"
         raise ModelsError(
-            "model_config",
-            f"the model row's default is {name!r}, not a model's name; give it one, like "
-            '`default = "sonnet"`, or remove it',
+            "models_file" if from_file else "model_config",
+            f'{who} is {name!r}, not a model\'s name; give it one, like `default = "sonnet"`, or remove it',
         )
     found = next((named for named in models if named.name == name), None)
     if found is None:
@@ -335,9 +400,10 @@ def chosen(name: object, models: Sequence[Named], source: str, refused: str | No
         add = refused or (
             f"to add {name!r}, give it a table in the models file {source}:\n{_EXAMPLE.replace('NAME', name)}"
         )
+        which = f", the default in the models file {source}" if from_file else ""
         raise ModelsError(
             "unknown_model",
-            f"no model named {name!r}; the models are {names}. /model NAME switches to one; {add}",
+            f"no model named {name!r}{which}; the models are {names}. /model NAME switches to one; {add}",
         )
     if (why := problem(found)) is not None:
         raise ModelsError("model_config", why)

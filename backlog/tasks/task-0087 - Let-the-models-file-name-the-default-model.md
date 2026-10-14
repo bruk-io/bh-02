@@ -1,9 +1,11 @@
 ---
 id: TASK-0087
 title: Let the models file name the default model
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-13 22:33'
+updated_date: '2026-10-14 06:28'
 labels:
   - models
   - size-2
@@ -20,8 +22,20 @@ Asked by the owner (2026-10-13), who runs a local OpenAI-compatible server and w
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A top-level default = "NAME" in the models file chooses the model a new session starts on when neither --model nor a layer names one; a resumed session keeps its own; /model and --model still switch
-- [ ] #2 A default that names no model, or is not a name, is said with what to write (the house style for models-file problems), and bh-02 still starts; a test of each
-- [ ] #3 /model's list marks which model is the default and where that came from (built-in or models file)
-- [ ] #4 docs/bh-02/using/models.md and the models plugin's README describe it; scripts/check passes
+- [x] #1 A top-level default = "NAME" in the models file chooses the model a new session starts on when neither --model nor a layer names one; a resumed session keeps its own; /model and --model still switch
+- [x] #2 A default that names no model, or is not a name, is said with what to write (the house style for models-file problems), and bh-02 still starts; a test of each
+- [x] #3 /model's list marks which model is the default and where that came from (built-in or models file)
+- [x] #4 docs/bh-02/using/models.md and the models plugin's README describe it; scripts/check passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Where: the models file's top-level default is read in named.parsed (now returns ModelsFile(models, default); a non-table 'default' value is the setting, a [default] table still a model) and carried by providers.known (now a Known NamedTuple: models, source, why, standing) - only when the file is read, so a models file in the project (refused) gives no default, same trust rule as model tables. Telling absence from 'sonnet was chosen': ModelConfig.default becomes str|None = None (None = no layer named a model; the session layer's model row carries only state unless --model//model wrote default), and named.intended(layer, standing) picks layer default if not None, else the file's, else the built-in 'sonnet'. Bad default (not a name / names no model) stays a ModelsError at resolve time (chosen(origin=...)) so opened() binds Unusable, bh-02 starts, /model NAME fixes; a bad file default is ignored when a layer names a model. /model list: Catalog.listed adds default='built in'|'the models file' on the standing default model; model_list prints it. Resume keeps the layer's model (layer wins); a session whose layer named none follows the file default. Proof: tests per precedence step + refusals + project file ignored; plant violations (swap precedence, drop the project refusal) and see them fail. Then docs, README, CONTRACTS, scripts/check.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Models file top-level default: named.parsed returns _ModelsFile(models, default); providers.known returns _Known(models, source, why, standing) with the file default read only when the file is read (never from a models file in the project). ModelConfig.default is now str|None=None (None = no layer named a model; a layer naming sonnet is a choice); named.intended(layer, standing) picks layer, else file, else built-in sonnet. A bad file default (not a name / names no model) raises ModelsError at resolve (kinds models_file / unknown_model, says what to write), opened() binds Unusable so bh-02 starts, /model NAME fixes it; ignored while a layer names a model. /model list marks '(default: built in|the models file)'; Catalog.listed has default key (CONTRACTS updated). Resume: layer's model kept; a session whose layer named none follows the file default as it is now. Tests: models-cordis-plugin/tests/test_models_default.py (11+1 tests: each precedence step, layer sonnet vs unset, both refusals + Unusable bind, project file ignored, set_model/with_model shape). Planted violations seen failing: file beats layer (2 failed), layer 'sonnet' treated as unset (1 failed), file default read when refused (1 failed); restored, all pass. Updated test_booting (default None, list suffix) and test_session_dirs comment. Docs: docs/bh-02/using/models.md, plugin README, app README, CONTRACTS. Ran as root without tini: scripts/check exit 0 (2570 passed, 31 skipped; format, lint, mypy, gates, docs ok; tokens skipped: no bh-01). Not verified: scripts/linux-jail-check (not relevant). Follow-up ideas: sessions list 'stack' shows 'sonnet' for a session started on the file default.
+<!-- SECTION:NOTES:END -->

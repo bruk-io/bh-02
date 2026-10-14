@@ -54,7 +54,7 @@ def test_the_built_ins_are_claude_through_claude_code_by_their_aliases() -> None
 
 def test_the_file_adds_models_a_user_s_shadows_a_built_in_and_extra_wins_over_the_file() -> None:
     models = combined(
-        parsed(_FILE, "/c/models.toml"),
+        parsed(_FILE, "/c/models.toml").models,
         "/c/models.toml",
         {"llama": {"provider": "openai", "id": "qwen3", "base_url": "http://gpu:11434/v1"}},
     )
@@ -130,7 +130,7 @@ def test_a_name_that_is_no_model_lists_the_models_and_says_how_to_add_it() -> No
 
 
 def test_a_models_file_that_is_not_toml_or_not_tables_is_named() -> None:
-    assert parsed(None, "f") == {}  # no file: no user models
+    assert parsed(None, "f").models == {}  # no file: no user models
     with pytest.raises(ModelsError, match="the models file /c/m.toml is not TOML"):
         parsed("[llama\n", "/c/m.toml")
     with pytest.raises(ModelsError, match="'llama' is not a table"):

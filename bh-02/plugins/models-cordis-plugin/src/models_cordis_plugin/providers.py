@@ -15,12 +15,13 @@ import os
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from models_cordis_plugin.claude_code import ClaudeCodeConfig, ClaudeCodeModel
 from models_cordis_plugin.named import (
     CLAUDE_CODE,
     OPENAI,
+    Intended,
     ModelConfig,
     ModelsError,
     Named,
@@ -28,9 +29,11 @@ from models_cordis_plugin.named import (
     combined,
     environ,
     in_project,
+    intended,
     models_file,
     parsed,
     read_models,
+    standing,
 )
 from models_cordis_plugin.openai import OpenAIModel
 
@@ -65,19 +68,32 @@ def refused(config: ModelConfig) -> str | None:
     return next((why for root in roots if (why := in_project(path, Path(root))) is not None), None)
 
 
-def known(config: ModelConfig) -> tuple[list[Named], str, str | None]:
-    """Every model the config can name, the models file they were read from, and why that file
-    was not read (`refused`): then only the built-ins and the row's `extra` are named."""
+class _Known(NamedTuple):
+    """What a config can name: `models`, the models file they were read from (`source`), why that
+    file was not read (`why`: `refused`; then only the built-ins and the row's `extra` are named),
+    and `standing`, the default below any layer (the file's `default`, read only with the file)."""
+
+    models: list[Named]
+    source: str
+    why: str | None
+    standing: Intended
+
+
+def known(config: ModelConfig) -> _Known:
+    """Every model the config can name, with where they came from (`_Known`)."""
     path = models_file(config.models, environ())
     why = refused(config)
     text = None if why is not None else read_models(path)
-    return combined(parsed(text, str(path)), str(path), config.extra), str(path), why
+    file = parsed(text, str(path))
+    return _Known(combined(file.models, str(path), config.extra), str(path), why, standing(file.default))
 
 
 def resolved(config: ModelConfig) -> Named:
-    """The model `config.default` names, or a `ModelsError` saying what to do."""
-    models, source, why = known(config)
-    return chosen(config.default, models, source, why)
+    """The model the config names (`intended`: its `default`, else the models file's, else
+    `sonnet`), or a `ModelsError` saying what to do."""
+    found = known(config)
+    wanted = intended(config.default, found.standing)
+    return chosen(wanted.name, found.models, found.source, found.why, wanted.origin)
 
 
 def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any:

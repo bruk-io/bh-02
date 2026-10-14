@@ -39,7 +39,7 @@ def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_r
     ]
     assert session_layer(Path("/s/2"), model=None, no_jail=False)[-1] == Row(
         "model", config={"state": "/s/2/claude"}
-    )  # no --model: the model row's own default, and the jail the harness ships
+    )  # no --model: no default here (the models file's, else sonnet), and the jail the harness ships
 
 
 def test_a_session_from_the_agent_sdk_stack_is_retired_and_says_why() -> None:

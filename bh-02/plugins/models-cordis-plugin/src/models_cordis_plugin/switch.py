@@ -64,15 +64,18 @@ class SwitchConfig:
 
 
 def model_list(models: Sequence[Mapping[str, Any]], path: str, problem: str | None = None) -> str:
-    """`/model`'s answer: every model, the current one marked, aligned, with where to add more,
-    or, when the models file is not read (`problem`), why and where it must be instead."""
+    """`/model`'s answer: every model, the current one marked and the default one said with where
+    it came from, aligned, with where to add more, or, when the models file is not read
+    (`problem`), why and where it must be instead."""
     width = max((len(str(m["name"])) for m in models), default=0)
     kinds = max((len(str(m["provider"])) for m in models), default=0)
     lines = []
     for m in models:
         mark = "●" if m.get("current") else " "
         where = f"  at {m['where']}" if m.get("where") else ""
-        line = f"{mark} {str(m['name']).ljust(width)}  {str(m['provider']).ljust(kinds)}  {m['id']}{where}"
+        default = f"  (default: {m['default']})" if m.get("default") else ""
+        head = f"{mark} {str(m['name']).ljust(width)}  {str(m['provider']).ljust(kinds)}"
+        line = f"{head}  {m['id']}{where}{default}"
         notes = [str(m[k]) for k in ("shadows", "problem") if m.get(k)]
         lines.append(line.rstrip() + "".join(f"\n    {note}" for note in notes))
     add = problem if problem is not None else f"add models in {path}"

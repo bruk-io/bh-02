@@ -68,10 +68,11 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     # `!COMMAND` is a layer's row, claiming its prefix in `commands`: no extension can
     assert rows["shell-command"].use == "commands:shell_command"
     assert resolve(rows["shell-command"].use or "").inject == {"commands"}
-    # the model row names its model by `default`, sonnet unless a layer says another; the
-    # status bar asks the models row which, so it needs no default of its own
+    # the model row names its model by `default`, which is None until a layer says one (then the
+    # models file's `default`, else sonnet); the status bar asks the models row which, so it needs
+    # no default of its own
     chosen_by = resolve(rows["model"].use or "").config_type
-    assert chosen_by is not None and chosen_by().default == "sonnet" and rows["status"].config is None
+    assert chosen_by is not None and chosen_by().default is None and rows["status"].config is None
 
 
 async def test_a_composition_that_cannot_start_says_what_it_is_waiting_on(tmp_path: Path) -> None:
@@ -292,7 +293,10 @@ async def test_slash_commands_act_on_the_running_session(composition: Callable[.
     rows, cleared, model, unknown = fragile.NOTES
     assert "python" in rows and "python:tool" in rows and "active" in rows
     assert cleared == "the conversation was cleared; starting afresh: loop, transcript, python, agents"
-    assert model.startswith("● sonnet  claude-code  sonnet\n  opus") and "/model NAME switches" in model
+    assert (
+        model.startswith("● sonnet  claude-code  sonnet  (default: built in)\n  opus")
+        and "/model NAME switches" in model
+    )
     assert unknown == "unknown command /nope; /help lists them"
     assert fragile.SHOWN == ["after"]  # only the message reached the model, after the restart
 

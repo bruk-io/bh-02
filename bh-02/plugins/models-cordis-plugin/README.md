@@ -9,7 +9,9 @@ bh-02's model: named models over their providers, switched by name. Three rows:
 | `models:switch` | registers `/model [NAME]`: lists the models, switches by name in the session's layer, the reload queued in `jobs`; config: `layer` (the session's), `model_row` (`model`) | `commands` (`register`), `loader`, `models`, `jobs` (`put`) |
 
 The model row's config (`ModelConfig`):
-- `default`: the model's name, `sonnet` unless a layer says another; `--model` and `/model` set it.
+- `default`: the model's name; `--model` and `/model` set it. Unset (None) when no layer names a
+  model, which is not the same as naming `sonnet`: then the models file's `default` is the
+  model, else `sonnet` (below).
 - `models`: the models file, when not the default one.
 - `extra`: models of the row's own, one table per name as in the file (a migrated layer
   writes one: an old Ollama row is an `extra` OpenAI-compatible model).
@@ -46,6 +48,19 @@ temperature = 0.2                         # optional, sent only when set
 provider = "claude-code"
 id = "claude-opus-4-1"
 ```
+
+A top-level `default = "NAME"` above the tables makes NAME the model a session starts on. The
+model is chosen, lowest first, by the built-in `sonnet`, the file's `default`, a layer's model
+row `default` (the session's own layer, which `/model` and `--model` write; a layer that sets no
+`default` leaves the file's in force, one that names `sonnet` chooses it: `ModelConfig.default`
+is None for none, `named.intended`), then `--model`. So a resumed session keeps the model its
+layer names, and `/model` and `--model` still switch; a session whose layer names none follows
+the file's `default` as it is now. The default chooses the spend, so it is read only where the
+tables are: from a models file outside the project (below), never from one in it. A `default`
+that is not a name, or names no model, is a `ModelsError` naming the models file and what to
+write (kind `models_file`, or `unknown_model`), said at each step like any model that can't be
+used (`Unusable`), while bh-02 starts and `/model NAME` fixes it; it is not looked at while a
+layer names a model. A `[default]` table is a model named `default`.
 
 A table's problems are said with what to do, and a model that can't be used still binds: an
 unknown name (the message lists the models and shows a table to add), no provider, an unknown
@@ -99,7 +114,8 @@ which a switch replaces.
 the catalog it reads, so the commands plugin knows nothing of how a model is chosen and a
 composition without the catalog keeps the operator's commands. `/model` lists the models (the
 `models` value: the built-ins, the models file's, the model row's own), the one the model row
-names marked `●`, each with its provider and id, and says where the models file is, or, when it
+names marked `●`, each with its provider and id, the one a new session starts on when no layer
+names one marked `(default: built in)` or `(default: the models file)`, and says where the models file is, or, when it
 is in the project and so not read (`models.problem`), why and where it must be instead.
 `/model NAME` switches by name, across providers: it asks `models.check(NAME)` first, so a name
 that is no model, or a model whose table has a problem, is said and changes nothing; then it

@@ -1,6 +1,6 @@
 # Models
 
-bh-02 runs one model at a time, chosen by name. `sonnet` is the default. You can start on
+bh-02 runs one model at a time, chosen by name. `sonnet` is the default, unless your models file names another. You can start on
 another, switch mid-session, and add models of your own.
 
 ## The built-in models
@@ -17,14 +17,40 @@ All three need the credential in `local.env` ([Get started](../get-started.md#th
 
 - **At launch**: `bh-02 --model opus`.
 - **When resuming**: `bh-02 --resume --model haiku` carries the session on with another model.
-- **Mid-session**: `/model` lists the models, with the current one marked `●`, each one's
-  provider and id, and where your models file is. `/model NAME` switches to one. The
+- **Mid-session**: `/model` lists the models, with the current one marked `●`, the default one marked
+  `(default: built in)` or `(default: the models file)`, each one's provider and id, and where your models file is. `/model NAME` switches to one. The
   conversation carries on: the transcript is a row of its own, and only the model row and what
   depends on it reload.
+
+When you give neither, bh-02 starts on `sonnet`, or on the model your models file names as the
+default ([below](#choosing-the-default)).
 
 A switch is written into the session's own layer, so a resumed session keeps the model you last
 chose. The status bar shows the model and its provider, `model: sonnet (claude-code)`, and
 `starting…` while a new one comes up.
+
+## Choosing the default
+
+Put `default = "NAME"` at the top of the models file, above the first table, to start new
+sessions on one of your models without a flag:
+
+```toml
+default = "local"
+
+[local]
+provider = "openai"
+id = "qwen3-coder"
+base_url = "http://localhost:11434/v1"
+```
+
+What a session starts on, strongest first: `--model`, the model the session already is on (a
+`/model` switch, or the one a resumed session was started or switched to), the models file's
+`default`, and `sonnet`. So `--model` and `/model` still switch, and a resumed session keeps its
+model. A session that never chose one follows the file's `default`, so changing it moves those
+sessions too. The default must be a model's name; one that is not, or names no model, is said
+in the conversation with what to write, and `/model NAME` switches to a usable one. Like the
+models themselves, the default is read only from the models file in your config directory,
+never from one in the project.
 
 ## Adding your own: the models file
 
