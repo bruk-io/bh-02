@@ -95,3 +95,20 @@ you press it while one runs. It is stopped after 120 seconds (the `shell-command
 `Ctrl+P` opens a palette of the commands. Choosing one runs it, or puts it in the composer when it
 takes arguments, for you to finish. `/model` has an entry for each model you can switch to, such
 as `/model haiku`. Shell commands aren't in the palette: you type those.
+
+## Completing a command as you type
+
+Type `/` in the composer and the commands that match appear in a list above it, the same ones
+the palette shows (including arguments such as `/model haiku`). Prefix matches come first, then
+commands that contain what you typed; at most eight rows show, and the list scrolls.
+
+| Key | While the list is open |
+|---|---|
+| `Up` / `Down` | move the highlight |
+| `Tab` | complete the line to the highlighted command, without running it |
+| `Enter` | take the highlighted command if you moved the highlight, or if what you typed so far is the start of its name (`/he` runs `/help`; `/mo` gives `/model `); otherwise send what you typed (`/model` and `/model h` are sent as they are) |
+| `Esc` | close the list for this line; the text stays |
+| `Ctrl+J`, `Shift+Enter` | start a new line and close the list (a command is one line) |
+
+A click on a row runs it. The list closes when you send, when a question comes up or when the
+composer loses focus. Every other key works as without it.

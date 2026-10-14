@@ -1,10 +1,11 @@
 ---
 id: TASK-0090
 title: Complete slash commands in the composer (decision-0003)
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-14 00:01'
-updated_date: '2026-10-14 00:03'
+updated_date: '2026-10-14 05:39'
 labels:
   - tui
   - size-2
@@ -39,17 +40,25 @@ The decision's defaults stand unless the owner changes them before this starts: 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Typing a one-line / (stripped as the broker strips it) shows, between the transcript and the composer, the palette's entries that match: prefix matches first in the palette's order, then substring matches, case-insensitive, arguments through choices (/model h shows /model haiku); at most 8 one-line rows, help dimmed and cut to the width; the composer keeps focus and the transcript keeps its newest line in view
-- [ ] #2 Entries are read once per opening (a spec whose choices counts its calls is called once per opening, not per key) and filtered per key; the frame's commands changing while open does not re-read them; a stale entry chosen is answered as an unknown command
-- [ ] #3 While open: Up/Down move the highlight; Tab completes without running; Enter follows decision-0003's rule (takes the highlight only when moved, or when no space is typed and the text is a strict prefix of the highlighted call; otherwise sends as typed); Esc closes it for the line and TextArea never sees it; Ctrl-J and Shift+Enter close it. With the list closed every key behaves as today
-- [ ] #4 It closes on send, on focus loss and when a question is put up, and never opens while one is up; a click on a row runs it through choose; Ctrl-P's choose writing /name opens it on that command's choices
-- [ ] #5 palette_entries strips C0, DEL and C1 control characters from each entry's call, help and usage, and rows in both views are built as Content with markup escaped; a test of each
-- [ ] #6 frame.completions is pure, in frame.py's __all__, unit-tested (prefix before substring, order, case, arguments, not a / line, a leading space, more than one line, an empty /); Pilot tests cover the decision's list, including a 15-row and a 40-column terminal and a reply streaming
-- [ ] #7 Nothing outside the tui plugin changes but docs: CONTRACTS.md's frame row (read when the palette is searched and when the list opens), the tui README's palette paragraph, docs/bh-02/using/commands.md; scripts/check passes
+- [x] #1 Typing a one-line / (stripped as the broker strips it) shows, between the transcript and the composer, the palette's entries that match: prefix matches first in the palette's order, then substring matches, case-insensitive, arguments through choices (/model h shows /model haiku); at most 8 one-line rows, help dimmed and cut to the width; the composer keeps focus and the transcript keeps its newest line in view
+- [x] #2 Entries are read once per opening (a spec whose choices counts its calls is called once per opening, not per key) and filtered per key; the frame's commands changing while open does not re-read them; a stale entry chosen is answered as an unknown command
+- [x] #3 While open: Up/Down move the highlight; Tab completes without running; Enter follows decision-0003's rule (takes the highlight only when moved, or when no space is typed and the text is a strict prefix of the highlighted call; otherwise sends as typed); Esc closes it for the line and TextArea never sees it; Ctrl-J and Shift+Enter close it. With the list closed every key behaves as today
+- [x] #4 It closes on send, on focus loss and when a question is put up, and never opens while one is up; a click on a row runs it through choose; Ctrl-P's choose writing /name opens it on that command's choices
+- [x] #5 palette_entries strips C0, DEL and C1 control characters from each entry's call, help and usage, and rows in both views are built as Content with markup escaped; a test of each
+- [x] #6 frame.completions is pure, in frame.py's __all__, unit-tested (prefix before substring, order, case, arguments, not a / line, a leading space, more than one line, an empty /); Pilot tests cover the decision's list, including a 15-row and a 40-column terminal and a reply streaming
+- [x] #7 Nothing outside the tui plugin changes but docs: CONTRACTS.md's frame row (read when the palette is searched and when the list opens), the tui README's palette paragraph, docs/bh-02/using/commands.md; scripts/check passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1 frame.py: completions() pure + __all__; palette_entries strips C0/DEL/C1 (unit tests first, seen failing with strip removed). 2 widgets/completions.py: OptionList subclass (can_focus False, Content rows, 8-row cap, display none when empty), takes PaletteEntry. 3 composer.py: key routing while open (Up/Down/Tab/Enter rule/Esc/Ctrl-J/Shift+Enter) via a small pure decision function. 4 app.py: layout between transcript and composer, snapshot per opening, open/close rules (TextArea.Changed, blur, question, send, choose), on_frame_changed doc. 5 Pilot tests per decision Tests list; plant violations (Enter replacing typed text, snapshot per key, strip removed, focusable list) and see each fail. 6 docs: CONTRACTS frame row, tui README palette paragraph, commands.md. 7 scripts/check, arch-check, mypy, bh-02/app tests. Risks: transcript anchoring with 8 rows on 15-row terminal; Esc reaching TextArea; Enter-rule edge cases; pypeeker purity/privacy gates. Proof: planted failures noted.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Accepted by the owner, 2026-10-14 (promoted from a draft), with decision-0003's defaults as written.
+
+Built per decision-0003: frame.py (completions, slash_line, enter_takes pure, in __all__; palette_entries strips C0/DEL/C1 and drops empty names), widgets/completions.py (Completions OptionList, can_focus False, Content rows via row(), snapshot per opening), composer.py (list keys while open, Chose message), app.py (layout, follow composer, close on blur/palette/question, click and Chose go through choose), docs (CONTRACTS frame row, tui README, commands.md). Tests: tests/test_completions_list.py (21 Pilot/unit) and 6 new in test_frame.py. Planted violations seen failing then restored: Enter always taking highlight -> enter-rule test failed; snapshot re-read per key -> once-per-opening test failed; control-char strip removed -> control-character test failed; can_focus True -> click/focus test failed; Esc case removed -> Esc test failed. Results: tui plugin tests 183 passed; scripts/arch-check exit 0 (first run caught row() impure via Content.truncate, rewritten with rich.cells); uv run mypy clean; scripts/check exit 0 (2558 passed, 31 skipped; tokens step skipped, no bh-01 dist), run as root without tini. Judgments: substring match compares what follows the leading / (so /ea finds /clear; with the / included it could never match); a trailing space is kept when matching so '/model ' lists the choices; Ctrl-P opening and palette choose close the list explicitly because pushing the palette screen does not blur the composer.
 <!-- SECTION:NOTES:END -->

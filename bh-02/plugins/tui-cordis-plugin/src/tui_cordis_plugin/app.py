@@ -34,8 +34,10 @@ from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.widgets import OptionList, TextArea
 
 from tui_cordis_plugin import frame, render, theme
 from tui_cordis_plugin.frame import PaletteEntry
@@ -54,6 +56,7 @@ from tui_cordis_plugin.widgets import (
     GRACE,
     ApprovalScreen,
     CommandsProvider,
+    Completions,
     Composer,
     StatusBar,
     Transcript,
@@ -122,7 +125,9 @@ class BhApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Transcript(id="transcript")
-        yield Composer(id="composer")
+        listed = Completions(id="completions")
+        yield listed
+        yield Composer(id="composer", completions=listed)
         yield StatusBar(id="status-bar")
 
     def on_mount(self) -> None:
@@ -180,6 +185,38 @@ class BhApp(App[None]):
         """What the command palette lists: the commands rows offer now, `/help`, `/exit`."""
         return frame.palette_entries(self.frame.offered_commands())
 
+    def on_text_area_changed(self, message: TextArea.Changed) -> None:
+        """The composer's text changed: the list of commands follows it (opening with the
+        entries read now, once, while no question is up)."""
+        if isinstance(message.text_area, Composer):
+            self._follow_composer()
+
+    def _follow_composer(self) -> None:
+        self.query_one(Completions).update_for(
+            self.query_one(Composer).text, self.palette_entries, allowed=self._asking is None
+        )
+
+    def on_descendant_blur(self, event: events.DescendantBlur) -> None:
+        """The composer lost focus (the palette, a question): the list closes."""
+        if isinstance(event.widget, Composer):
+            self.query_one(Completions).close()
+
+    def on_composer_chose(self, message: Composer.Chose) -> None:
+        """Enter took an entry of the list: it runs, or finishes its arguments in the composer."""
+        self._take(message.entry)
+
+    def on_option_list_option_selected(self, message: OptionList.OptionSelected) -> None:
+        """A click on a row of the list takes it, as Enter on it would."""
+        listed = message.option_list
+        if isinstance(listed, Completions) and (entry := listed.entry_at(message.option_index)) is not None:
+            self._take(entry)
+
+    def _take(self, entry: PaletteEntry) -> None:
+        """Choose an entry of the list: one that runs replaces the line it completed."""
+        if not entry.takes_arguments:
+            self.query_one(Composer).clear()
+        self.choose(entry)
+
     def choose(self, entry: PaletteEntry) -> None:
         """Run a palette entry; one that takes arguments goes in the composer to finish."""
         if not entry.takes_arguments:
@@ -193,6 +230,7 @@ class BhApp(App[None]):
     def action_command_palette(self) -> None:
         """Ctrl-P: the palette, except while a question waits for its answer."""
         if self._asking is None:
+            self.query_one(Completions).close()  # the palette is a screen of its own: no blur
             super().action_command_palette()
 
     def on_shown(self, message: Shown) -> None:
@@ -250,7 +288,9 @@ class BhApp(App[None]):
 
     def on_frame_changed(self, message: FrameChanged) -> None:
         """Redraw the status bar when a status field changed; commands need no redraw (the
-        palette reads them each time it opens)."""
+        palette reads them each time it opens, and the composer's list once per opening: a
+        command registered or removed while it is open shows at the next, and choosing one that
+        has gone is answered as an unknown command)."""
         if message.what == "status":
             self.query_one(StatusBar).show_fields(self.frame.forms())
 
@@ -277,6 +317,7 @@ class BhApp(App[None]):
                 continue
             screen = ApprovalScreen(request, grace=self.grace)
             self._asking = (screen, answer)
+            self.query_one(Completions).close()
             self.push_screen(screen, self._answerer(answer))
 
     def _answerer(self, answer: asyncio.Future[bool]) -> Any:

@@ -2,6 +2,7 @@
 entries. Pure: every function here is of plain values, so it is tested without an app."""
 
 import functools
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -11,6 +12,9 @@ __all__ = [
     "PaletteEntry",
     "Usage",
     "add_usage",
+    "completions",
+    "enter_takes",
+    "slash_line",
     "model_forms",
     "model_text",
     "listed",
@@ -263,7 +267,10 @@ def palette_entries(specs: Sequence[Mapping[str, Any]]) -> list[PaletteEntry]:
     """The palette's entries: every command offered (CONTRACTS.md: a spec is name, help,
     usage, and `choices`, the arguments offered as entries of their own: `/model haiku`),
     then `/help` and `/exit`; a call offered twice shows once, the first one. A command's
-    `choices` that fail to read (a models file mid-edit) offer none this time."""
+    `choices` that fail to read (a models file mid-edit) offer none this time. Control
+    characters (C0, DEL, C1) are stripped from each entry's call, help and usage: a command's
+    text is data from a row, an extension or the models file, and a terminal would act on them.
+    Both views of the commands (the palette and the composer's list) read this one function."""
     offered: list[PaletteEntry] = []
     for spec in specs:
         if not spec.get("name"):
@@ -272,9 +279,54 @@ def palette_entries(specs: Sequence[Mapping[str, Any]]) -> list[PaletteEntry]:
         offered.append(PaletteEntry(call, str(spec.get("help", "")), str(spec.get("usage") or "")))
         offered += [PaletteEntry(f"{call} {c['args']}", str(c.get("help", ""))) for c in _choices(spec)]
     entries: dict[str, PaletteEntry] = {}
-    for entry in [*offered, *_OWN]:
-        entries.setdefault(entry.call, entry)
+    for entry in map(_cleaned, [*offered, *_OWN]):
+        if entry.call.strip("/"):
+            entries.setdefault(entry.call, entry)
     return list(entries.values())
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _cleaned(entry: PaletteEntry) -> PaletteEntry:
+    """`entry` without control characters in its call, help and usage."""
+    return PaletteEntry(*(_CONTROL.sub("", text) for text in (entry.call, entry.help, entry.usage)))
+
+
+def slash_line(text: str) -> bool:
+    """Whether `text`, stripped as the commands broker strips a line, is one line starting with `/`:
+    what the composer's list completes."""
+    line = text.strip()
+    return line.startswith("/") and "\n" not in line
+
+
+def completions(entries: Sequence[PaletteEntry], text: str) -> tuple[PaletteEntry, ...]:
+    """The entries `text` (the composer's) completes: none unless it is a one-line `/` line
+    (`slash_line`); else those whose call starts with it, in the palette's order, then those
+    that contain it after the `/` (`/ea` finds `/clear`), ignoring case. Leading space is
+    ignored and trailing space is kept, so `/model ` matches `/model haiku` and not `/model`.
+    Arguments need no rule: `/model h` matches the entry `/model haiku`."""
+    if not slash_line(text):
+        return ()
+    wanted = text.lstrip().lower()
+    prefixed = [e for e in entries if e.call.lower().startswith(wanted)]
+    inside = wanted.removeprefix("/")
+    contained = [e for e in entries if inside in e.call.lower()[1:] and e not in prefixed]
+    return (*prefixed, *contained)
+
+
+def enter_takes(text: str, highlighted: PaletteEntry | None, moved: bool) -> bool:
+    """Whether Enter takes the `highlighted` entry rather than sending `text` as typed: only
+    when the person moved the highlight, or typed no space yet and `text` is a strict prefix of
+    the entry's call (`/he` runs `/help`). Typed text is never replaced by an entry the person
+    did not pick: `/model` and `/model ` send as they are, `/model h` sends `/model h`."""
+    if highlighted is None:
+        return False
+    if moved:
+        return True
+    typed = text.lstrip().lower()
+    call = highlighted.call.lower()
+    return " " not in typed and call.startswith(typed) and call != typed
 
 
 def _choices(spec: Mapping[str, Any]) -> list[Mapping[str, Any]]:

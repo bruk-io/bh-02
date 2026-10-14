@@ -161,3 +161,68 @@ def test_a_turn_stopped_before_its_output_was_counted_makes_the_totals_lower_bou
     assert frame.usage_forms(stopped) == ("1,800 in · 40+ out · $0.0022+", "1.8k/40+ $0.00+")
     carried = frame.add_usage(frame.Usage(), {"type": "carried", "input_tokens": 5, "uncounted": 2})
     assert carried.uncounted == 2  # a trimmed history keeps it
+
+
+_MENU = [
+    frame.PaletteEntry("/rows", "the rows"),
+    frame.PaletteEntry("/model", "switch", "[NAME]"),
+    frame.PaletteEntry("/model haiku", "fast"),
+    frame.PaletteEntry("/clear", "start afresh"),
+]
+
+
+def _calls(entries: Any) -> list[str]:
+    return [e.call for e in entries]
+
+
+def test_completions_put_prefix_matches_before_substring_matches_in_the_palette_s_order() -> None:
+    assert _calls(frame.completions(_MENU, "/mo")) == ["/model", "/model haiku"]
+    assert _calls(frame.completions(_MENU, "/r")) == ["/rows", "/clear"]  # prefix, then contained
+    assert _calls(frame.completions(_MENU, "/")) == _calls(_MENU)  # an empty / offers everything
+
+
+def test_completions_substring_matches_follow_prefix_matches() -> None:
+    menu = [frame.PaletteEntry("/clear", ""), frame.PaletteEntry("/rows", ""), frame.PaletteEntry("/ea", "")]
+    assert _calls(frame.completions(menu, "/ea")) == ["/ea", "/clear"]  # the prefix first, then the contained
+    assert _calls(frame.completions(menu, "/ROW")) == ["/rows"]
+    assert _calls(frame.completions(menu, "ea")) == []  # not a / line
+
+
+def test_completions_ignore_case_and_complete_arguments_through_choices() -> None:
+    assert _calls(frame.completions(_MENU, "/MO")) == ["/model", "/model haiku"]
+    assert _calls(frame.completions(_MENU, "/model h")) == ["/model haiku"]
+    assert _calls(frame.completions(_MENU, "/model ")) == ["/model haiku"]  # a trailing space is kept
+
+
+def test_completions_are_for_a_one_line_slash_line_only() -> None:
+    assert frame.completions(_MENU, "mo") == ()
+    assert frame.completions(_MENU, "") == ()
+    assert _calls(frame.completions(_MENU, "  /mo")) == ["/model", "/model haiku"]  # a leading space
+    assert frame.completions(_MENU, "/mo\nmore") == ()  # more than one line
+    assert not frame.slash_line("hello /mo") and frame.slash_line(" /mo ")
+
+
+def test_enter_takes_the_entry_only_when_it_is_picked_or_the_text_is_a_strict_prefix() -> None:
+    help_ = frame.PaletteEntry("/help", "")
+    assert frame.enter_takes("/he", help_, False)
+    assert not frame.enter_takes("/help", help_, False)  # exact: sent as typed
+    assert not frame.enter_takes("/model ", frame.PaletteEntry("/model haiku", ""), False)
+    assert not frame.enter_takes("/model h", frame.PaletteEntry("/model haiku", ""), False)
+    assert frame.enter_takes("/model h", frame.PaletteEntry("/model haiku", ""), True)  # moved
+    assert not frame.enter_takes("/x", None, True)
+
+
+def test_the_palette_strips_control_characters_from_every_entry() -> None:
+    specs = [
+        {
+            "name": "bad\x1b[2Jname",
+            "help": "help\x07 \x00with\x9b \x7fcontrols\n",
+            "usage": "[\x1bARG]",
+            "choices": lambda: [{"args": "c\x1b]0;x\x07", "help": "h\x85i"}],
+        }
+    ]
+    entries = frame.palette_entries(specs)
+    assert [(e.call, e.help, e.usage) for e in entries[:2]] == [
+        ("/bad[2Jname", "help with controls", "[ARG]"),
+        ("/bad[2Jname c]0;x", "hi", ""),
+    ]
