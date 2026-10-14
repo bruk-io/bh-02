@@ -1,13 +1,11 @@
-"""`scripts/model-friction` over transcripts on disk: its startup-file signal follows the startup
-file's name (`startup.py`), and still reads the sessions written while it was `kernel.py`."""
+"""`scripts/model-friction` over transcripts on disk: its startup-file signal counts a model that
+wrote the project's startup file (`.bh-02/startup.py`)."""
 
 import json
 import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-
-import pytest
 
 _SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "model-friction"
 
@@ -36,20 +34,15 @@ def _startup_findings(sessions: Path, codes: Sequence[str]) -> list[str]:
     return [f["detail"] for f in found if f["signal"] == "startup_file"]
 
 
-@pytest.mark.parametrize("name", ["startup.py", "kernel.py"])
-def test_a_session_whose_model_wrote_its_startup_file_is_counted_under_either_name(
-    tmp_path: Path, name: str
-) -> None:
-    """A new session writes `.bh-02/startup.py`; a session from before the rename, resumed or read
-    for what went wrong in it, wrote `.bh-02/kernel.py`: both are the model keeping its helpers."""
-    code = f"from pathlib import Path\nPath('.bh-02/{name}').write_text('def sh(): pass')"
+def test_a_session_whose_model_wrote_its_startup_file_is_counted(tmp_path: Path) -> None:
+    """A model that writes `.bh-02/startup.py` is keeping its helpers."""
+    code = "from pathlib import Path\nPath('.bh-02/startup.py').write_text('def sh(): pass')"
     assert _startup_findings(tmp_path, [code]) == [" ".join(code.split())]
 
 
 def test_reading_a_startup_file_or_writing_another_is_not_counted(tmp_path: Path) -> None:
     codes = [
         "print(open('.bh-02/startup.py').read())",
-        "print(open('.bh-02/kernel.py').read())",
         "from pathlib import Path\nPath('.bh-02/notes.py').write_text('x')",
     ]
     assert _startup_findings(tmp_path, codes) == []

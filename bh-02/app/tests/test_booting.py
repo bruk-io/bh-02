@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from bh_02 import CompositionError, layers, run
+from bh_02.bootstrap import NotStarted
 from cordis import Effects, Inspection, Row, Runtime, State, bind, boot, component
 from cordis.loader import read_layer, resolve
 
@@ -308,3 +309,21 @@ async def test_a_composition_that_cannot_be_read_says_why_instead_of_crashing(
     with pytest.raises(CompositionError) as raised:
         await asyncio.wait_for(run([*layers(), patch]), 5)
     assert "could not start" in raised.value.message and "nothing_before_me" in raised.value.message
+
+
+async def test_a_shipped_layer_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s_error(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The shipped layer is read as every layer is, first: a row of it whose `use` no plugin
+    provides is a boot failure that names the row, the use and the installed plugins, not a wait
+    (here a copy of it names a plugin that does not exist, as a stale layer would)."""
+    (shipped,) = layers()
+    text = shipped.read_text()
+    assert 'use = "agent:loop"' in text
+    stale = tmp_path / "shipped.toml"
+    stale.write_text(text.replace('use = "agent:loop"', 'use = "nonesuch:loop"'))
+    with pytest.raises(NotStarted) as raised:
+        await asyncio.wait_for(run([stale, composition("", one_reply=True)]), 10)
+    assert "could not start" in raised.value.message
+    assert "loop: unresolved:" in raised.value.message and "use 'nonesuch:loop'" in raised.value.message
+    assert "installed plugins: " in raised.value.message

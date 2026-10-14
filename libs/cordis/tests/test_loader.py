@@ -240,6 +240,25 @@ async def test_an_unresolvable_row_is_reported_and_its_siblings_run(plugin: Any,
     assert status["x"].startswith("unresolved: ModuleNotFoundError")
 
 
+async def test_an_unresolved_row_says_the_use_it_names_and_which_plugins_are_installed(
+    plugin: Any, tmp_path: Path
+) -> None:
+    """A layer that names a plugin nobody installed (a stale one, a typo) gets, in the row's
+    status, the `use` it wrote and the plugins there are, so it knows what to change."""
+    rows = BASE + '\n[[plugin]]\nid = "x"\nuse = "nonesuch:thing"\n'
+    rows += '\n[[plugin]]\nid = "y"\nuse = "git_plugin:nonesuch"\n'
+    booted = await boot([layer(tmp_path / "base.toml", rows)], watch=None)
+    status = booted.loader.status()
+    assert status["x"].startswith(
+        "unresolved: ModuleNotFoundError: No module named 'nonesuch' (use 'nonesuch:thing'; "
+    )
+    assert "no 'nonesuch' plugin either; installed plugins: " in status["x"]
+    assert status["y"].startswith("unresolved: LookupError: ") and status["y"].endswith(
+        "(use 'git_plugin:nonesuch')"
+    )
+    await booted.runtime.shutdown()
+
+
 async def test_a_row_whose_module_fails_to_import_is_unresolved_not_fatal(
     plugin: Any, tmp_path: Path
 ) -> None:
@@ -254,7 +273,7 @@ async def test_a_row_whose_module_fails_to_import_is_unresolved_not_fatal(
         status = booted.loader.status()
         assert status["git"] == "active"
         assert status["x"].startswith("unresolved: SyntaxError")
-        assert status["y"] == "unresolved: RuntimeError: not today"
+        assert status["y"] == "unresolved: RuntimeError: not today (use 'raising_plugin:thing')"
     finally:
         sys.modules.pop("broken_plugin", None)
         sys.modules.pop("raising_plugin", None)

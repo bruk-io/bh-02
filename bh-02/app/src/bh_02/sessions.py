@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, assert_never
 
-from bh_02.outdated import translated
 from cordis import Row
 from cordis.composition import format_layer
 from cordis.loader import read_layer
@@ -43,7 +42,6 @@ __all__ = [
     "discard",
     "find",
     "listed",
-    "models_file",
     "pins_model",
     "resume_command",
     "retired",
@@ -52,7 +50,6 @@ __all__ = [
     "set_model",
     "default_state_root",
     "state_root",
-    "update",
     "with_model",
 ]
 
@@ -71,11 +68,6 @@ _DEFAULT_MODEL = "sonnet"
 # The `stack` of a session whose layer records no model, because the models file's default can't be
 # read: it follows that default, and the model row says what is wrong with it.
 _UNPINNED = "default"
-# What an earlier bh-02 called the model row, and its Ollama stack (`--ollama`, gone): a
-# session started on that stack had the Ollama row from a shipped layer, not its own.
-_OLD_MODEL_ROW = "completion"
-_OLLAMA_STACK = "ollama"
-_OLLAMA = "ollama:completion"
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,8 +147,7 @@ def retired(rows: Sequence[Row]) -> str | None:
 
     The first Claude stack let Claude Code run its own loop (`claude-agent-sdk:*`, an `llm` row
     with a `session_file` and `stderr_log`): its conversation lived in Claude Code alone, with no
-    transcript bh-02 could continue it from. (Sessions from the Messages API stack, which named
-    `anthropic:completion`, are not retired: `_updated` moves them to the model row.)
+    transcript bh-02 could continue it from.
     """
     for row in rows:
         if row.use is not None and row.use.startswith("claude-agent-sdk:"):
@@ -164,60 +155,6 @@ def retired(rows: Sequence[Row]) -> str | None:
         if row.id == "llm" and {"session_file", "stderr_log"} & set(row.config or {}):
             return "it ran on the Claude Agent SDK stack, whose conversation bh-02 can no longer continue"
     return None
-
-
-# What a session layer written earlier said that the shipped layers now say better: a
-# `model_status` row naming its row (the model row was `completion` then), which replaced the
-# shipped config (and its `default`, the model the status bar names when none is chosen) with
-# one that has no default.
-_SUPERSEDED = (Row("model_status", config={"row": _OLD_MODEL_ROW}),)
-# Claude through Anthropic's Messages API (`anthropic:completion`) became Claude through Claude
-# Code (`claude-code:completion`), now a provider of the model row; of that row's config only
-# the model carries over (`outdated` names it as the model row's `default`).
-_RETIRED_COMPLETION = "anthropic:completion"
-_COMPLETION = "claude-code:completion"
-_CARRIED = frozenset({"model", "state", "env_file", "cwd"})
-
-
-def _updated(rows: Sequence[Row], dir: Path, stack: str) -> list[Row]:
-    """A session's layer as a session started now would have it: without the rows an earlier
-    bh-02 wrote that the shipped layers now say better, in today's names (`outdated`: rows
-    renamed, the status-bar rows made one, rows bh-02 no longer has dropped, its `session` row
-    among them, the model row's providers moved into `models:model`), a completion row that
-    named the Messages API naming Claude Code first (its API-only settings dropped), a session
-    of the Ollama stack given the Ollama row its shipped layer gave it (a layer bh-02 no longer
-    has), and the model row's `state` in the session's directory."""
-    pre: list[Row] = []
-    for row in rows:
-        if row in _SUPERSEDED:
-            continue  # superseded first: translated, it would become a `status` row
-        if row.id == _OLD_MODEL_ROW and row.use == _RETIRED_COMPLETION:
-            config = {k: v for k, v in (row.config or {}).items() if k in _CARRIED}
-            row = Row(row.id, _COMPLETION, config, row.disabled)
-        elif row.id == _OLD_MODEL_ROW and row.use is None and stack == _OLLAMA_STACK:
-            row = Row(row.id, _OLLAMA, row.config, row.disabled)  # --ollama --model: the row's model
-        pre.append(row)
-    ids = {row.id for row in pre}
-    if stack == _OLLAMA_STACK and not ids & {_OLD_MODEL_ROW, _MODEL_ROW}:
-        pre.append(Row(_OLD_MODEL_ROW, _OLLAMA))  # the Ollama row `ollama.toml` gave it
-    current, _ = translated(pre)
-    out: list[Row] = []
-    for row in current:
-        if row.id == _MODEL_ROW and row.use in (None, "models:model") and "state" not in (row.config or {}):
-            row = Row(
-                row.id, row.use, {**(row.config or {}), "state": str(dir / _CLAUDE_STATE)}, row.disabled
-            )
-        out.append(row)
-    if not any(row.id == _MODEL_ROW for row in out):
-        out.append(Row(_MODEL_ROW, config={"state": str(dir / _CLAUDE_STATE)}))
-    return out
-
-
-def update(session: Session) -> None:
-    """Rewrite a session's layer as `_updated` says, if that changes it (before a resume)."""
-    rows = read_layer(session.layer)
-    if (fresh := _updated(rows, session.dir, session.stack)) != rows:
-        session.layer.write_text(format_layer(fresh, _HEADER))
 
 
 def with_model(rows: Sequence[Row], model: str) -> list[Row]:
@@ -235,7 +172,7 @@ def state_root() -> Path:
     return state_home(os.environ, Path.home()) / "bh-02" / "sessions"
 
 
-def models_file() -> Path:
+def _models_file() -> Path:
     """`$XDG_CONFIG_HOME/bh-02/models.toml`, else `~/.config/bh-02/models.toml`: the models file
     the model row reads when its config names no other (the models plugin resolves it the same way,
     through `host_paths.config_home`)."""
@@ -299,9 +236,9 @@ def create(root: Path, cwd: str, *, model: str | None, no_jail: bool, patches: S
     # are the row's: the working directory, and the session's directory, which is the same one in a
     # real run. (The row's own `cwd` is only a layer's, and a layer that sets the model row replaces
     # the one written here whole: `pins_model`.)
-    if not model and not any(passes(models_file(), roots(Path(where))) for where in {cwd, os.getcwd()}):
+    if not model and not any(passes(_models_file(), roots(Path(where))) for where in {cwd, os.getcwd()}):
         try:
-            file = models_file().read_text(encoding="utf-8")
+            file = _models_file().read_text(encoding="utf-8")
         except FileNotFoundError:
             pass  # no file: no user models, no default
         except OSError as error:

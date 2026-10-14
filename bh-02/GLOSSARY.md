@@ -22,7 +22,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **effect**: one step a component yields, with its undo: `bind`, `acquire`, `enter`, `use`, `background`, `performer`, `observe`.
 - **undo**: the other half of an effect, which reverses its step (unbinds the key, calls the remover, exits the context); a row's undos run in reverse order when it goes.
 - **provides=**: the keys a component declares it binds (`@component(provides=(...))`), checked, not inferred.
-- **unresolved** (row): a row whose plugin's module failed to import; it is reported, never fatal to the rest.
+- **unresolved** (row): a row whose `use` names no plugin or component bh-02 has, or whose module failed to import; cordis reports it and runs the rest, but at launch bh-02 stops with its error ([Layers](../docs/bh-02/using/layers.md#a-layer-that-names-what-bh-02-doesnt-have)).
 - **acquire**: an effect that calls a registration and keeps the **remover** it returns (the function that takes the entry back out), called when the row goes.
 - **broker**: one row binds a registry; others register into it with `acquire`, and leave without reloading anyone (`commands`, `frame`, `tools`).
 - **fiber**: a component running as a row, with a state: loading, active, unloading, inactive, failed.
@@ -36,16 +36,15 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **harness** (the project): a separate project of the repository's owner whose `ARCHITECTURE.MD` gave bh-02 CodeAct and its step table: "harness's rule", never read a truncated or silent step as the answer (`stops.classify`).
 - **DeepSeek Harness**: the agent harness built on the paper cordis realises (cordis's README); its account of tool registries, tool changes and model-written plugins informed bh-02's designs.
 - **the harness's** (a line): bh-02's rather than the model's: a slash command, or a line with a prefix a row claimed, as `commands` decides (`claims`).
-- **harness** (row): the shell's pinned row before it was `shell` (`bh_02.bootstrap:harness`); `update-layer` renames it.
 - **harness** (in brig's docs and tests): the program that starts the jails, such as bh-02; in brig's tests, the test run itself (`harness_pid`).
 - **the shell**: `bh_02` (`app/`): the `bh-02` command, which reads the layers, boots them and waits for the chat to end.
 - **layer files**: `bh-02.toml` (the whole harness), a session's `session.toml`, and your `--patch` files, applied in that order.
 - **stack** (a session's): the model a session started on, kept in its `meta.json` and listed by `bh-02 sessions` (an earlier bh-02's session: `claude` or `ollama`); not always the model that answered.
 - **stack** (brig's): the mechanisms brig composes into one jail; bh-02's runner uses `scratch_darwin()` (Seatbelt) on macOS and `strict_linux()` (bubblewrap) on Linux (`stack_for`).
-- **first stack**, **second stack**, **Ollama stack**: how an earlier bh-02 reached a model: Claude Code's own loop through the Claude Agent SDK, the Messages API with the subscription token (`anthropic:completion`, which only Haiku answered), and Ollama's own row (`--ollama`) ([Sessions](../docs/bh-02/using/sessions.md#resuming)).
+- **first stack**: how an earlier bh-02 reached Claude: Claude Code's own loop through the Claude Agent SDK; a session started on it can't be resumed ([Sessions](../docs/bh-02/using/sessions.md#resuming)).
 - **stack** (a fiber's, in cordis): the undos a fiber has recorded, run last first when it unloads.
 - **loop** (row and key): the agent loop, `agent:loop`: sends the conversation to the model, runs each call it asks for through its tool, and nudges a step that didn't count ([The loop](../docs/bh-02/how-it-works/loop.md)).
-- **model** (row and key), **the model row**: the model itself, one step at a time (`models:model`), the one its `default` names, chosen by `--model NAME` or `/model NAME` (an earlier bh-02's `completion` row).
+- **model** (row and key), **the model row**: the model itself, one step at a time (`models:model`), the one its `default` names, chosen by `--model NAME` or `/model NAME`.
 - **named model**: a name the model row can take, with its provider and id: the built-ins `sonnet`, `opus` and `haiku`, and yours in the models file.
 - **endpoint** (a table of the models file with `discover = true`): an OpenAI-compatible server that lists its own models, named `ENDPOINT/ID` (split at the first `/`: `local/qwen2.5-coder:7b`); a name means its model with no network call, and only `/model` asks the server for its list ([Models](../docs/bh-02/using/models.md#listing-an-endpoints-models-discover)).
 - **model provider** (a model's `provider` field): what reaches a model: `claude-code` (Claude through Claude Code, on the subscription) or `openai` (any OpenAI-compatible endpoint).
@@ -76,7 +75,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **python** (row): `python:tool`, bh-02's handle on the Python process, which registers the `python` tool; its class is `PythonProcess` (its config `PythonProcessConfig`).
 - **extensions process**: the process the model's extensions run in, the second one the runner starts.
 - **worker**: an older word, still in some messages and in the code (`worker.py`), for a process the jail started: the Python process or the extensions process.
-- **startup file**: Python a new, confined Python process runs before its first input: yours (`$XDG_CONFIG_HOME/bh-02/startup.py`, else `~/.config/bh-02/startup.py`), then the project's `.bh-02/startup.py`; a `kernel.py`, its old name, is still read where `startup.py` is not there, and said to be called `startup.py` now ([The python tool](../docs/bh-02/how-it-works/python-tool.md)).
+- **startup file**: Python a new, confined Python process runs before its first input: yours (`$XDG_CONFIG_HOME/bh-02/startup.py`, else `~/.config/bh-02/startup.py`), then the project's `.bh-02/startup.py` ([The python tool](../docs/bh-02/how-it-works/python-tool.md)).
 - **runner** (row and key): what starts the Python process and the extensions process, each in a brig jail (`runner:confined`) or in none (`runner:unconfined`, `--no-jail`); not part of CodeAct, but what bh-02 runs it in.
 - **jail**: brig's sandbox around one program the confined runner started; its grades say what it enforces.
 - **confined**, **unconfined**: whether the runner enforces writes and network, so the model's code runs without asking (`jailed` in the status bar), or not, so each input is put to you first (`unjailed`).
@@ -122,7 +121,6 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **auto memory** (row `memory-auto`): `memory:auto`: memories the model keeps for itself across conversations (a `MEMORY.md` index and a file per memory), as Claude Code's auto memory, outside the repository ([Memory](../docs/bh-02/using/memory.md#auto-memory)).
 - **conversation** (row): `agent:conversation`: `/clear` and `/compact`, each a new conversation written over the transcript's file ([agent-cordis-plugin](plugins/agent-cordis-plugin/README.md)).
 - **asides** (row and key): `agent:asides`: a broker of functions rows add, each of which may add an aside to a call's result.
-- **notes** (row): the asides broker before it was `asides` (`agent:notes`); `update-layer` renames it.
 - **access** (row and key): `agent:access`: a broker of functions rows add that a tool asks before it opens a file, each answering go ahead or why not.
 - **executor** (row and key): `agent:executor`: where the loop reads the prompt and asks `asides`, in a thread off the app's event loop, one call at a time.
 - **touched**: the files a call opened, as its tool answers (an input's: what its own Python code opened, `touched()`).
@@ -139,6 +137,5 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **usage**: tokens and cost, per model step and summed for the session, in the status bar.
 - **credential**: `CLAUDE_CODE_OAUTH_TOKEN` in `local.env` at the repository root, read by the model row alone ([models-cordis-plugin](plugins/models-cordis-plugin/README.md)).
 - **fakes**: stand-in models in `bh_02.testing` that a `--patch` or a models file names, to run bh-02 without a login ([Writing a plugin](../docs/bh-02/extending/plugins.md#trying-it-without-a-login-fake-models)).
-- **update-layer**: `bh-02 update-layer FILE`: rewrites a layer that names rows or components bh-02 renamed, merged or dropped, keeping `FILE.bak` ([Layers](../docs/bh-02/using/layers.md#layers-from-an-earlier-bh-02)).
 - **gate**: the architecture check (pypeeker) that `scripts/check` runs: which packages may import which, and what must stay pure.
 - **value half**, **wiring**: a plugin's two parts: the plain library (no cordis), and `wiring.py`, the components that bind it.

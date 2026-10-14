@@ -43,13 +43,12 @@ uv run pytest -m "not real_launch"                        # skip the tests that 
 scripts/sync-tokens [--check] [--bh-01 PATH]              # bh-01's token CSS -> bh-02's Textual theme (reads ../bh-01)
 scripts/model-friction [--model NAME] [--examples N] [--json]  # where models trip in bh-02 sessions here: wrong tools, shell habits, errors, lost output, nudges
 uv run bh-02                                              # the harness: a CodeAct session in a TUI, Claude through Claude Code on the subscription
-uv tool install --editable ./bh-02/app                    # bh-02 as a command on your PATH, every plugin from this checkout (--reinstall after a pull that adds one)
+uv tool install --editable ./bh-02/app                    # bh-02 as a command on your PATH, every plugin from this checkout (--reinstall after a pull that adds or renames one)
 uv run bh-02 --resume [ID]                                # continue this directory's newest session (or ID: whole, its start, or its last part)
 uv run bh-02 sessions                                     # this directory's sessions, newest first
 uv run bh-02 --no-jail                                    # the Python process runs with your permissions; every input asks
 uv run bh-02 --model opus                                 # choose the model by name (sonnet, the default, opus, haiku, or yours in ~/.config/bh-02/models.toml; a session keeps it; /model lists and switches)
 uv run bh-02 --patch mine.toml                            # a layer of your own over the shipped composition
-uv run bh-02 update-layer mine.toml                       # rewrite a layer that names rows bh-02 renamed or dropped (keeps mine.toml.bak)
 uv run bh-02 --trace FILE                                 # every row's lifecycle event, appended to FILE
 uv run pytest -m e2e                                      # the tests against real services (Claude Code on the subscription): only when asked, skipped without the token
 ```

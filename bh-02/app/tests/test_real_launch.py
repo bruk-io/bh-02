@@ -924,3 +924,44 @@ def test_a_keyed_model_s_key_never_reaches_an_input_s_environment(tmp_path: Path
         finally:
             app.close()
     assert {r["authorization"] for r in stub.requests} == {"Bearer fake-verify-key"}
+
+
+def _said(app: Launched) -> str:
+    """What the terminal showed, on one line (a long path or message wraps)."""
+    return " ".join(app.text().split())
+
+
+def test_a_patch_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s_error(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """A layer written for a bh-02 that had other names (or with a typo) is no hang and no
+    half-started app: bh-02 exits at boot, code 1, and says once the terminal is the person's
+    which row could not start, the `use` it names, and which plugins are installed instead."""
+    stale = tmp_path / "stale.toml"
+    stale.write_text('[[plugin]]\nid = "loop"\nuse = "nonesuch:loop"\n')
+    app = launch("echo", "--patch", str(stale))
+    assert app.exit_code(60) == 1
+    said = _said(app)
+    assert "error: could not start:" in said, said
+    assert "loop: unresolved:" in said and "use 'nonesuch:loop'" in said, said
+    assert "installed plugins: " in said and "subagents" in said, said  # what to name instead
+    assert "Traceback" not in said
+
+
+def test_a_resumed_session_whose_layer_names_a_use_no_plugin_provides_fails_at_boot_too(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """The session's own layer is a layer like any other: nothing translates it on a resume, and
+    a `use` it names that no plugin provides is the same boot failure."""
+    first = launch("echo")
+    first.wait_for(_READY, 60)
+    first.press(b"\x11")
+    assert first.exit_code() == 0
+    (layer,) = (tmp_path / "state").glob("bh-02/sessions/*/session.toml")
+    layer.write_text(layer.read_text() + '\n[[plugin]]\nid = "python"\nuse = "nonesuch:tool"\n')
+    again = launch("echo", "--resume")
+    assert again.exit_code(60) == 1
+    said = _said(again)
+    assert "error: could not start:" in said, said
+    assert "python: unresolved:" in said and "use 'nonesuch:tool'" in said, said
+    assert "Traceback" not in said

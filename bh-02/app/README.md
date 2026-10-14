@@ -7,8 +7,7 @@ process), inside a Textual TUI (`tui:ui`), with every part of the program a plug
 replaced while it runs. `bh_02` is the shell: `cli.py` (the `bh-02` command), `bootstrap.py`
 (`run()`: read every layer, boot, follow the chat row's `done`, unwind; its own `shell`, `host`
 and `session` rows), `sessions.py` (a session is `$XDG_STATE_HOME/bh-02/sessions/<id>/`),
-`outdated.py` (an earlier bh-02's layers in today's names), the layer file (`bh-02.toml`) and
-`testing.py` (fake models). Every capability is a `*-cordis-plugin` workspace member
+the layer file (`bh-02.toml`) and `testing.py` (fake models). Every capability is a `*-cordis-plugin` workspace member
 (`../plugins/`) that a layer names by string; no package imports another, and they agree on the
 names and shapes in [`CONTRACTS.md`](../CONTRACTS.md). The words used here are in
 [`GLOSSARY.md`](../GLOSSARY.md).
@@ -18,7 +17,6 @@ uv run bh-02                                       # a new session
 uv run bh-02 --resume [ID]                         # continue this directory's newest session (or ID: all of it, its start, or its last part)
 uv run bh-02 sessions                              # list them
 uv run bh-02 --no-jail | --model NAME | --patch mine.toml | --trace trace.log
-uv run bh-02 update-layer mine.toml                # rewrite a layer in today's row names (keeps mine.toml.bak)
 uv tool install --editable ./bh-02/app --reinstall # an installed bh-02, after a pull that adds or renames a plugin
 ```
 
@@ -27,7 +25,8 @@ uv tool install --editable ./bh-02/app --reinstall # an installed bh-02, after a
 rest of the user guide is on the docs site: [Sessions](../../docs/bh-02/using/sessions.md),
 [Commands](../../docs/bh-02/using/commands.md), [Models](../../docs/bh-02/using/models.md),
 [Memory](../../docs/bh-02/using/memory.md), [The jail](../../docs/bh-02/using/jail.md) and
-[Layers](../../docs/bh-02/using/layers.md) (patches, and layer files from an earlier bh-02).
+[Layers](../../docs/bh-02/using/layers.md) (patches, and what a layer that names something bh-02
+doesn't have gets).
 
 ## The compositions
 
@@ -65,6 +64,7 @@ rest of the user guide is on the docs site: [Sessions](../../docs/bh-02/using/se
 | `memory-auto` | `memory:auto` | |
 | `extensions` | `extensions:extensions` | |
 | `agents` | `subagents:parent` (`rows`: the parent's rows a child is made of; `tools`: those a type may grant, `["python"]`; `start`: 30; `max_running`: 4; `session_agents`: 16) | |
+| `agents-status` | `subagents:status` | |
 
 `run()` adds three rows of its own after every layer, pinned on (`disabled = false`) so no layer
 can remove them: `host` (what the host is: the layer files as `paths`, where the credential is
@@ -78,6 +78,12 @@ A row's `id` is its role; `use` is `plugin:component`, a `cordis.plugins` entry 
 `module:attribute`. Order in a file means nothing; dependencies decide what starts when. The
 layer files are live: [Layers](../../docs/bh-02/using/layers.md) has how, and the runner
 plugin's README ("When the host undoes a mount") what a save does to a jail on Linux.
+
+A layer (the shipped one, a session's or a `--patch` file) that names a row or a `use` bh-02 no
+longer has fails at boot: bh-02 renames its own and translates nothing, so it exits with code 1
+and the loader's error, which names the row, the `use` it wrote and the plugins installed, and
+the layer is the one to change. After a pull that renames a plugin, install again with
+`--reinstall`, since plugins are read from what is installed.
 
 What the rows depend on, which is what decides what reloads when:
 

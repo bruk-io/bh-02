@@ -126,7 +126,8 @@ The loader binds its handle under `loader`, so a row can be an operator: `status
 `restart(*rows)` (a fresh fiber for each row; everything depending on them reloads, once
 however many of them it depends on) and
 `explain(row)`. One change at a time: a reload and a restart never interleave. A row whose
-module fails to import in any way is `unresolved`, never fatal. A plugin
+module fails to import in any way is `unresolved`, never fatal; its status says the error, the
+`use` the layer wrote and, for a plugin nobody installed, the plugins there are. A plugin
 is a package that ships components and owns the keys they define, advertised by one
 `cordis.plugins` entry point. The bootstrap is the only code that is not a component:
 

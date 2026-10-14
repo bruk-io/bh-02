@@ -24,8 +24,7 @@ says what each name is; this file is where things go and what the gate holds.
 
 A function every package that decides whether to trust a file by where it is, and how it is
 reached, must compute alike: the models plugin (the models file), the python plugin (the person's
-startup file, and `kernel.py`, its old name, which it still reads), memory (memory files outside the
-project, and in it through no link), the app
+startup file), memory (memory files outside the project, and in it through no link), the app
 and brig (the XDG directories), agent (the project's `.git/HEAD`) and the extensions host (the
 model's extensions). bh-02's plugins may import nothing of each other's, so a copy in each would
 drift, and a drifted copy is a hole. It depends on the standard library alone: no cordis, no key, row

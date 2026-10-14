@@ -21,11 +21,9 @@ from bh_02.sessions import (
     session_layer,
     set_model,
     state_root,
-    update,
     with_model,
 )
 from cordis import Row
-from cordis.composition import format_layer
 from cordis.loader import read_layer
 from models_cordis_plugin import ModelConfig, ModelsError, opened, resolved
 from models_cordis_plugin.openai.testing import StubServer
@@ -59,7 +57,6 @@ def test_a_new_session_records_the_models_file_s_default_and_a_resume_keeps_it(
     assert _recorded(first) == "llama" and first.stack == "llama"
     assert json.loads((first.dir / "meta.json").read_text())["stack"] == "llama"
     _models_default(_own_config, 'default = "opus"\n')
-    update(first)  # what a resume does first
     assert _recorded(first) == "llama"  # still on the first model
     assert _recorded(create(tmp_path / "s", "/work/a", model=None, no_jail=False)) == "opus"
     assert _recorded(create(tmp_path / "s", "/work/a", model="haiku", no_jail=False)) == "haiku"  # --model
@@ -273,246 +270,6 @@ def test_a_session_from_the_agent_sdk_stack_is_retired_and_says_why() -> None:
     assert "Claude Agent SDK" in str(retired(old))
     assert "claude-agent-sdk:agent" in str(retired([Row("llm", "claude-agent-sdk:agent")]))
     assert retired(session_layer(Path("/s/1"), model="haiku", no_jail=True)) is None
-    assert retired([Row("completion", "anthropic:completion", {"model": "haiku"})]) is None  # updated, below
-
-
-def _old_session(root: Path, cwd: str, stack: str, rows: list[Row]) -> Session:
-    """A session as an earlier bh-02 wrote it: its stack (`claude`, `ollama`), its own layer."""
-    session = create(root, cwd, model=None, no_jail=False)
-    meta = session.dir / "meta.json"
-    meta.write_text(meta.read_text().replace('"stack": "sonnet"', f'"stack": "{stack}"'))
-    session.layer.write_text(format_layer(rows))
-    (found,) = [s for s in listed(root, cwd) if s.id == session.id]
-    return found
-
-
-def _base(dir: Path) -> list[Row]:
-    """The rows every session's layer has but the model row (an earlier bh-02's named it `completion`)."""
-    return [r for r in session_layer(dir, model=None, no_jail=False) if r.id != "model"]
-
-
-def test_a_session_from_the_messages_api_stack_moves_to_the_model_row_keeping_its_model(
-    tmp_path: Path,
-) -> None:
-    """Sessions written before the claude-code provider: their completion row named no `use`
-    (the shipped `anthropic:completion`) or named it, with Messages API settings Claude Code has
-    no use for. Their transcript is kept; Claude Code's session is rebuilt from it."""
-    session = _old_session(tmp_path, "/work/a", "claude", [])
-    rows, state = _base(session.dir), str(session.dir / "claude")
-    session.layer.write_text(format_layer([*rows, Row("completion", config={"model": "claude-haiku-4-5"})]))
-    update(session)
-    extra = {"claude-haiku-4-5": {"provider": "claude-code", "id": "claude-haiku-4-5"}}
-    assert read_layer(session.layer) == [  # an id, not a built-in name: a model of the row's own
-        *rows,
-        Row("model", config={"default": "claude-haiku-4-5", "extra": extra, "state": state}),
-    ]
-    named = Row(
-        "completion", "anthropic:completion", {"model": "opus", "max_tokens": 9, "thinking": {"type": "x"}}
-    )
-    session.layer.write_text(format_layer([*rows, named]))
-    update(session)
-    assert read_layer(session.layer) == [
-        *rows,
-        Row("model", "models:model", {"default": "opus", "state": state}),
-    ]
-    session.layer.write_text(format_layer(rows))  # no model row at all: the state is added
-    update(session)
-    assert read_layer(session.layer) == [*rows, Row("model", config={"state": state})]
-
-
-def test_a_claude_code_session_moves_to_the_model_row_and_a_second_update_changes_nothing(
-    tmp_path: Path,
-) -> None:
-    session = _old_session(tmp_path, "/work/a", "claude", [])
-    rows, state = _base(session.dir), str(session.dir / "claude")
-    switch = next(r for r in rows if r.id == "switch")
-    old = [*rows, Row("operator", config={"model_row": "completion"})]  # /model was the operator's
-    session.layer.write_text(
-        format_layer([*old, Row("completion", config={"state": state, "model": "haiku"})])
-    )
-    update(session)
-    now = read_layer(session.layer)
-    assert next(r for r in now if r.id == "switch") == switch  # /model edits the model row now
-    assert next(r for r in now if r.id == "operator") == Row("operator")
-    assert next(r for r in now if r.id == "model") == Row(
-        "model", config={"state": state, "default": "haiku"}
-    )
-    written = session.layer.read_text()
-    update(session)
-    assert session.layer.read_text() == written
-
-
-def test_an_ollama_session_s_model_is_an_openai_model_of_the_model_row(tmp_path: Path) -> None:
-    """An Ollama-stack session's layer named no model row: `ollama.toml`, gone now, gave it
-    `ollama:completion`. A resume makes it the model row with the Ollama model as an `extra`
-    OpenAI-compatible model at the host's `/v1`, named as its model and chosen."""
-    session = _old_session(tmp_path, "/work/a", "ollama", [])
-    rows, state = _base(session.dir), str(session.dir / "claude")
-    session.layer.write_text(format_layer(rows))
-    update(session)
-    llama = {"llama3.2": {"provider": "openai", "id": "llama3.2", "base_url": "http://localhost:11434/v1"}}
-    assert read_layer(session.layer) == [
-        *rows,
-        Row("model", "models:model", {"default": "llama3.2", "extra": llama, "state": state}),
-    ]
-    chosen = _old_session(
-        tmp_path, "/work/a", "ollama", [*rows, Row("completion", config={"model": "qwen3"})]
-    )
-    update(chosen)  # --ollama --model qwen3
-    qwen = {"qwen3": {"provider": "openai", "id": "qwen3", "base_url": "http://localhost:11434/v1"}}
-    assert read_layer(chosen.layer)[-1] == Row(
-        "model", "models:model", {"default": "qwen3", "extra": qwen, "state": str(chosen.dir / "claude")}
-    )
-
-
-def test_a_session_started_earlier_drops_the_model_status_row_that_hid_the_model_s_name(
-    tmp_path: Path,
-) -> None:
-    """Sessions started before the shipped layers named the default model wrote a
-    `model_status` row that replaced that config, so their status bar said `default`."""
-    session = create(tmp_path, "/work/a", model="haiku", no_jail=False)
-    rows = read_layer(session.layer)
-    session.layer.write_text(format_layer([*rows, Row("model_status", config={"row": "completion"})]))
-    update(session)
-    assert read_layer(session.layer) == rows  # everything else as it was
-    written = session.layer.read_text()
-    update(session)  # nothing superseded left: the file is not rewritten
-    assert session.layer.read_text() == written
-
-
-# What a session layer from before the one tool could name: the tool registry, what registered into
-# it, and what offered it, as rows of their own or as overrides of shipped ones.
-_BEFORE_ONE_TOOL = [
-    Row("tools", "tools:registry"),
-    Row("fs", disabled=True),
-    Row("approve", "tui:approver"),
-    Row("actions", "tools:actions"),
-    Row("guard", disabled=True),
-    Row("mine", "codeact:python", {"expose": ["tools"]}),
-]
-
-
-def test_a_session_from_before_the_one_tool_drops_the_rows_bh_02_no_longer_has(tmp_path: Path) -> None:
-    session = create(tmp_path, "/work/a", model=None, no_jail=True)
-    rows = read_layer(session.layer)
-    session.layer.write_text(format_layer([*rows, *_BEFORE_ONE_TOOL]))
-    update(session)
-    assert read_layer(session.layer) == rows  # everything else as it was, the jail choice included
-
-
-def test_a_session_from_before_the_one_tool_resumes(composition: Callable[..., Path], state: Path) -> None:
-    """Its layer is updated before it boots, so the rows it names that no plugin fills any more
-    never reach the loader (which would refuse to start: a row with no `use` it can resolve)."""
-    patch = composition(
-        '[[plugin]]\nid = "model"\nuse = "fragile:counting_model"\n'
-        '[[plugin]]\nid = "ui"\nuse = "fragile:one_message_recorded_ui"\n'
-    )
-    runner = CliRunner()
-    assert runner.invoke(main, ["--patch", str(patch)]).exit_code == 0
-    (session,) = listed(state, str(Path.cwd()))
-    session.layer.write_text(format_layer([*read_layer(session.layer), *_BEFORE_ONE_TOOL]))
-    again = runner.invoke(main, ["--resume", "--patch", str(patch)])
-    assert again.exit_code == 0, again.output + again.stderr
-    import fragile
-
-    assert fragile.SHOWN == ["seen 1", "seen 2"]  # resumed, with its history
-    assert not {row.id for row in read_layer(session.layer)} & {"tools", "fs", "approve", "actions", "guard"}
-
-
-def test_a_session_started_earlier_drops_its_session_row(tmp_path: Path) -> None:
-    """Sessions wrote a `session` row (`tui:status`, a fixed field holding their id); the status
-    row now shows the id itself, from the `session` value, so a resume drops the row."""
-    session = create(tmp_path, "/work/a", model=None, no_jail=False)
-    rows = read_layer(session.layer)
-    old = Row("session", "tui:status", {"field": "session", "text": session.id, "shorter": ["x"]})
-    session.layer.write_text(format_layer([old, *rows]))
-    update(session)
-    assert read_layer(session.layer) == rows
-
-
-def test_a_session_layer_naming_the_sidebar_drops_it(tmp_path: Path) -> None:
-    """bh-02 never wrote a `sidebar` row into a session's layer, but a hand edit could have
-    (turning it off); with no `sidebar` row shipped, it would stop the resume, so it goes."""
-    session = create(tmp_path, "/work/a", model=None, no_jail=False)
-    rows = read_layer(session.layer)
-    session.layer.write_text(format_layer([*rows, Row("sidebar", disabled=True)]))
-    update(session)
-    assert read_layer(session.layer) == rows
-
-
-def test_a_session_layer_in_old_row_names_is_brought_up_to_date(tmp_path: Path) -> None:
-    """A layer as an earlier bh-02 wrote it (its `session` row, the superseded `model_status`)
-    and then hand-edited in the old names (`llm`, `jail_status`): a resume reads it in today's
-    names, the id now the status row's own and the status bar's config the shipped one."""
-    session = create(tmp_path, "/work/a", model=None, no_jail=False)
-    rows = read_layer(session.layer)
-    old = [
-        Row("session", "tui:status", {"field": "session", "text": session.id, "shorter": ["x"]}),
-        *rows,
-        Row("model_status", config={"row": "completion"}),
-        Row("llm", config={"max_nudges": 5}),
-        Row("jail_status", disabled=True),
-    ]
-    session.layer.write_text(format_layer(old))
-    update(session)
-    # the status row has nothing else to say, so it is not written at all; jail_status, the
-    # jail's field, is the grades row now, and stays off
-    assert read_layer(session.layer) == [
-        *rows,
-        Row("loop", config={"max_nudges": 5}),
-        Row("grades", disabled=True),
-    ]
-
-
-def test_a_resumed_session_keeps_its_status_bar_when_one_old_part_was_off(tmp_path: Path) -> None:
-    """An old model_status, off, with its own config, and a disabled jail_status: the status row
-    carries the config (but the default model, which the models row answers now) and stays
-    on, so the resumed bar still shows session and model; the jail's field (the grades row now)
-    stays off."""
-    session = create(tmp_path, "/work/a", model=None, no_jail=False)
-    rows = read_layer(session.layer)
-    old = [
-        *rows,
-        Row("model_status", disabled=True, config={"default": "opus", "row": "llm"}),
-        Row("jail_status", disabled=True),
-    ]
-    session.layer.write_text(format_layer(old))
-    update(session)
-    assert read_layer(session.layer) == [
-        *rows,
-        Row("status", config={"model_row": "model"}),
-        Row("grades", disabled=True),
-    ]
-
-
-def test_a_status_row_s_own_disabled_is_kept(tmp_path: Path) -> None:
-    session = create(tmp_path, "/work/a", model=None, no_jail=False)
-    rows = read_layer(session.layer)
-    session.layer.write_text(
-        format_layer([*rows, Row("status", disabled=True), Row("jail_status", disabled=True)])
-    )
-    update(session)
-    assert read_layer(session.layer) == [*rows, Row("status", disabled=True), Row("grades", disabled=True)]
-
-
-def test_a_session_in_old_row_names_resumes(composition: Callable[..., Path], state: Path) -> None:
-    patch = composition(
-        '[[plugin]]\nid = "model"\nuse = "fragile:counting_model"\n'
-        '[[plugin]]\nid = "ui"\nuse = "fragile:one_message_recorded_ui"\n'
-    )
-    runner = CliRunner()
-    assert runner.invoke(main, ["--patch", str(patch)]).exit_code == 0
-    (session,) = listed(state, str(Path.cwd()))
-    session_row = Row("session", "tui:status", {"field": "session", "text": session.id})
-    old = [session_row, *read_layer(session.layer), Row("model_status", config={"row": "completion"})]
-    session.layer.write_text(format_layer(old))
-    again = runner.invoke(main, ["--resume", "--patch", str(patch)])
-    assert again.exit_code == 0, again.output + again.stderr
-    import fragile
-
-    assert fragile.SHOWN == ["seen 1", "seen 2"]  # resumed, with its history
-    assert fragile.FIELDS["session"] == f"{session.id} (resumed)"  # the status row's, not the old row's
-    assert not {row.id for row in read_layer(session.layer)} & {"session", "model_status"}
 
 
 def test_choosing_a_model_keeps_the_row_s_other_config() -> None:
@@ -609,20 +366,6 @@ def test_a_session_from_the_agent_sdk_stack_can_t_be_resumed_and_says_so_in_one_
     assert line.startswith(f"error: can't resume {old.id}: it ran on the Claude Agent SDK stack")
     assert line.endswith("start a new session with `uv run bh-02`")
     assert [s.id for s in listed(state, str(Path.cwd()))] == [old.id]  # still listed, never deleted
-
-
-def test_a_session_layer_with_both_an_old_row_and_its_new_name_is_refused_unchanged(state: Path) -> None:
-    """Only a hand edit writes both `llm` and `loop`: which one's settings win is the person's call."""
-    old = create(state, str(Path.cwd()), model=None, no_jail=False)
-    text = old.layer.read_text() + '[[plugin]]\nid = "llm"\n[[plugin]]\nid = "loop"\n'
-    old.layer.write_text(text)
-    resumed = CliRunner().invoke(main, ["--resume", old.id])
-    assert resumed.exit_code == 1
-    lines = resumed.stderr.splitlines()
-    assert lines[0] == f"error: can't resume {old.id}: {old.layer} has rows it cannot fold together for you:"
-    assert "row 'llm' is now 'loop', and this layer has a row 'loop' too" in lines[1]
-    assert lines[-1] == "fix that file by hand, then resume again"
-    assert old.layer.read_text() == text  # nothing rewritten
 
 
 def test_a_prefix_two_sessions_share_names_both_and_an_exact_id_wins(tmp_path: Path) -> None:

@@ -83,11 +83,10 @@ async def test_the_project_s_startup_file_runs_first_when_inputs_are_confined(tm
         assert "exec(open('.bh-02/startup.py').read())" in told and "broken" not in told
 
 
-def _person_s(text: str | bytes, name: str = "startup.py") -> Path:
+def _person_s(text: str | bytes) -> Path:
     """The person's own startup file, `$XDG_CONFIG_HOME/bh-02/startup.py` (conftest gives each
-    test a config directory of its own, outside its `tmp_path`), holding `text`; `name` is
-    `kernel.py` for the file under its old name."""
-    path = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / name
+    test a config directory of its own, outside its `tmp_path`), holding `text`."""
+    path = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "startup.py"
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(text, bytes):
         path.write_bytes(text)
@@ -96,10 +95,9 @@ def _person_s(text: str | bytes, name: str = "startup.py") -> Path:
     return path
 
 
-def _project_s(root: Path, text: str, name: str = "startup.py") -> Path:
-    """The project's startup file, `.bh-02/startup.py` under `root`, holding `text`; `name` is
-    `kernel.py` for the file under its old name."""
-    path = root / ".bh-02" / name
+def _project_s(root: Path, text: str) -> Path:
+    """The project's startup file, `.bh-02/startup.py` under `root`, holding `text`."""
+    path = root / ".bh-02" / "startup.py"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
@@ -131,203 +129,6 @@ async def test_a_startup_file_that_is_not_there_is_passed_over(tmp_path: Path) -
     (tmp_path / ".bh-02" / "startup.py").unlink()
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:  # neither: nothing to tell
         assert await k.run("1") == "1"
-
-
-async def test_the_person_s_old_kernel_py_runs_when_startup_py_is_absent_and_says_its_new_name(
-    tmp_path: Path,
-) -> None:
-    """The startup file was called `kernel.py`. One that is still there keeps running, and the
-    first input of each Python process says it is called `startup.py` now (the person's file,
-    which the model cannot write, is only named, not asked to be renamed)."""
-    old = _person_s("HELPER = 1\n", "kernel.py")
-    new = old.with_name("startup.py")
-    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        assert await k.run("HELPER") == (
-            f"({old} is the old name of the person's startup file, now {new}. "
-            f"{old} ran first and defined: HELPER)\n1"
-        )
-        assert await k.run("HELPER") == "1"  # said once, then plain inputs
-        assert "Python process is stopped" in await k.stopped()  # /release
-        again = await k.run("HELPER")  # a new Python process: said again, once
-        assert again.startswith("(the REPL was started again") and again.count("is the old name") == 1
-        assert await k.run("HELPER") == "1"
-    old.rename(new)  # renamed: nothing more to say
-    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        assert await k.run("HELPER") == f"({new} ran first and defined: HELPER)\n1"
-
-
-async def test_the_project_s_old_kernel_py_runs_when_startup_py_is_absent_and_says_to_rename_it(
-    tmp_path: Path,
-) -> None:
-    """The project's is the model's to edit, so the line asks for the rename, which it can do."""
-    old = _project_s(tmp_path, "TOOLS = 2\n", "kernel.py")
-    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        assert await k.run("TOOLS") == (
-            "(.bh-02/kernel.py is the old name of the project's startup file, now .bh-02/startup.py: "
-            "rename it. .bh-02/kernel.py ran first and defined: TOOLS)\n2"
-        )
-        assert await k.run("TOOLS") == "2"  # said once, then plain inputs
-    old.rename(old.with_name("startup.py"))  # renamed: nothing more to say
-    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        assert await k.run("TOOLS") == "(.bh-02/startup.py ran first and defined: TOOLS)\n2"
-
-
-async def test_with_startup_py_and_kernel_py_in_a_place_startup_py_runs_and_kernel_py_is_said_to_be_ignored(
-    tmp_path: Path,
-) -> None:
-    """A conversation that began with the old prompt names `.bh-02/kernel.py`, and its model may
-    write helpers there after a `startup.py` appeared: they would be lost without a word. So
-    the input says `kernel.py` is no longer read, in each place that has both."""
-    old = _person_s("OLD_PERSON = 1\n", "kernel.py")
-    person = _person_s("NEW_PERSON = 1\n")
-    _project_s(tmp_path, "OLD_PROJECT = 1\n", "kernel.py")
-    _project_s(tmp_path, "NEW_PROJECT = 1\n")
-    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        first = await k.run("sorted(n for n in globals() if n.endswith(('PERSON', 'PROJECT')))")
-        assert first == (
-            f"({old} is no longer read, because {person} exists. "
-            f"{person} ran first and defined: NEW_PERSON. "
-            ".bh-02/kernel.py is no longer read, because .bh-02/startup.py exists: move what you "
-            "still need from it into .bh-02/startup.py. "
-            ".bh-02/startup.py ran next and defined: NEW_PROJECT)\n['NEW_PERSON', 'NEW_PROJECT']"
-        )
-        assert await k.run("1") == "1"  # said once, then plain inputs
-
-
-async def test_a_startup_config_written_out_as_the_new_default_falls_back_to_kernel_py_the_same_way(
-    tmp_path: Path,
-) -> None:
-    """The fallback is by name, per entry: an entry named `startup.py` is looked for as `kernel.py`
-    beside it, whether it is the default or a layer wrote the same list out (`update-layer` does not
-    rewrite a config), and a single string is one entry."""
-    old = _person_s("A = 1\n", "kernel.py")
-    _project_s(tmp_path, "TOOLS = 2\n", "kernel.py")
-    written = PythonProcessConfig(
-        root=str(tmp_path), startup=("$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py")
-    )
-    assert written.startup == PythonProcessConfig().startup
-    async with _process(Confined(), written) as k:
-        assert await k.run("A + TOOLS") == (
-            f"({old} is the old name of the person's startup file, now {old.with_name('startup.py')}. "
-            f"{old} ran first and defined: A. "
-            ".bh-02/kernel.py is the old name of the project's startup file, now .bh-02/startup.py: "
-            "rename it. .bh-02/kernel.py ran next and defined: TOOLS)\n3"
-        )
-    one = PythonProcessConfig(root=str(tmp_path), startup=".bh-02/startup.py")
-    async with _process(Confined(), one) as k:
-        told = await k.run("TOOLS")
-        assert told.endswith(".bh-02/kernel.py ran first and defined: TOOLS)\n2") and "rename it" in told
-
-
-async def test_an_entry_named_startup_py_anywhere_falls_back_to_the_kernel_py_beside_it(
-    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Beside it: the same directory, whoever names it (`~/`, the root), and only an entry named
-    `startup.py`: `~/helpers.py` has no old name, so a `kernel.py` next to it is not read."""
-    home = tmp_path_factory.mktemp("home")
-    monkeypatch.setenv("HOME", str(home))
-    (home / "dots").mkdir()
-    (home / "dots" / "kernel.py").write_text("A = 1\n")
-    (home / "kernel.py").write_text("NEVER = 1\n")
-    (home / "helpers.py").write_text("B = 2\n")
-    config = PythonProcessConfig(root=str(tmp_path), startup=("~/dots/startup.py", "~/helpers.py"))
-    async with _process(Confined(), config) as k:
-        told = await k.run("A + B, 'NEVER' in globals()")
-    assert told == (
-        f"({home}/dots/kernel.py is the old name of the person's startup file, now {home}/dots/startup.py. "
-        f"{home}/dots/kernel.py ran first and defined: A. "
-        f"{home}/helpers.py ran next and defined: B)\n(3, False)"
-    )
-
-
-async def test_an_explicit_kernel_py_entry_runs_as_named_with_no_line(tmp_path: Path) -> None:
-    """A config that names `kernel.py` itself is the person's choice of that file: it runs as
-    named, whatever is beside it, and nothing is said about the name."""
-    person = _person_s("A = 1\n", "kernel.py")
-    _person_s("NOT_READ = 1\n")  # a startup.py beside it: an entry named kernel.py is not that entry
-    _project_s(tmp_path, "TOOLS = 2\n", "kernel.py")
-    config = PythonProcessConfig(
-        root=str(tmp_path), startup=("$XDG_CONFIG_HOME/bh-02/kernel.py", ".bh-02/kernel.py")
-    )
-    async with _process(Confined(), config) as k:
-        assert await k.run("A + TOOLS, 'NOT_READ' in globals()") == (
-            f"({person} ran first and defined: A. .bh-02/kernel.py ran next and defined: TOOLS)\n(3, False)"
-        )
-    async with _process(Unjailed(), config) as k:  # unjailed: asked about, still no line
-        told = await k.run("1")
-    assert "old name" not in told and "no longer read" not in told
-
-
-async def test_unconfined_the_old_name_is_said_beside_the_startup_files_that_were_not_run(
-    tmp_path: Path,
-) -> None:
-    """Unjailed, nothing runs unasked: the model is told to run each as an input of its own, and
-    that the file it would run is under its old name, in the same input, once."""
-    person = _person_s("A = 1\n", "kernel.py")
-    _project_s(tmp_path, "TOOLS = 2\n", "kernel.py")
-    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
-        told = await k.run("1")
-        assert await k.run("1") == "1"
-    assert told == (
-        f"({person} and .bh-02/kernel.py were not run: inputs here are put to the person, so run them "
-        "as an input of your own if you want them: "
-        f"exec(open({str(person)!r}).read()); exec(open('.bh-02/kernel.py').read()). "
-        f"{person} is the old name of the person's startup file, now {person.with_name('startup.py')}. "
-        ".bh-02/kernel.py is the old name of the project's startup file, now .bh-02/startup.py: "
-        "rename it)\n1"
-    )
-
-
-async def test_the_prompt_names_only_startup_py_whatever_is_on_disk(tmp_path: Path) -> None:
-    """The fallback changes what is opened, never the name the model is told: the old name is said
-    once, beside what ran, and the prompt (sent unchanged for a whole conversation) is the same
-    with neither file, the old names, both or the new ones."""
-    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "startup.py"
-    prompts = []
-    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        prompts.append(k.instructions())  # neither file
-        _person_s("A = 1\n", "kernel.py")
-        _project_s(tmp_path, "B = 1\n", "kernel.py")
-        prompts.append(k.instructions())  # the old names
-        _person_s("A = 1\n")
-        _project_s(tmp_path, "B = 1\n")
-        prompts.append(k.instructions())  # both
-        person.with_name("kernel.py").unlink()
-        (tmp_path / ".bh-02" / "kernel.py").unlink()
-        prompts.append(k.instructions())  # the new names
-    assert len(set(prompts)) == 1
-    assert ".bh-02/startup.py" in prompts[0] and str(person) in prompts[0] and "kernel.py" not in prompts[0]
-    assert "kernel.py" not in instructions_for(True) and ".bh-02/startup.py" in instructions_for(True)
-    assert "kernel.py" not in instructions_for(False, theirs=(str(person),))
-
-
-async def test_a_person_s_old_kernel_py_behind_a_link_the_model_could_make_is_refused_as_startup_py_is(
-    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The fallback is read by the same rule as the file it stands for (`host_paths.walked`): the
-    person's config directory is a link into the project, where the model could make the old file a
-    link to one the jail hides. The host does not read it for the model; the jail decides."""
-    dotfiles = tmp_path / "dotfiles"
-    (dotfiles / "bh-02").mkdir(parents=True)
-    config = tmp_path_factory.mktemp("home") / "config"
-    config.symlink_to(dotfiles)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
-    old = config / "bh-02" / "kernel.py"
-    hidden = tmp_path_factory.mktemp("hidden")
-    (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
-    (dotfiles / "bh-02" / "kernel.py").symlink_to(hidden / "secret.py")  # what a model could do
-    async with _process(Hiding(str(hidden)), PythonProcessConfig(root=str(tmp_path))) as k:
-        told = await k.run("'SECRET' in globals()")
-    assert told.startswith(
-        f"({old} is the old name of the person's startup file, now {config / 'bh-02' / 'startup.py'}. "
-        f"{old} ran first and failed (its way passes through {tmp_path}, where inputs can write, so "
-        "bh-02 left it to the jail), so what it defines is missing:\n"
-    ), told
-    assert "PermissionError" in told and "stand-in" not in told and told.endswith(")\nFalse")
-    (dotfiles / "bh-02" / "kernel.py").unlink()
-    (dotfiles / "bh-02" / "kernel.py").write_text("HELPER = 1\n")  # an ordinary file there: read in the jail
-    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        assert (await k.run("HELPER")).endswith(f"{old} ran first and defined: HELPER)\n1")
 
 
 async def test_a_failing_startup_file_says_why_and_the_next_one_still_runs(tmp_path: Path) -> None:

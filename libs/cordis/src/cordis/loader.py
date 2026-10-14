@@ -62,6 +62,14 @@ def _listed(plugins: Mapping[str, object]) -> str:
     return ", ".join(sorted(plugins)) or "none"
 
 
+def _unresolved_reason(use: str, error: Exception) -> str:
+    """Why `use` is no component, as the row's `unresolved` status says it: the error, then the
+    `use` the layer wrote and what `resolve` noted on the error (the plugins installed), so the
+    author of a stale layer sees what to change without a traceback."""
+    noted = "".join(f"; {note}" for note in getattr(error, "__notes__", ()))
+    return f"{type(error).__name__}: {error} (use {use!r}{noted})"
+
+
 def _entries(config: LoaderConfig) -> list[Entry]:
     layers: list[Iterable[Row]] = [read_layer(p) for p in config.layers]
     return compose([*layers, config.overrides])
@@ -212,7 +220,7 @@ class Loader:
             # An unresolvable row is reported, not fatal: its siblings still run. Importing a
             # module runs it, so a row's module can fail any way code can (a SyntaxError in a
             # model-written plugin is the usual one), not just with an ImportError.
-            self.rows[entry.id] = Unresolved(entry, f"{type(e).__name__}: {e}")
+            self.rows[entry.id] = Unresolved(entry, _unresolved_reason(entry.use, e))
             return
         fiber = await self._host.perform(use(what, config=entry.config, id=entry.id))
         self.rows[entry.id] = Live(entry, fiber)

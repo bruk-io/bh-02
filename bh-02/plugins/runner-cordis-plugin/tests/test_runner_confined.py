@@ -171,7 +171,7 @@ def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> 
         )
 
     spec = home_rooted(_HOME)
-    for name in ("startup.py", "kernel.py", "models.toml", "context.toml"):
+    for name in ("startup.py", "models.toml", "context.toml"):
         assert _denied(spec, f"{_HOME}/.config/bh-02/{name}"), name
         assert _denied(spec, f"{_HOME}/xdg/bh-02/{name}"), name  # $XDG_CONFIG_HOME/bh-02
     assert _denied(spec, f"{_HOME}/.config/bh-02")  # the directory itself: no link swapped in

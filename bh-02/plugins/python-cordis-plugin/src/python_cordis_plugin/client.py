@@ -40,15 +40,6 @@ choose what a later one reads there: brig's `trusted`.) A startup file that ends
 passed over by the workers after it, until `/restart python`, and the input it cut short says
 which it was, after what the opening had to tell by then (that the worker was started again,
 and why).
-
-A startup file was called `kernel.py`, and one that is still called so keeps running, for good:
-an entry named `startup.py` (the default, or the same list written out) is looked for as
-`kernel.py` beside it when `startup.py` is not there, read by the rules of the entry it stands
-for (the person's through `host_paths.walked`, the project's by the worker, in the jail). The
-first input of each Python process says the file is called `startup.py` now (the project's: to
-rename it), and, where both are there, that `kernel.py` is no longer read: a conversation that
-began with the old prompt may write helpers there again. An entry that names `kernel.py` itself
-runs as named, with nothing said, and the prompt names `startup.py` whatever is on disk.
 """
 
 import asyncio
@@ -75,8 +66,6 @@ _WORKER = Path(__file__).with_name("worker.py")
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
 _LINE_LIMIT = 1 << 20
 _CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a startup file in the person's config directory
-_STARTUP = "startup.py"  # what a startup file is called
-_FORMERLY = "kernel.py"  # what it was called, and is still read as when `startup.py` is not there
 
 
 @runtime_checkable
@@ -139,7 +128,7 @@ class PythonProcessConfig:
     across sessions. The person's own first (`$XDG_CONFIG_HOME/` is their config directory: that
     variable's value, else `~/.config`, as for the models file; `~/` is their home), then the
     project's (a relative name is from `root`), the one the model may write. A single string is
-    one file. An entry named `startup.py` runs the `kernel.py` beside it when it is not there."""
+    one file."""
 
     root: str = "."
     grace: float = 5.0
@@ -161,14 +150,11 @@ class _Startup:
     configured, from the root; the person's by its absolute path), `path`, where it is, and
     whether it is the project's (named from the root), the model's to edit, rather than the
     person's (named from their config directory, their home or `/`). Whose it is is not where
-    it is read: a person's file in the project is read in the jail all the same (`_ready`).
-    `old` is the file beside it under its old name (`kernel.py`), read when this one is not
-    there: only an entry named `startup.py` has one."""
+    it is read: a person's file in the project is read in the jail all the same (`_ready`)."""
 
     name: str
     path: Path
     project: bool
-    old: _Startup | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,15 +162,13 @@ class _Ready:
     """A startup file that is there: `name` as the model is told of it, `path` what the code
     that runs it opens, and `source`, its text when the host read it (None: the worker reads
     `path`, in the jail), or `problem`, why the host could not; `why`, when the worker reads a
-    person's file, why the host did not (said if it then fails). `said` is what the model is
-    told of the file's old name ("" for nothing to tell: `_chosen`)."""
+    person's file, why the host did not (said if it then fails)."""
 
     name: str
     path: str
     source: str | None = None
     problem: str = ""
     why: str = ""
-    said: str = ""
 
 
 class _StartupEnded(ConnectionError):
@@ -277,52 +261,14 @@ def _located(name: str, root: Path, home: Path, environ: Mapping[str, str]) -> P
 def _placed(names: Sequence[str], root: Path, home: Path, environ: Mapping[str, str]) -> tuple[_Startup, ...]:
     """The startup files `names` (`PythonProcessConfig.startup`; a string is one) name, in order, each
     where it is (from the absolute `root`) and whether it is the project's: named from the root,
-    not from the person's config directory, their home or `/`; one named `startup.py` with the
-    `kernel.py` beside it, which is read when it is not there."""
+    not from the person's config directory, their home or `/`."""
     listed = (names,) if isinstance(names, str) else tuple(names)
     placed = []
     for name in listed:
         path = Path(os.path.normpath(_located(name, root, home, environ)))
         project = not (name.startswith(("/", "~/", _CONFIG_HOME)) or name == "~")
-        shown = name if project else str(path)
-        formerly = (
-            _Startup(str(Path(shown).with_name(_FORMERLY)), path.with_name(_FORMERLY), project)
-            if path.name == _STARTUP
-            else None
-        )
-        placed.append(_Startup(shown, path, project, formerly))
+        placed.append(_Startup(name if project else str(path), path, project))
     return tuple(placed)
-
-
-@dataclass(frozen=True, slots=True)
-class _Chosen:
-    """Which of an entry's files runs (`startup`; None: neither is there) and what the model is told
-    of the old name (`said`; "" when nothing needs saying)."""
-
-    startup: _Startup | None
-    said: str = ""
-
-
-def _chosen(entry: _Startup, new_there: bool, old_there: bool) -> _Chosen:
-    """Which file an entry runs, from which of its two are there: its own when it is (`startup.py`,
-    and when `kernel.py` is there too, that it is no longer read, since a conversation that began
-    with the old prompt may have its model write helpers there), else the old one beside it,
-    which keeps running for good and is said to be called `startup.py` now. The project's file is
-    the model's to rename and move helpers out of; the person's it cannot write, so it is only
-    told the new name. An entry with no old name (one that names `kernel.py` itself, or any other
-    file) runs as named, with nothing said."""
-    old = entry.old
-    if old is None or not old_there:
-        return _Chosen(entry if new_there else None)
-    if new_there:
-        ignored = f"{old.name} is no longer read, because {entry.name} exists"
-        return _Chosen(
-            entry,
-            f"{ignored}: move what you still need from it into {entry.name}" if entry.project else ignored,
-        )
-    whose = "project" if entry.project else "person"
-    renamed = f"{old.name} is the old name of the {whose}'s startup file, now {entry.name}"
-    return _Chosen(old, f"{renamed}: rename it" if entry.project else renamed)
 
 
 def worker_argv(endpoint: str) -> list[str]:
@@ -540,10 +486,7 @@ class PythonProcess:
                 f"are put to the person, so run {'it' if one else 'them'} as an input of your own if you "
                 f"want {'it' if one else 'them'}: {runs}"
             )
-            asides.extend(r.said for r in ready if r.said)
         for index, startup in enumerate(ready if confined else ()):
-            if startup.said:
-                asides.append(startup.said)
             if startup.name in self._passed:
                 asides.append(
                     f"{startup.name} was not run: {self._passed[startup.name]} when it last ran, so what "
@@ -589,29 +532,22 @@ class PythonProcess:
         worker's to read, in the jail. The person's, when reading it goes nowhere an input may
         write, the host reads (when `read`: inputs are confined, so it is about to run); one in
         the project or another root the worker's jail lets an input write (its `writes()`), or
-        whose way passes through one, is read by the worker as the project's is. An entry named
-        `startup.py` whose file is not there runs the `kernel.py` beside it (`_chosen`), by the
-        same rules: the file that runs is walked, whichever name it has."""
+        whose way passes through one, is read by the worker as the project's is."""
         given = Path(os.path.normpath(Path(self._config.root).absolute()))
         root = given.resolve()
         writes = self._worker.writes() if self._worker is not None else ()
         writable = (given, root, *(Path(w) for w in writes))
         ready: list[_Ready] = []
         seen: set[Path] = set()
-        for entry in _placed(self._config.startup, root, Path.home(), os.environ):
-            old = entry.old
-            chosen = _chosen(entry, entry.path.is_file(), old is not None and old.path.is_file())
-            startup = chosen.startup
-            if startup is None:
-                continue
+        for startup in _placed(self._config.startup, root, Path.home(), os.environ):
             real = startup.path.resolve()
-            if real in seen:
+            if not startup.path.is_file() or real in seen:
                 continue
             seen.add(real)
             way = (startup.path, *walked(startup.path))
             meets = next((r for p in way for r in writable if p.is_relative_to(r)), None)
             if startup.project:  # the worker reads it by its name, from the root it starts in
-                ready.append(_Ready(startup.name, startup.name, said=chosen.said))
+                ready.append(_Ready(startup.name, startup.name))
             elif meets is not None:
                 # in the project, or reached through it or another root an input may write (bh-02
                 # run from the home directory, a config directory linked into the project): the
@@ -619,22 +555,18 @@ class PythonProcess:
                 # where the jail can see it if anywhere
                 inside = any(real.is_relative_to(r) for r in writable)
                 why = f"its way passes through {meets}, where inputs can write, so bh-02 left it to the jail"
-                ready.append(
-                    _Ready(startup.name, str(real if inside else startup.path), why=why, said=chosen.said)
-                )
+                ready.append(_Ready(startup.name, str(real if inside else startup.path), why=why))
             elif not read:
-                ready.append(_Ready(startup.name, str(startup.path), said=chosen.said))
+                ready.append(_Ready(startup.name, str(startup.path)))
             else:
                 try:
                     source = startup.path.read_text(encoding="utf-8-sig")
                 except FileNotFoundError:  # gone since it was looked at
                     continue
                 except (OSError, UnicodeDecodeError) as error:
-                    ready.append(
-                        _Ready(startup.name, str(startup.path), problem=str(error), said=chosen.said)
-                    )
+                    ready.append(_Ready(startup.name, str(startup.path), problem=str(error)))
                     continue
-                ready.append(_Ready(startup.name, str(startup.path), source, said=chosen.said))
+                ready.append(_Ready(startup.name, str(startup.path), source))
         return ready
 
     def _ended(self) -> str:

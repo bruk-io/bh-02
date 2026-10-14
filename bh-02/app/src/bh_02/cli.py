@@ -10,7 +10,6 @@ a fatal error, and those reports after the run.
 import asyncio
 import contextlib
 import os
-import shutil
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from importlib.metadata import entry_points
@@ -38,8 +37,6 @@ from bh_02.bootstrap import (
     run,
     unreadable,
 )
-from bh_02.outdated import clashes, translated
-from cordis.composition import format_layer
 from cordis.loader import read_layer
 
 __all__ = ["credential_search", "main"]
@@ -52,10 +49,6 @@ _PATCH_HELP = "A layer file applied over the shipped composition. Repeatable."
 _TRACE_HELP = "Append every row's lifecycle event to FILE (the app owns the terminal)."
 _PATCH_TYPE = click.Path(exists=True, dir_okay=False, path_type=Path)
 _TRACE_TYPE = click.Path(dir_okay=False, writable=True, path_type=Path)
-_UPDATED_HEADER = (
-    "Rewritten by `bh-02 update-layer` in this bh-02's row names; the original, with its comments, "
-    "is {backup}."
-)
 
 
 @click.group(invoke_without_command=True)
@@ -94,7 +87,6 @@ def main(
         return
     try:
         read_layers(patches)  # before a session is made for a run that can't start
-        _no_outdated_rows(patches)
         _no_pinned_model(model, patches)
         session = _session(resume, model=model, no_jail=no_jail, patches=patches)
     except LayerError as error:
@@ -114,30 +106,6 @@ def main(
     sys.exit(code)
 
 
-def _no_outdated_rows(patches: Sequence[Path]) -> None:
-    """Raise `LayerError` for `--patch` files naming rows this bh-02 renamed or no longer has:
-    each such row, what to change, and how. `bh-02 update-layer` rewrites a file, except one
-    with rows it cannot fold together (`clashes`), which is fixed by hand first."""
-    stale = {patch: changes for patch in patches if (changes := translated(read_layer(str(patch)))[1])}
-    if not stale:
-        return
-    lines = [f"  {patch}: {change}" for patch, changes in stale.items() for change in changes]
-    by_hand = {patch: len(clashes(read_layer(str(patch)))) for patch in stale}
-    rewritable = [patch for patch in stale if not by_hand[patch]]
-    if rewritable:
-        commands = " and ".join(f"`bh-02 update-layer {patch}`" for patch in rewritable)
-        lines.append(f"run {commands} to rewrite it (the original is kept beside it as .bak), then run again")
-    for patch, count in by_hand.items():
-        if not count:
-            continue
-        rest = f", then `bh-02 update-layer {patch}` for the rest" if len(stale[patch]) > count else ""
-        lines.append(
-            f"fold the clashing rows in {patch} together by hand (update-layer leaves which one "
-            f"wins to you){rest}, then run again"
-        )
-    raise LayerError("a --patch file names rows this bh-02 renamed or no longer has:\n" + "\n".join(lines))
-
-
 def _no_pinned_model(model: str | None, patches: Sequence[Path]) -> None:
     """Raise `LayerError` for `--model` with a `--patch` file that sets the model row's config,
     which replaces the session layer's whole: the model it names would run, not `--model`'s."""
@@ -149,47 +117,6 @@ def _no_pinned_model(model: str | None, patches: Sequence[Path]) -> None:
         "replaces the one --model writes whole. Drop --model and set `default` in that file's model "
         f'row (`config = {{ default = "{model}", ... }}`), or remove the model row\'s config from it'
     )
-
-
-@main.command("update-layer")
-@click.argument("file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
-def update_layer_command(file: Path) -> None:
-    """Rewrite a layer file (a --patch file) that names rows this bh-02 renamed or no longer
-    has, in today's names, and say what changed. The original is kept as FILE.bak (with its
-    comments, which the rewrite does not carry over; an earlier FILE.bak is replaced, and the
-    output says so). A file already up to date is left as it
-    is, so running it again changes nothing. A file with a renamed row whose new id it already
-    has (both `llm` and `loop`) is refused, unchanged: which one wins is the person's call."""
-    try:
-        read_layers([file])
-    except LayerError as error:
-        click.echo(f"error: {error.message}", err=True)
-        sys.exit(1)
-    if by_hand := clashes(read_layer(str(file))):
-        click.echo(f"error: {file} has rows update-layer cannot fold together for you:", err=True)
-        for clash in by_hand:
-            click.echo(f"  {file}: {clash}", err=True)
-        click.echo("nothing was rewritten; fix those by hand, then run it again", err=True)
-        sys.exit(1)
-    rows, changes = translated(read_layer(str(file)))
-    if not changes:
-        click.echo(f"{file} is up to date: nothing to change")
-        return
-    backup = file.with_name(f"{file.name}.bak")
-    replaced = backup.exists()
-    shutil.copyfile(file, backup)
-    file.write_text(format_layer(rows, _UPDATED_HEADER.format(backup=backup.name)))
-    for change in changes:
-        click.echo(f"{file}: {change}")
-    click.echo(f"rewritten; the original, with its comments, is {backup}")
-    if sessions.pins_model(rows):
-        click.echo(
-            f"note: {file} sets the model row's config, so while it is a --patch it chooses the model: "
-            "--model is refused and /model can't switch. To switch freely, move its models to the "
-            f"models file ({sessions.models_file()}) and remove the model row from it"
-        )
-    if replaced:
-        click.echo(f"note: {backup} was there already, from an earlier run; it now holds this run's original")
 
 
 @main.command("sessions")
@@ -229,8 +156,7 @@ def watch_command(session: str, agent: str, once: bool) -> None:
 def _session(
     resume: str | None, *, model: str | None, no_jail: bool, patches: Sequence[Path]
 ) -> sessions.Session:
-    """A new session, or the one `--resume` names, its layer written (or brought up to date)
-    before anything boots."""
+    """A new session, its layer written before anything boots, or the one `--resume` names."""
     root, cwd = sessions.state_root(), str(Path.cwd())
     if resume is None:
         names = [patch.name for patch in patches]
@@ -251,15 +177,8 @@ def _session(
     read_layers([found.layer])  # a hand-edited session.toml: one line, before /model rewrites it
     if (why := sessions.retired(read_layer(str(found.layer)))) is not None:
         raise LayerError(f"can't resume {found.id}: {why}; start a new session with `uv run bh-02`")
-    if by_hand := clashes(read_layer(str(found.layer))):  # only a hand edit writes both names
-        raise LayerError(
-            f"can't resume {found.id}: {found.layer} has rows it cannot fold together for you:\n"
-            + "\n".join(f"  {clash}" for clash in by_hand)
-            + "\nfix that file by hand, then resume again"
-        )
     if no_jail:
         raise click.UsageError("a resumed session keeps the jail it started with")
-    sessions.update(found)
     if model is not None:
         sessions.set_model(found, model)
     return found

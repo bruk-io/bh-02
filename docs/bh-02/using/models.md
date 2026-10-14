@@ -181,8 +181,7 @@ A `--patch` layer that gives the `model` row a `config` replaces the session's w
 `state`, where Claude Code's session is kept, too), so the patch chooses the model: the `default`
 `/model` would write changes nothing. `--model` is refused with such a patch, and `/model` says it
 can't switch. Set `default` in the patch instead, or put the models in the models file.
-`bh-02 update-layer` says so when the patch it writes is one. [Layers](layers.md) has more on
-patches.
+[Layers](layers.md) has more on patches.
 
 The models plugin's own README has every setting and how each provider works:
 [models-cordis-plugin](../reference/plugins/models.md).

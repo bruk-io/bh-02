@@ -9,7 +9,7 @@ runner for `/release`. It binds no key. Whether an input runs unasked is the `ap
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `PythonProcess`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/startup.py`, then the project's `.bh-02/startup.py`; an entry named `startup.py` runs the `kernel.py` beside it, its old name, when it is not there) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file) |
+| `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `PythonProcess`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/startup.py`, then the project's `.bh-02/startup.py`) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file) |
 
 `PythonProcess` (`client.py`) is the value the row enters (given `tools` too, the `Calls` it offers
 an input: `specs()`, `call(name, input)`): `call(input)`, `instructions()`, `run(code) -> str`, `confined` (the `approval` rule's), `report()`, `notice()` and `reads()` (its own start's:
@@ -152,22 +152,8 @@ by where it is read: one named from the root is the project's, one named from th
 directory, their home or `/` is theirs. `instructions_for` tells the model that only the
 project's startup file is its to edit, and names the person's, which comes before it, as theirs.
 
-A startup file was called `kernel.py` before it was `startup.py`, and one still called so keeps
-running for good, with nothing renamed on disk: an entry named `startup.py` (the default, or a
-config that wrote the same list out) whose file is not there runs the `kernel.py` beside it, by
-that entry's own rules (the person's through `host_paths.walked`, as above, so a link the model
-could make is refused as it would be for `startup.py`; the project's read by the Python process,
-in the jail). The first input of each Python process says so beside what the file defined:
-`kernel.py` is the old name, and the file is called `startup.py` now; for the project's, which
-the model may write, to rename it; for the person's, which it cannot, only the name. Where both
-are there, `startup.py` runs and the line says `kernel.py` is no longer read: a conversation that
-began with the old prompt, sent unchanged, names `.bh-02/kernel.py`, and its model may write
-helpers there after a `startup.py` appeared, which would be lost without a word. A config that
-names `kernel.py` itself runs it as named, with no line (`bh-02 update-layer` does not rewrite a
-config). The prompt (`instructions_for`) names only `startup.py`, whatever is on disk: the
-fallback changes what is opened, never the name the model is told, so the line is the one place
-the old name is said. The one old word left is the namespace's `__name__`, `__kernel__`: a
-startup file may test it, and renaming it would break that silently.
+The namespace's `__name__` is `__kernel__`: a startup file may test it, and renaming it would
+break that silently.
 
 Every failure it knows of comes back as the input's text, never as an exception out of `run`: a
 Python process that died, an answer it can't read (the process is replaced), one the runner won't
