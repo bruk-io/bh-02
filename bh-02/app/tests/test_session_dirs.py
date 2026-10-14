@@ -26,7 +26,7 @@ from bh_02.sessions import (
 from cordis import Row
 from cordis.composition import format_layer
 from cordis.loader import read_layer
-from models_cordis_plugin import ModelConfig, opened, resolved
+from models_cordis_plugin import ModelConfig, ModelsError, opened, resolved
 from models_cordis_plugin.openai.testing import StubServer
 
 
@@ -86,6 +86,26 @@ async def test_a_models_file_default_of_an_endpoint_s_model_starts_the_session_o
         assert any(c.get("type") == "text" for c in chunks)
     assert [(r["method"], r["path"]) for r in server.requests] == [("POST", "/v1/chat/completions")]
     assert server.requests[0]["body"]["model"] == "x:7b"  # zero GETs: the endpoint's list was never asked
+
+
+async def test_the_model_flag_naming_a_model_of_a_broken_endpoint_starts_the_session_and_its_model_says_why(
+    _own_config: Path, tmp_path: Path
+) -> None:
+    """TASK-0095: `--model local/x:7b` over an endpoint table with a problem (an id beside `discover`) is
+    recorded as it is typed; the model row still binds, so bh-02 starts, and refuses each step with the
+    table's problem. Nothing is asked of the server."""
+    with StubServer(models=["x:7b"]) as server:
+        _models_default(
+            _own_config,
+            f'[local]\nprovider = "openai"\ndiscover = true\nid = "x"\nbase_url = "{server.base_url}"\n',
+        )
+        made = create(tmp_path / "s", "/work/a", model="local/x:7b", no_jail=False)
+        assert _recorded(made) == "local/x:7b"
+        async with opened(ModelConfig(default=_recorded(made))) as model:
+            with pytest.raises(ModelsError, match="an endpoint names no id, it lists its models") as step:
+                [c async for c in model.complete([{"role": "user", "content": "hi"}], [])]
+        assert step.value.message.startswith("model 'local' (")
+    assert server.requests == []
 
 
 def test_a_new_session_with_no_file_default_records_sonnet(_own_config: Path, tmp_path: Path) -> None:

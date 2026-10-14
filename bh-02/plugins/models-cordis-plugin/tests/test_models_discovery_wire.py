@@ -13,7 +13,7 @@ import httpx2
 import pytest
 
 from models_cordis_plugin import Catalog, ModelConfig, Switch, SwitchConfig, opened, set_model
-from models_cordis_plugin.openai import Down, Reply, httpx_get
+from models_cordis_plugin.openai import Down, Reply, discovery, httpx_get
 from models_cordis_plugin.openai.listing import BODY_LIMIT
 from models_cordis_plugin.openai.testing import StubServer
 
@@ -65,7 +65,7 @@ def _endpoint(tmp_path: Path, base_url: str, key: str | None = None) -> str:
 def _catalog(tmp_path: Path, base_url: str, *, get: Any = httpx_get, key: str | None = None) -> Catalog:
     row: dict[str, Any] = {"models": _endpoint(tmp_path, base_url, key)}
     if key:
-        (tmp_path / "local.env").write_text(f"LOCAL_KEY={key}\n")
+        (tmp_path / "local.env").write_text(f"LOCAL_KEY={key}\n", encoding="utf-8")
         row["env_file"] = str(tmp_path / "local.env")
     return Catalog(_Loader(_Entry("model", "models:model", row)), get=get)
 
@@ -96,6 +96,28 @@ async def test_the_key_is_sent_in_the_header_only_and_a_wrong_one_says_so_withou
         said = str(await _switch(other, wrong).run(""))
     assert _names(wrong) == [] and "HTTP 401: it wants a key, or refused the one named" in said
     assert _KEY not in said and "cdef" not in said
+
+
+async def test_a_key_line_that_cannot_go_in_a_header_is_one_line_under_the_list_and_asks_nothing(
+    tmp_path: Path,
+) -> None:
+    """TASK-0095: a header carries printable ASCII; httpx2 raises `UnicodeEncodeError` for anything else,
+    which `/model` used to let out. The endpoint says why instead (never the key), and the server is
+    not asked."""
+    for n, key in enumerate(("sk-caf" + chr(0xE9) + "-0123", "sk-tab\there")):
+        directory = tmp_path / f"key{n}"
+        directory.mkdir()
+        with StubServer(models=["m"]) as server:
+            catalog = _catalog(directory, server.base_url, key=key)
+            said = str(await _switch(directory, catalog).run(""))  # nothing raises out of /model
+        env = directory / "local.env"
+        (line,) = [s for s in said.splitlines() if s.startswith("  local: ")]
+        assert line == (
+            f"  local: no list from {server.base_url}/models (model 'local' names the key LOCAL_KEY, whose "
+            f"line in {env} holds a character a request header can't carry (a key is printable ASCII). "
+            "Fix that line, then try again.); its models are not listed"
+        )
+        assert key not in said and _names(catalog) == [] and server.requests == []
 
 
 def _switch(tmp_path: Path, catalog: Catalog) -> Switch:
@@ -173,6 +195,36 @@ async def test_an_answer_over_the_limit_is_not_read_whole_and_a_failure_status_h
     get = _mock(handler)
     assert await get("http://h/big", {}) == Down("its answer is over 1 MiB, more than a model list is")
     assert await get("http://h/err", {}) == Reply(500, b"")  # a body is never quoted, so never read
+
+
+async def test_the_body_limit_is_checked_before_a_chunk_is_held_so_never_more_than_the_limit_is(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TASK-0095: an answer just over the limit is a `Down` either way, so what tells the checks apart is
+    what was held: the buffer's size after each chunk it took. A test double for the buffer records it."""
+    held: list[int] = []
+
+    class _Buffer(bytearray):
+        def __iadd__(self, chunk: Any) -> Any:
+            held.append(len(self) + len(chunk))
+            return super().__iadd__(chunk)
+
+    monkeypatch.setattr(discovery, "bytearray", _Buffer, raising=False)  # the name `httpx_get` builds it by
+
+    def answer(size: int) -> Any:
+        async def chunks() -> Any:  # two chunks, the first just short of the limit
+            yield b"x" * (BODY_LIMIT - 10)
+            yield b"y" * (size - (BODY_LIMIT - 10))
+
+        return _mock(lambda request: httpx2.Response(200, content=chunks()))
+
+    assert await answer(BODY_LIMIT + 1)("http://h/v1/models", {}) == Down(
+        "its answer is over 1 MiB, more than a model list is"
+    )
+    assert held and max(held) <= BODY_LIMIT  # the second chunk was refused, not taken and then counted
+    held.clear()
+    got = await answer(BODY_LIMIT)("http://h/v1/models", {})  # exactly the limit is still an answer
+    assert isinstance(got, Reply) and len(got.body) == BODY_LIMIT and max(held) == BODY_LIMIT
 
 
 async def test_a_request_that_fails_is_a_down_with_no_key_in_it() -> None:

@@ -200,12 +200,16 @@ other.
   `--model`, `/model NAME`, a layer's `default` and the file's `default` mean the model with no
   request, the status bar shows `local/qwen (openai)`, and the model row has no way to ask a server at
   all: an id the server lacks is the first step's 404. The endpoint alone names no model
-  (`not_a_model` says to name one of its models).
+  (`not_a_model` says to name one of its models). An endpoint whose table has a problem (an `id`
+  beside `discover`, a bad `include` or `base_url`) names no model either: `derived` hands back the
+  table itself, so `--model local/x`, `/model local/x` and a `default` are refused with that problem
+  and what to write, and the model row binds `Unusable` as for any table with one.
 - **Only `/model` asks.** `Catalog.refresh()`, awaited by `/model` with no argument in its own
   coroutine, asks each endpoint `GET <base_url>/models` through a `Get` (`openai/discovery.py`: an
   async call returning a `Reply` or a `Down`, never raising for a server that isn't there; `httpx_get`
   is the real one, `testing.FakeGet` the tests'), all at once: connecting within 3 s, the whole
-  request within 6 s, no redirect followed (a key goes to its `base_url` alone), at most 1 MiB read.
+  request within 6 s, no redirect followed (a key goes to its `base_url` alone), at most 1 MiB read
+  and held (a chunk that would pass it is not taken).
   It is async I/O, never a call that blocks the loop the TUI shares, and a thread would hold bh-02
   open at exit. `listed` (which `/model`'s `choices` and the composer's completion call, on the
   loop, per key), `endpoints` and `current` (the status bar's) only read what the last `refresh`
@@ -223,20 +227,22 @@ other.
   the marks always show. `endpoints()` gives each endpoint's `name`, `where` and `notes`, the lines
   `model_list` prints after the models: why it listed none (the server isn't there or took too long,
   HTTP 401/403, no `/models`, a redirect, an answer that isn't a model list, a key's line missing from
-  `local.env`, the table's problem), `include` matching nothing, more than 200, ids it can't name,
-  more than 2000 kept. Never an error, and never the server's text but its ids.
+  `local.env`, the table's problem), `include` matching nothing, more than 200, entries of its list that give no
+  usable id (counted as entries, whether the id is missing or one a name can't be), more than 2000 kept. Never an error, and never the server's text but its ids.
 - **Which ids are names** (`listing.usable`): the server's text, so control characters (C0, DEL,
   C1) are stripped, and what remains must be 1 to 200 printable ASCII characters with no space. A
   name is one word in `/model NAME`, and `format_layer` writes a character outside the Basic
   Multilingual Plane as a surrogate-pair escape, which is invalid TOML, so choosing such a name
-  would write a session layer the loader can't read. The rest are counted in a note, never listed. An
+  would write a session layer the loader can't read. The rest are never listed: a note counts the
+  entries of the list that gave no usable id, missing or refused. An
   id is only ever a name and the `model` of a request's body: never a path, an argument or part of a
   URL.
 - **Trust.** Endpoints come only from the models file, which is not read when it is in the project
   (above), so the model's code can't add one; a table of a layer's `extra` that says `discover` is
   that table's problem and asks nothing (`endpoint` is false for it). The key is read from `local.env`
   for the one request and goes in its `Authorization` header only (`openai.authorization`, whose
-  withheld-token wall applies); a line that is missing asks nothing and is said. Whatever a library
+  withheld-token wall applies); a line that is missing, or that holds what a header can't carry
+  (anything but printable ASCII), asks nothing and is said, without the key. Whatever a library
   says of a failure goes through `wire.scrubbed` and a control strip first, and a body is never quoted.
 
 ## When the tools change mid-conversation

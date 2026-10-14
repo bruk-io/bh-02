@@ -74,7 +74,8 @@ async def httpx_get(
 ) -> Reply | Down:
     """GET `url` over httpx2: connecting within 3 s, the whole request within `deadline`, a
     redirect not followed (a key is sent to its `base_url` alone) and at most `BODY_LIMIT` bytes of
-    an answer read, none of one that is not a success (a body is never quoted)."""
+    an answer read and held (a chunk that would pass it is not taken), none of one that is not a
+    success (a body is never quoted)."""
     try:
         async with (
             asyncio.timeout(deadline),
@@ -87,11 +88,11 @@ async def httpx_get(
                 return Reply(response.status_code, b"")
             body = bytearray()
             async for chunk in response.aiter_bytes():
-                body += chunk
-                if len(body) > BODY_LIMIT:
+                if len(body) + len(chunk) > BODY_LIMIT:  # before it is held: never more than the limit is
                     return Down(
                         f"its answer is over {BODY_LIMIT // 1024 // 1024} MiB, more than a model list is"
                     )
+                body += chunk
             return Reply(response.status_code, bytes(body))
     except TimeoutError, httpx2.TimeoutException:
         return Down(f"no answer within {deadline:g} s")

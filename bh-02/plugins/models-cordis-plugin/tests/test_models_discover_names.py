@@ -163,10 +163,33 @@ def test_a_name_that_is_nothing_lists_the_models_and_the_endpoints_whose_models_
     assert bare.value.kind == "unknown_model"
 
 
-def test_a_bad_endpoint_table_shows_as_the_derived_model_s_problem(tmp_path: Path) -> None:
-    broken = _FILE.replace("http://localhost:1234/v1", "localhost:1234")
-    with pytest.raises(ModelsError, match="base_url 'localhost:1234' is not an http"):
-        chosen("local/x", _models(text=broken), "/c/models.toml")
+@pytest.mark.parametrize(
+    ("table", "said"),
+    [
+        ({"id": "x"}, "an endpoint names no id, it lists its models (named local/ID). Remove id"),
+        ({"include": "qwen*"}, 'include must be a list of patterns, like `include = ["qwen*"]`'),
+        ({"include": []}, "include must be a list of patterns"),
+        ({"base_url": "localhost:1234"}, "base_url 'localhost:1234' is not an http(s) URL with a host"),
+        ({"max_tokens": 0}, "max_tokens must be a whole number above 0"),
+    ],
+)
+def test_an_endpoint_whose_table_has_a_problem_names_no_model_and_says_that_problem(
+    table: dict[str, Any], said: str
+) -> None:
+    """TASK-0095: the table is broken, so what is derived from it is too: `local/x` is refused with the
+    endpoint's own problem (which says what to write), not resolved through a table bh-02 calls broken."""
+    sound = {"provider": "openai", "discover": True, "base_url": "http://localhost:1234/v1"}
+    models = combined({"local": {**sound, **table}}, "/c/models.toml", {})
+    host = models[-1]
+    why = problem(host)
+    assert why is not None and said in why and why.startswith("model 'local' (/c/models.toml)")
+    assert derived(host, "x:7b") is host  # no model is derived from it: the table to fix is the one named
+    for name in ("local/x:7b", "local/Qwen/q", "local"):  # a model of it, and the endpoint itself
+        found = find(name, models)
+        assert found is not None and not_a_model(found) == why
+        with pytest.raises(ModelsError) as raised:
+            chosen(name, models, "/c/models.toml")
+        assert raised.value.kind == "model_config" and raised.value.message == why
 
 
 async def test_the_model_row_resolves_a_layer_s_default_of_an_endpoint_model_and_binds_it(

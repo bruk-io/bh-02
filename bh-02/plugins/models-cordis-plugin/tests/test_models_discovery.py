@@ -10,7 +10,16 @@ from typing import Any
 import pytest
 
 from cordis.loader import read_layer
-from models_cordis_plugin import Catalog, ModelConfig, Switch, SwitchConfig, opened, resolved, set_model
+from models_cordis_plugin import (
+    Catalog,
+    ModelConfig,
+    ModelsError,
+    Switch,
+    SwitchConfig,
+    opened,
+    resolved,
+    set_model,
+)
 from models_cordis_plugin.openai import Down, Reply
 from models_cordis_plugin.openai.listing import SHOWN
 from models_cordis_plugin.openai.testing import FakeGet
@@ -140,6 +149,64 @@ async def test_a_model_of_an_endpoint_means_a_model_with_no_network_call(tmp_pat
     assert row.config == {"state": "/s/claude", "default": "local/other:1b"}  # a layer's default
 
 
+_BROKEN = _FILE + 'id = "x"\n'  # an endpoint with an id beside discover = true: its table's problem
+
+
+def _why(tmp_path: Path) -> str:
+    return (
+        f"model 'local' ({tmp_path / 'models.toml'}): an endpoint names no id, it lists its models "
+        "(named local/ID). Remove id, or remove discover for a single model"
+    )
+
+
+async def test_a_layer_s_default_naming_a_model_of_a_broken_endpoint_binds_a_model_that_says_why(
+    tmp_path: Path,
+) -> None:
+    """TASK-0095, by `--model` too (it writes a layer's default): refused with the table's problem; the model
+    row still binds, so bh-02 starts, and each step says why."""
+    get = FakeGet({_LOCAL: _ids("x")})
+    _catalog(tmp_path, get, _BROKEN)  # writes the models file
+    config = ModelConfig(default="local/x", models=str(tmp_path / "models.toml"))
+    with pytest.raises(ModelsError) as raised:
+        resolved(config)
+    assert raised.value.kind == "model_config" and raised.value.message == _why(tmp_path)
+    async with opened(config) as model:  # the row is up
+        with pytest.raises(ModelsError) as step:
+            [chunk async for chunk in model.complete([{"role": "user", "content": "hi"}], [])]
+    assert step.value.message == _why(tmp_path)
+    assert get.calls == []
+
+
+async def test_the_models_file_s_default_naming_a_model_of_a_broken_endpoint_is_refused_the_same_way(
+    tmp_path: Path,
+) -> None:
+    get = FakeGet({_LOCAL: _ids("x")})
+    _catalog(tmp_path, get, 'default = "local/x:7b"\n' + _BROKEN)
+    config = ModelConfig(models=str(tmp_path / "models.toml"))  # no layer names a model: the file's counts
+    with pytest.raises(ModelsError) as raised:
+        resolved(config)
+    assert raised.value.message == _why(tmp_path)
+    async with opened(config) as model:
+        with pytest.raises(ModelsError, match="an endpoint names no id"):
+            [chunk async for chunk in model.complete([{"role": "user", "content": "hi"}], [])]
+    assert get.calls == []
+
+
+async def test_slash_model_name_of_a_broken_endpoint_s_model_is_refused_and_the_status_bar_says_none(
+    tmp_path: Path,
+) -> None:
+    get = FakeGet({_LOCAL: _ids("x")})
+    catalog = _catalog(tmp_path, get, _BROKEN, default="local/x")
+    assert catalog.check("local/x:7b") == _why(tmp_path) and catalog.check("local") == _why(tmp_path)
+    assert catalog.current() == {"name": "local/x", "provider": ""}  # the status bar: no provider, no error
+    switch = _switch(tmp_path, catalog)
+    said = await switch.run("local/other:1b")  # `/model NAME`
+    assert said == f"not switched: {_why(tmp_path)}"
+    (row,) = read_layer(tmp_path / "session.toml")
+    assert row.config == {"state": "/s/claude"}  # nothing was written to the session's layer
+    assert get.calls == []
+
+
 async def test_the_choices_and_the_status_bar_never_ask_a_server_and_offer_what_model_found(
     tmp_path: Path,
 ) -> None:
@@ -189,7 +256,7 @@ async def test_a_server_s_ids_are_shown_with_control_characters_stripped(tmp_pat
     said = str(await _switch(tmp_path, catalog).run(""))
     assert not any(ord(c) < 0x20 and c != "\n" or 0x7F <= ord(c) <= 0x9F for c in said)  # no control char
     assert _discovered(catalog) == ["local/bellx", "local/evil[2Jid", "local/ok:1"]
-    assert "3 ids not listed: a name here is printable ASCII without a space" in said  # the rest, counted
+    assert "3 entries not listed: a model here needs an id of printable ASCII without a space" in said
 
 
 async def test_an_id_is_only_a_name_and_a_body_never_a_path_an_argument_or_a_url(

@@ -116,7 +116,9 @@ and switches with the server down. An id the server doesn't have is that first m
 What to know:
 - The endpoint is not a model itself: it takes no `id`, and `--model local` says to name one of its
   models. It takes `key`, `max_tokens` and `temperature` as any `openai` table does, and its models
-  share them. The table's name may not hold `/`.
+  share them. The table's name may not hold `/`. A table with something wrong in it (an `id` beside
+  `discover`, a bad `include` or `base_url`) names no models either: `local/ID` is refused, as a
+  model of any table with a problem is, with that table's problem and what to write.
 - `include` is a list of globs (`*`, `?`, `[abc]`), case-sensitive, tried on the id as the server
   says it (`qwen*`, not `local/qwen*`); a model is listed if any matches. Use it for a server that
   lists hundreds: `/model` shows 200 of an endpoint's models and says how many it left out.
@@ -129,7 +131,8 @@ What to know:
   its models are not listed`), never an error; the other models are listed as usual.
 - An id is listed only if it is printable ASCII without a space, at most 200 characters, once its
   control characters are removed: a name is one word, and `/model` writes it into your session's layer
-  file. The rest are counted in a line under the list.
+  file. A line under the list counts the entries it left out, whether an entry had no id or an id that
+  isn't one.
 - Endpoints are read only from the models file in your config directory, like the rest of it. A
   `discover` in a layer (a `--patch`'s `extra`) is refused.
 - The key goes only in the request's `Authorization` header, as for a chat request, and nothing
@@ -141,7 +144,8 @@ A `key` names a line of `local.env`, never the key itself. For the example above
 holds a line that sets `OPENROUTER_API_KEY`. The model row reads that line for each request and
 sends it only as the request's `Authorization` header. The jail keeps the model's code from
 reading `local.env`. A key may not name `CLAUDE_CODE_OAUTH_TOKEN`: that token is for Claude
-Code alone, and a model whose key names it is refused.
+Code alone, and a model whose key names it is refused. A key's line holds printable ASCII, as a key is issued: one that a request header can't carry (an
+accented letter, say) is said in a line under `/model`'s list, and not sent.
 
 ### Keep the models file out of the project
 

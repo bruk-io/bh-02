@@ -29,7 +29,8 @@ An openai table with `discover = true` is an endpoint, not a model: it names the
 lists, `ENDPOINT/ID`, split at the first `/` (`find`). Such a name needs no network to mean what it
 says (`find` derives the model from the endpoint's table); the server is asked only when `/model`
 lists (`discovery.py`). `include` narrows what is listed, by glob. Endpoints come only from the
-models file, which is why a layer's `extra` may not hold one.
+models file, which is why a layer's `extra` may not hold one. An endpoint whose table has a problem
+names no model: `ENDPOINT/ID` is refused with that table's problem, as the table alone is.
 
 The models file is trusted whole: a factory it names runs in bh-02's own process, and a `key`
 it names is sent to its `base_url`. So it is not read when it is in the project, which the
@@ -440,15 +441,19 @@ def key_name(key: object) -> str | None:
 def derived(host: Named, model_id: str) -> Named:
     """The model `ENDPOINT/ID` means: the endpoint's table (its provider, `base_url`, `key` and
     settings) with `model_id` as the model's, named as the person writes it. Nothing is asked of the
-    server: an id it lacks is the first step's 404."""
+    server: an id it lacks is the first step's 404. A table with a problem (`problem`) means no model:
+    `host` itself comes back, which `not_a_model` refuses with that problem, so the person is told
+    which table to fix and what to write, and no model is made of a table bh-02 calls broken."""
+    if problem(host) is not None:
+        return host
     table = {k: v for k, v in host.table.items() if k not in (_DISCOVER, _INCLUDE)}
     return Named(f"{host.name}/{model_id}", OPENAI, model_id, {**table, "id": model_id}, host.source)
 
 
 def find(name: object, models: Sequence[Named]) -> Named | None:
     """The model `name` means, or None: the table of that name, else `ENDPOINT/ID` for an
-    endpoint (`derived`), split at the first `/` so an id may hold more of them, and `:`. Pure:
-    no server is asked."""
+    endpoint (`derived`: the endpoint's own table when that has a problem), split at the first `/`
+    so an id may hold more of them, and `:`. Pure: no server is asked."""
     if not isinstance(name, str):
         return None
     exact = next((named for named in models if named.name == name), None)
@@ -462,15 +467,17 @@ def find(name: object, models: Sequence[Named]) -> Named | None:
 
 
 def not_a_model(found: Named) -> str | None:
-    """Why `found` can't be the model row's model, said so the person can fix it: it is an
-    endpoint, which lists models and is none, or its table has a problem (`problem`); None when
-    it can be."""
+    """Why `found` can't be the model row's model, said so the person can fix it: its table has a
+    problem (`problem`: an endpoint's too, which resolves no model of it), or it is an endpoint,
+    which lists models and is none; None when it can be."""
+    if (why := problem(found)) is not None:
+        return why
     if endpoint(found):
         return (
             f"{found.name!r} ({found.source}) is an endpoint, which lists models and is none itself; "
             f"name one of them, {found.name}/ID: /model lists them"
         )
-    return problem(found)
+    return None
 
 
 def said_names(models: Sequence[Named]) -> str:

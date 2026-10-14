@@ -69,7 +69,15 @@ def test_a_list_is_its_usable_ids_sorted_each_once_and_the_rest_counted() -> Non
 
 def test_what_is_not_an_id_is_skipped_and_counted() -> None:
     body = json.dumps({"data": [{"id": "ok"}, {"id": 5}, {"name": "x"}, "str", None]}).encode()
-    assert read_listing(Reply(200, body)) == Listed(("ok",), skipped=4)
+    got = read_listing(Reply(200, body))
+    assert got == Listed(("ok",), skipped=4)
+    # the count says what it counts: entries of the list, not ids (none of these four has a usable one)
+    assert notes("http://h/v1/models", got, ()) == (
+        "4 entries not listed: a model here needs an id of printable ASCII without a space, "
+        "at most 200 characters",
+    )
+    one = Listed(("ok",), skipped=1)
+    assert notes("http://h/v1/models", one, ())[0].startswith("1 entry not listed: ")
 
 
 def test_a_list_longer_than_kept_is_cut_and_the_cut_counted() -> None:
@@ -128,4 +136,7 @@ def test_the_notes_say_what_an_endpoint_leaves_out_one_line_each() -> None:
     assert notes(url, many, ()) == ('5 more not shown; narrow them with include = ["qwen*"]',)
     left_out = notes(url, Listed(("a",), skipped=2, cut=3), ())
     assert [line.split(" ")[0] for line in left_out] == ["2", "3"]
-    assert "printable ASCII without a space" in left_out[0] and "first 2000" in left_out[1]
+    assert (
+        left_out[0].startswith("2 entries not listed:") and "printable ASCII without a space" in left_out[0]
+    )
+    assert "first 2000" in left_out[1]

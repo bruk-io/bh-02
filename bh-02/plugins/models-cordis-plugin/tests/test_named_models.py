@@ -204,6 +204,28 @@ def test_a_key_that_holds_a_value_not_a_line_name_is_refused_without_quoting_it(
     assert sent.value.kind == "model_config" and secret not in sent.value.message
 
 
+@pytest.mark.parametrize(
+    "secret", ["sk-caf" + chr(0xE9), "sk-" + chr(0x1F999), "sk-tab\there", "sk-bell\x07"]
+)
+def test_a_key_line_a_header_can_not_carry_is_a_models_error_that_never_quotes_it(
+    tmp_path: Path, secret: str
+) -> None:
+    """TASK-0095: not printable ASCII is no header's: said as a `ModelsError` naming the line, not the
+    `UnicodeEncodeError` httpx2 raises (which `/model`'s discovery used to let out of `refresh`)."""
+    env = tmp_path / "local.env"
+    env.write_text(f"KEYED_KEY={secret}\n", encoding="utf-8")
+    table = {"provider": "openai", "id": "x", "base_url": "https://h/v1", "key": "KEYED_KEY"}
+    (named,) = [m for m in combined({"keyed": table}, "/c/models.toml", {}) if m.name == "keyed"]
+    with pytest.raises(ModelsError) as raised:
+        authorization(named, str(env))
+    assert raised.value.kind == "authentication_failed"
+    assert raised.value.message == (
+        f"model 'keyed' names the key KEYED_KEY, whose line in {env} holds a character a request header "
+        "can't carry (a key is printable ASCII). Fix that line, then try again."
+    )
+    assert secret not in raised.value.message
+
+
 def test_a_malformed_base_url_in_the_file_is_one_model_s_problem_not_the_catalog_s(tmp_path: Path) -> None:
     """One typo'd model neither breaks `/model` for the rest nor the model row: it is listed
     with its problem, switching to it says why not, and as the default it binds `Unusable`."""

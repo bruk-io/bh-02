@@ -8,7 +8,8 @@ characters are stripped, and what remains must be 1 to 200 printable ASCII chara
 space (`usable`). A space can't be typed in `/model NAME`, one word; and a character outside the
 Basic Multilingual Plane would make a layer file invalid TOML when `/model` writes the name into it
 (cordis's `format_layer` writes it as a surrogate-pair escape, which TOML does not allow). An id
-that is none of that is counted, never listed. An id is only ever a name and the `model` of a
+that is none of that is counted, never listed, and so is an entry that has no id: one line says how
+many entries were not listed. An id is only ever a name and the `model` of a
 request's body: never a path, never an argument.
 """
 
@@ -61,7 +62,8 @@ class Down:
 @dataclass(frozen=True, slots=True)
 class Listed:
     """What a server listed: `ids`, the usable ones sorted and each once, at most `KEPT`;
-    `skipped`, how many ids were not usable (`usable`); `cut`, how many usable ones past `KEPT`."""
+    `skipped`, how many entries of its list gave none (no id at all, or one `usable` refuses: it
+    counts entries, not ids); `cut`, how many usable ids past `KEPT`."""
 
     ids: tuple[str, ...]
     skipped: int = 0
@@ -135,7 +137,7 @@ def matching(ids: Sequence[str], include: Sequence[str]) -> tuple[str, ...]:
 
 def notes(url: str, found: Listed | Unlisted | None, include: Sequence[str]) -> tuple[str, ...]:
     """What `/model` says of an endpoint besides its models, one line each: why it has none, or
-    what its list leaves out (more than `SHOWN`, ids a name can't carry, a list cut at `KEPT`, an
+    what its list leaves out (more than `SHOWN`, entries with no id a name can carry, a list cut at `KEPT`, an
     `include` that matches nothing). None when it was never asked."""
     match found:
         case None:
@@ -152,9 +154,10 @@ def notes(url: str, found: Listed | Unlisted | None, include: Sequence[str]) -> 
             if len(shown) > SHOWN:
                 out.append(f'{len(shown) - SHOWN} more not shown; narrow them with include = ["qwen*"]')
             if skipped:
+                noun = "entry" if skipped == 1 else "entries"
                 out.append(
-                    f"{skipped} ids not listed: a name here is printable ASCII without a space, "
-                    f"at most {_LONGEST} characters"
+                    f"{skipped} {noun} not listed: a model here needs an id of printable ASCII without "
+                    f"a space, at most {_LONGEST} characters"
                 )
             if cut:
                 out.append(f"{cut} more ids not kept: only the first {KEPT} of a list are")
