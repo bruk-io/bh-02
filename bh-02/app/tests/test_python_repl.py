@@ -490,7 +490,11 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
     project = tmp_path / "project"
     project.mkdir()
     credential = project / "local.env"
-    jail = BrigJail(BrigConfig(), _Host(credentials=(str(credential),), secrets=(str(credential),)))
+    jail = BrigJail(
+        BrigConfig(),
+        _Host(credentials=(str(credential),), secrets=(str(credential),)),
+        lock=str(tmp_path / "jails.lock"),
+    )
     reach = (
         "import os\n"
         f"for how in ('r', 'w'):\n"
@@ -647,7 +651,11 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
     elsewhere.mkdir()
     (elsewhere / "worker.py").write_text(_LISTENS)
     credential = project / "local.env"
-    jail = BrigJail(BrigConfig(), _Host(credentials=(str(credential),), secrets=(str(credential),)))
+    jail = BrigJail(
+        BrigConfig(),
+        _Host(credentials=(str(credential),), secrets=(str(credential),)),
+        lock=str(tmp_path / "jails.lock"),
+    )
     sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
     endpoint = str(sockets / "x.sock")
     try:

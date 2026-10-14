@@ -195,7 +195,8 @@ When they go: the jail removes the ones it made once brig has verified the progr
 no other bh-02 jail of the same user is running (a shared `flock` on
 `/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken exclusively to clean up: a
 second session in the same project binds the first one's placeholders read-only, and removing
-them would detach those binds). The jail makes its placeholders itself, before bubblewrap
+them would detach those binds). `BrigJail` takes that path as its `lock` parameter: only tests pass one of
+their own (a `tmp_path`), so a bh-02 jail running on the machine can't hold the lock out from under them. The jail makes its placeholders itself, before bubblewrap
 starts (which then mounts over them as it would over directories it made): first it records
 them, in bh-02's state directory (`$XDG_STATE_HOME/bh-02/jails/`, else
 `~/.local/state/bh-02/jails/`, one file per jail), then makes each and at once marks it as its

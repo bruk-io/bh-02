@@ -753,7 +753,13 @@ async def test_release_frees_what_the_programs_held_once_each_owner_stopped_its_
     project = tmp_path / "project"
     project.mkdir()
     credential = project / "local.env"
-    runner = Runner(BrigJail(BrigConfig(), Host(credentials=(str(credential),), secrets=(str(credential),))))
+    runner = Runner(
+        BrigJail(
+            BrigConfig(),
+            Host(credentials=(str(credential),), secrets=(str(credential),)),
+            lock=str(tmp_path / "jails.lock"),
+        )
+    )
     started = []
     for _ in ("python", "extensions"):
         endpoint = _endpoint()
@@ -823,7 +829,7 @@ async def test_release_waits_for_a_start_under_way_and_says_it_still_runs(
         return launched[-1]
 
     monkeypatch.setattr("brig.run.Jail.create", slow)
-    runner = Runner(BrigJail(BrigConfig(), Host()))
+    runner = Runner(BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")))
     endpoint = _endpoint()
     argv = [sys.executable, "-I", "-c", _LISTEN, endpoint]
     starting = asyncio.ensure_future(runner.start(argv, cwd=str(project), endpoint=endpoint))

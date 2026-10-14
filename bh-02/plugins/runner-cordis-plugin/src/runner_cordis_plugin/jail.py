@@ -792,12 +792,22 @@ def _unended(jail_id: str, items: Sequence[KillItem]) -> tuple[str, ...]:
 
 
 class BrigJail:
-    """The confined runner's mechanism (`runner.Mechanism`): brig's preset for this platform."""
+    """The confined runner's mechanism (`runner.Mechanism`): brig's preset for this platform.
 
-    def __init__(self, config: BrigConfig, host: Host, *, platform: str = host_platform) -> None:
+    `lock` is the path of the jail lock (Linux). Left out, it is the user's one bh-02 lock
+    (`_LOCK`), which every bh-02 session of the user shares, so a jail sweeps what another
+    session's jails left and none removes a placeholder while another runs. Only tests pass one
+    of their own (a `tmp_path`), so that another session's jail running on the person's machine
+    can't hold the lock out from under them.
+    """
+
+    def __init__(
+        self, config: BrigConfig, host: Host, *, platform: str = host_platform, lock: str | None = None
+    ) -> None:
         self._config = config
         self._host = host
         self._platform = platform
+        self._lock = lock if lock is not None else _LOCK.format(uid=os.getuid())
         # The grades are known before anything starts: compile once against a throwaway directory.
         # A platform brig has no preset for grades nothing; `start` says what to use instead.
         # The probe's endpoint is in a subdirectory: bwrap refuses one directly in the jail directory.
@@ -1050,7 +1060,7 @@ class BrigJail:
         its mounts are there, which removing a placeholder would detach. The hold is then made
         shared (not atomically: in between another jail may take it
         exclusively, which only removes its own)."""
-        lock = os.open(_LOCK.format(uid=os.getuid()), os.O_RDWR | os.O_CREAT, 0o600)
+        lock = os.open(self._lock, os.O_RDWR | os.O_CREAT, 0o600)
         self._sweep(lock, records)
         fcntl.flock(lock, fcntl.LOCK_SH)
         return lock
@@ -1078,7 +1088,7 @@ class BrigJail:
     def _swept(self, records: str) -> None:
         """`_sweep` with a hold of its own, let go of at once: for `release`, with no jail of
         this one's running."""
-        lock = os.open(_LOCK.format(uid=os.getuid()), os.O_RDWR | os.O_CREAT, 0o600)
+        lock = os.open(self._lock, os.O_RDWR | os.O_CREAT, 0o600)
         try:
             self._sweep(lock, records)
         finally:
