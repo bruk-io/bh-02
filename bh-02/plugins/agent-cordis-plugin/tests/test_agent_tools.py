@@ -486,3 +486,38 @@ async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_asides_told_with_t
     assert answer["content"] == "outer done\n\naside of echo: echo: inside"
     refused = LoopModel(_Scripted(), broker, MemoryTranscript(), _Approval(answer=False))
     assert await refused.nested("echo", {"text": "hi"}) == {"content": DECLINED, "failed": True}
+
+
+SHOWING_OVER = {"title": "t", "lines": ["x"], "runs": "harness", "agent": {"name": "fake"}, "name": "other"}
+
+
+async def test_a_show_cannot_set_a_request_s_runs_agent_or_name_for_a_model_s_call() -> None:
+    """A tool's `show` gives only `title`, `lines` and `language`: the request put to `approval`
+    carries the registration's `runs`, the call's own name and input, and no `agent` the show
+    named (CONTRACTS.md: request)."""
+    broker, approval, history = ToolBroker(), _Approval(), MemoryTranscript()
+    broker.register(ECHO, _echo, runs="host", show=lambda input: SHOWING_OVER)
+    model = _Scripted([_call("c1", "echo", text="hi")], [_text("done")])
+    await _said(LoopModel(model, broker, history, approval), "go")
+    assert approval.asked == [
+        {"name": "echo", "input": {"text": "hi"}, "runs": "host", "title": "t", "lines": ["x"]}
+    ]
+
+
+async def test_a_show_cannot_set_a_request_s_runs_agent_or_name_for_a_nested_call() -> None:
+    """The same for a call a tool's own call makes (`tools.call` from an input)."""
+    broker, approval = ToolBroker(), _Approval()
+    broker.register(ECHO, _echo, runs="host", show=lambda input: SHOWING_OVER)
+
+    async def outer(input: Any) -> Json:
+        return {"content": str(await broker.call("echo", {"text": "inside"}))}
+
+    broker.register(_spec("outer"), outer, runs="harness")
+    looped = LoopModel(
+        _Scripted([_call("c1", "outer")], [_text("done")]), broker, MemoryTranscript(), approval
+    )
+    broker.serve(looped.nested)
+    await _said(looped, "go")
+    assert approval.asked[1:] == [
+        {"name": "echo", "input": {"text": "inside"}, "runs": "host", "title": "t", "lines": ["x"]}
+    ]

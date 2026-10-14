@@ -116,8 +116,10 @@ request     {"name": str, "input": Mapping, "runs"?: "jail" | "harness" | "host"
              "lines"?: [str, ...], "language"?: str,
              "agent"?: {"name": str, "type": str}}   put to `approval.unasked`, and when that
             says no, to the person by `output.confirm`: a call (its tool's name, its input, where
-            it runs, and how it is shown: its tool's `show`, the python tool's `title` and its
-            code as `lines`, else its input as JSON), or an extension to load (`"name":
+            it runs, and how it is shown: its tool's `show`, which may give only `title`,
+            `lines` and `language` (never `name`, `input`, `runs` or `agent`: the loop and the
+            asker set those), the python tool's `title` and its code as `lines`, else its input
+            as JSON), or an extension to load (`"name":
             "extension"`, its own `title`, its source as `input.code`), or a sub-agent's start
             the agents row asks about (`"name": "agent"`, its `title` saying why, the prompt as
             `lines`). `agent`: the sub-agent that asks, which its `output` (`agents:output`) sets
