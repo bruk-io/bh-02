@@ -34,14 +34,17 @@ class Reloads(Protocol):
 @runtime_checkable
 class Models(Protocol):
     """What `/model` needs of the `models` value (CONTRACTS.md: models): the models there are,
-    the one the model row names now, why a name can't be switched to, the models file, and why
-    that file is not read."""
+    the endpoints and what to say of each, the one the model row names now, why a name can't be
+    switched to, the models file, and why that file is not read; and `refresh`, which asks the
+    endpoints for their models (what `listed` and `endpoints` then say of them)."""
 
     @property
     def path(self) -> str: ...
     @property
     def problem(self) -> str | None: ...
     def listed(self) -> Sequence[Mapping[str, Any]]: ...
+    def endpoints(self) -> Sequence[Mapping[str, Any]]: ...
+    async def refresh(self) -> None: ...
     def current(self) -> Mapping[str, str]: ...
     def check(self, name: str) -> str | None: ...
 
@@ -63,10 +66,16 @@ class SwitchConfig:
     model_row: str = "model"
 
 
-def model_list(models: Sequence[Mapping[str, Any]], path: str, problem: str | None = None) -> str:
+def model_list(
+    models: Sequence[Mapping[str, Any]],
+    path: str,
+    problem: str | None = None,
+    endpoints: Sequence[Mapping[str, Any]] = (),
+) -> str:
     """`/model`'s answer: every model, the current one marked and the default one said with where
-    it came from, aligned, with where to add more, or, when the models file is not read
-    (`problem`), why and where it must be instead."""
+    it came from, aligned, then what each endpoint (`endpoints`) has to say besides its models, one
+    line each (why it lists none, what it leaves out), with where to add more, or, when the models
+    file is not read (`problem`), why and where it must be instead."""
     width = max((len(str(m["name"])) for m in models), default=0)
     kinds = max((len(str(m["provider"])) for m in models), default=0)
     lines = []
@@ -78,6 +87,7 @@ def model_list(models: Sequence[Mapping[str, Any]], path: str, problem: str | No
         line = f"{head}  {m['id']}{where}{default}"
         notes = [str(m[k]) for k in ("shadows", "problem") if m.get(k)]
         lines.append(line.rstrip() + "".join(f"\n    {note}" for note in notes))
+    lines += [f"  {e['name']}: {note}" for e in endpoints for note in e.get("notes", ())]
     add = problem if problem is not None else f"add models in {path}"
     return "\n".join([*lines, f"/model NAME switches; {add}"])
 
@@ -116,6 +126,9 @@ class Switch:
         }
 
     def _choices(self) -> list[Mapping[str, str]]:
+        """One choice per usable model. The palette calls this on every key and the composer's list
+        once per opening, on the event loop: it reads `listed`, which holds what the last `/model`
+        found of each endpoint, and must never ask a server itself (decision-0003)."""
         try:
             listed = self.models.listed()
         except Exception:  # a models file that can't be read: /model says what is wrong
@@ -132,12 +145,16 @@ class Switch:
         ]
 
     async def run(self, args: str) -> Answer:
-        """List the models, the current one marked; or record NAME in the session's layer and
+        """List the models (asking each endpoint of the models file for its own first), the current
+        one marked; or record NAME in the session's layer and
         reload it now. A name the row already has changes nothing, so nothing restarts; a name
         that isn't a usable model says why and changes nothing either."""
         row = self.config.model_row
         if not args:
-            return model_list(self.models.listed(), self.models.path, self.models.problem)
+            await self.models.refresh()  # the one place a server is asked (`models.refresh`)
+            return model_list(
+                self.models.listed(), self.models.path, self.models.problem, self.models.endpoints()
+            )
         if args.startswith("/") or len(args.split()) != 1:
             return f"not a model name: {args!r}; type /model and one name, e.g. /model sonnet"
         if self.config.layer is None:

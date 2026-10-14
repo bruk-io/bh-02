@@ -18,7 +18,8 @@ All three need the credential in `local.env` ([Get started](../get-started.md#th
 - **At launch**: `bh-02 --model opus`.
 - **When resuming**: `bh-02 --resume --model haiku` carries the session on with another model.
 - **Mid-session**: `/model` lists the models, with the current one marked `●`, the default one marked
-  `(default: built in)` or `(default: the models file)`, each one's provider and id, and where your models file is. `/model NAME` switches to one. The
+  `(default: built in)` or `(default: the models file)`, each one's provider and id, and where your models file is. It also asks each
+  endpoint you set to list its models ([below](#listing-an-endpoints-models-discover)). `/model NAME` switches to one. The
   conversation carries on: the transcript is a row of its own, and only the model row and what
   depends on it reload.
 
@@ -81,12 +82,58 @@ Then `/model local`, or `bh-02 --model router`.
 | `base_url` | `openai` only: the endpoint, ending before `/chat/completions` |
 | `key` | `openai` only, optional: the **name** of a line in `local.env` that holds the API key |
 | `max_tokens`, `temperature` | `openai` only, optional: sent with each request when set |
+| `discover`, `include` | `openai` only, optional: `discover = true` makes the table an endpoint that lists its models, `include` narrows them ([below](#listing-an-endpoints-models-discover)) |
 
 The `openai` provider works with OpenAI, OpenRouter, Groq, Together, Mistral, xAI, DeepSeek,
 Gemini's compatibility endpoint, vLLM, LM Studio and Ollama (at `/v1`). A `claude-code` table can
 name another Claude model by its id.
 
 A model of yours with a built-in's name takes its place, and `/model` says so.
+
+### Listing an endpoint's models: discover
+
+A server you run yourself may serve many models, and one table each is a chore. Give the
+endpoint one table with `discover = true` instead:
+
+```toml
+default = "local/qwen2.5-coder:7b"
+
+[local]
+provider = "openai"
+discover = true
+base_url = "http://localhost:11434/v1"
+include = ["qwen*", "llama3*"]    # optional: only the ids matching one of these globs
+```
+
+`/model` then asks the server which models it has (`GET <base_url>/models`) and lists each as
+`local/ID`: `local/qwen2.5-coder:7b`, `local/llama3.2:latest`. The name is the table's name, a
+`/`, and the server's id, split at the first `/`, so an id may hold more of them (`local/Qwen/Qwen2.5-Coder`)
+and `:`. `/model local/qwen2.5-coder:7b`, `bh-02 --model local/qwen2.5-coder:7b`, a layer's
+`default` and the models file's `default` all take such a name, and none of them asks the server:
+`local/ID` means the model `ID` on that endpoint, whether or not the server lists it, so bh-02 starts
+and switches with the server down. An id the server doesn't have is that first message's 404.
+
+What to know:
+- The endpoint is not a model itself: it takes no `id`, and `--model local` says to name one of its
+  models. It takes `key`, `max_tokens` and `temperature` as any `openai` table does, and its models
+  share them. The table's name may not hold `/`.
+- `include` is a list of globs (`*`, `?`, `[abc]`), case-sensitive, tried on the id as the server
+  says it (`qwen*`, not `local/qwen*`); a model is listed if any matches. Use it for a server that
+  lists hundreds: `/model` shows 200 of an endpoint's models and says how many it left out.
+- Only `/model` asks the server, and it waits at most 6 seconds without freezing the app. What it
+  heard is kept: `/model` typed again within 30 seconds doesn't ask again, and the palette and the
+  list under the composer offer the discovered models from what the last `/model` heard (so run
+  `/model` once to have them offered). Nothing else asks: not the status bar, not a launch.
+- A server that isn't there, refuses the key, has no `/models`, or answers something else is one
+  line under the list (`local: no list from http://localhost:11434/v1/models (can't connect: ...);
+  its models are not listed`), never an error; the other models are listed as usual.
+- An id is listed only if it is printable ASCII without a space, at most 200 characters, once its
+  control characters are removed: a name is one word, and `/model` writes it into your session's layer
+  file. The rest are counted in a line under the list.
+- Endpoints are read only from the models file in your config directory, like the rest of it. A
+  `discover` in a layer (a `--patch`'s `extra`) is refused.
+- The key goes only in the request's `Authorization` header, as for a chat request, and nothing
+  the server says is shown but its ids and that line of why.
 
 ### The key
 

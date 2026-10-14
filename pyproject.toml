@@ -283,6 +283,12 @@ exclude = [
     "models_cordis_plugin.catalog:Catalog.path", "models_cordis_plugin.catalog:Catalog.listed",
     "models_cordis_plugin.catalog:Catalog.current", "models_cordis_plugin.catalog:Catalog.check",
     "models_cordis_plugin.catalog:Catalog.problem",
+    # the same value's endpoints (`discover = true`): `endpoints` reads the models file afresh, as
+    # `listed` does, and says what `refresh` kept; `refresh` reads it too, then asks each endpoint for
+    # its models, the one place a server is asked; `_ask` makes one request, reading the key's line of
+    # local.env into its headers; `httpx_get` is the real `Get`, that request over httpx2
+    "models_cordis_plugin.catalog:Catalog.endpoints", "models_cordis_plugin.catalog:Catalog.refresh",
+    "models_cordis_plugin.catalog:_ask", "models_cordis_plugin.openai.discovery:httpx_get",
     # an OpenAI-compatible model: one streamed HTTP call per step, and its key read from local.env
     "models_cordis_plugin.openai.client:authorization",
     "models_cordis_plugin.openai.client:missing_key",  # /model looks for the key's line, reads no value out

@@ -1,4 +1,5 @@
-"""A stand-in OpenAI-compatible server for tests: `StubServer`, real sockets, real SSE.
+"""A stand-in OpenAI-compatible server for tests: `StubServer`, real sockets, real SSE; and
+`FakeGet`, the `Get` a test of model discovery gives the catalog instead of a network.
 
 It serves `POST /v1/chat/completions` on 127.0.0.1 from a thread, streaming each reply as
 server-sent events the way the API does (a role delta, content in pieces, a tool call's id and
@@ -16,6 +17,10 @@ line, CONTRACTS.md: message):
   long enough to be stopped part-way);
 - anything else: `[<model id>] heard: <message>`, a few words at a time.
 
+`GET /v1/models` lists the ids it was given (`models`), after `delay` seconds when that is set, as
+the API's JSON list (`{"object": "list", "data": [{"id": ..., "object": "model"}]}`), kept in
+`requests` like the rest (each has its `method`, `path` and `authorization`; a POST its `body`).
+
 With `key` set, a request without `Authorization: Bearer <key>` is answered 401, and a wrong
 key is echoed back in that answer, whole and masked but for its end (as a proxy and OpenAI's
 own 401 do). With `strict`, a request asking for usage (`stream_options`) is answered 422, as
@@ -24,6 +29,7 @@ request gets an `outcome` once its reply ends: `complete`, or `cut` when the cli
 connection before the reply was all written.
 """
 
+import asyncio
 import json
 import re
 import threading
@@ -32,7 +38,9 @@ from collections.abc import Iterator, Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-__all__ = ["StubServer"]
+from models_cordis_plugin.openai.listing import Down, Reply
+
+__all__ = ["FakeGet", "StubServer"]
 
 type Json = Mapping[str, Any]
 
@@ -133,9 +141,37 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def do_GET(self) -> None:
+        kept: dict[str, Any] = {
+            "method": "GET",
+            "path": self.path,
+            "authorization": self.headers.get("Authorization"),
+        }
+        self.server.requests.append(kept)
+        if self.path.rstrip("/") != "/v1/models":
+            self._json(404, f"no route {self.path}")
+            return
+        time.sleep(self.server.delay)
+        sent = self.headers.get("Authorization")
+        if self.server.key is not None and sent != f"Bearer {self.server.key}":
+            self._json(401, "Incorrect API key provided")
+            return
+        data = json.dumps(
+            {"object": "list", "data": [{"id": name, "object": "model"} for name in self.server.models]}
+        ).encode()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except BrokenPipeError, ConnectionResetError:
+            pass  # the client gave up before the answer (its deadline): nothing to say
+
     def do_POST(self) -> None:
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         kept: dict[str, Any] = {
+            "method": "POST",
             "path": self.path,
             "body": body,
             "authorization": self.headers.get("Authorization"),
@@ -180,10 +216,12 @@ class _Handler(BaseHTTPRequestHandler):
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, key: str | None, strict: bool) -> None:
+    def __init__(self, key: str | None, strict: bool, models: Sequence[str], delay: float) -> None:
         super().__init__(("127.0.0.1", 0), _Handler)
         self.key = key
         self.strict = strict
+        self.models = tuple(models)
+        self.delay = delay
         self.requests: list[dict[str, Any]] = []
 
 
@@ -191,8 +229,15 @@ class StubServer:
     """The stub on a port of its own, served from a thread while entered: `base_url` is what a
     model's table names, `requests` what it was sent."""
 
-    def __init__(self, key: str | None = None, *, strict: bool = False) -> None:
-        self._server = _Server(key, strict)
+    def __init__(
+        self,
+        key: str | None = None,
+        *,
+        strict: bool = False,
+        models: Sequence[str] = (),
+        delay: float = 0.0,
+    ) -> None:
+        self._server = _Server(key, strict, models, delay)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     @property
@@ -211,3 +256,20 @@ class StubServer:
     def __exit__(self, *exc: object) -> None:
         self._server.shutdown()
         self._server.server_close()
+
+
+class FakeGet:
+    """A `Get` with no network: each URL asked answers what `replies` maps it to (a `Reply`, or a
+    `Down`), else `Down("no such server")`. `calls` keeps every request as `(url, headers)`, in
+    order, headers as they were handed over. `gate`, when set, holds each answer until it is set."""
+
+    def __init__(self, replies: Mapping[str, Reply | Down], gate: asyncio.Event | None = None) -> None:
+        self.replies = dict(replies)
+        self.calls: list[tuple[str, dict[str, str]]] = []
+        self._gate = gate
+
+    async def __call__(self, url: str, headers: Mapping[str, str]) -> Reply | Down:
+        self.calls.append((url, dict(headers)))
+        if self._gate is not None:
+            await self._gate.wait()
+        return self.replies.get(url, Down("no such server"))

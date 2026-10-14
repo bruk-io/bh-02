@@ -31,6 +31,14 @@ class _Models:
         self.now = "haiku"
         self.broken = False
         self.problem: str | None = None  # why the models file is not read (it is in the project)
+        self.refreshed = 0  # how often /model asked the endpoints
+        self.said: list[dict[str, Any]] = []  # what `endpoints` says
+
+    async def refresh(self) -> None:
+        self.refreshed += 1
+
+    def endpoints(self) -> list[dict[str, Any]]:
+        return self.said
 
     def listed(self) -> list[dict[str, Any]]:
         if self.broken:
@@ -102,6 +110,7 @@ async def test_model_lists_the_models_and_switches_by_name_in_the_session_s_laye
         "    model 'typo' names no provider",
         f"/model NAME switches; add models in {models.path}",
     ]
+    assert models.refreshed == 1  # listing asks the endpoints, once
     assert await run("haiku") == "model: haiku already; nothing to switch"
     assert await run("gpt-9") == "not switched: no model named 'gpt-9'"
     assert await run("typo") == "not switched: model 'typo' names no provider"
@@ -176,6 +185,22 @@ def test_the_model_list_marks_a_shadowed_built_in() -> None:
     assert model_list(listed, "f").splitlines()[:2] == [
         "● sonnet  openai  x",
         "    shadows the built-in 'sonnet' (f)",
+    ]
+
+
+def test_the_model_list_says_what_each_endpoint_has_to_say_one_line_each_before_the_footer() -> None:
+    listed = [{"name": "sonnet", "provider": "claude-code", "id": "sonnet", "current": True}]
+    endpoints = [
+        {"name": "far", "where": "http://far/v1", "notes": ["no list from http://far/v1/models (gone)"]},
+        {"name": "big", "where": "http://big/v1", "notes": ["5 more not shown", "2 ids not listed"]},
+        {"name": "quiet", "where": "http://quiet/v1", "notes": []},
+    ]
+    assert model_list(listed, "f", None, endpoints).splitlines() == [
+        "● sonnet  claude-code  sonnet",
+        "  far: no list from http://far/v1/models (gone)",
+        "  big: 5 more not shown",
+        "  big: 2 ids not listed",
+        "/model NAME switches; add models in f",
     ]
 
 

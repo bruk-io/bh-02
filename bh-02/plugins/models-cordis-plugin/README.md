@@ -5,7 +5,7 @@ bh-02's model: named models over their providers, switched by name. Three rows:
 | Row | Binds / registers | Consumes |
 |---|---|---|
 | `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | `host` (`credentials`: where `local.env` is looked for) |
-| `models:catalog` | `models`: the models there are, the one the model row names now, why a name can't be switched to, and why the models file is not read (CONTRACTS.md: models) | `loader`, `host` |
+| `models:catalog` | `models`: the models there are (an endpoint's, as `/model` last heard them), the one the model row names now, why a name can't be switched to, and why the models file is not read (CONTRACTS.md: models) | `loader`, `host` |
 | `models:switch` | registers `/model [NAME]`: lists the models, switches by name in the session's layer, the reload queued in `jobs`; config: `layer` (the session's), `model_row` (`model`) | `commands` (`register`), `loader`, `models`, `jobs` (`put`) |
 
 The model row's config (`ModelConfig`):
@@ -28,7 +28,8 @@ Three places name models, each over the last (`named.py`, pure but for reading t
 - the row's `extra`.
 
 A later one of the same name wins: `extra` over the file, and a user's model over a built-in
-(allowed, and `/model` marks it as shadowing the built-in). The file is one table per model:
+(allowed, and `/model` marks it as shadowing the built-in). The file is one table per model (or per endpoint that lists its own,
+[below](#discovering-an-endpoints-models)):
 
 ```toml
 [llama]                                   # Ollama is an OpenAI-compatible endpoint at /v1
@@ -47,6 +48,12 @@ temperature = 0.2                         # optional, sent only when set
 [opus-4-1]
 provider = "claude-code"
 id = "claude-opus-4-1"
+
+[local-server]                            # an endpoint: its models are named local-server/ID
+provider = "openai"
+discover = true
+base_url = "http://localhost:1234/v1"
+include = ["qwen*"]                       # optional: the ids matching one of these globs
 ```
 
 A top-level `default = "NAME"` above the tables makes NAME the model a session starts on. The
@@ -116,7 +123,8 @@ which a switch replaces.
 `models:switch` (`switch.py`, its row in `wiring.py`) registers `/model` with `commands`, beside
 the catalog it reads, so the commands plugin knows nothing of how a model is chosen and a
 composition without the catalog keeps the operator's commands. `/model` lists the models (the
-`models` value: the built-ins, the models file's, the model row's own), the one the model row
+`models` value: the built-ins, the models file's, the model row's own, then each endpoint's
+[discovered](#discovering-an-endpoints-models) ones, after asking the endpoints: `models.refresh`), the one the model row
 names marked `●`, each with its provider and id, the one a new session starts on when no layer
 names one marked `(default: built in)` or `(default: the models file)`, and says where the models file is, or, when it
 is in the project and so not read (`models.problem`), why and where it must be instead.
@@ -132,7 +140,7 @@ run after the command has answered, since it restarts the chat row the command's
 shown in; one that fails is told through `output.notice` there. The chat row reads its next
 line only once the reload is done, so a line typed meanwhile reaches the new model. Its spec
 carries `choices`, one per usable model, which the palette offers as entries of their own
-(`/model haiku`). The row depends on `models`, not on `model`, so a switch reloads the model
+(`/model haiku`); they read `models.listed` and never ask a server (below). The row depends on `models`, not on `model`, so a switch reloads the model
 row and what uses it, never the row running the switch. The answer ends with `restarting`
 (CONTRACTS.md: event), naming the model row, which the ui names in what a line typed meanwhile
 says it waits for.
@@ -174,6 +182,62 @@ shows it. A key named but not there says which file and what line to add, at `/m
 the line is removed since; no key sends none.
 Connecting times out after 10 s; reading does not (a local model can take minutes to its first
 token). Closing the step (Ctrl-C) closes the HTTP stream.
+
+## Discovering an endpoint's models
+
+A table of the models file with `discover = true` is an endpoint, not a model: it names the
+models its server lists, `ENDPOINT/ID`, instead of one table each (`named.endpoint`, `find`;
+`openai/listing.py` pure, `openai/discovery.py` the I/O and the cache). It is an `openai` table
+(`base_url`, `key`, `max_tokens`, `temperature`, which its models share) with no `id`, and an
+optional `include`, a list of globs (`fnmatch`: `*`, `?`, `[abc]`, case-sensitive) tried on the
+id; its name may not hold `/`. What is wrong with one is that table's `problem`, said like any
+other.
+
+- **Names resolve with no network.** `named.find(name, models)` is the one pure rule: the table of
+  that exact name, else `ENDPOINT/ID` for an endpoint, split at the first `/` (the id keeps the
+  rest, and `:`), derived from the endpoint's table (`derived`: its provider, `base_url`, `key` and
+  settings, the id as the model's). `chosen`, `check`, `current` and `listed` all go through it, so
+  `--model`, `/model NAME`, a layer's `default` and the file's `default` mean the model with no
+  request, the status bar shows `local/qwen (openai)`, and the model row has no way to ask a server at
+  all: an id the server lacks is the first step's 404. The endpoint alone names no model
+  (`not_a_model` says to name one of its models).
+- **Only `/model` asks.** `Catalog.refresh()`, awaited by `/model` with no argument in its own
+  coroutine, asks each endpoint `GET <base_url>/models` through a `Get` (`openai/discovery.py`: an
+  async call returning a `Reply` or a `Down`, never raising for a server that isn't there; `httpx_get`
+  is the real one, `testing.FakeGet` the tests'), all at once: connecting within 3 s, the whole
+  request within 6 s, no redirect followed (a key goes to its `base_url` alone), at most 1 MiB read.
+  It is async I/O, never a call that blocks the loop the TUI shares, and a thread would hold bh-02
+  open at exit. `listed` (which `/model`'s `choices` and the composer's completion call, on the
+  loop, per key), `endpoints` and `current` (the status bar's) only read what the last `refresh`
+  kept, so nothing else ever triggers it (decision-0003).
+- **The cache** (`Discovery`, in the catalog row, lost with it) is kept under the endpoint's
+  `base_url` and the name of its key's line, holding ids and never the key. `refresh` asks an endpoint
+  again only when it has no listing, the last one failed, or it is 30 s old: retyping `/model` doesn't
+  ask a hosted endpoint again, and typing it once the server is started does at once. A reader never
+  expires it (a stale id is a suggestion: resolution never depends on it); a refresh that fails drops
+  the ids it had, and one that no longer finds the endpoint in the file forgets it. `include` is
+  applied on read, so editing it needs no new request.
+- **What `/model` shows.** `listed` adds each endpoint's models after the `extra` ones, sorted, at most
+  200 of them (`SHOWN`), as `{name, provider, id, current, where}`; the model row's model and the
+  default, when they are `ENDPOINT/ID` names, are listed even if the server doesn't list them, so
+  the marks always show. `endpoints()` gives each endpoint's `name`, `where` and `notes`, the lines
+  `model_list` prints after the models: why it listed none (the server isn't there or took too long,
+  HTTP 401/403, no `/models`, a redirect, an answer that isn't a model list, a key's line missing from
+  `local.env`, the table's problem), `include` matching nothing, more than 200, ids it can't name,
+  more than 2000 kept. Never an error, and never the server's text but its ids.
+- **Which ids are names** (`listing.usable`): the server's text, so control characters (C0, DEL,
+  C1) are stripped, and what remains must be 1 to 200 printable ASCII characters with no space. A
+  name is one word in `/model NAME`, and `format_layer` writes a character outside the Basic
+  Multilingual Plane as a surrogate-pair escape, which is invalid TOML, so choosing such a name
+  would write a session layer the loader can't read. The rest are counted in a note, never listed. An
+  id is only ever a name and the `model` of a request's body: never a path, an argument or part of a
+  URL.
+- **Trust.** Endpoints come only from the models file, which is not read when it is in the project
+  (above), so the model's code can't add one; a table of a layer's `extra` that says `discover` is
+  that table's problem and asks nothing (`endpoint` is false for it). The key is read from `local.env`
+  for the one request and goes in its `Authorization` header only (`openai.authorization`, whose
+  withheld-token wall applies); a line that is missing asks nothing and is said. Whatever a library
+  says of a failure goes through `wire.scrubbed` and a control strip first, and a body is never quoted.
 
 ## When the tools change mid-conversation
 

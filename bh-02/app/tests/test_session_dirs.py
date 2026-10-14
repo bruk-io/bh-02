@@ -26,6 +26,8 @@ from bh_02.sessions import (
 from cordis import Row
 from cordis.composition import format_layer
 from cordis.loader import read_layer
+from models_cordis_plugin import ModelConfig, opened, resolved
+from models_cordis_plugin.openai.testing import StubServer
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +62,30 @@ def test_a_new_session_records_the_models_file_s_default_and_a_resume_keeps_it(
     assert _recorded(first) == "llama"  # still on the first model
     assert _recorded(create(tmp_path / "s", "/work/a", model=None, no_jail=False)) == "opus"
     assert _recorded(create(tmp_path / "s", "/work/a", model="haiku", no_jail=False)) == "haiku"  # --model
+
+
+async def test_a_models_file_default_of_an_endpoint_s_model_starts_the_session_on_it_with_no_listing_asked(
+    _own_config: Path, tmp_path: Path
+) -> None:
+    """TASK-0087 and TASK-0088 together: `default = "local/x:7b"` over an endpoint that lists its
+    models. The session's layer and meta name it; the model row resolves it and runs a step, and the
+    server is never asked for its list."""
+    with StubServer(models=["listed-but-not-chosen"]) as server:
+        _models_default(
+            _own_config,
+            'default = "local/x:7b"\n[local]\nprovider = "openai"\ndiscover = true\n'
+            f'base_url = "{server.base_url}"\n',
+        )
+        made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+        assert _recorded(made) == "local/x:7b" and made.stack == "local/x:7b"
+        assert json.loads((made.dir / "meta.json").read_text())["stack"] == "local/x:7b"
+        config = ModelConfig(default=_recorded(made))  # the model row of the session's layer
+        assert resolved(config).id == "x:7b"
+        async with opened(config) as model:
+            chunks = [c async for c in model.complete([{"role": "user", "content": "hi"}], [])]
+        assert any(c.get("type") == "text" for c in chunks)
+    assert [(r["method"], r["path"]) for r in server.requests] == [("POST", "/v1/chat/completions")]
+    assert server.requests[0]["body"]["model"] == "x:7b"  # zero GETs: the endpoint's list was never asked
 
 
 def test_a_new_session_with_no_file_default_records_sonnet(_own_config: Path, tmp_path: Path) -> None:
