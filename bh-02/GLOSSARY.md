@@ -73,10 +73,10 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **input**: one `python` call: the code the model sent the Python process and what it printed (not a cell: there is no notebook; not the `input` key, below).
 - **Python process**: the process the runner starts to run inputs and keep the namespace for the run; to the model, a Python REPL of its own that persists.
 - **namespace**: what the inputs have defined in the Python process (variables, functions, imports): the model's working state for the run, and a cache, since the transcript is the record.
-- **python** (row): `python:tool`, bh-02's handle on the Python process, which registers the `python` tool; its class is still `Kernel`, an older name (not Jupyter's kernel, which is the process itself).
+- **python** (row): `python:tool`, bh-02's handle on the Python process, which registers the `python` tool; its class is `PythonProcess` (its config `PythonProcessConfig`).
 - **extensions process**: the process the model's extensions run in, the second one the runner starts.
 - **worker**: an older word, still in some messages and in the code (`worker.py`), for a process the jail started: the Python process or the extensions process.
-- **startup file**: Python a new, confined Python process runs before its first input: yours (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else `~/.config/bh-02/kernel.py`), then the project's `.bh-02/kernel.py` ([The python tool](../docs/bh-02/how-it-works/python-tool.md)).
+- **startup file**: Python a new, confined Python process runs before its first input: yours (`$XDG_CONFIG_HOME/bh-02/startup.py`, else `~/.config/bh-02/startup.py`), then the project's `.bh-02/startup.py`; a `kernel.py`, its old name, is still read where `startup.py` is not there, and said to be called `startup.py` now ([The python tool](../docs/bh-02/how-it-works/python-tool.md)).
 - **runner** (row and key): what starts the Python process and the extensions process, each in a brig jail (`runner:confined`) or in none (`runner:unconfined`, `--no-jail`); not part of CodeAct, but what bh-02 runs it in.
 - **jail**: brig's sandbox around one program the confined runner started; its grades say what it enforces.
 - **confined**, **unconfined**: whether the runner enforces writes and network, so the model's code runs without asking (`jailed` in the status bar), or not, so each input is put to you first (`unjailed`).

@@ -10,13 +10,13 @@ from pathlib import Path
 from bh_02.bootstrap import layers, run
 
 
-async def test_compact_begins_a_new_conversation_from_the_summary_and_the_kernel_keeps_its_namespace(
+async def test_compact_begins_a_new_conversation_from_the_summary_and_the_python_process_keeps_its_namespace(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
     """An input sets `x`; `/compact` asks the model for a summary (the conversation as the loop
     sends it, the one tool offered) and writes the new conversation over the transcript's file,
     the old kept as `.bak`; the loop and the transcript restart, and the next input still reads
-    `x`, since the kernel was not restarted. The next request begins with the prompt as it reads
+    `x`, since the Python process was not restarted. The next request begins with the prompt as it reads
     now, then bh-02's message and the summary, and holds nothing of the old conversation."""
     history = tmp_path / "transcript.jsonl"
     patch = composition(

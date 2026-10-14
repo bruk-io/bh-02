@@ -19,8 +19,8 @@ from python_cordis_plugin import (
     PYTHON,
     Access,
     Calls,
-    Kernel,
-    KernelConfig,
+    PythonProcess,
+    PythonProcessConfig,
     instructions_for,
     shown_call,
     tool,
@@ -29,28 +29,28 @@ from python_cordis_plugin import (
 from runner_cordis_plugin import UNENFORCED, Approval, Mechanism, Runner, Unjailed
 
 
-def _kernel(
+def _process(
     mechanism: Mechanism | Runner,
-    config: KernelConfig,
+    config: PythonProcessConfig,
     access: Access | None = None,
     tools: Calls | None = None,
-) -> Kernel:
+) -> PythonProcess:
     """The python tool's process as the python row builds it: started by a runner over
     `mechanism`, its inputs confined as the approval rule says of that runner."""
     runner = mechanism if isinstance(mechanism, Runner) else Runner(mechanism)
-    return Kernel(runner, config, access, rule=Approval(runner), tools=tools)
+    return PythonProcess(runner, config, access, rule=Approval(runner), tools=tools)
 
 
 async def test_a_traceback_shows_each_line_and_the_input_it_came_from() -> None:
-    async with _kernel(Unjailed(), KernelConfig()) as k:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
         await k.run("def parse(line):\n    key, value = line.split('=')\n    return key, value")
         failed = await k.run("pairs = [parse(l) for l in ['a=1', 'c']]")
         assert 'File "<input 2>", line 1, in <module>\n    pairs = [parse(l)' in failed
         assert "File \"<input 1>\", line 2, in parse\n    key, value = line.split('=')" in failed
 
 
-async def test_a_name_this_kernel_never_had_says_the_kernel_is_new() -> None:
-    async with _kernel(Unjailed(), KernelConfig()) as k:
+async def test_a_name_this_repl_never_had_says_the_repl_is_new() -> None:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
         missing = await k.run("helper()")
         assert "NameError" in missing and "'helper' has not been defined in this REPL" in missing
         assert "earlier session, or before /clear or a restart" in missing
@@ -62,29 +62,32 @@ async def test_a_name_this_kernel_never_had_says_the_kernel_is_new() -> None:
 
 async def test_the_project_s_startup_file_runs_first_when_inputs_are_confined(tmp_path: Path) -> None:
     (tmp_path / ".bh-02").mkdir()
-    (tmp_path / ".bh-02" / "kernel.py").write_text("def sh(cmd):\n    return cmd\n\nTOOLS = 2\n_hidden = 1\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    (tmp_path / ".bh-02" / "startup.py").write_text(
+        "def sh(cmd):\n    return cmd\n\nTOOLS = 2\n_hidden = 1\n"
+    )
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("sh('ls')")
-        assert first == "(.bh-02/kernel.py ran first and defined: TOOLS, sh)\n'ls'"
+        assert first == "(.bh-02/startup.py ran first and defined: TOOLS, sh)\n'ls'"
         assert await k.run("TOOLS") == "2"  # told once, then plain inputs
-    (tmp_path / ".bh-02" / "kernel.py").write_text("raise RuntimeError('broken helper')\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    (tmp_path / ".bh-02" / "startup.py").write_text("raise RuntimeError('broken helper')\n")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         failed = await k.run("1")
         assert (
-            failed.startswith("(.bh-02/kernel.py ran first and failed")
+            failed.startswith("(.bh-02/startup.py ran first and failed")
             and "RuntimeError: broken helper" in failed
         )
         assert failed.endswith(")\n1")
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:  # unjailed: not unasked
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:  # unjailed: not unasked
         told = await k.run("1")
-        assert told.startswith("(.bh-02/kernel.py was not run: inputs here are put to the person")
-        assert "exec(open('.bh-02/kernel.py').read())" in told and "broken" not in told
+        assert told.startswith("(.bh-02/startup.py was not run: inputs here are put to the person")
+        assert "exec(open('.bh-02/startup.py').read())" in told and "broken" not in told
 
 
-def _person_s(text: str | bytes) -> Path:
-    """The person's own startup file, `$XDG_CONFIG_HOME/bh-02/kernel.py` (conftest gives each
-    test a config directory of its own, outside its `tmp_path`), holding `text`."""
-    path = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "kernel.py"
+def _person_s(text: str | bytes, name: str = "startup.py") -> Path:
+    """The person's own startup file, `$XDG_CONFIG_HOME/bh-02/startup.py` (conftest gives each
+    test a config directory of its own, outside its `tmp_path`), holding `text`; `name` is
+    `kernel.py` for the file under its old name."""
+    path = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(text, bytes):
         path.write_bytes(text)
@@ -93,9 +96,10 @@ def _person_s(text: str | bytes) -> Path:
     return path
 
 
-def _project_s(root: Path, text: str) -> Path:
-    """The project's startup file, `.bh-02/kernel.py` under `root`, holding `text`."""
-    path = root / ".bh-02" / "kernel.py"
+def _project_s(root: Path, text: str, name: str = "startup.py") -> Path:
+    """The project's startup file, `.bh-02/startup.py` under `root`, holding `text`; `name` is
+    `kernel.py` for the file under its old name."""
+    path = root / ".bh-02" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
@@ -106,11 +110,11 @@ async def test_the_person_s_startup_file_runs_before_the_project_s(tmp_path: Pat
     bind a name afresh; each is said with the names it defined, and leaves nothing else behind."""
     person = _person_s("def show(x):\n    return f'<{x}>'\n\nWIDTH = 80\n")
     _project_s(tmp_path, "def sh(cmd):\n    return show(cmd)\n\nWIDTH = 100\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("sh('ls'), WIDTH")
         assert first == (
             f"({person} ran first and defined: WIDTH, show. "
-            ".bh-02/kernel.py ran next and defined: WIDTH, sh)\n('<ls>', 100)"
+            ".bh-02/startup.py ran next and defined: WIDTH, sh)\n('<ls>', 100)"
         )
         assert await k.run("[n for n in globals() if n.startswith('_bh')]") == "[]"
         assert await k.run("show(1)") == "'<1>'"  # told once, then plain inputs
@@ -118,15 +122,212 @@ async def test_the_person_s_startup_file_runs_before_the_project_s(tmp_path: Pat
 
 async def test_a_startup_file_that_is_not_there_is_passed_over(tmp_path: Path) -> None:
     person = _person_s("HELPER = 1\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # the project has none
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:  # the project has none
         assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
     person.unlink()
     _project_s(tmp_path, "TOOLS = 2\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # the person has none
-        assert await k.run("TOOLS") == "(.bh-02/kernel.py ran first and defined: TOOLS)\n2"
-    (tmp_path / ".bh-02" / "kernel.py").unlink()
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # neither: nothing to tell
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:  # the person has none
+        assert await k.run("TOOLS") == "(.bh-02/startup.py ran first and defined: TOOLS)\n2"
+    (tmp_path / ".bh-02" / "startup.py").unlink()
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:  # neither: nothing to tell
         assert await k.run("1") == "1"
+
+
+async def test_the_person_s_old_kernel_py_runs_when_startup_py_is_absent_and_says_its_new_name(
+    tmp_path: Path,
+) -> None:
+    """The startup file was called `kernel.py`. One that is still there keeps running, and the
+    first input of each Python process says it is called `startup.py` now (the person's file,
+    which the model cannot write, is only named, not asked to be renamed)."""
+    old = _person_s("HELPER = 1\n", "kernel.py")
+    new = old.with_name("startup.py")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        assert await k.run("HELPER") == (
+            f"({old} is the old name of the person's startup file, now {new}. "
+            f"{old} ran first and defined: HELPER)\n1"
+        )
+        assert await k.run("HELPER") == "1"  # said once, then plain inputs
+        assert "Python process is stopped" in await k.stopped()  # /release
+        again = await k.run("HELPER")  # a new Python process: said again, once
+        assert again.startswith("(the REPL was started again") and again.count("is the old name") == 1
+        assert await k.run("HELPER") == "1"
+    old.rename(new)  # renamed: nothing more to say
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        assert await k.run("HELPER") == f"({new} ran first and defined: HELPER)\n1"
+
+
+async def test_the_project_s_old_kernel_py_runs_when_startup_py_is_absent_and_says_to_rename_it(
+    tmp_path: Path,
+) -> None:
+    """The project's is the model's to edit, so the line asks for the rename, which it can do."""
+    old = _project_s(tmp_path, "TOOLS = 2\n", "kernel.py")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        assert await k.run("TOOLS") == (
+            "(.bh-02/kernel.py is the old name of the project's startup file, now .bh-02/startup.py: "
+            "rename it. .bh-02/kernel.py ran first and defined: TOOLS)\n2"
+        )
+        assert await k.run("TOOLS") == "2"  # said once, then plain inputs
+    old.rename(old.with_name("startup.py"))  # renamed: nothing more to say
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        assert await k.run("TOOLS") == "(.bh-02/startup.py ran first and defined: TOOLS)\n2"
+
+
+async def test_with_startup_py_and_kernel_py_in_a_place_startup_py_runs_and_kernel_py_is_said_to_be_ignored(
+    tmp_path: Path,
+) -> None:
+    """A conversation that began with the old prompt names `.bh-02/kernel.py`, and its model may
+    write helpers there after a `startup.py` appeared: they would be lost without a word. So
+    the input says `kernel.py` is no longer read, in each place that has both."""
+    old = _person_s("OLD_PERSON = 1\n", "kernel.py")
+    person = _person_s("NEW_PERSON = 1\n")
+    _project_s(tmp_path, "OLD_PROJECT = 1\n", "kernel.py")
+    _project_s(tmp_path, "NEW_PROJECT = 1\n")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        first = await k.run("sorted(n for n in globals() if n.endswith(('PERSON', 'PROJECT')))")
+        assert first == (
+            f"({old} is no longer read, because {person} exists. "
+            f"{person} ran first and defined: NEW_PERSON. "
+            ".bh-02/kernel.py is no longer read, because .bh-02/startup.py exists: move what you "
+            "still need from it into .bh-02/startup.py. "
+            ".bh-02/startup.py ran next and defined: NEW_PROJECT)\n['NEW_PERSON', 'NEW_PROJECT']"
+        )
+        assert await k.run("1") == "1"  # said once, then plain inputs
+
+
+async def test_a_startup_config_written_out_as_the_new_default_falls_back_to_kernel_py_the_same_way(
+    tmp_path: Path,
+) -> None:
+    """The fallback is by name, per entry: an entry named `startup.py` is looked for as `kernel.py`
+    beside it, whether it is the default or a layer wrote the same list out (`update-layer` does not
+    rewrite a config), and a single string is one entry."""
+    old = _person_s("A = 1\n", "kernel.py")
+    _project_s(tmp_path, "TOOLS = 2\n", "kernel.py")
+    written = PythonProcessConfig(
+        root=str(tmp_path), startup=("$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py")
+    )
+    assert written.startup == PythonProcessConfig().startup
+    async with _process(Confined(), written) as k:
+        assert await k.run("A + TOOLS") == (
+            f"({old} is the old name of the person's startup file, now {old.with_name('startup.py')}. "
+            f"{old} ran first and defined: A. "
+            ".bh-02/kernel.py is the old name of the project's startup file, now .bh-02/startup.py: "
+            "rename it. .bh-02/kernel.py ran next and defined: TOOLS)\n3"
+        )
+    one = PythonProcessConfig(root=str(tmp_path), startup=".bh-02/startup.py")
+    async with _process(Confined(), one) as k:
+        told = await k.run("TOOLS")
+        assert told.endswith(".bh-02/kernel.py ran first and defined: TOOLS)\n2") and "rename it" in told
+
+
+async def test_an_entry_named_startup_py_anywhere_falls_back_to_the_kernel_py_beside_it(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Beside it: the same directory, whoever names it (`~/`, the root), and only an entry named
+    `startup.py`: `~/helpers.py` has no old name, so a `kernel.py` next to it is not read."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    (home / "dots").mkdir()
+    (home / "dots" / "kernel.py").write_text("A = 1\n")
+    (home / "kernel.py").write_text("NEVER = 1\n")
+    (home / "helpers.py").write_text("B = 2\n")
+    config = PythonProcessConfig(root=str(tmp_path), startup=("~/dots/startup.py", "~/helpers.py"))
+    async with _process(Confined(), config) as k:
+        told = await k.run("A + B, 'NEVER' in globals()")
+    assert told == (
+        f"({home}/dots/kernel.py is the old name of the person's startup file, now {home}/dots/startup.py. "
+        f"{home}/dots/kernel.py ran first and defined: A. "
+        f"{home}/helpers.py ran next and defined: B)\n(3, False)"
+    )
+
+
+async def test_an_explicit_kernel_py_entry_runs_as_named_with_no_line(tmp_path: Path) -> None:
+    """A config that names `kernel.py` itself is the person's choice of that file: it runs as
+    named, whatever is beside it, and nothing is said about the name."""
+    person = _person_s("A = 1\n", "kernel.py")
+    _person_s("NOT_READ = 1\n")  # a startup.py beside it: an entry named kernel.py is not that entry
+    _project_s(tmp_path, "TOOLS = 2\n", "kernel.py")
+    config = PythonProcessConfig(
+        root=str(tmp_path), startup=("$XDG_CONFIG_HOME/bh-02/kernel.py", ".bh-02/kernel.py")
+    )
+    async with _process(Confined(), config) as k:
+        assert await k.run("A + TOOLS, 'NOT_READ' in globals()") == (
+            f"({person} ran first and defined: A. .bh-02/kernel.py ran next and defined: TOOLS)\n(3, False)"
+        )
+    async with _process(Unjailed(), config) as k:  # unjailed: asked about, still no line
+        told = await k.run("1")
+    assert "old name" not in told and "no longer read" not in told
+
+
+async def test_unconfined_the_old_name_is_said_beside_the_startup_files_that_were_not_run(
+    tmp_path: Path,
+) -> None:
+    """Unjailed, nothing runs unasked: the model is told to run each as an input of its own, and
+    that the file it would run is under its old name, in the same input, once."""
+    person = _person_s("A = 1\n", "kernel.py")
+    _project_s(tmp_path, "TOOLS = 2\n", "kernel.py")
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
+        told = await k.run("1")
+        assert await k.run("1") == "1"
+    assert told == (
+        f"({person} and .bh-02/kernel.py were not run: inputs here are put to the person, so run them "
+        "as an input of your own if you want them: "
+        f"exec(open({str(person)!r}).read()); exec(open('.bh-02/kernel.py').read()). "
+        f"{person} is the old name of the person's startup file, now {person.with_name('startup.py')}. "
+        ".bh-02/kernel.py is the old name of the project's startup file, now .bh-02/startup.py: "
+        "rename it)\n1"
+    )
+
+
+async def test_the_prompt_names_only_startup_py_whatever_is_on_disk(tmp_path: Path) -> None:
+    """The fallback changes what is opened, never the name the model is told: the old name is said
+    once, beside what ran, and the prompt (sent unchanged for a whole conversation) is the same
+    with neither file, the old names, both or the new ones."""
+    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "startup.py"
+    prompts = []
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        prompts.append(k.instructions())  # neither file
+        _person_s("A = 1\n", "kernel.py")
+        _project_s(tmp_path, "B = 1\n", "kernel.py")
+        prompts.append(k.instructions())  # the old names
+        _person_s("A = 1\n")
+        _project_s(tmp_path, "B = 1\n")
+        prompts.append(k.instructions())  # both
+        person.with_name("kernel.py").unlink()
+        (tmp_path / ".bh-02" / "kernel.py").unlink()
+        prompts.append(k.instructions())  # the new names
+    assert len(set(prompts)) == 1
+    assert ".bh-02/startup.py" in prompts[0] and str(person) in prompts[0] and "kernel.py" not in prompts[0]
+    assert "kernel.py" not in instructions_for(True) and ".bh-02/startup.py" in instructions_for(True)
+    assert "kernel.py" not in instructions_for(False, theirs=(str(person),))
+
+
+async def test_a_person_s_old_kernel_py_behind_a_link_the_model_could_make_is_refused_as_startup_py_is(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fallback is read by the same rule as the file it stands for (`host_paths.walked`): the
+    person's config directory is a link into the project, where the model could make the old file a
+    link to one the jail hides. The host does not read it for the model; the jail decides."""
+    dotfiles = tmp_path / "dotfiles"
+    (dotfiles / "bh-02").mkdir(parents=True)
+    config = tmp_path_factory.mktemp("home") / "config"
+    config.symlink_to(dotfiles)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    old = config / "bh-02" / "kernel.py"
+    hidden = tmp_path_factory.mktemp("hidden")
+    (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
+    (dotfiles / "bh-02" / "kernel.py").symlink_to(hidden / "secret.py")  # what a model could do
+    async with _process(Hiding(str(hidden)), PythonProcessConfig(root=str(tmp_path))) as k:
+        told = await k.run("'SECRET' in globals()")
+    assert told.startswith(
+        f"({old} is the old name of the person's startup file, now {config / 'bh-02' / 'startup.py'}. "
+        f"{old} ran first and failed (its way passes through {tmp_path}, where inputs can write, so "
+        "bh-02 left it to the jail), so what it defines is missing:\n"
+    ), told
+    assert "PermissionError" in told and "stand-in" not in told and told.endswith(")\nFalse")
+    (dotfiles / "bh-02" / "kernel.py").unlink()
+    (dotfiles / "bh-02" / "kernel.py").write_text("HELPER = 1\n")  # an ordinary file there: read in the jail
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        assert (await k.run("HELPER")).endswith(f"{old} ran first and defined: HELPER)\n1")
 
 
 async def test_a_failing_startup_file_says_why_and_the_next_one_still_runs(tmp_path: Path) -> None:
@@ -134,38 +335,38 @@ async def test_a_failing_startup_file_says_why_and_the_next_one_still_runs(tmp_p
     host sent), and what ran before it stays, as at a REPL; the next file runs all the same."""
     person = _person_s("def show(x):\n    return x\n\n\nraise RuntimeError('broken person helper')\n")
     project = _project_s(tmp_path, "TOOLS = 2\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("TOOLS")
         assert first.startswith(f"({person} ran first and failed, so what it defines is missing:\n")
         assert (
             f'File "{person}", line 5, in <module>\n' in first
             and "RuntimeError: broken person helper" in first
         )
-        assert first.endswith(". .bh-02/kernel.py ran next and defined: TOOLS)\n2")
+        assert first.endswith(". .bh-02/startup.py ran next and defined: TOOLS)\n2")
         assert await k.run("show(3)") == "3"
     person.write_text("HELPER = 1\n")
     project.write_text("raise ValueError('broken project helper')\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("HELPER")
         assert first.startswith(
-            f"({person} ran first and defined: HELPER. .bh-02/kernel.py ran next and failed, so what "
+            f"({person} ran first and defined: HELPER. .bh-02/startup.py ran next and failed, so what "
             "it defines is missing:\n"
         )
         assert "ValueError: broken project helper" in first and first.endswith(")\n1")
     _person_s(b"HELPER = '\xff'\n")  # not UTF-8: the host can't read it, and says so
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         told = await k.run("1")
         assert told.startswith(f"({person} could not be read ('utf-8' codec can't decode byte 0xff")
-        assert "so what it defines is missing. .bh-02/kernel.py ran next and failed" in told
+        assert "so what it defines is missing. .bh-02/startup.py ran next and failed" in told
 
 
 async def test_a_startup_file_that_ends_the_repl_is_named_and_passed_over_after(tmp_path: Path) -> None:
     """A file that ends the worker (os._exit, a crash) would end every new one: the input it
     cut short names it, and the workers after it pass it over, saying so, until `/restart python`
-    (a new kernel) runs it again. The project's still runs."""
+    (a new Python process) runs it again. The project's still runs."""
     person = _person_s("import os\nos._exit(3)\n")
     _project_s(tmp_path, "TOOLS = 2\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         ended = await k.run("1")
         assert ended == (
             f"the REPL's process ended as {person} ran, before this input, so this input did not run; "
@@ -175,7 +376,7 @@ async def test_a_startup_file_that_ends_the_repl_is_named_and_passed_over_after(
         assert passed.startswith(
             f"(the REPL was started again; what earlier inputs defined is gone. {person} was not run: it "
             "ended the REPL's process when it last ran, so what it defines is missing (`/restart python` "
-            "runs it again). .bh-02/kernel.py ran next and defined: TOOLS)\n"
+            "runs it again). .bh-02/startup.py ran next and defined: TOOLS)\n"
         ), passed
         assert passed.endswith("\n2") and await k.run("TOOLS + 1") == "3"
 
@@ -186,7 +387,7 @@ async def test_a_startup_file_that_ends_the_repl_keeps_what_the_opening_had_to_t
     and why, before it says which file ended it. Else the model never learns its variables went."""
     person = _person_s("HELPER = 1\n")
     jail = Tripping()
-    async with _kernel(jail, KernelConfig(root=str(tmp_path))) as k:
+    async with _process(jail, PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("kept = HELPER") == f"({person} ran first and defined: HELPER)"
         _person_s("import os\nos._exit(3)\n")
         await jail.trip("the host undid the jail's hold on /w/local.env; the next one holds it again")
@@ -204,7 +405,7 @@ async def test_a_startup_file_stopped_part_way_keeps_what_the_opening_had_to_tel
     REPL was started again as well as what was cut short."""
     person = _person_s("HELPER = 1\n")
     jail = Tripping()
-    async with _kernel(jail, KernelConfig(root=str(tmp_path))) as k:
+    async with _process(jail, PythonProcessConfig(root=str(tmp_path))) as k:
         await k.run("kept = HELPER")
         _person_s("import time\ntime.sleep(60)\n")
         await jail.trip("the host undid the jail's hold on /w/local.env")
@@ -226,7 +427,7 @@ async def test_a_startup_file_stopped_part_way_is_not_run_again_in_that_repl(tmp
     costs its REPL, and the next passes it over rather than hang again."""
     person = _person_s("import time\nA = 1\ntime.sleep(60)\nB = 2\n")
     _project_s(tmp_path, "TOOLS = 2\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         hanging = asyncio.create_task(k.run("1"))
         await asyncio.sleep(0.5)
         hanging.cancel()
@@ -240,7 +441,9 @@ async def test_a_startup_file_stopped_part_way_is_not_run_again_in_that_repl(tmp
         "import time\nwhile True:\n    try:\n        time.sleep(60)\n"
         "    except KeyboardInterrupt:\n        pass\n"
     )
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path), grace=0.5)) as k:  # one that won't stop
+    async with _process(
+        Confined(), PythonProcessConfig(root=str(tmp_path), grace=0.5)
+    ) as k:  # one that won't stop
         hanging = asyncio.create_task(k.run("1"))
         await asyncio.sleep(0.5)
         hanging.cancel()
@@ -249,7 +452,7 @@ async def test_a_startup_file_stopped_part_way_is_not_run_again_in_that_repl(tmp
     assert told == (
         f"(the REPL was started again; what earlier inputs defined is gone. {person} was not run: it would "
         "not stop at Ctrl-C when it last ran, so what it defines is missing (`/restart python` runs it "
-        "again). .bh-02/kernel.py ran next and defined: TOOLS)\n2"
+        "again). .bh-02/startup.py ran next and defined: TOOLS)\n2"
     ), told
 
 
@@ -258,10 +461,10 @@ async def test_a_startup_file_s_names_are_what_its_code_binds_on_a_line_of_their
     (`WIDTH = 80` in both: one int), and what a file prints without a newline stays out of it."""
     person = _person_s("print('hello', end='')\nWIDTH = 80\n")
     _project_s(tmp_path, "WIDTH = 80\nTOOLS = 2\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("WIDTH") == (
             f"({person} ran first and defined: WIDTH. "
-            ".bh-02/kernel.py ran next and defined: TOOLS, WIDTH)\n80"
+            ".bh-02/startup.py ran next and defined: TOOLS, WIDTH)\n80"
         )
 
 
@@ -270,10 +473,10 @@ async def test_a_startup_file_saved_with_a_byte_order_mark_runs(tmp_path: Path) 
     the source, read on the host or in the jail."""
     person = _person_s(b"\xef\xbb\xbfA = 1\n")
     (tmp_path / ".bh-02").mkdir()
-    (tmp_path / ".bh-02" / "kernel.py").write_bytes(b"\xef\xbb\xbfB = 2\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    (tmp_path / ".bh-02" / "startup.py").write_bytes(b"\xef\xbb\xbfB = 2\n")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("A + B") == (
-            f"({person} ran first and defined: A. .bh-02/kernel.py ran next and defined: B)\n3"
+            f"({person} ran first and defined: A. .bh-02/startup.py ran next and defined: B)\n3"
         )
 
 
@@ -281,14 +484,15 @@ def test_startup_is_a_file_name_or_a_list_of_them() -> None:
     """A layer's typo (a number in the list) is the row's config error, saying what to write,
     not an AttributeError from every request's instructions."""
     with pytest.raises(TypeError) as raised:
-        KernelConfig(startup=[".bh-02/kernel.py", 1])  # type: ignore[list-item]
+        PythonProcessConfig(startup=[".bh-02/startup.py", 1])  # type: ignore[list-item]
     assert str(raised.value) == (
         "`startup` must be a file name or a list of them, as in "
-        '`startup = ["$XDG_CONFIG_HOME/bh-02/kernel.py", ".bh-02/kernel.py"]`, not [\'.bh-02/kernel.py\', 1]'
+        '`startup = ["$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py"]`, '
+        "not ['.bh-02/startup.py', 1]"
     )
     with pytest.raises(TypeError):
-        KernelConfig(startup=3)  # type: ignore[arg-type]
-    assert KernelConfig(startup="~/helpers.py").startup == "~/helpers.py"
+        PythonProcessConfig(startup=3)  # type: ignore[arg-type]
+    assert PythonProcessConfig(startup="~/helpers.py").startup == "~/helpers.py"
 
 
 async def test_unconfined_neither_startup_file_runs_unasked(tmp_path: Path) -> None:
@@ -296,12 +500,12 @@ async def test_unconfined_neither_startup_file_runs_unasked(tmp_path: Path) -> N
     asked: the model is told to run each as an input of its own, which the person is asked about."""
     person = _person_s("print('the person s ran unasked')\n")
     _project_s(tmp_path, "print('the project s ran unasked')\n")
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
         told = await k.run("1")
     assert told == (
-        f"({person} and .bh-02/kernel.py were not run: inputs here are put to the person, so run them "
+        f"({person} and .bh-02/startup.py were not run: inputs here are put to the person, so run them "
         "as an input of your own if you want them: "
-        f"exec(open({str(person)!r}).read()); exec(open('.bh-02/kernel.py').read()))\n1"
+        f"exec(open({str(person)!r}).read()); exec(open('.bh-02/startup.py').read()))\n1"
     )
 
 
@@ -311,10 +515,10 @@ async def test_the_person_s_startup_file_runs_in_a_jail_that_cannot_read_it(tmp_
     there all the same, its lines shown in a traceback. The project's is read in the jail."""
     person = _person_s("def show(x):\n    return 1 / x\n")
     _project_s(tmp_path, "TOOLS = 2\n")
-    async with _kernel(Hiding(os.environ["XDG_CONFIG_HOME"]), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Hiding(os.environ["XDG_CONFIG_HOME"]), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run(f"open({str(person)!r})")
         assert first.startswith(
-            f"({person} ran first and defined: show. .bh-02/kernel.py ran next and defined: TOOLS)\n"
+            f"({person} ran first and defined: show. .bh-02/startup.py ran next and defined: TOOLS)\n"
         )
         assert "PermissionError: [Errno 13] the jail hides it" in first  # an input can't read it
         failed = await k.run("show(0)")
@@ -333,21 +537,21 @@ async def test_a_person_s_file_whose_way_leads_through_the_project_is_read_only_
     config = tmp_path_factory.mktemp("home") / "config"
     config.symlink_to(dotfiles)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
-    person = config / "bh-02" / "kernel.py"
-    (dotfiles / "bh-02" / "kernel.py").write_text("HELPER = 1\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    person = config / "bh-02" / "startup.py"
+    (dotfiles / "bh-02" / "startup.py").write_text("HELPER = 1\n")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
     hidden = tmp_path_factory.mktemp("hidden")
     (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
-    (dotfiles / "bh-02" / "kernel.py").unlink()
-    (dotfiles / "bh-02" / "kernel.py").symlink_to(hidden / "secret.py")  # what a model could do
-    async with _kernel(Hiding(str(hidden)), KernelConfig(root=str(tmp_path))) as k:
+    (dotfiles / "bh-02" / "startup.py").unlink()
+    (dotfiles / "bh-02" / "startup.py").symlink_to(hidden / "secret.py")  # what a model could do
+    async with _process(Hiding(str(hidden)), PythonProcessConfig(root=str(tmp_path))) as k:
         told = await k.run("'SECRET' in globals()")
         assert told.startswith(f"({person} ran first and failed") and "PermissionError" in told
         assert "stand-in" not in told and told.endswith(")\nFalse")
-    (dotfiles / "bh-02" / "kernel.py").unlink()
-    (dotfiles / "bh-02" / "kernel.py").symlink_to(_project_s(tmp_path, "TOOLS = 2\n"))
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:  # the project's own, once
+    (dotfiles / "bh-02" / "startup.py").unlink()
+    (dotfiles / "bh-02" / "startup.py").symlink_to(_project_s(tmp_path, "TOOLS = 2\n"))
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:  # the project's own, once
         assert await k.run("TOOLS") == f"({person} ran first and defined: TOOLS)\n2"
 
 
@@ -360,19 +564,19 @@ async def test_run_from_the_home_directory_the_person_s_file_is_read_in_the_jail
     the person's, not its own to edit."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("XDG_CONFIG_HOME")
-    person = tmp_path / ".config" / "bh-02" / "kernel.py"
+    person = tmp_path / ".config" / "bh-02" / "startup.py"
     person.parent.mkdir(parents=True)
     person.write_text("HELPER = 1\n")
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
         told = k.instructions()
-        assert "go in .bh-02/kernel.py, the project's startup file" in told
+        assert "go in .bh-02/startup.py, the project's startup file" in told
         assert f"own in {person}, which comes before it, and that file is theirs." in told
     hidden = tmp_path_factory.mktemp("hidden")
     (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
     person.unlink()
     person.symlink_to(hidden / "secret.py")  # what a model could do
-    async with _kernel(Hiding(str(hidden)), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Hiding(str(hidden)), PythonProcessConfig(root=str(tmp_path))) as k:
         told = await k.run("'SECRET' in globals()")
         assert told.startswith(f"({person} ran first and failed") and "PermissionError" in told
         assert "stand-in" not in told and told.endswith(")\nFalse")
@@ -392,11 +596,11 @@ async def test_a_person_s_file_whose_way_leads_through_any_root_an_input_writes_
     config = tmp_path_factory.mktemp("home") / "config"
     config.symlink_to(dotfiles)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
-    person = config / "bh-02" / "kernel.py"
+    person = config / "bh-02" / "startup.py"
     hidden = tmp_path_factory.mktemp("hidden")
     (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
-    (dotfiles / "bh-02" / "kernel.py").symlink_to(hidden / "secret.py")  # what a model could do
-    async with _kernel(Writing(str(hidden), [str(dotfiles)]), KernelConfig(root=str(project))) as k:
+    (dotfiles / "bh-02" / "startup.py").symlink_to(hidden / "secret.py")  # what a model could do
+    async with _process(Writing(str(hidden), [str(dotfiles)]), PythonProcessConfig(root=str(project))) as k:
         told = await k.run(
             "import linecache\n'SECRET' in globals(), linecache.getlines(" + repr(str(person)) + ")"
         )
@@ -405,9 +609,9 @@ async def test_a_person_s_file_whose_way_leads_through_any_root_an_input_writes_
         "bh-02 left it to the jail), so what it defines is missing:\n"
     ), told
     assert "PermissionError" in told and "stand-in" not in told and told.endswith(")\n(False, [])")
-    (dotfiles / "bh-02" / "kernel.py").unlink()
-    (dotfiles / "bh-02" / "kernel.py").write_text("HELPER = 1\n")
-    async with _kernel(Writing(str(hidden), [str(dotfiles)]), KernelConfig(root=str(project))) as k:
+    (dotfiles / "bh-02" / "startup.py").unlink()
+    (dotfiles / "bh-02" / "startup.py").write_text("HELPER = 1\n")
+    async with _process(Writing(str(hidden), [str(dotfiles)]), PythonProcessConfig(root=str(project))) as k:
         assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"  # read in the jail
 
 
@@ -420,31 +624,31 @@ async def test_a_startup_file_is_named_from_home_or_the_config_directory_on_the_
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("XDG_CONFIG_HOME")
     (home / ".config" / "bh-02").mkdir(parents=True)
-    (home / ".config" / "bh-02" / "kernel.py").write_text("A = 1\n")
+    (home / ".config" / "bh-02" / "startup.py").write_text("A = 1\n")
     (home / "helpers.py").write_text("B = 2\n")
-    config = KernelConfig(
-        root=str(tmp_path), startup=("$XDG_CONFIG_HOME/bh-02/kernel.py", "~/helpers.py", ".bh-02/kernel.py")
+    config = PythonProcessConfig(
+        root=str(tmp_path), startup=("$XDG_CONFIG_HOME/bh-02/startup.py", "~/helpers.py", ".bh-02/startup.py")
     )
-    async with _kernel(Hiding(str(home)), config) as k:
+    async with _process(Hiding(str(home)), config) as k:
         assert await k.run("A + B") == (
-            f"({home}/.config/bh-02/kernel.py ran first and defined: A. "
+            f"({home}/.config/bh-02/startup.py ran first and defined: A. "
             f"{home}/helpers.py ran next and defined: B)\n3"
         )
         told = k.instructions()
-        assert f"helpers of their own in {home}/.config/bh-02/kernel.py and {home}/helpers.py" in told
-    one = KernelConfig(root=str(tmp_path), startup="~/helpers.py")  # a single string is one file
-    async with _kernel(Confined(), one) as k:
+        assert f"helpers of their own in {home}/.config/bh-02/startup.py and {home}/helpers.py" in told
+    one = PythonProcessConfig(root=str(tmp_path), startup="~/helpers.py")  # a single string is one file
+    async with _process(Confined(), one) as k:
         assert await k.run("B") == f"({home}/helpers.py ran first and defined: B)\n2"
 
 
 def test_the_model_is_told_only_the_project_s_startup_file_is_its_to_edit() -> None:
-    mine, theirs = (".bh-02/kernel.py",), ("/home/me/.config/bh-02/kernel.py",)
+    mine, theirs = (".bh-02/startup.py",), ("/home/me/.config/bh-02/startup.py",)
     for confined in (True, False):
         told = instructions_for(confined, mine, theirs=theirs)
-        assert "go in .bh-02/kernel.py, the project's startup file, which you can write and grow" in told
+        assert "go in .bh-02/startup.py, the project's startup file, which you can write and grow" in told
         assert (
             "Only the project's startup file is yours to edit: the person may keep helpers of their "
-            "own in /home/me/.config/bh-02/kernel.py, which comes before it, and that file is theirs."
+            "own in /home/me/.config/bh-02/startup.py, which comes before it, and that file is theirs."
         ) in told
     assert "Only the project's" not in instructions_for(True)  # no file of the person's to name
     alone = instructions_for(True, (), theirs=theirs)  # only the person's
@@ -454,26 +658,26 @@ def test_the_model_is_told_only_the_project_s_startup_file_is_its_to_edit() -> N
 def test_under_an_allowlist_the_model_is_told_how_to_see_the_person_s_helpers() -> None:
     """A Linux jail has no home directory in it: the person's helpers run (the host sent their
     source), but the model's code finds no such file to open, so it is told what shows one."""
-    mine, theirs, reads = (".bh-02/kernel.py",), ("/home/me/.config/bh-02/kernel.py",), ("/usr", "/w/app")
+    mine, theirs, reads = (".bh-02/startup.py",), ("/home/me/.config/bh-02/startup.py",), ("/usr", "/w/app")
     told = instructions_for(True, mine, reads, theirs=theirs)
     assert "finds no such file (bh-02 reads it for the REPL): inspect.getsource(helper) shows one" in told
     assert "inspect.getsource" not in instructions_for(True, mine, reads)  # no file of the person's
     assert "inspect.getsource" not in instructions_for(True, mine, (), theirs=theirs)  # it reads everything
 
 
-async def test_the_kernel_tells_the_model_where_the_person_s_startup_file_is(tmp_path: Path) -> None:
+async def test_the_python_process_tells_the_model_where_the_person_s_startup_file_is(tmp_path: Path) -> None:
     """By its place on this machine, `$XDG_CONFIG_HOME` expanded, though there is no file yet."""
-    async with _kernel(Confined(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         told = k.instructions()
-    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "kernel.py"
-    assert "go in .bh-02/kernel.py, the project's startup file" in told
+    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "startup.py"
+    assert "go in .bh-02/startup.py, the project's startup file" in told
     said = "Only the project's startup file is yours to edit: the person may keep helpers of their own in"
     assert f"{said} {person}, which comes before it" in told
 
 
 def test_the_model_is_told_where_else_its_jail_lets_its_code_write() -> None:
     """A directory outside the project the jail lets an input write (the project's auto memory, a
-    `write` the person added) is named with the project; the kernel says what its own start may
+    `write` the person added) is named with the project; the Python process says what its own start may
     write and knows nothing of what the directory is for."""
     assert "it can write only inside the project directory, cannot" in instructions_for(True)
     memory = "/home/me/.local/state/bh-02/projects/-src-app/memory"
@@ -506,7 +710,7 @@ def test_the_model_is_told_its_tool_is_a_repl_of_its_own_that_persists_and_how_t
 
 
 async def test_a_program_s_own_output_reaches_an_input_only_when_captured(tmp_path: Path) -> None:
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("import subprocess; subprocess.run(['echo', 'lost']).returncode") == "0"
         said = await k.run("print(subprocess.run(['echo', 'kept'], capture_output=True, text=True).stdout)")
         assert said == "kept"
@@ -522,7 +726,7 @@ async def test_touched_is_the_project_s_files_the_last_input_opened(tmp_path: Pa
     outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
     outside.write_text("o")
     root = tmp_path.resolve()
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert k.touched() == ()
         await k.run(
             "import os\nfrom pathlib import Path\n"
@@ -549,7 +753,7 @@ async def test_touched_is_not_misled_by_a_removal_that_opens_through_a_directory
     `os.open` is not heard; an `open()` in the same input still is."""
     (tmp_path / "src" / "db").mkdir(parents=True)
     (tmp_path / "notes.md").write_text("n")
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
         await k.run(
             "import os, shutil, tempfile\n"
             "with tempfile.TemporaryDirectory() as t:\n"
@@ -566,7 +770,7 @@ async def test_only_the_project_s_files_count_towards_the_most_touched_names(tmp
     more than that elsewhere (a temporary directory, site-packages) still names the project file
     it opens after them."""
     (tmp_path / "notes.md").write_text("n")
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
         await k.run(
             "import os, tempfile\n"
             "with tempfile.TemporaryDirectory() as t:\n"
@@ -583,7 +787,7 @@ async def test_an_open_with_no_python_frame_above_it_is_heard_and_goes_ahead(tmp
     """`open` called straight from a thread `_thread` started has no Python frame above the
     hook's own: it is not the import system's, so the file is heard, and the hook does not make
     the open fail."""
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
         made = await k.run(
             "import _thread, os, time\n"
             "_thread.start_new_thread(open, ('threaded.txt', 'w'))\n"
@@ -602,7 +806,7 @@ async def test_hearing_an_open_calls_the_hook_twice_however_deep_the_stack(tmp_p
     so an open 500 frames deep called it some 500 times; now it is the open and `_getframe`."""
     for name in ("shallow.md", "deep.md"):
         (tmp_path / name).write_text("x")
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
         counted = await k.run(
             "import sys\n"
             "events = []\n"
@@ -631,7 +835,7 @@ async def test_formatting_a_failed_input_s_traceback_is_not_heard(tmp_path: Path
     """A failed input's traceback reads the source file of each frame in it, after the input's
     own code has stopped: those are not files the input worked on."""
     (tmp_path / "helper.py").write_text("def fail():\n    raise ValueError('boom')\n")
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
         failed = await k.run("import os, sys\nsys.path.insert(0, os.getcwd())\nimport helper\nhelper.fail()")
         assert "raise ValueError('boom')" in failed  # helper.py was read, to show its frame's line
         assert k.touched() == ()
@@ -679,7 +883,7 @@ class Told:
 
 
 class Confined(Unjailed):
-    """The unjailed process, reported as confined: what a jail looks like to the kernel, without
+    """The unjailed process, reported as confined: what a jail looks like to the Python process, without
     needing one on this platform. `writable`: the roots besides the project an input may write
     (brig's `write`), which each start says."""
 
@@ -753,7 +957,7 @@ class _Tripped:
 
 class Tripping(Confined):
     """A confined jail that can end its worker itself and say why, as a Linux `runner:confined` does
-    when the host undoes one of its holds (its tripwire): between inputs, so the kernel finds
+    when the host undoes one of its holds (its tripwire): between inputs, so the Python process finds
     the worker gone before the next one and tells that input why."""
 
     def __init__(self) -> None:
@@ -782,7 +986,7 @@ class Writing(Hiding):
 
 
 async def test_the_namespace_persists_and_the_last_expression_is_shown() -> None:
-    async with _kernel(Unjailed(), KernelConfig()) as k:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
         assert await k.run("x = 20") == "(no output)"
         assert await k.run("print('hello')\nx + 22") == "hello\n42"
 
@@ -790,7 +994,7 @@ async def test_the_namespace_persists_and_the_last_expression_is_shown() -> None
 async def test_a_call_runs_its_code_and_the_namespace_holds_only_what_inputs_put_there() -> None:
     """The `python` tool's call (CONTRACTS.md: tools): `code` run as an input, answered with what
     the model reads and the files it opened; one with no `code` string runs nothing."""
-    async with _kernel(Unjailed(), KernelConfig()) as k:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
         assert PYTHON["name"] == "python" and PYTHON["parameters"]["required"] == ["code"]
         assert "Path(p).read_text()" in k.instructions() and "unjailed" in k.instructions()
         assert await k.call({"code": "1 + 1"}) == {"content": "2", "touched": []}
@@ -806,16 +1010,16 @@ async def test_a_call_runs_its_code_and_the_namespace_holds_only_what_inputs_put
         assert names == "[]"  # no functions of the host's: an input is plain Python
 
 
-async def test_a_confined_kernel_says_so_and_tells_the_model_it_runs_in_a_jail() -> None:
-    async with _kernel(Confined(), KernelConfig()) as k:
+async def test_a_confined_python_process_says_so_and_tells_the_model_it_runs_in_a_jail() -> None:
+    async with _process(Confined(), PythonProcessConfig()) as k:
         assert k.confined and "runs in a jail" in k.instructions()
         assert await k.run("6 * 7") == "42"
 
 
-async def test_an_input_too_long_to_send_whole_comes_back_capped_and_the_kernel_carries_on() -> None:
+async def test_an_input_too_long_to_send_whole_comes_back_capped_and_the_python_process_carries_on() -> None:
     """20,000 emoji are 240 KB as JSON, and a traceback has no length of its own: both used to
     overrun the host's line limit and leave the stream out of step for every later input."""
-    async with _kernel(Unjailed(), KernelConfig()) as k:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
         await k.run("kept = 1")
         emoji = await k.run("print('\\N{GRINNING FACE}' * 30000 + 'the end')")
         # the start and the end are kept (a summary is last), and the whole is saved for an input
@@ -829,10 +1033,10 @@ async def test_an_input_too_long_to_send_whole_comes_back_capped_and_the_kernel_
         assert await k.run("kept + 1") == "2"  # the same worker, its namespace intact
 
 
-async def test_an_answer_that_cannot_be_read_restarts_the_kernel_instead_of_raising() -> None:
+async def test_an_answer_that_cannot_be_read_restarts_the_python_process_instead_of_raising() -> None:
     """A worker that sends what the host can't read (here, a line that is not JSON) is replaced,
     and the input says so: nothing escapes `run` to end the session."""
-    async with _kernel(Unjailed(), KernelConfig()) as k:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
         await k.run("x = 1")
         garbled = await k.run(
             "import gc\n"
@@ -844,7 +1048,9 @@ async def test_an_answer_that_cannot_be_read_restarts_the_kernel_instead_of_rais
         assert again.startswith("(the REPL was started again") and again.endswith("False")
 
 
-async def test_a_kernel_that_cannot_start_again_says_so_as_the_input_and_tries_again_next_time() -> None:
+async def test_a_python_process_that_cannot_start_again_says_so_as_the_input_and_tries_again_next_time() -> (
+    None
+):
     class Flaky(Unjailed):
         def __init__(self) -> None:
             super().__init__()
@@ -856,7 +1062,7 @@ async def test_a_kernel_that_cannot_start_again_says_so_as_the_input_and_tries_a
             return await super().start(argv, cwd=cwd, endpoint=endpoint)
 
     jail = Flaky()
-    async with _kernel(jail, KernelConfig()) as k:
+    async with _process(jail, PythonProcessConfig()) as k:
         assert "ended" in await k.run("import os; os._exit(3)")
         jail.refuse = True
         refused = await k.run("1 + 1")
@@ -873,7 +1079,7 @@ async def test_an_unjailed_input_does_not_inherit_a_claude_credential(
     monkeypatch.setenv("CLAUDE_CODE_MESSAGING_TOKEN", "not-a-real-token")  # a launching Claude Code's
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("BH_02_TEST_KEPT", "yes")
-    async with _kernel(Unjailed(), KernelConfig()) as k:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
         ran = await k.run(
             "import os\n"
             "sorted(n for n in os.environ if n.startswith(('CLAUDE', 'ANTHROPIC_'))), "
@@ -883,7 +1089,7 @@ async def test_an_unjailed_input_does_not_inherit_a_claude_credential(
 
 
 async def test_an_interrupted_input_stops_and_the_namespace_survives() -> None:
-    async with _kernel(Unjailed(), KernelConfig()) as k:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
         await k.run("kept = 'still here'")
         spinning = asyncio.create_task(k.run("while True: pass"))
         await asyncio.sleep(0.3)
@@ -893,7 +1099,7 @@ async def test_an_interrupted_input_stops_and_the_namespace_survives() -> None:
 
 
 async def test_errors_come_back_as_text_and_a_dead_worker_is_started_again() -> None:
-    async with _kernel(Unjailed(), KernelConfig()) as k:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
         failed = await k.run("1/0")
         assert "ZeroDivisionError" in failed
         assert "worker.py" not in failed and 'File "<input 1>", line 1' in failed  # the input's own
@@ -948,11 +1154,11 @@ class Ending(Unjailed):
 
 
 async def test_a_worker_its_jail_ended_between_inputs_is_started_again_for_the_next() -> None:
-    """The jail can say it ended the worker before the end of its socket has reached the kernel
+    """The jail can say it ended the worker before the end of its socket has reached the Python process
     (nothing has run on bh-02's event loop since): the next input still runs, in a new worker,
     told why, and is not sent to the one that ended."""
     jail = Ending()
-    async with _kernel(jail, KernelConfig()) as k:
+    async with _process(jail, PythonProcessConfig()) as k:
         pid = int(await k.run("import os; x = 1; os.getpid()"))
         jail.why = "something on the host replaced /p/.git/config"
         os.killpg(pid, 9)
@@ -965,7 +1171,7 @@ async def test_a_worker_its_jail_ended_between_inputs_is_started_again_for_the_n
 
 
 class _Brokers:
-    """The `tools`, `system` and `access` values as the kernel row needs them: what it registered,
+    """The `tools`, `system` and `access` values as the python row needs them: what it registered,
     by name, and an `access` that refuses every write (`refusing`) and keeps what it was asked."""
 
     def __init__(self, refusing: str | None = None) -> None:
@@ -1112,10 +1318,10 @@ async def test_touched_is_normalised_so_a_path_cannot_climb_out_of_the_project(t
     believed."""
     root = tmp_path.resolve()
     forged = str(root / ".." / "elsewhere" / "id_test")
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path))) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
         await k.run(
             "import gc\n"
-            "worker = next(o for o in gc.get_objects() if type(o).__name__ == '_Kernel')\n"
+            "worker = next(o for o in gc.get_objects() if type(o).__name__ == '_Repl')\n"
             f"worker._touched[{forged!r}] = None\n"
             f"worker._touched[{str(root / 'a' / '..' / 'b.md')!r}] = None"
         )
@@ -1138,7 +1344,7 @@ async def test_release_ends_the_worker_now_and_the_next_input_starts_another() -
     `on_release`), so its jail lets go of what it holds on the host, then says what it freed; the
     next input starts a new worker, told its variables went, and ends the release."""
     runner = Runner(Holding())
-    async with _kernel(runner, KernelConfig()) as k:
+    async with _process(runner, PythonProcessConfig()) as k:
         runner.on_release(k.stopped)
         await k.run("kept = 1")
         said = await runner.release()
@@ -1152,7 +1358,7 @@ async def test_release_ends_the_worker_now_and_the_next_input_starts_another() -
 
 
 async def test_release_while_an_input_runs_leaves_it_alone_and_says_so() -> None:
-    async with _kernel(Holding(), KernelConfig()) as k:
+    async with _process(Holding(), PythonProcessConfig()) as k:
         running = asyncio.ensure_future(k.run("import time; time.sleep(1); 'done'"))
         await asyncio.sleep(0.3)
         said = await k.stopped()
@@ -1178,13 +1384,13 @@ class Counting(Confined):
         )
 
 
-async def test_the_kernel_tells_its_own_worker_s_jail_whatever_else_the_jail_starts() -> None:
+async def test_the_python_process_tells_its_own_worker_s_jail_whatever_else_the_jail_starts() -> None:
     """One jail starts more than one program (the extensions process is another): what each
-    start is stays with it, and the kernel's `reads()`, `notice()` and `report()`, and so what
+    start is stays with it, and the Python process's `reads()`, `notice()` and `report()`, and so what
     the model is told, are its own worker's. Another program starting changes none of them, nor
     does the worker stopping for `/release`, until the next input starts a new one."""
     jail = Counting()
-    async with _kernel(jail, KernelConfig()) as k:
+    async with _process(jail, PythonProcessConfig()) as k:
         told = k.instructions()
         assert "/start/1" in told
         assert (k.reads(), k.notice(), k.report()["fs_read"]) == (("/start/1",), "notice 1", "grade 1")
@@ -1227,7 +1433,7 @@ async def test_an_input_asks_before_it_writes_a_project_file_and_a_refusal_stops
     (once per file an input): a refusal is a PermissionError at the input's own line, the file
     untouched, and is told after the output too; the refused file is among what it touched."""
     gate = _Gate(("write",), {"guarded.txt": "read src/CLAUDE.md first"})
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path)), gate) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path)), gate) as k:
         assert await k.run("open('free.txt', 'w').write('a'); open('free.txt', 'a').write('b')") == "1"
         refused = await k.call({"code": "x = 1\nopen('guarded.txt', 'w').write('no')"})
     guarded = tmp_path.resolve() / "guarded.txt"
@@ -1244,7 +1450,7 @@ async def test_a_refusal_the_input_caught_is_still_told_with_its_result(tmp_path
     """An input's code may catch the error (`except OSError: pass`): the write still doesn't
     happen, and the model is told of it after the output, so it never passes unseen."""
     gate = _Gate(("write",), {"guarded.txt": "not yet"})
-    async with _kernel(Unjailed(), KernelConfig(root=str(tmp_path)), gate) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path)), gate) as k:
         said = await k.run("try:\n    open('guarded.txt', 'w')\nexcept OSError:\n    pass\n'carried on'")
     guarded = tmp_path.resolve() / "guarded.txt"
     assert said == f"'carried on'\n(bh-02 refused to let this input write {guarded}: not yet)"
@@ -1261,16 +1467,16 @@ async def test_only_the_kinds_of_opening_a_row_asks_about_are_asked_and_only_in_
     (project / "both.txt").write_text("b")
     outside = tmp_path_factory.mktemp("outside") / "elsewhere.txt"
     reads = _Gate(("read",), {"secret.txt": "not this one"})
-    async with _kernel(Unjailed(), KernelConfig(root=str(project)), reads) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(project)), reads) as k:
         assert await k.run("open('new.txt', 'w').write('n')") == "1"
         said = await k.run(f"open({str(outside)!r}, 'w').write('o'); open('secret.txt').read()")
     assert reads.asked == [("read", "secret.txt")] and "PermissionError" in said
     both = _Gate(("read", "write"), {})
-    async with _kernel(Unjailed(), KernelConfig(root=str(project)), both) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(project)), both) as k:
         assert await k.run("open('both.txt', 'r+').read()") == "'b'"
     assert both.asked == [("read", "both.txt"), ("write", "both.txt")]
     none = _Gate((), {"new.txt": "never asked"})
-    async with _kernel(Unjailed(), KernelConfig(root=str(project)), none) as k:
+    async with _process(Unjailed(), PythonProcessConfig(root=str(project)), none) as k:
         assert await k.run("open('new.txt', 'w').write('again')") == "5"
     assert none.asked == []
 
@@ -1307,7 +1513,7 @@ async def test_bh_02_s_other_tools_are_functions_an_input_calls_as_the_model_wou
     text, and one that did not run raises `tools.Error`. The first input says which there are;
     a later one says what changed; an input that binds `tools` itself keeps its own."""
     offering = _Offering("echo")
-    async with _kernel(Unjailed(), KernelConfig(), tools=offering) as k:
+    async with _process(Unjailed(), PythonProcessConfig(), tools=offering) as k:
         first = await k.run("tools.echo(text='hi')")
         assert first == (
             "(bh-02's other tools are functions in your namespace: tools.echo; help(tools.NAME) "
@@ -1340,5 +1546,5 @@ async def test_bh_02_s_other_tools_are_functions_an_input_calls_as_the_model_wou
 
 
 async def test_with_no_tools_to_offer_the_namespace_has_no_tools() -> None:
-    async with _kernel(Unjailed(), KernelConfig(), tools=_Offering()) as k:
+    async with _process(Unjailed(), PythonProcessConfig(), tools=_Offering()) as k:
         assert await k.run("'tools' in globals()") == "False"

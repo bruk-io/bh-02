@@ -260,7 +260,7 @@ class Transcript(VerticalScroll):
                     self.event(entry)
         self.end_turn()
         if replay.entries:
-            self.note("↑ the session so far (a resumed session's kernel starts empty)")
+            self.note("↑ the session so far (a resumed session's Python process starts empty)")
 
     def blocks(self) -> list[tuple[str, str]]:
         """What the transcript shows, as (kind, plain text) per block, top to bottom."""

@@ -63,9 +63,9 @@ why when it knows. The transcript is the record; the namespace is a cache.
 
 A new Python process can run setup code before the first input, when it is jailed:
 
-1. yours: `~/.config/bh-02/kernel.py` (`$XDG_CONFIG_HOME/bh-02/kernel.py` when that is set), for
+1. yours: `~/.config/bh-02/startup.py` (`$XDG_CONFIG_HOME/bh-02/startup.py` when that is set), for
    helpers you want in every project;
-2. the project's: `.bh-02/kernel.py`, the only one the model is told it may edit.
+2. the project's: `.bh-02/startup.py`, the only one the model is told it may edit.
 
 The first input is told which names each defined, or its traceback. One failing doesn't stop the
 other. Without the jail they don't run unasked: the model is told to run them as inputs, which you
@@ -73,6 +73,13 @@ are asked about like any other.
 
 bh-02 reads your file itself and sends its text in, since a Linux jail has no home directory in
 it. So whatever your file holds, the model can read. The project's file is read inside the jail.
+
+These files were called `kernel.py`, and one still called so keeps running: where `startup.py` is
+not there, bh-02 reads the `kernel.py` beside it, the same way. The first input in each new Python
+process says it is called `startup.py` now (for the project's file, which the model may write, to
+rename it). Where both are there, `startup.py` runs, and the input says `kernel.py` is no longer
+read, so helpers the model wrote to it from an older conversation are not lost without a word.
+A `startup` in a layer that names `kernel.py` itself runs it as named, with no line.
 
 ## What an input touched
 

@@ -171,7 +171,7 @@ def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> 
         )
 
     spec = home_rooted(_HOME)
-    for name in ("kernel.py", "models.toml", "context.toml"):
+    for name in ("startup.py", "kernel.py", "models.toml", "context.toml"):
         assert _denied(spec, f"{_HOME}/.config/bh-02/{name}"), name
         assert _denied(spec, f"{_HOME}/xdg/bh-02/{name}"), name  # $XDG_CONFIG_HOME/bh-02
     assert _denied(spec, f"{_HOME}/.config/bh-02")  # the directory itself: no link swapped in
@@ -180,7 +180,7 @@ def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> 
     project = home_rooted(f"{_HOME}/src/app")  # the usual case: the home is not writable at all
     assert not set(trusted) & set(project.fs.write_denies)
     extra = home_rooted(f"{_HOME}/src/app", write=(".", _HOME))  # a root `write` adds
-    assert _denied(extra, f"{_HOME}/.config/bh-02/kernel.py")
+    assert _denied(extra, f"{_HOME}/.config/bh-02/startup.py")
     inside = home_rooted(f"{_HOME}/.config/bh-02")  # bh-02 run in its own config directory
     assert not _denied(inside, f"{_HOME}/.config/bh-02/notes.md")
 
@@ -959,13 +959,13 @@ asyncio.run(main())
 
 # A bh-02 killed while its Python process runs an input's background program, which keeps trying to write
 # under `.claude/` (Claude Code would run hooks from its settings) and says it is alive: the real
-# kernel, in the real jail. argv: the project, then "setsid" to start the program in a session
+# Python process, in the real jail. argv: the project, then "setsid" to start the program in a session
 # of its own (out of the jail's process group), else "group". It says "started" and waits to be
 # killed.
 _KILLED_WITH_A_BACKGROUND_INPUT = """
 import asyncio, sys, time
 from runner_cordis_plugin import Approval, BrigConfig, BrigJail, Runner
-from python_cordis_plugin import Kernel, KernelConfig
+from python_cordis_plugin import PythonProcess, PythonProcessConfig
 
 class Host:
     paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
@@ -985,15 +985,15 @@ LOOP = (
 
 async def main():
     runner = Runner(BrigJail(BrigConfig(), Host()))
-    kernel = Kernel(runner, KernelConfig(root=sys.argv[1]), rule=Approval(runner))
-    await kernel.__aenter__()
+    process = PythonProcess(runner, PythonProcessConfig(root=sys.argv[1]), rule=Approval(runner))
+    await process.__aenter__()
     setsid = sys.argv[2] == "setsid"
     code = (
         "import subprocess, sys\\n"
         f"subprocess.Popen([sys.executable, '-c', {LOOP!r}, 'alive'], start_new_session={setsid})\\n"
         "print('started')"
     )
-    print(await kernel.run(code), flush=True)
+    print(await process.run(code), flush=True)
     time.sleep(600)
 
 asyncio.run(main())

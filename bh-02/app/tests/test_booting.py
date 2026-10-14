@@ -126,7 +126,7 @@ async def test_a_row_that_leaves_mid_run_is_reported_rather_than_a_silent_exit(
 
 
 async def test_the_shipped_stack_boots_around_a_patched_model(composition: Callable[..., Path]) -> None:
-    """The kernel, the commands and the frame's rows are real; only the model is a fake. Nothing stalls."""
+    """The python, commands and frame's rows are real; only the model is a fake. Nothing stalls."""
     patch = composition('[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n', one_reply=True)
     await asyncio.wait_for(run([*layers(), patch], [Row("chat", config={"prompt": "hi"})]), 2)
 
@@ -281,7 +281,7 @@ async def test_stopping_replies_with_a_clear_or_a_model_switch_between_leaves_on
 
 async def test_slash_commands_act_on_the_running_session(composition: Callable[..., Path]) -> None:
     """/rows and /clear go to the operator, not the model; /clear restarts the model and the
-    kernel, and the session carries on and answers the next message."""
+    Python process, and the session carries on and answers the next message."""
     patch = composition(
         '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
         '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n'

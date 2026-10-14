@@ -54,7 +54,7 @@ _TERMINAL_MODULES = (
 
 # Names in a terminal module that are not terminal I/O: the interpreter's path, the process's
 # arguments, where it imports from (its environment's prefix and the base interpreter's), and
-# what it runs on; its audit hooks and its call stack (the kernel's worker hears what files an
+# what it runs on; its audit hooks and its call stack (the Python process's worker hears what files an
 # input opens). Imported by name (`from sys import executable`), never the module.
 _NOT_TERMINAL = (
     "sys.argv",
@@ -259,7 +259,7 @@ register_dsl_rule(
         message=(
             "'{module}' imports '{imported_from}'; it runs inside a jail and imports only the "
             "standard library. An input is plain Python, and what it may touch is the jail's "
-            "decision: use the standard library, or do the work in bh-02 outside the kernel"
+            "decision: use the standard library, or do the work in bh-02 outside the Python process"
         ),
     )
 )

@@ -218,7 +218,7 @@ async def test_what_is_shown_is_kept_and_drawn_again_by_the_next_app(tmp_path: P
             ("text", "Hello back"),  # the streamed run, merged
             ("tool_call", "⏺ python\n1"),
             ("failure", "error: slow down"),
-            ("note", "↑ the session so far (a resumed session's kernel starts empty)"),
+            ("note", "↑ the session so far (a resumed session's Python process starts empty)"),
             (
                 "note",
                 "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running turn; Ctrl-P lists commands.",

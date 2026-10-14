@@ -109,7 +109,7 @@ def shown_call(input: Mapping[str, Any]) -> dict[str, Any]:
 
 def instructions_for(
     confined: bool,
-    startup: Sequence[str] = (".bh-02/kernel.py",),
+    startup: Sequence[str] = (".bh-02/startup.py",),
     reads: Sequence[str] = (),
     *,
     theirs: Sequence[str] = (),

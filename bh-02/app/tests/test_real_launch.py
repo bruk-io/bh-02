@@ -337,33 +337,33 @@ def _alive(pid: int) -> bool:
 
 
 def _ends_and_takes_its_children(app: Launched, children: list[int]) -> int:
-    """Wait for bh-02 to leave on its own (not killed by a signal) and its kernel to be gone."""
+    """Wait for bh-02 to leave on its own (not killed by a signal) and its Python process to be gone."""
     deadline = time.monotonic() + 10
     while (app.process.poll() is None or any(map(_alive, children))) and time.monotonic() < deadline:
         app.settle(0.1)
     code = app.process.returncode
     assert code is not None and code >= 0, f"still running, or killed ({code}):\n{app.text()[-2000:]}"
-    assert not [pid for pid in children if _alive(pid)], "the kernel outlived bh-02"
+    assert not [pid for pid in children if _alive(pid)], "the Python process outlived bh-02"
     return code
 
 
-def test_the_terminal_going_away_leaves_and_ends_the_kernel(launch: Launch) -> None:
+def test_the_terminal_going_away_leaves_and_ends_the_python_process(launch: Launch) -> None:
     """A pty with no controlling terminal: no SIGHUP, only stdin at end of file (which Textual's
     input thread would otherwise read again and again, at 100% CPU, for ever)."""
     app = launch("echo")
     app.wait_for(_READY, 60)
     children = _children(app.process.pid)
-    assert children  # the kernel
+    assert children  # the Python process
     app.hang_up()
     # 120: Python could not flush its output at exit, to a terminal that is gone
     assert _ends_and_takes_its_children(app, children) in (0, 120)
 
 
-def test_a_hangup_signal_leaves_and_ends_the_kernel(launch: Launch) -> None:
+def test_a_hangup_signal_leaves_and_ends_the_python_process(launch: Launch) -> None:
     app = launch("echo")
     app.wait_for(_READY, 60)
     children = _children(app.process.pid)
-    assert children  # the kernel
+    assert children  # the Python process
     app.process.send_signal(signal.SIGHUP)
     assert _ends_and_takes_its_children(app, children) == 0
 
@@ -748,7 +748,7 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     """`/model` restarts the model row, which may take a while to come up (`slow-2` takes 3 s):
     the model field says it is starting until the row is active, and a message
     typed meanwhile says it is waiting, then gets its reply. `/clear` restarts the loop, its
-    transcript and the kernel, and a message typed then reaches the new loop."""
+    transcript and the Python process, and a message typed then reaches the new loop."""
     app = launch("slow")
     ready = app.wait_for(_READY, 60)
     app.type("first")
