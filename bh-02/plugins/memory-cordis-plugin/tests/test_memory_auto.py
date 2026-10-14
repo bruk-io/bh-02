@@ -4,6 +4,8 @@ conversation through no link, and the row that adds it to the system prompt."""
 import os
 from pathlib import Path
 
+import pytest
+
 from cordis.testing import drive
 from memory_cordis_plugin import AutoMemory, Memory, MemoryConfig, auto, auto_section, indexed, listing
 
@@ -27,6 +29,26 @@ def test_the_model_is_told_how_to_keep_it_and_where() -> None:
     told = auto_section("/m", "- [Testing](testing.md): run the suite with -x", True)
     assert "Contents of /m/MEMORY.md (your auto memory index):\n\n- [Testing](testing.md)" in told
     assert told.endswith("one line per memory, the detail in topic files.)")
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        pytest.param("update that one rather than add a duplicate", id="check-for-existing-first"),
+        pytest.param("**Why:** line", id="feedback-and-project-why"),
+        pytest.param("**How to apply:** line", id="feedback-and-project-how-to-apply"),
+        pytest.param("absolute ones (2026-10-14)", id="absolute-dates"),
+        pytest.param("one specific line", id="specific-description"),
+        pytest.param("only matters to this conversation", id="not-this-conversation"),
+        pytest.param("what was non-obvious about it", id="asked-for-what-is-not-recorded"),
+        pytest.param("check it still exists before you recommend it", id="check-against-the-code"),
+        pytest.param("git log for the current state", id="current-state-from-code-or-git"),
+        pytest.param("under 200 lines and 4 KB", id="short-memory-files"),
+        pytest.param("organised by topic", id="organised-by-topic"),
+    ],
+)
+def test_the_model_is_told_each_rule_for_keeping_memories(phrase: str) -> None:
+    assert phrase in auto_section("/m", None, False)
 
 
 def test_the_index_is_read_once_a_conversation(tmp_path: Path) -> None:

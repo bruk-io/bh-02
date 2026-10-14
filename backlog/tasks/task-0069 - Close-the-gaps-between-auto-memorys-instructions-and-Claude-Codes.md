@@ -4,7 +4,7 @@ title: Close the gaps between auto memory's instructions and Claude Code's
 status: To Do
 assignee: []
 created_date: '2026-10-10 03:34'
-updated_date: '2026-10-11 15:30'
+updated_date: '2026-10-14 14:42'
 labels:
   - memory
   - docs
@@ -31,14 +31,22 @@ These are judgement rules, so they are prose. The mechanical ones (a slug name, 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `auto_section` tells the model each rule the description lists: check for an existing memory before saving; the **Why:** / **How to apply:** body for `feedback` and `project`; absolute dates; a specific one-line `description`; what not to save, and what to save instead when asked; checking a memory against the code before recommending from it; keeping each memory file short and organised by topic
-- [ ] #2 test_memory_auto.py checks that the section says each rule
-- [ ] #3 The memory plugin's README and docs/bh-02/using/memory.md, where they say what the model is told about auto memory, say the same
-- [ ] #4 `scripts/check` passes
+- [x] #1 `auto_section` tells the model each rule the description lists: check for an existing memory before saving; the **Why:** / **How to apply:** body for `feedback` and `project`; absolute dates; a specific one-line `description`; what not to save, and what to save instead when asked; checking a memory against the code before recommending from it; keeping each memory file short and organised by topic
+- [x] #2 test_memory_auto.py checks that the section says each rule
+- [x] #3 The memory plugin's README and docs/bh-02/using/memory.md, where they say what the model is told about auto memory, say the same
+- [x] #4 `scripts/check` passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Order: (1) tests first in bh-02/plugins/memory-cordis-plugin/tests/test_memory_auto.py: one parametrised test, one case per rule, each a distinctive phrase absent from the current auto_section text; run it and record the failures. (2) Add the seven rules to auto_section in src/memory_cordis_plugin/auto.py, short, in bh-02 voice, no em dashes, Canadian spelling, existing sentences kept; rerun until green. (3) Same short list of what the model is told in the README Auto memory section and in docs/bh-02/using/memory.md (reference/plugins/memory.md includes the README). (4) Memory plugin tests as root, then scripts/check, exit codes read directly. Risks: every request carries the section, so words are kept to what each rule needs; a phrase matching existing text would pass before the change, so each is checked absent first. Proof: failing run and passing run recorded in notes.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Sized size-1 (2026-10-11): prompt text, a test that it says each rule, two docs; nothing unknown.
+
+Changed: memory_cordis_plugin/auto.py auto_section (seven rules added in the section text, existing sentences kept; the section is now 316 words, MEMORY.md line unchanged); tests/test_memory_auto.py (one parametrised test, 11 cases, one distinctive phrase per rule, each absent from the old text: grep count 0 before the edit); README.md Auto memory section and docs/bh-02/using/memory.md (the same seven-bullet list in both; reference/plugins/memory.md includes the README). Seen failing first: test_memory_auto.py before the prompt edit gave 11 failed, 6 passed (all 11 new cases failed); after it, 17 passed, exit 0. Memory plugin tests as root: uv run pytest bh-02/plugins/memory-cordis-plugin -q gave 59 passed, exit 0. scripts/check as root (log in the scratchpad, read by exit code, not piped): format ok, lint ok, types ok (187 files), tests 2802 passed 31 skipped, gates ok, docs ok (mkdocs build), tokens skipped (no bh-01 dist beside the repo); exit 0. No em dashes in the changed text; Canadian -ise spellings (organised, summarise). Not run: scripts/linux-jail-check (not touched by this change) and the tester-user run (memory plugin tests are unprivileged-safe but were run as root per the brief).
 <!-- SECTION:NOTES:END -->

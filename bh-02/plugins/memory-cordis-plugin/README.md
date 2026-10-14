@@ -124,6 +124,19 @@ Claude Code reads it at the start of one: a write to it later in the conversatio
 model's own, and telling it back as a change in its instructions would only repeat it.
 `disabled = true` on the `memory-auto` row turns auto memory off.
 
+Among its rules for keeping memories, the model is told:
+
+- to check for a memory that already covers a new one, and update that one rather than add a
+  duplicate;
+- for `feedback` and `project`, to follow the rule or fact with a **Why:** line and a **How to
+  apply:** line;
+- to write dates as absolute ones, not relative ones;
+- to make `description` one specific line, since it decides whether the memory is relevant later;
+- not to save what only matters to this conversation, or what the code, its history or CLAUDE.md
+  already records; asked to save one of those, to ask what was non-obvious about it and save that;
+- to check a memory that names a file, function or flag against the code before recommending it;
+- to keep each memory file under 200 lines and 4 KB, organised by topic.
+
 ## Reading safely
 
 `reading.py`'s `read(path, files, root)` is the one way a memory file is read, for the prompt
