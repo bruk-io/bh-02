@@ -3,11 +3,11 @@ id: TASK-0083
 title: >-
   Make the real-launch /model refusal test hold when the screen wraps the
   message
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-12 09:14'
-updated_date: '2026-10-14 03:01'
+updated_date: '2026-10-14 03:16'
 labels:
   - app
   - tests
@@ -44,4 +44,6 @@ Evidence:
 - Full file as root (uv run pytest bh-02/app/tests/test_real_launch.py -q): 30 passed, exit 0.
 - scripts/check (root): 2528 passed, 31 skipped; gates ok; docs ok; tokens skipped (no ../bh-01/dist); exit 0.
 Note: the before-run was on the unchanged tree (no stash needed, tree was clean).
+
+Closed on review (Opus, low) of 0d6f5d4: CLOSE, nothing blocking, nothing to fix. 'replaces' after 'not switched:' identifies only the shadowed-patch message (switch.py:148); the test still checks the patch's model is kept and --model refused. Root and tester under tini: 1 passed each; the pre-commit test failed as tester ('row's config never appeared'). The whole real-launch file as tester under tini: 30 passed, so no other wait splits on a wrap. Nit left: the wait no longer checks the words 'row's config' themselves.
 <!-- SECTION:NOTES:END -->
