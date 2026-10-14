@@ -5,9 +5,10 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-14 15:56'
-updated_date: '2026-10-14 16:40'
+updated_date: '2026-10-14 18:42'
 labels:
   - naming
+  - finish-moved
 dependencies: []
 priority: high
 type: intent
@@ -29,8 +30,7 @@ The owner (2026-10-14): the naming is hurting my head. A sweep of the shipped co
 One naming rule, written where a plugin author reads it, and the names that break it renamed, so a row's id, a plugin's name and a file's name each say what they name, and no word means two things without saying which.
 
 ## Must not break
-- A person's layers and a resumed session: every renamed row id and component is translated by `bh-02 update-layer` and on resume, saying what changed (as TASK-0064).
-- A person's existing startup file keeps running after it is renamed, with a line saying the new name.
+- (Changed by the owner, 2026-10-14: no backwards compatibility. Old names are not translated or read; layers and files that name them are updated by hand. TASK-0099.07 removes the translation machinery that was here.)
 - The model-facing names stay unless the rule needs them changed: the tools `agent`, `agent_wait`, `agent_send`, `agent_stop`, `python` and the commands the person types (`/agents`).
 - The gates: renames go through `pypeeker rename` where it applies (`demote` only makes a name private); `scripts/check` passes after each.
 
@@ -46,7 +46,7 @@ One naming rule, written where a plugin author reads it, and the names that brea
 <!-- AC:BEGIN -->
 - [ ] #1 One naming rule is written in bh-02/CLAUDE.md, with the reason for it; GLOSSARY.md carries the renamed terms
 - [ ] #2 No two plugins' names differ by a letter, no component repeats its plugin's name, and no GLOSSARY.md term has two meanings without a label saying which
-- [ ] #3 Every old row id, component and startup-file name a person may have is translated or still read, saying what changed; scripts/check passes
+- [ ] #3 No old name is translated or read anywhere (outdated.py's renames, bh-02 update-layer, the resume translation and the kernel.py fallback are gone), and a layer naming a use no plugin provides fails at boot with the loader's error; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -55,4 +55,6 @@ One naming rule, written where a plugin author reads it, and the names that brea
 Accepted 2026-10-14 by Fable standing in for the owner (he delegated these decisions): open questions answered above; AC #1 keeps the rule in one place (bh-02/CLAUDE.md), AC #2 says 'no component repeats its plugin's name' (agents:agents is a component; no row id stutters). Added to the sweep: the row id agents_status, the one two-word id with an underscore. TASK-0099.01 starts now.
 
 TASK-0099.01 wrote decision-0005 (proposed, awaiting the owner): the rule, subagents:parent, the sweep, the rename table. It filed TASK-0099.04 (extensions:extensions to extensions:process) and TASK-0099.05 (the rule into bh-02/CLAUDE.md, after .02, .03 and .04), and added to .02 and .03.
+
+Finish line changed after work started (owner, 2026-10-14): no backwards compatibility. Must-not-break's translation lines replaced; AC #3 now asks that no old name is translated or read and that a stale layer fails at boot with the loader's error. TASK-0099.07 removes the translation machinery; .03 and .04's criteria changed to match.
 <!-- SECTION:NOTES:END -->

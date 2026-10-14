@@ -49,10 +49,9 @@ Worded to go into `bh-02/CLAUDE.md` as a "Naming" section after "Adding a plugin
 > - **One word, one thing.** A thing seen from two places keeps its word with a label saying where
 >   (`tools`: the broker row and key, and the namespace's view in an input; `python`: the tool, and
 >   the row). GLOSSARY.md holds each label, and a new term goes there.
-> - **A rename is translated, not abandoned.** A row id or component a person may have written goes
->   into `bh_02/outdated.py` (`_RENAMED`, `_RENAMED_USES`), so `bh-02 update-layer` and a resume say
->   what changed; a file the person owns is read under its old name for good, with a line saying the
->   new one. Rename symbols with `pypeeker rename` (`demote` only makes one private).
+> - **A rename is clean.** The old name goes everywhere at once: nothing translates it and no
+>   file is read under it; a layer that names it fails at boot with the loader's error. Rename
+>   symbols with `pypeeker rename` (`demote` only makes one private).
 
 "Repeats" means the same word, plural or not, or the word a plugin's name is built on:
 `agents:agents` and `extensions:extensions` repeat, and `subagents:agents` would. `models:model` is
@@ -230,3 +229,13 @@ per configured entry, through `host_paths.walked` for the person's, with the pro
 `startup.py`; `__kernel__` stays; `pypeeker rename`, not `demote`; the counts' exclusions. Flags
 ruled: `models:model`, `model` and `models` kept (the key's-name exception; thirty files for no
 confusion removed); a session's `stack` kept and out of scope.
+
+## Amended
+
+2026-10-14, by the owner: "we don't need backwards compat - better to ensure things are clean", and
+of `bh-02 update-layer` and the earlier translations: "remove". So the rule's last bullet now says a
+rename is clean, and everything above about translating an old name (the rename table's
+`outdated.py` column, the startup-file fallback in items 1 to 7 of section 4) is superseded: no old
+name is translated or read. TASK-0099.03 landed without translation; TASK-0099.07 removes
+`bh_02/outdated.py`, `bh-02 update-layer`, the resume translation and the `kernel.py` fallback
+TASK-0099.02 built.
