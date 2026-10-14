@@ -1,6 +1,8 @@
 """Sessions: the layer a session runs from, the state directory, and resuming from the CLI."""
 
+import json
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -25,6 +27,230 @@ from bh_02.sessions import (
 from cordis import Row
 from cordis.composition import format_layer
 from cordis.loader import read_layer
+from models_cordis_plugin import ModelConfig, ModelsError, opened, resolved
+from models_cordis_plugin.openai.testing import StubServer
+
+
+@pytest.fixture(autouse=True)
+def _own_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A new session reads the models file's `default`: these tests use an empty config directory,
+    never the one of whoever runs them."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    return tmp_path / "config" / "bh-02"
+
+
+def _models_default(config: Path, text: str) -> None:
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "models.toml").write_text(text)
+
+
+def _recorded(session: Session) -> str | None:
+    (row,) = [r for r in read_layer(str(session.layer)) if r.id == "model"]
+    return (row.config or {}).get("default")
+
+
+def test_a_new_session_records_the_models_file_s_default_and_a_resume_keeps_it(
+    _own_config: Path, tmp_path: Path
+) -> None:
+    """The session's layer names the model it started on, so changing the file's `default`
+    later moves new sessions only."""
+    _models_default(_own_config, 'default = "llama"\n[llama]\nprovider = "openai"\nid = "x"\n')
+    first = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+    assert _recorded(first) == "llama" and first.stack == "llama"
+    assert json.loads((first.dir / "meta.json").read_text())["stack"] == "llama"
+    _models_default(_own_config, 'default = "opus"\n')
+    update(first)  # what a resume does first
+    assert _recorded(first) == "llama"  # still on the first model
+    assert _recorded(create(tmp_path / "s", "/work/a", model=None, no_jail=False)) == "opus"
+    assert _recorded(create(tmp_path / "s", "/work/a", model="haiku", no_jail=False)) == "haiku"  # --model
+
+
+async def test_a_models_file_default_of_an_endpoint_s_model_starts_the_session_on_it_with_no_listing_asked(
+    _own_config: Path, tmp_path: Path
+) -> None:
+    """TASK-0087 and TASK-0088 together: `default = "local/x:7b"` over an endpoint that lists its
+    models. The session's layer and meta name it; the model row resolves it and runs a step, and the
+    server is never asked for its list."""
+    with StubServer(models=["listed-but-not-chosen"]) as server:
+        _models_default(
+            _own_config,
+            'default = "local/x:7b"\n[local]\nprovider = "openai"\ndiscover = true\n'
+            f'base_url = "{server.base_url}"\n',
+        )
+        made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+        assert _recorded(made) == "local/x:7b" and made.stack == "local/x:7b"
+        assert json.loads((made.dir / "meta.json").read_text())["stack"] == "local/x:7b"
+        config = ModelConfig(default=_recorded(made))  # the model row of the session's layer
+        assert resolved(config).id == "x:7b"
+        async with opened(config) as model:
+            chunks = [c async for c in model.complete([{"role": "user", "content": "hi"}], [])]
+        assert any(c.get("type") == "text" for c in chunks)
+    assert [(r["method"], r["path"]) for r in server.requests] == [("POST", "/v1/chat/completions")]
+    assert server.requests[0]["body"]["model"] == "x:7b"  # zero GETs: the endpoint's list was never asked
+
+
+async def test_the_model_flag_naming_a_model_of_a_broken_endpoint_starts_the_session_and_its_model_says_why(
+    _own_config: Path, tmp_path: Path
+) -> None:
+    """TASK-0095: `--model local/x:7b` over an endpoint table with a problem (an id beside `discover`) is
+    recorded as it is typed; the model row still binds, so bh-02 starts, and refuses each step with the
+    table's problem. Nothing is asked of the server."""
+    with StubServer(models=["x:7b"]) as server:
+        _models_default(
+            _own_config,
+            f'[local]\nprovider = "openai"\ndiscover = true\nid = "x"\nbase_url = "{server.base_url}"\n',
+        )
+        made = create(tmp_path / "s", "/work/a", model="local/x:7b", no_jail=False)
+        assert _recorded(made) == "local/x:7b"
+        async with opened(ModelConfig(default=_recorded(made))) as model:
+            with pytest.raises(ModelsError, match="an endpoint names no id, it lists its models") as step:
+                [c async for c in model.complete([{"role": "user", "content": "hi"}], [])]
+        assert step.value.message.startswith("model 'local' (")
+    assert server.requests == []
+
+
+def test_a_model_name_above_u_ffff_is_recorded_in_the_layer_and_read_back_as_typed(tmp_path: Path) -> None:
+    """TASK-0094: `--model local/<id>` (and a resume's `--model`) takes any id after the endpoint, and
+    cordis's `format_layer` wrote a character above U+FFFF as an escape TOML refuses, which left the
+    session a layer the loader can't read."""
+    name = "local/llama-\U0001f999"
+    made = create(tmp_path / "s", "/work/a", model=name, no_jail=False)
+    assert _recorded(made) == name and made.stack == name
+    assert json.loads((made.dir / "meta.json").read_text())["stack"] == name
+    other = "local/\U0001f999-2"
+    set_model(made, other)  # a resume with --model rewrites the layer the same way
+    assert _recorded(made) == other
+
+
+def test_a_new_session_with_no_file_default_records_sonnet(_own_config: Path, tmp_path: Path) -> None:
+    made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+    assert _recorded(made) == "sonnet" and made.stack == "sonnet"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["default = [\n", 'llama = "x"\n', "default = 5\n", 'default = ""\n', 'default = ["opus"]\n'],
+    ids=["not TOML", "a key that is no table", "a number", "an empty string", "a list"],
+)
+def test_a_models_file_that_is_not_toml_or_whose_default_is_no_name_pins_no_model(
+    _own_config: Path, tmp_path: Path, text: str
+) -> None:
+    """TASK-0087's `Unusable` must show: a pinned sonnet would hide that the file's default can't be
+    read, so the session's layer names no model and the model row says what is wrong with the file."""
+    _models_default(_own_config, text)
+    made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+    assert _recorded(made) is None and made.stack == "default"  # follows the file's default
+    assert json.loads((made.dir / "meta.json").read_text())["stack"] == "default"
+    assert [(s.id, s.stack) for s in listed(tmp_path / "s", "/work/a")] == [(made.id, "default")]
+    with pytest.raises(ModelsError) as said:  # the row's error, with what to write
+        resolved(ModelConfig(default=_recorded(made)))
+    assert said.value.kind == "models_file"
+
+
+def test_a_default_that_names_no_model_is_pinned_and_the_row_says_the_file_s_default_is_the_cause(
+    _own_config: Path, tmp_path: Path
+) -> None:
+    _models_default(_own_config, 'default = "nosuch"\n')
+    made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+    assert _recorded(made) == "nosuch" and made.stack == "nosuch"
+    with pytest.raises(ModelsError, match="no model named 'nosuch', the default in the models file"):
+        resolved(ModelConfig(default=_recorded(made)))
+
+
+def test_a_models_file_in_the_project_gives_a_new_session_no_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default chooses the spend: a file the model's code can write does not choose it."""
+    project = tmp_path / "project"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(project / ".config"))
+    _models_default(project / ".config" / "bh-02", 'default = "opus"\n')
+    made = create(tmp_path / "s", str(project), model=None, no_jail=False)
+    assert _recorded(made) == "sonnet"
+
+
+def _outcome(config: ModelConfig) -> tuple[str, str]:
+    """What the model row makes of `config`, by its public surface: a model's name, or its error's kind."""
+    try:
+        return "model", resolved(config).name
+    except ModelsError as error:
+        return "error", error.kind
+
+
+@dataclass(frozen=True)
+class _Case:
+    """A models file, where it is, and what a new session starts on: `text` (None: no file; a directory
+    stands in for the file when it is `DIRECTORY`), what `create` records (`pin`: None, no model) and
+    whether the row can then use the model (`works`). `where`: outside the project, in it as named, in it
+    through a link, or in it while `create` is told another directory than the working one."""
+
+    text: str | None
+    pin: str | None
+    works: bool = True
+    where: str = "outside"
+
+
+_DIRECTORY = "<a directory>"
+_ENDPOINT = '[local]\nprovider = "openai"\ndiscover = true\nbase_url = "http://localhost:1/v1"\n'
+_OPUS = 'default = "opus"\n'
+_CONTRACT = {
+    "a trusted default": _Case(_OPUS, "opus"),
+    "no file": _Case(None, "sonnet"),
+    "a default table, which is a model": _Case(
+        '[default]\nprovider = "claude-code"\nid = "opus"\n', "sonnet"
+    ),
+    "an endpoint's model": _Case('default = "local/x:7b"\n' + _ENDPOINT, "local/x:7b"),
+    "no model": _Case('default = "nosuch"\n', "nosuch", works=False),
+    "not TOML": _Case("default = [\n", None, works=False),
+    "a key that is no table": _Case('llama = "x"\n', None, works=False),
+    "a number": _Case("default = 5\n", None, works=False),
+    "an empty string": _Case('default = ""\n', None, works=False),
+    "a list": _Case('default = ["opus"]\n', None, works=False),
+    "a directory": _Case(_DIRECTORY, None, works=False),
+    # the default chooses the spend: a file the model's code can write chooses nothing, however it is reached
+    "in the project": _Case(_OPUS, "sonnet", where="project"),
+    "through a link into the project": _Case(_OPUS, "sonnet", where="link"),
+    "in the project, create told another directory": _Case(_OPUS, "sonnet", where="elsewhere"),
+}
+
+
+def _placed(case: _Case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Put the case's models file in an XDG config directory (outside the project, in it, or reached
+    through a link into it), make the project the working directory, and return the directory `create`
+    is told is the session's."""
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    config = project / ".config" if case.where in ("project", "elsewhere") else tmp_path / "config"
+    models = config / "bh-02"
+    if case.where == "link":  # the config directory's `bh-02` is a link into the project
+        models = project / "real"
+        config.mkdir()
+        (config / "bh-02").symlink_to(models)
+    models.mkdir(parents=True)
+    if case.text == _DIRECTORY:
+        (models / "models.toml").mkdir()
+    elif case.text is not None:
+        (models / "models.toml").write_text(case.text)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    return str(tmp_path / "elsewhere") if case.where == "elsewhere" else str(project)
+
+
+@pytest.mark.parametrize("kind", _CONTRACT)
+def test_the_shell_and_the_model_row_agree_on_what_a_new_session_starts_on(
+    kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TASK-0093: the shell (`create`) and the model row each decide whether the models file is
+    trusted and what its default is, and cannot share a function (no package imports another). This
+    drives both over the same files, by their public surfaces, and fails if they disagree on what a
+    new session starts on: what `create` records in the session's layer must make the row resolve
+    what it would with the layer naming none (a model, or the same error), whatever the file is: in
+    the project, not TOML, a default that is no name, one that names no model, an endpoint's model."""
+    case = _CONTRACT[kind]
+    made = create(tmp_path / "s", _placed(case, tmp_path, monkeypatch), model=None, no_jail=False)
+    assert _recorded(made) == case.pin and made.stack == (case.pin or "default")
+    row = _outcome(ModelConfig(default=_recorded(made)))  # the session's layer, as the row reads it
+    assert row == _outcome(ModelConfig())  # the one thing that must hold: the shell and the row agree
+    assert row[0] == ("model" if case.works else "error")  # and the cases are what they claim to be
 
 
 def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_row() -> None:
@@ -39,7 +265,7 @@ def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_r
     ]
     assert session_layer(Path("/s/2"), model=None, no_jail=False)[-1] == Row(
         "model", config={"state": "/s/2/claude"}
-    )  # no --model: the model row's own default, and the jail the harness ships
+    )  # no --model: no default here (the models file's, else sonnet), and the jail the harness ships
 
 
 def test_a_session_from_the_agent_sdk_stack_is_retired_and_says_why() -> None:

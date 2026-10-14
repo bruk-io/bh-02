@@ -1,7 +1,7 @@
 """The `model` value for a row's config: the named model, on its provider.
 
 `resolved` is which model the config names (the built-ins, the models file unless it is in the
-project, `refused`, and the row's own `extra`), or why none can be used. `opened` is its
+project or can't be read, and the row's own `extra`), or why none can be used. `opened` is its
 provider's value, entered for as long as the row is up: Claude Code (`claude-code`), an
 OpenAI-compatible endpoint (`openai`), or a factory a model names as `module:attribute`. A
 model that can't be used still binds, as `Unusable`, whose every step raises what is wrong,
@@ -15,12 +15,13 @@ import os
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from models_cordis_plugin.claude_code import ClaudeCodeConfig, ClaudeCodeModel
 from models_cordis_plugin.named import (
     CLAUDE_CODE,
     OPENAI,
+    Intended,
     ModelConfig,
     ModelsError,
     Named,
@@ -28,13 +29,15 @@ from models_cordis_plugin.named import (
     combined,
     environ,
     in_project,
+    intended,
     models_file,
     parsed,
     read_models,
+    standing,
 )
 from models_cordis_plugin.openai import OpenAIModel
 
-__all__ = ["Unusable", "known", "opened", "refused", "resolved"]
+__all__ = ["Unusable", "known", "opened", "resolution", "resolved"]
 
 type Json = Mapping[str, Any]
 
@@ -50,7 +53,7 @@ class Unusable:
         yield {}  # an async generator, as every provider's `complete` is
 
 
-def refused(config: ModelConfig) -> str | None:
+def _refused(config: ModelConfig) -> str | None:
     """Why the config's models file is not read (`in_project`), or None when it is outside the
     project: the working directory, where the jail lets the model's code write (the kernel's
     root), and the row's `cwd` when a layer names another."""
@@ -65,19 +68,73 @@ def refused(config: ModelConfig) -> str | None:
     return next((why for root in roots if (why := in_project(path, Path(root))) is not None), None)
 
 
-def known(config: ModelConfig) -> tuple[list[Named], str, str | None]:
-    """Every model the config can name, the models file they were read from, and why that file
-    was not read (`refused`): then only the built-ins and the row's `extra` are named."""
+class _Known(NamedTuple):
+    """What a config can name: `models`, the models file they were read from (`source`), why that
+    file is not read (`why`: it is in the project, or it can't be read or parsed (`unread`);
+    then only the built-ins and the row's `extra` are named), `standing`, the default below any layer
+    (the file's `default`, read only with the file), and `unread`, the error that file gave, if any
+    (its `default` is unknown, so a row no layer names a model for has no model: `resolution`)."""
+
+    models: list[Named]
+    source: str
+    why: str | None
+    standing: Intended
+    unread: ModelsError | None
+
+
+def known(config: ModelConfig) -> _Known:
+    """Every model the config can name, with where they came from (`_Known`). A models file that
+    can't be read or is not TOML (or holds a key that is no table) is not an error here: the
+    built-ins stay named, as behind a file refused in the project, so `/model sonnet` always works.
+
+    Raises:
+        ModelsError: the config's own `cwd` is not a directory's name.
+    """
     path = models_file(config.models, environ())
-    why = refused(config)
-    text = None if why is not None else read_models(path)
-    return combined(parsed(text, str(path)), str(path), config.extra), str(path), why
+    why = _refused(config)
+    unread: ModelsError | None = None
+    try:
+        file = parsed(None if why is not None else read_models(path), str(path))
+    except ModelsError as error:
+        unread, file = error, parsed(None, str(path))
+        why = (
+            "only the built-in models and the model row's `extra` are offered until the models file is "
+            f"fixed: {error.message}"
+        )
+    return _Known(
+        combined(file.models, str(path), config.extra), str(path), why, standing(file.default), unread
+    )
+
+
+def resolution(config: ModelConfig) -> tuple[object, Named | ModelsError]:
+    """The name the config chooses (as written; None when it is the models file's `default`, which
+    can't be read) and the model it means, or why none can be used: the config's `default`, else
+    the models file's, else `sonnet` (`intended`). A models file that can't be read gives no
+    default, so a row no layer names a model for has the file's problem to say, with what to write.
+
+    Raises:
+        ModelsError: the config's own `cwd` is not a directory's name (`known`).
+    """
+    found = known(config)
+    if config.default is None and found.unread is not None:
+        return None, found.unread
+    wanted = intended(config.default, found.standing)
+    try:
+        return wanted.name, chosen(wanted.name, found.models, found.source, found.why, wanted.origin)
+    except ModelsError as error:
+        return wanted.name, error
 
 
 def resolved(config: ModelConfig) -> Named:
-    """The model `config.default` names, or a `ModelsError` saying what to do."""
-    models, source, why = known(config)
-    return chosen(config.default, models, source, why)
+    """The model the config names (`resolution`), or a `ModelsError` saying what to do.
+
+    Raises:
+        ModelsError: no model can be used, and why.
+    """
+    _, outcome = resolution(config)
+    if isinstance(outcome, ModelsError):
+        raise outcome
+    return outcome
 
 
 def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any:

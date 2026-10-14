@@ -23,12 +23,13 @@ started and a short suffix, such as `20261008-225423-07f8`. It holds:
 bh-02 sessions
 ```
 
-This lists the sessions started in the current directory, newest first, one line each: the id,
-when it started, and the model it started on (its stack; an earlier bh-02's session says `claude`
-or `ollama`), then `patched:` and the names of any `--patch` files it started with
-(`patched: echo.toml`). That label is what the session started on, not always the model that
-answered: `/model` switches, a patch can replace the `loop` row, and a resume with other patches
-keeps the label it started with.
+This lists the sessions started in the current directory, newest first, one line each: the id, when
+it started, and the model it started on (its stack; an earlier bh-02's session says `claude` or
+`ollama`, and one whose models file's `default` couldn't be used says `default`: it follows that
+default, and the first message says what is wrong with it), then `patched:` and the names of any
+`--patch` files it started with (`patched: echo.toml`). That label is what the session started on,
+not always the model that answered: `/model` switches, a patch can replace the `loop` row, and a
+resume with other patches keeps the label it started with.
 
 A session whose `meta.json` can't be read (not JSON, a key missing, a value of the wrong type) is
 skipped, never fatal: `bh-02 sessions` names it on stderr, and `--resume` passes over it (and

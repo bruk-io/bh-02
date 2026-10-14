@@ -52,7 +52,14 @@ palette (Ctrl-P) calls each time it opens, so a command registered
 after the push is offered with no reload; choosing one sends `/name` through the input as if
 typed, or puts `/name ` in the composer when it takes arguments; a spec's `choices` (read each
 time it opens too) are entries of their own that run at once (`/model haiku`, one per model).
-`/help` and `/exit` are the ui's own entries. `tui:status` shows the running session's id (from
+`/help` and `/exit` are the ui's own entries. Typing a one-line `/` in the composer
+shows the same entries as a list between the transcript and the composer (decision-0003): read
+once when it opens (a command registered meanwhile shows at the next opening), filtered per key,
+prefix matches then substring matches, at most 8 rows. Up/Down move the highlight, Tab completes
+without running, Enter takes the highlight only when it was moved or the text is a strict prefix
+of its call (otherwise the text is sent as typed), Esc closes it for the line, Ctrl-J and
+Shift+Enter close it. It never takes focus and closes on a question or when the composer loses
+focus. Control characters are stripped from every entry (`frame.palette_entries`) for both views. `tui:status` shows the running session's id (from
 the `session` value, `(resumed)` after it on a resume), and asks
 the `models` value which model the model row names now and on which provider (`models.current()`;
 `config.model_row`, `model`, names the row whose lifecycle it follows): `sonnet (claude-code)`

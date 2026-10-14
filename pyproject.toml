@@ -236,14 +236,18 @@ exclude = [
     "chat_cordis_plugin.chat:converse",
     "agent_cordis_plugin.loop:LoopModel.reply",
     "agent_cordis_plugin.loop:_today",                        # the clock: the date the loop tells with a message
-    # a sub-agent: its state directory made (the session's agents/NAME, 0700), in the call that runs it
-    "agents_cordis_plugin.agents:Agents._claim", "agents_cordis_plugin.agents:Agents.agent",
+    # a sub-agent: its state directory made (the session's agents/NAME, 0700), on a thread, by the
+    # one function that makes it (the name is chosen on the loop, purely); the call that starts
+    # its run (impure through `_run`); a finished background run's failure marked retrieved, so
+    # asyncio does not log one nobody waited for
+    "agents_cordis_plugin.agents:_made", "agents_cordis_plugin.agents:Agents.agent",
+    "agents_cordis_plugin.agents:_retrieved",
     # a sub-agent's run: its reply driven, its events kept for its report and for the usage shown
     # however the run ends (a step limit, Ctrl-C, its retirement)
     "agents_cordis_plugin.agents:Agents._run", "agents_cordis_plugin.agents:_driven",
     "agents_cordis_plugin.agents:_driven.reply",
     # a sub-agent's event log: stamped with the clock and appended to a file, on a thread
-    "agents_cordis_plugin.eventlog:EventLog.write", "agents_cordis_plugin.eventlog:EventLog._append",
+    "agents_cordis_plugin.eventlog:EventLog.write", "agents_cordis_plugin.eventlog:_append",
     # agent types: the type files read from bh-02's config directories
     "agents_cordis_plugin.kinds:type_files", "agents_cordis_plugin.kinds:type_names",
     "agent_cordis_plugin.transcript:MemoryTranscript.append",
@@ -268,17 +272,26 @@ exclude = [
     "models_cordis_plugin.named:read_models", "models_cordis_plugin.named:environ",
     # whether the models file is in the project, which the model can write (then it is not read):
     # the project's root resolved, and the file's links followed, each time before it is read
-    "models_cordis_plugin.named:in_project", "models_cordis_plugin.providers:refused",
+    "models_cordis_plugin.named:in_project", "models_cordis_plugin.providers:_refused",
     # the model row reads the models file when it starts (`known`), and the `models` value reads
     # it again each time it is asked, so a /model or the status bar never sees a stale one
     "models_cordis_plugin.providers:known", "models_cordis_plugin.providers:resolved",
     "models_cordis_plugin.providers:opened",
+    # which model the config means, or why none can be used (`resolved`'s and the status bar's one rule):
+    # it reads the models file through `known`
+    "models_cordis_plugin.providers:resolution",
     # the `models` value: each answer reads the models file afresh (through `known`), or asks
     # whether it is in the project (`problem`); the rest of the catalog (`_config`, `_entry`,
     # `_listed`) stays gated
     "models_cordis_plugin.catalog:Catalog.path", "models_cordis_plugin.catalog:Catalog.listed",
     "models_cordis_plugin.catalog:Catalog.current", "models_cordis_plugin.catalog:Catalog.check",
-    "models_cordis_plugin.catalog:Catalog.problem",
+    "models_cordis_plugin.catalog:Catalog.problem", "models_cordis_plugin.catalog:Catalog.default_problem",
+    # the same value's endpoints (`discover = true`): `endpoints` reads the models file afresh, as
+    # `listed` does, and says what `refresh` kept; `refresh` reads it too, then asks each endpoint for
+    # its models, the one place a server is asked; `_ask` makes one request, reading the key's line of
+    # local.env into its headers; `httpx_get` is the real `Get`, that request over httpx2
+    "models_cordis_plugin.catalog:Catalog.endpoints", "models_cordis_plugin.catalog:Catalog.refresh",
+    "models_cordis_plugin.catalog:_ask", "models_cordis_plugin.openai.discovery:httpx_get",
     # an OpenAI-compatible model: one streamed HTTP call per step, and its key read from local.env
     "models_cordis_plugin.openai.client:authorization",
     "models_cordis_plugin.openai.client:missing_key",  # /model looks for the key's line, reads no value out

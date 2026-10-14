@@ -163,7 +163,7 @@ class ModelField:
         self._loader = loader
         self._row = row
         self._current = current
-        self._model = ("", "")
+        self._model = frame.ModelShown("")
         self._phase: str | None = None  # read from the loader at the first push
         self._shown: Remover | None = None
 

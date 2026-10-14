@@ -31,7 +31,9 @@ _AGENT = re.compile(r"[a-z][a-z0-9_-]{0,31}-[0-9]{1,6}")
 _LOG = "events.jsonl"
 _CAP = 64 * 1024 * 1024  # a log larger than this is not read
 _POLL_S = 0.5
-_UNSAFE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+# C0 and C1 controls (escape sequences among them), and the bidirectional overrides and isolates
+# (U+202A-202E, U+2066-2069), which can make a line read in another order than it is written
+_UNSAFE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 _CLIP = 400  # characters of a call's input or result shown on one line
 
 

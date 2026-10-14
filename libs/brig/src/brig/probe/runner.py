@@ -110,7 +110,7 @@ def run_battery(
     `BatteryVerdict.CONSISTENT`.
 
     A probe still running after `deadline_s` seconds is stopped and recorded
-    (`_unfinished`, SPEC.md §12, decision-187), never raised.
+    (`_unfinished`, SPEC.md §12, decision-187 and decision-188), never raised.
     """
     controls = [probe for probe in battery.probes if probe.shape is ProbeShape.CONTROL]
     others = [probe for probe in battery.probes if probe.shape is not ProbeShape.CONTROL]
@@ -191,15 +191,15 @@ def _run_one(handle: Any, probe: Probe, deadline_s: float) -> ProbeOutcome:
 
 def _unfinished(probe: Probe, deadline_s: float) -> ProbeOutcome:
     """The outcome of a probe that did not finish by its deadline (SPEC.md §12,
-    decision-187): `FAIL` for a `CONTROL` (the action did not succeed), `VACUOUS`
-    for the other shapes (no denial or absence was observed; a connect that never
-    completes is unreachability, not refusal)."""
-    verdict = Verdict.FAIL if probe.shape is ProbeShape.CONTROL else Verdict.VACUOUS
+    decision-188, amending decision-187): `VACUOUS` for every shape, a `CONTROL`
+    included. It was stopped, so it observed nothing: a connect that never
+    completes is unreachability, not refusal, and an unfinished control adds no
+    contradiction (its battery is `VACUOUS` all the same)."""
     return ProbeOutcome(
         probe_name=probe.name,
         axis=probe.axis,
         shape=probe.shape,
-        verdict=verdict,
+        verdict=Verdict.VACUOUS,
         subject="",
         detail=f"the probe did not finish in {deadline_s:g} s and was stopped",
     )

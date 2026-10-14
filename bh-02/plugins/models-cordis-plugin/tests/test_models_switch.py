@@ -31,6 +31,15 @@ class _Models:
         self.now = "haiku"
         self.broken = False
         self.problem: str | None = None  # why the models file is not read (it is in the project)
+        self.default_problem: str | None = None  # why the models file's `default` is refused
+        self.refreshed = 0  # how often /model asked the endpoints
+        self.said: list[dict[str, Any]] = []  # what `endpoints` says
+
+    async def refresh(self) -> None:
+        self.refreshed += 1
+
+    def endpoints(self) -> list[dict[str, Any]]:
+        return self.said
 
     def listed(self) -> list[dict[str, Any]]:
         if self.broken:
@@ -102,6 +111,7 @@ async def test_model_lists_the_models_and_switches_by_name_in_the_session_s_laye
         "    model 'typo' names no provider",
         f"/model NAME switches; add models in {models.path}",
     ]
+    assert models.refreshed == 1  # listing asks the endpoints, once
     assert await run("haiku") == "model: haiku already; nothing to switch"
     assert await run("gpt-9") == "not switched: no model named 'gpt-9'"
     assert await run("typo") == "not switched: model 'typo' names no provider"
@@ -179,6 +189,22 @@ def test_the_model_list_marks_a_shadowed_built_in() -> None:
     ]
 
 
+def test_the_model_list_says_what_each_endpoint_has_to_say_one_line_each_before_the_footer() -> None:
+    listed = [{"name": "sonnet", "provider": "claude-code", "id": "sonnet", "current": True}]
+    endpoints = [
+        {"name": "far", "where": "http://far/v1", "notes": ["no list from http://far/v1/models (gone)"]},
+        {"name": "big", "where": "http://big/v1", "notes": ["5 more not shown", "2 ids not listed"]},
+        {"name": "quiet", "where": "http://quiet/v1", "notes": []},
+    ]
+    assert model_list(listed, "f", None, endpoints).splitlines() == [
+        "● sonnet  claude-code  sonnet",
+        "  far: no list from http://far/v1/models (gone)",
+        "  big: 5 more not shown",
+        "  big: 2 ids not listed",
+        "/model NAME switches; add models in f",
+    ]
+
+
 async def test_the_model_list_says_why_the_models_file_is_not_read_instead_of_where_to_add() -> None:
     """A models file in the project is not read: /model says so where it would say to add models
     there, and still lists the models there are."""
@@ -232,3 +258,16 @@ async def test_the_switch_row_registers_model_and_queues_the_reload_in_jobs(tmp_
     assert told.startswith("the model switch's reload failed (RuntimeError: the layer does not parse)")
     await rt.shutdown()
     assert commands.runs == {}
+
+
+async def test_the_model_list_says_the_models_file_s_default_is_refused_and_why(tmp_path: Path) -> None:
+    """TASK-0093: a default the row can't use is a line of /model's list (never an exception), above
+    where to add models, so the person who looks there sees why a new session's model can't run."""
+    models = _Models()
+    models.default_problem = "the default in the models file /c/models.toml is 5, not a model's name"
+    switch = Switch(_Loader(), models, SwitchConfig(layer=str(tmp_path / "s.toml")), _Jobs(), lambda *a: None)
+    lines = str(await switch.run("")).splitlines()
+    assert lines[-2] == f"  the models file's default is refused: {models.default_problem}"
+    assert lines[-1] == f"/model NAME switches; add models in {models.path}"
+    models.default_problem = None
+    assert "refused" not in str(await switch.run(""))

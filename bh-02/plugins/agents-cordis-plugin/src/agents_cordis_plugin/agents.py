@@ -28,7 +28,7 @@ import dataclasses
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
 
 from agents_cordis_plugin.child import (
     ChildRow,
@@ -37,6 +37,7 @@ from agents_cordis_plugin.child import (
     Steps,
     agents_dir,
     asked_why,
+    background_flag,
     child_rows,
     denied,
     doing,
@@ -61,6 +62,7 @@ from agents_cordis_plugin.child import (
     stepped,
     stop_note,
     stopped,
+    timeout_seconds,
     unknown_type,
     usage_event,
     waited,
@@ -91,6 +93,9 @@ __all__ = [
 ]
 
 type Json = Mapping[str, Any]
+
+# How long the agents row unloading waits for the runs of its retired children to say so.
+_UNLOAD_WAIT: Final = 5.0
 
 AGENT: Json = {
     "name": "agent",
@@ -471,7 +476,11 @@ class Agents:
 
         Raises:
             ValueError: the layer's `rows` gives a child the agents row (`child.child_rows`).
+            OSError: the child's state directory can't be made.
         """
+        background = background_flag(input.get("background", False))
+        if isinstance(background, str):  # not a boolean: said before anything is read, asked or spent
+            return {"content": background}
         types = await self._types()
         asked = str(input.get("type", ""))
         kind = types.get(asked)
@@ -492,28 +501,34 @@ class Agents:
             return {"content": denied(kind.name, why)}
         if model is not None:
             kind = dataclasses.replace(kind, model=str(model))
-        name, place = self._claim(kind.name, agents_dir(entries, self._config.transcript_row))
-        hand = Hand()
-        rows = child_rows(
-            entries,
-            name=name,
-            kind=kind,
-            kept=self._config.rows,
-            tools=self._config.tools,
-            transcript_row=self._config.transcript_row,
-            model_row=self._config.model_row,
-            place=place,
-            hand=hand,
-        )
+        # a start is counted before anything waits (the directory is made on a thread), so no two
+        # calls can pass the budget's check together; one that never began is given back
         self._started += 1
-        background = input.get("background") is True
+        hand = Hand()
+        try:
+            name, place = await self._claim(kind.name, agents_dir(entries, self._config.transcript_row))
+            rows = child_rows(
+                entries,
+                name=name,
+                kind=kind,
+                kept=self._config.rows,
+                tools=self._config.tools,
+                transcript_row=self._config.transcript_row,
+                model_row=self._config.model_row,
+                place=place,
+                hand=hand,
+            )
+        except ValueError, OSError:
+            self._started -= 1
+            raise
         live = self._live[name] = _Live(name, kind.name, background, place, hand, self._changed)
         self._places[name] = place
         self._changed()
         run = self._run(live, kind, str(input.get("prompt", "")), rows)
         if not background:
             return {"content": await run}
-        self._background[name] = asyncio.ensure_future(run)
+        self._background[name] = task = asyncio.ensure_future(run)
+        task.add_done_callback(_retrieved)  # a run nobody waits for does not leave its failure unretrieved
         return {
             "content": f"agent {name} ({kind.name}) started in the background; "
             f"agent_wait(names=[{name!r}]) returns its report"
@@ -526,9 +541,11 @@ class Agents:
         names = [names] if isinstance(names, str) else [str(n) for n in names]
         runs = {self._background[n]: n for n in dict.fromkeys(names) if n in self._background}
         finished: list[str] = [n for run, n in runs.items() if run.done()]
-        timeout = input.get("timeout")
+        timeout = timeout_seconds(input.get("timeout"))
+        if isinstance(timeout, str):  # no number: said, with nothing waited for
+            return {"content": timeout}
         with contextlib.suppress(TimeoutError):
-            async with asyncio.timeout(float(timeout) if timeout is not None else None):
+            async with asyncio.timeout(timeout):
                 pending = {run for run in runs if not run.done()}
                 while pending:
                     done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
@@ -575,10 +592,13 @@ class Agents:
             return self._watch_command(name)
         if name and name not in self._names():
             return not_running(name, self._names())
-        names = [name] if name else self._names()
-        for each in names:
-            await self._live[each].stop()
-        return stopped(names, self._names())
+        ended: list[str] = []
+        for each in [name] if name else self._names():
+            # a child that ended on its own while an earlier stop was awaited is not there to stop
+            if (live := self._live.get(each)) is not None and not live.stopped:
+                await live.stop()
+                ended.append(each)
+        return stopped(ended, self._names())
 
     def _watch_command(self, name: str) -> str:
         """`/agents watch NAME`: the command that follows the child's event log in another
@@ -606,8 +626,12 @@ class Agents:
         return self._cancel
 
     async def _cancel(self) -> None:
+        """The row unloading: its children are retired by now (each mount's undo), so the runs
+        that were waiting on them end with a note of their own. They get `_UNLOAD_WAIT` seconds
+        for it (fixed: a note is a few awaits, and a run stuck beyond that is not worth holding
+        the session's end for), and any still running after are cancelled."""
         if runs := [run for run in self._background.values() if not run.done()]:
-            await asyncio.wait(runs, timeout=5)  # their children are retired by now
+            await asyncio.wait(runs, timeout=_UNLOAD_WAIT)
         for run in self._background.values():
             run.cancel()
 
@@ -685,25 +709,44 @@ class Agents:
         async with self._slots:
             yield
 
-    def _claim(self, kind: str, base: PurePath | None) -> tuple[str, PurePath | None]:
+    async def _claim(self, kind: str, base: PurePath | None) -> tuple[str, PurePath | None]:
         """A name no child of this row or of the session had (a resumed session's children
-        keep their directories), and its state directory, made 0700 (None in memory)."""
+        keep their directories), and its state directory, made 0700 on a thread (None in memory).
+        A name is taken before the directory is waited for, so no two calls are given one.
+
+        Raises:
+            OSError: the directory can't be made.
+        """
         while True:
             name = next_name(kind, self._taken)
             self._taken.append(name)
             if base is None:
                 return name, None
-            Path(base).mkdir(mode=0o700, parents=True, exist_ok=True)
-            try:
-                (place := Path(base) / name).mkdir(mode=0o700)
-            except FileExistsError:
-                continue
-            return name, place
+            if (place := await asyncio.to_thread(_made, Path(base), name)) is not None:
+                return name, place
+
+
+def _made(base: Path, name: str) -> Path | None:
+    """The child `name`'s state directory beneath `base` (the session's agents directory, made
+    too when it is not there), 0700; None when a child of that name had one already."""
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        (place := base / name).mkdir(mode=0o700)
+    except FileExistsError:
+        return None
+    return place
 
 
 async def _shown(*events: Json) -> AsyncIterator[Json]:
     for event in events:
         yield event
+
+
+def _retrieved(run: asyncio.Task[str]) -> None:
+    """Mark a finished run's failure as seen (asyncio logs one nobody retrieved when the task is
+    collected): `_outcome` and the event log tell it, to whoever waits and to whoever watches."""
+    if not run.cancelled():
+        run.exception()
 
 
 def _outcome(name: str, run: asyncio.Task[str]) -> str:

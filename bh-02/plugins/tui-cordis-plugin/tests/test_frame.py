@@ -41,18 +41,30 @@ class _Entry:
 
 
 def test_the_model_is_what_the_models_value_says_the_model_row_names() -> None:
-    assert frame.model_text({"name": "qwen3", "provider": "openai"}) == ("qwen3", "openai")
-    assert frame.model_text({"name": "typo", "provider": ""}) == ("typo", "")  # no model there is
-    assert frame.model_text({}) == ("none", "")
-    assert frame.model_forms(("qwen3", "openai"), "up") == ("qwen3 (openai)", "qwen3")
-    assert frame.model_forms(("typo", ""), "up") == ("typo",)
+    assert frame.model_text({"name": "qwen3", "provider": "openai"}) == frame.ModelShown("qwen3", "openai")
+    assert frame.model_text({"name": "other:fake", "provider": ""}) == frame.ModelShown("other:fake")
+    assert frame.model_text({}) == frame.ModelShown("none")  # never blank
+    assert frame.model_forms(frame.ModelShown("qwen3", "openai"), "up") == ("qwen3 (openai)", "qwen3")
+    assert frame.model_forms(frame.ModelShown("other:fake"), "up") == ("other:fake",)
+
+
+def test_a_model_the_row_can_not_use_is_said_unusable_never_a_bare_name() -> None:
+    """TASK-0093: the `models` value's `unusable` (a name that names no model, a table with a problem, a
+    default that is no name) is shown, in the wide form and the narrow one, whatever phase the row is in."""
+    typo = frame.model_text({"name": "typo", "provider": "", "unusable": "no model named 'typo'"})
+    assert typo == frame.ModelShown("typo", "", True)
+    assert frame.model_forms(typo, "up") == ("typo (unusable)", "typo ✗")
+    assert frame.model_forms(typo, "starting") == ("typo (unusable, starting…)", "typo…")
+    assert frame.model_forms(typo, "failed") == ("typo (unusable, failed)", "typo ✗")
+    named = frame.model_text({"name": "default", "provider": "", "unusable": "the file's default is 5"})
+    assert frame.model_forms(named, "up")[0] == "default (unusable)"
 
 
 def test_the_model_field_says_starting_from_the_row_s_unloading_until_it_is_active() -> None:
     """A `/model` replacement: unloading, the old fiber inactive, the new one's reload, and
     (for the Claude stack's `/clear`) a second reload as the loop comes back, then active."""
     phase = frame.phase_of("active")
-    sonnet = ("sonnet", "claude-code")
+    sonnet = frame.ModelShown("sonnet", "claude-code")
     assert frame.model_forms(sonnet, phase) == ("sonnet (claude-code)", "sonnet")
     seen = []
     for kind in ("unloading", "unbind", "inactive", "reload", "unloading", "reload", "bind", "active"):
@@ -64,7 +76,7 @@ def test_the_model_field_says_starting_from_the_row_s_unloading_until_it_is_acti
         "sonnet (claude-code, failed)",
         "sonnet ✗",
     )
-    assert frame.model_forms(("typo", ""), "starting") == ("typo (starting…)", "typo…")
+    assert frame.model_forms(frame.ModelShown("typo"), "starting") == ("typo (starting…)", "typo…")
 
 
 def test_the_model_field_stops_saying_starting_once_the_row_is_down_for_good() -> None:
@@ -161,3 +173,70 @@ def test_a_turn_stopped_before_its_output_was_counted_makes_the_totals_lower_bou
     assert frame.usage_forms(stopped) == ("1,800 in · 40+ out · $0.0022+", "1.8k/40+ $0.00+")
     carried = frame.add_usage(frame.Usage(), {"type": "carried", "input_tokens": 5, "uncounted": 2})
     assert carried.uncounted == 2  # a trimmed history keeps it
+
+
+_MENU = [
+    frame.PaletteEntry("/rows", "the rows"),
+    frame.PaletteEntry("/model", "switch", "[NAME]"),
+    frame.PaletteEntry("/model haiku", "fast"),
+    frame.PaletteEntry("/clear", "start afresh"),
+]
+
+
+def _calls(entries: Any) -> list[str]:
+    return [e.call for e in entries]
+
+
+def test_completions_put_prefix_matches_before_substring_matches_in_the_palette_s_order() -> None:
+    assert _calls(frame.completions(_MENU, "/mo")) == ["/model", "/model haiku"]
+    assert _calls(frame.completions(_MENU, "/r")) == ["/rows", "/clear"]  # prefix, then contained
+    assert _calls(frame.completions(_MENU, "/")) == _calls(_MENU)  # an empty / offers everything
+
+
+def test_completions_substring_matches_follow_prefix_matches() -> None:
+    menu = [frame.PaletteEntry("/clear", ""), frame.PaletteEntry("/rows", ""), frame.PaletteEntry("/ea", "")]
+    assert _calls(frame.completions(menu, "/ea")) == ["/ea", "/clear"]  # the prefix first, then the contained
+    assert _calls(frame.completions(menu, "/ROW")) == ["/rows"]
+    assert _calls(frame.completions(menu, "ea")) == []  # not a / line
+
+
+def test_completions_ignore_case_and_complete_arguments_through_choices() -> None:
+    assert _calls(frame.completions(_MENU, "/MO")) == ["/model", "/model haiku"]
+    assert _calls(frame.completions(_MENU, "/model h")) == ["/model haiku"]
+    assert _calls(frame.completions(_MENU, "/model ")) == ["/model haiku"]  # a trailing space is kept
+
+
+def test_completions_are_for_a_one_line_slash_line_only() -> None:
+    assert frame.completions(_MENU, "mo") == ()
+    assert frame.completions(_MENU, "") == ()
+    assert _calls(frame.completions(_MENU, "  /mo")) == ["/model", "/model haiku"]  # a leading space
+    assert frame.completions(_MENU, "/mo\nmore") == ()  # more than one line
+    assert frame.completions(_MENU, "/mo\n") == ()  # the newline Ctrl-J inserts is still a newline
+    assert not frame.slash_line("hello /mo") and frame.slash_line(" /mo ")
+    assert not frame.slash_line("/mo\n") and not frame.slash_line("\n/mo")
+
+
+def test_enter_takes_the_entry_only_when_it_is_picked_or_the_text_is_a_strict_prefix() -> None:
+    help_ = frame.PaletteEntry("/help", "")
+    assert frame.enter_takes("/he", help_, False)
+    assert not frame.enter_takes("/help", help_, False)  # exact: sent as typed
+    assert not frame.enter_takes("/model ", frame.PaletteEntry("/model haiku", ""), False)
+    assert not frame.enter_takes("/model h", frame.PaletteEntry("/model haiku", ""), False)
+    assert frame.enter_takes("/model h", frame.PaletteEntry("/model haiku", ""), True)  # moved
+    assert not frame.enter_takes("/x", None, True)
+
+
+def test_the_palette_strips_control_characters_from_every_entry() -> None:
+    specs = [
+        {
+            "name": "bad\x1b[2Jname",
+            "help": "help\x07 \x00with\x9b \x7fcontrols\n",
+            "usage": "[\x1bARG]",
+            "choices": lambda: [{"args": "c\x1b]0;x\x07", "help": "h\x85i"}],
+        }
+    ]
+    entries = frame.palette_entries(specs)
+    assert [(e.call, e.help, e.usage) for e in entries[:2]] == [
+        ("/bad[2Jname", "help with controls", "[ARG]"),
+        ("/bad[2Jname c]0;x", "hi", ""),
+    ]

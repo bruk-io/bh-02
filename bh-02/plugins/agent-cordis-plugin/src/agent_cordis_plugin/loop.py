@@ -359,17 +359,22 @@ def malformed(spec: Json, input: object) -> str | None:
     return None
 
 
+_SHOW_KEYS = ("title", "lines", "language")  # the only keys a tool's `show` may give
+
+
 def shown(tool: Tool, name: str, input: Json) -> dict[str, Any]:
-    """How a call is put to the person (`approval`): the tool's own `show(input)` (`title`,
-    `lines`, `language`), else the loop's way, the tool's name and its input as JSON. A `show`
-    that fails, or answers with something other than a mapping, leaves the loop's way."""
+    """How a call is put to the person (`approval`): the tool's own `show(input)`, else the loop's
+    way, the tool's name and its input as JSON. A show may give only `title`, `lines` and
+    `language` (CONTRACTS.md: request); any other key it returns is dropped, so a show never sets
+    the request's `name`, `input`, `runs` or `agent`, which are the loop's and the asker's. A
+    `show` that fails, or answers with something other than a mapping, leaves the loop's way."""
     title = {"title": f"Call {name} with this input?"}
     try:
         own = tool.show(input) if tool.show is not None else None
     except Exception:  # a tool's own way of showing a call failing must not cost the person the question
         own = None
     if isinstance(own, Mapping):
-        return title | dict(own)
+        return title | {key: own[key] for key in _SHOW_KEYS if key in own}
     lines = json.dumps(input, indent=2, ensure_ascii=False, default=str).splitlines()
     return title | {"lines": lines, "language": "json"}
 

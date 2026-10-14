@@ -23,16 +23,17 @@ import json
 import os
 import secrets
 import shutil
+import tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, assert_never
 
 from bh_02.outdated import translated
 from cordis import Row
 from cordis.composition import format_layer
 from cordis.loader import read_layer
-from host_paths import config_home, state_home
+from host_paths import config_home, passes, roots, state_home
 
 __all__ = [
     "Broken",
@@ -64,7 +65,12 @@ _MODEL_ROW = "model"  # the row whose `default` (the model's name) /model and --
 _CLAUDE_STATE = (
     "claude"  # the claude-code provider's own state: Claude Code's config, its session, its stderr
 )
-_DEFAULT_MODEL = "sonnet"  # what the model row names when no layer says (models:model's default)
+# What a new session starts on when neither `--model` nor the models file's `default` says: the
+# model row's own default (models:model), which `create` writes into the session's layer.
+_DEFAULT_MODEL = "sonnet"
+# The `stack` of a session whose layer records no model, because the models file's default can't be
+# read: it follows that default, and the model row says what is wrong with it.
+_UNPINNED = "default"
 # What an earlier bh-02 called the model row, and its Ollama stack (`--ollama`, gone): a
 # session started on that stack had the Ollama row from a shipped layer, not its own.
 _OLD_MODEL_ROW = "completion"
@@ -236,6 +242,40 @@ def models_file() -> Path:
     return config_home(os.environ, Path.home()) / "bh-02" / "models.toml"
 
 
+def _pinned(file: str | OSError | None) -> str | None:
+    """The model a new session's layer records from the models file (`file`: its text; None when there
+    is none, or it is not read; the error when it can't be read): the file's `default` when that is a
+    name (a non-empty string; the model row says so if it names no model), else `sonnet`. None, no
+    model recorded, when the model row has something to say about the file that a recorded `sonnet`
+    would hide: the file can't be read, is not TOML, holds a key that is no table, or its `default`
+    is no name (TASK-0087: the row stays `Unusable` and says what to write). The same rule as
+    `models_cordis_plugin.named.parsed` and `standing`, which the app test of the two sides holds
+    them to: a `default` that is a table is a model named `default`, not the setting."""
+    match file:
+        case None:
+            return _DEFAULT_MODEL
+        case OSError():
+            return None
+        case str():
+            pass
+        case _ as unreachable:
+            assert_never(unreachable)
+    try:
+        data = tomllib.loads(file)
+    except tomllib.TOMLDecodeError:
+        return None
+    declared: object = None
+    for name, value in data.items():
+        if isinstance(value, dict):
+            continue  # a model's table
+        if name != "default":
+            return None  # a key that is no table
+        declared = value
+    if declared is None:
+        return _DEFAULT_MODEL
+    return declared if isinstance(declared, str) and declared else None
+
+
 def default_state_root() -> Path:
     """`~/.local/state/bh-02/sessions`: where sessions live when `XDG_STATE_HOME` is not set,
     so a run with it set still keeps a jailed input out of a default run's sessions."""
@@ -245,11 +285,29 @@ def default_state_root() -> Path:
 def create(root: Path, cwd: str, *, model: str | None, no_jail: bool, patches: Sequence[str] = ()) -> Session:
     """A new session directory, its metadata and its layer, written before anything boots.
 
-    Its `stack` is the model it was started on (`--model`'s name, else the default), and
+    The model it starts on is `--model`'s name, else the models file's `default` when that is a
+    name, else `sonnet` (`_pinned`); the layer records it (as `--model` does), so a resume keeps it
+    whatever the file says later. When the file can't be read, is not TOML or has a `default` that is
+    no name, the layer records none and the model row says what is wrong with the file; the session's
+    `stack` is then `default`. Otherwise its `stack` is that model, and
     `patches` the names of the `--patch` files it started with: the listing shows both, since
     a patch can replace the model row. A resume with other patches keeps these.
     """
-    stack = model or _DEFAULT_MODEL
+    file: str | OSError | None = None
+    # As the model row reads the file, it is trusted only outside the project, where the model's
+    # code can write: a file in it, by its path or the links on the way, gives no default. The roots
+    # are the row's: the working directory, and the session's directory, which is the same one in a
+    # real run. (The row's own `cwd` is only a layer's, and a layer that sets the model row replaces
+    # the one written here whole: `pins_model`.)
+    if not model and not any(passes(models_file(), roots(Path(where))) for where in {cwd, os.getcwd()}):
+        try:
+            file = models_file().read_text(encoding="utf-8")
+        except FileNotFoundError:
+            pass  # no file: no user models, no default
+        except OSError as error:
+            file = error  # the model row says it can't read the file
+    pinned = model or _pinned(file)
+    stack = pinned or _UNPINNED
     now = datetime.datetime.now()
     sid = f"{now:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
     # To the microsecond, so two sessions started in the same second still list newest first.
@@ -259,7 +317,7 @@ def create(root: Path, cwd: str, *, model: str | None, no_jail: bool, patches: S
     if patches:
         meta["patches"] = list(patches)
     (session.dir / _META).write_text(json.dumps(meta, indent=2) + "\n")
-    rows = session_layer(session.dir, model=model, no_jail=no_jail)
+    rows = session_layer(session.dir, model=pinned, no_jail=no_jail)
     session.layer.write_text(format_layer(rows, _HEADER))
     return session
 

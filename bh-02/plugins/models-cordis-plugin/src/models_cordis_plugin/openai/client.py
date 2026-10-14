@@ -54,7 +54,8 @@ class _Headers(dict[str, str]):
 def authorization(named: Named, env_file: str | None, searched: Sequence[str] = ()) -> dict[str, str]:
     """The request's headers: JSON, and `Authorization: Bearer <key>` when the model names a
     key, read from local.env now (`env_file`, else the first file of `searched`). A key named
-    but not there is a `ModelsError` saying where to put it."""
+    but not there, or there as something a header can't carry (not printable ASCII), is a
+    `ModelsError` saying where to look; never the key itself."""
     headers = _Headers({"Content-Type": "application/json", "Accept": "text/event-stream"})
     if named.table.get("key") is None:
         return headers
@@ -78,14 +79,33 @@ def authorization(named: Named, env_file: str | None, searched: Sequence[str] = 
         raise ModelsError(
             "authentication_failed", _no_key_line(named.name, key, path) + " then send the message again."
         )
+    if not _carried(headers["Authorization"]):
+        raise ModelsError("authentication_failed", _unsendable_line(named.name, key, path))
     return headers
 
 
+def _carried(value: str) -> bool:
+    """Whether a header's `value` can go out as it is: printable ASCII (httpx2 raises
+    `UnicodeEncodeError` for a character outside it, and a control character is no header's)."""
+    return value.isascii() and value.isprintable()
+
+
+def _place(path: Path | None) -> str:
+    return str(path) if path is not None else f"{ENV_FILE} at the repository root"
+
+
 def _no_key_line(name: str, key: str, path: Path | None) -> str:
-    where = str(path) if path is not None else f"{ENV_FILE} at the repository root"
     return (
-        f"model {name!r} names the key {key}, which is not a line of {where}. Add "
+        f"model {name!r} names the key {key}, which is not a line of {_place(path)}. Add "
         f"`{key}=<the key>` there (keep that file out of git),"
+    )
+
+
+def _unsendable_line(name: str, key: str, path: Path | None) -> str:
+    """Said without the key: it is what can't go in a header."""
+    return (
+        f"model {name!r} names the key {key}, whose line in {_place(path)} holds a character a request "
+        "header can't carry (a key is printable ASCII). Fix that line, then try again."
     )
 
 

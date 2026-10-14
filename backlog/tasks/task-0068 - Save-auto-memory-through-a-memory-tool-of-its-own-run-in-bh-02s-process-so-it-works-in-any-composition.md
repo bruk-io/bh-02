@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-10 03:31'
-updated_date: '2026-10-11 15:30'
+updated_date: '2026-10-14 15:03'
 labels:
   - memory
   - runner
@@ -49,4 +49,6 @@ Decided with the owner (2026-10-10): the tool runs in bh-02's process, not in th
 
 <!-- SECTION:NOTES:BEGIN -->
 Sized size-5 (2026-10-11): a host-side tool, an approval-rule case whose shape is still open, a no-link writer in host_paths, and docs in five places.
+
+From TASK-0069's close review (2026-10-14), for when this task rewrites auto_section: bring the README and docs/bh-02/using/memory.md bullets level with the prompt ('read the code or git log for the current state'; 'split or summarise one that outgrows that'); say the 'don't save what CLAUDE.md, the code or git history records' rule in one place; trim where the review suggests (absolute dates, the file/function/flag sentence, 'later' in the description sentence); give the 200-line / 4 KB cap one spelling. Whether the tool refuses an oversized memory is DRAFT-0005, deferred.
 <!-- SECTION:NOTES:END -->

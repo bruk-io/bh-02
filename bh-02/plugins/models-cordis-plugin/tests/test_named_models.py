@@ -54,7 +54,7 @@ def test_the_built_ins_are_claude_through_claude_code_by_their_aliases() -> None
 
 def test_the_file_adds_models_a_user_s_shadows_a_built_in_and_extra_wins_over_the_file() -> None:
     models = combined(
-        parsed(_FILE, "/c/models.toml"),
+        parsed(_FILE, "/c/models.toml").models,
         "/c/models.toml",
         {"llama": {"provider": "openai", "id": "qwen3", "base_url": "http://gpu:11434/v1"}},
     )
@@ -130,7 +130,7 @@ def test_a_name_that_is_no_model_lists_the_models_and_says_how_to_add_it() -> No
 
 
 def test_a_models_file_that_is_not_toml_or_not_tables_is_named() -> None:
-    assert parsed(None, "f") == {}  # no file: no user models
+    assert parsed(None, "f").models == {}  # no file: no user models
     with pytest.raises(ModelsError, match="the models file /c/m.toml is not TOML"):
         parsed("[llama\n", "/c/m.toml")
     with pytest.raises(ModelsError, match="'llama' is not a table"):
@@ -176,12 +176,16 @@ def test_the_models_value_reads_the_model_row_and_the_file_fresh(tmp_path: Path)
     loader.now = [_Entry("model", None, {"models": str(models), "default": "llama"})]  # /model llama
     assert values.current() == {"name": "llama", "provider": "openai"}
     loader.now = [_Entry("model", None, {"models": str(models), "default": "gone"})]
-    assert values.current() == {"name": "gone", "provider": ""}  # names no model there is
+    names_none = values.current()  # names no model there is: unusable, said
+    assert (names_none["name"], names_none["provider"]) == ("gone", "")
+    assert names_none["unusable"].startswith("no model named 'gone'")
     models.write_text("[broken\n")
-    assert values.current() == {"name": "gone", "provider": ""}  # never raises: the status bar reads it
+    broken = values.current()  # never raises: the status bar reads it
+    assert (broken["name"], broken["provider"]) == ("gone", "") and "is not TOML" in broken["unusable"]
     assert "is not TOML" in str(values.check("llama"))
-    with pytest.raises(ModelsError):
-        values.listed()  # /model says what is wrong with the file
+    # not a raise since TASK-0093: the built-ins stay listed and `problem` is what /model says of the file
+    assert [m["name"] for m in values.listed()] == ["sonnet", "opus", "haiku"]
+    assert values.problem is not None and "is not TOML" in values.problem
 
 
 def test_the_models_value_over_another_component_says_it_has_no_models() -> None:
@@ -202,6 +206,28 @@ def test_a_key_that_holds_a_value_not_a_line_name_is_refused_without_quoting_it(
     with pytest.raises(ModelsError) as sent:
         authorization(named, None)
     assert sent.value.kind == "model_config" and secret not in sent.value.message
+
+
+@pytest.mark.parametrize(
+    "secret", ["sk-caf" + chr(0xE9), "sk-" + chr(0x1F999), "sk-tab\there", "sk-bell\x07"]
+)
+def test_a_key_line_a_header_can_not_carry_is_a_models_error_that_never_quotes_it(
+    tmp_path: Path, secret: str
+) -> None:
+    """TASK-0095: not printable ASCII is no header's: said as a `ModelsError` naming the line, not the
+    `UnicodeEncodeError` httpx2 raises (which `/model`'s discovery used to let out of `refresh`)."""
+    env = tmp_path / "local.env"
+    env.write_text(f"KEYED_KEY={secret}\n", encoding="utf-8")
+    table = {"provider": "openai", "id": "x", "base_url": "https://h/v1", "key": "KEYED_KEY"}
+    (named,) = [m for m in combined({"keyed": table}, "/c/models.toml", {}) if m.name == "keyed"]
+    with pytest.raises(ModelsError) as raised:
+        authorization(named, str(env))
+    assert raised.value.kind == "authentication_failed"
+    assert raised.value.message == (
+        f"model 'keyed' names the key KEYED_KEY, whose line in {env} holds a character a request header "
+        "can't carry (a key is printable ASCII). Fix that line, then try again."
+    )
+    assert secret not in raised.value.message
 
 
 def test_a_malformed_base_url_in_the_file_is_one_model_s_problem_not_the_catalog_s(tmp_path: Path) -> None:

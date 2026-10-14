@@ -526,6 +526,38 @@ def test_the_palette_runs_a_command_and_the_status_bar_follows_the_model(launch:
     assert app.exit_code() == 0
 
 
+def test_a_models_file_default_that_is_no_name_shows_in_the_status_bar_and_the_first_message(
+    tmp_path: Path,
+) -> None:
+    """TASK-0093: a new session under `default = 5` records no model, so the model row says what is wrong
+    with the file's default (TASK-0087's `Unusable`) instead of a pinned sonnet hiding it: the status bar
+    names it as unusable, never blank, the first message gets the error with what to write, and
+    `/model fake` (a model that is fine) gets the person out."""
+    work, state, config = tmp_path / "work", tmp_path / "state", tmp_path / "config"
+    work.mkdir()
+    _models_file(config)
+    file = config / "bh-02" / "models.toml"
+    file.write_text("default = 5\n" + file.read_text())
+    app = Launched(["--no-jail"], work, state, config=config)
+    try:
+        ready = app.wait_for(_READY, 60)
+        app.wait_for("model: default (unusable)", after=0)  # not blank, and not a model that looks fine
+        app.type("hello")
+        told = app.wait_for(
+            "remove it", 20, after=ready
+        )  # `... give it one, like `default = "sonnet"`, or remove it`
+        assert "not a model's name" in app.text()[ready:told].replace("\n", " ")
+        app.type("/model fake")
+        app.wait_for("model: fake", 20, after=told)
+        app.settle(1.0)
+        app.type("again")
+        app.wait_for("[fake] echo: AGAIN", 20, after=told)
+        app.press(b"\x11")
+        assert app.exit_code() == 0
+    finally:
+        app.close()
+
+
 def test_a_patch_that_cannot_be_read_is_one_line_not_a_traceback(launch: Launch, tmp_path: Path) -> None:
     broken = tmp_path / "broken.toml"
     broken.write_text("[[plugin]\n")
@@ -853,7 +885,8 @@ def test_a_patch_that_sets_the_model_row_s_config_keeps_its_model_and_says_so(tm
         app.wait_for("model: fake-2", after=0)
         app.type("/model fake")
         said = app.wait_for("not switched:", 10, after=ready)
-        app.wait_for("row's config", 10, after=said)
+        # one word of the message: a long patch path wraps its line, which can split a phrase
+        app.wait_for("replaces", 10, after=said)
         app.type("hello")
         app.wait_for("[fake-2] echo: HELLO", 20, after=said)  # still the patch's model
         app.press(b"\x11")
