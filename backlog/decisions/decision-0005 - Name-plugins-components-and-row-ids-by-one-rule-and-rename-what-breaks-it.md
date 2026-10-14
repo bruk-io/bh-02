@@ -136,7 +136,7 @@ Counts are `grep -l` files outside `backlog/`, the generated `site/`, `.pypeeker
 and `__pycache__/`; a file that
 needs two renames is counted in each.
 
-| # | Old | New | Touches | How a person's layer or session translates it |
+| # | Old | New | Touches | How a person's layer or session translates it (superseded: nothing translates, see Amended) |
 |---|---|---|---|---|
 | 1 | plugin `agents`: package `agents_cordis_plugin`, member `agents-cordis-plugin`, entry point `agents` | `subagents`: `subagents_cordis_plugin`, `subagents-cordis-plugin`, `subagents` | package name: 12 files; member name: 9; together with rows 2 to 5, 11 files outside the member (`bh-02/CONTRACTS.md`, `GLOSSARY.md`, `app/README.md`, `app/pyproject.toml`, `bh-02.toml`, `watching.py`, `app/tests/{conftest,test_python_repl,test_watching}.py`, `docs/bh-02/using/commands.md`, root `pyproject.toml`), `uv.lock`, and the word "agents plugin" in prose (`bh_02/testing.py`); the member's own 14 files move | the entry point is the first half of every `use`, so rows 2 to 4 carry it |
 | 2 | `agents:agents` | `subagents:parent` | 10 files | `_RENAMED_USES["agents:agents"]` |
