@@ -28,7 +28,8 @@ default ([below](#choosing-the-default)).
 
 A switch is written into the session's own layer, so a resumed session keeps the model you last
 chose. The status bar shows the model and its provider, `model: sonnet (claude-code)`, and
-`starting…` while a new one comes up.
+`starting…` while a new one comes up; a model that can't be used shows `(unusable)` instead of
+looking like one that runs.
 
 ## Choosing the default
 
@@ -49,11 +50,19 @@ does, so it keeps that model when you resume it, whatever the file says later; c
 and only new sessions move. What a new session starts on, strongest first: `--model`, the
 models file's `default`, and `sonnet`. `/model` still switches mid-session.
 
-The default must be a model's name. One that names no model is said in the conversation with
-what to write, and `/model NAME` switches to a usable one; one that is not a name at all (a
-number, say) is passed over when a session starts, and the session starts on `sonnet`. Like the
-models themselves, the default is read only from the models file in your config directory,
-never from one in the project.
+The default must be a model's name. A default bh-02 can't use never quietly becomes a Claude
+model, since the default chooses what you spend: the session starts, the model row says what to
+write at your first message (a default that is not a name, a number say, or names no model: `no
+model named 'gone', the default in the models file ...`), the status bar says `model: default
+(unusable)` or `gone (unusable)`, and `/model` lists the models and a line saying the default is
+refused and why. `/model NAME` of a model that works switches, and so does `--model`; such a
+session is listed by `bh-02 sessions` as started on `default`. Like the models themselves, the
+default is read only from the models file in your config directory, never from one in the
+project.
+
+If the models file itself can't be read (not TOML, a key that is no table, a path that is no
+file), the built-in models still work: `/model sonnet` switches, the first message says what is
+wrong with the file, and `/model` ends with that problem in place of where to add models.
 
 ## Adding your own: the models file
 

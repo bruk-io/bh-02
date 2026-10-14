@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -111,10 +112,36 @@ async def test_the_model_flag_naming_a_model_of_a_broken_endpoint_starts_the_ses
 def test_a_new_session_with_no_file_default_records_sonnet(_own_config: Path, tmp_path: Path) -> None:
     made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
     assert _recorded(made) == "sonnet" and made.stack == "sonnet"
-    _models_default(_own_config, "default = [\n")  # not TOML, or not a name: the model row says so
-    assert _recorded(create(tmp_path / "s", "/work/a", model=None, no_jail=False)) == "sonnet"
-    _models_default(_own_config, "default = 5\n")
-    assert _recorded(create(tmp_path / "s", "/work/a", model=None, no_jail=False)) == "sonnet"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["default = [\n", 'llama = "x"\n', "default = 5\n", 'default = ""\n', 'default = ["opus"]\n'],
+    ids=["not TOML", "a key that is no table", "a number", "an empty string", "a list"],
+)
+def test_a_models_file_that_is_not_toml_or_whose_default_is_no_name_pins_no_model(
+    _own_config: Path, tmp_path: Path, text: str
+) -> None:
+    """TASK-0087's `Unusable` must show: a pinned sonnet would hide that the file's default can't be
+    read, so the session's layer names no model and the model row says what is wrong with the file."""
+    _models_default(_own_config, text)
+    made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+    assert _recorded(made) is None and made.stack == "default"  # follows the file's default
+    assert json.loads((made.dir / "meta.json").read_text())["stack"] == "default"
+    assert [(s.id, s.stack) for s in listed(tmp_path / "s", "/work/a")] == [(made.id, "default")]
+    with pytest.raises(ModelsError) as said:  # the row's error, with what to write
+        resolved(ModelConfig(default=_recorded(made)))
+    assert said.value.kind == "models_file"
+
+
+def test_a_default_that_names_no_model_is_pinned_and_the_row_says_the_file_s_default_is_the_cause(
+    _own_config: Path, tmp_path: Path
+) -> None:
+    _models_default(_own_config, 'default = "nosuch"\n')
+    made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+    assert _recorded(made) == "nosuch" and made.stack == "nosuch"
+    with pytest.raises(ModelsError, match="no model named 'nosuch', the default in the models file"):
+        resolved(ModelConfig(default=_recorded(made)))
 
 
 def test_a_models_file_in_the_project_gives_a_new_session_no_default(
@@ -126,6 +153,91 @@ def test_a_models_file_in_the_project_gives_a_new_session_no_default(
     _models_default(project / ".config" / "bh-02", 'default = "opus"\n')
     made = create(tmp_path / "s", str(project), model=None, no_jail=False)
     assert _recorded(made) == "sonnet"
+
+
+def _outcome(config: ModelConfig) -> tuple[str, str]:
+    """What the model row makes of `config`, by its public surface: a model's name, or its error's kind."""
+    try:
+        return "model", resolved(config).name
+    except ModelsError as error:
+        return "error", error.kind
+
+
+@dataclass(frozen=True)
+class _Case:
+    """A models file, where it is, and what a new session starts on: `text` (None: no file; a directory
+    stands in for the file when it is `DIRECTORY`), what `create` records (`pin`: None, no model) and
+    whether the row can then use the model (`works`). `where`: outside the project, in it as named, in it
+    through a link, or in it while `create` is told another directory than the working one."""
+
+    text: str | None
+    pin: str | None
+    works: bool = True
+    where: str = "outside"
+
+
+_DIRECTORY = "<a directory>"
+_ENDPOINT = '[local]\nprovider = "openai"\ndiscover = true\nbase_url = "http://localhost:1/v1"\n'
+_OPUS = 'default = "opus"\n'
+_CONTRACT = {
+    "a trusted default": _Case(_OPUS, "opus"),
+    "no file": _Case(None, "sonnet"),
+    "a default table, which is a model": _Case(
+        '[default]\nprovider = "claude-code"\nid = "opus"\n', "sonnet"
+    ),
+    "an endpoint's model": _Case('default = "local/x:7b"\n' + _ENDPOINT, "local/x:7b"),
+    "no model": _Case('default = "nosuch"\n', "nosuch", works=False),
+    "not TOML": _Case("default = [\n", None, works=False),
+    "a key that is no table": _Case('llama = "x"\n', None, works=False),
+    "a number": _Case("default = 5\n", None, works=False),
+    "an empty string": _Case('default = ""\n', None, works=False),
+    "a list": _Case('default = ["opus"]\n', None, works=False),
+    "a directory": _Case(_DIRECTORY, None, works=False),
+    # the default chooses the spend: a file the model's code can write chooses nothing, however it is reached
+    "in the project": _Case(_OPUS, "sonnet", where="project"),
+    "through a link into the project": _Case(_OPUS, "sonnet", where="link"),
+    "in the project, create told another directory": _Case(_OPUS, "sonnet", where="elsewhere"),
+}
+
+
+def _placed(case: _Case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Put the case's models file in an XDG config directory (outside the project, in it, or reached
+    through a link into it), make the project the working directory, and return the directory `create`
+    is told is the session's."""
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    config = project / ".config" if case.where in ("project", "elsewhere") else tmp_path / "config"
+    models = config / "bh-02"
+    if case.where == "link":  # the config directory's `bh-02` is a link into the project
+        models = project / "real"
+        config.mkdir()
+        (config / "bh-02").symlink_to(models)
+    models.mkdir(parents=True)
+    if case.text == _DIRECTORY:
+        (models / "models.toml").mkdir()
+    elif case.text is not None:
+        (models / "models.toml").write_text(case.text)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    return str(tmp_path / "elsewhere") if case.where == "elsewhere" else str(project)
+
+
+@pytest.mark.parametrize("kind", _CONTRACT)
+def test_the_shell_and_the_model_row_agree_on_what_a_new_session_starts_on(
+    kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TASK-0093: the shell (`create`) and the model row each decide whether the models file is
+    trusted and what its default is, and cannot share a function (no package imports another). This
+    drives both over the same files, by their public surfaces, and fails if they disagree on what a
+    new session starts on: what `create` records in the session's layer must make the row resolve
+    what it would with the layer naming none (a model, or the same error), whatever the file is: in
+    the project, not TOML, a default that is no name, one that names no model, an endpoint's model."""
+    case = _CONTRACT[kind]
+    made = create(tmp_path / "s", _placed(case, tmp_path, monkeypatch), model=None, no_jail=False)
+    assert _recorded(made) == case.pin and made.stack == (case.pin or "default")
+    row = _outcome(ModelConfig(default=_recorded(made)))  # the session's layer, as the row reads it
+    assert row == _outcome(ModelConfig())  # the one thing that must hold: the shell and the row agree
+    assert row[0] == ("model" if case.works else "error")  # and the cases are what they claim to be
 
 
 def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_row() -> None:

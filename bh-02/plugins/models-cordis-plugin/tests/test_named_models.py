@@ -176,12 +176,16 @@ def test_the_models_value_reads_the_model_row_and_the_file_fresh(tmp_path: Path)
     loader.now = [_Entry("model", None, {"models": str(models), "default": "llama"})]  # /model llama
     assert values.current() == {"name": "llama", "provider": "openai"}
     loader.now = [_Entry("model", None, {"models": str(models), "default": "gone"})]
-    assert values.current() == {"name": "gone", "provider": ""}  # names no model there is
+    names_none = values.current()  # names no model there is: unusable, said
+    assert (names_none["name"], names_none["provider"]) == ("gone", "")
+    assert names_none["unusable"].startswith("no model named 'gone'")
     models.write_text("[broken\n")
-    assert values.current() == {"name": "gone", "provider": ""}  # never raises: the status bar reads it
+    broken = values.current()  # never raises: the status bar reads it
+    assert (broken["name"], broken["provider"]) == ("gone", "") and "is not TOML" in broken["unusable"]
     assert "is not TOML" in str(values.check("llama"))
-    with pytest.raises(ModelsError):
-        values.listed()  # /model says what is wrong with the file
+    # not a raise since TASK-0093: the built-ins stay listed and `problem` is what /model says of the file
+    assert [m["name"] for m in values.listed()] == ["sonnet", "opus", "haiku"]
+    assert values.problem is not None and "is not TOML" in values.problem
 
 
 def test_the_models_value_over_another_component_says_it_has_no_models() -> None:

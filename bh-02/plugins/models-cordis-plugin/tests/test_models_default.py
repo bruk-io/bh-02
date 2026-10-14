@@ -119,7 +119,8 @@ async def test_a_file_default_that_names_no_model_says_what_to_write_and_the_row
     async with opened(config) as value:
         assert isinstance(value, Unusable)
     values = _catalog({"models": config.models})
-    assert values.current() == {"name": "gone", "provider": ""}  # never raises: the status bar reads it
+    # never raises: the status bar reads it, and says the model can't be used, as the row does
+    assert values.current() == {"name": "gone", "provider": "", "unusable": said}
     assert values.check("haiku") is None  # /model another model fixes it
     assert not any("default" in m for m in values.listed())  # no model to mark
 
@@ -130,10 +131,16 @@ def test_a_bad_file_default_is_ignored_while_a_layer_names_a_model(tmp_path: Pat
 
 
 def test_a_file_that_cannot_be_read_still_gives_the_status_bar_a_name(tmp_path: Path) -> None:
+    """Its default is unknown, so with no layer's choice the model is `default` and unusable (the
+    row says the file's problem); a layer's choice runs, from the built-ins."""
     path = tmp_path / "models.toml"
     path.write_text("default = [\n")
-    assert _catalog({"models": str(path)}).current() == {"name": "sonnet", "provider": ""}
-    assert _catalog({"models": str(path), "default": "haiku"}).current() == {"name": "haiku", "provider": ""}
+    now = _catalog({"models": str(path)}).current()
+    assert (now["name"], now["provider"]) == ("default", "") and "is not TOML" in now["unusable"]
+    assert _catalog({"models": str(path), "default": "haiku"}).current() == {
+        "name": "haiku",
+        "provider": "claude-code",
+    }
 
 
 def test_the_default_key_is_a_setting_but_a_default_table_is_a_model() -> None:

@@ -9,6 +9,7 @@ from typing import Any
 
 __all__ = [
     "Keyless",
+    "ModelShown",
     "PaletteEntry",
     "Usage",
     "add_usage",
@@ -128,10 +129,26 @@ def _tokens(count: int) -> str:
     return f"{count:,}"
 
 
-def model_text(current: Mapping[str, Any]) -> tuple[str, str]:
+@dataclass(frozen=True, slots=True)
+class ModelShown:
+    """The model field's model: its `name`, its `provider` (empty when the name is no model there is,
+    or the row is another component), and whether the model row can't use it (`unusable`: the
+    status bar says so, since a name alone reads as a model that runs)."""
+
+    name: str
+    provider: str = ""
+    unusable: bool = False
+
+
+def model_text(current: Mapping[str, Any]) -> ModelShown:
     """The model field's model: the name and provider the `models` value says the model row
-    names now (CONTRACTS.md: models; the provider is empty when the name is no model there is)."""
-    return str(current.get("name") or "none"), str(current.get("provider") or "")
+    names now, and whether it says that model is unusable (CONTRACTS.md: models; the provider is
+    empty when the name is no model there is). A name is never blank: `none` when there is none."""
+    return ModelShown(
+        str(current.get("name") or "none"),
+        str(current.get("provider") or ""),
+        bool(current.get("unusable")),
+    )
 
 
 # A row's phase, as the status bar tells it: up, coming (back) up, or failed.
@@ -176,16 +193,20 @@ def listed(entries: Sequence[Any], row: str) -> bool:
     return any(getattr(e, "id", None) == row and not getattr(e, "disabled", False) for e in entries)
 
 
-def model_forms(model: tuple[str, str], phase: str) -> tuple[str, ...]:
-    """The model field in `phase` (`model`: its name and provider), then a shorter form for a
-    narrow status bar: `sonnet (claude-code)` then `sonnet` when it is up, `sonnet
-    (claude-code, starting…)` then `sonnet…` while the model row comes up, `sonnet
-    (claude-code, failed)` then `sonnet ✗` when it failed. No provider: the name alone."""
-    name, provider = model
+def model_forms(model: ModelShown, phase: str) -> tuple[str, ...]:
+    """The model field in `phase`, then a shorter form for a narrow status bar: `sonnet
+    (claude-code)` then `sonnet` when it is up, `sonnet (claude-code, starting…)` then `sonnet…`
+    while the model row comes up, `sonnet (claude-code, failed)` then `sonnet ✗` when it failed. A
+    model the row can't use says so, `typo (unusable)` then `typo ✗`, whatever the phase adds. No
+    provider: the name alone."""
     said = {_STARTING: "starting…", _FAILED: "failed"}.get(phase)
-    inside = ", ".join(part for part in (provider, said) if part)
-    full = f"{name} ({inside})" if inside else name
-    short = {_STARTING: f"{name}…", _FAILED: f"{name} ✗"}.get(phase, name)
+    flagged = "unusable" if model.unusable else ""
+    inside = ", ".join(part for part in (model.provider, flagged, said) if part)
+    full = f"{model.name} ({inside})" if inside else model.name
+    broken = f"{model.name} ✗"
+    short = {_STARTING: f"{model.name}…", _FAILED: broken}.get(
+        phase, broken if model.unusable else model.name
+    )
     return (full, short) if full != short else (full,)
 
 

@@ -198,7 +198,8 @@ async def test_slash_model_name_of_a_broken_endpoint_s_model_is_refused_and_the_
     get = FakeGet({_LOCAL: _ids("x")})
     catalog = _catalog(tmp_path, get, _BROKEN, default="local/x")
     assert catalog.check("local/x:7b") == _why(tmp_path) and catalog.check("local") == _why(tmp_path)
-    assert catalog.current() == {"name": "local/x", "provider": ""}  # the status bar: no provider, no error
+    # the status bar: no provider, no error, and the model is said to be unusable (TASK-0093)
+    assert catalog.current() == {"name": "local/x", "provider": "", "unusable": _why(tmp_path)}
     switch = _switch(tmp_path, catalog)
     said = await switch.run("local/other:1b")  # `/model NAME`
     assert said == f"not switched: {_why(tmp_path)}"
@@ -407,8 +408,8 @@ async def test_a_refresh_that_can_not_be_made_is_no_error(tmp_path: Path) -> Non
     get = FakeGet({})
     other = Catalog(_Loader(_Entry("model", "some:fake", {})), get=get, clock=_Clock())  # not models:model
     await other.refresh()
-    broken = _catalog(tmp_path, get, "[local\n")  # a models file that is not TOML: `listed` says so
+    broken = _catalog(tmp_path, get, "[local\n")  # a models file that is not TOML: `problem` says so
     await broken.refresh()
     assert get.calls == []
-    with pytest.raises(Exception, match="is not TOML"):
-        broken.listed()
+    assert [m["name"] for m in broken.listed()] == ["sonnet", "opus", "haiku"]  # the built-ins, no raise
+    assert broken.problem is not None and "is not TOML" in broken.problem

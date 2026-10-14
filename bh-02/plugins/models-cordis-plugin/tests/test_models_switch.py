@@ -31,6 +31,7 @@ class _Models:
         self.now = "haiku"
         self.broken = False
         self.problem: str | None = None  # why the models file is not read (it is in the project)
+        self.default_problem: str | None = None  # why the models file's `default` is refused
         self.refreshed = 0  # how often /model asked the endpoints
         self.said: list[dict[str, Any]] = []  # what `endpoints` says
 
@@ -257,3 +258,16 @@ async def test_the_switch_row_registers_model_and_queues_the_reload_in_jobs(tmp_
     assert told.startswith("the model switch's reload failed (RuntimeError: the layer does not parse)")
     await rt.shutdown()
     assert commands.runs == {}
+
+
+async def test_the_model_list_says_the_models_file_s_default_is_refused_and_why(tmp_path: Path) -> None:
+    """TASK-0093: a default the row can't use is a line of /model's list (never an exception), above
+    where to add models, so the person who looks there sees why a new session's model can't run."""
+    models = _Models()
+    models.default_problem = "the default in the models file /c/models.toml is 5, not a model's name"
+    switch = Switch(_Loader(), models, SwitchConfig(layer=str(tmp_path / "s.toml")), _Jobs(), lambda *a: None)
+    lines = str(await switch.run("")).splitlines()
+    assert lines[-2] == f"  the models file's default is refused: {models.default_problem}"
+    assert lines[-1] == f"/model NAME switches; add models in {models.path}"
+    models.default_problem = None
+    assert "refused" not in str(await switch.run(""))

@@ -68,6 +68,7 @@ __all__ = [
     "endpoint",
     "environ",
     "find",
+    "from_file",
     "in_project",
     "intended",
     "key_name",
@@ -263,10 +264,18 @@ def standing(from_file: object) -> Intended:
 
 def intended(layer: object, below: Intended) -> Intended:
     """The model a session starts on: a layer's model row `default` when it has one (None when no
-    layer names a model, which `sonnet` named in a layer is not), else `below` (`standing`)."""
-    if layer is None:
+    layer names a model, which `sonnet` named in a layer is not), else `below` (`standing`). A
+    layer's default that is the models file's own default is the file's (`from_file`): a new
+    session's layer records it from there at the start (`bh_02.sessions.create`), so an error
+    about it says the file's default is the cause."""
+    if layer is None or (layer == below.name and from_file(below)):
         return below
     return Intended(layer, _LAYER_SOURCE)
+
+
+def from_file(wanted: Intended) -> bool:
+    """Whether `wanted` was written as the models file's `default`."""
+    return wanted.origin == _FILE_SOURCE
 
 
 def combined(

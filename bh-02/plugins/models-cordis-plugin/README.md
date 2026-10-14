@@ -63,14 +63,30 @@ row `default` (the session's own layer, which `/model` and `--model` write; a la
 is None for none, `named.intended`), then `--model`. So a resumed session keeps the model its
 layer names, and `/model` and `--model` still switch. The app writes the model a new session
 starts on into its layer when it creates it (`bh_02.sessions.create`: `--model`, else the file's
-`default`, else `sonnet`, read by the shell with the same trust rule), so a session keeps it
-whatever the file says later; only a layer from before that, naming none, follows the file's
-`default` as it is now (and `/model` of that name there says "already"). The default chooses the spend, so it is read only where the
-tables are: from a models file outside the project (below), never from one in it. A `default`
-that is not a name, or names no model, is a `ModelsError` naming the models file and what to
-write (kind `models_file`, or `unknown_model`), said at each step like any model that can't be
-used (`Unusable`), while bh-02 starts and `/model NAME` fixes it; it is not looked at while a
-layer names a model. A `[default]` table is a model named `default`.
+`default`, else `sonnet`), so a session keeps it whatever the file says later; only a layer from
+before that, naming none, follows the file's `default` as it is now (and `/model` of that name
+there says "already"). The default chooses the spend, so it is read only where the tables are:
+from a models file outside the project (below), never from one in it. The shell reads the file
+itself, with the row's trust rule (`host_paths.passes` over the working directory and the
+session's directory) and the row's reading of the `default` (`named.parsed`): the two cannot share
+a function (no package imports another), so one app test (`test_session_dirs.py`) drives both
+over the same files and fails if they disagree on what a new session starts on. A `default` that
+is not a name, or names no model, is a `ModelsError` naming the models file and what to write
+(kind `models_file`, or `unknown_model`, which says it is the models file's `default` also when
+the session's layer recorded it: `named.intended`), said at each step like any model that can't
+be used (`Unusable`), while bh-02 starts and `/model NAME` fixes it; it is not looked at while a
+layer names a model. The shell never hides it: for a default that is not a name (a number, an
+empty string, a list), and for a file that is not TOML, has a key that is no table, or can't be
+read, it records no model in the new session's layer (its `stack` in `bh-02 sessions` is
+`default`), so the row's error shows; a default that names no model is a name, and is recorded.
+A `[default]` table is a model named `default`.
+
+**A models file that can't be read** (not TOML, a key that is no table, a path that is no file)
+is not a failure of every model: `known` names the built-ins and the row's `extra` behind it, as
+behind a file refused in the project, with `why` saying what is wrong and what to do. A layer's
+choice runs (`/model sonnet` always works); a row no layer names a model for has no default to
+follow, so it says the file's problem (`resolution`). `Catalog.listed` lists the built-ins and
+`problem` is the line `/model` ends with; none of them raises.
 
 A table's problems are said with what to do, and a model that can't be used still binds: an
 unknown name (the message lists the models and shows a table to add), no provider, an unknown
@@ -96,7 +112,7 @@ can't be imported, or raises, is a model that can't be used, like any other (`Un
 in bh-02's own, unjailed process, and a `key` it names is read from local.env and sent to the
 table's `base_url`. The project is the working directory, which the jail lets the model's code
 write (the python row's root), and the model row's `cwd` too when a layer sets one. A models file in
-it would let the model choose both, so it is not read (`providers.refused`, `named.in_project`),
+it would let the model choose both, so it is not read (`providers.known`, `named.in_project`),
 however it got there: bh-02 run from the home directory (`~/.config` is then in the project),
 `$XDG_CONFIG_HOME` or the row's `models` in the project, or a link into it. It counts as the
 project's when the file as named, or any place reading it goes through (each directory and link
@@ -126,8 +142,14 @@ composition without the catalog keeps the operator's commands. `/model` lists th
 `models` value: the built-ins, the models file's, the model row's own, then each endpoint's
 [discovered](#discovering-an-endpoints-models) ones, after asking the endpoints: `models.refresh`), the one the model row
 names marked `●`, each with its provider and id, the one a new session starts on when no layer
-names one marked `(default: built in)` or `(default: the models file)`, and says where the models file is, or, when it
-is in the project and so not read (`models.problem`), why and where it must be instead.
+names one marked `(default: built in)` or `(default: the models file)`, and says where the models
+file is, or, when it is not read (`models.problem`: it is in the project, or can't be read), why and
+where it must be instead. When the models file's `default` is refused (`models.default_problem`: no
+name, no model, or a model whose table has a problem) it says so in a line above that, with what to
+write, never as an error. The status bar's model comes from `models.current`, which says `unusable`
+(the reason) when the row can't use the model it names; the field then reads `NAME (unusable)`, and
+`NAME ✗` on a narrow bar, so a name never reads as a model that runs. Its `NAME` is the default's
+own text when it is a name, else `default`.
 `/model NAME` switches by name, across providers: it asks `models.check(NAME)` first, so a name
 that is no model, or a model whose table has a problem, is said and changes nothing; then it
 names NAME as the model row's `default` in the session's layer (`layer`, on the row

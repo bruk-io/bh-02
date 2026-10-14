@@ -120,3 +120,15 @@ def test_the_model_field_stops_saying_starting_when_a_layer_edit_takes_the_row_d
     assert frame.fields() == {"model": "sonnet (starting…)"}
     model_field.lifecycle(_Event("inactive", "loop"))
     assert frame.fields() == {"model": "sonnet"}
+
+
+def test_the_model_field_says_a_model_the_row_can_not_use_is_unusable_never_blank() -> None:
+    """TASK-0093: `models.current()` says why a name can't run; the bar shows it, then the usable one."""
+    frame, loader = _frame(), _Loader(_Entry("model", {}))
+    now = {"name": "default", "provider": "", "unusable": "the default in the models file is 5"}
+    model_field = ModelField(frame.status, loader, "model", lambda: now)
+    model_field.show()
+    assert frame.forms() == {"model": ("default (unusable)", "default ✗")}
+    now = {"name": "haiku", "provider": "claude-code"}  # /model haiku
+    model_field.lifecycle(_Event("active", "model"))
+    assert frame.forms() == {"model": ("haiku (claude-code)", "haiku")}

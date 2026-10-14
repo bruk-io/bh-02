@@ -25,15 +25,15 @@ from models_cordis_plugin.named import (
     ModelConfig,
     ModelsError,
     Named,
+    chosen,
     derived,
     endpoint,
     find,
-    intended,
+    from_file,
     key_name,
     not_a_model,
     problem,
     said_names,
-    standing,
 )
 from models_cordis_plugin.openai import (
     SHOWN,
@@ -50,7 +50,7 @@ from models_cordis_plugin.openai import (
     models_url,
     notes,
 )
-from models_cordis_plugin.providers import known, refused
+from models_cordis_plugin.providers import known, resolution
 
 __all__ = ["Catalog", "Entries"]
 
@@ -103,9 +103,26 @@ class Catalog:
     @property
     def problem(self) -> str | None:
         """Why the models file is not read, said so the person can fix it: it is in the project,
-        which the model's code can write (the built-ins and the row's `extra` are still listed).
-        None when it is outside the project, there or not."""
-        return refused(self._config() or ModelConfig())
+        which the model's code can write, or it can't be read or is not TOML (the built-ins and the
+        row's `extra` are still listed, and can be switched to). None when it is read, there or not."""
+        return known(self._config() or ModelConfig()).why
+
+    @property
+    def default_problem(self) -> str | None:
+        """Why the models file's `default` can't be used, said as the model row says it (what to
+        write): it is no name, names no model, or its model's table has a problem. None when it can
+        be used, there is none, or the file is not read (`problem` says why not)."""
+        config = self._config()
+        if config is None:
+            return None
+        found = known(config)
+        if found.unread is not None or not from_file(found.standing):
+            return None
+        try:
+            chosen(found.standing.name, found.models, found.source, found.why, found.standing.origin)
+        except ModelsError as error:
+            return error.message
+        return None
 
     def listed(self) -> list[dict[str, Any]]:
         """Every model, in order (the built-ins, the file's, the row's `extra`, then each endpoint's
@@ -114,21 +131,24 @@ class Catalog:
         from, `built in` or `the models file`), `where` (an openai model's base_url), and `problem`
         or `shadows` when there is one. An endpoint's models are what its last `refresh` found, in
         its `include`, and the model row names and the default when they are of it, so the marks
-        are always there; this never asks a server. A models file that can't be read raises its
-        `ModelsError`; one in the project is not read (`problem` says why)."""
+        are always there; this never asks a server. A models file that can't be read, is not TOML, or
+        is in the project is not read, and lists none (`problem` says why); it never raises."""
         config = self._config() or ModelConfig()
         found = known(config)
         current = self.current()["name"]
+        standing = None if found.unread is not None else found.standing  # an unread default is unknown
         return [
             *(
-                _listed(named, named.name == current, _default(named, found.standing))
+                _listed(named, named.name == current, _default(named, standing))
                 for named in found.models
                 if not endpoint(named)
             ),
-            *self._discovered(found.models, current, found.standing),
+            *self._discovered(found.models, current, standing),
         ]
 
-    def _discovered(self, models: Sequence[Named], current: str, standing: Intended) -> list[dict[str, Any]]:
+    def _discovered(
+        self, models: Sequence[Named], current: str, standing: Intended | None
+    ) -> list[dict[str, Any]]:
         """The models each endpoint of `models` lists, from what `refresh` kept: those its
         `include` lets through (at most `SHOWN`), and the model row's and the default, when they
         are of it; sorted by id."""
@@ -141,7 +161,7 @@ class Catalog:
             prefix = f"{host.name}/"
             pinned = (
                 name.removeprefix(prefix)
-                for name in (current, standing.name)
+                for name in (current, standing.name if standing else None)
                 if isinstance(name, str) and name.startswith(prefix)
             )
             for model_id in sorted({*ids[:SHOWN], *filter(None, pinned)}):
@@ -192,18 +212,20 @@ class Catalog:
 
     def current(self) -> dict[str, str]:
         """The model the row names now: `name` and `provider` (empty when it names no model
-        there is, or the row is another component: then `name` is that component)."""
+        there is, or the row is another component: then `name` is that component), and `unusable`,
+        why it can't be used, when it can't (the status bar says so; `name` is the default's own text
+        when it is a name, else `default`, so it is never blank). Never raises."""
         entry = self._entry()
         config = self._config()
         if config is None:
             return {"name": str(getattr(entry, "use", "") or "none"), "provider": ""}
         try:
-            options = known(config)
-        except ModelsError:  # the models file can't be read: its default is unknown, a layer's is not
-            return {"name": str(intended(config.default, standing(None)).name), "provider": ""}
-        name = intended(config.default, options.standing).name
-        found = find(name, options.models)
-        return {"name": str(name), "provider": found.provider if found and not not_a_model(found) else ""}
+            name, outcome = resolution(config)
+        except ModelsError as error:  # the row's own config is wrong: a layer's default is still its name
+            return {"name": _shown(config.default), "provider": "", "unusable": error.message}
+        if isinstance(outcome, ModelsError):
+            return {"name": _shown(name), "provider": "", "unusable": outcome.message}
+        return {"name": outcome.name, "provider": outcome.provider}
 
     def check(self, name: str) -> str | None:
         """Why the model row can't switch to `name`, said so the person can fix it; None when
@@ -217,7 +239,7 @@ class Catalog:
                 f"{_MODELS}, so it has no models to switch between"
             )
         try:
-            models, source, why, _ = known(config)
+            models, source, why, _, _ = known(config)
         except ModelsError as error:
             return error.message
         found = find(name, models)
@@ -247,9 +269,16 @@ def _listed(named: Named, current: bool, default: str | None) -> dict[str, Any]:
     return out
 
 
-def _default(named: Named, standing: Intended) -> str | None:
-    """Where the default model came from (`built in`, `the models file`) when `named` is it."""
-    return standing.origin if named.name == standing.name else None
+def _shown(name: object) -> str:
+    """A model's name as the status bar shows it: its own text when it is a name, else `default`
+    (the models file's, which is no name or can't be read)."""
+    return name if isinstance(name, str) and name else "default"
+
+
+def _default(named: Named, standing: Intended | None) -> str | None:
+    """Where the default model came from (`built in`, `the models file`) when `named` is it; None
+    for no default known (`standing` None: the models file can't be read)."""
+    return standing.origin if standing is not None and named.name == standing.name else None
 
 
 def _key(host: Named) -> Key:

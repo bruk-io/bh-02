@@ -272,17 +272,20 @@ exclude = [
     "models_cordis_plugin.named:read_models", "models_cordis_plugin.named:environ",
     # whether the models file is in the project, which the model can write (then it is not read):
     # the project's root resolved, and the file's links followed, each time before it is read
-    "models_cordis_plugin.named:in_project", "models_cordis_plugin.providers:refused",
+    "models_cordis_plugin.named:in_project", "models_cordis_plugin.providers:_refused",
     # the model row reads the models file when it starts (`known`), and the `models` value reads
     # it again each time it is asked, so a /model or the status bar never sees a stale one
     "models_cordis_plugin.providers:known", "models_cordis_plugin.providers:resolved",
     "models_cordis_plugin.providers:opened",
+    # which model the config means, or why none can be used (`resolved`'s and the status bar's one rule):
+    # it reads the models file through `known`
+    "models_cordis_plugin.providers:resolution",
     # the `models` value: each answer reads the models file afresh (through `known`), or asks
     # whether it is in the project (`problem`); the rest of the catalog (`_config`, `_entry`,
     # `_listed`) stays gated
     "models_cordis_plugin.catalog:Catalog.path", "models_cordis_plugin.catalog:Catalog.listed",
     "models_cordis_plugin.catalog:Catalog.current", "models_cordis_plugin.catalog:Catalog.check",
-    "models_cordis_plugin.catalog:Catalog.problem",
+    "models_cordis_plugin.catalog:Catalog.problem", "models_cordis_plugin.catalog:Catalog.default_problem",
     # the same value's endpoints (`discover = true`): `endpoints` reads the models file afresh, as
     # `listed` does, and says what `refresh` kept; `refresh` reads it too, then asks each endpoint for
     # its models, the one place a server is asked; `_ask` makes one request, reading the key's line of
