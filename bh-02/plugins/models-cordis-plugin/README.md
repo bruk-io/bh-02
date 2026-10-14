@@ -54,8 +54,11 @@ model is chosen, lowest first, by the built-in `sonnet`, the file's `default`, a
 row `default` (the session's own layer, which `/model` and `--model` write; a layer that sets no
 `default` leaves the file's in force, one that names `sonnet` chooses it: `ModelConfig.default`
 is None for none, `named.intended`), then `--model`. So a resumed session keeps the model its
-layer names, and `/model` and `--model` still switch; a session whose layer names none follows
-the file's `default` as it is now. The default chooses the spend, so it is read only where the
+layer names, and `/model` and `--model` still switch. The app writes the model a new session
+starts on into its layer when it creates it (`bh_02.sessions.create`: `--model`, else the file's
+`default`, else `sonnet`, read by the shell with the same trust rule), so a session keeps it
+whatever the file says later; only a layer from before that, naming none, follows the file's
+`default` as it is now (and `/model` of that name there says "already"). The default chooses the spend, so it is read only where the
 tables are: from a models file outside the project (below), never from one in it. A `default`
 that is not a name, or names no model, is a `ModelsError` naming the models file and what to
 write (kind `models_file`, or `unknown_model`), said at each step like any model that can't be

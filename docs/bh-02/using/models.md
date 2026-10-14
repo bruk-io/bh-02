@@ -43,12 +43,14 @@ id = "qwen3-coder"
 base_url = "http://localhost:11434/v1"
 ```
 
-What a session starts on, strongest first: `--model`, the model the session already is on (a
-`/model` switch, or the one a resumed session was started or switched to), the models file's
-`default`, and `sonnet`. So `--model` and `/model` still switch, and a resumed session keeps its
-model. A session that never chose one follows the file's `default`, so changing it moves those
-sessions too. The default must be a model's name; one that is not, or names no model, is said
-in the conversation with what to write, and `/model NAME` switches to a usable one. Like the
+A new session takes the default when it starts and records it in its own layer, as `--model`
+does, so it keeps that model when you resume it, whatever the file says later; change the file
+and only new sessions move. What a new session starts on, strongest first: `--model`, the
+models file's `default`, and `sonnet`. `/model` still switches mid-session.
+
+The default must be a model's name. One that names no model is said in the conversation with
+what to write, and `/model NAME` switches to a usable one; one that is not a name at all (a
+number, say) is passed over when a session starts, and the session starts on `sonnet`. Like the
 models themselves, the default is read only from the models file in your config directory,
 never from one in the project.
 

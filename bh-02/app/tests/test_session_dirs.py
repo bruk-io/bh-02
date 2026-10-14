@@ -1,5 +1,6 @@
 """Sessions: the layer a session runs from, the state directory, and resuming from the CLI."""
 
+import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -25,6 +26,60 @@ from bh_02.sessions import (
 from cordis import Row
 from cordis.composition import format_layer
 from cordis.loader import read_layer
+
+
+@pytest.fixture(autouse=True)
+def _own_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A new session reads the models file's `default`: these tests use an empty config directory,
+    never the one of whoever runs them."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    return tmp_path / "config" / "bh-02"
+
+
+def _models_default(config: Path, text: str) -> None:
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "models.toml").write_text(text)
+
+
+def _recorded(session: Session) -> str | None:
+    (row,) = [r for r in read_layer(str(session.layer)) if r.id == "model"]
+    return (row.config or {}).get("default")
+
+
+def test_a_new_session_records_the_models_file_s_default_and_a_resume_keeps_it(
+    _own_config: Path, tmp_path: Path
+) -> None:
+    """The session's layer names the model it started on, so changing the file's `default`
+    later moves new sessions only."""
+    _models_default(_own_config, 'default = "llama"\n[llama]\nprovider = "openai"\nid = "x"\n')
+    first = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+    assert _recorded(first) == "llama" and first.stack == "llama"
+    assert json.loads((first.dir / "meta.json").read_text())["stack"] == "llama"
+    _models_default(_own_config, 'default = "opus"\n')
+    update(first)  # what a resume does first
+    assert _recorded(first) == "llama"  # still on the first model
+    assert _recorded(create(tmp_path / "s", "/work/a", model=None, no_jail=False)) == "opus"
+    assert _recorded(create(tmp_path / "s", "/work/a", model="haiku", no_jail=False)) == "haiku"  # --model
+
+
+def test_a_new_session_with_no_file_default_records_sonnet(_own_config: Path, tmp_path: Path) -> None:
+    made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+    assert _recorded(made) == "sonnet" and made.stack == "sonnet"
+    _models_default(_own_config, "default = [\n")  # not TOML, or not a name: the model row says so
+    assert _recorded(create(tmp_path / "s", "/work/a", model=None, no_jail=False)) == "sonnet"
+    _models_default(_own_config, "default = 5\n")
+    assert _recorded(create(tmp_path / "s", "/work/a", model=None, no_jail=False)) == "sonnet"
+
+
+def test_a_models_file_in_the_project_gives_a_new_session_no_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default chooses the spend: a file the model's code can write does not choose it."""
+    project = tmp_path / "project"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(project / ".config"))
+    _models_default(project / ".config" / "bh-02", 'default = "opus"\n')
+    made = create(tmp_path / "s", str(project), model=None, no_jail=False)
+    assert _recorded(made) == "sonnet"
 
 
 def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_row() -> None:
