@@ -3,11 +3,11 @@ id: TASK-0094
 title: >-
   format_layer writes a character outside the Basic Multilingual Plane as
   invalid TOML
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 09:53'
-updated_date: '2026-10-14 14:06'
+updated_date: '2026-10-14 14:27'
 labels:
   - cordis
   - size-2
@@ -42,4 +42,6 @@ TESTS. libs/cordis/tests/test_loader.py: test_format_layer_round_trips_a_charact
 SEEN FAILING BEFORE THE FIX (new tests written first, source untouched): the 7 round-trip cases and the control-character test failed with tomllib.TOMLDecodeError: 'Escaped character is not a Unicode scalar value' (at the surrogate-pair escape), the two lone-surrogate cases with 'DID NOT RAISE ValueError' (10 failed in test_loader.py); the models plugin test and the app test each failed with the same TOMLDecodeError raised from read_layer. After the fix: test_loader.py 50 passed; the two bh-02 tests passed.
 CHECKS (all as root without tini, one at a time, exit codes read directly): uv run pytest libs/cordis -q: 493 passed (exit 0); libs/cordis/tests/test_invariants.py: 360 passed (exit 0); uv run pytest bh-02/plugins/models-cordis-plugin -q: 314 passed, 2 skipped (exit 0); uv run pytest bh-02/app/tests -q: 223 passed, 1 skipped (exit 0); scripts/arch-check: exit 0; uv run mypy: 'Success: no issues found in 187 source files' (exit 0); scripts/check: exit 0 (format, lint, types, tests 2791 passed 31 skipped, gates, docs ok; tokens skipped: no ../bh-01/dist). Not run: scripts/linux-jail-check (nothing in brig or the jail changed).
 FOLLOW-UP: TASK-0098 (size-1): bh-02 --model with a name that is not valid UTF-8 now raises format_layer's ValueError from sessions.create after the session directory and meta.json were made (checked: the directory holds meta.json only); before, it wrote an unreadable layer. The fix belongs where the name enters (the CLI), a different area from this task.
+
+Close review (Opus low, independent): CLOSE, no blocking or should-fix findings. Planted in a scratch copy: values back to json.dumps (8 of 11 format_layer tests fail), keys only (3), both (10). Byte-identical for every BMP character but surrogates, so no existing layer changes on its next write; the repo's parseable layers format with no diff. The lone-surrogate ValueError is right (TOML holds only scalar values) and says what to do; TASK-0098 describes its leftover accurately. Runs: cordis 493, models + app 537 passed; mypy, arch-check, scripts/check exit 0. Nits answered, not filed: _toml_string's docstring explains history; the test's 'nasty' string holds invisible characters written literally.
 <!-- SECTION:NOTES:END -->
