@@ -5,6 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-14 15:56'
+updated_date: '2026-10-14 16:29'
 labels:
   - naming
 dependencies: []
@@ -34,16 +35,22 @@ One naming rule, written where a plugin author reads it, and the names that brea
 - The gates: renames go through `pypeeker demote` where it applies; `scripts/check` passes after each.
 
 ## Open questions
-- [ ] The rule: is a row named for what it is, for the key it binds, or for the key when it is a broker? What about stutters?
-- [ ] The sub-agents plugin's new name (`subagents`?) and its rows'.
-- [ ] The startup files' new name (`startup.py`?), and the python row's class (`Repl`? `PythonProcess`?).
-- [ ] Whether GLOSSARY.md's double meanings get new words or a line saying which sense.
-- [ ] Whether the old startup-file name keeps working for good or for a release, then is refused with what to rename.
+- [x] The rule: answered by Fable for the owner (2026-10-14): a plugin is named for its subject; a component for what it is, read after the plugin's name (`commands:registry`, `models:catalog`, `agent:tools`), never repeating its plugin; a row id for the one key it binds, else its role (as CONTRACTS.md already says). When a broker's key is the plugin's own name, the component names the kind (`registry`), so stutters vanish by the rule. One word, one thing; a thing seen from two places keeps its word with a label saying where. Why: a layer author reads `id` and `use` and should know what fills the role without opening the plugin.
+- [x] The sub-agents plugin: `subagents` (package `subagents_cordis_plugin`; GLOSSARY.md already says sub-agent). The row id `agents` stays (the person's word: `/agents`, `agents: N running`, `clear` lists, the row's own `rows` config). `:status`, `:child`, `:output` keep their names; `agents:agents`'s new component name is for TASK-0099.01 (Fable's lean: `subagents:parent`, pairing with `child`). The row id `agents_status` becomes `agents-status`, the one two-word id with an underscore.
+- [x] The startup files: `startup.py` (`~/.config/bh-02/startup.py`, `.bh-02/startup.py`): Python's own word (`PYTHONSTARTUP`), the config key is already `startup`, the GLOSSARY term already 'startup file'. The python row's class: `PythonProcess`, config `PythonProcessConfig`. worker.py keeps its name (the gates name it; the model never sees it); its private `_Kernel` and `__kernel__` are TASK-0099.02's call.
+- [x] GLOSSARY.md's double meanings: no new words; each (`tools`, `python`) is one thing seen from two places and already carries its label. The rule writes that down.
+- [x] The old startup-file name keeps working for good, as `outdated._RENAMED` does: when `startup.py` is absent and `kernel.py` is there, run it and say the new name once per REPL start. No expiry, no refusal.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 One naming rule is written in bh-02/CLAUDE.md and GLOSSARY.md, with the reason for it
-- [ ] #2 No two plugins' names differ by a letter, no row id stutters, and no GLOSSARY.md term has two meanings without saying which
+- [ ] #1 One naming rule is written in bh-02/CLAUDE.md, with the reason for it; GLOSSARY.md carries the renamed terms
+- [ ] #2 No two plugins' names differ by a letter, no component repeats its plugin's name, and no GLOSSARY.md term has two meanings without a label saying which
 - [ ] #3 Every old row id, component and startup-file name a person may have is translated or still read, saying what changed; scripts/check passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Accepted 2026-10-14 by Fable standing in for the owner (he delegated these decisions): open questions answered above; AC #1 keeps the rule in one place (bh-02/CLAUDE.md), AC #2 says 'no component repeats its plugin's name' (agents:agents is a component; no row id stutters). Added to the sweep: the row id agents_status, the one two-word id with an underscore. TASK-0099.01 starts now.
+<!-- SECTION:NOTES:END -->

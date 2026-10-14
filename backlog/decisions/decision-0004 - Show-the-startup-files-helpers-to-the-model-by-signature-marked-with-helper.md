@@ -2,7 +2,7 @@
 id: decision-0004
 title: 'Show the startup files'' helpers to the model by signature, marked with @helper'
 date: '2026-10-14 15:55'
-status: proposed
+status: accepted
 ---
 ## Context
 
@@ -57,8 +57,9 @@ the REPL runs in (a separate design), no tracking of helpers after startup.
 6. **Told at startup only.** A REPL started again runs the startup files again and tells them
    again. A helper the model defines or redefines in a later input is not announced: the model
    wrote it.
-7. **Unconfined (`--no-jail`)** the model runs the startup files itself, as an input the person
-   approves; the code it is told to run is the same `_startup_input`, so it prints the same line.
+7. **Unconfined (`--no-jail`) stays as today**: the aside names the file and the model runs it
+   with `exec(open(PATH).read())`, which lists nothing. The person reads every input there
+   anyway, and a long listing input to approve would be more than was asked.
 
 Where it lands: `worker.py` (binds `helper`), `client.py` (`_startup_input` and the startup
 aside's text), `python.py` (`_keep`'s sentence), the plugin README,
@@ -75,6 +76,18 @@ aside's text), `python.py` (`_keep`'s sentence), the plugin README,
   holds.
 - A helper the model writes in the project's startup file is listed the same way, so the model
   can grow its own toolbox and see it next session.
+- After `/compact` the signatures live only in the model's summary (the python row is kept
+  across it, and `/compact` already asks the model to name what the namespace holds); `/clear`
+  and a new run tell them again. Accepted as a limit, not built around.
+- The 160-character cut is the one point beyond the owner's ask, kept: it keeps the line cheap
+  when a default's `repr` is long, which is the point of the feature.
 - Not decided here, each its own work: a directory of startup files; the environment the REPL
   runs in (owner, 2026-10-14: a `.venv` per project); naming (the startup files are still
   `kernel.py`, an older name the naming work may change, which this decision does not depend on).
+
+## Accepted
+
+2026-10-14, by Fable standing in for the owner (he delegated these decisions): accepted with two
+changes, both applied above: unconfined stays as today (was: the model runs the listing input),
+and the `/compact` limit is written down. Built by TASK-0100, after TASK-0099.02 renames the
+startup files and the python row's class.
