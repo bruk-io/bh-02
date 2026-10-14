@@ -174,7 +174,7 @@ class _Repl:
         yield {"type": "stop", "reason": "tool_use"}
 
 
-# What the shipped `general` type's section of a sub-agent's prompt says (agents plugin): how the
+# What the shipped `general` type's section of a sub-agent's prompt says (sub-agents plugin): how the
 # fake tells a child's request from its parent's.
 _SUB_AGENT = "You are a sub-agent"
 

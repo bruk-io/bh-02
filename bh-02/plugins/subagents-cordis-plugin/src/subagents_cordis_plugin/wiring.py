@@ -17,7 +17,8 @@ from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
 import cordis.loader
-from agents_cordis_plugin.agents import (
+from cordis import Effects, Fiber, Inspection, Performer, Row, acquire, bind, component, performer, use
+from subagents_cordis_plugin.agents import (
     AGENT,
     AGENT_SEND,
     AGENT_STOP,
@@ -35,11 +36,10 @@ from agents_cordis_plugin.agents import (
     Rows,
     section,
 )
-from agents_cordis_plugin.child import ChildRow, prefixed
-from agents_cordis_plugin.kinds import read_types, type_names
-from cordis import Effects, Fiber, Inspection, Performer, Row, acquire, bind, component, performer, use
+from subagents_cordis_plugin.child import ChildRow, prefixed
+from subagents_cordis_plugin.kinds import read_types, type_names
 
-__all__ = ["ChildConfig", "OutputConfig", "agents", "child", "output", "status"]
+__all__ = ["ChildConfig", "OutputConfig", "child", "output", "parent", "status"]
 
 # What a child's realm reads from outside (decision-0002): its python tool's runner, the one
 # approval rule, what the jail keeps from the model, and the asker over the parent's output.
@@ -146,7 +146,7 @@ class _StatusSink(Protocol):
 
 
 @component(provides=("asker", "roster"))
-async def agents(
+async def parent(
     *,
     tools: _Registrar,
     system: _Sections,
@@ -157,7 +157,7 @@ async def agents(
     model: object,
     config: AgentsConfig,
 ) -> Effects:
-    """Fills an `agents` row: `use = "agents:agents"`. Binds `asker` (a confirm-only view of the
+    """Fills an `agents` row: `use = "subagents:parent"`. Binds `asker` (a confirm-only view of the
     parent's `output`, for its children) and `roster` (how many children run, for the status bar),
     registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools
     (`runs="harness"`: bh-02's own, unasked exactly when the runner confines) and tells the model
@@ -185,7 +185,7 @@ async def agents(
 
 @component
 async def status(*, roster: Roster, frame: _StatusSink) -> Effects:
-    """Fills an `agents_status` row: `use = "agents:status"`. Shows the status bar's `agents`
+    """Fills an `agents-status` row: `use = "subagents:status"`. Shows the status bar's `agents`
     field, `agents: N running`, while a sub-agent runs (absent at none), following the agents
     row's `roster`. A layer with no ui (no `frame`) leaves it out, as it does the other status
     rows."""
@@ -196,7 +196,7 @@ async def status(*, roster: Roster, frame: _StatusSink) -> Effects:
 
 @dataclass(frozen=True, slots=True)
 class OutputConfig:
-    """`agents:output`'s config, written by the agents row: the agent's name and type."""
+    """`subagents:output`'s config, written by the agents row: the agent's name and type."""
 
     name: str
     type: str
@@ -204,14 +204,14 @@ class OutputConfig:
 
 @component(provides=("output",))
 async def output(*, asker: Confirm, config: OutputConfig) -> Effects:
-    """Fills a child's `output` row (`use = "agents:output"`, inside its realm): its loop's
+    """Fills a child's `output` row (`use = "subagents:output"`, inside its realm): its loop's
     `confirm` through `asker`, labelled with the agent's name and type. Nothing else."""
     yield bind("output", Labelled(asker, config.name, config.type))
 
 
 @dataclass(frozen=True, slots=True)
 class ChildConfig:
-    """`agents:child`'s config, written by the agents row: where its loop is passed (`hand`) and
+    """`subagents:child`'s config, written by the agents row: where its loop is passed (`hand`) and
     its type's section of the prompt."""
 
     hand: Hand
@@ -220,7 +220,7 @@ class ChildConfig:
 
 @component
 async def child(*, loop: Loop, system: _Sections, asides: _Asides, config: ChildConfig) -> Effects:
-    """A child's own row (`use = "agents:child"`, inside its realm): adds its type's section to
+    """A child's own row (`use = "subagents:child"`, inside its realm): adds its type's section to
     its prompt (`agent`), an aside that tells it what `agent_send` left for it, and passes its
     loop to the run that mounted it; leaving says it is gone."""
     yield acquire(system.add, "agent", lambda: config.section)

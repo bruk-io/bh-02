@@ -1,4 +1,4 @@
-# agents-cordis-plugin
+# subagents-cordis-plugin
 
 Sub-agents: the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools and `/agents`, each `agent` call a child conversation of its
 own, of a type that is data, mounted in a sealed cordis realm while it runs, its questions put to
@@ -8,12 +8,18 @@ foreground or, with `background`, to `agent_wait`. The design is decision-0002
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agents:agents` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `executor`, `python`), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
-| `agents:status` | the status bar's `agents` field: `agents: N running` while a sub-agent runs, absent at none; config: none | `roster` (`running`, `watch`), `frame` (`status`) |
-| `agents:output` | a child's `output`, inside its realm: `confirm(request)` through `asker`, the request labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
-| `agents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system`, `asides` (`add`: what `agent_send` left) |
+| `subagents:parent` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `executor`, `python`), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
+| `subagents:status` | the status bar's `agents` field: `agents: N running` while a sub-agent runs, absent at none; config: none | `roster` (`running`, `watch`), `frame` (`status`) |
+| `subagents:output` | a child's `output`, inside its realm: `confirm(request)` through `asker`, the request labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
+| `subagents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system`, `asides` (`add`: what `agent_send` left) |
 
-The agents row writes the two inner rows' config; a layer names only `agents:agents`.
+The shipped layer fills them as the rows `agents` (`subagents:parent`) and `agents-status`
+(`subagents:status`); the two inner rows are written by the agents row into each child's realm, so a
+layer names only `subagents:parent` and `subagents:status`. The plugin is `subagents` so that no
+plugin's name is a letter from `agent`, the conversation loop's; the row id stays `agents`, the word
+the person types (`/agents`, `agents: N running`) and a layer's `clear` and `rows` name. An installed
+bh-02 needs `uv tool install --editable ./bh-02/app --reinstall` after the pull that renamed the
+plugin.
 
 ## Agent types are data
 
@@ -76,8 +82,8 @@ input, which the loop serves as it does the model's own calls) starts one child:
    call) names (the shipped types name none: the session's). Of the rows in `tools`, only those
    its type grants. No memory rows, no `chat`, no `input`, no `agents`
    row: a child can't start one of its own (depth one). A layer whose `rows` names the agents row
-   (by its id, or any row using `agents:agents`) gets an error from the call saying so, not a
-   child with one (decision-0002). Then `agents:output` and `agents:child`.
+   (by its id, or any row using `subagents:parent`) gets an error from the call saying so, not a
+   child with one (decision-0002). Then `subagents:output` and `subagents:child`.
 4. **Its realm**: `performer.perform(use(cordis.loader:loader, config=LoaderConfig(overrides=rows,
    watch=None), expose={runner, approval, host, asker}, id="agents/NAME"))`. The realm's own
    loader resolves each row by name (this plugin imports no other), and every key its rows bind
@@ -88,7 +94,7 @@ input, which the loop serves as it does the model's own calls) starts one child:
    jail keeps from the model; the model row reads it for the credential) and `asker`.
 5. **A slot**: at most `max_running` children run at once, foreground and background alike; a
    further one waits for a slot, and a note through the parent's `output.show` says so.
-6. **Its reply**: once `agents:child` has passed its loop (`Hand`), the run drives
+6. **Its reply**: once `subagents:child` has passed its loop (`Hand`), the run drives
    `loop.reply(prompt)` and keeps the events, until it ends or its type's step limit does: once
    that many model steps have ended (a step ends with its last call's result, or the loop's
    `stop`) and it would take another, the reply is closed there, and the report says the limit
@@ -117,7 +123,7 @@ and nothing is waited for).
 
 ## Questions, and nothing else of the parent's output
 
-A child's loop asks through its `output`, which is `agents:output`'s: `confirm` alone, every
+A child's loop asks through its `output`, which is `subagents:output`'s: `confirm` alone, every
 request labelled `agent: {name, type}` (over whatever it carried) and put through `asker`.
 `asker` puts to the person only a labelled request (any other is a no), through the parent's
 `output.confirm`: the ui queues it behind the parent's own, one at a time, and its modal says
@@ -152,7 +158,7 @@ child's: the policy is the same.
 ## Talking to a child, and ending it
 
 - **`agent_send(name, text)`** (`tools.agent_send(name=..., text=...)` in an input) leaves `text`
-  in a running child's mailbox (`Hand`). The child reads it as an *aside* (`agents:child` adds
+  in a running child's mailbox (`Hand`). The child reads it as an *aside* (`subagents:child` adds
   one to its `asides`, which the loop asks after every call, on the executor): the text rides
   with its next call's result, framed `Message from your parent agent (the agent that started
   you), not from the person:` (`parent_message`, decision-0002's default, the owner's to revise).
@@ -212,7 +218,7 @@ runs.
   until `agent_end` (`--once` stops after what is there), and refuses names bh-02 did not make before
   it builds a path: it reads through `host_paths.read_beneath` (no link, a descriptor opened
   read-only). Terminal control characters and bidirectional overrides in what the model wrote are dropped.
-- **The status field.** `agents:status` shows `agents: N running` while any child runs and takes the
+- **The status field.** `subagents:status` shows `agents: N running` while any child runs and takes the
   field down at none, following the agents row's `roster`. A layer with no ui has no `frame`, and so
   no field.
 - **`/agents watch NAME`** answers with the command to run in another terminal, `bh-02 watch SESSION NAME`,

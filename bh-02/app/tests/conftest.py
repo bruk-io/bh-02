@@ -14,10 +14,10 @@ UNJAILED = '[[plugin]]\nid = "runner"\nuse = "runner:unconfined"\n'
 
 # These tests read the python tool's output and the tool list exactly; the agents row's `agent`
 # would be told as a function in the namespace with the first input and offered beside `python`.
-# Its own tests are the agents plugin's and the real launch's.
+# Its own tests are the sub-agents plugin's and the real launch's.
 NO_AGENTS = (
-    '[[plugin]]\nid = "agents"\nuse = "agents:agents"\ndisabled = true\n'
-    '[[plugin]]\nid = "agents_status"\nuse = "agents:status"\ndisabled = true\n'
+    '[[plugin]]\nid = "agents"\nuse = "subagents:parent"\ndisabled = true\n'
+    '[[plugin]]\nid = "agents-status"\nuse = "subagents:status"\ndisabled = true\n'
 )
 
 # bh-02 has no one-shot chat row, but many of its tests want one: the reply to one prompt (the

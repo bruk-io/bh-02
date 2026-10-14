@@ -106,8 +106,9 @@ cd ~/some/project && bh-02
 ```
 
 The plugins and libraries are installed from the checkout itself, so `local.env` at its root is
-still found. After a pull that adds a plugin or changes a dependency, run the same command with
-`--reinstall`.
+still found. After a pull that adds or renames a plugin, or changes a dependency, run the same
+command with `--reinstall`: a command reads its plugins from what is installed, so until then a row
+naming a renamed plugin is reported as unresolved.
 
 The model acts in Python, at a REPL of its own that persists for this run of bh-02. In the sandbox its
 code runs without asking: it can write inside

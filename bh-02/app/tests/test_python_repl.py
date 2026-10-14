@@ -22,7 +22,6 @@ import pytest
 import cordis
 import memory_cordis_plugin
 from agent_cordis_plugin import ToolBroker
-from agents_cordis_plugin import EventLog
 from bh_02.bootstrap import (
     code_directories,
     code_packages,
@@ -46,6 +45,7 @@ from runner_cordis_plugin import (
     recorded_group,
     self_modify_denied,
 )
+from subagents_cordis_plugin import EventLog
 
 # darwin's jail (seatbelt) reads by denylist: everything but the secrets. Linux's (bubblewrap)
 # reads by allowlist: the system, the interpreter and the project, so a file anywhere else is

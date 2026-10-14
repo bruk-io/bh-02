@@ -19,6 +19,7 @@ uv run bh-02 --resume [ID]                         # continue this directory's n
 uv run bh-02 sessions                              # list them
 uv run bh-02 --no-jail | --model NAME | --patch mine.toml | --trace trace.log
 uv run bh-02 update-layer mine.toml                # rewrite a layer in today's row names (keeps mine.toml.bak)
+uv tool install --editable ./bh-02/app --reinstall # an installed bh-02, after a pull that adds or renames a plugin
 ```
 
 [Get started](../../docs/bh-02/get-started.md) sets it up (the credential included), and
@@ -63,7 +64,7 @@ rest of the user guide is on the docs site: [Sessions](../../docs/bh-02/using/se
 | `on-touch` | `memory:on_touch` | |
 | `memory-auto` | `memory:auto` | |
 | `extensions` | `extensions:extensions` | |
-| `agents` | `agents:agents` (`rows`: the parent's rows a child is made of; `tools`: those a type may grant, `["python"]`; `start`: 30; `max_running`: 4; `session_agents`: 16) | |
+| `agents` | `subagents:parent` (`rows`: the parent's rows a child is made of; `tools`: those a type may grant, `["python"]`; `start`: 30; `max_running`: 4; `session_agents`: 16) | |
 
 `run()` adds three rows of its own after every layer, pinned on (`disabled = false`) so no layer
 can remove them: `host` (what the host is: the layer files as `paths`, where the credential is
@@ -110,23 +111,23 @@ tui:grades              pushes the jail field              depends on Runner, Ap
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:converse           runs the chat, binds Done          depends on Loop, Input, Output, Commands, Jobs
 extensions:extensions   loads the model's own plugins      depends on Runner, Commands, Frame, System, Tools, Approval, Output
-agents:status           pushes the agents field            depends on Roster, Frame
-agents:agents           binds Asker, Roster, registers agent tools depends on Tools, System, Output, Loader, Host, Commands, Model (each call mounts a child; /agents; a Model reload ends them; see below)
+subagents:status        pushes the agents field            depends on Roster, Frame
+subagents:parent        binds Asker, Roster, registers agent tools depends on Tools, System, Output, Loader, Host, Commands, Model (each call mounts a child; /agents; a Model reload ends them; see below)
 ```
 
 A sub-agent (`agent`, the agents row) is not a row of these layers: each call mounts one child
 under the agents row, a sealed cordis realm whose own loader runs copies of `loop`, `tools`,
 `transcript`, `model`, `system`, `asides`, `access`, `executor` and `python` as the parent's
 loader mounted them, each under `agents/NAME/` (its transcript in the session's
-`agents/NAME/`), plus `agents:output` (its `output`: a `confirm` over `asker`, labelled) and
-`agents:child` (its type's section of the prompt); of the tool rows a type may grant, only its
+`agents/NAME/`), plus `subagents:output` (its `output`: a `confirm` over `asker`, labelled) and
+`subagents:child` (its type's section of the prompt); of the tool rows a type may grant, only its
 type's. Its type is data: shipped (`explore`, `general`) or the person's, `agents/NAME.toml` in
 bh-02's config directory (`host.trusted`). From outside it reads only `runner`, `approval`,
 `host` and `asker`. It runs in the foreground, or in the background for `agent_wait`, at most
 `max_running` at once, until its type's step limit; past `session_agents`, or naming a model
 other than its type's, its start is asked first. It is retired when it answers, when the call is
 stopped (Ctrl-C; a background child is not), by `agent_stop` or `/agents stop`, or with the agents row (a `/clear`, a `/model` switch or a restart of it), and what it used joins
-the session's totals; the ui shows none of its rows' lifecycle, and `--trace` keeps them. Its events go to the session's `agents/NAME/events.jsonl` (0600, under `host.secrets`), which `bh-02 watch SESSION NAME` follows read-only and `/agents watch NAME` names the command for; the status bar's `agents: N running` field is the `agents:status` row's ([agents-cordis-plugin](../plugins/agents-cordis-plugin/README.md)).
+the session's totals; the ui shows none of its rows' lifecycle, and `--trace` keeps them. Its events go to the session's `agents/NAME/events.jsonl` (0600, under `host.secrets`), which `bh-02 watch SESSION NAME` follows read-only and `/agents watch NAME` names the command for; the status bar's `agents: N running` field is the `subagents:status` row's ([subagents-cordis-plugin](../plugins/subagents-cordis-plugin/README.md)).
 
 So a new model or ui keeps the Python process and its namespace (the python row depends on the
 runner and brokers that never reload), a new runner starts a new one, and a `/model` switch
@@ -144,7 +145,7 @@ has its rows' config and the keys' methods each one uses.
 | Package | Binds / registers | Consumes |
 |---|---|---|
 | [`agent-cordis-plugin`](../plugins/agent-cordis-plugin/README.md) | `loop`, `tools`, `transcript`, `system`, `asides`, `access`, `executor`; `/clear` and `/compact` (`agent:conversation`) | `model`, `tools`, `transcript`, `system`, `approval`, `output`, `asides`, `executor`, `loader`, `commands`, `jobs` |
-| [`agents-cordis-plugin`](../plugins/agents-cordis-plugin/README.md) | `asker`, the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools and `/agents` (`agents:agents`); inside a child's realm, its `output` (`agents:output`) and its type's section (`agents:child`) | `tools`, `system`, `output`, `loader`, `host`, `commands`, `model`; in a child, `asker`, `loop`, `system` |
+| [`subagents-cordis-plugin`](../plugins/subagents-cordis-plugin/README.md) | `asker`, the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools and `/agents` (`subagents:parent`); inside a child's realm, its `output` (`subagents:output`) and its type's section (`subagents:child`) | `tools`, `system`, `output`, `loader`, `host`, `commands`, `model`; in a child, `asker`, `loop`, `system` |
 | [`chat-cordis-plugin`](../plugins/chat-cordis-plugin/README.md) | `done` (`chat:converse`, the chat itself) | `loop`, `input`, `output`, `commands`, `jobs` |
 | [`commands-cordis-plugin`](../plugins/commands-cordis-plugin/README.md) | `commands` (the broker), `jobs`; `/rows`, `/explain`, `/restart` (`commands:operator`); the `!` prefix (`commands:shell_command`) | `output`, `commands`, `loader`, `jobs` |
 | [`extensions-cordis-plugin`](../plugins/extensions-cordis-plugin/README.md) | nothing: loads the model's own plugins into the extensions process, whose additions go into `commands`, `frame`, `system` and `tools` | `runner`, `commands`, `frame`, `system`, `tools`, `approval`, `output` |

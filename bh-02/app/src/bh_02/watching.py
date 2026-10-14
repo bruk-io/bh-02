@@ -1,7 +1,7 @@
 """`bh-02 watch SESSION AGENT`: one sub-agent's event log, rendered for a person at a terminal.
 
 The log is `<sessions>/SESSION/agents/AGENT/events.jsonl`, written by the agents row
-(agents-cordis-plugin) and kept under the sessions' state directory, which the `host` value's
+(subagents-cordis-plugin) and kept under the sessions' state directory, which the `host` value's
 `secrets` hides from every jail. This module only reads it: through `host_paths.read_beneath`
 (a walk that follows no link, from a descriptor it opened read-only), so it opens nothing for
 writing and creates nothing. The two names are judged before any path is made of them: only a

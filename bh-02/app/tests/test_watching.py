@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from agents_cordis_plugin import EventLog, ended_record, started_record
 from bh_02.cli import main
 from bh_02.watching import Refused, refused, rendered, watched
+from subagents_cordis_plugin import EventLog, ended_record, started_record
 
 _SESSION = "20261012-091500-ab12"
 

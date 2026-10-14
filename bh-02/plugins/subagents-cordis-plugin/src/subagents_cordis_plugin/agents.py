@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Any, Final, Protocol, runtime_checkable
 
-from agents_cordis_plugin.child import (
+from subagents_cordis_plugin.child import (
     ChildRow,
     Entry,
     Listed,
@@ -68,8 +68,8 @@ from agents_cordis_plugin.child import (
     waited,
     watch_command,
 )
-from agents_cordis_plugin.eventlog import LOG, EventLog
-from agents_cordis_plugin.kinds import AgentType
+from subagents_cordis_plugin.eventlog import LOG, EventLog
+from subagents_cordis_plugin.kinds import AgentType
 
 __all__ = [
     "AGENT",
@@ -228,7 +228,7 @@ type Types = Callable[[], Awaitable[Mapping[str, AgentType | str]]]
 @dataclass(frozen=True, slots=True)
 class Asker:
     """The `asker` key: a confirm-only view of the parent's `output`, for the children's
-    `agents:output` rows. A request that does not say which agent asks is a no, never put to the
+    `subagents:output` rows. A request that does not say which agent asks is a no, never put to the
     person unlabelled."""
 
     output: Confirm
@@ -288,7 +288,7 @@ class Field:
 
 
 class Hand:
-    """Where a child's `agents:child` row passes its `loop` to the run that mounted it, and says
+    """Where a child's `subagents:child` row passes its `loop` to the run that mounted it, and says
     when it is gone (the row unloading: the child retired). Gone is for good."""
 
     def __init__(self) -> None:

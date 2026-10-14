@@ -7,7 +7,7 @@ import gc
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
-from agents_cordis_plugin import GENERAL, Agents, AgentsConfig, AgentType, ChildRow, Hand
+from subagents_cordis_plugin import GENERAL, Agents, AgentsConfig, AgentType, ChildRow, Hand
 
 type Json = Mapping[str, Any]
 
@@ -61,7 +61,7 @@ class _Mounted:
 
 class _Mounts:
     """The way `Agents` mounts a child: each child's loop is passed through the `hand` its rows
-    carry, as the `agents:child` row would, and its retirement is held until `released[name]`."""
+    carry, as the `subagents:child` row would, and its retirement is held until `released[name]`."""
 
     def __init__(self, *names: str, fails: bool = False) -> None:
         self.replies = {name: _Reply(fails) for name in names}

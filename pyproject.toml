@@ -100,8 +100,6 @@ src = [
     "bh-02/app/tests",
     "bh-02/plugins/agent-cordis-plugin/src",
     "bh-02/plugins/agent-cordis-plugin/tests",
-    "bh-02/plugins/agents-cordis-plugin/src",
-    "bh-02/plugins/agents-cordis-plugin/tests",
     "bh-02/plugins/chat-cordis-plugin/src",
     "bh-02/plugins/chat-cordis-plugin/tests",
     "bh-02/plugins/commands-cordis-plugin/src",
@@ -116,6 +114,8 @@ src = [
     "bh-02/plugins/python-cordis-plugin/tests",
     "bh-02/plugins/runner-cordis-plugin/src",
     "bh-02/plugins/runner-cordis-plugin/tests",
+    "bh-02/plugins/subagents-cordis-plugin/src",
+    "bh-02/plugins/subagents-cordis-plugin/tests",
     "bh-02/plugins/tui-cordis-plugin/src",
     "bh-02/plugins/tui-cordis-plugin/tests",
     "docs/hooks",
@@ -240,16 +240,16 @@ exclude = [
     # one function that makes it (the name is chosen on the loop, purely); the call that starts
     # its run (impure through `_run`); a finished background run's failure marked retrieved, so
     # asyncio does not log one nobody waited for
-    "agents_cordis_plugin.agents:_made", "agents_cordis_plugin.agents:Agents.agent",
-    "agents_cordis_plugin.agents:_retrieved",
+    "subagents_cordis_plugin.agents:_made", "subagents_cordis_plugin.agents:Agents.agent",
+    "subagents_cordis_plugin.agents:_retrieved",
     # a sub-agent's run: its reply driven, its events kept for its report and for the usage shown
     # however the run ends (a step limit, Ctrl-C, its retirement)
-    "agents_cordis_plugin.agents:Agents._run", "agents_cordis_plugin.agents:_driven",
-    "agents_cordis_plugin.agents:_driven.reply",
+    "subagents_cordis_plugin.agents:Agents._run", "subagents_cordis_plugin.agents:_driven",
+    "subagents_cordis_plugin.agents:_driven.reply",
     # a sub-agent's event log: stamped with the clock and appended to a file, on a thread
-    "agents_cordis_plugin.eventlog:EventLog.write", "agents_cordis_plugin.eventlog:_append",
+    "subagents_cordis_plugin.eventlog:EventLog.write", "subagents_cordis_plugin.eventlog:_append",
     # agent types: the type files read from bh-02's config directories
-    "agents_cordis_plugin.kinds:type_files", "agents_cordis_plugin.kinds:type_names",
+    "subagents_cordis_plugin.kinds:type_files", "subagents_cordis_plugin.kinds:type_names",
     "agent_cordis_plugin.transcript:MemoryTranscript.append",
     # Claude Code: one process per conversation and what it holds, saved in the session's
     # state dir; the one read of local.env; a rebuilt session file; the CLI's stderr to a log;
