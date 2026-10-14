@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-14 15:56'
-updated_date: '2026-10-14 16:29'
+updated_date: '2026-10-14 16:40'
 labels:
   - naming
 dependencies: []
@@ -53,4 +53,6 @@ One naming rule, written where a plugin author reads it, and the names that brea
 
 <!-- SECTION:NOTES:BEGIN -->
 Accepted 2026-10-14 by Fable standing in for the owner (he delegated these decisions): open questions answered above; AC #1 keeps the rule in one place (bh-02/CLAUDE.md), AC #2 says 'no component repeats its plugin's name' (agents:agents is a component; no row id stutters). Added to the sweep: the row id agents_status, the one two-word id with an underscore. TASK-0099.01 starts now.
+
+TASK-0099.01 wrote decision-0005 (proposed, awaiting the owner): the rule, subagents:parent, the sweep, the rename table. It filed TASK-0099.04 (extensions:extensions to extensions:process) and TASK-0099.05 (the rule into bh-02/CLAUDE.md, after .02, .03 and .04), and added to .02 and .03.
 <!-- SECTION:NOTES:END -->
