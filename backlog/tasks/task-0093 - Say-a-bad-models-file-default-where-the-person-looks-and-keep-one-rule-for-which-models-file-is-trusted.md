@@ -3,14 +3,15 @@ id: TASK-0093
 title: >-
   Say a bad models-file default where the person looks, and keep one rule for
   which models file is trusted
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 08:10'
-updated_date: '2026-10-14 13:06'
+updated_date: '2026-10-14 13:40'
 labels:
   - models
   - size-3
+  - finish-moved
 dependencies: []
 priority: low
 type: bug
@@ -72,4 +73,6 @@ EVIDENCE BY AC.
 
 RUNS (root, no tini, foreground, one at a time, exit codes read from the shell, not a pipe): uv run pytest bh-02/plugins/models-cordis-plugin: 313 passed, 2 skipped (was 262/2); bh-02/app/tests: 222 passed, 1 skipped (was 201/1; includes the real-launch test); bh-02/plugins/tui-cordis-plugin: 188 passed; scripts/arch-check --no-fix exit 0 (after demoting refused and two budget entries); uv run mypy exit 0 (187 files); ruff format + check clean.
 NOT VERIFIED: scripts/linux-jail-check (not relevant); against Claude itself (the real-launch test uses the fakes). KNOWN LIMIT: behind a non-TOML file the file's default is unknown, so a row no layer names a model for is unusable (named 'default') until the file is fixed or /model picks one; the first message says what is wrong. NITS from TASK-0095 not carried: none of the lines I touched were the nit lines (models.md ~147, the plugin README ~230, openai/client.py's 'then try again.').
+
+Close review (Opus low, independent): CLOSE, no blocking findings. Planted in a scratch copy: shell roots back to cwd only (1 fails), shell trusting a project file (4), known() re-raising (13), current() without unusable (14), model_text ignoring unusable (2), check() refusing while the default or a table is broken (17, 4, 26). Every bad-default path ends in a said error or Unusable, never a silent sonnet; /model sonnet switches behind a broken file. Changed existing tests assert more, not less. Runs: models 313, tui 188 passed; arch-check, mypy, scripts/check (2779 passed) exit 0. Should-fix 1 (models.md says a session with a bad default lists as 'default'; one naming no model lists by its name) and nit 5 (README's 'the session's directory' for the row's roots) join TASK-0096. Should-fix 2, a timing flake in test_real_launch.py (the restart status-bar test, also seen in TASK-0087's runs), filed as TASK-0097. Nits answered: --model '' now reads the file (harmless); a docstring line break in switch.py. finish-moved: criteria rewritten at the design gate (see the note above).
 <!-- SECTION:NOTES:END -->

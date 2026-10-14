@@ -4,6 +4,7 @@ title: A models file that is not UTF-8 text crashes the shell and the model row
 status: To Do
 assignee: []
 created_date: '2026-10-14 13:05'
+updated_date: '2026-10-14 13:40'
 labels:
   - models
   - size-1
@@ -22,4 +23,5 @@ Found while building TASK-0093 (probed on e049e4b): a models.toml holding bytes 
 - [ ] #1 A models file that is not UTF-8 text is the model row's ModelsError with what to write, never a traceback, and the built-in models stay usable (/model sonnet switches)
 - [ ] #2 sessions.create records no model for it and bh-02 starts; the shell-and-row contract test in test_session_dirs.py has a case of it and fails if either side crashes or they disagree
 - [ ] #3 scripts/check passes
+- [ ] #4 docs/bh-02/using/models.md says which new sessions list as 'default' in bh-02 sessions (a default that is not a name, an unreadable file) and that one whose default names no model lists by that name; the models plugin README says the shell and the row both use the working directory and the layer's cwd as roots (from TASK-0093's close review)
 <!-- AC:END -->
