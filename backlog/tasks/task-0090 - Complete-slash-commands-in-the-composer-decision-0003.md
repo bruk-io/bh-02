@@ -1,11 +1,11 @@
 ---
 id: TASK-0090
 title: Complete slash commands in the composer (decision-0003)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 00:01'
-updated_date: '2026-10-14 05:39'
+updated_date: '2026-10-14 06:02'
 labels:
   - tui
   - size-2
@@ -61,4 +61,6 @@ The decision's defaults stand unless the owner changes them before this starts: 
 Accepted by the owner, 2026-10-14 (promoted from a draft), with decision-0003's defaults as written.
 
 Built per decision-0003: frame.py (completions, slash_line, enter_takes pure, in __all__; palette_entries strips C0/DEL/C1 and drops empty names), widgets/completions.py (Completions OptionList, can_focus False, Content rows via row(), snapshot per opening), composer.py (list keys while open, Chose message), app.py (layout, follow composer, close on blur/palette/question, click and Chose go through choose), docs (CONTRACTS frame row, tui README, commands.md). Tests: tests/test_completions_list.py (21 Pilot/unit) and 6 new in test_frame.py. Planted violations seen failing then restored: Enter always taking highlight -> enter-rule test failed; snapshot re-read per key -> once-per-opening test failed; control-char strip removed -> control-character test failed; can_focus True -> click/focus test failed; Esc case removed -> Esc test failed. Results: tui plugin tests 183 passed; scripts/arch-check exit 0 (first run caught row() impure via Content.truncate, rewritten with rich.cells); uv run mypy clean; scripts/check exit 0 (2558 passed, 31 skipped; tokens step skipped, no bh-01 dist), run as root without tini. Judgments: substring match compares what follows the leading / (so /ea finds /clear; with the / included it could never match); a trailing space is kept when matching so '/model ' lists the choices; Ctrl-P opening and palette choose close the list explicitly because pushing the palette screen does not blur the composer.
+
+Closed on review (Opus, low) of 0b88057: CLOSE, all seven criteria met, nothing blocking. Driven with Pilot at 60x20: /mo lists /model and its choices with help cut; Tab gives /model with choices; Enter on /model sends it (the broker strips the space); Esc keeps the text and the list stays shut; Ctrl-J closes it; a question arriving hides the list and it does not reopen after the answer. Plants each failed their tests: Enter always taking the highlight, prefix-only Enter, reading per key, no Esc, no strip, markup rows, allowed=True under a question. Wide characters cut within the width (rich.cells). tui 183 passed; bh-02/app 195 passed; arch-check and mypy exit 0; scripts/check's tests 2558 passed (its gates passed alone). The worker's calls judged sound: substring after the /, trailing space kept, explicit close on Ctrl-P, /model sent with its space. Should-fix filed (blocking-only rule): TASK-0089.01. Nits left: palette_entries drops a bare / call (harmless); each key resets the highlight to the first row (not in the decision).
 <!-- SECTION:NOTES:END -->
