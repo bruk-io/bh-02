@@ -32,7 +32,7 @@ One naming rule, written where a plugin author reads it, and the names that brea
 - A person's layers and a resumed session: every renamed row id and component is translated by `bh-02 update-layer` and on resume, saying what changed (as TASK-0064).
 - A person's existing startup file keeps running after it is renamed, with a line saying the new name.
 - The model-facing names stay unless the rule needs them changed: the tools `agent`, `agent_wait`, `agent_send`, `agent_stop`, `python` and the commands the person types (`/agents`).
-- The gates: renames go through `pypeeker demote` where it applies; `scripts/check` passes after each.
+- The gates: renames go through `pypeeker rename` where it applies (`demote` only makes a name private); `scripts/check` passes after each.
 
 ## Open questions
 - [x] The rule: answered by Fable for the owner (2026-10-14): a plugin is named for its subject; a component for what it is, read after the plugin's name (`commands:registry`, `models:catalog`, `agent:tools`), never repeating its plugin; a row id for the one key it binds, else its role (as CONTRACTS.md already says). When a broker's key is the plugin's own name, the component names the kind (`registry`), so stutters vanish by the rule. One word, one thing; a thing seen from two places keeps its word with a label saying where. Why: a layer author reads `id` and `use` and should know what fills the role without opening the plugin.

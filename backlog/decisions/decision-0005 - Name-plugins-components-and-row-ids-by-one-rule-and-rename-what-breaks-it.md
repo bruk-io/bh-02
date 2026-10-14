@@ -2,7 +2,7 @@
 id: decision-0005
 title: 'Name plugins, components and row ids by one rule, and rename what breaks it'
 date: '2026-10-14 16:38'
-status: proposed
+status: accepted
 ---
 ## Context
 
@@ -39,7 +39,9 @@ Worded to go into `bh-02/CLAUDE.md` as a "Naming" section after "Adding a plugin
 >   `models:catalog`, `agent:tools`, `python:tool`), and never repeats its plugin's word, in the
 >   singular or the plural, unless it is named for the key it binds, whose name its consumers fix
 >   (`models:model` binds `model`). A broker whose key is its plugin's own name takes the kind for
->   its component (`registry`, `catalog`).
+>   its component (`registry`, `catalog`). The one kept stutter is `tui:ui`: TASK-0064 gave the
+>   Textual app one name for its function, component and row, and `tui:app` would bring the third
+>   back.
 > - A **row id** is the key the row binds, when it binds one key and that key names what fills the
 >   role (`loop`, `tools`, `commands`); else its role (`ui` binds three keys, `agents` two, `python`
 >   none; `chat` binds `done`, a signal the shell waits on, not the thing that fills the role). Ids
@@ -50,12 +52,12 @@ Worded to go into `bh-02/CLAUDE.md` as a "Naming" section after "Adding a plugin
 > - **A rename is translated, not abandoned.** A row id or component a person may have written goes
 >   into `bh_02/outdated.py` (`_RENAMED`, `_RENAMED_USES`), so `bh-02 update-layer` and a resume say
 >   what changed; a file the person owns is read under its old name for good, with a line saying the
->   new one. Rename symbols with `pypeeker demote`.
+>   new one. Rename symbols with `pypeeker rename` (`demote` only makes one private).
 
-"Repeats" means the same word, plural or not, and a component that is the plugin's whole subject
-under another name for it counts: `agents:agents` and `extensions:extensions` repeat, and
-`subagents:agents` would. `models:model` is the one place the exception applies, and `tui:ui` is a
-different word (see the sweep).
+"Repeats" means the same word, plural or not, or the word a plugin's name is built on:
+`agents:agents` and `extensions:extensions` repeat, and `subagents:agents` would. `models:model` is
+the one place the key's-name exception applies. `tui:ui` reads as a stutter and is kept on purpose,
+named in the rule (see the sweep).
 
 ### 2. The component of the `agents` row: `subagents:parent`
 
@@ -97,7 +99,7 @@ every plugin's components, against the rule.
   key's name covers (it binds `model`); the rows are a noun and its plural, each the key its row
   binds, and read as what they are. Renaming either costs 30 files naming `models:model` (and it is
   the target of two earlier translations in `outdated.py`) or every consumer of the `models` key,
-  for a pair that does not mislead. The closest call in the sweep; flagged for the owner.
+  for a pair that does not mislead. The closest call in the sweep; the owner kept it.
 - **`memory-auto`, `on-touch`, `shell-command`, `agents-status`** (and `status`, `grades`, `palette`
   in tui): each id is its role; `memory-auto`, `shell-command` and `agents-status` take their
   plugin's or kind's word where the bare role is another row's key or id (`memory`, `status`).
@@ -120,8 +122,8 @@ every plugin's components, against the rule.
   `shell` (bh-02's app, and your shell for `!`), `harness` (five senses), `stack` (a session's,
   brig's, a fiber's), and, after the rename, `agent` (the plugin's loop; the tool and the glossary's
   child). One of these names something other than what it holds: a session's `stack` is the model
-  it started on (in every session's `meta.json`, the `bh-02 sessions` column). Kept, flagged for
-  the owner: a rename needs a read-both-forever shim like `kernel.py`'s for one column and one
+  it started on (in every session's `meta.json`, the `bh-02 sessions` column). Kept by the owner,
+  out of scope (a `meta.json` field, not a plugin, component or row id): a rename needs a read-both-forever shim like `kernel.py`'s for one column and one
   glossary line.
 - **Module names inside a plugin** (`prompt.py` next to `system.py`, `toolset.py` next to
   `tools.py`, `jail.py` beside `unconfined.py`): not named by any layer or person, each says what it
@@ -131,7 +133,8 @@ every plugin's components, against the rule.
 
 ### 4. The rename table
 
-Counts are `grep -l` files outside `backlog/`, the generated `site/` and `.pypeeker/`; a file that
+Counts are `grep -l` files outside `backlog/`, the generated `site/`, `.pypeeker/`, `.hypothesis/`
+and `__pycache__/`; a file that
 needs two renames is counted in each.
 
 | # | Old | New | Touches | How a person's layer or session translates it |
@@ -141,7 +144,7 @@ needs two renames is counted in each.
 | 3 | `agents:status` | `subagents:status` | 8 | `_RENAMED_USES["agents:status"]` |
 | 4 | `agents:child`, `agents:output` | `subagents:child`, `subagents:output` | 8 and 7 (`child.py` names both and `agents:agents` as strings) | `_RENAMED_USES`, both. The agents row writes these into each child's realm, so no layer or session names them; the entries cost two lines and make "every use the plugin had" true |
 | 5 | row id `agents_status` | `agents-status` | 4 files | `_RENAMED["agents_status"]`. The likely hit is a patch that turns the field off (`id = "agents_status"`, `disabled = true`, no `use`); `_renamed_rows` carries a `clear` list too. A layer that has both ids gets `_clash`'s fold-them line |
-| 6 | `extensions:extensions` | `extensions:process` | 10: `README.md`, `bh-02/{CONTRACTS,GLOSSARY}.md`, `app/README.md`, `bh-02.toml`, the plugin's and the runner's READMEs, `wiring.py`, `__init__.py` (the re-export), `tests/test_extensions_host.py` | `_RENAMED_USES["extensions:extensions"]`. The row id `extensions` stays, so `/restart extensions` and a config override of it keep working |
+| 6 | `extensions:extensions` | `extensions:process` | 10 (8 name the use; `__init__.py` and the test name the function): `README.md`, `bh-02/{CONTRACTS,GLOSSARY}.md`, `app/README.md`, `bh-02.toml`, the plugin's and the runner's READMEs, `wiring.py`, `__init__.py` (the re-export), `tests/test_extensions_host.py` | `_RENAMED_USES["extensions:extensions"]`. The row id `extensions` stays, so `/restart extensions` and a config override of it keep working |
 | 7 | `kernel.py`: `$XDG_CONFIG_HOME/bh-02/kernel.py` and `.bh-02/kernel.py` | `startup.py`, same places | 12 files name `kernel.py`; with the class (row 8), 17 in all; `scripts/model-friction` among them (it reads old sessions, so it matches both names) | not `outdated.py`: it is not a layer. The python row reads the old name for good (below) |
 | 8 | `Kernel`, `KernelConfig`, `_Kernel` (`worker.py`), `__kernel__` | `PythonProcess`, `PythonProcessConfig`; `_Kernel` and `__kernel__` are TASK-0099.02's call | the 17 above, among them root `pyproject.toml` (purity budget: `python_cordis_plugin.client:Kernel.*`, `worker:_Kernel._run`), `bh-02/CLAUDE.md` (`Kernel.run`) and `libs/host-paths/CLAUDE.md`; 46 files say "kernel" in prose or a test's name (some mean the Linux kernel: judge each hit) | nothing: no class name is in a layer or on disk. `KernelConfig`'s fields keep their names (`startup`...) |
 
@@ -157,7 +160,11 @@ rules: the project's in the jail, the person's on the host through `host_paths`,
 
 1. For each place (the person's, the project's): `startup.py` there runs. A `kernel.py` beside it
    is not read, and the line says so (below).
-2. `startup.py` absent and `kernel.py` there: `kernel.py` runs.
+2. `startup.py` absent and `kernel.py` there: `kernel.py` runs, as the placed file in that entry's
+   place: the person's goes through `host_paths.walked` as any startup file does (`_ready`), the
+   project's is read by the worker in the jail. The fallback is by name, per configured entry: an
+   entry named `startup.py`, default or written out, is looked for as `kernel.py` beside it when
+   absent.
 3. Neither: nothing, as today.
 4. The line, once per Python process start, in the first input's output beside "ran first and
    defined": that the file ran under its old name, that it is called `startup.py` now, and (for
@@ -167,11 +174,13 @@ rules: the project's in the jail, the person's on the host through `host_paths`,
 5. The both-exist line matters for one case: a resumed conversation began with the prompt that
    names `.bh-02/kernel.py` (a conversation's prompt is sent unchanged); its model may write
    helpers there again after a `startup.py` appeared, and would lose them silently.
-6. A `startup` config that names a file explicitly runs as named; `update-layer` does not rewrite
-   it. Only the defaults change.
-7. `__kernel__` (the namespace's `__name__`) is readable by a person's startup file; if
-   TASK-0099.02 changes it, that is one more thing the line says, or it stays as the one old word
-   left, with its reason in `worker.py`.
+6. A `startup` config naming `kernel.py` explicitly runs as named, with no line; `update-layer`
+   does not rewrite it. The prompt (`instructions_for`, built from each entry's configured name)
+   names only `startup.py`, whatever is on disk: the fallback changes what is opened, never the
+   name the model is told, so the aside is the one place the old name is said.
+7. `__kernel__` (the namespace's `__name__`) stays: a person's startup file may test `__name__`,
+   a rename breaks that silently, and nothing the model or person sees changes. The one old word
+   left; `worker.py` says why beside it. `_Kernel` is TASK-0099.02's call.
 
 ### 5. Review against the cordis design
 
@@ -211,3 +220,13 @@ rules: the project's in the jail, the person's on the host through `host_paths`,
 - Not decided here: nothing about brig, cordis or the warden example (their own names); a docs
   reference page for the sub-agents plugin does not exist (`docs/bh-02/reference/plugins/` has none,
   `mkdocs.yml` lists none) and is not made by the rename.
+
+## Accepted
+
+2026-10-14, by Fable standing in for the owner (he delegated these decisions), after the review
+against the cordis design (TASK-0099.01's notes) found nothing blocking. Accepted with five changes,
+applied above: `tui:ui` named in the rule as the one kept stutter; the startup-file fallback by name
+per configured entry, through `host_paths.walked` for the person's, with the prompt naming only
+`startup.py`; `__kernel__` stays; `pypeeker rename`, not `demote`; the counts' exclusions. Flags
+ruled: `models:model`, `model` and `models` kept (the key's-name exception; thirty files for no
+confusion removed); a session's `stack` kept and out of scope.
