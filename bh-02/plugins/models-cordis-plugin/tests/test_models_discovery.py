@@ -283,6 +283,22 @@ async def test_an_id_is_only_a_name_and_a_body_never_a_path_an_argument_or_a_url
     assert list(work.iterdir()) == [] and not (tmp_path / "pwned").exists()  # no file made or named by one
 
 
+async def test_a_name_above_u_ffff_is_written_to_the_session_s_layer_and_read_back_as_typed(
+    tmp_path: Path,
+) -> None:
+    """TASK-0094: `/model local/<id>` takes any id after the endpoint, and cordis's `format_layer` wrote
+    a character above U+FFFF as an escape TOML refuses, so the next read of the layer failed."""
+    name = "local/llama-\U0001f999"
+    get = FakeGet({})
+    catalog = _catalog(tmp_path, get)
+    note, _restarting = await _switch(tmp_path, catalog).run(name)
+    assert isinstance(note, dict) and str(note["text"]).startswith(f"switching to {name}")
+    (row,) = read_layer(tmp_path / "session.toml")  # what the loader reads next
+    assert row.config == {"state": "/s/claude", "default": name}
+    assert resolved(ModelConfig(default=name, models=str(tmp_path / "models.toml"))).id == "llama-\U0001f999"
+    assert get.calls == []  # a name is resolved without asking the server
+
+
 async def test_the_key_goes_in_the_request_s_header_and_nowhere_else(tmp_path: Path) -> None:
     env = tmp_path / "local.env"
     env.write_text(f"LOCAL_KEY={_KEY}\n")

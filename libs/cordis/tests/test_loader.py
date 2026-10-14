@@ -423,6 +423,47 @@ def test_format_layer_is_parse_layer_s_inverse() -> None:
         format_layer([Row("bad", "p:c", {"thing": object()})])
 
 
+_LLAMA = "\U0001f999"  # above U+FFFF: one scalar value, two UTF-16 code units
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        pytest.param(Row(f"a{_LLAMA}"), id="row id"),
+        pytest.param(Row("a", f"m{_LLAMA}:c"), id="use"),
+        pytest.param(Row("a", "m:c", {"k": f"v{_LLAMA}"}), id="config value"),
+        pytest.param(Row("a", "m:c", {"k": ["x", f"v{_LLAMA}"]}), id="config value in a list"),
+        pytest.param(Row("a", "m:c", {"t": {"k": f"v{_LLAMA}"}}), id="config value in a table"),
+        pytest.param(Row("a", "m:c", {f"k{_LLAMA}": 1}), id="config key"),
+        pytest.param(
+            Row("a", "m:c", {"t": {f"k{_LLAMA}": [{_LLAMA: _LLAMA}]}}), id="key in a table, in a list"
+        ),
+    ],
+)
+def test_format_layer_round_trips_a_character_above_u_ffff(row: Row) -> None:
+    """json.dumps wrote it as a surrogate pair, which TOML refuses in an escape (tomllib: "Escaped
+    character is not a Unicode scalar value"): a model name typed or passed to --model could make
+    the layer the loader reads next unreadable."""
+    assert parse_layer(format_layer([row])) == [row]
+
+
+def test_format_layer_escapes_what_a_toml_string_may_not_hold_raw() -> None:
+    """Control characters (TOML forbids them raw in a basic string) are escaped, and so is every
+    character outside printable ASCII, so the text is ASCII whatever encoding it is written with."""
+    nasty = 'q"b\\ \x00\x07\x08\t\n\x0c\r\x1b\x7f \x85   \xe9 ￿ \U00010000 \U0010ffff'
+    text = format_layer([Row("a", "m:c", {"k": nasty})])
+    assert all(c == "\n" or " " <= c <= "~" for c in text)
+    assert parse_layer(text)[0].config == {"k": nasty}
+
+
+@pytest.mark.parametrize("config", [{"k": "x\udcff"}, {"x\ud83e": 1}], ids=["value", "key"])
+def test_format_layer_refuses_a_lone_surrogate_and_says_what_to_do(config: dict[str, Any]) -> None:
+    """No TOML string holds half a character (bytes that are not UTF-8 decode to one): refused
+    where it is written, not written as a layer the loader can't read."""
+    with pytest.raises(ValueError, match=r"half of a character.*write it in UTF-8"):
+        format_layer([Row("a", "m:c", config)])
+
+
 @pytest.mark.parametrize(
     ("text", "said"),
     [

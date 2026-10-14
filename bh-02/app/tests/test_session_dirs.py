@@ -109,6 +109,19 @@ async def test_the_model_flag_naming_a_model_of_a_broken_endpoint_starts_the_ses
     assert server.requests == []
 
 
+def test_a_model_name_above_u_ffff_is_recorded_in_the_layer_and_read_back_as_typed(tmp_path: Path) -> None:
+    """TASK-0094: `--model local/<id>` (and a resume's `--model`) takes any id after the endpoint, and
+    cordis's `format_layer` wrote a character above U+FFFF as an escape TOML refuses, which left the
+    session a layer the loader can't read."""
+    name = "local/llama-\U0001f999"
+    made = create(tmp_path / "s", "/work/a", model=name, no_jail=False)
+    assert _recorded(made) == name and made.stack == name
+    assert json.loads((made.dir / "meta.json").read_text())["stack"] == name
+    other = "local/\U0001f999-2"
+    set_model(made, other)  # a resume with --model rewrites the layer the same way
+    assert _recorded(made) == other
+
+
 def test_a_new_session_with_no_file_default_records_sonnet(_own_config: Path, tmp_path: Path) -> None:
     made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
     assert _recorded(made) == "sonnet" and made.stack == "sonnet"

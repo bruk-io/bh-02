@@ -125,7 +125,21 @@ def _toml_kind(value: object) -> str:
 def format_layer(rows: Iterable[Row], header: str = "") -> str:
     """The text of a layer holding `rows`: `parse_layer`'s inverse, for a program that writes
     the layer files it runs from (a session's own layer, a `/model` command). `header` is a
-    comment block put first; comments already in a file are not kept."""
+    comment block put first; comments already in a file are not kept.
+
+    Every string (an id, a `use`, a config key or value, however nested) is written as a TOML
+    basic string of printable ASCII: a quote, a backslash and a control character get their
+    backslash escape, and any other character outside printable ASCII is a `\\uXXXX` escape
+    (`\\UXXXXXXXX` above U+FFFF, which is one escape, not the surrogate pair JSON would write
+    and TOML refuses). So the text reads back as the same strings whatever encoding the file is
+    written with.
+
+    Raises:
+        TypeError: A config value is not a string, number, bool, mapping, list or tuple.
+        ValueError: A string holds a lone surrogate (half of a character, which is what bytes
+            that are not UTF-8 decode to): no TOML string can, so it is refused here, not
+            written as a layer `parse_layer` can't read.
+    """
     parts = [f"# {line}".rstrip() for line in header.splitlines()]
     for row in rows:
         lines = ["[[plugin]]", f"id = {_toml(row.id)}"]
@@ -147,12 +161,44 @@ def _toml(value: object) -> str:
         case int() | float():
             return repr(value)
         case str():
-            return json.dumps(value)  # a JSON string is a valid TOML basic string
+            return _toml_string(value)
         case Mapping():
-            return "{ " + ", ".join(f"{_toml(str(k))} = {_toml(v)}" for k, v in value.items()) + " }"
+            return "{ " + ", ".join(f"{_toml_string(str(k))} = {_toml(v)}" for k, v in value.items()) + " }"
         case list() | tuple():
             return "[" + ", ".join(_toml(v) for v in value) + "]"
     raise TypeError(f"a layer can't hold a {type(value).__name__}: {value!r}")
+
+
+# The characters a TOML basic string spells with a short escape; every other one of printable
+# ASCII (space to `~`) is written as it is.
+_SHORT_ESCAPES = {'"': '\\"', "\\": "\\\\", "\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r"}
+
+
+def _toml_string(text: str) -> str:
+    """`text` as a TOML basic string, in printable ASCII only (see `format_layer`).
+
+    JSON's own string would not do: it writes a character above U+FFFF as a surrogate pair, which
+    TOML refuses in an escape (it takes Unicode scalar values only).
+
+    Raises:
+        ValueError: `text` holds a lone surrogate, which no TOML string can.
+    """
+    if (half := next((c for c in text if "\ud800" <= c <= "\udfff"), None)) is not None:
+        raise ValueError(
+            f"a layer can't hold {text!r}: {half!r} is half of a character (a surrogate), which no TOML "
+            f"string can hold; bytes that are not UTF-8 decode to one, so write it in UTF-8"
+        )
+    return '"' + "".join(map(_written, text)) + '"'
+
+
+def _written(char: str) -> str:
+    """One character of a TOML basic string: itself when it is printable ASCII, else an escape."""
+    if char in _SHORT_ESCAPES:
+        return _SHORT_ESCAPES[char]
+    if " " <= char <= "~":
+        return char
+    code = ord(char)
+    return f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
 
 
 @dataclass(frozen=True, slots=True)
