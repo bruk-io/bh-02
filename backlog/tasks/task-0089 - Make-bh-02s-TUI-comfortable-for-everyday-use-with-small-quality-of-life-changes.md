@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-14 00:01'
-updated_date: '2026-10-14 00:03'
+updated_date: '2026-10-14 03:42'
 labels:
   - tui
 dependencies: []
@@ -49,4 +49,8 @@ Drafted by the orchestrator from the owner's words (2026-10-13/14); the owner co
 
 <!-- SECTION:NOTES:BEGIN -->
 Accepted by the owner, 2026-10-14 (promoted from a draft). First task: TASK-0090, slash completion (decision-0003, accepted the same day).
+
+Seeds from the owner, 2026-10-14 (thoughts to come back to, not to build yet):
+- Toad (github.com/batrachianai/toad), a Textual front end for coding agents, surveyed for features (not code). Ranked by everyday value: input history on Up/Down (keeps the draft); a working indicator with elapsed time; attention signals when the window is unfocused (bell, title); copying (copy a selection, copy a code block; and check whether Ctrl-C, bound as a priority interrupt, stops Textual's copy of a selection); an @ file picker (fuzzy, gitignore-aware; needs its own design for where the file list comes from and how files are read on the host); Esc to stop a reply (twice, with a hint); expand a tool call's clipped output (render.py cuts results at 12 lines); scrolling the transcript from the composer; markdown tables; context-window fill in the status bar (needs each model's window size in the models contract); allow-always approvals (a security design for the approval rule); a session list and /rename inside the TUI. Out of step with bh-02: Toad's built-in shell terminal and several sessions in one process.
+- Before adding any of them: think through how the TUI grows under cordis, as one design (a decision record reviewed like decision-0003): rows contribute data through frame and the TUI owns how it looks; tui:ui depends on nothing, with bridge rows the only way data reaches the screen; which contribution points to add (views or screens, input completers, signals), each carrying data, never widgets; one precedence table for Up/Down, Tab, Enter, Esc and Ctrl-C across the composer, the slash list, history, the palette, questions and a streaming reply; where TUI state such as input history lives. The trajectories draft intent (a session's steps with their timing) asks the same question of a second place to render.
 <!-- SECTION:NOTES:END -->
