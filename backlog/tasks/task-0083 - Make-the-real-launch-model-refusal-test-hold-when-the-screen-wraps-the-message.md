@@ -3,9 +3,11 @@ id: TASK-0083
 title: >-
   Make the real-launch /model refusal test hold when the screen wraps the
   message
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-12 09:14'
+updated_date: '2026-10-14 03:01'
 labels:
   - app
   - tests
@@ -22,5 +24,24 @@ Found by TASK-0079.27 (unrelated to it; fails on the unchanged tree too). bh-02/
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The test waits for text that a line wrap cannot split (or matches across the wrap), and passes as root and as tester under tini
+- [x] #1 The test waits for text that a line wrap cannot split (or matches across the wrap), and passes as root and as tester under tini
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Message text: switch.py:148 'not switched: {patch} sets the {row!r} row's config, which replaces the session's ... whole'. 2. Test waits (after said) for 'row's config' which a wrap splits. Change to wait for the single word 'replaces' (unbreakable, unique to that message, only searched after 'not switched:'). 3. Prove: run the unchanged test as tester under tini (expect fail), restore, run as root and tester (expect pass). 4. uv run pytest test_real_launch.py, scripts/check. Risk: none to app; only the test wait token changes.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Cause: the message from switch.py (not switched: {patch} sets the 'model' row's config, which replaces ...) wraps at the long tmp path, so 'row's config' is split across two screen lines. Change: test_real_launch.py waits for the single word 'replaces' from the same message (after the 'not switched:' offset) instead of the phrase. Message and app untouched.
+Evidence:
+- Before (unchanged test, as tester under tini: su tester -c 'cd /home/user/bh-02 && tini -s -- .venv/bin/python -m pytest -q -p no:cacheprovider bh-02/app/tests/test_real_launch.py -k patch_that_sets'): FAILED, '"row's config" never appeared'; the screen showed the full message wrapped as "sets the 'model' row's" / "config, which replaces".
+- After, root (uv run pytest bh-02/app/tests/test_real_launch.py -k patch_that_sets -q): 1 passed, exit 0.
+- After, tester under tini (same command): 1 passed, exit 0.
+- Full file as root (uv run pytest bh-02/app/tests/test_real_launch.py -q): 30 passed, exit 0.
+- scripts/check (root): 2528 passed, 31 skipped; gates ok; docs ok; tokens skipped (no ../bh-01/dist); exit 0.
+Note: the before-run was on the unchanged tree (no stash needed, tree was clean).
+<!-- SECTION:NOTES:END -->

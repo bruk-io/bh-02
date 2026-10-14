@@ -853,7 +853,8 @@ def test_a_patch_that_sets_the_model_row_s_config_keeps_its_model_and_says_so(tm
         app.wait_for("model: fake-2", after=0)
         app.type("/model fake")
         said = app.wait_for("not switched:", 10, after=ready)
-        app.wait_for("row's config", 10, after=said)
+        # one word of the message: a long patch path wraps its line, which can split a phrase
+        app.wait_for("replaces", 10, after=said)
         app.type("hello")
         app.wait_for("[fake-2] echo: HELLO", 20, after=said)  # still the patch's model
         app.press(b"\x11")
