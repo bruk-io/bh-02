@@ -16,7 +16,7 @@ from extensions_cordis_plugin.host import (
     Tools,
 )
 
-__all__ = ["extensions"]
+__all__ = ["process"]
 
 
 @runtime_checkable
@@ -28,7 +28,7 @@ class _Runs(Runner, Protocol):
 
 
 @component
-async def extensions(
+async def process(
     *,
     runner: _Runs,
     commands: Commands,
@@ -39,7 +39,7 @@ async def extensions(
     output: Confirm,
     config: ExtensionsConfig,
 ) -> Effects:
-    """Fills an `extensions` row: `use = "extensions:extensions"`. Watches the project's
+    """Fills an `extensions` row: `use = "extensions:process"`. Watches the project's
     extensions directory and loads what the model writes there into a worker the runner starts,
     each at once when the `approval` rule says it runs unasked (a runner that confines it), else
     on the person's yes (`output.confirm`); tells the model how (a `system` section). On

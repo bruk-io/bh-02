@@ -62,7 +62,7 @@ doesn't have gets).
 | `memory` | `memory:files` | |
 | `on-touch` | `memory:on_touch` | |
 | `memory-auto` | `memory:auto` | |
-| `extensions` | `extensions:extensions` | |
+| `extensions` | `extensions:process` | |
 | `agents` | `subagents:parent` (`rows`: the parent's rows a child is made of; `tools`: those a type may grant, `["python"]`; `start`: 30; `max_running`: 4; `session_agents`: 16) | |
 | `agents-status` | `subagents:status` | |
 
@@ -116,7 +116,7 @@ tui:status              pushes session and model fields    depends on Loader, Mo
 tui:grades              pushes the jail field              depends on Runner, Approval, Frame, Output
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:converse           runs the chat, binds Done          depends on Loop, Input, Output, Commands, Jobs
-extensions:extensions   loads the model's own plugins      depends on Runner, Commands, Frame, System, Tools, Approval, Output
+extensions:process   loads the model's own plugins      depends on Runner, Commands, Frame, System, Tools, Approval, Output
 subagents:status        pushes the agents field            depends on Roster, Frame
 subagents:parent        binds Asker, Roster, registers agent tools depends on Tools, System, Output, Loader, Host, Commands, Model (each call mounts a child; /agents; a Model reload ends them; see below)
 ```

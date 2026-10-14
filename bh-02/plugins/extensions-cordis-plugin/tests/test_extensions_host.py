@@ -19,7 +19,7 @@ import pytest
 
 from agent_cordis_plugin import ToolBroker
 from cordis.testing import drive
-from extensions_cordis_plugin import Extensions, ExtensionsConfig, extensions, worker_argv
+from extensions_cordis_plugin import Extensions, ExtensionsConfig, process, worker_argv
 from extensions_cordis_plugin.testing import PlainJail
 from runner_cordis_plugin import Runner
 
@@ -518,7 +518,7 @@ async def test_a_change_while_released_loads_at_once_and_ends_the_release(tmp_pa
 
 async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -> None:
     effects = await drive(
-        extensions(
+        process(
             runner=Runner(PlainJail()),
             commands=_Commands(),
             frame=_Frame(),

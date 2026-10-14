@@ -6,7 +6,7 @@ restart; what keeps that safe is where the code runs, not who reads it first.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `extensions:extensions` | nothing: what extensions add goes into `commands`, `frame`, `system` and `tools`; its own `system` section tells the model how; registers the extensions process's stop with the runner (`/release`) | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `tools` (`register`, `specs`), `approval` (`confined`, `unasked`), `output` (`confirm`) |
+| `extensions:process` | nothing: what extensions add goes into `commands`, `frame`, `system` and `tools`; its own `system` section tells the model how; registers the extensions process's stop with the runner (`/release`) | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `tools` (`register`, `specs`), `approval` (`confined`, `unasked`), `output` (`confirm`) |
 
 Config (`ExtensionsConfig`): `root` (the project, `.`), `path` (the extensions directory under
 it, `.bh-02/plugins`), `watch` (how often it is looked at, 0.5 s).

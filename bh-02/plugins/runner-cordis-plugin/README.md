@@ -107,7 +107,7 @@ policy seam, not this).
   and the runner waits for it to accept a connection itself (TASK-0079.31 moves the owners to a
   socket brig reserves and dials with its check). The runner
   starts two programs, each with a jail of its own compiled from this one policy: the Python
-  process (`python:tool`), and the extensions process (`extensions:extensions`), where the
+  process (`python:tool`), and the extensions process (`extensions:process`), where the
   model's own plugins run;
 - **env**: scrubbed to `env`.
 

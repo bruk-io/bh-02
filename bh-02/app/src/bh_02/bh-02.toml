@@ -153,4 +153,4 @@ use = "tui:palette"
 # The model's own extensions, `.bh-02/plugins/NAME.py`, loaded into the extensions process.
 [[plugin]]
 id = "extensions"
-use = "extensions:extensions"
+use = "extensions:process"

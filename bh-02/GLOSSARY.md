@@ -126,7 +126,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **touched**: the files a call opened, as its tool answers (an input's: what its own Python code opened, `touched()`).
 - **on-touch** (row): `memory:on_touch`: memory that loads on demand (a subdirectory's CLAUDE.md, a rule whose `paths` match), told whole as an aside to the first input in a conversation that opens a file it covers.
 - **extension**: a plugin the model writes itself, `.bh-02/plugins/NAME.py` in the project, which bh-02 loads while it runs ([The model's extensions](../docs/bh-02/extending/extensions.md)).
-- **extensions** (row): `extensions:extensions`, which loads the extensions into the extensions process.
+- **extensions** (row): `extensions:process`, bh-02's handle on the extensions process.
 - **run**: one launch of bh-02, from start to leaving; the Python process and its namespace last one run.
 - **session**: what a run keeps under `$XDG_STATE_HOME/bh-02/sessions/<id>/` (its layer, transcript and history, not the namespace), so `--resume` continues it in a later run.
 - **pinned** (row): one of the three rows the shell adds itself after every layer (`session`, `host`, `shell`), `disabled = false`, so no layer can remove it.
