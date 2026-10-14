@@ -4,7 +4,7 @@ title: >-
   Complete slash commands in the composer from the commands the palette already
   reads
 date: '2026-10-13 23:45'
-status: proposed
+status: accepted
 ---
 ## Context
 
@@ -213,5 +213,6 @@ Three reviews, 2026-10-13, none by the author, each ACCEPT WITH CHANGES; all tak
   Enter rule now never replaces typed text the person did not pick; Shift+Enter closes the
   list; rows are one line; Tab with the list closed is unchanged; more Pilot tests.
 
-The owner's call: accept, and with it the defaults above (the Enter rule, the 8-row cap, the
-list opening on Ctrl-P's `choose`), or change any of them before the task starts.
+Accepted by the owner, 2026-10-14, with the defaults above as written (the Enter rule, the
+8-row cap, the list opening on Ctrl-P's `choose`). Built by TASK-0090, under the intent
+TASK-0089.

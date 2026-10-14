@@ -1,13 +1,13 @@
 ---
-id: DRAFT-0004
+id: TASK-0089
 title: >-
   Make bh-02's TUI comfortable for everyday use with small quality-of-life
   changes
-status: Draft
+status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-14 00:01'
-updated_date: '2026-10-14 00:01'
+updated_date: '2026-10-14 00:03'
 labels:
   - tui
 dependencies: []
@@ -44,3 +44,9 @@ Drafted by the orchestrator from the owner's words (2026-10-13/14); the owner co
 - [ ] #2 Each further quality-of-life change the owner names is a task under this intent, done or dropped by the owner
 - [ ] #3 Must not break: tui:ui depends on nothing; nothing blocks the event loop; commands stays a neutral broker and the ui runs no command itself; the palette, the question screen and Ctrl-C work as before
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Accepted by the owner, 2026-10-14 (promoted from a draft). First task: TASK-0090, slash completion (decision-0003, accepted the same day).
+<!-- SECTION:NOTES:END -->
