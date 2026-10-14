@@ -5,8 +5,10 @@ directory is in the `host` value's `secrets`, so the jail can neither read nor f
 The file is created with mode 0600 in the one call that makes it (`O_CREAT | O_EXCL`, no window
 in which it is wider), never through a link (`O_NOFOLLOW`), and only by this module; the viewer
 opens nothing for writing. Writes go through a thread, so the event loop is never blocked on a
-disk. A log that can't be written (the disk is full) stops writing; the child goes on, since the
-log is for the person, not the run.
+disk, one after the other: a record waits for the write before it, even one whose caller was
+cancelled and left it to finish (a cancelled child's end record, written next, would otherwise
+overtake it or mix with it), and closing waits for the last. A log that can't be written (the
+disk is full) stops writing; the child goes on, since the log is for the person, not the run.
 """
 
 import asyncio
@@ -39,7 +41,8 @@ class EventLog:
     def __init__(self, fd: int | None) -> None:
         self._fd = fd
         self._broken = False
-        self._writing: asyncio.Future[None] | None = None  # the write on its thread, if one is
+        # the newest write, on its thread or waiting for the one before it (which it follows)
+        self._last: asyncio.Future[None] | None = None
 
     @classmethod
     def open(cls, path: str) -> EventLog:
@@ -57,27 +60,37 @@ class EventLog:
         return cls(None)
 
     async def write(self, event: Json) -> None:
-        """Append `event`, stamped with the time, off the event loop."""
+        """Append `event`, stamped with the time, off the event loop, after every write asked
+        before it has finished (whatever it came to)."""
         if self._fd is None or self._broken:
             return
         line = record_line(datetime.datetime.now().astimezone(), event)
-        self._writing = asyncio.ensure_future(asyncio.to_thread(self._append, self._fd, line))
-        try:  # shielded: a cancelled caller leaves the write to finish before `close` closes the file
-            await asyncio.shield(self._writing)
+        self._last = pending = asyncio.ensure_future(_appended(self._last, self._fd, line))
+        try:  # shielded: a cancelled caller leaves the write to finish, which the next one waits for
+            await asyncio.shield(pending)
         except OSError:
             self._broken = True  # the log stops here; the child goes on
 
     async def close(self) -> None:
-        """Wait for a write on its thread, then close the file; later writes are nothing."""
-        if self._writing is not None:
-            await asyncio.gather(self._writing, return_exceptions=True)
-        if self._fd is not None:
+        """Wait for the last write, which has waited for the rest, then close the file (off the
+        event loop); later writes are nothing."""
+        fd, self._fd = self._fd, None
+        if self._last is not None:
+            await asyncio.gather(self._last, return_exceptions=True)
+        if fd is not None:
             with contextlib.suppress(OSError):
-                os.close(self._fd)
-            self._fd = None
+                await asyncio.to_thread(os.close, fd)
 
-    @staticmethod
-    def _append(fd: int, line: bytes) -> None:
-        view = memoryview(line)
-        while view:
-            view = view[os.write(fd, view) :]
+
+async def _appended(before: asyncio.Future[None] | None, fd: int, line: bytes) -> None:
+    """Append `line` to `fd` on a thread once the write `before` it (if one) has ended, whatever
+    it came to: its caller sees its own failure, so none is raised here."""
+    if before is not None:
+        await asyncio.gather(before, return_exceptions=True)
+    await asyncio.to_thread(_append, fd, line)
+
+
+def _append(fd: int, line: bytes) -> None:
+    view = memoryview(line)
+    while view:
+        view = view[os.write(fd, view) :]

@@ -13,9 +13,11 @@ one table of four fields:
 
 A type chooses a model and so the spend, which is the person's to decide, so a type file is read
 only from where the model can't write: bh-02's config directories, and never one whose reading
-passes through the project (`host_paths.passes`, as the models file is judged). A type grants only
-the agents row's grantable tool rows (its `tools`), never the agents row (depth one) and never
-extensions or MCP.
+passes through the project (`host_paths.passes`, as the models file is judged). It is then read
+through no link at all (`host_paths.read_beneath`, from the descriptor it was opened as): not the
+file, nor the `agents` directory it is in, so there is no gap between the check and the read for a
+link to be swapped into. A type grants only the agents row's grantable tool rows (its `tools`),
+never the agents row (depth one) and never extensions or MCP.
 
 Everything here is pure but `type_files`, which lists and reads the directories, and
 `read_types` and `type_names`, which run it (the first off the event loop).
@@ -27,9 +29,9 @@ import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, assert_never
 
-from host_paths import passes, roots
+from host_paths import Link, Linked, NotOneFile, TooLarge, passes, read_beneath, roots
 
 __all__ = [
     "EXPLORE",
@@ -47,6 +49,8 @@ __all__ = [
 
 # How many model steps a type may take when it does not say.
 STEPS: Final = 30
+# The largest type file read: a type is a short prompt and four fields.
+_LIMIT: Final = 64 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +171,8 @@ class TypeFile:
 def type_files(trusted: Iterable[str], project: Path) -> tuple[TypeFile, ...]:
     """Every `agents/*.toml` in the `trusted` directories (bh-02's config directories, the
     `host` value's `trusted`), the first of a name kept. One whose reading passes through the
-    `project`, which the model's code can write, is not read: `refused` says why."""
+    `project`, which the model's code can write, is not read: `refused` says why. One that is
+    read is read through no link (`_read`)."""
     found: dict[str, TypeFile] = {}
     for directory in dict.fromkeys(trusted):
         place = Path(directory) / "agents"
@@ -181,12 +186,56 @@ def type_files(trusted: Iterable[str], project: Path) -> tuple[TypeFile, ...]:
             if passes(path, roots(project)):
                 found[path.stem] = TypeFile(path.stem, str(path), None, _in_project(path, project))
                 continue
-            try:
-                found[path.stem] = TypeFile(path.stem, str(path), path.read_text(encoding="utf-8"))
-            except OSError as error:
-                why = f"can't read the agent type file {path} ({error.strerror}); fix it or remove it"
-                found[path.stem] = TypeFile(path.stem, str(path), None, why)
+            found[path.stem] = _read(Path(directory), path)
     return tuple(found.values())
+
+
+def _read(root: Path, path: Path) -> TypeFile:
+    """The type file `path`, which is `agents/NAME.toml` beneath the trusted directory `root`
+    (opened as named: the person's own), read through no link and from the descriptor it was
+    opened as, or `refused` for why it was not."""
+    source = str(path)
+    try:
+        found = read_beneath(root, ["agents", path.name], cap=_LIMIT)
+    except OSError as error:
+        return TypeFile(path.stem, source, None, _unread(root, path, error))
+    if isinstance(found, Link):
+        return TypeFile(path.stem, source, None, _unread(root, path, found))
+    try:
+        return TypeFile(path.stem, source, found.decode("utf-8"))
+    except UnicodeDecodeError as error:
+        return TypeFile(path.stem, source, None, _unread(root, path, error))
+
+
+def _unread(root: Path, path: Path, why: Link | OSError | UnicodeDecodeError) -> str:
+    """Why the type file `path` (beneath the trusted directory `root`) was not read, saying what
+    to do: it is a link, it is reached through one, it is not a plain file with one name, it is
+    too large, it is not UTF-8 text, or the system could not open it."""
+    where = f"the agent type file {path}"
+    match why:
+        case Link(target=target):
+            return (
+                f"{where} is a link to {target}, which bh-02 does not follow; keep the type's file "
+                "itself in bh-02's config directory"
+            )
+        case Linked(part=part):
+            return (
+                f"{where} is reached through {root / part}, which is a link, so bh-02 did not read it; "
+                "keep the agents directory itself in bh-02's config directory"
+            )
+        case NotOneFile():
+            return (
+                f"{where} is not a regular file with one name (it has another name, or is a pipe, a "
+                "device, ...), so bh-02 did not read it; keep one plain file there"
+            )
+        case TooLarge(cap=cap):
+            return f"{where} is larger than {cap:,} bytes, so bh-02 did not read it"
+        case OSError():
+            return f"can't read {where} ({why.strerror}); fix it or remove it"
+        case UnicodeDecodeError():
+            return f"{where} is not UTF-8 text ({why.reason}); save it as UTF-8"
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _in_project(path: Path, project: Path) -> str:
@@ -220,6 +269,8 @@ async def read_types(trusted: Sequence[str], grantable: Sequence[str]) -> Mappin
 
 
 def type_names(trusted: Sequence[str], grantable: Sequence[str]) -> list[str]:
-    """The names of the types that can be used, in order, read here (on the caller's thread)."""
+    """The names of the types that can be used, in order, read here (on the caller's thread: the
+    `system` section that calls it is asked on the executor, one call at a time, never on the event
+    loop, so this blocking read does not stop the ui; a caller on the loop uses `read_types`)."""
     known = known_types(type_files(trusted, Path.cwd()), grantable)
     return sorted(name for name, kind in known.items() if isinstance(kind, AgentType))

@@ -37,7 +37,11 @@ conversation begins. A type chooses a model and so the spend, which is the perso
 read only from where the model can't write: bh-02's config directories, and never a file whose
 reading passes through the project (bh-02 run from a directory that holds its config, or a link
 into the project: `host_paths.passes`, as the models file is judged), which the call answers is
-not read and why. A malformed type is refused when a call names it, the error naming the file,
+not read and why. One that passes is read through no link at all (`host_paths.read_beneath`, from
+the descriptor it was opened as, so no link can be swapped in between the check and the read): not
+the file, nor the `agents` directory it is in, nor a file with a second name, and at most 64 KiB of
+UTF-8; each is answered as not read, with what to do (keep the file itself in the config
+directory). A malformed type is refused when a call names it, the error naming the file,
 the field and what to write there (`parsed_type`): not TOML, a field there is none of, no
 `prompt`, a `model` that is not a name, `steps` not a whole number of at least 1, `tools` not a
 list of names, or naming a row a type can't grant: the agents row (a sub-agent can't start one,
@@ -53,7 +57,11 @@ input, which the loop serves as it does the model's own calls) starts one child:
    type's (the type's, else the parent's model row's `default`), the start is put to the person
    through the parent's `output.confirm`, titled with what it starts and why (`start_request`),
    the prompt shown whole; a no answers the call that the person said no, and starts nothing.
-   A model a yes chose is the child's alone: its model row's `default`, in its realm.
+   A model a yes chose is the child's alone: its model row's `default`, in its realm. A start is
+   counted as it is admitted, before the child's directory is made (on a thread), so two calls
+   made together cannot both pass the last of the budget unasked; one that fails before a child
+   exists (its directory can't be made, a layer gives it the agents row) is given back, and one
+   that was admitted but never comes up has spent its start.
 
 2. **Its name**: bh-02's, `TYPE-N`, the first `N` this row has not given whose state directory
    is not there yet (a resumed session's children keep theirs), so a description the model gives
@@ -101,7 +109,11 @@ name at once (`agent NAME (TYPE) started in the background; ...`) and the run go
 of this row's; `agent_wait(names, timeout?)` (`tools.agent_wait(names=[...])` in an input)
 returns the reports of those agents in the order they finish, waiting until all have or
 `timeout` seconds pass (none: until all have), then says which still run and which names this
-row gave no background agent. A report is kept: waiting again returns it again.
+row gave no background agent. A report is kept: waiting again returns it again. `background`
+is a boolean and `timeout` a number of seconds: the loop's schema check refuses anything else
+before the tool runs, and the tool answers it with text of its own when it is run bare
+(`background` such as `"true"` starts nothing; a `timeout` that is NaN or infinite is refused
+and nothing is waited for).
 
 ## Questions, and nothing else of the parent's output
 
@@ -120,7 +132,9 @@ screen; the person sees the `agent` call and its report.
   The foreground `agent` call it waits on is cancelled with it, from the model's call and from an input's
   `tools.agent(...)` alike (the python tool's call awaits that call in the same task, then
   interrupts the input): the child's reply is closed, its model step with it, its question if
-  one is up is withdrawn, and the child is retired.
+  one is up is withdrawn, and the child is retired
+  (`test_ctrl_c_withdraws_the_open_question_of_the_foreground_child_it_stops` drives a real child's
+  open question through it).
 - **Retired from outside** while it replies (its realm's fiber), the call ends with no report:
   `gave no report: it was stopped before it answered`.
 - **Background children** keep running through Ctrl-C (and an `agent_wait` it stops); the stop notice says how many.
@@ -156,7 +170,8 @@ child's: the policy is the same.
   rest once the reply has ended.
 - **`/agents`** lists the running children (name, type, foreground or background, what each is
   doing: waiting to start, starting, calling a tool, thinking, answering, and the path of its
-  transcript, for the person). **`/agents stop [NAME]`** ends one or all.
+  transcript, for the person). **`/agents stop [NAME]`** ends one or all (a child that ends on its own while an earlier one is
+  being stopped is skipped, and the answer names only those it stopped).
 
 ### What other commands do to children
 
@@ -188,13 +203,15 @@ runs.
   0600 (not the umask's: a test runs with umask 0), so there is no moment it is wider. A line is
   `{"at": TIME, "event": ...}`: first `agent_start` (name, type, prompt, background), then every
   event of the child's reply as it came, then `agent_end` with the report (or why it gave none),
-  whatever ended the child. Writes run on a thread, so the event loop never waits on a disk; one
+  whatever ended the child. Writes run on a thread, so the event loop never waits on a disk, one
+  after the other: a record waits for the write before it, even one a cancelled child's caller left
+  to finish, so the end record never overtakes or mixes with it, and closing waits for the last; one
   that fails (a full disk) stops the log and the child goes on. A session kept in memory has no log;
   a log that can't be made is said in a note, and the child runs without one.
 - **`bh-02 watch SESSION AGENT`** (the app's, `bh_02.watching`) renders one log read-only, follows it
   until `agent_end` (`--once` stops after what is there), and refuses names bh-02 did not make before
   it builds a path: it reads through `host_paths.read_beneath` (no link, a descriptor opened
-  read-only). Terminal control characters in what the model wrote are dropped.
+  read-only). Terminal control characters and bidirectional overrides in what the model wrote are dropped.
 - **The status field.** `agents:status` shows `agents: N running` while any child runs and takes the
   field down at none, following the agents row's `roster`. A layer with no ui has no `frame`, and so
   no field.

@@ -158,6 +158,67 @@ def test_a_type_file_whose_reading_passes_through_the_project_is_not_read(tmp_pa
     assert isinstance(known["mine"], str) and isinstance(known["linked"], str)
 
 
+def test_a_type_file_is_read_through_no_link_whatever_the_link_leads_to(tmp_path: Path) -> None:
+    """A link made after the project check, or one the check let through (it leads outside the
+    project), is not followed: the file is read from the descriptor it was opened as, so there is
+    no gap between the check and the read for a link to be swapped into."""
+    project = tmp_path / "project"
+    project.mkdir()
+    cfg, elsewhere = tmp_path / "cfg", tmp_path / "elsewhere"
+    _write(elsewhere / "real.toml", 'prompt = "a file the person keeps elsewhere"')
+    _write(cfg / "agents" / "plain.toml", 'prompt = "plain"')
+    os.symlink(elsewhere / "real.toml", cfg / "agents" / "linked.toml")
+    _write(elsewhere / "second.toml", 'prompt = "a second name for a file elsewhere"')
+    os.link(elsewhere / "second.toml", cfg / "agents" / "twice.toml")
+    found = {f.name: f for f in type_files([str(cfg)], project)}
+    assert set(found) == {"plain", "linked", "twice"}
+    linked = found["linked"]
+    assert linked.text is None
+    assert linked.refused == (
+        f"the agent type file {cfg / 'agents' / 'linked.toml'} is a link to {elsewhere / 'real.toml'}, which "
+        "bh-02 does not follow; keep the type's file itself in bh-02's config directory"
+    )
+    assert found["twice"].text is None  # a hard link is a second name for a file kept elsewhere
+    assert "is not a regular file with one name" in str(found["twice"].refused)
+    assert found["plain"].text == 'prompt = "plain"' and found["plain"].refused is None
+    known = known_types(found.values(), _GRANTABLE)
+    assert isinstance(known["plain"], AgentType)
+    assert isinstance(known["linked"], str) and isinstance(known["twice"], str)
+
+
+def test_a_type_file_beneath_an_agents_directory_that_is_a_link_is_not_read(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    cfg = tmp_path / "cfg"
+    _write(tmp_path / "dotfiles" / "scout.toml", 'prompt = "scout"')
+    cfg.mkdir()
+    os.symlink(tmp_path / "dotfiles", cfg / "agents")
+    [scout] = type_files([str(cfg)], project)
+    assert scout.text is None
+    assert scout.refused == (
+        f"the agent type file {cfg / 'agents' / 'scout.toml'} is reached through {cfg / 'agents'}, "
+        "which is a link, so bh-02 did not read it; keep the agents directory itself in bh-02's config "
+        "directory"
+    )
+
+
+def test_a_type_file_that_is_too_large_or_not_text_is_refused_saying_so(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    cfg = tmp_path / "cfg"
+    _write(cfg / "agents" / "long.toml", 'prompt = "' + "x" * 70_000 + '"')
+    (cfg / "agents" / "binary.toml").write_bytes(b'prompt = "\xff\xfe"')
+    found = {f.name: f for f in type_files([str(cfg)], project)}
+    assert found["long"].text is None and found["long"].refused == (
+        f"the agent type file {cfg / 'agents' / 'long.toml'} is larger than 65,536 bytes, "
+        "so bh-02 did not read it"
+    )
+    assert found["binary"].text is None
+    assert str(found["binary"].refused).startswith(
+        f"the agent type file {cfg / 'agents' / 'binary.toml'} is not UTF-8 text ("
+    )
+
+
 @dataclass(frozen=True)
 class _Entry:
     id: str

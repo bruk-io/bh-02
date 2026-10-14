@@ -14,11 +14,13 @@ from agents_cordis_plugin import (
     Labelled,
     Report,
     agents_dir,
+    background_flag,
     child_rows,
     framed,
     labelled,
     next_name,
     report_of,
+    timeout_seconds,
     unknown_type,
 )
 
@@ -173,3 +175,34 @@ def test_a_child_never_gets_an_agents_row_whatever_the_layer_names() -> None:
                 hand="the hand",
             )
         assert repr(named) in str(why.value) and "take it out of `rows`" in str(why.value)
+
+
+@pytest.mark.parametrize("value", ["true", "false", "", 1, 0, None, [True], {}])
+def test_a_background_that_is_not_a_boolean_is_refused_saying_what_to_pass(value: object) -> None:
+    """Only true and false are an answer: a truthy "true" is not a yes, and none is taken for
+    the foreground with no word."""
+    said = background_flag(value)
+    assert isinstance(said, str)
+    assert said.startswith(f"error: the agent tool's `background` is {value!r}, not a boolean")
+    assert "pass true to have its name back at once" in said and "so no agent was started" in said
+
+
+def test_a_boolean_background_is_taken_as_it_is() -> None:
+    assert background_flag(True) is True and background_flag(False) is False
+
+
+@pytest.mark.parametrize(
+    ("value", "seconds"), [(None, None), (5, 5.0), (0.5, 0.5), (0, 0.0), (-3, 0.0), (2**70, float(2**70))]
+)
+def test_agent_wait_takes_a_number_of_seconds_or_none(value: object, seconds: float | None) -> None:
+    assert timeout_seconds(value) == seconds
+
+
+@pytest.mark.parametrize(
+    "value", ["soon", "30", "", True, False, [1], {}, float("nan"), float("inf"), 10**400]
+)
+def test_a_timeout_that_is_no_number_is_refused_saying_what_to_give(value: object) -> None:
+    said = timeout_seconds(value)
+    assert isinstance(said, str)
+    assert said.startswith(f"error: agent_wait's `timeout` is {value!r}, not a number of seconds")
+    assert "such as timeout=30" in said and "leave it out to wait until all" in said

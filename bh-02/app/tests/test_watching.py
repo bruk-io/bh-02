@@ -61,6 +61,18 @@ def test_what_the_model_said_reaches_the_terminal_without_an_escape_sequence() -
     assert text == "a[31mred" and inline and not last
 
 
+def test_what_the_model_said_cannot_reorder_the_line_it_is_shown_in() -> None:
+    """The bidirectional overrides and isolates are dropped: they spoof what a line reads as."""
+    spoof = "ok \u202egpj.exe\u202c \u2066hidden\u2069 \u202a\u202b\u202d"
+    line = json.dumps({"at": "2026-10-12T09:15:00.000+00:00", "event": {"type": "text", "text": spoof}})
+    text, _, _ = rendered(line.encode(), False)
+    assert text == "ok gpj.exe hidden "
+    note = json.dumps(
+        {"at": "2026-10-12T09:15:00.000+00:00", "event": {"type": "note", "text": "a\u202eb\u2067c"}}
+    )
+    assert rendered(note.encode(), False)[0].endswith("note: abc\n")
+
+
 def test_a_line_that_is_not_a_record_is_said_so_and_skipped(tmp_path: Path) -> None:
     text, _, _ = rendered(b"not json", False)
     assert text.startswith("? a line of the log that is not a record")

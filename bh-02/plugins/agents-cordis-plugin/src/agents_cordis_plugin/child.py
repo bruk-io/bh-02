@@ -14,6 +14,8 @@ labelled `confirm`, nothing else), and `agents:child`, its type's section of the
 hand its `loop` is passed to the agents row by.
 """
 
+import contextlib
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePath
@@ -29,6 +31,7 @@ __all__ = [
     "Steps",
     "agents_dir",
     "asked_why",
+    "background_flag",
     "child_rows",
     "Listed",
     "denied",
@@ -55,6 +58,7 @@ __all__ = [
     "stepped",
     "stop_note",
     "stopped",
+    "timeout_seconds",
     "unknown_type",
     "usage_event",
     "waited",
@@ -174,6 +178,19 @@ def child_rows(
     section = name.join(kind.section.split("{name}"))
     rows.append(ChildRow(prefixed(name, "agent"), "agents:child", {"hand": hand, "section": section}))
     return tuple(rows)
+
+
+def background_flag(value: object) -> bool | str:
+    """The `agent` call's `background` as it was given: a boolean, or why it can't be taken
+    (the call's result, which starts nothing). A truthy text such as "true" is not a yes: it
+    would have run the child in the foreground with no word."""
+    if isinstance(value, bool):
+        return value
+    return (
+        f"error: the agent tool's `background` is {value!r}, not a boolean, so no agent was started; "
+        "pass true to have its name back at once (agent_wait then has its report), or false, or leave it "
+        "out, to wait here for its report"
+    )
 
 
 def asked_why(
@@ -356,6 +373,21 @@ def waited(
     return (
         "\n\n".join(parts)
         or "No agents named: give agent_wait the names `agent(..., background=True)` returned."
+    )
+
+
+def timeout_seconds(value: object) -> float | None | str:
+    """`agent_wait`'s `timeout` as it was given: seconds (never below 0), None to wait until all
+    finish, or why it can't be taken (the call's result, which waits for nothing)."""
+    if value is None:
+        return None
+    if not isinstance(value, bool) and isinstance(value, int | float):
+        with contextlib.suppress(OverflowError):  # an int too large for a float is no timeout
+            if math.isfinite(seconds := float(value)):
+                return max(0.0, seconds)
+    return (
+        f"error: agent_wait's `timeout` is {value!r}, not a number of seconds; give it one, such as "
+        "timeout=30, or leave it out to wait until all the agents finish"
     )
 
 
