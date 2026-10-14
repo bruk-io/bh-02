@@ -48,6 +48,7 @@ import itertools
 import os
 import shutil
 import stat
+import subprocess
 from collections.abc import Sequence
 from typing import cast
 
@@ -581,6 +582,14 @@ def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _shell_gone(pid: int) -> bool:
+    """Whether `pid` runs nothing: absent from the process table, or a zombie."""
+    state = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    return not state or state.startswith("Z")
+
+
 @pytest.mark.integration
 def test_an_unfinished_control_adds_no_contradiction_under_an_enforced_grade(run_id: str) -> None:
     """A CONTROL that hangs past its deadline is `VACUOUS` (decision-188), so under a
@@ -626,7 +635,7 @@ def test_a_probe_still_running_at_its_deadline_is_stopped_and_recorded(run_id: s
     scratch = _new_root(run_id, "dl")
     os.makedirs(scratch)
     pidfile = f"{scratch}/pid"
-    hang = workload_argv(run_id, f"echo $$ > {pidfile}; sleep 100")
+    hang = workload_argv(run_id, f"echo $$ $(ps -o pgid= -p $$) > {pidfile}; sleep 100")
     denial = Probe(
         name="hangs-denial",
         shape=ProbeShape.DENIAL,
@@ -667,9 +676,11 @@ def test_a_probe_still_running_at_its_deadline_is_stopped_and_recorded(run_id: s
             assert "did not finish in 0.5 s" in outcome.detail
             assert alone.battery_verdict is BatteryVerdict.VACUOUS  # a non-control asserted nothing
             with open(pidfile, encoding="utf-8") as f:
-                pid = int(f.read())
-            # the probe leads its own group (pgid == pid): the shell and its `sleep` both
-            assert not group_alive(pid), "the probe that missed its deadline still runs"
+                pid, pgid = (int(field) for field in f.read().split())
+            # the group the probe really ran in (brig's exit wrapper leads it, the shell is
+            # its child), read while the probe ran: nothing of it, `sleep` included, runs
+            assert not group_alive(pgid), "the probe's process group still runs"
+            assert _shell_gone(pid), "the probe's shell still runs"
 
             both = run_battery(
                 jail,
