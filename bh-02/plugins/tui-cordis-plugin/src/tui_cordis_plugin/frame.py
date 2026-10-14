@@ -294,10 +294,10 @@ def _cleaned(entry: PaletteEntry) -> PaletteEntry:
 
 
 def slash_line(text: str) -> bool:
-    """Whether `text`, stripped as the commands broker strips a line, is one line starting with `/`:
-    what the composer's list completes."""
-    line = text.strip()
-    return line.startswith("/") and "\n" not in line
+    """Whether `text` is one line starting with `/`, stripped as the commands broker strips a
+    line: what the composer's list completes. A text holding a newline is never one, even a
+    newline at its end (the one Ctrl-J inserts), so the check is on the text before stripping."""
+    return "\n" not in text and text.strip().startswith("/")
 
 
 def completions(entries: Sequence[PaletteEntry], text: str) -> tuple[PaletteEntry, ...]:

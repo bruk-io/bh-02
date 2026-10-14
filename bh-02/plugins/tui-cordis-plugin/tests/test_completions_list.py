@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+import pytest
 from textual.command import CommandPalette
 from textual.content import Content
 from textual.pilot import Pilot
@@ -238,6 +239,23 @@ async def test_a_new_line_closes_the_list_whichever_key_makes_it() -> None:
             assert "\n" in _composer(app).text
 
 
+@pytest.mark.parametrize("key", ["ctrl+j", "shift+enter"])
+async def test_a_newline_never_opens_the_list_or_reads_the_commands_again(key: str) -> None:
+    """A text holding a newline is no one-line `/` line: the key that makes one closes the list
+    and reads no entries. Planted as the strip-first check of `frame.slash_line`, the count goes
+    to 2 (the newline's text re-read as a `/` line)."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE) as pilot:
+        models = await _open(pilot)
+        await pilot.press("/", "m")
+        await pilot.pause()
+        assert models.calls == 1 and app.query_one(Completions).display
+        await pilot.press(key)
+        await pilot.pause()
+        assert models.calls == 1
+        assert not app.query_one(Completions).display and "\n" in _composer(app).text
+
+
 async def test_a_click_on_a_row_runs_it_and_the_composer_keeps_focus() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
@@ -262,6 +280,20 @@ async def test_the_list_never_takes_focus() -> None:
         await pilot.pause()
         assert not any(isinstance(w, Completions) for w in (app.focused,))
         assert isinstance(app.focused, Composer)
+
+
+async def test_the_list_closes_when_the_composer_loses_focus() -> None:
+    """The close on focus loss (`BhApp.on_descendant_blur`): planted as a pass, this fails."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE) as pilot:
+        await _open(pilot)
+        await pilot.press(*"/mo")
+        await pilot.pause()
+        assert app.query_one(Completions).display
+        app.set_focus(None)  # the composer loses focus, as when the palette or a question takes it
+        await pilot.pause()
+        assert not isinstance(app.focused, Composer)
+        assert not app.query_one(Completions).display
 
 
 async def test_a_question_closes_the_list_and_none_opens_while_one_is_up() -> None:

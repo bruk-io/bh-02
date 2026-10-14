@@ -199,7 +199,9 @@ def test_completions_are_for_a_one_line_slash_line_only() -> None:
     assert frame.completions(_MENU, "") == ()
     assert _calls(frame.completions(_MENU, "  /mo")) == ["/model", "/model haiku"]  # a leading space
     assert frame.completions(_MENU, "/mo\nmore") == ()  # more than one line
+    assert frame.completions(_MENU, "/mo\n") == ()  # the newline Ctrl-J inserts is still a newline
     assert not frame.slash_line("hello /mo") and frame.slash_line(" /mo ")
+    assert not frame.slash_line("/mo\n") and not frame.slash_line("\n/mo")
 
 
 def test_enter_takes_the_entry_only_when_it_is_picked_or_the_text_is_a_strict_prefix() -> None:
