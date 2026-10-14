@@ -7,6 +7,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-14 03:13'
+updated_date: '2026-10-14 15:57'
 labels:
   - docs
   - cordis
@@ -49,3 +50,9 @@ Candidate tasks, not yet filed (orchestrator's sizes): a check that CONTRACTS.md
 - [ ] #3 Each semantic promise in CONTRACTS.md names the test that proves it, or a task to write one
 - [ ] #4 A plain walkthrough takes a newcomer from nothing to a working plugin, linking into the references
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Naming moved to its own intent, TASK-0099 (owner, 2026-10-14): one written rule and the renames it calls for. This intent keeps the contract check, the static graph and the walkthrough.
+<!-- SECTION:NOTES:END -->
