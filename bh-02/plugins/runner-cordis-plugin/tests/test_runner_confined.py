@@ -468,7 +468,11 @@ async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_h
     (project / "pkg").mkdir(parents=True)
     secret, absent, seen = project / "local.env", project / "pkg" / "local.env", project / "seen"
     secret.write_text("OLD=1\n")  # a stand-in: never the real file
-    one = BrigJail(BrigConfig(), Host(credentials=(str(absent),), secrets=(str(absent),)))
+    one = BrigJail(
+        BrigConfig(),
+        Host(credentials=(str(absent),), secrets=(str(absent),)),
+        lock=str(tmp_path / "jails.lock"),
+    )
 
     async def jailed() -> Any:
         sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
@@ -799,7 +803,13 @@ async def test_release_never_stops_a_program_its_owner_did_not_and_says_it_still
     project = tmp_path / "project"
     project.mkdir()
     credential = project / "local.env"
-    runner = Runner(BrigJail(BrigConfig(), Host(credentials=(str(credential),), secrets=(str(credential),))))
+    runner = Runner(
+        BrigJail(
+            BrigConfig(),
+            Host(credentials=(str(credential),), secrets=(str(credential),)),
+            lock=str(tmp_path / "jails.lock"),
+        )
+    )
     endpoint = _endpoint()
     kept = await runner.start(
         [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(project), endpoint=endpoint
@@ -810,6 +820,53 @@ async def test_release_never_stops_a_program_its_owner_did_not_and_says_it_still
         assert credential.is_dir() and kept.ended() == ""
     finally:
         await kept.stop()
+
+
+_HOLDS_THE_LOCK_SHARED = """
+import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)
+fcntl.flock(fd, fcntl.LOCK_SH)
+print("held", flush=True)
+time.sleep(120)
+"""
+
+
+@pytest.mark.usefixtures("_plain_launch")
+async def test_release_keeps_what_another_session_holds_on_the_shared_lock_until_it_is_gone(
+    tmp_path: Path,
+) -> None:
+    """Another bh-02 session of the person's runs a jail: it holds the jail lock shared, from a
+    process of its own. A program stopped here can't remove the placeholder while that hold
+    stands, and `/release` says the path stays held by another session. Once that session is
+    gone, the next `/release` frees it."""
+    project = tmp_path / "project"
+    project.mkdir()
+    credential = project / "local.env"
+    lock = str(tmp_path / "jails.lock")
+    runner = Runner(
+        BrigJail(BrigConfig(), Host(credentials=(str(credential),), secrets=(str(credential),)), lock=lock)
+    )
+    endpoint = _endpoint()
+    started = await runner.start(
+        [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(project), endpoint=endpoint
+    )
+    other = subprocess.Popen(
+        [sys.executable, "-I", "-c", _HOLDS_THE_LOCK_SHARED, lock], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert other.stdout is not None and other.stdout.readline() == "held\n"
+        await started.stop()
+        said = await runner.release()
+        assert credential.is_dir(), said
+        assert f"{credential} stays held" in said and "another bh-02 session" in said, said
+        other.kill()
+        other.wait()
+        said = await runner.release()
+        assert not credential.exists() and said.startswith(f"Nothing holds {credential}"), said
+    finally:
+        other.kill()
+        other.wait()
+        await started.stop()
 
 
 @pytest.mark.usefixtures("_plain_launch")
@@ -996,7 +1053,7 @@ async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what
         with contextlib.suppress(ProcessLookupError):
             os.killpg(group, signal.SIGKILL)
     assert (project / ".claude").is_dir() and not list((project / ".claude").iterdir())
-    one = BrigJail(BrigConfig(), Host())
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1050,7 +1107,7 @@ async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
     record = records / "bh-j-living.json"
     record.write_text(record_text([(str(held), identity(held.stat()))], living.pid))
     try:
-        one = BrigJail(BrigConfig(), Host())
+        one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
         sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
         endpoint = str(sock_dir / "k.sock")
         argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1059,7 +1116,7 @@ async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
     finally:
         living.kill()
         await living.wait()
-    one = BrigJail(BrigConfig(), Host())
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1132,7 +1189,7 @@ async def test_the_sweep_removes_what_a_jail_left_whose_group_is_only_zombies(
     os.killpg(leader.pid, 0)  # CONTROL: the group is still found, by its zombies
     record = records / "bh-j-zombies.json"
     record.write_text(record_text([(str(held), identity(held.stat()))], leader.pid))
-    one = BrigJail(BrigConfig(), Host())
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1179,7 +1236,7 @@ async def test_a_placeholder_is_made_and_marked_before_bubblewrap_starts(
     assert {".claude", ".vscode", ".envrc", ".git"} <= set(left), left
     if sys.platform == "linux":  # os.getxattr is Linux's
         assert {os.getxattr(project / name, MARK).decode() for name in left} == {record.stem}
-    one = BrigJail(BrigConfig(), Host())
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1251,7 +1308,7 @@ async def test_a_jail_that_fails_to_launch_leaves_nothing_on_the_host(
     monkeypatch.setattr("brig.run.Jail.create", refused)
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     with pytest.raises(RuntimeError, match="no launch today"):
-        await BrigJail(BrigConfig(), Host()).start(
+        await BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")).start(
             [sys.executable, "-c", "pass"], cwd=str(project), endpoint=str(sock_dir / "k.sock")
         )
     assert list(project.iterdir()) == []
@@ -1263,7 +1320,8 @@ async def test_a_jail_that_fails_to_launch_leaves_nothing_on_the_host(
 # brig refuses the jail's first start; "control": a prefix wrap, so it starts. It says
 # "refused: <why>" or "started", waits for a line, stops what started (saying "stopped"), and
 # waits for another. argv: the project, a token (the helper's command line holds "keeper-" and
-# it, which this program's own does not), "refused" or "control".
+# it, which this program's own does not), "refused" or "control", then the jail lock (a tmp path:
+# another bh-02 session of the machine must not hold it out from under the test).
 _REFUSED_FIRST_START = """
 import asyncio, dataclasses, sys, tempfile
 from pathlib import Path
@@ -1274,7 +1332,7 @@ from runner_cordis_plugin import BrigConfig, BrigJail
 class Host:
     paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
 
-project, token, how = sys.argv[1:4]
+project, token, how, lock = sys.argv[1:5]
 helper = Helper(
     name="keeper",
     argv=("/bin/sh", "-c", f": keeper-{token}; sleep 100"),
@@ -1296,7 +1354,7 @@ async def main():
     )
     started = None
     try:
-        started = await BrigJail(BrigConfig(), Host()).start(
+        started = await BrigJail(BrigConfig(), Host(), lock=lock).start(
             [sys.executable, "-I", "-c", worker, sock], cwd=project, endpoint=sock
         )
     except ExecWrapNotAPrefix as error:
@@ -1359,6 +1417,7 @@ async def test_a_refused_first_start_destroys_the_jail_so_nothing_it_made_outliv
         str(project),
         token,
         how,
+        str(tmp_path / "jails.lock"),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
     )
@@ -1430,7 +1489,7 @@ async def test_a_refused_start_s_error_crosses_with_what_ending_its_jail_left(
     project = tmp_path / "project"
     project.mkdir()
     with pytest.raises(RuntimeError, match="start refused today") as refused:
-        await BrigJail(BrigConfig(), Host()).start(
+        await BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")).start(
             [sys.executable, "-c", "pass"], cwd=str(project), endpoint=_endpoint()
         )
     notes = " ".join(getattr(refused.value, "__notes__", ()))
@@ -1467,7 +1526,9 @@ async def test_a_jail_start_cancelled_while_it_launches_ends_what_the_launch_sta
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
     starting = asyncio.ensure_future(
-        BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), endpoint=endpoint)
+        BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")).start(
+            argv, cwd=str(project), endpoint=endpoint
+        )
     )
     await asyncio.sleep(0.1)
     starting.cancel()
@@ -1497,7 +1558,7 @@ async def test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove(
     records.mkdir(parents=True)
     record = records / "bh-j-crashed.json"
     record.write_text(record_text([(str(mine), None), (str(project / "gone"), None)]))
-    one = BrigJail(BrigConfig(), Host())
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
@@ -1536,7 +1597,7 @@ async def test_placeholders_a_crashed_session_left_are_removed_by_the_next_jail_
     (project / ".claude" / "mine.json").write_text("{}")  # the person's, since
     (project / ".vscode").rmdir()
     (project / ".vscode").mkdir()  # the person's own, made again
-    one = BrigJail(BrigConfig(), Host())
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]

@@ -795,10 +795,10 @@ class BrigJail:
     """The confined runner's mechanism (`runner.Mechanism`): brig's preset for this platform.
 
     `lock` is the path of the jail lock (Linux). Left out, it is the user's one bh-02 lock
-    (`_LOCK`), which every bh-02 session of the user shares, so a jail sweeps what another
-    session's jails left and none removes a placeholder while another runs. Only tests pass one
-    of their own (a `tmp_path`), so that another session's jail running on the person's machine
-    can't hold the lock out from under them.
+    (`/tmp/bh-02-jails-<uid>.lock`), which every bh-02 session of the user shares, so a jail sweeps
+    what another session's jails left and none removes a placeholder while another runs. Only tests
+    pass one of their own (a `tmp_path`), so that another session's jail running on the person's
+    machine can't hold the lock out from under them.
     """
 
     def __init__(

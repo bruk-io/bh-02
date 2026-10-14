@@ -191,25 +191,25 @@ changes meanwhile. `/restart python` is not the step:
 it stops and starts the Python process and its jail at once, holding the path again before you could create anything
 (`test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input`).
 
-When they go: the jail removes the ones it made once brig has verified the program it ran is gone and
-no other bh-02 jail of the same user is running (a shared `flock` on
+When they go: the jail removes the ones it made once brig has verified the program it ran is gone
+and no other bh-02 jail of the same user is running (a shared `flock` on
 `/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken exclusively to clean up: a
-second session in the same project binds the first one's placeholders read-only, and removing
-them would detach those binds). `BrigJail` takes that path as its `lock` parameter: only tests pass one of
-their own (a `tmp_path`), so a bh-02 jail running on the machine can't hold the lock out from under them. The jail makes its placeholders itself, before bubblewrap
-starts (which then mounts over them as it would over directories it made): first it records
-them, in bh-02's state directory (`$XDG_STATE_HOME/bh-02/jails/`, else
-`~/.local/state/bh-02/jails/`, one file per jail), then makes each and at once marks it as its
-own (an extended attribute, `user.bh-02.placeholder`, holding the jail's id; where the
-filesystem takes none, the record keeps the directory's inode and change time instead). Once
-bubblewrap is started the record names its process group. A session that crashed, or stopped
-while another ran, leaves its record, and the next bh-02 jail to start with none running removes
-what it names: only an empty directory still marked as that jail's, never one the person has
-put something in or made again since, and nothing a record names by path alone (an empty
-directory there may be the person's: `test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove`). A record whose process group still runs is left alone,
-placeholders and all, until it has ended (removing one would detach that jail's mount; the
-moment between a killed bh-02 and its jail ending, below, is such a time:
-`test_the_sweep_leaves_a_record_whose_process_group_still_runs`).
+second session in the same project binds the first one's placeholders read-only, and removing them
+would detach those binds). `BrigJail` takes that path as its `lock` parameter: only tests pass one
+of their own (a `tmp_path`), so a bh-02 jail running on the machine can't hold the lock out from
+under them. The jail makes its placeholders itself, before bubblewrap starts (which then mounts over
+them as it would over directories it made): first it records them, in bh-02's state directory
+(`$XDG_STATE_HOME/bh-02/jails/`, else `~/.local/state/bh-02/jails/`, one file per jail), then makes
+each and at once marks it as its own (an extended attribute, `user.bh-02.placeholder`, holding the
+jail's id; where the filesystem takes none, the record keeps the directory's inode and change time
+instead). Once bubblewrap is started the record names its process group. A session that crashed, or
+stopped while another ran, leaves its record, and the next bh-02 jail to start with none running
+removes what it names: only an empty directory still marked as that jail's, never one the person has
+put something in or made again since, and nothing a record names by path alone (an empty directory
+there may be the person's: `test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove`). A
+record whose process group still runs is left alone, placeholders and all, until it has ended
+(removing one would detach that jail's mount; the moment between a killed bh-02 and its jail ending,
+below, is such a time: `test_the_sweep_leaves_a_record_whose_process_group_still_runs`).
 
 **The jail ends with bh-02.** Each jail is launched tethered (brig SPEC.md section 8,
 decision-167): bh-02 holds the write end of a pipe nothing else holds, and brig's watcher, in the
