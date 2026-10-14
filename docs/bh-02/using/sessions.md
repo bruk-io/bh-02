@@ -68,9 +68,7 @@ What a resume brings back, and what it doesn't:
 A resume boots the session's own layer as it is: nothing translates old names. A session whose
 layer names a plugin or component bh-02 no longer has fails at boot like any layer
 ([Layers](layers.md#a-layer-that-names-what-bh-02-doesnt-have)); the session is kept, so you can edit
-its `session.toml` and resume it again. A session started on the first Claude Agent SDK stack,
-where Claude Code ran its own loop, can't be resumed: `--resume` says so in one line; start a new
-one.
+its `session.toml` and resume it again.
 
 ## A new conversation in the same session
 

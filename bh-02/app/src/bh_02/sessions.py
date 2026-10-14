@@ -10,11 +10,10 @@ the layer files stay the only way the running program changes.
 
 A `meta.json` that can't be read (not JSON, a key missing, a value of the wrong type) is a
 `Broken` record: listing skips it and says which one it is and what is wrong, so one bad file
-never stops the app, `bh-02 sessions` or `--resume`. A session whose layer still names the
-Claude Agent SDK stack bh-02 no longer has is `retired`: it lists, but can't be resumed.
+never stops the app, `bh-02 sessions` or `--resume`.
 
-`session_layer`, `with_model`, `retired` and `resume_command` (and the private helpers) are
-pure; the rest reads or writes the state directory. `Listing` is the `session` value
+`session_layer`, `with_model` and `resume_command` (and the private helpers) are pure; the
+rest reads or writes the state directory. `Listing` is the `session` value
 (CONTRACTS.md) the shell binds for the status bar.
 """
 
@@ -44,7 +43,6 @@ __all__ = [
     "listed",
     "pins_model",
     "resume_command",
-    "retired",
     "scanned",
     "session_layer",
     "set_model",
@@ -140,21 +138,6 @@ def pins_model(rows: Sequence[Row]) -> bool:
     a layer replaces a row's config whole, so its `default` wins over the one `--model` and
     `/model` record in the session's layer."""
     return any(row.id == _MODEL_ROW and row.config is not None for row in rows)
-
-
-def retired(rows: Sequence[Row]) -> str | None:
-    """Why a session's layer can't run any more, or None when it can.
-
-    The first Claude stack let Claude Code run its own loop (`claude-agent-sdk:*`, an `llm` row
-    with a `session_file` and `stderr_log`): its conversation lived in Claude Code alone, with no
-    transcript bh-02 could continue it from.
-    """
-    for row in rows:
-        if row.use is not None and row.use.startswith("claude-agent-sdk:"):
-            return f"its layer names {row.use}, which bh-02 no longer has"
-        if row.id == "llm" and {"session_file", "stderr_log"} & set(row.config or {}):
-            return "it ran on the Claude Agent SDK stack, whose conversation bh-02 can no longer continue"
-    return None
 
 
 def with_model(rows: Sequence[Row], model: str) -> list[Row]:

@@ -16,7 +16,6 @@ from bh_02.sessions import (
     default_state_root,
     find,
     listed,
-    retired,
     scanned,
     session_layer,
     set_model,
@@ -265,13 +264,6 @@ def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_r
     )  # no --model: no default here (the models file's, else sonnet), and the jail the harness ships
 
 
-def test_a_session_from_the_agent_sdk_stack_is_retired_and_says_why() -> None:
-    old = [Row("llm", config={"session_file": "/s/claude-session", "stderr_log": "/s/claude-stderr.log"})]
-    assert "Claude Agent SDK" in str(retired(old))
-    assert "claude-agent-sdk:agent" in str(retired([Row("llm", "claude-agent-sdk:agent")]))
-    assert retired(session_layer(Path("/s/1"), model="haiku", no_jail=True)) is None
-
-
 def test_choosing_a_model_keeps_the_row_s_other_config() -> None:
     rows = [Row("model", config={"state": "/s"}), Row("runner", "runner:unconfined")]
     assert with_model(rows, "opus") == [
@@ -351,21 +343,6 @@ def test_resume_refuses_what_it_can_t_honour(composition: Callable[..., Path], s
     assert gone.exit_code == 2 and "No such option '--ollama'" in gone.stderr  # a models file entry now
     unjailed = runner.invoke(main, ["--resume", "--no-jail"])
     assert unjailed.exit_code == 2 and "keeps the jail" in unjailed.stderr
-
-
-def test_a_session_from_the_agent_sdk_stack_can_t_be_resumed_and_says_so_in_one_line(state: Path) -> None:
-    old = create(state, str(Path.cwd()), model=None, no_jail=False)
-    old.layer.write_text(  # the layer such a session was written with
-        '[[plugin]]\nid = "llm"\n'
-        f'config = {{ session_file = "{old.dir}/claude-session", '
-        f'stderr_log = "{old.dir}/claude-stderr.log" }}\n'
-    )
-    resumed = CliRunner().invoke(main, ["--resume", old.id])
-    assert resumed.exit_code == 1
-    (line,) = resumed.stderr.splitlines()
-    assert line.startswith(f"error: can't resume {old.id}: it ran on the Claude Agent SDK stack")
-    assert line.endswith("start a new session with `uv run bh-02`")
-    assert [s.id for s in listed(state, str(Path.cwd()))] == [old.id]  # still listed, never deleted
 
 
 def test_a_prefix_two_sessions_share_names_both_and_an_exact_id_wins(tmp_path: Path) -> None:

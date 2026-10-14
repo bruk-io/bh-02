@@ -952,16 +952,19 @@ def test_a_resumed_session_whose_layer_names_a_use_no_plugin_provides_fails_at_b
     launch: Launch, tmp_path: Path
 ) -> None:
     """The session's own layer is a layer like any other: nothing translates it on a resume, and
-    a `use` it names that no plugin provides is the same boot failure."""
+    a `use` it names that no plugin provides is the same boot failure. The use is the first Claude
+    stack's (`claude-agent-sdk:agent`), which a session started on it still names: it fails at boot
+    with the loader's error, and the session's directory is kept."""
     first = launch("echo")
     first.wait_for(_READY, 60)
     first.press(b"\x11")
     assert first.exit_code() == 0
     (layer,) = (tmp_path / "state").glob("bh-02/sessions/*/session.toml")
-    layer.write_text(layer.read_text() + '\n[[plugin]]\nid = "python"\nuse = "nonesuch:tool"\n')
+    layer.write_text(layer.read_text() + '\n[[plugin]]\nid = "python"\nuse = "claude-agent-sdk:agent"\n')
     again = launch("echo", "--resume")
     assert again.exit_code(60) == 1
     said = _said(again)
     assert "error: could not start:" in said, said
-    assert "python: unresolved:" in said and "use 'nonesuch:tool'" in said, said
+    assert "python: unresolved:" in said and "use 'claude-agent-sdk:agent'" in said, said
     assert "Traceback" not in said
+    assert layer.is_file(), "the session's directory is kept"

@@ -41,7 +41,6 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **layer files**: `bh-02.toml` (the whole harness), a session's `session.toml`, and your `--patch` files, applied in that order.
 - **stack** (a session's): the model a session started on, kept in its `meta.json` and listed by `bh-02 sessions` (an earlier bh-02's session: `claude` or `ollama`); not always the model that answered.
 - **stack** (brig's): the mechanisms brig composes into one jail; bh-02's runner uses `scratch_darwin()` (Seatbelt) on macOS and `strict_linux()` (bubblewrap) on Linux (`stack_for`).
-- **first stack**: how an earlier bh-02 reached Claude: Claude Code's own loop through the Claude Agent SDK; a session started on it can't be resumed ([Sessions](../docs/bh-02/using/sessions.md#resuming)).
 - **stack** (a fiber's, in cordis): the undos a fiber has recorded, run last first when it unloads.
 - **loop** (row and key): the agent loop, `agent:loop`: sends the conversation to the model, runs each call it asks for through its tool, and nudges a step that didn't count ([The loop](../docs/bh-02/how-it-works/loop.md)).
 - **model** (row and key), **the model row**: the model itself, one step at a time (`models:model`), the one its `default` names, chosen by `--model NAME` or `/model NAME`.

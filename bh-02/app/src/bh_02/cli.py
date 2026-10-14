@@ -175,8 +175,6 @@ def _session(
     if isinstance(found, sessions.Broken):
         raise click.UsageError(f"can't resume {found.id}: {found.message}")
     read_layers([found.layer])  # a hand-edited session.toml: one line, before /model rewrites it
-    if (why := sessions.retired(read_layer(str(found.layer)))) is not None:
-        raise LayerError(f"can't resume {found.id}: {why}; start a new session with `uv run bh-02`")
     if no_jail:
         raise click.UsageError("a resumed session keeps the jail it started with")
     if model is not None:
