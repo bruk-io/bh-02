@@ -3,11 +3,11 @@ id: TASK-0085
 title: >-
   The /release tests fail while any other jail of the same user runs: the jail
   lock is one fixed path in /tmp
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-12 21:29'
-updated_date: '2026-10-14 01:54'
+updated_date: '2026-10-14 02:08'
 labels:
   - runner
   - tests
@@ -47,4 +47,6 @@ Change: BrigJail.__init__ takes keyword-only lock (default _LOCK.format(uid=os.g
 AC1 evidence (root, uv run pytest bh-02/app/tests/test_python_repl.py -k on_linux_release): a python3 holder took LOCK_SH on /tmp/bh-02-jails-0.lock. Unchanged code: 2 failed (the 'stays held: another bh-02 session ... is running a jail' assertion). With the change: 2 passed. Stashed again with the holder alive: 2 failed. Restored: 2 passed. uv run pytest bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py -k release with holder alive: 4 passed. Holder killed (pid 1810, now a zombie, which holds no fds); a LOCK_EX|LOCK_NB probe on /tmp/bh-02-jails-0.lock then succeeded.
 Checks (root): runner plugin tests 65 passed 1 skipped (exit 0); test_python_repl.py 36 passed 1 skipped (exit 0); scripts/arch-check exit 0; uv run mypy exit 0 (184 files); ruff format --check . exit 0; scripts/check exit 0 (2527 passed, 31 skipped, 362s). The first scripts/check had failed on format and lint for my two long BrigJail lines; ruff format fixed them, and the rerun passed.
 Not run: scripts/linux-jail-check (not in scope). The tester-user run was not used; these were root runs.
+
+Closed on review (Opus, low) of 62ab0cb: CLOSE, both criteria met, nothing blocking. Reviewer held the real lock shared from another process: test_python_repl.py -k release 2 passed, test_runner_confined.py -k release 4 passed; holder killed and reaped after. The one production builder (runner wiring.py:37, Runner(BrigJail(config, host))) passes no lock, and nothing a layer or config sets reaches it. scripts/check exit 0 (2527 passed, 31 skipped); runner 65 passed; mypy and arch-check exit 0. Should-fix and nits folded into TASK-0091 before it starts: a test that a second holder of the same (tmp) lock keeps placeholders held; test_release_never_stops_a_program_its_owner_did_not_and_says_it_still_holds onto a tmp lock; the README lines at 198-199 rewrapped; the BrigJail docstring names the path, not _LOCK.
 <!-- SECTION:NOTES:END -->

@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-14 01:54'
+updated_date: '2026-10-14 02:08'
 labels:
   - runner
   - tests
@@ -25,4 +26,12 @@ Noticed by TASK-0085's worker (2026-10-14). TASK-0085 gave BrigJail a keyword-on
 <!-- AC:BEGIN -->
 - [ ] #1 Every runner test that asserts placeholders removed on stop or release builds its BrigJail with a lock under tmp_path; a run with another process holding the real lock passes them (recorded), and failed before
 - [ ] #2 scripts/check passes
+- [ ] #3 A test holds the tmp lock shared from another process, calls release, and shows the placeholders stay held and the answer says another session holds them (the shared-lock rule end to end)
+- [ ] #4 test_release_never_stops_a_program_its_owner_did_not_and_says_it_still_holds uses a tmp lock too; the runner README's lock sentence is wrapped like the rest of the file; BrigJail's docstring names /tmp/bh-02-jails-<uid>.lock rather than the private _LOCK
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Orchestrator, 2026-10-14: TASK-0085's close review's should-fix items and nits added before work began; still size-1 (one small test and mechanical edits in the same files).
+<!-- SECTION:NOTES:END -->
