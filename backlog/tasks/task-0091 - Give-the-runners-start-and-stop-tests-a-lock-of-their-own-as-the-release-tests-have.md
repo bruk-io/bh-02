@@ -3,11 +3,11 @@ id: TASK-0091
 title: >-
   Give the runner's start and stop tests a lock of their own, as the /release
   tests have
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 01:54'
-updated_date: '2026-10-14 02:37'
+updated_date: '2026-10-14 02:49'
 labels:
   - runner
   - tests
@@ -53,4 +53,6 @@ EVIDENCE (root, uv run; holder = python3 LOCK_SH on /tmp/bh-02-jails-0.lock, pid
 Checks (root): scripts/arch-check exit 0; uv run mypy exit 0 (184 files, no issues); scripts/check exit 1 at first (lint E501 on the BrigJail docstring line, 112 > 110: rewrapped); scripts/check exit 0 after: format 618 files ok, lint ok, types ok, tests 2528 passed, 31 skipped (364.80s), gates ok, docs ok.
 Holder: pid 3806 killed; it is a zombie (PID 1 does not reap), with no open fds; no sleep(900) process is running. /tmp/bh-02-jails-0.lock is left as the file it was.
 Not run: the tester-user run (not used: root runs); scripts/linux-jail-check (not required by the criteria, not run); libs/brig and libs/cordis were not touched, so their suites run only through scripts/check.
+
+Closed on review (Opus, low) of 132b03a: CLOSE, all four criteria met, nothing blocking, nothing to fix. Reviewer held the real lock: test_runner_confined.py 51 passed, 1 skipped; planted a non-shared lock in a scratch copy and the new shared-lock test failed at credential.is_dir(); scripts/check exit 0 (2528 passed, 31 skipped); runner 66 passed. The stand-ins for another session stay on the real lock correctly: each is dead before the test's jail starts, so those tests prove the record and group rule (crashed-session cleanup), not lock sharing. Nits left: README.md:191 is 116 columns (predates this task); two tests left on the real lock leave harmless placeholders under tmp_path when a holder is live; the new test's child sleeps 120 s if readline hangs (its finally kills it).
 <!-- SECTION:NOTES:END -->
