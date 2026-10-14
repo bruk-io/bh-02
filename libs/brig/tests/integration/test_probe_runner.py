@@ -70,7 +70,7 @@ from brig.core.probes import Battery as CoreBattery
 from brig.core.probes import BatteryVerdict
 from brig.probe.battery import Battery, Expectation, Probe
 from brig.probe.runner import run_battery
-from brig.run import IoPolicy, Jail, Process
+from brig.run import IoPolicy, Jail, Process, group_alive
 from brig.stack import Stack, degraded
 from tests.conftest import launch, teardown_group, workload_argv
 
@@ -581,20 +581,47 @@ def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _gone(pid: int) -> bool:
-    """Whether `pid` runs nothing: absent, or a zombie nothing has reaped."""
+@pytest.mark.integration
+def test_an_unfinished_control_adds_no_contradiction_under_an_enforced_grade(run_id: str) -> None:
+    """A CONTROL that hangs past its deadline is `VACUOUS` (decision-188), so under a
+    network grade that is not `UNENFORCED` the report carries no contradiction, and the
+    battery is `VACUOUS` as any non-passing control makes it."""
+    scratch = _new_root(run_id, "dc")
+    os.makedirs(scratch)
+    hang = workload_argv(run_id, "sleep 100")
+    control = Probe(
+        name="hangs-control",
+        shape=ProbeShape.CONTROL,
+        axis=Axis.NETWORK,
+        argv=tuple(hang),
+        expect=Expectation(token="never"),
+    )
     try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
-            return f.read().rsplit(")", 1)[1].split()[0] == "Z"
-    except FileNotFoundError:
-        return True
+        jail, process = _launch(
+            Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t084-01", run_id=run_id
+        )
+        try:
+            enforced = _with_axis_grade(jail, Axis.NETWORK, Grade.ENFORCED)
+            assert enforced.report.grade_for(Axis.NETWORK).grade is not Grade.UNENFORCED
+            report = run_battery(
+                enforced,
+                Battery(name="t084-01", axis=Axis.NETWORK, probes=(control,)),
+                deadline_s=0.5,
+            )
+            assert report.contradictions == ()
+            assert [o.verdict for o in report.outcomes] == [Verdict.VACUOUS]
+            assert report.battery_verdict is BatteryVerdict.VACUOUS
+        finally:
+            _teardown_group(process)
+    finally:
+        shutil.rmtree(scratch)
 
 
 @pytest.mark.integration
 def test_a_probe_still_running_at_its_deadline_is_stopped_and_recorded(run_id: str) -> None:
     """A DENIAL probe that never finishes (a connect that waits out the OS's timeout) is
-    `VACUOUS` saying it did not finish; a CONTROL that never finishes is `FAIL` and so its
-    battery is `VACUOUS`; the sleeping process is gone afterwards. The deadline is injected
+    `VACUOUS` saying it did not finish; a CONTROL that never finishes is `VACUOUS` too and so
+    is its battery; the probe's whole process group is gone afterwards. The deadline is injected
     (0.5 s), not waited out."""
     scratch = _new_root(run_id, "dl")
     os.makedirs(scratch)
@@ -641,7 +668,8 @@ def test_a_probe_still_running_at_its_deadline_is_stopped_and_recorded(run_id: s
             assert alone.battery_verdict is BatteryVerdict.VACUOUS  # a non-control asserted nothing
             with open(pidfile, encoding="utf-8") as f:
                 pid = int(f.read())
-            assert _gone(pid), "the probe that missed its deadline still runs"
+            # the probe leads its own group (pgid == pid): the shell and its `sleep` both
+            assert not group_alive(pid), "the probe that missed its deadline still runs"
 
             both = run_battery(
                 jail,
@@ -650,7 +678,7 @@ def test_a_probe_still_running_at_its_deadline_is_stopped_and_recorded(run_id: s
             )
             verdicts = {o.probe_name: o.verdict for o in both.outcomes}
             assert verdicts == {
-                "hangs-control": Verdict.FAIL,
+                "hangs-control": Verdict.VACUOUS,
                 "hangs-denial": Verdict.VACUOUS,
             }
             assert both.battery_verdict is BatteryVerdict.VACUOUS

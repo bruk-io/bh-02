@@ -2635,7 +2635,18 @@ rule above. The battery therefore always returns a `ProbeReport`; a `TimeoutErro
 out of `run_battery` was the defect (a Mac with a default route, where
 `exec 3<>/dev/tcp/192.0.2.1/80` waits out a ~75 s connect timeout, crashed four
 batteries instead of grading them). The deadline's length and the probes' argv
-are unchanged. Implementing task: TASK-0079.35. (Ruled 2026-10-13, decision-187.)
+are unchanged. Implementing task: TASK-0079.35. (Ruled 2026-10-13, decision-187.) *Amended by decision-188 (below, 2026-10-14): an unfinished `CONTROL` is `VACUOUS`, not `FAIL`.*
+
+**A probe that did not finish by its deadline is `VACUOUS`, whatever its shape, a
+`CONTROL` included.** It amends decision-187's `CONTROL` clause, which recorded an
+unfinished control as `FAIL`. A probe that was stopped observed nothing, so it
+asserts no fact about the jail; `FAIL` asserts one (the action ran and did not
+succeed), and under any report grade but `UNENFORCED` a `FAIL` adds a contradiction
+to `ProbeReport.contradictions`. An unfinished probe therefore adds none. A control
+that is not `PASS` already makes its battery `VACUOUS`, so the battery verdict is
+unchanged; only the contradiction text goes. The deadline, its length, and the
+rest of decision-187 are unchanged. Implementing task: TASK-0084.01. (Ruled
+2026-10-14, decision-188.)
 
 (Ruled 2026-08-24, operator ruling round 15, decision-104, on `doc-015` §5 —
 direction (c): the vocabulary was the defect, not the algorithm and not the
