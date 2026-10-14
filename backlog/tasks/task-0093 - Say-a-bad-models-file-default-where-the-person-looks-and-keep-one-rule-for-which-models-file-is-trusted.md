@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-14 08:10'
+updated_date: '2026-10-14 12:02'
 labels:
   - models
   - size-3
@@ -26,4 +27,11 @@ Filed from TASK-0087's close review (should-fix and nit, not blocking). Three ga
 - [ ] #2 A new session started under a models file whose default is not TOML, not a name, or names no model says so with what to write, and still starts on sonnet; a test of each
 - [ ] #3 With a bad file default, the status bar names the model or says it is unusable (never blank) and /model's list says the file's default was refused and why
 - [ ] #4 scripts/check passes
+- [ ] #5 /model NAME of a valid model still switches while an endpoint table or the file's default is broken; a test (from TASK-0095's close review)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+From TASK-0095's close review (nits, carry only where this task already touches the line): docs/bh-02/using/models.md:147 and the models plugin README ~230 have lines longer than their neighbours' wrap; the unsendable-key message (openai/client.py ~107) ends 'then try again.' where the missing-key one ends 'then send the message again.'; the status bar's blank provider for a broken table is checked through current() only, not the rendered TUI (this task's AC #3 covers the status bar).
+<!-- SECTION:NOTES:END -->

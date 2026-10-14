@@ -3,11 +3,11 @@ id: TASK-0095
 title: >-
   Refuse an ENDPOINT/ID name when its endpoint table has a problem, and tidy
   discovery's edges
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 10:40'
-updated_date: '2026-10-14 11:42'
+updated_date: '2026-10-14 12:02'
 labels:
   - models
   - size-2
@@ -43,4 +43,6 @@ TESTS (new): test_models_discover_names.py parametrized over 5 kinds of endpoint
 SEEN FAILING BEFORE THE FIX (today's code, same tests): AC1: 8 failed in the models tests (DID NOT RAISE ModelsError; check('local/x:7b') was None) + the app --model test (DID NOT RAISE: the step ran against the stub). AC2: UnicodeEncodeError: 'ascii' codec can't encode character 'xe9' out of /model's refresh (the wire test). AC3: the spy on the body buffer saw 1048577 bytes held for a 1 MiB+1 answer (the Down is the same either way, so a buffer double records what was held; asserts max <= BODY_LIMIT, and that the spy was used).
 PLANTED AFTER THE FIX, restored and cmp'd against copies: derived without the problem(host) check -> 9 failed (all of the above); authorization without the printable-ASCII guard -> 5 failed (wire + 4 unit); httpx_get back to check-after-append -> the body-limit test failed.
 RUNS (root, no tini, foreground, one at a time; exit codes read from the shell, not through a pipe): uv run pytest bh-02/plugins/models-cordis-plugin -q: exit 0, 262 passed, 2 skipped (was 249/2); uv run pytest bh-02/app/tests -q: exit 0, 201 passed, 1 skipped (was 200); scripts/arch-check --no-fix: exit 0; uv run mypy: exit 0 (187 files); scripts/check: exit 0 (2705 passed, 31 skipped, 7m15s; format, lint, types, gates, docs ok; tokens skipped: no bh-01). scripts/check outlived the tool's 600 s foreground limit and was moved to the background by the tool; I waited for it in the same turn (tail --pid), nothing else ran meanwhile. Not verified: /model against a real hosted or local server (StubServer and httpx2.MockTransport stand in), scripts/linux-jail-check (not relevant).
+
+Close review (Opus low, independent): CLOSE, no blocking findings. Planted in a scratch copy: problem(host) check removed (9 fail), the printable-ASCII key guard removed (5 fail), the 1 MiB check after the append (the buffer-spy test fails). The key's value is in no message; the chat row gets a Recoverable ModelsError(authentication_failed) that says what to do. Runs: models 262, app 201 passed; arch-check, mypy exit 0; scripts/check's steps all ok (2705 passed; the reviewer's run hit its time cap after tests, gates and docs then run alone, exit 0). Should-fix (no test that /model NAME of another, valid model still switches while an endpoint table is broken) added to TASK-0093 as AC; nits noted there.
 <!-- SECTION:NOTES:END -->
