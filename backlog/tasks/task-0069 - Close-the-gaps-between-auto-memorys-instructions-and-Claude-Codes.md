@@ -1,10 +1,10 @@
 ---
 id: TASK-0069
 title: Close the gaps between auto memory's instructions and Claude Code's
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10 03:34'
-updated_date: '2026-10-14 14:42'
+updated_date: '2026-10-14 15:03'
 labels:
   - memory
   - docs
@@ -49,4 +49,6 @@ Order: (1) tests first in bh-02/plugins/memory-cordis-plugin/tests/test_memory_a
 Sized size-1 (2026-10-11): prompt text, a test that it says each rule, two docs; nothing unknown.
 
 Changed: memory_cordis_plugin/auto.py auto_section (seven rules added in the section text, existing sentences kept; the section is now 316 words, MEMORY.md line unchanged); tests/test_memory_auto.py (one parametrised test, 11 cases, one distinctive phrase per rule, each absent from the old text: grep count 0 before the edit); README.md Auto memory section and docs/bh-02/using/memory.md (the same seven-bullet list in both; reference/plugins/memory.md includes the README). Seen failing first: test_memory_auto.py before the prompt edit gave 11 failed, 6 passed (all 11 new cases failed); after it, 17 passed, exit 0. Memory plugin tests as root: uv run pytest bh-02/plugins/memory-cordis-plugin -q gave 59 passed, exit 0. scripts/check as root (log in the scratchpad, read by exit code, not piped): format ok, lint ok, types ok (187 files), tests 2802 passed 31 skipped, gates ok, docs ok (mkdocs build), tokens skipped (no bh-01 dist beside the repo); exit 0. No em dashes in the changed text; Canadian -ise spellings (organised, summarise). Not run: scripts/linux-jail-check (not touched by this change) and the tester-user run (memory plugin tests are unprivileged-safe but were run as root per the brief).
+
+Close review (Opus low, independent): CLOSE, no blocking findings. All seven rules present and correct; removing any one rule's sentence in a scratch copy fails at least one test case; memory tests 59 passed; scripts/check exit 0 (2802 passed). Should-fix joined TASK-0068 (it rewrites this section next): the README and memory.md bullets leave out 'read the code or git log for the current state' and 'split or summarise one that outgrows that'; the 'don't save what CLAUDE.md, the code or git records' rule is spread over two sentences that name it differently. Nits answered: '4 KB' vs '25KB' spacing; the example date is the commit's date; 'split or summarise' has no test phrase; the docs give the cap without Claude Code's reason, as the prompt does. Suggested trims (about 15 words) are in the review, for TASK-0068's pass.
 <!-- SECTION:NOTES:END -->
