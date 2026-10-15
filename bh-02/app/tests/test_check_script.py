@@ -61,7 +61,7 @@ def test_the_plan_is_the_steps_in_their_order_for_the_workspace(check: ModuleTyp
     by_name = {step.name: step for step in steps}
     assert by_name["format"].argv[-1] == "."
     assert by_name["lint"].argv[-2:] == ("--no-fix", ".")
-    assert by_name["tests"].argv[-2:] == ("pytest", "-q")
+    assert by_name["tests"].argv[-6:] == ("pytest", "-q", "-n", check.TEST_WORKERS, "--dist", "loadgroup")
     assert by_name["gates"].argv[-1] == "--no-fix"
     assert isinstance(by_name["tokens"], check.Skipped)
 
@@ -76,7 +76,7 @@ def test_the_plan_for_a_member_scopes_ruff_pytest_and_mypy_and_can_leave_out_gat
     assert by_name["format"].argv[-1] == "libs/host-paths"
     assert by_name["lint"].argv[-1] == "libs/host-paths"
     assert by_name["types"].argv[-1] == "libs/host-paths/src"
-    assert by_name["tests"].argv[-1] == "libs/host-paths"
+    assert by_name["tests"].argv[-5:] == ("-n", check.TEST_WORKERS, "--dist", "loadgroup", "libs/host-paths")
     assert isinstance(by_name["tokens"], check.Step)
 
 

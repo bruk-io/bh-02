@@ -31,6 +31,9 @@ import click
 
 ROOT = Path(__file__).resolve().parent.parent
 BH_01 = ROOT.parent / "bh-01"  # where scripts/sync-tokens reads bh-01's token CSS from
+# pytest-xdist's `-n`: how many worker processes run the tests, and `--dist loadgroup` keeps the tests of
+# one group (the root conftest.py names them: what they share on the host) on one of them.
+TEST_WORKERS = "auto"
 
 
 @dataclass(frozen=True)
@@ -73,7 +76,10 @@ def plan(
         Step("format", ("uv", "run", "--quiet", "ruff", "format", "--check", *where)),
         Step("lint", ("uv", "run", "--quiet", "ruff", "check", "--no-fix", *where)),
         Step("types", ("uv", "run", "--quiet", "mypy", *types)),
-        Step("tests", ("uv", "run", "--quiet", "pytest", "-q", *tests)),
+        Step(
+            "tests",
+            ("uv", "run", "--quiet", "pytest", "-q", "-n", TEST_WORKERS, "--dist", "loadgroup", *tests),
+        ),
     ]
     if gates:
         steps.append(Step("gates", (str(ROOT / "scripts" / "arch-check"), "--no-fix")))

@@ -8,7 +8,11 @@ violation is a definition in a package `__init__.py`) and runs the script's `run
 with the workspace's own pypeeker."""
 
 import importlib.util
+import os
+import shutil
 import sys
+import threading
+import tomllib
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
@@ -183,3 +187,93 @@ def test_a_path_is_without_an_index_when_any_of_its_files_is(arch_check: ModuleT
     assert arch_check.without_index(files, frozenset({"a/src/x.py", "b/src/z.py"})) == ("a/src",)
     assert arch_check.without_index(files, frozenset()) == ("a/src", "b/src")
     assert arch_check.without_index(files, frozenset({"a/src/x.py", "a/src/y.py", "b/src/z.py"})) == ()
+
+
+def test_the_src_list_is_written_through_a_temporary_file_renamed_over_the_old_one(
+    arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pyproject = gate / "pyproject.toml"
+    pyproject.chmod(0o640)
+    renamed: list[tuple[Path, Path]] = []
+    replace = os.replace
+
+    def spy(source: Path, target: Path) -> None:
+        renamed.append((Path(source), Path(target)))
+        replace(source, target)
+
+    monkeypatch.setattr(os, "replace", spy)
+
+    arch_check.sync_src(gate)
+
+    [(source, target)] = renamed
+    assert target == pyproject and source.parent == gate and source != pyproject  # beside it: one filesystem
+    assert not source.exists() and sorted(p.name for p in gate.iterdir()) == ["members", "pyproject.toml"]
+    assert '"members/a/src"' in pyproject.read_text()
+    assert pyproject.stat().st_mode & 0o777 == 0o640  # the mode it had
+
+
+def test_a_src_list_that_has_not_changed_leaves_the_file_alone(
+    arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arch_check.sync_src(gate)
+    before = (gate / "pyproject.toml").stat()
+
+    def refuse(source: Path, target: Path) -> None:
+        raise AssertionError(f"wrote {target} though nothing changed")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    arch_check.sync_src(gate)
+
+    after = (gate / "pyproject.toml").stat()
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+
+def test_a_write_that_fails_leaves_the_old_file_and_no_temporary_one(
+    arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pyproject = gate / "pyproject.toml"
+    before = pyproject.read_text()
+
+    def fail(source: Path, target: Path) -> None:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(os, "replace", fail)
+
+    with pytest.raises(OSError, match="no space left"):
+        arch_check.sync_src(gate)
+
+    assert pyproject.read_text() == before
+    assert sorted(p.name for p in gate.iterdir()) == ["members", "pyproject.toml"]
+
+
+def test_a_process_reading_the_file_while_the_list_changes_never_reads_part_of_it(
+    arch_check: ModuleType, gate: Path
+) -> None:
+    """What pytest, ruff and mypy do as they start beside arch-check: read pyproject.toml, at any
+    moment. Each rewrite adds or removes a member, so the list changes every time."""
+    pyproject = gate / "pyproject.toml"
+    torn: list[str] = []
+    stop = threading.Event()
+
+    def reader() -> None:
+        while not stop.is_set():
+            try:
+                config = tomllib.loads(pyproject.read_text())
+                assert config["tool"]["pypeeker"]["src"] and config["tool"]["arch-check"]["src"]
+            except (tomllib.TOMLDecodeError, KeyError, AssertionError) as error:
+                torn.append(f"{type(error).__name__}: {error}")
+
+    arch_check.sync_src(gate)
+    watching = threading.Thread(target=reader)
+    watching.start()
+    try:
+        for _ in range(400):
+            _member(gate, "b")
+            arch_check.sync_src(gate)
+            shutil.rmtree(gate / "members" / "b")
+            arch_check.sync_src(gate)
+    finally:
+        stop.set()
+        watching.join()
+
+    assert torn == []

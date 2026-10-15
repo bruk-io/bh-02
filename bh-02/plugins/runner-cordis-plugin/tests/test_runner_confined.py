@@ -1175,7 +1175,9 @@ async def test_the_sweep_removes_what_a_jail_left_whose_group_is_only_zombies(
     held.mkdir(parents=True)
     records = tmp_path / "state" / "bh-02" / "jails"
     records.mkdir(parents=True)
-    body = "import subprocess, time; subprocess.Popen(['true']); time.sleep(100)"
+    # keeps the `Popen`: a dropped one reaps its child in `__del__` once it has exited, which on a loaded
+    # machine it has by then, and no zombie is left
+    body = "import subprocess, time; zombie = subprocess.Popen(['true']); time.sleep(100)"
     leader = subprocess.Popen([sys.executable, "-c", body], start_new_session=True)
     non_reaping_init.append(leader.pid)
     deadline = time.monotonic() + 10

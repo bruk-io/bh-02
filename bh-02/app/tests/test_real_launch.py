@@ -546,7 +546,10 @@ def test_a_models_file_default_that_is_no_name_shows_in_the_status_bar_and_the_f
         told = app.wait_for(
             "remove it", 20, after=ready
         )  # `... give it one, like `default = "sonnet"`, or remove it`
-        assert "not a model's name" in app.text()[ready:told].replace("\n", " ")
+        # the error names the models file, whose path is as long as the test's tmp_path (pytest-xdist
+        # adds `popen-gwN/` to it), so where the screen breaks the line moves: read the words only
+        said = " ".join(app.text()[ready:told].replace("▎", " ").split())
+        assert "not a model's name" in said
         app.type("/model fake")
         app.wait_for("model: fake", 20, after=told)
         app.settle(1.0)

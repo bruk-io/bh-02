@@ -32,6 +32,7 @@ uv sync --all-packages
 scripts/check                                             # the one definition of green: format, lint, types, tests, gates, docs; the steps run at once (it takes as long as the tests)
 scripts/check bh-02/plugins/python-cordis-plugin          # the same for one member (the gates always see everything)
 uv run pytest -q                                          # every member
+uv run pytest -q -n auto --dist loadgroup                 # every member on every core, as scripts/check runs it; tests that share host state (the jail lock) are grouped in the root conftest.py
 uv run pytest libs/cordis -q                              # one member
 uv run pytest libs/cordis/tests/test_runtime.py::test_name -q
 uv run ruff format .                                      # format
