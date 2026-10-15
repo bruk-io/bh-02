@@ -39,6 +39,7 @@ __all__ = [
     "usage_line",
     "usage_sum",
     "waiting_line",
+    "working_line",
 ]
 
 type Event = Mapping[str, Any]
@@ -281,6 +282,21 @@ def waiting_line(rows: Iterable[str]) -> str:
     named = sorted(rows)
     them = "it is" if len(named) == 1 else "they are"
     return f"⧗ waiting for {', '.join(named)} to start; this message is sent once {them} up"
+
+
+def working_line(seconds: float) -> str:
+    """What the screen says while a reply runs: that it is working, and for how long."""
+    return f"Working · {_elapsed(seconds)}"
+
+
+def _elapsed(seconds: float) -> str:
+    """A time as the person reads it, whole seconds first and minutes once there are some:
+    `7s`, `1m 05s`, `1h 02m` (the seconds are left out once there are hours)."""
+    minutes, whole = divmod(max(0, int(seconds)), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes}m {whole:02d}s" if minutes else f"{whole}s"
 
 
 def copied_line(text: str) -> str:

@@ -6,9 +6,11 @@ from tui_cordis_plugin.widgets.composer import Composer
 from tui_cordis_plugin.widgets.palette import CommandsProvider
 from tui_cordis_plugin.widgets.status_bar import StatusBar
 from tui_cordis_plugin.widgets.transcript import Stream, Transcript
+from tui_cordis_plugin.widgets.working import WORKING_EVERY, Working
 
 __all__ = [
     "GRACE",
+    "WORKING_EVERY",
     "ApprovalScreen",
     "CommandsProvider",
     "Completions",
@@ -16,4 +18,5 @@ __all__ = [
     "StatusBar",
     "Stream",
     "Transcript",
+    "Working",
 ]

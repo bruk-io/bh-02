@@ -120,6 +120,17 @@ and reading waits once it is large), and gives the loop a turn after every event
 that yields everything at once still leaves Ctrl-C heard mid-reply. The app joins each run of
 streamed text before drawing and recording it.
 
+**Working.** While a reply runs, a line between the transcript and the composer says so and for how
+long: `Working · 12s`, then `Working · 1m 05s`, then `Working · 1h 02m` (`render.working_line`, pure).
+The `Working` widget redraws it from a Textual timer (`set_interval`, every `WORKING_EVERY`, one second),
+never a loop or a wait: the timer starts when the first of the replies streaming begins
+(`TurnStarted`) and stops when the last ends (`TurnEnded`, which the output posts whether the reply
+finished, was stopped with Ctrl-C or Esc, or failed), and the next reply counts from its own start.
+The first tick comes a second in and the line is hidden until then, so a reply that ends sooner (a
+command's answer goes through the same stream) never flashes it or moves the transcript. It is the
+reply's line: a command still running (`!`, `/compact`) shows nothing until it answers. `BhApp(clock=,
+working_every=)` are the seams a test drives.
+
 **Paging.** PageUp and PageDown in the composer scroll the transcript a page (`Composer.Paged`, which
 the app answers with `Transcript.page`) and leave the focus and the cursor where they are, with the
 slash list open too (they are not its keys); with a question up they are the modal's. A transcript

@@ -18,6 +18,9 @@ sequence), and every way of copying says how much in one line: Ctrl-C with text 
 stops nothing then, and a second Ctrl-C stops the reply), Cmd-C (Textual's own `super+c`),
 a mouse selection finished in the transcript (copied at once), and Ctrl-T for the newest reply.
 
+While a reply runs, a line above the composer says for how long (`Working`, redrawn by a timer
+that starts and stops with the reply).
+
 Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
 withdraws its own (shown or queued), and Ctrl-C with one up answers no to every open question
 but a sub-agent's: the reply it stops withdraws its foreground child's, and a background
@@ -37,8 +40,9 @@ import signal
 import struct
 import sys
 import termios
+import time
 from collections import deque
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import Any
 
 from textual import events
@@ -61,12 +65,14 @@ from tui_cordis_plugin.messages import (
 from tui_cordis_plugin.ports import AppCrashed, Bridge, Frame
 from tui_cordis_plugin.widgets import (
     GRACE,
+    WORKING_EVERY,
     ApprovalScreen,
     CommandsProvider,
     Completions,
     Composer,
     StatusBar,
     Transcript,
+    Working,
 )
 
 __all__ = ["BhApp", "running"]
@@ -100,7 +106,8 @@ class BhApp(App[None]):
     """bh-02's screen. `bridge` is what its input, output and frame share with it; `frame` is
     what rows push into; `replay` is drawn when it starts; `history`, when given, is appended
     to as the transcript draws; `grace` is how long a question just put up ignores y, n and
-    Escape (keys typed ahead)."""
+    Escape (keys typed ahead); `clock` and `working_every` are the time and the seconds between
+    redraws of the line that says how long a reply has run (`Working`)."""
 
     TITLE = "bh-02"
     COMMANDS = {CommandsProvider}  # the commands rows offer, not Textual's system commands
@@ -119,12 +126,20 @@ class BhApp(App[None]):
     # which would lose its translucent background.
 
     def __init__(
-        self, *, history: History | None = None, replay: Replay | None = None, grace: float = GRACE
+        self,
+        *,
+        history: History | None = None,
+        replay: Replay | None = None,
+        grace: float = GRACE,
+        clock: Callable[[], float] = time.monotonic,
+        working_every: float = WORKING_EVERY,
     ) -> None:
         super().__init__()
         self.history = history
         self.replay = replay
         self.grace = grace  # how long a question just shown ignores its keys (`ApprovalScreen`)
+        self._clock = clock
+        self._working_every = working_every
         # Registered before anything mounts: a stylesheet parsed at startup must find its tokens.
         for each in theme.themes():
             self.register_theme(each)
@@ -143,6 +158,7 @@ class BhApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Transcript(id="transcript")
+        yield Working(id="working", clock=self._clock, every=self._working_every)
         listed = Completions(id="completions")
         yield listed
         yield Composer(id="composer", completions=listed)
@@ -288,6 +304,8 @@ class BhApp(App[None]):
         self._record({"type": "user", "text": line})
 
     def on_turn_started(self, message: TurnStarted) -> None:
+        if not self._replying:
+            self.query_one(Working).begin()  # the first of the replies streaming now
         self._replying += 1
 
     def on_turn_ended(self, message: TurnEnded) -> None:
@@ -295,6 +313,7 @@ class BhApp(App[None]):
         self._record({"type": "turn_end"})
         self._replying = max(0, self._replying - 1)
         if not self._replying:
+            self.query_one(Working).end()
             typed, self._typed = self._typed, []
             for line in typed:
                 self._draw_typed(line)

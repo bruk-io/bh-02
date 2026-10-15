@@ -17,6 +17,10 @@ reach the model: slash commands, and `!` followed by a shell command.
 | `Ctrl+P` | opens the command palette |
 | `Ctrl+Q` | leaves bh-02 (so do `/exit` and `/quit`) |
 
+While a reply runs, a line above the composer says so and for how long (`Working · 12s`, then
+`Working · 1m 05s`); it appears once the reply has run for a second and goes when the reply ends, is
+stopped or fails. A command still running (`!`, `/compact`) shows no such line until it answers.
+
 A line you send while a reply runs waits for the reply to end. One you send while a command's
 restart runs (`/clear`, `/compact`, `/model NAME`, `/restart`) waits for the restart, and reaches
 the new loop.
