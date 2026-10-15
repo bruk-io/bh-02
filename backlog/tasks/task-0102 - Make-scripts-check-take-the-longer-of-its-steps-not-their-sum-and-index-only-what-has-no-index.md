@@ -3,11 +3,11 @@ id: TASK-0102
 title: >-
   Make scripts/check take the longer of its steps, not their sum, and index only
   what has no index
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-15 02:28'
-updated_date: '2026-10-15 04:50'
+updated_date: '2026-10-15 12:37'
 labels:
   - scripts
   - gates
@@ -58,4 +58,12 @@ Pin only (old arch-check, new pin): arch-check --no-fix 198 s. Gates on the new 
 AFTER (new scripts, new pin, via a scratchpad copy that adds each step's time): wall 487 s = format 0.1, lint 0.1, types 0.6, tests 487.0, gates 95.4, docs 2.6 (steps overlap; tests 2772 passed, 31 skipped, 16 more than before; they took 21 s longer than alone, CPU shared with the gates). The real scripts/check, run last: exit 0, wall 478 s, same results. arch-check --no-fix on a clean tree with the new files to index: 93.7 s (exit 0). Not changed by this: scripts/arch-check in its default mode (with --fix) took 244 s (check --strict --fix alone 131 s vs 82 s plain check), upstream pypeeker's fix pass; scripts/check uses --no-fix.
 
 Exit codes read directly, one at a time, foreground: uv run mypy 0 (186 files); ruff format --check 0, ruff check --no-fix 0; scripts/arch-check (default) 0, --no-fix 0; scripts/check 0. Not run: scripts/linux-jail-check (nothing here touches the jail).
+
+Closed on the independent review (Opus low, did not do the work): CLOSE.
+- AC #1: pyproject pins pypeeker @7905d24; uv.lock carries the full sha; uv lock --check exits 0; the installed copy's direct_url.json names commit 7905d240.
+- AC #2: met, and stronger than its words: a path is indexed when any .py file under it has no entry. The reviewer planted a layering violation and a new subpackage in the real repo (exit 1, all three findings), renamed and deleted them (the rename reported at its new path, the deleted entry dropped, no ghost finding), then removed both (exit 0, 97.7 s); afterwards no gate had a file without an entry.
+- AC #3: a misformatted file planted in libs/host-paths/tests: exit 1, FAILED: format, the other steps reported ok in plan order.
+- AC #4: the reviewer's scripts/check exited 0 in 8m12s (tests 489 s, 2772 passed, 31 skipped), against 12m12s before; uv run mypy exits 0. brig: 1029 passed, 24 skipped.
+- Guards: test_check_script with max_workers=1 fails exactly the two tests that guard concurrency.
+Should-fix (sync_src's non-atomic write of pyproject.toml while pytest, ruff and mypy read it) joined TASK-0103 as AC #4. Nits answered here: AC #2's wording is narrower than what was built and the notes say why; captured output hides a long test run's progress (noted on TASK-0103); test_arch_check.py sits in bh-02/app/tests beside test_check_script.py, where the repo's script tests are.
 <!-- SECTION:NOTES:END -->
