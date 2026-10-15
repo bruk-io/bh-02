@@ -22,7 +22,39 @@ are judgement and stay by hand in the root `pyproject.toml`: purity-budget entri
 every member either way, but `uv tool install ./bh-02/app` installs only what the app depends on
 (`test_booting.py` checks every plugin the layer names is there). Then `uv sync --all-packages`:
 entry points are read from installed metadata, and a stale one shows up as an unresolved row,
-not an import error.
+not an import error. Name the plugin, its components and its row ids by the rule under Naming, below.
+
+## Naming
+
+**Names say what they name.** A layer author reads `id` and `use` and should know what fills the
+role without opening the plugin.
+
+- A **plugin** is named for its subject, as a user would say it (`agent`, `runner`, `python`,
+  `subagents`). No two plugin names differ by a letter or a plural.
+- A **component** is named for what it is, read after its plugin's name (`commands:registry`,
+  `models:catalog`, `agent:tools`, `python:tool`), and never repeats its plugin's word, in the
+  singular or the plural, unless it is named for the key it binds, whose name its consumers fix
+  (`models:model` binds `model`). A broker whose key is its plugin's own name takes the kind for
+  its component (`registry`, `catalog`). The one kept stutter is `tui:ui`: TASK-0064 gave the
+  Textual app one name for its function, component and row, and `tui:app` would bring the third
+  back.
+- A **row id** is the key the row binds, when it binds one key and that key names what fills the
+  role (`loop`, `tools`, `commands`); else its role (`ui` binds three keys, `agents` two, `python`
+  none; `chat` binds `done`, a signal the shell waits on, not the thing that fills the role). Ids
+  are lowercase words joined by hyphens (`memory-auto`); components are Python names (`on_touch`).
+- **One word, one thing.** A thing seen from two places keeps its word with a label saying where
+  (`tools`: the broker row and key, and the namespace's view in an input; `python`: the tool, and
+  the row). GLOSSARY.md holds each label, and a new term goes there.
+- **A rename is clean.** The old name goes everywhere at once: nothing translates it and no
+  file is read under it; a layer that names it fails at boot with the loader's error. Rename
+  symbols with `pypeeker rename` (`demote` only makes one private).
+
+"Repeats" means the same word, plural or not, or the word a plugin's name is built on:
+`agents:agents` and `extensions:extensions` repeat, and `subagents:agents` would. `models:model` is
+the one place the key's-name exception applies. `tui:ui` reads as a stutter and is kept on purpose,
+named in the rule (see the sweep).
+
+The rule and the renames it made are decision-0005 (`backlog/decisions/`).
 
 ## How the family stays apart
 
