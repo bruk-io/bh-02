@@ -7,6 +7,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-15 20:32'
+updated_date: '2026-10-15 20:32'
 labels:
   - models
   - size-8
@@ -75,3 +76,21 @@ max_tokens = 4096
 - [ ] #11 This machine's models file uses the new shape (`qwen38` under an endpoint) and its models work
 - [ ] #12 `scripts/check` passes, and the docs describe the one format
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+From the owner's machine (DRAFT-0008 there, uncommitted), their notes as written:
+
+Done uncommitted on the owner's machine (2026-10-15; the owner asked for no commits).
+
+- Format: `named.py` (every user table an endpoint, `models` table per endpoint, `derived` merges endpoint then model settings, flat tables with `id` refused with a rewrite hint, endpoint names can't be built-ins or hold `/`, `Named.endpoint` replaces `endpoint()` and `shadows`). `catalog.py` lists named models then discovered ones; `endpoints()` only for problems or `discover`.
+- key_command: `key_command.py` (`command_key`); openai `headers_for`, headers kept for `key_ttl_ms` (default 300000) and dropped on 401/403; discovery requests are async.
+- Gateway: `credential.Gateway`, `gateway_settings` (inline JSON for the SDK's `settings`), `gateway_env` (token variable empty); `ClaudeCodeConfig.gateway`; `failure_of` names the gateway and command.
+- Tests: new `test_models_key_command.py`, `test_models_gateway.py`; existing models, app and subagents tests moved to the format.
+- Evidence: through the owner's gateway, bh-02's provider got replies on `work/opus`, `work/sonnet`, `work/haiku` and `claude-opus-5-5[1m]`; a `key_command` printing a bad key got the gateway refusal message (after the CLI retried for about 3 minutes). `local/qwen38` answered from the local server. The owner's `~/.config/bh-02/models.toml` is in the new shape.
+- `scripts/check`: format, lint, gates, docs ok. Tests: 2775 passed; the failures are environment-bound and touch no models code (subagent tests read `/proc`, which macOS lacks; two python-repl tests see this machine's global Claude rules or jail; the rest pass alone, flaky under load). Types: the bare `mypy` run stops on stray empty plugin directories (agents-, brig-, context-, kernel-cordis-plugin, only `__pycache__`); mypy over the changed packages is clean.
+- Built-ins removed (#12): no `BUILT_IN`; no default and no `--model` means no model (`chosen` raises "no model is chosen" with an endpoint to write; status bar `none`); `bh_02.sessions._pinned` records none; a broken or untrusted models file leaves only `extra`. Docs: get-started gains "Your models" (a `claude` endpoint with sonnet/opus/haiku), models guide, README, CONTRACTS, GLOSSARY, plugin READMEs, CLI help. `scripts/check` after: format, lint, gates, docs ok; 2776 passed, the 9 failures environment-bound or flaky alone (as above).
+
+Accepted 2026-10-15 by the owner, who asked for these changes on this branch, made carefully rather than copied, since the codebase may have moved. Their diff is kept at the orchestrator's scratchpad (models-endpoints.diff, 48 files). Measured before porting: 42 of its 44 changed files have exactly the diff's base here; bh-02/CLAUDE.md and GLOSSARY.md differ only by TASK-0099.05's and TASK-0100's edits, and the whole diff applies. Criteria #9 and #10 are about the owner's machine: their notes above are that evidence, and nothing here can repeat it (no gateway, no owner models file).
+<!-- SECTION:NOTES:END -->
