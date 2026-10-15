@@ -128,6 +128,29 @@ again, as the mouse wheel does (both are Textual's `scroll_to`). `page` guards t
 `scroll_to` gets wrong: with nothing to scroll, or a page down from the end, it would release the
 anchor with no movement to restore it, and the output that came next would not be followed.
 
+**Copying** goes to the terminal's clipboard through Textual's `copy_to_clipboard` (an OSC 52
+escape sequence, so it reaches the local clipboard over SSH where the terminal allows it, and a
+terminal that ignores it copies nothing: a test sees only what the app asked to copy, `app.clipboard`,
+and the line it showed). `BhApp` overrides `copy_to_clipboard` to say how much in one line, so every
+way of copying says it alike, Textual's own included. The line is a toast, not a line of the
+conversation: one there would split a reply that is still streaming (the transcript draws the
+person's own lines only once the reply ends, for the same reason). Four ways: **Ctrl-C** with text
+selected copies it, clears the selection and stops nothing (the composer's own selection when it has
+the focus, else the transcript's, which Textual keeps), and with none stops the reply as before, so
+a second Ctrl-C after a copy stops it; never while a question is up (Ctrl-C then answers it no).
+**Cmd-C** is Textual's own `super+c`, bound by the screen's copy and by the text area's: the priority
+Ctrl-C binding never shadowed it, and it reaches the app only where the terminal passes Cmd to
+programs (the kitty keyboard protocol). A **mouse selection** in the transcript is copied when the
+mouse lets go (the screen's `TextSelected`, posted at every mouse up, a click included); a click, or
+one character, copies nothing and says nothing, and the selection stays shown. **Ctrl-T** copies the
+newest reply whole (`Transcript.reply`, `render.newest_reply`): the text blocks after the last
+message, as the model wrote them (the markdown source, not what is drawn), a blank line between,
+so a reply that stops for tool calls and goes on comes whole; when the newest message has no text
+yet it is the one before; with none, it says `Nothing to copy: no reply yet`. It is a free key:
+the text area binds no `ctrl+t`, nor does a screen or the app, and no terminal keeps it, while
+Ctrl-O (Claude Code's), Ctrl-R, Ctrl-G and Ctrl-N are keys readline and Claude Code give other
+meanings. Esc never copies (it also clears a selection, Textual's own).
+
 **The transcript** draws a turn as it streams: a block per event, a CSS class per kind. Text
 and thinking grow one `Stream`, which settles its text into pieces of a couple of dozen lines
 and re-draws only the open one, so a chunk costs the same at line 2,000 as at line 1 (a Pilot

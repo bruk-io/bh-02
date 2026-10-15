@@ -10,7 +10,9 @@ reach the model: slash commands, and `!` followed by a shell command.
 | `Enter` | sends the message or command in the composer |
 | `Up` / `Down` | on the composer's first / last line: the line you sent before, and forward again; past the newest, `Down` gives back what you were typing ([Recalling lines](#recalling-lines-you-sent)) |
 | `PageUp` / `PageDown` | scroll the conversation a page while you type; the cursor stays where it is. Scrolled up, the conversation stops following new output until you scroll back to its end |
-| `Ctrl+C` | stops the running reply. It never quits, and it doesn't stop a command. |
+| `Ctrl+C` | copies the text you have selected and clears the selection; with nothing selected it stops the running reply. It never quits, and it doesn't stop a command ([Copying](#copying)) |
+| `Cmd+C` | copies the selection in a terminal that passes Cmd to programs ([Copying](#copying)) |
+| `Ctrl+T` | copies the newest reply ([Copying](#copying)) |
 | `Esc` | stops the running reply, as `Ctrl+C` does, once nothing nearer wants it: it closes the command list, declines a question or closes the palette first, and only that. With no reply running it does nothing. |
 | `Ctrl+P` | opens the command palette |
 | `Ctrl+Q` | leaves bh-02 (so do `/exit` and `/quit`) |
@@ -126,3 +128,20 @@ and the edit is sent and joins the lines; the line you recalled stays as it was.
 for the run only: a new run, a resumed session's too, starts with none. In a line that takes several rows, `Up` moves the
 cursor up until it is on the first row. While the command list is open its `Up` and `Down` move its
 highlight, and a recalled command doesn't open it until you edit it, so `Up` goes on through your lines.
+
+## Copying
+
+Select text in the conversation with the mouse and it is copied as you let go: bh-02 says
+`Copied 120 characters` for a few seconds. A click, or a selection of one character, copies
+nothing. `Ctrl+C` copies what is selected too (and the text selected in the composer), and clears
+the selection, so a second `Ctrl+C` stops the running reply as it does when nothing is selected; it
+never stops a reply while there is a selection to copy. `Cmd+C` copies the selection as well, in a
+terminal that passes it on to programs. `Ctrl+T` copies the newest reply whole, as the model wrote
+it: all its text, with the markdown as written and a blank line between the parts that tool calls
+split; `Nothing to copy: no reply yet` says there is none.
+
+bh-02 copies through the terminal: it sends the text in an OSC 52 escape sequence, which a
+terminal that supports it puts on your clipboard, over SSH too. bh-02 cannot see whether the
+terminal did, so `Copied` means bh-02 asked. A terminal that keeps `Cmd+C` for itself never gives
+bh-02 the key and copies its own selection of the screen instead, which is not the selection
+bh-02 shows; select with the mouse, which copies as you let go, or use `Ctrl+T`.

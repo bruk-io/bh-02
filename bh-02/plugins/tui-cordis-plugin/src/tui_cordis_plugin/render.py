@@ -21,12 +21,14 @@ __all__ = [
     "approval_title",
     "asked_by_a_sub_agent",
     "code",
+    "copied_line",
     "fence_after",
     "is_quiet_stop",
     "jail_forms",
     "lifecycle_line",
     "session_forms",
     "markdown",
+    "newest_reply",
     "noted",
     "of_a_sub_agent",
     "settle_point",
@@ -279,6 +281,26 @@ def waiting_line(rows: Iterable[str]) -> str:
     named = sorted(rows)
     them = "it is" if len(named) == 1 else "they are"
     return f"⧗ waiting for {', '.join(named)} to start; this message is sent once {them} up"
+
+
+def copied_line(text: str) -> str:
+    """What copying `text` says, in one short line: how much went to the clipboard."""
+    return f"Copied {len(text)} character{'' if len(text) == 1 else 's'}"
+
+
+def newest_reply(blocks: Iterable[tuple[str, str]]) -> str | None:
+    """The newest reply's text, from the transcript's blocks (a (kind, text) pair each, oldest
+    first, the text of a `text` block as the model wrote it): every `text` block after the
+    message it answers (a `user` block), in order, a blank line between, so a reply that stops
+    for tool calls and goes on is whole. While the newest message has no text yet, the newest
+    reply is the one before it. None when the model has said nothing."""
+    said: list[str] = []
+    for kind, text in reversed(list(blocks)):
+        if kind == "user" and said:
+            break
+        if kind == "text" and text.strip():
+            said.append(text.strip())
+    return "\n\n".join(reversed(said)) or None
 
 
 def approval_title(request: Event) -> str:

@@ -13,6 +13,11 @@ stops a running reply as Ctrl-C does, once nothing nearer wants it: the composer
 commands (Esc closes it), a question (Esc declines it) and the palette (Esc closes it); with no
 reply running it does nothing. Ctrl-P opens the command palette.
 
+Copying goes to the terminal's clipboard through Textual (`copy_to_clipboard`, an OSC 52
+sequence), and every way of copying says how much in one line: Ctrl-C with text selected (it
+stops nothing then, and a second Ctrl-C stops the reply), Cmd-C (Textual's own `super+c`),
+a mouse selection finished in the transcript (copied at once), and Ctrl-T for the newest reply.
+
 Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
 withdraws its own (shown or queued), and Ctrl-C with one up answers no to every open question
 but a sub-agent's: the reply it stops withdraws its foreground child's, and a background
@@ -75,6 +80,11 @@ _COMMAND_RUNS = (
 
 type _Question = tuple[Mapping[str, Any], asyncio.Future[bool]]
 
+# How long the line saying what was copied stays on screen.
+_TOLD_FOR = 3.0
+_NOTHING_TO_COPY = "Nothing to copy: no reply yet"
+# A selection of fewer characters than this is not copied when the mouse ends it.
+_COPY_ON_SELECT = 2
 # How long an interrupted turn has to withdraw its own questions before they are answered no.
 _WITHDRAW_GRACE = 0.5
 # How long a Ctrl-C held for the line being handled may go unheard before the app says a
@@ -99,6 +109,10 @@ class BhApp(App[None]):
         Binding("ctrl+q", "quit", "Quit", priority=True, show=False),
         # Not priority: the list of commands, the question and the palette take Esc first.
         Binding("escape", "stop_reply", "Stop the reply", show=False),
+        # Free in the composer (TextArea binds no ctrl+t), the screen and the app, and no
+        # terminal keeps it: Ctrl-O, Ctrl-R, Ctrl-G and Ctrl-N are what Claude Code and readline
+        # use for other things.
+        Binding("ctrl+t", "copy_reply", "Copy the newest reply", show=False),
     ]
     # No app `CSS`: each widget styles itself (its DEFAULT_CSS). App CSS outranks every
     # DEFAULT_CSS, and a `Screen { background: ... }` here would match the approval modal too,
@@ -363,7 +377,54 @@ class BhApp(App[None]):
         screen.dismiss(False)
 
     def action_interrupt(self) -> None:
-        """Ctrl-C: stop the running turn and take its questions down as a no; with nothing
+        """Ctrl-C: copy the text that is selected, if any, and stop nothing (`_copy_selection`);
+        otherwise stop the running turn (`_stop`)."""
+        if not self._copy_selection():
+            self._stop()
+
+    def _copy_selection(self) -> bool:
+        """Copy the text selected now, clear the selection (or a second Ctrl-C would copy it
+        again and never stop anything), and say whether there was any. It is the composer's own
+        selection when the composer has the focus and some, else the screen's (the transcript's,
+        which Textual keeps). Never while a question is up: Ctrl-C then answers it no, as ever."""
+        if self._asking is not None:
+            return False
+        composer = self.query_one(Composer)
+        selected = composer.selected_text if self.focused is composer else ""
+        if selected:
+            composer.move_cursor(composer.cursor_location)  # the cursor alone: nothing selected
+        elif selected := self.screen.get_selected_text() or "":
+            self.screen.clear_selection()
+        else:
+            return False
+        self.copy_to_clipboard(selected)
+        return True
+
+    def copy_to_clipboard(self, text: str) -> None:
+        """Copy `text` to the terminal's clipboard (Textual writes OSC 52, which a terminal may
+        ignore, and keeps its own record in `clipboard`) and say how much in one line. Every
+        copy comes through here, Textual's own too (Cmd-C, a cut or a copy in the composer),
+        so each says the same. A toast, not a line of the conversation: one there would split
+        a reply that is still streaming."""
+        super().copy_to_clipboard(text)
+        self.notify(render.copied_line(text), timeout=_TOLD_FOR, markup=False)
+
+    def on_text_selected(self, event: events.TextSelected) -> None:
+        """A mouse selection ended (the screen says so at every mouse up, a click included):
+        what is selected is copied at once. A click, or one character, copies nothing and says
+        nothing. The selection stays shown."""
+        if len(text := self.screen.get_selected_text() or "") >= _COPY_ON_SELECT:
+            self.copy_to_clipboard(text)
+
+    def action_copy_reply(self) -> None:
+        """Ctrl-T: copy the newest reply's text whole (`Transcript.reply`), or say there is none."""
+        if (text := self.query_one(Transcript).reply()) is None:
+            self.notify(_NOTHING_TO_COPY, timeout=_TOLD_FOR, markup=False)
+        else:
+            self.copy_to_clipboard(text)
+
+    def _stop(self) -> None:
+        """Stop the running turn and take its questions down as a no; with nothing
         running, say how to leave; while a command runs, say that Ctrl-C doesn't stop it. A
         sub-agent's question is never answered here: the stopped reply withdraws its foreground
         child's, and a background child's stays queued (the reply it stops is not its own).
@@ -387,12 +448,12 @@ class BhApp(App[None]):
             self.set_timer(_UNHEARD_GRACE, self._unheard)
 
     def action_stop_reply(self) -> None:
-        """Esc: stop the running reply exactly as Ctrl-C does (`action_interrupt`). With no
+        """Esc: stop the running reply exactly as Ctrl-C does (`_stop`), though never to copy. With no
         reply running it does nothing, and says nothing: Esc is pressed out of habit, and the
         composer is not its business. It reaches here only when the list of commands, a question
         and the palette have passed on it."""
         if self.bridge.turn_running:
-            self.action_interrupt()
+            self._stop()
 
     def _unheard(self) -> None:
         """A Ctrl-C held for the line being handled went unheard: a command is running (no turn

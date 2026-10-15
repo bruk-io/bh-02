@@ -278,6 +278,12 @@ class Transcript(VerticalScroll):
         if replay.entries:
             self.note("↑ the session so far (a resumed session's Python process starts empty)")
 
+    def reply(self) -> str | None:
+        """The newest reply's text as the model wrote it (`render.newest_reply`), or None."""
+        return render.newest_reply(
+            (_kind(block), block.text if isinstance(block, Stream) else "") for block in self.children
+        )
+
     def blocks(self) -> list[tuple[str, str]]:
         """What the transcript shows, as (kind, plain text) per block, top to bottom."""
         return [(_kind(block), _plain(block)) for block in self.children]
