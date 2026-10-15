@@ -3,7 +3,7 @@ id: TASK-0100
 title: >-
   Mark startup-file helpers with @helper, and show the model their signatures
   (decision-0004)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 15:57'
@@ -67,4 +67,12 @@ Evidence (root; tester+tini where said):
 - AC4: `_keep` (once, confined only), the plugin README, docs/bh-02/how-it-works/python-tool.md (new Helpers subsection) and GLOSSARY.md (`helper`) say the convention; the worker is still standard library only (gate passed). "scripts/check passes" for the whole workspace is left to the reviewer: only the per-member checks above were run.
 
 Finish moved (recorded 2026-10-15): AC #3 was reworded in c467e69, when decision-0004 was accepted (Fable for the owner), before any code: "an input that binds helper itself keeps it" left the criterion, since the decision covers it in point 1. The build kept it anyway, and the review confirmed a rebound `helper` is kept (test_helper_is_bound_for_an_unconfined_input_too_and_a_rebound_one_is_kept).
+
+Closed on the independent review (Opus low, did not do the work): CLOSE, then CLOSE again on the fix for its should-fix.
+- AC #1 met: startup_ran words the aside as decision-0004 point 2 (`helpers a(x), b(); N other names hidden`, `no helpers; N names hidden`, `defined: nothing` for a file that bound nothing); failure forms untouched; the new real-process tests fail on the old code (NameError or old wording).
+- AC #2 met: test_python_listing.py covers the strip, the cut at 160 (160 whole, 161 cut with …, cut counted after stripping), name(...), malformed lines; slicing is by code point, so no character is split.
+- AC #3 met: help() prints the docstring; helper(f) is f. Only `__bh_helper__ is True` on a callable counts; a rebound `helper` is kept.
+- AC #4 met: _keep's sentence is point 5's, confined only; README, python-tool.md and the GLOSSARY helper line say what was built; worker.py adds no import (worker-stdlib-only ok); the batch's full scripts/check exits 0 on 96492f9. Unconfined output is unchanged; `helper` now shows in two namespace listings, as decision point 1 implies.
+- Should-fix, fixed in b505f4a by the orchestrator and verified by the reviewer: a file could bind any string as a name through globals() and word the aside (a forged "0 other names hidden)" with a right-to-left override). Only identifier names are listed now, the rest counted hidden; names and signatures lose Unicode format characters (Cc and Cf). Two tests, seen failing first; scripts/check bh-02/plugins/python-cordis-plugin exit 0 (75 passed, gates and docs ok); the reviewer's scratch plant now gives `helpers ok(a="[2J"); 1 other name hidden`.
+Nits answered here, none filed: a signature's own text (a default's repr) can still hold `;` or `)` and imitate the aside's wording, within decision-0004, which asks only for stripping and the cut; the process cuts a signature at 640 before the host cleans it, so one with over 480 control characters can lose its tail without a …; a startup file whose listing passes the worker's 20,000-character output cap is said not to be listable.
 <!-- SECTION:NOTES:END -->
