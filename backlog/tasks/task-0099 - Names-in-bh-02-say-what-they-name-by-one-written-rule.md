@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-14 15:56'
-updated_date: '2026-10-15 02:28'
+updated_date: '2026-10-15 18:39'
 labels:
   - naming
   - finish-moved
@@ -44,9 +44,9 @@ One naming rule, written where a plugin author reads it, and the names that brea
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 One naming rule is written in bh-02/CLAUDE.md, with the reason for it; GLOSSARY.md carries the renamed terms
-- [ ] #2 No two plugins' names differ by a letter, no component repeats its plugin's name, and no GLOSSARY.md term has two meanings without a label saying which
-- [ ] #3 No old name is translated or read anywhere (outdated.py's renames, bh-02 update-layer, the resume translation and the kernel.py fallback are gone), and a layer naming a use no plugin provides fails at boot with the loader's error; scripts/check passes
+- [x] #1 One naming rule is written in bh-02/CLAUDE.md, with the reason for it; GLOSSARY.md carries the renamed terms
+- [x] #2 No two plugins' names differ by a letter, no component repeats its plugin's name, and no GLOSSARY.md term has two meanings without a label saying which
+- [x] #3 No old name is translated or read anywhere (outdated.py's renames, bh-02 update-layer, the resume translation and the kernel.py fallback are gone), and a layer naming a use no plugin provides fails at boot with the loader's error; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Notes
