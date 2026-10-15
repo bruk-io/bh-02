@@ -36,19 +36,19 @@ a tool added mid-conversation can be called from code at once, even where the mo
 of tools stays as the conversation began (TASK-0057's `fixed` providers). The namespace is a
 view of the registry, never where a tool is registered.
 
-A function the model defines in an input and a registered tool differ in what holds them:
+A function the model defines in an input, a helper and a registered tool differ in what holds them:
 
-| | A function defined in an input | A registered tool |
-|---|---|---|
-| Where it lives | the Python process's namespace | `tools`, the registry a row (or an extension) registers into |
-| How long | until the process ends (`/clear`, a restart, a resume) | as long as its row: an extension's lasts as long as its file, across sessions |
-| Who can call it | later inputs | the model directly, and inputs as `tools.NAME(...)` |
-| Asked about, told asides | no: the input that calls it was | each call, as any tool call |
-| Where it runs | in the Python process | where its row says: an extension's in the extensions process, a layer row's in bh-02 |
+| | A function defined in an input | A helper (`@helper` in a startup file) | A registered tool |
+|---|---|---|---|
+| Where it lives | the Python process's namespace | the Python process's namespace, put there by its startup file | `tools`, the registry a row (or an extension) registers into |
+| How long | until the process ends (`/clear`, a restart, a resume) | as long as its startup file: a new REPL has it again | as long as its row: an extension's lasts as long as its file, across sessions |
+| Who can call it | later inputs | later inputs | the model directly, and inputs as `tools.NAME(...)` |
+| Asked about, told asides | no: the input that calls it was | no: the input that calls it was | each call, as any tool call |
+| Where it runs | in the Python process | in the Python process, with an input's limits | where its row says: an extension's in the extensions process, a layer row's in bh-02 |
 
-A helper worth keeping between sessions goes in the project's startup file; a capability the
-model should have as a tool, or that should run outside the Python process, is an extension's
-tool.
+A function worth keeping between sessions goes in the project's startup file, marked `@helper` so a
+new REPL tells the model of it; a capability the model should have as a tool, or that should run
+outside the Python process, is an extension's tool.
 
 ## How long the namespace lasts
 

@@ -73,7 +73,7 @@ _USE = (
     "",
     _EXAMPLE,
     "",
-    "- Build up state: define a helper once (a function that runs the tests and prints only the "
+    "- Build up state: define a function once (one that runs the tests and prints only the "
     "failures, say) and call it later. A variable holds what was read, not the file: read a "
     "file again after you change it.",
     "- It is plain Python, not IPython or a notebook: no `!command` or `%magic`, and no "
@@ -93,11 +93,16 @@ _USE = (
     "REPL holds stays as it was.",
     "- Several calls in one message run in order, one input each. The person sees every input "
     "and its output as it runs, so say what a result means rather than repeat it.",
-    "- bh-02's other tools are functions here too: `tools.NAME(arg=...)` calls one as your own "
-    "call to it would (asked about, with bh-02's asides), returns its result as text, and raises tools.Error "
-    "when it did not run or failed; `tools` lists them, help(tools.NAME) shows what one takes, "
-    "and an aside before an input's output says when they change. A function you define here is "
-    "yours alone and goes with the REPL; a tool is bh-02's. Don't bind `tools` yourself.",
+    "- Three kinds of function are here, and they are different things. Your own: what an input "
+    "defines, plain Python in this REPL, gone when the REPL ends. Helpers: functions a startup "
+    "file marks `@helper`, also plain Python in this REPL; a helper runs as your own code does, "
+    "with the same limits, and is kept in its startup file rather than only in the REPL. Tools: "
+    "bh-02's own, `tools.NAME(arg=...)`; a call leaves the REPL and is run by bh-02, exactly as "
+    "your own call to that tool would be (asked about when that call would be, with bh-02's "
+    "asides), so a tool can do what your code can't, such as start a sub-agent. A tool call "
+    "returns its result as text, and raises tools.Error when it did not run or failed. `tools` "
+    "lists them, help(tools.NAME) shows what one takes, and an aside before an input's output "
+    "says when they change. Don't bind `tools` yourself.",
 )
 
 
@@ -148,8 +153,8 @@ def instructions_for(
         if confined and theirs:
             where += (
                 " The person's startup file runs in the REPL even where your code finds no such "
-                "file (bh-02 reads it for the REPL): inspect.getsource(helper) shows one of its "
-                "helpers."
+                "file (bh-02 reads it for the REPL): inspect.getsource(NAME) shows one of its "
+                "helpers, NAME as the startup line lists it."
             )
     keep = _keep(confined, (startup,) if isinstance(startup, str) else startup, theirs)
     return "\n".join([f"{_REPL} {keep}".rstrip(), "", *_USE, "", where])

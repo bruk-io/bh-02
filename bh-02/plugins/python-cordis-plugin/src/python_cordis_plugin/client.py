@@ -746,7 +746,7 @@ class PythonProcess:
                 return ""
             listed = ", ".join(f"tools.{name}" for name in sorted(now))
             return (
-                f"(bh-02's other tools are functions in your namespace: {listed}; "
+                f"(bh-02's other tools, run by bh-02 when you call one: {listed}; "
                 "help(tools.NAME) says what one takes)\n"
             )
         added = sorted(now.keys() - before.keys())

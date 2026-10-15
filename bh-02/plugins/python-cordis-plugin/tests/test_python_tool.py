@@ -581,7 +581,7 @@ def test_the_model_is_told_once_what_helper_does_in_a_startup_file_it_runs() -> 
     mine, theirs = (".bh-02/startup.py",), ("/home/me/.config/bh-02/startup.py",)
     assert instructions_for(True, mine, theirs=theirs).count(said) == 1
     assert said in instructions_for(True, mine) and said in instructions_for(True, (), theirs=theirs)
-    assert said not in instructions_for(True, ()) and "@helper" not in instructions_for(False, mine)
+    assert said not in instructions_for(True, ()) and said not in instructions_for(False, mine)
     assert "says what it defined" not in instructions_for(True, mine)  # what it said before
 
 
@@ -590,7 +590,7 @@ def test_under_an_allowlist_the_model_is_told_how_to_see_the_person_s_helpers() 
     source), but the model's code finds no such file to open, so it is told what shows one."""
     mine, theirs, reads = (".bh-02/startup.py",), ("/home/me/.config/bh-02/startup.py",), ("/usr", "/w/app")
     told = instructions_for(True, mine, reads, theirs=theirs)
-    assert "finds no such file (bh-02 reads it for the REPL): inspect.getsource(helper) shows one" in told
+    assert "finds no such file (bh-02 reads it for the REPL): inspect.getsource(NAME) shows one" in told
     assert "inspect.getsource" not in instructions_for(True, mine, reads)  # no file of the person's
     assert "inspect.getsource" not in instructions_for(True, mine, (), theirs=theirs)  # it reads everything
 
@@ -1446,7 +1446,7 @@ async def test_bh_02_s_other_tools_are_functions_an_input_calls_as_the_model_wou
     async with _process(Unjailed(), PythonProcessConfig(), tools=offering) as k:
         first = await k.run("tools.echo(text='hi')")
         assert first == (
-            "(bh-02's other tools are functions in your namespace: tools.echo; help(tools.NAME) "
+            "(bh-02's other tools, run by bh-02 when you call one: tools.echo; help(tools.NAME) "
             "says what one takes)\n'echo: hi'"
         )
         assert offering.calls == [("echo", {"text": "hi"})]

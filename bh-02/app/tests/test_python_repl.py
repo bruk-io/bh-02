@@ -147,7 +147,7 @@ async def test_an_input_calls_another_row_s_tool_as_a_function_put_to_the_person
     assert [request["name"] for request in fragile.ASKED] == ["python", "echo", "python", "echo"]
     echo = fragile.ASKED[1]
     assert echo["runs"] == "host" and echo["input"] == {"text": "from code"}
-    assert "[0] (bh-02's other tools are functions in your namespace: tools.echo;" in out
+    assert "[0] (bh-02's other tools, run by bh-02 when you call one: tools.echo;" in out
     assert "echo: from code" in out
     assert "[1] not run: denied: the person said no to this call" in out
 

@@ -131,7 +131,7 @@ model, and nothing needs keeping from it. Where each is read is the point:
   itself is not there: its helpers run and `inspect.getsource` shows them (through
   `linecache`), but `open` on its path finds nothing, a helper that reads a file beside it
   finds nothing either, and `__file__` is not set (nor for the project's: each runs as an
-  input). The model is told how to see one (`inspect.getsource(helper)`).
+  input). The model is told how to see one (`inspect.getsource(NAME)`, NAME a helper as the startup line lists it).
 - But only when reading it goes nowhere an input may write (`host_paths.walked`, the walk the
   models file and memory files outside the project are held to: each directory and link on the
   way, as named and as resolved): the
