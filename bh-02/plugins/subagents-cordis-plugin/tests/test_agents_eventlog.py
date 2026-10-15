@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agents_cordis_plugin import EventLog, ended_record
+from subagents_cordis_plugin import EventLog, ended_record
 
 
 def _kinds(path: Path) -> list[str]:

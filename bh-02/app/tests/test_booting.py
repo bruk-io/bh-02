@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from bh_02 import CompositionError, layers, run
+from bh_02.bootstrap import NotStarted
 from cordis import Effects, Inspection, Row, Runtime, State, bind, boot, component
 from cordis.loader import read_layer, resolve
 
@@ -37,7 +38,7 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
         for row in read_layer(str(layer)):
             rows[row.id] = row if row.use else Row(row.id, rows[row.id].use, row.config)
     assert {"loop", "ui", "chat", "python", "runner", "system", "tools"} <= set(rows)
-    assert not {"kernel", "jail"} & set(rows)  # the kernel plugin's rows, before the python and runner ones
+    assert "jail" not in rows  # a row id from before the python and runner plugins
     assert not {"actions", "fs", "approve", "guard"} & set(rows)  # the tool rows of before CodeAct
     assert rows["tools"].use == "agent:tools" and rows["loop"].config == {"requires": ["python"]}
     for row in rows.values():
@@ -126,7 +127,7 @@ async def test_a_row_that_leaves_mid_run_is_reported_rather_than_a_silent_exit(
 
 
 async def test_the_shipped_stack_boots_around_a_patched_model(composition: Callable[..., Path]) -> None:
-    """The kernel, the commands and the frame's rows are real; only the model is a fake. Nothing stalls."""
+    """The python, commands and frame's rows are real; only the model is a fake. Nothing stalls."""
     patch = composition('[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n', one_reply=True)
     await asyncio.wait_for(run([*layers(), patch], [Row("chat", config={"prompt": "hi"})]), 2)
 
@@ -281,7 +282,7 @@ async def test_stopping_replies_with_a_clear_or_a_model_switch_between_leaves_on
 
 async def test_slash_commands_act_on_the_running_session(composition: Callable[..., Path]) -> None:
     """/rows and /clear go to the operator, not the model; /clear restarts the model and the
-    kernel, and the session carries on and answers the next message."""
+    Python process, and the session carries on and answers the next message."""
     patch = composition(
         '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
         '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n'
@@ -308,3 +309,21 @@ async def test_a_composition_that_cannot_be_read_says_why_instead_of_crashing(
     with pytest.raises(CompositionError) as raised:
         await asyncio.wait_for(run([*layers(), patch]), 5)
     assert "could not start" in raised.value.message and "nothing_before_me" in raised.value.message
+
+
+async def test_a_shipped_layer_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s_error(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The shipped layer is read as every layer is, first: a row of it whose `use` no plugin
+    provides is a boot failure that names the row, the use and the installed plugins, not a wait
+    (here a copy of it names a plugin that does not exist, as a stale layer would)."""
+    (shipped,) = layers()
+    text = shipped.read_text()
+    assert 'use = "agent:loop"' in text
+    stale = tmp_path / "shipped.toml"
+    stale.write_text(text.replace('use = "agent:loop"', 'use = "nonesuch:loop"'))
+    with pytest.raises(NotStarted) as raised:
+        await asyncio.wait_for(run([stale, composition("", one_reply=True)]), 10)
+    assert "could not start" in raised.value.message
+    assert "loop: unresolved:" in raised.value.message and "use 'nonesuch:loop'" in raised.value.message
+    assert "installed plugins: " in raised.value.message

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from agents_cordis_plugin import (
+from subagents_cordis_plugin import (
     GENERAL,
     AgentType,
     Asker,
@@ -75,8 +75,8 @@ def test_a_child_s_rows_are_the_parent_s_kept_ones_prefixed_with_what_is_its_own
         ("agents/general-1/loop", "agent:loop"),
         ("agents/general-1/transcript", "agent:transcript"),
         ("agents/general-1/model", "models:model"),
-        ("agents/general-1/output", "agents:output"),
-        ("agents/general-1/agent", "agents:child"),
+        ("agents/general-1/output", "subagents:output"),
+        ("agents/general-1/agent", "subagents:child"),
     ]
     by_id = {r.id: r.config for r in rows}
     assert by_id["agents/general-1/loop"] == {"requires": ["python"]}
@@ -157,8 +157,8 @@ async def test_the_asker_puts_only_a_labelled_request_to_the_person() -> None:
 
 def test_a_child_never_gets_an_agents_row_whatever_the_layer_names() -> None:
     """Depth one (decision-0002): naming the agents row in `rows`, by its id or as any row that
-    uses `agents:agents`, is refused saying what to do; it never reaches a child."""
-    parent = [*_PARENT, _Entry("agents", "agents:agents"), _Entry("helpers", "agents:agents")]
+    uses `subagents:parent`, is refused saying what to do; it never reaches a child."""
+    parent = [*_PARENT, _Entry("agents", "subagents:parent"), _Entry("helpers", "subagents:parent")]
     for named in ("agents", "helpers"):
         with pytest.raises(
             ValueError, match=r"a child has no agents row \(depth one, decision-0002\)"

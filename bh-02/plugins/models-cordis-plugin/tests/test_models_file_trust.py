@@ -182,7 +182,7 @@ def test_run_from_home_the_default_models_file_is_in_the_project(
 def test_the_working_directory_counts_even_when_the_row_s_cwd_names_another(
     places: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The jail lets the model write in the working directory (the kernel's root), whatever
+    """The jail lets the model write in the working directory (the Python process's root), whatever
     project a layer tells Claude Code it works in."""
     project, _, elsewhere = places
     monkeypatch.setenv("XDG_CONFIG_HOME", str(project / ".config"))

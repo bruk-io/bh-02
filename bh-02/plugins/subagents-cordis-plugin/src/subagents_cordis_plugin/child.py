@@ -9,8 +9,8 @@ A child's rows are the parent's own, as its loader mounted them (`loop`, `tools`
 rows a type may grant (the agents row's `tools`), only those its type grants. The agents row
 writes what is the child's own: its transcript in its own state directory, the model's Claude
 Code state beside it, and the model its type (or the call, once the person said yes) names. Two
-rows of the agents plugin join them inside the realm: `agents:output`, the child's `output` (a
-labelled `confirm`, nothing else), and `agents:child`, its type's section of the prompt and the
+rows of the sub-agents plugin join them inside the realm: `subagents:output`, the child's `output` (a
+labelled `confirm`, nothing else), and `subagents:child`, its type's section of the prompt and the
 hand its `loop` is passed to the agents row by.
 """
 
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, Protocol
 
-from agents_cordis_plugin.kinds import AgentType
+from subagents_cordis_plugin.kinds import AgentType
 
 __all__ = [
     "PREFIX",
@@ -85,7 +85,7 @@ class Entry(Protocol):
 
 # The parent's agents row: a child is never given one, so it can start none of its own.
 _AGENTS_ROW = "agents"
-_AGENTS_USE = "agents:agents"
+_AGENTS_USE = "subagents:parent"
 
 
 def _is_agents(entry: Entry | None) -> bool:
@@ -151,7 +151,7 @@ def child_rows(
     its `loop` to the agents row (`hand`) and tells it its type.
 
     Raises:
-        ValueError: `kept` names the agents row (by its id, or any row that is `agents:agents`):
+        ValueError: `kept` names the agents row (by its id, or any row that is `subagents:parent`):
             a child has no agents row, depth one (decision-0002), whatever a layer asks.
     """
     mounted = {e.id: e for e in entries if not e.disabled}
@@ -174,9 +174,9 @@ def child_rows(
             if kind.model is not None:
                 config["default"] = kind.model
         rows.append(ChildRow(prefixed(name, rid), entry.use, config))
-    rows.append(ChildRow(prefixed(name, "output"), "agents:output", {"name": name, "type": kind.name}))
+    rows.append(ChildRow(prefixed(name, "output"), "subagents:output", {"name": name, "type": kind.name}))
     section = name.join(kind.section.split("{name}"))
-    rows.append(ChildRow(prefixed(name, "agent"), "agents:child", {"hand": hand, "section": section}))
+    rows.append(ChildRow(prefixed(name, "agent"), "subagents:child", {"hand": hand, "section": section}))
     return tuple(rows)
 
 

@@ -261,10 +261,10 @@ def test_reloads_and_failures_become_notes() -> None:
 
     posted = Posted()
     output = TuiOutput(posted, Bridge())
-    for event in (Event("active", "loop"), Event("active", "loop"), Event("failed", "kernel", "boom")):
+    for event in (Event("active", "loop"), Event("active", "loop"), Event("failed", "tools", "boom")):
         output.lifecycle(event)
     notes = [(m.text, m.kind) for m in posted.messages if isinstance(m, Noted)]
-    assert notes == [("↻ loop reloaded", "note"), ("✗ kernel failed: boom", "failure")]
+    assert notes == [("↻ loop reloaded", "note"), ("✗ tools failed: boom", "failure")]
 
 
 def test_a_row_up_before_the_app_heard_it_says_reloaded_the_first_time_it_comes_back() -> None:
@@ -324,7 +324,7 @@ def test_a_line_kept_between_a_restarted_row_s_old_fiber_and_its_new_one_says_it
     assert bridge.waiting_on == frozenset()
     assert not bridge.submit("hello")  # kept, and nothing to say it waits for yet
     output.lifecycle(_Event("reload", "loop"))
-    output.lifecycle(_Event("reload", "kernel"))  # said once, not per row
+    output.lifecycle(_Event("reload", "tools"))  # said once, not per row
     notes = [m.text for m in posted.messages if isinstance(m, Noted)]
     assert notes == ["⧗ waiting for loop to start; this message is sent once it is up"]
 
@@ -410,8 +410,8 @@ async def test_a_line_kept_while_the_command_ran_says_it_waits_once_the_restart_
     assert await bridge.line() == "/clear"
     assert not bridge.submit("again")  # typed while /clear runs: it waits for the command
     assert _notes(posted) == []
-    await output.show(_answered({"type": "cleared"}, {"type": "restarting", "rows": ["loop", "kernel"]}))
-    assert _notes(posted) == ["⧗ waiting for kernel, loop to start; this message is sent once they are up"]
+    await output.show(_answered({"type": "cleared"}, {"type": "restarting", "rows": ["loop", "tools"]}))
+    assert _notes(posted) == ["⧗ waiting for loop, tools to start; this message is sent once they are up"]
     assert await bridge.line() == "again"  # the bridge holds nothing back: the chat row's read is when
 
 

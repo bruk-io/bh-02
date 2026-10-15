@@ -1,4 +1,4 @@
-"""The python tool booted from the shipped layers: a real loop, kernel and jail; only the model
+"""The python tool booted from the shipped layers: a real loop, Python process and jail; only the model
 is a fake, which calls scripted inputs. An input is plain Python: it reads and writes files and
 runs programs itself, the jail decides what it may touch, and unjailed every input is asked about."""
 
@@ -22,7 +22,6 @@ import pytest
 import cordis
 import memory_cordis_plugin
 from agent_cordis_plugin import ToolBroker
-from agents_cordis_plugin import EventLog
 from bh_02.bootstrap import (
     code_directories,
     code_packages,
@@ -36,7 +35,7 @@ from cordis import Row
 from cordis.loader import boot
 from extensions_cordis_plugin import Extensions, ExtensionsConfig
 from models_cordis_plugin.local_env import token_file
-from python_cordis_plugin import Kernel, KernelConfig, worker_argv
+from python_cordis_plugin import PythonProcess, PythonProcessConfig, worker_argv
 from runner_cordis_plugin import (
     Approval,
     BrigConfig,
@@ -46,6 +45,7 @@ from runner_cordis_plugin import (
     recorded_group,
     self_modify_denied,
 )
+from subagents_cordis_plugin import EventLog
 
 # darwin's jail (seatbelt) reads by denylist: everything but the secrets. Linux's (bubblewrap)
 # reads by allowlist: the system, the interpreter and the project, so a file anywhere else is
@@ -94,7 +94,7 @@ def _inputs(composition: Callable[..., Path], *inputs: str, extra: str = "") -> 
 
 
 def _jailed_in(project: Path) -> str:
-    """Layer rows that put the kernel in `project`, inside brig's jail (the fixture's layers
+    """Layer rows that put the Python process in `project`, inside brig's jail (the fixture's layers
     default to no jail)."""
     return (
         f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
@@ -346,13 +346,13 @@ async def test_a_jailed_input_cannot_read_the_credential_file_bh_02_names_from_a
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_a_jailed_kernel_starts_in_a_worktree_and_cannot_write_its_layer_in_the_project(
+async def test_a_jailed_python_process_starts_in_a_worktree_and_cannot_write_its_layer_in_the_project(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
     """A git worktree (or submodule): `.git` is a `gitdir:` file, so `.git/hooks` can't exist,
     and on Linux bubblewrap can't make a mount point under a file; the jail denies the file
-    itself instead, and the kernel starts. And a layer file inside the project (where
+    itself instead, and the Python process starts. And a layer file inside the project (where
     `--patch mine.toml` usually is) can't be written, though the project can."""
     project = tmp_path / "project"
     project.mkdir()
@@ -469,11 +469,11 @@ class _Host:
     auto_memory: str = ""
 
 
-def _python(jail: BrigJail | Runner, config: KernelConfig) -> Kernel:
+def _python(jail: BrigJail | Runner, config: PythonProcessConfig) -> PythonProcess:
     """The python tool's process over `jail`, as the python row builds it: started by a runner,
     its inputs confined as the approval rule says of that runner."""
     runner = jail if isinstance(jail, Runner) else Runner(jail)
-    return Kernel(runner, config, rule=Approval(runner))
+    return PythonProcess(runner, config, rule=Approval(runner))
 
 
 async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input(
@@ -505,8 +505,8 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
         "        print(how, type(error).__name__)\n"
     )
     runner = Runner(jail)
-    async with _python(runner, KernelConfig(root=str(project))) as kernel:
-        runner.on_release(kernel.stopped)
+    async with _python(runner, PythonProcessConfig(root=str(project))) as process:
+        runner.on_release(process.stopped)
         assert credential.is_dir()  # held: the person can't create it
         (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
         group = recorded_group(record.read_text())
@@ -517,17 +517,17 @@ async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_i
         )
         assert not credential.exists() and runner.released()
         assert not group_alive(group)  # the jail is gone, not only its worker
-        await kernel.run("1")
+        await process.run("1")
         assert credential.is_dir() and not runner.released()  # an input came first: held again
         await runner.release()
-        await kernel.__aexit__(None, None, None)  # `/restart python`: stops the jail ...
-        await kernel.__aenter__()  # ... and starts one at once, which holds the path again
+        await process.__aexit__(None, None, None)  # `/restart python`: stops the jail ...
+        await process.__aenter__()  # ... and starts one at once, which holds the path again
         assert credential.is_dir()
         await runner.release()
         credential.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n")  # never a real one
-        out = await kernel.run(reach)
+        out = await process.run(reach)
         assert "r PermissionError" in out and "w PermissionError" in out, out
-        assert str(credential) in kernel.notice()
+        assert str(credential) in process.notice()
     assert credential.read_text() == "CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n"
     assert token_file(None, [str(credential)]) == credential
 
@@ -568,13 +568,13 @@ async def test_on_linux_a_module_an_input_plants_in_the_project_runs_nowhere_out
         f"    open(name, 'w').write({source!r})\n"
         "print('planted')"
     )
-    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
-        out = await kernel.run(plants)
+    async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
+        out = await process.run(plants)
         assert "planted" in out, out
         assert all((project / name).is_file() for name in ("subprocess.py", "signal.py", "brig/__init__.py"))
-        await kernel.__aexit__(None, None, None)  # `/restart python`: stops the jail ...
-        await kernel.__aenter__()  # ... and starts the Python process again, in the project root
-        out = await kernel.run("print('started again')")
+        await process.__aexit__(None, None, None)  # `/restart python`: stops the jail ...
+        await process.__aenter__()  # ... and starts the Python process again, in the project root
+        out = await process.run("print('started again')")
         assert "started again" in out, out
     assert not record.exists(), f"planted modules ran outside the jail: {record.read_text()}"
 
@@ -597,13 +597,13 @@ time.sleep(60)
 """
 
 
-async def test_on_linux_the_kernel_tells_the_model_its_own_worker_s_trees_when_another_starts(
+async def test_on_linux_the_python_process_tells_the_model_its_own_worker_s_trees_when_another_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The runner starts the Python process and the extensions process, and a Linux jail
-    reads the directory of the program it runs. What the kernel tells the model is its own
+    reads the directory of the program it runs. What the Python process tells the model is its own
     worker's jail: another program starting on the same jail, from another directory, leaves
-    `kernel.instructions()` as it was, so the loop tells the model no change and names no tree
+    `process.instructions()` as it was, so the loop tells the model no change and names no tree
     its inputs can't read."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
@@ -616,15 +616,15 @@ async def test_on_linux_the_kernel_tells_the_model_its_own_worker_s_trees_when_a
     sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
     endpoint = str(sockets / "x.sock")
     try:
-        async with _python(jail, KernelConfig(root=str(project))) as kernel:
-            told = kernel.instructions()
-            own = str(Path(worker_argv(endpoint)[2]).parent)  # the kernel's worker's directory
-            assert own in kernel.reads() and own in told, kernel.reads()
+        async with _python(jail, PythonProcessConfig(root=str(project))) as process:
+            told = process.instructions()
+            own = str(Path(worker_argv(endpoint)[2]).parent)  # the Python process's worker's directory
+            assert own in process.reads() and own in told, process.reads()
             argv = [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint]
             other = await jail.start(argv, cwd=str(project), endpoint=endpoint)
             try:
-                assert str(elsewhere) not in kernel.reads(), kernel.reads()
-                assert kernel.instructions() == told
+                assert str(elsewhere) not in process.reads(), process.reads()
+                assert process.instructions() == told
                 assert str(elsewhere) in other.reads()  # the other program's own
             finally:
                 await other.stop()
@@ -660,8 +660,8 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
     endpoint = str(sockets / "x.sock")
     try:
         runner = Runner(jail)
-        async with _python(runner, KernelConfig(root=str(project))) as kernel:
-            runner.on_release(kernel.stopped)
+        async with _python(runner, PythonProcessConfig(root=str(project))) as process:
+            runner.on_release(process.stopped)
             argv = [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint]
             extensions = await runner.start(argv, cwd=str(project), endpoint=endpoint)
 
@@ -681,7 +681,7 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
                     assert group is not None
                     assert not group_alive(group)  # both jails are gone, the extensions process's too
                 assert runner.released()
-                await kernel.run("1")  # the next input
+                await process.run("1")  # the next input
                 assert not runner.released() and credential.is_dir()
             finally:
                 await extensions.stop()
@@ -796,8 +796,8 @@ async def test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_i
     try:
         for root in (checkout, shipped.parent.parent):  # the workspace, then the plugin's `src`
             jail = BrigJail(config, _Host(code=_code()))
-            async with _python(jail, KernelConfig(root=str(root))) as kernel:
-                said[root] = [await kernel.run(code) for code in inputs]
+            async with _python(jail, PythonProcessConfig(root=str(root))) as process:
+                said[root] = [await process.run(code) for code in inputs]
     finally:
         for path in planted:
             path.unlink(missing_ok=True)
@@ -816,16 +816,16 @@ async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_hom
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "kernel.py"  # conftest: outside the project
+    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "startup.py"  # conftest: outside the project
     person.parent.mkdir(parents=True)
     person.write_text("def show(x):\n    return f'<{x}>'\n")
     project = tmp_path / "project"
     (project / ".bh-02").mkdir(parents=True)
-    (project / ".bh-02" / "kernel.py").write_text("TOOLS = 2\n")
-    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
-        out = await kernel.run(f"import os\nprint(os.path.exists({str(person)!r}))\nshow(TOOLS)")
+    (project / ".bh-02" / "startup.py").write_text("TOOLS = 2\n")
+    async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
+        out = await process.run(f"import os\nprint(os.path.exists({str(person)!r}))\nshow(TOOLS)")
     assert out.startswith(
-        f"({person} ran first and defined: show. .bh-02/kernel.py ran next and defined: TOOLS)\n"
+        f"({person} ran first and defined: show. .bh-02/startup.py ran next and defined: TOOLS)\n"
     ), out
     assert out.endswith("\nFalse\n'<2>'"), out  # the jail can't see the person's file; its helper runs
 
@@ -845,7 +845,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     xdg = home / "xdg" / "bh-02"
     xdg.mkdir(parents=True)
     (home / ".config").mkdir()  # the default directory's parent, without a bh-02 of its own
-    person = xdg / "kernel.py"
+    person = xdg / "startup.py"
     person.write_text("HELPER = 1\n")
     key = home / ".ssh" / "id_ed25519"  # a file the jail hides (brig's credential list)
     key.parent.mkdir()
@@ -859,7 +859,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     def attempt(what: str) -> str:
         return f"import os\ntry:\n    {what}; print('WROTE')\nexcept OSError:\n    print('DENIED')"
 
-    default = home / ".config" / "bh-02" / "kernel.py"
+    default = home / ".config" / "bh-02" / "startup.py"
     inputs = [
         attempt(f"open({str(person)!r}, 'w').write('HELPER = 2')"),
         attempt(f"os.symlink({str(key)!r}, 'planted'); os.replace('planted', {str(person)!r})"),
@@ -872,8 +872,8 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
         attempt(f"os.rename({str(home / '.config')!r}, 'moved-too')"),
     ]
     jail = BrigJail(BrigConfig(), _Host(trusted=trusted))
-    async with _python(jail, KernelConfig(root=str(home))) as kernel:  # session A, from home
-        said = [await kernel.run(code) for code in inputs]
+    async with _python(jail, PythonProcessConfig(root=str(home))) as process:  # session A, from home
+        said = [await process.run(code) for code in inputs]
     assert said[0].startswith(f"({person} ran first and defined: HELPER)\n"), said[0]
     assert [s.rsplit("\n", 1)[-1] for s in said] == ["DENIED"] * len(inputs), said
     with contextlib.suppress(FileNotFoundError):
@@ -883,9 +883,9 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     project = tmp_path / "work" / "project"  # session B, in another project
     project.mkdir(parents=True)
     async with _python(
-        BrigJail(BrigConfig(), _Host(trusted=trusted)), KernelConfig(root=str(project))
-    ) as kernel:
-        seen = await kernel.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), HELPER")
+        BrigJail(BrigConfig(), _Host(trusted=trusted)), PythonProcessConfig(root=str(project))
+    ) as process:
+        seen = await process.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), HELPER")
     assert seen == f"({person} ran first and defined: HELPER)\n('HELPER = 1\\n', 1)", seen
     assert "STAND-IN" not in seen
 
@@ -933,12 +933,12 @@ async def test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_n
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     config = project / ".git" / "config"
     jail = BrigJail(BrigConfig(), _Host())
-    async with _python(jail, KernelConfig(root=str(project))) as kernel:
-        assert "DENIED" in await kernel.run(_append_to(config))
+    async with _python(jail, PythonProcessConfig(root=str(project))) as process:
+        assert "DENIED" in await process.run(_append_to(config))
         group = _group(tmp_path / "state")
         subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)  # by rename
         await _ended(group)
-        out = await kernel.run(_append_to(config))
+        out = await process.run(_append_to(config))
         assert "DENIED" in out, out  # a new jail holds it again
         assert "started again" in out and str(config) in out, out  # and the input says why
     assert "planted" not in config.read_text() and "Pat" in config.read_text()
@@ -973,8 +973,8 @@ async def test_an_input_can_t_put_its_own_git_config_in_place_by_moving_the_dire
         "    except OSError as error:\n"
         "        print(step, 'DENIED', type(error).__name__)\n"
     )
-    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
-        out = await kernel.run(swap)
+    async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
+        out = await process.run(swap)
     assert "write DENIED" in out, out
     assert "hooksPath" not in config.read_text() if config.exists() else True
     if sys.platform == "linux":
@@ -990,10 +990,10 @@ async def test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing(tmp_path
     project.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     config = project / ".git" / "config"
-    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
-        assert "DENIED" in await kernel.run("x = 1\n" + _append_to(config))
+    async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
+        assert "DENIED" in await process.run("x = 1\n" + _append_to(config))
         subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)
-        out = await kernel.run("print(x)\n" + _append_to(config))
+        out = await process.run("print(x)\n" + _append_to(config))
         assert "DENIED" in out and "started again" not in out and out.startswith("1"), out
     assert "planted" not in config.read_text()
 
@@ -1011,13 +1011,13 @@ async def test_on_linux_an_input_running_when_the_host_renames_over_a_denied_pat
     project.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     config = project / ".git" / "config"
-    async with _python(BrigJail(BrigConfig(), _Host()), KernelConfig(root=str(project))) as kernel:
-        running = asyncio.ensure_future(kernel.run("import time\ntime.sleep(5)\nprint('slept')"))
+    async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
+        running = asyncio.ensure_future(process.run("import time\ntime.sleep(5)\nprint('slept')"))
         await asyncio.sleep(1.0)
         subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)
         out = await asyncio.wait_for(running, 10)
         assert "slept" not in out and "ended during this input" in out and str(config) in out, out
-        assert "DENIED" in await kernel.run(_append_to(config))
+        assert "DENIED" in await process.run(_append_to(config))
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -1042,9 +1042,9 @@ async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_input_
     booted = await boot([mine], watch=0.05)
     try:
         jail = BrigJail(BrigConfig(), _Host(paths=(str(mine.resolve()),)))
-        async with _python(jail, KernelConfig(root=str(project))) as kernel:
+        async with _python(jail, PythonProcessConfig(root=str(project))) as process:
             rewrite = _append_to(mine, "w", row("planted"))
-            assert "DENIED" in await kernel.run(rewrite)
+            assert "DENIED" in await process.run(rewrite)
             group = _group(tmp_path / "state")
             saved = project / "mine.toml.tmp"
             saved.write_text(row("two"))
@@ -1055,7 +1055,7 @@ async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_input_
                     break
                 await asyncio.sleep(0.02)
             assert set(booted.loader.rows) == {"two"}  # the person's edit applies
-            out = await kernel.run(rewrite)
+            out = await process.run(rewrite)
             assert "DENIED" in out, out
             await asyncio.sleep(0.3)  # the loader looks every 0.05 s
             assert set(booted.loader.rows) == {"two"} and mine.read_text() == row("two")
@@ -1104,12 +1104,12 @@ async def test_a_layer_file_in_a_directory_of_the_project_can_t_be_swapped_by_mo
     )
     try:
         jail = BrigJail(BrigConfig(), _Host(paths=(str(mine.resolve()),)))
-        async with _python(jail, KernelConfig(root=str(project))) as kernel:
+        async with _python(jail, PythonProcessConfig(root=str(project))) as process:
             saved = project / "conf" / "mine.toml.tmp"
             saved.write_text(row("two"))
             saved.replace(mine)  # the person's save, by rename
             assert await until({"two"}) == {"two"}  # applies
-            out = await kernel.run(swap)
+            out = await process.run(swap)
             assert "write DENIED" in out, out
             await asyncio.sleep(0.3)  # the loader looks every 0.05 s
             assert set(booted.loader.rows) == {"two"}, out  # nothing of the input's applied
@@ -1293,7 +1293,7 @@ async def test_the_harness_owned_loop_offers_only_python_and_runs_the_input(
     composition: Callable[..., Path],
 ) -> None:
     """The shipped loop (agent:loop) with only the model scripted: the loop reads
-    the kernel, so it is offered one tool, and the input runs there (asked about: unjailed)."""
+    the Python process, so it is offered one tool, and the input runs there (asked about: unjailed)."""
     patch = composition(
         '[[plugin]]\nid = "model"\nuse = "fragile:one_input_model"\n',
         one_reply=True,

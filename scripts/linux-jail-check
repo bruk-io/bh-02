@@ -4,7 +4,7 @@
 # dependencies = ["click"]
 # ///
 """The Linux jail, on a real Linux kernel, from a darwin laptop: brig's `bwrap` tests and
-bh-02's jailed kernel (`brig:jail` over `strict_linux()`) run in a container with bubblewrap.
+bh-02's jailed Python process (`brig:jail` over `strict_linux()`) run in a container with bubblewrap.
 
 On darwin those tests skip, visibly and by name, because there is no `bwrap`. This is the one
 place they run here. It is not part of `scripts/check`: it needs Docker, it is slow, and green
@@ -235,7 +235,7 @@ def source_tar() -> bytes:
 )
 @click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
 def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...]) -> None:
-    """Run brig's Linux jail and bh-02's jailed kernel in a container with bubblewrap."""
+    """Run brig's Linux jail and bh-02's jailed Python process in a container with bubblewrap."""
     if subprocess.run([DOCKER, "info"], capture_output=True).returncode != 0:
         raise click.ClickException("docker is not answering: this check needs a running Docker daemon")
     proxy = resolve_proxy(os.environ, ca_option)

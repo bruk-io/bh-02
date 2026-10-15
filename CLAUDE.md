@@ -29,9 +29,10 @@ layout. Then `uv sync --all-packages`.
 
 ```
 uv sync --all-packages
-scripts/check                                             # the one definition of green: format, lint, types, tests, gates
+scripts/check                                             # the one definition of green: format, lint, types, tests, gates, docs; the steps run at once (it takes as long as the tests)
 scripts/check bh-02/plugins/python-cordis-plugin          # the same for one member (the gates always see everything)
 uv run pytest -q                                          # every member
+uv run pytest -q -n auto --dist loadgroup                 # every member on every core, as scripts/check runs it; tests that share host state (the jail lock) are grouped in the root conftest.py
 uv run pytest libs/cordis -q                              # one member
 uv run pytest libs/cordis/tests/test_runtime.py::test_name -q
 uv run ruff format .                                      # format
@@ -43,13 +44,12 @@ uv run pytest -m "not real_launch"                        # skip the tests that 
 scripts/sync-tokens [--check] [--bh-01 PATH]              # bh-01's token CSS -> bh-02's Textual theme (reads ../bh-01)
 scripts/model-friction [--model NAME] [--examples N] [--json]  # where models trip in bh-02 sessions here: wrong tools, shell habits, errors, lost output, nudges
 uv run bh-02                                              # the harness: a CodeAct session in a TUI, Claude through Claude Code on the subscription
-uv tool install --editable ./bh-02/app                    # bh-02 as a command on your PATH, every plugin from this checkout (--reinstall after a pull that adds one)
+uv tool install --editable ./bh-02/app                    # bh-02 as a command on your PATH, every plugin from this checkout (--reinstall after a pull that adds or renames one)
 uv run bh-02 --resume [ID]                                # continue this directory's newest session (or ID: whole, its start, or its last part)
 uv run bh-02 sessions                                     # this directory's sessions, newest first
 uv run bh-02 --no-jail                                    # the Python process runs with your permissions; every input asks
 uv run bh-02 --model opus                                 # choose the model by name (sonnet, the default, opus, haiku, or yours in ~/.config/bh-02/models.toml; a session keeps it; /model lists and switches)
 uv run bh-02 --patch mine.toml                            # a layer of your own over the shipped composition
-uv run bh-02 update-layer mine.toml                       # rewrite a layer that names rows bh-02 renamed or dropped (keeps mine.toml.bak)
 uv run bh-02 --trace FILE                                 # every row's lifecycle event, appended to FILE
 uv run pytest -m e2e                                      # the tests against real services (Claude Code on the subscription): only when asked, skipped without the token
 ```
@@ -91,9 +91,12 @@ PyPI, switch back to `"mypy>=2.4"`.
 `scripts/arch-check` runs every pypeeker gate: the root one (`[tool.pypeeker]` in the root
 `pyproject.toml`, rules from `pypeeker_rules/apps.py`: what spans packages) and one per library
 that keeps its own (`libs/*/pyproject.toml`: internal layering and purity budgets). It writes
-each gate's `[tool.pypeeker].src` from the globs in `[tool.arch-check].src`, indexes every path,
+each gate's `[tool.pypeeker].src` from the globs in `[tool.arch-check].src`, indexes each path that
+holds a file with no index entry (all of them on a fresh checkout, none when nothing was added),
 then runs `check --strict`. **Always use the script, not a bare `pypeeker check`**: `check`
-doesn't build the index, and against a missing index it passes silently.
+doesn't build the index, and against a missing index it passes silently. It refreshes the entries
+the index has (a changed file is indexed again, a deleted one dropped) but never adds one, so a new
+module in an indexed path, or a new member, is not in what it checks until the script has indexed it.
 
 Root-gate rules that apply everywhere (area-specific ones are in the area CLAUDE.md files):
 - **`cordis-public-api`**: outside cordis, import from `cordis`, `cordis.loader`, `cordis.composition` or `cordis.testing`, never deeper.

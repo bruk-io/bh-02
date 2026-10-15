@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from agents_cordis_plugin import (
+from subagents_cordis_plugin import (
     EXPLORE,
     GENERAL,
     SHIPPED,

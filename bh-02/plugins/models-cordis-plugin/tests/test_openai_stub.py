@@ -96,7 +96,7 @@ async def test_the_key_is_read_from_local_env_and_sent_only_as_the_authorization
                 await _step(keyless, [{"role": "user", "content": "hi"}])
     assert stub.requests[0]["authorization"] == "Bearer sk-stand-in"
     assert "sk-stand-in" not in str(stub.requests[0]["body"])
-    # never in bh-02's environment, which the kernel's (and any child's) is made from
+    # never in bh-02's environment, which the Python process's (and any child's) is made from
     assert "STUB_KEY" not in os.environ and "sk-stand-in" not in os.environ.values()
     assert missing.value.kind == "authentication_failed"
     assert missing.value.message.startswith(

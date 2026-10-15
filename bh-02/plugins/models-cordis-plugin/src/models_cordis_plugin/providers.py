@@ -55,7 +55,7 @@ class Unusable:
 
 def _refused(config: ModelConfig) -> str | None:
     """Why the config's models file is not read (`in_project`), or None when it is outside the
-    project: the working directory, where the jail lets the model's code write (the kernel's
+    project: the working directory, where the jail lets the model's code write (the Python process's
     root), and the row's `cwd` when a layer names another."""
     if not isinstance(config.cwd, str | None):  # cordis does not type-check a row's config
         raise ModelsError(

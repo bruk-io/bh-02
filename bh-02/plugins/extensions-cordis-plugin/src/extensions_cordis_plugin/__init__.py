@@ -3,7 +3,7 @@
 from extensions_cordis_plugin.host import Extensions, ExtensionsConfig, worker_argv
 from extensions_cordis_plugin.offered import offered_tool, shown_tool_call
 from extensions_cordis_plugin.watch import Status, changes, extension_name, instructions
-from extensions_cordis_plugin.wiring import extensions
+from extensions_cordis_plugin.wiring import process
 
 __all__ = [
     "Extensions",
@@ -11,9 +11,9 @@ __all__ = [
     "Status",
     "changes",
     "extension_name",
-    "extensions",
     "instructions",
     "offered_tool",
+    "process",
     "shown_tool_call",
     "worker_argv",
 ]

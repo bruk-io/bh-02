@@ -65,11 +65,10 @@ What a resume brings back, and what it doesn't:
   ([The python tool](../how-it-works/python-tool.md)).
 - **Refused**: `--no-jail`. A resumed session keeps the jail it started with.
 
-A session's layer from an earlier bh-02, with rows that have since been renamed, is brought up to
-date when you resume it ([Layers](layers.md#layers-from-an-earlier-bh-02)). A session started on
-Anthropic's Messages API (`anthropic:completion`) resumes on Claude Code, from its transcript. A
-session started on the first Claude Agent SDK stack, where Claude Code ran its own loop, can't be
-resumed: `--resume` says so in one line; start a new one.
+A resume boots the session's own layer as it is: nothing translates old names. A session whose
+layer names a plugin or component bh-02 no longer has fails at boot like any layer
+([Layers](layers.md#a-layer-that-names-what-bh-02-doesnt-have)); the session is kept, so you can edit
+its `session.toml` and resume it again.
 
 ## A new conversation in the same session
 

@@ -115,7 +115,7 @@ def test_usage_and_stops() -> None:
 def test_only_a_reload_or_a_failure_is_worth_a_note() -> None:
     assert render.lifecycle_line("active", "loop", None, seen=False) is None  # starting up
     assert render.lifecycle_line("active", "loop", None, seen=True) == "↻ loop reloaded"
-    assert render.lifecycle_line("failed", "kernel", "boom", seen=False) == "✗ kernel failed: boom"
+    assert render.lifecycle_line("failed", "tools", "boom", seen=False) == "✗ tools failed: boom"
     assert render.lifecycle_line("bind", "loop", None, seen=True) is None
 
 

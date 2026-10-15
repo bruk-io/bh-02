@@ -31,8 +31,9 @@ uv tool install --editable ./bh-02/app
 ```
 
 The plugins and libraries are installed from the checkout, so a `git pull` updates the command
-too. After a pull that adds a plugin or changes a dependency, run the same command again with
-`--reinstall`.
+too. After a pull that adds or renames a plugin, or changes a dependency, run the same command again
+with `--reinstall`: the command reads its plugins from what is installed, so until then a row naming
+a renamed plugin is reported as unresolved.
 
 ## The credential
 

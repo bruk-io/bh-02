@@ -9,9 +9,9 @@ runner for `/release`. It binds no key. Whether an input runs unasked is the `ap
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `Kernel`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/kernel.py`, then the project's `.bh-02/kernel.py`) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file) |
+| `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `PythonProcess`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/startup.py`, then the project's `.bh-02/startup.py`) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file) |
 
-`Kernel` (`client.py`) is the value the row enters (given `tools` too, the `Calls` it offers
+`PythonProcess` (`client.py`) is the value the row enters (given `tools` too, the `Calls` it offers
 an input: `specs()`, `call(name, input)`): `call(input)`, `instructions()`, `run(code) -> str`, `confined` (the `approval` rule's), `report()`, `notice()` and `reads()` (its own start's:
 the process it last started, never another program the runner started), `stopped()`,
 `touched()`.
@@ -69,7 +69,7 @@ plain function: a bound method cost three times as much per call (CPython looks 
 calls it at most twice, at any depth: the import system's frames are told by their globals
 (`f_globals`, `f_back`), which raise no audit event, where a frame's `f_code` raises one.
 
-`client.py`'s `Kernel` is the host end: entering starts the Python process through the runner
+`client.py`'s `PythonProcess` is the host end: entering starts the Python process through the runner
 (its socket in a short `/tmp` directory, since a socket path must fit in ~100 bytes), leaving
 stops it. Cancelling `run` interrupts the input and waits `grace` seconds for it to end; a
 process that won't, or that died, is started again on the next input, which is told its variables are gone,
@@ -102,9 +102,9 @@ told before the input's own output. An input that binds `tools` itself keeps its
 namespace's is a view of the registry, never where a tool is registered.
 
 A new Python process's first input is also told what the startup files did (`startup`, helpers kept
-across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/kernel.py` (else
-`~/.config/bh-02/kernel.py`), for the helpers they want in every project, then the project's,
-`.bh-02/kernel.py`, the model's own. A name starting `$XDG_CONFIG_HOME/` is in the person's
+across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/startup.py` (else
+`~/.config/bh-02/startup.py`), for the helpers they want in every project, then the project's,
+`.bh-02/startup.py`, the model's own. A name starting `$XDG_CONFIG_HOME/` is in the person's
 config directory (that variable's value, else `~/.config`, as for the models file), one
 starting `~/` in their home, any other from `root`; a single string is one file, and anything
 but a name or a list of names is the row's config error. Confined, the process runs each that is
@@ -151,6 +151,9 @@ Each file runs once, at its first place in the list. Whose a file is goes by how
 by where it is read: one named from the root is the project's, one named from the person's config
 directory, their home or `/` is theirs. `instructions_for` tells the model that only the
 project's startup file is its to edit, and names the person's, which comes before it, as theirs.
+
+The namespace's `__name__` is `__kernel__`: a startup file may test it, and renaming it would
+break that silently.
 
 Every failure it knows of comes back as the input's text, never as an exception out of `run`: a
 Python process that died, an answer it can't read (the process is replaced), one the runner won't

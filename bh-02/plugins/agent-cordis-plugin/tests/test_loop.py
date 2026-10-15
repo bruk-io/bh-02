@@ -1,4 +1,4 @@
-"""The loop over a scripted model and a fake kernel, and the transcript outliving a model swap."""
+"""The loop over a scripted model and a fake Python process, and the transcript outliving a model swap."""
 
 import asyncio
 import gc
@@ -67,8 +67,8 @@ PYTHON: Json = {
 
 
 class Shouting:
-    """A `kernel` value whose inputs upper-case their code and touch `/p/<code>.py`, registered
-    as the `python` tool by `offered`."""
+    """A stand-in for the python row's value (`PythonProcess`): its inputs upper-case their code
+    and touch `/p/<code>.py`, and `as_tool` registers it as the `python` tool."""
 
     def __init__(self) -> None:
         self.ran: list[str] = []
@@ -88,19 +88,19 @@ class Shouting:
         return (f"/p/{self.ran[-1].lower()}.py",) if self.ran else ()
 
 
-def as_tool(kernel: Shouting) -> ToolBroker:
-    """The `tools` value with `kernel`'s `python` registered, as the kernel row registers it: a
+def as_tool(shouting: Shouting) -> ToolBroker:
+    """The `tools` value with `shouting`'s `python` registered, as the python row registers it: a
     call runs its `code` as an input, answering with the files it touched, and is shown as code."""
     tools = ToolBroker()
 
     async def run(input: Json) -> Json:
-        content = await kernel.run(str(input["code"]))
-        return {"content": content, "touched": list(kernel.touched())}
+        content = await shouting.run(str(input["code"]))
+        return {"content": content, "touched": list(shouting.touched())}
 
     def show(input: Json) -> Json:
         return {"title": "Run this python code?", "lines": str(input["code"]).splitlines()}
 
-    tools.register(kernel.spec, run, show=show)
+    tools.register(shouting.spec, run, show=show)
     return tools
 
 
@@ -194,8 +194,8 @@ async def test_each_input_is_put_to_approval_and_a_no_runs_nothing() -> None:
     to decide (runner:approval); the loop asks about every call (`Asked`), saying where it runs
     and showing it as its tool's registration says, and runs only what it says yes to."""
     scripted = Scripted([call("c1", "python", code="x"), call("c2", "python", code="y")], [text("fine")])
-    kernel, person, history = Shouting(), Person(False, True), MemoryTranscript()
-    assert await _collect(LoopModel(scripted, as_tool(kernel), history, person), "go") == "fine"
+    shouting, person, history = Shouting(), Person(False, True), MemoryTranscript()
+    assert await _collect(LoopModel(scripted, as_tool(shouting), history, person), "go") == "fine"
     assert person.asked == [
         {
             "name": "python",
@@ -207,7 +207,7 @@ async def test_each_input_is_put_to_approval_and_a_no_runs_nothing() -> None:
         for c in ("x", "y")
     ]
     assert [m["content"] for m in history.messages if m["role"] == "tool"] == [DECLINED, "Y"]
-    assert kernel.ran == ["y"]  # the no reached the model as text, and the yes ran
+    assert shouting.ran == ["y"]  # the no reached the model as text, and the yes ran
 
 
 async def test_a_call_runs_unasked_when_the_rule_says_so_else_on_the_person_s_answer() -> None:
@@ -276,7 +276,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
             return ""
 
     @component
-    async def kernel_and_system() -> Effects:
+    async def shouting_and_system() -> Effects:
         yield bind("tools", as_tool(Shouting()))
         yield bind("system", Nowhere())
         yield bind("approval", Confined())
@@ -287,7 +287,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
     rt.mount(asides, id="asides")
     executor_fiber = rt.mount(executor, id="executor")
     rt.mount(loop, id="loop")
-    kernel_fiber = rt.mount(kernel_and_system, id="kernel")
+    shouting_fiber = rt.mount(shouting_and_system, id="shouting")
     row = rt.mount(model_row(first), id="model")
     await rt.settle()
     assert await _collect(rt.root.get("loop"), "first") == "one"
@@ -302,7 +302,7 @@ async def test_swapping_the_model_reloads_the_loop_and_keeps_the_transcript() ->
     # one conversation (its first message told the date first)
     said = [m for m in history.messages if m["role"] != "tools"]
     assert [m["content"].rpartition("\n\n")[2] for m in said] == ["first", "one", "second", "two"]
-    assert Inspection(rt).fiber("kernel") is kernel_fiber  # the kernel's row stayed up throughout
+    assert Inspection(rt).fiber("shouting") is shouting_fiber  # the shouting row stayed up throughout
     assert Inspection(rt).fiber("executor") is executor_fiber  # and so did the call in flight's
     await rt.shutdown()
 
@@ -399,17 +399,17 @@ async def test_an_interrupted_call_still_gets_an_answer_in_the_transcript() -> N
     await asyncio.gather(task, return_exceptions=True)
     tools = [m for m in history.messages if m["role"] == "tool"]
     assert [m["call_id"] for m in tools] == ["c1", "c2"]  # both calls answered
-    assert tools[0]["content"].startswith("interrupted")  # c1 was in the kernel: it may have partly run
+    assert tools[0]["content"].startswith("interrupted")  # c1 was in the Python process: may have partly run
     assert tools[1]["content"].startswith("not run")  # c2 never started
     assert [m["asides"] for m in tools] == [[], []]
 
 
 async def test_a_turn_stopped_at_the_approval_question_says_the_input_never_ran() -> None:
-    kernel, history = Shouting(), MemoryTranscript()
+    shouting, history = Shouting(), MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "python", code="b")])
 
     async def run() -> None:
-        async for _ in LoopModel(scripted, as_tool(kernel), history, Person(hang=True)).reply("go"):
+        async for _ in LoopModel(scripted, as_tool(shouting), history, Person(hang=True)).reply("go"):
             pass
 
     task = asyncio.create_task(run())
@@ -419,7 +419,7 @@ async def test_a_turn_stopped_at_the_approval_question_says_the_input_never_ran(
     tools = [m for m in history.messages if m["role"] == "tool"]
     assert [m["call_id"] for m in tools] == ["c1", "c2"]
     assert all(m["content"].startswith("not run: the person stopped the turn") for m in tools)
-    assert kernel.ran == []
+    assert shouting.ran == []
 
 
 class _Where:
@@ -435,7 +435,7 @@ class _Where:
 
 
 class _Guided(Shouting):
-    """A kernel whose row tells the model about it (`_SHOUT`, a section of `_Where(_SHOUT)`)."""
+    """A `Shouting` whose row tells the model about it (`_SHOUT`, a section of `_Where(_SHOUT)`)."""
 
 
 async def test_a_conversation_keeps_the_prompt_it_began_with_and_is_told_what_changed() -> None:
@@ -753,18 +753,18 @@ async def test_a_reply_stopped_before_it_said_anything_is_still_answered() -> No
 
 async def test_a_call_that_is_not_an_input_is_answered_as_text_and_runs_nothing() -> None:
     """A model (a small local one, say) that invents a tool, or calls python without code (its
-    spec's `required`), reads why in the result; nothing reaches the kernel, nobody is asked, and
+    spec's `required`), reads why in the result; nothing reaches the Python process, nobody is asked, and
     the reply carries on."""
-    kernel = Shouting()
+    shouting = Shouting()
     scripted = Scripted([call("c1", "read_file", path="a"), call("c2", "python", source="x")], [text("ok")])
     history = MemoryTranscript()
-    assert await _collect(LoopModel(scripted, as_tool(kernel), history, Confined()), "go") == "ok"
+    assert await _collect(LoopModel(scripted, as_tool(shouting), history, Confined()), "go") == "ok"
     results = [m["content"] for m in history.messages if m["role"] == "tool"]
     assert results == [
         "error: there is no tool named 'read_file'; your tools are python",
         "error: python needs `code`",
     ]
-    assert kernel.ran == []
+    assert shouting.ran == []
 
 
 def test_only_a_python_call_with_code_is_a_input() -> None:
@@ -920,10 +920,10 @@ async def test_a_reply_stopped_while_an_input_s_asides_are_made_answers_it_with_
 
     asides: Hooks[Callable[[Json], str]] = Hooks()
     asides.add(slow)
-    kernel, history = Shouting(), MemoryTranscript()
+    shouting, history = Shouting(), MemoryTranscript()
     scripted = Scripted([call("c1", "python", code="a"), call("c2", "python", code="b")])
     task = asyncio.create_task(
-        _collect(LoopModel(scripted, as_tool(kernel), history, Confined(), asides=asides), "go")
+        _collect(LoopModel(scripted, as_tool(shouting), history, Confined(), asides=asides), "go")
     )
     while not started.is_set():
         await asyncio.sleep(0.01)
@@ -934,7 +934,7 @@ async def test_a_reply_stopped_while_an_input_s_asides_are_made_answers_it_with_
     assert tools[0]["content"] == "A\n\na rule"  # it ran to the end: its result and its aside
     assert tools[0]["asides"] == ["a rule"]
     assert tools[1]["content"].startswith("not run") and tools[1]["asides"] == []
-    assert kernel.ran == ["a"]
+    assert shouting.ran == ["a"]
 
 
 async def test_a_reply_stopped_while_the_prompt_is_read_keeps_the_message_answered_as_stopped() -> None:

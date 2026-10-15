@@ -32,7 +32,7 @@ No package imports another (`plugin-layering`: the units are every package under
   parameter (`converse(*, loop: Loop)`), which cordis checks the bound value against before it
   runs: two consumers of one key, two contracts (the loop's `Tools`, `/compact`'s `Offered`).
 - **A provider just has the methods** (`ClaudeCodeModel.complete`, `OpenAIModel.complete`,
-  `Kernel.run`), nothing to import. Data crosses as dicts, typed by its reader (`TypedDict`).
+  `PythonProcess.run`), nothing to import. Data crosses as dicts, typed by its reader (`TypedDict`).
 - **Errors are a shape**: a recoverable `loop` failure is any exception with `kind` and `message`
   (`Recoverable` in `chat` and the shell's bootstrap). Anything else is a bug.
 - **Two halves per plugin**: the value (`loop.py`, `client.py`, `jail.py`, `named.py`,

@@ -67,7 +67,7 @@ its Python process. Ctrl-C stops the reply and the sub-agent it waits on, but no
 ones: its notice says how many still run and that `/agents stop` ends them. `/clear`, `/model`
 and `/restart agents` end the running ones too, each with a note; `/compact` keeps them, and
 `/release` stops only their Python processes. Details:
-[agents-cordis-plugin](../../../bh-02/plugins/agents-cordis-plugin/README.md).
+[subagents-cordis-plugin](../../../bh-02/plugins/subagents-cordis-plugin/README.md).
 
 ## Shell commands: `!COMMAND`
 

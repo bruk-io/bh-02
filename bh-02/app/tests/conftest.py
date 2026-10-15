@@ -8,16 +8,16 @@ from typing import Protocol
 
 import pytest
 
-# The kernel with no jail, for tests that are not about the jail: brig runs on darwin and on
+# The Python process with no jail, for tests that are not about the jail: brig runs on darwin and on
 # Linux with bubblewrap, and a test of a model or a chat row should not depend on the platform.
 UNJAILED = '[[plugin]]\nid = "runner"\nuse = "runner:unconfined"\n'
 
 # These tests read the python tool's output and the tool list exactly; the agents row's `agent`
 # would be told as a function in the namespace with the first input and offered beside `python`.
-# Its own tests are the agents plugin's and the real launch's.
+# Its own tests are the sub-agents plugin's and the real launch's.
 NO_AGENTS = (
-    '[[plugin]]\nid = "agents"\nuse = "agents:agents"\ndisabled = true\n'
-    '[[plugin]]\nid = "agents_status"\nuse = "agents:status"\ndisabled = true\n'
+    '[[plugin]]\nid = "agents"\nuse = "subagents:parent"\ndisabled = true\n'
+    '[[plugin]]\nid = "agents-status"\nuse = "subagents:status"\ndisabled = true\n'
 )
 
 # bh-02 has no one-shot chat row, but many of its tests want one: the reply to one prompt (the
@@ -394,7 +394,7 @@ class Inputs:
 
 class InputScript:
     """A model that acts only in code: it calls each scripted input in turn, through the
-    loop (which asks about it when the kernel is unjailed), then shows every result."""
+    loop (which asks about it when the Python process is unjailed), then shows every result."""
 
     def __init__(self, inputs: tuple[str, ...]) -> None:
         self._inputs = inputs
@@ -563,7 +563,7 @@ async def drawing_ui() -> Effects:
 def _own_models_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test reads a models file of its own (none, unless it writes one), never the
     person's `~/.config/bh-02/models.toml`, and runs no startup file of the person's
-    (`~/.config/bh-02/kernel.py`) in a kernel."""
+    (`~/.config/bh-02/startup.py`) in a Python process."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
@@ -579,7 +579,7 @@ def composition(tmp_path: Path) -> Iterator[Composition]:
     written = 0
 
     def layer(text: str, *, one_reply: bool = False) -> Path:
-        """A layer file; every one also puts the kernel in no jail (see UNJAILED) and drops the
+        """A layer file; every one also puts the Python process in no jail (see UNJAILED) and drops the
         agents row (NO_AGENTS), and
         `one_reply` makes the chat row a one-shot whose reply is recorded (see ONE_REPLY)."""
         nonlocal written

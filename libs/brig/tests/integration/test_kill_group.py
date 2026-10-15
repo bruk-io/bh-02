@@ -330,6 +330,11 @@ def test_control_kill_ends_a_cooperative_group_without_needing_escalation(run_id
 
 _PR_SET_CHILD_SUBREAPER = 36
 
+# A program that starts a child which exits at once, and never waits for it: a zombie in its group. It
+# keeps the `Popen`, because a dropped one reaps its child in `__del__` when the child has already exited
+# (always, on a machine loaded enough that the parent runs after it), and then no zombie is planted.
+_PLANTS_A_ZOMBIE = 'import subprocess, time; zombie = subprocess.Popen(["true"]); time.sleep(100)'
+
 
 @pytest.fixture
 def non_reaping_init() -> Iterator[list[int]]:
@@ -365,7 +370,7 @@ def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
     table for good. The report must still say `ENDED`: the zombie has exited.
     Before decision-171 the `/bin/ps` scan counted it and the item was
     `FAILED`."""
-    body = f"{sys.executable} -c 'import subprocess, time; subprocess.Popen([\"true\"]); time.sleep(100)'"
+    body = f"{sys.executable} -c '{_PLANTS_A_ZOMBIE}'"
     jail, process = _launch(workload_argv(run_id, body))
     deadline = time.monotonic() + 10
     zombies: list[int] = []
@@ -394,7 +399,7 @@ def test_group_alive_counts_a_zombie_the_init_never_reaps_as_gone(
 ) -> None:
     """TASK-0079.19: a group whose only members are zombies reads gone through
     `group_alive`, though `os.killpg(pgid, 0)` still finds it."""
-    body = f"{sys.executable} -c 'import subprocess, time; subprocess.Popen([\"true\"]); time.sleep(100)'"
+    body = f"{sys.executable} -c '{_PLANTS_A_ZOMBIE}'"
     jail, process = _launch(workload_argv(run_id, body))
     deadline = time.monotonic() + 10
     zombies: list[int] = []

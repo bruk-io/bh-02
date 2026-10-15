@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-14 13:40'
+updated_date: '2026-10-15 02:27'
 labels:
   - app
   - tests
@@ -27,3 +28,9 @@ bh-02/app/tests/test_real_launch.py::test_while_the_model_restarts_the_status_ba
 - [ ] #2 test_real_launch.py passes 20 runs in a row under load (for example beside another pytest process), recorded in the notes
 - [ ] #3 scripts/check passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Deferred by the owner (2026-10-15): this run fixes only critical bugs; this one is not critical (no data loss, no security exposure, a workaround exists). Not to be started without the owner's word.
+<!-- SECTION:NOTES:END -->

@@ -3,7 +3,7 @@ type that is data (shipped, or the person's in bh-02's config directory), mounte
 cordis realm while it runs, its questions put to the person labelled with its name and type,
 and its last answer handed back as its report."""
 
-from agents_cordis_plugin.agents import (
+from subagents_cordis_plugin.agents import (
     AGENT,
     AGENT_SEND,
     AGENT_STOP,
@@ -17,7 +17,7 @@ from agents_cordis_plugin.agents import (
     Roster,
     section,
 )
-from agents_cordis_plugin.child import (
+from subagents_cordis_plugin.child import (
     PREFIX,
     ChildRow,
     Report,
@@ -48,8 +48,8 @@ from agents_cordis_plugin.child import (
     waited,
     watch_command,
 )
-from agents_cordis_plugin.eventlog import LOG, EventLog, record_line
-from agents_cordis_plugin.kinds import (
+from subagents_cordis_plugin.eventlog import LOG, EventLog, record_line
+from subagents_cordis_plugin.kinds import (
     EXPLORE,
     GENERAL,
     SHIPPED,
@@ -62,7 +62,7 @@ from agents_cordis_plugin.kinds import (
     type_files,
     type_names,
 )
-from agents_cordis_plugin.wiring import ChildConfig, OutputConfig, agents, child, output, status
+from subagents_cordis_plugin.wiring import ChildConfig, OutputConfig, child, output, parent, status
 
 __all__ = [
     "LOG",
@@ -90,7 +90,6 @@ __all__ = [
     "Roster",
     "Steps",
     "TypeFile",
-    "agents",
     "agents_dir",
     "asked_why",
     "background_flag",
@@ -108,6 +107,7 @@ __all__ = [
     "next_name",
     "no_such_agent",
     "output",
+    "parent",
     "parsed_type",
     "prefixed",
     "read_types",

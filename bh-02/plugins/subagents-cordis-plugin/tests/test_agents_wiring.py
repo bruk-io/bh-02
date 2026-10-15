@@ -245,7 +245,7 @@ def _rows(model: _Model, screen: _Screen, path: Path | None = None, /, **more: A
         "approval": Row("approval", f"{__name__}:fake_rule", {"unasked": True}),
         "host": Row("host", f"{__name__}:trusted_host"),
         "commands": Row("commands", "commands:registry"),
-        "agents": Row("agents", "agents:agents"),
+        "agents": Row("agents", "subagents:parent"),
     }
     for rid, row in more.items():
         if row is None:
@@ -269,7 +269,7 @@ def _with_python(model: _Model, screen: _Screen, where: Path) -> list[Row]:
         runner=Row("runner", "runner:unconfined"),
         approval=Row("approval", "runner:approval"),
         python=Row("python", "python:tool", {"root": str(where), "startup": []}),
-        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "python"]}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "python"]}),
     )
 
 
@@ -472,7 +472,7 @@ async def test_a_child_s_question_reaches_the_person_labelled_and_nothing_else_o
         screen,
         approval=Row("approval", f"{__name__}:fake_rule", {"unasked": False}),
         echo=Row("echo", f"{__name__}:echo_tool"),
-        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"]}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "echo"]}),
     )
     booted = await _booted(rows)
     rt = booted.runtime
@@ -585,7 +585,7 @@ async def test_ctrl_c_withdraws_the_open_question_of_the_foreground_child_it_sto
 async def test_a_child_that_never_comes_up_says_which_rows_wait_on_what() -> None:
     model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")])
     no_asides = [rid for rid in _KEPT if rid not in ("asides", "executor")]
-    agents = Row("agents", "agents:agents", {"rows": no_asides, "start": 0.2})
+    agents = Row("agents", "subagents:parent", {"rows": no_asides, "start": 0.2})
     booted = await _booted(_rows(model, _Screen(), agents=agents))
     [result] = _results(await _bounded(_reply(booted.runtime, "go")))
     assert result == (
@@ -601,7 +601,7 @@ async def test_a_layer_naming_the_agents_row_among_the_child_s_rows_gives_the_ch
     """Depth one: `rows` naming `agents` fails the call saying so, and mounts no child (so no
     grandchild can be started)."""
     model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")])
-    agents = Row("agents", "agents:agents", {"rows": [*_KEPT, "agents"]})
+    agents = Row("agents", "subagents:parent", {"rows": [*_KEPT, "agents"]})
     booted = await _booted(_rows(model, _Screen(), agents=agents))
     rt = booted.runtime
     [result] = _results(await _bounded(_reply(rt, "go")))
@@ -647,7 +647,7 @@ async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_run
         runner=Row("runner", "runner:confined"),
         approval=Row("approval", "runner:approval"),
         python=Row("python", "python:tool", {"root": str(tmp_path), "startup": []}),
-        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "python"]}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "python"]}),
     )
     booted = await _booted(rows)
     rt = booted.runtime
@@ -671,7 +671,7 @@ async def _asked_for(key: str, kept: Sequence[str]) -> tuple[str, list[Any], Any
         _Screen(),
         probe=Row("probe", f"{__name__}:wants_{key}", {"seen": seen}),
         commands=Row("commands", f"{__name__}:fake_commands"),
-        agents=Row("agents", "agents:agents", {"rows": [*kept, "probe"]}),
+        agents=Row("agents", "subagents:parent", {"rows": [*kept, "probe"]}),
     )
     booted = await _booted(rows)
     rt = booted.runtime
@@ -767,7 +767,7 @@ async def test_a_type_s_tools_are_the_only_tool_rows_its_child_has_and_its_model
         host=host,
         model=Row("model", f"{__name__}:fake_model", {"model": model, "default": "sonnet", "state": "/s/c"}),
         echo=Row("echo", f"{__name__}:echo_tool"),
-        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"], "tools": ["echo"]}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "echo"], "tools": ["echo"]}),
     )
     booted = await _booted(rows)
     rt = booted.runtime
@@ -827,7 +827,7 @@ async def test_a_background_that_is_not_a_boolean_is_refused_before_anything_sta
         parent=[[_call("1", "agent", prompt="p", type="general", background="true")], _text("ok")],
     )
     screen = _Screen()
-    agents = Row("agents", "agents:agents", {"session_agents": 0})
+    agents = Row("agents", "subagents:parent", {"session_agents": 0})
     booted = await _booted(_rows(model, screen, agents=agents))
     rt = booted.runtime
     [by_the_loop] = _results(await _bounded(_reply(rt, "go"), 10))
@@ -889,7 +889,7 @@ async def test_past_max_running_a_child_waits_for_a_slot_and_a_note_says_so() ->
         child={"general-1": [(gate, _text("one"))], "general-2": [_text("two")], "general-3": [_HANG]},
     )
     screen = _Screen()
-    booted = await _booted(_rows(model, screen, agents=Row("agents", "agents:agents", {"max_running": 1})))
+    booted = await _booted(_rows(model, screen, agents=Row("agents", "subagents:parent", {"max_running": 1})))
     rt = booted.runtime
     tools = rt.root.get("tools")
     agent, wait = tools.get("agent"), tools.get("agent_wait")
@@ -929,7 +929,7 @@ async def test_a_type_s_step_limit_ends_its_child_with_what_it_has_said_in_its_r
         _Screen(),
         host=host,
         echo=Row("echo", f"{__name__}:echo_tool"),
-        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"]}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "echo"]}),
     )
     booted = await _booted(rows)
     [report] = _results(await _bounded(_reply(booted.runtime, "go")))
@@ -954,7 +954,7 @@ async def test_past_the_session_budget_each_start_is_asked_and_a_no_refuses_it()
         child=[_text("fine")],
     )
     screen = _Screen(answer=_start_asked)  # yes to a call, no to a start
-    agents = Row("agents", "agents:agents", {"session_agents": 1})
+    agents = Row("agents", "subagents:parent", {"session_agents": 1})
     booted = await _booted(_rows(model, screen, agents=agents))
     first, second = _results(await _bounded(_reply(booted.runtime, "go")))
     assert first.startswith("Report from agent general-1 (general)")
@@ -976,7 +976,7 @@ async def test_two_calls_at_once_cannot_both_pass_the_last_of_the_budget(tmp_pat
     with one start left, the first is under the budget and the second is asked."""
     model = _Model(parent=[], child=[_text("one"), _text("two")])
     screen = _Screen(answer=False)
-    agents = Row("agents", "agents:agents", {"session_agents": 1})
+    agents = Row("agents", "subagents:parent", {"session_agents": 1})
     booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl", agents=agents))
     rt = booted.runtime
     agent = rt.root.get("tools").get("agent")
@@ -993,7 +993,9 @@ async def test_past_the_session_budget_a_yes_starts_the_child() -> None:
         parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")], child=[_text("fine")]
     )
     screen = _Screen()
-    booted = await _booted(_rows(model, screen, agents=Row("agents", "agents:agents", {"session_agents": 0})))
+    booted = await _booted(
+        _rows(model, screen, agents=Row("agents", "subagents:parent", {"session_agents": 0}))
+    )
     [report] = _results(await _bounded(_reply(booted.runtime, "go")))
     assert report.startswith("Report from agent general-1 (general)")
     assert [r["title"] for r in screen.asked] == [
@@ -1055,7 +1057,7 @@ async def test_each_child_s_usage_is_shown_through_the_parent_s_output_when_it_e
         model,
         screen,
         echo=Row("echo", f"{__name__}:echo_tool"),
-        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"]}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "echo"]}),
     )
     booted = await _booted(rows)
     rt = booted.runtime
@@ -1084,7 +1086,7 @@ async def test_a_child_stopped_by_ctrl_c_still_shows_what_it_used() -> None:
         model,
         screen,
         echo=Row("echo", f"{__name__}:echo_tool"),
-        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"]}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "echo"]}),
     )
     booted = await _booted(rows)
     rt = booted.runtime
@@ -1110,7 +1112,7 @@ def _with_echo(model: _Model, screen: _Screen, path: Path | None = None, **more:
         screen,
         path,
         echo=Row("echo", f"{__name__}:echo_tool"),
-        agents=Row("agents", "agents:agents", {"rows": [*_KEPT, "echo"]}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "echo"]}),
         **more,
     )
 
@@ -1489,7 +1491,7 @@ async def test_the_status_bar_shows_how_many_sub_agents_run_and_nothing_at_none(
         _Screen(),
         tmp_path / "transcript.jsonl",
         frame=Row("frame", f"{__name__}:fake_frame", {"frame": frame}),
-        agents_status=Row("agents_status", "agents:status"),
+        **{"agents-status": Row("agents-status", "subagents:status")},
     )
     booted = await _booted(rows)
     rt = booted.runtime

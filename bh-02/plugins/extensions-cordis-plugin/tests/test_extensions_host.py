@@ -19,7 +19,7 @@ import pytest
 
 from agent_cordis_plugin import ToolBroker
 from cordis.testing import drive
-from extensions_cordis_plugin import Extensions, ExtensionsConfig, extensions, worker_argv
+from extensions_cordis_plugin import Extensions, ExtensionsConfig, process, worker_argv
 from extensions_cordis_plugin.testing import PlainJail
 from runner_cordis_plugin import Runner
 
@@ -490,7 +490,7 @@ async def test_after_release_stops_the_worker_every_extension_loads_again_once_t
         await h.extensions.look()
         assert len(h.jail.started) == 1  # released: no worker starts while nothing changed
         sockets = tempfile.mkdtemp(prefix="bh-x-", dir="/tmp")  # a socket path must be short
-        kernel = await h.runner.start(
+        python_process = await h.runner.start(
             worker_argv(f"{sockets}/k.sock"), cwd=sockets, endpoint=f"{sockets}/k.sock"
         )
         try:  # the next input started the Python process (a stand-in): the runner runs again
@@ -498,7 +498,7 @@ async def test_after_release_stops_the_worker_every_extension_loads_again_once_t
             assert len(h.jail.started) == 3 and h.extensions.statuses["todo"].ok
             assert await h.commands.runs["todo"]("eggs") == "eggs"  # a new worker: a new list
         finally:
-            await kernel.stop()
+            await python_process.stop()
             shutil.rmtree(sockets, ignore_errors=True)
 
 
@@ -518,7 +518,7 @@ async def test_a_change_while_released_loads_at_once_and_ends_the_release(tmp_pa
 
 async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -> None:
     effects = await drive(
-        extensions(
+        process(
             runner=Runner(PlainJail()),
             commands=_Commands(),
             frame=_Frame(),

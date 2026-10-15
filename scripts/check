@@ -12,23 +12,132 @@ checks one member: ruff and pytest on that directory, mypy on its src/, and the 
 docs (which always see the whole workspace: what the gates check spans packages, and the site
 includes every member's README). Each step reports and the run goes on, so one pass shows
 everything that is red; the exit code is non-zero if any step failed.
+
+The steps share nothing (each reads the sources and writes only its own cache or output), so they
+run at the same time and the run takes as long as its slowest step, the tests, not as long as all
+of them. Each step's output is captured and printed whole, in the order below, once it has
+finished: a step that ends early waits for the ones before it to be printed.
 """
 
 import subprocess
 import sys
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
+from typing import assert_never
 
 import click
 
 ROOT = Path(__file__).resolve().parent.parent
 BH_01 = ROOT.parent / "bh-01"  # where scripts/sync-tokens reads bh-01's token CSS from
+# pytest-xdist's `-n`: how many worker processes run the tests, and `--dist loadgroup` keeps the tests of
+# one group (the root conftest.py names them: what they share on the host) on one of them.
+TEST_WORKERS = "auto"
 
 
-def step(name: str, *argv: str) -> bool:
-    click.echo(click.style(f"== {name}", bold=True))
-    ok = subprocess.run(argv, cwd=ROOT).returncode == 0
-    click.echo(click.style("   ok" if ok else f"   FAILED: {name}", fg="green" if ok else "red"))
-    return ok
+@dataclass(frozen=True)
+class Step:
+    """A command run from the repository's root; it passes when it exits 0."""
+
+    name: str
+    argv: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Skipped:
+    """A step that does not apply here, and why; it passes."""
+
+    name: str
+    why: str
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """How a step ended: whether it passed, and everything it wrote (stdout and stderr, in order)."""
+
+    ok: bool
+    output: str
+
+
+type Planned = Step | Skipped
+
+
+def plan(
+    member: Path | None, has_src: bool, gates: bool, docs: bool, bh_01_built: bool
+) -> tuple[Planned, ...]:
+    """The steps in the order they report: format, lint, types, tests, then (when asked for) the
+    gates and the docs, then the tokens. For a `member` ruff and pytest take its directory and mypy
+    its src/ (`has_src`, when it has one); the rest always see the whole workspace."""
+    where = (str(member),) if member else (".",)
+    types = (str(member / "src"),) if member and has_src else ()
+    tests = (str(member),) if member else ()
+    steps: list[Planned] = [
+        Step("format", ("uv", "run", "--quiet", "ruff", "format", "--check", *where)),
+        Step("lint", ("uv", "run", "--quiet", "ruff", "check", "--no-fix", *where)),
+        Step("types", ("uv", "run", "--quiet", "mypy", *types)),
+        Step(
+            "tests",
+            ("uv", "run", "--quiet", "pytest", "-q", "-n", TEST_WORKERS, "--dist", "loadgroup", *tests),
+        ),
+    ]
+    if gates:
+        steps.append(Step("gates", (str(ROOT / "scripts" / "arch-check"), "--no-fix")))
+    if docs:
+        steps.append(Step("docs", ("uv", "run", "--quiet", "mkdocs", "build", "--strict")))
+    steps.append(
+        Step("tokens", (str(ROOT / "scripts" / "sync-tokens"), "--check", "--bh-01", str(BH_01)))
+        if bh_01_built
+        else Skipped("tokens", f"no {BH_01}/dist (bh-01, built, beside this repository)")
+    )
+    return tuple(steps)
+
+
+def perform(planned: Planned) -> Outcome | None:
+    """Run a step to its end, capturing what it wrote; a step that cannot start has failed."""
+    match planned:
+        case Skipped():
+            return None
+        case Step(name=name, argv=argv):
+            try:
+                done = subprocess.run(
+                    argv,
+                    cwd=ROOT,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                )
+            except OSError as error:
+                return Outcome(False, f"{name}: could not start {argv[0]}: {error}\n")
+            return Outcome(done.returncode == 0, done.stdout)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def report(planned: Planned, outcome: Outcome | None) -> bool:
+    """Print a step's name, everything it wrote and its verdict; whether it passed."""
+    click.echo(click.style(f"== {planned.name}", bold=True))
+    match planned:
+        case Skipped(why=why):
+            click.echo(click.style(f"   skipped: {why}", fg="yellow"))
+            return True
+        case Step(name=name):
+            assert outcome is not None, "a step that ran has an outcome"
+            if outcome.output:
+                click.echo(outcome.output, nl=not outcome.output.endswith("\n"))
+            verdict = "   ok" if outcome.ok else f"   FAILED: {name}"
+            click.echo(click.style(verdict, fg="green" if outcome.ok else "red"))
+            return outcome.ok
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def outcomes(steps: tuple[Planned, ...]) -> Iterator[Outcome | None]:
+    """Every step started at once; each outcome yielded in the steps' order, as it is ready."""
+    with ThreadPoolExecutor(max_workers=len(steps)) as pool:
+        yield from pool.map(perform, steps)
 
 
 @click.command()
@@ -37,31 +146,10 @@ def step(name: str, *argv: str) -> bool:
 @click.option("--docs/--no-docs", default=True, help="Build the documentation site, failing on any warning.")
 def main(member: Path | None, gates: bool, docs: bool) -> None:
     """Check the workspace, or one MEMBER directory."""
-    where = [str(member)] if member else ["."]
-    types = [str(member / "src")] if member and (member / "src").is_dir() else []
-    results = [
-        step("format", "uv", "run", "--quiet", "ruff", "format", "--check", *where),
-        step("lint", "uv", "run", "--quiet", "ruff", "check", "--no-fix", *where),
-        step("types", "uv", "run", "--quiet", "mypy", *types),
-        step("tests", "uv", "run", "--quiet", "pytest", "-q", *([str(member)] if member else [])),
-    ]
-    if gates:
-        results.append(step("gates", str(ROOT / "scripts" / "arch-check"), "--no-fix"))
-    if docs:
-        results.append(step("docs", "uv", "run", "--quiet", "mkdocs", "build", "--strict"))
-    results.append(tokens())
+    has_src = member is not None and (member / "src").is_dir()
+    steps = plan(member, has_src, gates, docs, (BH_01 / "dist").is_dir())
+    results = [report(planned, outcome) for planned, outcome in zip(steps, outcomes(steps))]
     sys.exit(0 if all(results) else 1)
-
-
-def tokens() -> bool:
-    """bh-02's theme against bh-01's tokens (`scripts/sync-tokens --check`), when bh-01 is
-    checked out beside this repository; without it the in-repo test still pins the theme to
-    the committed snapshot, and this says it skipped."""
-    if not (BH_01 / "dist").is_dir():
-        click.echo(click.style("== tokens", bold=True))
-        click.echo(click.style(f"   skipped: no {BH_01}/dist (bh-01, built, beside this repository)", fg="yellow"))
-        return True
-    return step("tokens", str(ROOT / "scripts" / "sync-tokens"), "--check", "--bh-01", str(BH_01))
 
 
 if __name__ == "__main__":

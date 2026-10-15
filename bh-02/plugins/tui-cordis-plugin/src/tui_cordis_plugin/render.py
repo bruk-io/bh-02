@@ -325,8 +325,8 @@ def approval_language(request: Event) -> str:
 
 
 def jail_forms(confined: bool, report: Mapping[str, str]) -> tuple[str, ...]:
-    """A kernel's confinement for a status bar, fullest form first: confined or not and a glyph
-    per main axis, each axis named (`jailed fs_write ✓ network ✓`), then by its initial
+    """The confinement of a runner start, for a status bar, fullest form first: confined or not and a
+    glyph per main axis, each axis named (`jailed fs_write ✓ network ✓`), then by its initial
     (`jailed w✓ n✓`), the initials run together (`jailed w✓n✓`), and the glyphs alone, in the
     axes' fixed order (`jailed ✓✓`). The status bar takes the first that fits."""
     head = "jailed" if confined else "unjailed"

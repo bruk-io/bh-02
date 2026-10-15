@@ -63,9 +63,9 @@ why when it knows. The transcript is the record; the namespace is a cache.
 
 A new Python process can run setup code before the first input, when it is jailed:
 
-1. yours: `~/.config/bh-02/kernel.py` (`$XDG_CONFIG_HOME/bh-02/kernel.py` when that is set), for
+1. yours: `~/.config/bh-02/startup.py` (`$XDG_CONFIG_HOME/bh-02/startup.py` when that is set), for
    helpers you want in every project;
-2. the project's: `.bh-02/kernel.py`, the only one the model is told it may edit.
+2. the project's: `.bh-02/startup.py`, the only one the model is told it may edit.
 
 The first input is told which names each defined, or its traceback. One failing doesn't stop the
 other. Without the jail they don't run unasked: the model is told to run them as inputs, which you

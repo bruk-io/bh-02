@@ -23,9 +23,9 @@ makes comes back here and goes to `tools.call`, which runs it as the model's own
 never where a tool is registered. What changed in it since the model was last told is told
 before the input's own output (`_offered`).
 
-A new Python process runs its startup files before its first input (`KernelConfig.startup`), when its
-inputs are confined: the person's own (`$XDG_CONFIG_HOME/bh-02/kernel.py`, else
-`~/.config/bh-02/kernel.py`), then the project's (`.bh-02/kernel.py`). The project's is read by
+A new Python process runs its startup files before its first input (`PythonProcessConfig.startup`), when its
+inputs are confined: the person's own (`$XDG_CONFIG_HOME/bh-02/startup.py`, else
+`~/.config/bh-02/startup.py`), then the project's (`.bh-02/startup.py`). The project's is read by
 the worker, in the jail, which decides: the model can write it, and a link there could lead to a
 file the jail hides. The person's is outside the project, where a Linux jail (which reads by
 allowlist, the home directory absent) can't see it, so the host reads it and sends its source;
@@ -58,7 +58,7 @@ from typing import Any, Protocol, runtime_checkable
 from host_paths import config_home, walked
 from python_cordis_plugin.python import PYTHON, instructions_for
 
-__all__ = ["Access", "Jailed", "Kernel", "KernelConfig", "Rule", "Runner", "worker_argv"]
+__all__ = ["Access", "Jailed", "PythonProcess", "PythonProcessConfig", "Rule", "Runner", "worker_argv"]
 
 _WORKER = Path(__file__).with_name("worker.py")
 # The longest line the worker sends: its output and its error are capped at 20,000 characters
@@ -121,10 +121,10 @@ class Rule(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class KernelConfig:
+class PythonProcessConfig:
     """`root` is the working directory inputs run in; `grace` how long an interrupted input gets
     to say it ended before the worker is stopped and started again; `startup` the files a new
-    kernel runs, in order, before its first input, when its inputs are confined: helpers kept
+    Python process runs, in order, before its first input, when its inputs are confined: helpers kept
     across sessions. The person's own first (`$XDG_CONFIG_HOME/` is their config directory: that
     variable's value, else `~/.config`, as for the models file; `~/` is their home), then the
     project's (a relative name is from `root`), the one the model may write. A single string is
@@ -132,14 +132,14 @@ class KernelConfig:
 
     root: str = "."
     grace: float = 5.0
-    startup: Sequence[str] = ("$XDG_CONFIG_HOME/bh-02/kernel.py", ".bh-02/kernel.py")
+    startup: Sequence[str] = ("$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py")
 
     def __post_init__(self) -> None:
         names = (self.startup,) if isinstance(self.startup, str) else self.startup
         if not isinstance(names, Sequence) or not all(isinstance(name, str) for name in names):
             raise TypeError(
                 "`startup` must be a file name or a list of them, as in "
-                '`startup = ["$XDG_CONFIG_HOME/bh-02/kernel.py", ".bh-02/kernel.py"]`, '
+                '`startup = ["$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py"]`, '
                 f"not {self.startup!r}"
             )
 
@@ -259,7 +259,7 @@ def _located(name: str, root: Path, home: Path, environ: Mapping[str, str]) -> P
 
 
 def _placed(names: Sequence[str], root: Path, home: Path, environ: Mapping[str, str]) -> tuple[_Startup, ...]:
-    """The startup files `names` (`KernelConfig.startup`; a string is one) name, in order, each
+    """The startup files `names` (`PythonProcessConfig.startup`; a string is one) name, in order, each
     where it is (from the absolute `root`) and whether it is the project's: named from the root,
     not from the person's config directory, their home or `/`."""
     listed = (names,) if isinstance(names, str) else tuple(names)
@@ -284,7 +284,7 @@ def _inside(paths: Sequence[str], root: str) -> tuple[str, ...]:
     return tuple(p for p in map(os.path.normpath, paths) if p.startswith(under))
 
 
-class Kernel:
+class PythonProcess:
     """The Python process: a persistent namespace, and the `python` tool's call (`call(input)`,
     over `run(code)`) and what the model is told about it (`instructions()`). An async context
     manager: entering starts the worker in the runner, leaving stops it."""
@@ -292,7 +292,7 @@ class Kernel:
     def __init__(
         self,
         runner: Runner,
-        config: KernelConfig,
+        config: PythonProcessConfig,
         access: Access | None = None,
         *,
         rule: Rule,
@@ -354,7 +354,7 @@ class Kernel:
             elsewhere=tuple(w for w in writes if not Path(w).is_relative_to(root)),
         )
 
-    async def __aenter__(self) -> Kernel:
+    async def __aenter__(self) -> PythonProcess:
         await self._start()
         return self
 

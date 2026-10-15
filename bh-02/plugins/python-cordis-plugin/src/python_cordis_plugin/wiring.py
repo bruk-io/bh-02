@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from cordis import Effects, acquire, component, enter
-from python_cordis_plugin.client import Access, Calls, Kernel, KernelConfig, Rule, Runner
+from python_cordis_plugin.client import Access, Calls, PythonProcess, PythonProcessConfig, Rule, Runner
 from python_cordis_plugin.python import PYTHON, shown_call
 
 __all__ = ["tool"]
@@ -50,7 +50,13 @@ class _Sections(Protocol):
 
 @component
 async def tool(
-    *, runner: _Runs, approval: Rule, tools: _Tools, system: _Sections, access: Access, config: KernelConfig
+    *,
+    runner: _Runs,
+    approval: Rule,
+    tools: _Tools,
+    system: _Sections,
+    access: Access,
+    config: PythonProcessConfig,
 ) -> Effects:
     """Fills a `python` row: `use = "python:tool"`. Starts a persistent Python process in the
     runner and registers the `python(code)` tool with `tools` (each call runs as an input in it;
@@ -66,7 +72,7 @@ async def tool(
     model or the ui keeps the namespace, and so does a reload of the loop; swapping the runner
     starts a new process, which is the honest thing for a new runner to mean. A restart
     (`/clear`) registers the same tool again, so the loop reloads with nothing."""
-    started = yield enter(Kernel(runner, config, access, rule=approval, tools=tools))
+    started = yield enter(PythonProcess(runner, config, access, rule=approval, tools=tools))
     yield acquire(runner.on_release, started.stopped)
     yield acquire(tools.register, PYTHON, started.call, show=shown_call)
     yield acquire(system.add, "python", started.instructions)

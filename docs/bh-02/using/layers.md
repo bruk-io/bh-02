@@ -66,53 +66,30 @@ The model's code can't write a layer file: the jail protects them.
 - `--trace FILE` appends every row's lifecycle events to `FILE` (the app owns the terminal, so
   they go to a file).
 
-## Layers from an earlier bh-02
+## A layer that names what bh-02 doesn't have
 
-Some rows have been renamed, merged or dropped since earlier versions, and so have some
-components:
-
-| An earlier bh-02's | Is now |
-|---|---|
-| rows `llm`, `mode`, `kernel`, `jail`, `jail_status` | `loop`, `chat`, `python`, `runner`, `grades` |
-| the model row `completion`, filled by a provider's own row | `model` (`models:model`), below |
-| the shell's own rows `harness`, `layers`, `sessions` | `shell`, `host`, `session` |
-| the status-bar rows: `model_status`, and the `session` row an earlier session's layer filled with `tui:status` | one `status` row |
-| components `chat:session`, `tui:app` | `chat:converse`, `tui:ui` |
-| the shell's `bh_02.bootstrap:harness`, `layer_files`, `session_list` | `bh_02.bootstrap:shell`, `host`, `session` |
-| the tool rows from before CodeAct: `fs`, `approve`, `actions`, `guard`, and any row using the old `tools:` plugin | gone (a `tools` row naming no plugin is today's broker, `agent:tools`) |
-| the sidebar: `sidebar`, or any row using `tui:sessions` | gone (`bh-02 sessions` lists the sessions) |
-
-The old model row's provider becomes a named model. `claude-code:completion`'s `model` is the
-model row's `default` now; an id that is no built-in name becomes an `extra` model of the row's
-own. `ollama:completion` becomes an `extra` OpenAI-compatible model at its host's `/v1`, named as
-its model and chosen; a session started with `--ollama` is given that model on `--resume`. An old
-`model_status` naming `llm` names `model`, the row that holds the model now, and a status row's
-`default_model` is gone: the status bar asks the `models` row. An old status-bar row that was
-`disabled` is not carried over: `status` can't turn off one part, so the bar stays on, and the
-change line says to give `status` `disabled = true` to turn off all of it.
-
-A session's own layer is brought up to date when you resume it, silently. A `--patch` file is
-yours, so bh-02 stops before the app starts (exit code 1, and no session is made) and says what
-to change:
+bh-02 renames its own rows and plugins now and then, and it doesn't translate the old names. A
+layer that names a plugin, a component or a row bh-02 no longer has fails at boot, whichever layer
+it is: the shipped one, a session's own `session.toml`, or a `--patch` file. bh-02 exits with code
+1, once the terminal is yours again, and says which row could not start, the `use` it names and
+which plugins are installed:
 
 ```text
-error: a --patch file names rows this bh-02 renamed or no longer has:
-  mine.toml: row 'llm' is now 'loop'; rename its id
-run `bh-02 update-layer mine.toml` to rewrite it (the original is kept beside it as .bak), then run again
+error: could not start:
+loop: unresolved: ModuleNotFoundError: No module named 'nonesuch' (use 'nonesuch:loop'; no 'nonesuch' plugin either; installed plugins: agent, chat, commands, extensions, memory, models, python, runner, subagents, tui)
+chat#16: inactive
+  waiting on: loop
+shell#32: inactive
+  waiting on: done
+error: chat needs loop; no row provides it
 ```
 
-`bh-02 update-layer` rewrites the file in today's names and keeps the original, comments and
-all, as `FILE.bak`:
+To fix it, edit the layer so the row names what exists: the plugin from the list in the message,
+and a component that plugin has (for a plugin that is there but has no such component, the message
+lists the components it has). A row of your own with no `use`, whose `id` bh-02 doesn't have, is
+refused the same way, naming the row. After a `git pull` that renames a plugin, install again with
+`--reinstall` first ([Get started](../get-started.md)): the names come from what is installed.
 
-```text
-$ bh-02 update-layer mine.toml
-mine.toml: row 'llm' is now 'loop'; rename its id
-rewritten; the original, with its comments, is mine.toml.bak
-$ bh-02 update-layer mine.toml
-mine.toml is up to date: nothing to change
-```
-
-A file it can't read is one line saying what is wrong, exit code 1, and nothing written. A file
-with both an old row and its new name (`llm` and `loop`) is refused unchanged: which one's
-settings win is yours to decide. A resumed session whose `session.toml` has both is refused the
-same way.
+A run that fails this way makes no session. A resumed session whose layer names something bh-02
+dropped is kept: edit its `session.toml`, in its directory under `bh-02/sessions/` in the state
+directory (`$XDG_STATE_HOME`, else `~/.local/state`), or start a new session.

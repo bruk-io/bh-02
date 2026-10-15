@@ -337,33 +337,33 @@ def _alive(pid: int) -> bool:
 
 
 def _ends_and_takes_its_children(app: Launched, children: list[int]) -> int:
-    """Wait for bh-02 to leave on its own (not killed by a signal) and its kernel to be gone."""
+    """Wait for bh-02 to leave on its own (not killed by a signal) and its Python process to be gone."""
     deadline = time.monotonic() + 10
     while (app.process.poll() is None or any(map(_alive, children))) and time.monotonic() < deadline:
         app.settle(0.1)
     code = app.process.returncode
     assert code is not None and code >= 0, f"still running, or killed ({code}):\n{app.text()[-2000:]}"
-    assert not [pid for pid in children if _alive(pid)], "the kernel outlived bh-02"
+    assert not [pid for pid in children if _alive(pid)], "the Python process outlived bh-02"
     return code
 
 
-def test_the_terminal_going_away_leaves_and_ends_the_kernel(launch: Launch) -> None:
+def test_the_terminal_going_away_leaves_and_ends_the_python_process(launch: Launch) -> None:
     """A pty with no controlling terminal: no SIGHUP, only stdin at end of file (which Textual's
     input thread would otherwise read again and again, at 100% CPU, for ever)."""
     app = launch("echo")
     app.wait_for(_READY, 60)
     children = _children(app.process.pid)
-    assert children  # the kernel
+    assert children  # the Python process
     app.hang_up()
     # 120: Python could not flush its output at exit, to a terminal that is gone
     assert _ends_and_takes_its_children(app, children) in (0, 120)
 
 
-def test_a_hangup_signal_leaves_and_ends_the_kernel(launch: Launch) -> None:
+def test_a_hangup_signal_leaves_and_ends_the_python_process(launch: Launch) -> None:
     app = launch("echo")
     app.wait_for(_READY, 60)
     children = _children(app.process.pid)
-    assert children  # the kernel
+    assert children  # the Python process
     app.process.send_signal(signal.SIGHUP)
     assert _ends_and_takes_its_children(app, children) == 0
 
@@ -546,7 +546,10 @@ def test_a_models_file_default_that_is_no_name_shows_in_the_status_bar_and_the_f
         told = app.wait_for(
             "remove it", 20, after=ready
         )  # `... give it one, like `default = "sonnet"`, or remove it`
-        assert "not a model's name" in app.text()[ready:told].replace("\n", " ")
+        # the error names the models file, whose path is as long as the test's tmp_path (pytest-xdist
+        # adds `popen-gwN/` to it), so where the screen breaks the line moves: read the words only
+        said = " ".join(app.text()[ready:told].replace("▎", " ").split())
+        assert "not a model's name" in said
         app.type("/model fake")
         app.wait_for("model: fake", 20, after=told)
         app.settle(1.0)
@@ -748,7 +751,7 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     """`/model` restarts the model row, which may take a while to come up (`slow-2` takes 3 s):
     the model field says it is starting until the row is active, and a message
     typed meanwhile says it is waiting, then gets its reply. `/clear` restarts the loop, its
-    transcript and the kernel, and a message typed then reaches the new loop."""
+    transcript and the Python process, and a message typed then reaches the new loop."""
     app = launch("slow")
     ready = app.wait_for(_READY, 60)
     app.type("first")
@@ -924,3 +927,47 @@ def test_a_keyed_model_s_key_never_reaches_an_input_s_environment(tmp_path: Path
         finally:
             app.close()
     assert {r["authorization"] for r in stub.requests} == {"Bearer fake-verify-key"}
+
+
+def _said(app: Launched) -> str:
+    """What the terminal showed, on one line (a long path or message wraps)."""
+    return " ".join(app.text().split())
+
+
+def test_a_patch_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s_error(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """A layer written for a bh-02 that had other names (or with a typo) is no hang and no
+    half-started app: bh-02 exits at boot, code 1, and says once the terminal is the person's
+    which row could not start, the `use` it names, and which plugins are installed instead."""
+    stale = tmp_path / "stale.toml"
+    stale.write_text('[[plugin]]\nid = "loop"\nuse = "nonesuch:loop"\n')
+    app = launch("echo", "--patch", str(stale))
+    assert app.exit_code(60) == 1
+    said = _said(app)
+    assert "error: could not start:" in said, said
+    assert "loop: unresolved:" in said and "use 'nonesuch:loop'" in said, said
+    assert "installed plugins: " in said and "subagents" in said, said  # what to name instead
+    assert "Traceback" not in said
+
+
+def test_a_resumed_session_whose_layer_names_a_use_no_plugin_provides_fails_at_boot_too(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """The session's own layer is a layer like any other: nothing translates it on a resume, and
+    a `use` it names that no plugin provides is the same boot failure. The use is the first Claude
+    stack's (`claude-agent-sdk:agent`), which a session started on it still names: it fails at boot
+    with the loader's error, and the session's directory is kept."""
+    first = launch("echo")
+    first.wait_for(_READY, 60)
+    first.press(b"\x11")
+    assert first.exit_code() == 0
+    (layer,) = (tmp_path / "state").glob("bh-02/sessions/*/session.toml")
+    layer.write_text(layer.read_text() + '\n[[plugin]]\nid = "python"\nuse = "claude-agent-sdk:agent"\n')
+    again = launch("echo", "--resume")
+    assert again.exit_code(60) == 1
+    said = _said(again)
+    assert "error: could not start:" in said, said
+    assert "python: unresolved:" in said and "use 'claude-agent-sdk:agent'" in said, said
+    assert "Traceback" not in said
+    assert layer.is_file(), "the session's directory is kept"

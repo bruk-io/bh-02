@@ -1,7 +1,7 @@
 # Command line
 
-`bh-02` starts a session in the current directory. Its subcommands list sessions, bring old
-layer files up to date and follow a sub-agent's event log. Each block below is the command's own `--help`.
+`bh-02` starts a session in the current directory. Its subcommands list sessions and follow a
+sub-agent's event log. Each block below is the command's own `--help`.
 
 ## `bh-02`
 
@@ -31,15 +31,18 @@ Options:
   --help         Show this message and exit.
 
 Commands:
-  sessions      List this directory's sessions, newest first: each one's...
-  update-layer  Rewrite a layer file (a --patch file) that names rows...
-  watch         Follow one sub-agent's event log, read-only: SESSION is a...
+  sessions  List this directory's sessions, newest first: each one's id,...
+  watch     Follow one sub-agent's event log, read-only: SESSION is a...
 ```
 
 - `--model` with a `--patch` that sets the model row's config is refused: the patch chooses the
   model ([Models](../using/models.md#a-patch-that-sets-the-model)).
 - `--resume` with `--no-jail` is refused: a resumed session keeps the jail it started with.
 - `--resume` with `--model` carries the session on with that model.
+- A layer (the shipped one, the session's or a `--patch` file) that names a plugin or component
+  bh-02 doesn't have fails at boot, exit code 1, with the loader's error naming the row, its `use`
+  and the installed plugins; nothing translates an old name
+  ([Layers](../using/layers.md#a-layer-that-names-what-bh-02-doesnt-have)).
 
 When you leave, bh-02 prints the session's id and the command that continues it, on stderr.
 
@@ -60,25 +63,6 @@ Usage: bh-02 sessions [OPTIONS]
 Options:
   --help  Show this message and exit.
 ```
-
-## `bh-02 update-layer`
-
-```text
-Usage: bh-02 update-layer [OPTIONS] FILE
-
-  Rewrite a layer file (a --patch file) that names rows this bh-02 renamed or
-  no longer has, in today's names, and say what changed. The original is kept
-  as FILE.bak (with its comments, which the rewrite does not carry over; an
-  earlier FILE.bak is replaced, and the output says so). A file already up to
-  date is left as it is, so running it again changes nothing. A file with a
-  renamed row whose new id it already has (both `llm` and `loop`) is refused,
-  unchanged: which one wins is the person's call.
-
-Options:
-  --help  Show this message and exit.
-```
-
-[Layers](../using/layers.md#layers-from-an-earlier-bh-02) shows it at work.
 
 ## `bh-02 watch`
 

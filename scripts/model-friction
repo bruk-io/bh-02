@@ -5,7 +5,7 @@ Reads every session's `transcript.jsonl` under bh-02's state directory (`$XDG_ST
 sessions`, else `~/.local/state/bh-02/sessions`, or `--sessions DIR`) and counts, per signal,
 how often it happened and in how many sessions, with a few examples of each. A transcript holds
 the conversation since its last /clear. Run it after using bh-02 for a while: the signals that
-come up most are where the prompt, the kernel or the loop should change next.
+come up most are where the prompt, the Python process or the loop should change next.
 
     scripts/model-friction                 # every session here
     scripts/model-friction --model qwen    # only the sessions that started on one model
@@ -51,8 +51,9 @@ SIGNALS = {
     "claude_code": "the model's own text mentions Claude Code",
     "extension_written": "an input that wrote into .bh-02/plugins (the model extending bh-02)",
     "instructions_changed": "the model was told its instructions changed mid-conversation (an extension, a branch, CLAUDE.md)",
-    "startup_file": "an input that wrote .bh-02/kernel.py (the model keeping its helpers)",
+    "startup_file": "an input that wrote .bh-02/startup.py (the model keeping its helpers)",
 }
+_STARTUP_FILE = ".bh-02/startup.py"  # the project's startup file, the one the model may write
 _PROGRAM = re.compile(r"\b(?:subprocess\.(?:run|call|check_call|Popen)|os\.system)\(")
 _CAPTURED = re.compile(r"capture_output\s*=\s*True|stdout\s*=|check_output\(")
 _EXCEPTION = re.compile(r"^(\w+(?:\.\w+)*(?:Error|Exception|Exit|Interrupt|Expired)):", re.M)
@@ -235,7 +236,7 @@ def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
                 code = str((call.get("input") or {}).get("code") or "")
                 if ".bh-02/plugins" in code and _WRITES.search(code):
                     yield Finding("extension_written", session, _short(code))
-                if ".bh-02/kernel.py" in code and _WRITES.search(code):
+                if _STARTUP_FILE in code and _WRITES.search(code):
                     yield Finding("startup_file", session, _short(code))
 
 

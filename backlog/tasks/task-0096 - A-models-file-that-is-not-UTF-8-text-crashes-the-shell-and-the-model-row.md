@@ -4,11 +4,12 @@ title: A models file that is not UTF-8 text crashes the shell and the model row
 status: To Do
 assignee: []
 created_date: '2026-10-14 13:05'
-updated_date: '2026-10-14 13:40'
+updated_date: '2026-10-15 02:27'
 labels:
   - models
   - size-1
 dependencies: []
+priority: low
 type: bug
 ---
 
@@ -25,3 +26,9 @@ Found while building TASK-0093 (probed on e049e4b): a models.toml holding bytes 
 - [ ] #3 scripts/check passes
 - [ ] #4 docs/bh-02/using/models.md says which new sessions list as 'default' in bh-02 sessions (a default that is not a name, an unreadable file) and that one whose default names no model lists by that name; the models plugin README says the shell and the row both use the working directory and the layer's cwd as roots (from TASK-0093's close review)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Deferred by the owner (2026-10-15): this run fixes only critical bugs; this one is not critical (no data loss, no security exposure, a workaround exists). Not to be started without the owner's word.
+<!-- SECTION:NOTES:END -->

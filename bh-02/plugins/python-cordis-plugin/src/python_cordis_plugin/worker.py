@@ -1,4 +1,4 @@
-"""The kernel's own process: one persistent Python namespace behind a Unix socket.
+"""The Python process's own program: one persistent Python namespace behind a Unix socket.
 
 Run by path (``python -I worker.py SOCKET``), usually inside a jail. It imports the standard
 library and nothing else, so nothing of the host crosses into the jail with it. The namespace
@@ -10,7 +10,7 @@ connects and closes without a word, so the worker keeps accepting until one spea
 ``{"op": "done", "output", "error", "touched", "refused"}``: `touched` the files under the
 directory the worker started in (the project root) that the input's own code opened with
 `open()` or `pathlib`, read or written, each once by its absolute path (an audit hook,
-`_Kernel.heard`: what Python opens, not what a program it runs does, nor an `os.open`). `ask`
+`_Repl.heard`: what Python opens, not what a program it runs does, nor an `os.open`). `ask`
 names the kinds (`read`, `write`) the host wants to be asked about: before the input's own code
 opens such a file to one of them, the worker sends ``{"op": "ask", "id", "kind", "path"}`` and
 waits for ``{"op": "answer", "id", "refuse"}``, once per file and kind per input; a `refuse` that
@@ -156,7 +156,7 @@ def input_traceback(exc: BaseException) -> str:
     """Format a failed input's exception from its first input frame (`<input 3>`) on: the worker's
     own frames (the `exec` that ran the input) say nothing about the input. Keep every frame if
     none is an input's. Nor do the worker's frames below the input's say anything: an open the
-    host refused is raised from the audit hook (`_Kernel._asked`), so the traceback ends at the
+    host refused is raised from the audit hook (`_Repl._asked`), so the traceback ends at the
     input's own line, as a PermissionError from the file system would."""
     tb = exc.__traceback__
     while tb is not None and not tb.tb_frame.f_code.co_filename.startswith(_INPUT):
@@ -180,7 +180,7 @@ class _Channel:
         self._waiting: dict[
             int, queue.Queue[dict[str, Any]]
         ] = {}  # a question's number: where its answer goes
-        threading.Thread(target=self._read, name="kernel-reader", daemon=True).start()
+        threading.Thread(target=self._read, name="repl-reader", daemon=True).start()
 
     def _read(self) -> None:
         for line in self._file:
@@ -212,12 +212,13 @@ class _Channel:
             self._waiting.pop(number, None)
 
 
-class _Kernel:
+class _Repl:
     """The namespace and the input loop. `root` is the directory the worker started in, the
     project's (a jail starts it there): the files `touched` names are under it."""
 
     def __init__(self, channel: _Channel, root: str) -> None:
         self._channel = channel
+        # `__kernel__` is kept: a startup file may test `__name__`, and a rename would break that silently
         self._namespace: dict[str, Any] = {"__name__": "__kernel__"}
         self.running = False  # an input is running, parsed or failing included: SIGINT interrupts it
         self._hearing = False  # the input's own code is running: what it opens is heard
@@ -449,15 +450,15 @@ def main(argv: Sequence[str]) -> None:
         if file.readline().strip():
             break
         conn.close()  # a readiness probe: connected, said nothing, left
-    kernel = _Kernel(_Channel(conn, file), root)
-    addaudithook(_hook(kernel.heard))
+    repl = _Repl(_Channel(conn, file), root)
+    addaudithook(_hook(repl.heard))
 
     def interrupt(signum: int, frame: object) -> None:
-        if kernel.running:
+        if repl.running:
             raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, interrupt)
-    kernel.serve()
+    repl.serve()
 
 
 if __name__ == "__main__":
