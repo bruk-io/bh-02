@@ -551,7 +551,7 @@ async def test_a_startup_file_is_named_from_home_or_the_config_directory_on_the_
             f"{home}/helpers.py ran next: no helpers; 1 name hidden)\n3"
         )
         told = k.instructions()
-        assert f"helpers of their own in {home}/.config/bh-02/startup.py and {home}/helpers.py" in told
+        assert f"functions of their own in {home}/.config/bh-02/startup.py and {home}/helpers.py" in told
     one = PythonProcessConfig(root=str(tmp_path), startup="~/helpers.py")  # a single string is one file
     async with _process(Confined(), one) as k:
         assert await k.run("B") == f"({home}/helpers.py ran first: no helpers; 1 name hidden)\n2"
@@ -563,7 +563,7 @@ def test_the_model_is_told_only_the_project_s_startup_file_is_its_to_edit() -> N
         told = instructions_for(confined, mine, theirs=theirs)
         assert "go in .bh-02/startup.py, the project's startup file, which you can write and grow" in told
         assert (
-            "Only the project's startup file is yours to edit: the person may keep helpers of their "
+            "Only the project's startup file is yours to edit: the person may keep functions of their "
             "own in /home/me/.config/bh-02/startup.py, which comes before it, and that file is theirs."
         ) in told
     assert "Only the project's" not in instructions_for(True)  # no file of the person's to name
@@ -601,7 +601,7 @@ async def test_the_python_process_tells_the_model_where_the_person_s_startup_fil
         told = k.instructions()
     person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "startup.py"
     assert "go in .bh-02/startup.py, the project's startup file" in told
-    said = "Only the project's startup file is yours to edit: the person may keep helpers of their own in"
+    said = "Only the project's startup file is yours to edit: the person may keep functions of their own in"
     assert f"{said} {person}, which comes before it" in told
 
 

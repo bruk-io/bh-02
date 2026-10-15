@@ -41,7 +41,7 @@ A function the model defines in an input, a helper and a registered tool differ 
 | | A function defined in an input | A helper (`@helper` in a startup file) | A registered tool |
 |---|---|---|---|
 | Where it lives | the Python process's namespace | the Python process's namespace, put there by its startup file | `tools`, the registry a row (or an extension) registers into |
-| How long | until the process ends (`/clear`, a restart, a resume) | as long as its startup file: a new REPL has it again | as long as its row: an extension's lasts as long as its file, across sessions |
+| How long | until the process ends (`/clear`, a restart, a resume) | as long as its startup file: a new REPL runs the file again (with `--no-jail`, once the model runs it) | as long as its row: an extension's lasts as long as its file, across sessions |
 | Who can call it | later inputs | later inputs | the model directly, and inputs as `tools.NAME(...)` |
 | Asked about, told asides | no: the input that calls it was | no: the input that calls it was | each call, as any tool call |
 | Where it runs | in the Python process | in the Python process, with an input's limits | where its row says: an extension's in the extensions process, a layer row's in bh-02 |

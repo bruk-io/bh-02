@@ -175,17 +175,17 @@ def _keep(confined: bool, startup: Sequence[str], theirs: Sequence[str]) -> str:
     said = []
     if startup:
         said.append(
-            f"Helpers worth having in every session go in {' and '.join(startup)}, the project's "
+            f"Functions worth having in every session go in {' and '.join(startup)}, the project's "
             f"startup file, which you can write and grow: {runs}"
         )
     if theirs and startup:
         said.append(
-            "Only the project's startup file is yours to edit: the person may keep helpers of "
+            "Only the project's startup file is yours to edit: the person may keep functions of "
             f"their own in {' and '.join(theirs)}, which comes before it, and that file is theirs."
         )
     elif theirs:
         said.append(
-            f"The person may keep helpers of their own in {' and '.join(theirs)}: {runs} That file "
+            f"The person may keep functions of their own in {' and '.join(theirs)}: {runs} That file "
             "is theirs, not yours to edit."
         )
     if confined and said:

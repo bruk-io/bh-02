@@ -20,7 +20,7 @@ the process it last started, never another program the runner started), `stopped
 (`shown_call`: its code, whole) and `instructions_for(confined, startup, reads, theirs=,
 elsewhere=)`, what the model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
 long as this run of bh-02 (a /model switch keeps it; a start, a resume, /clear or a Python process
-that died empties it), and that helpers worth keeping go in the project's startup file (`startup`), the
+that died empties it), and that functions worth keeping go in the project's startup file (`startup`), the
 only one that is its to edit, the person's own (`theirs`), which comes first, being theirs; how to use it (work in
 Python, not through a shell, shown by an input that searches and keeps what it found and a later
 one that edits with it; build up state and re-read what changed, print what matters, run

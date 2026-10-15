@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-15 21:00'
-updated_date: '2026-10-15 21:12'
+updated_date: '2026-10-15 21:27'
 labels:
   - python
   - size-1
@@ -54,4 +54,12 @@ Asked by the owner (2026-10-15): keep tools and helpers separate, but make it ob
 - bh-02/app/tests/test_python_repl.py not run (jail lock, per the orchestrator); the full check runs it.
 
 - Follow-up: bh-02/plugins/python-cordis-plugin/README.md:134 now says `inspect.getsource(NAME)`, NAME a helper as the startup line lists it (the only line changed there). `scripts/check bh-02/plugins/python-cordis-plugin --no-gates`: exit 0 (lint, types, 75 tests passed, docs built; the gates were not run per the orchestrator).
+
+- From the close review: four wording fixes.
+  - python.py, the startup-file lines: "Helpers worth having in every session go in" is now "Functions worth having in every session go in"; "the person may keep helpers of" (the startup-file aside, both branches) is now "the person may keep functions of", the two lines "The person may keep functions of their own in" and "the person may keep functions of their own in".
+  - test_python_tool.py: the three quotes of those lines (about lines 554, 566 and 604) follow the new wording, nothing else in them.
+  - docs/bh-02/how-it-works/python-tool.md, the helper column's "How long" cell: "a new REPL runs the file again (with `--no-jail`, once the model runs it)".
+  - bh-02/GLOSSARY.md, the helper line: replaced whole with the wording the close review gives.
+- Flagged, not changed: bh-02/plugins/python-cordis-plugin/README.md:23 still says "that helpers worth keeping go in the project's startup file" (developer docs).
+- `scripts/check bh-02/plugins/python-cordis-plugin`: exit 0 (format, lint, types, 75 passed, gates, docs built; tokens skipped, no bh-01 dist).
 <!-- SECTION:NOTES:END -->
