@@ -41,7 +41,13 @@ from brig.run.host import HostRuntime, _clear_earlier_records
 from brig.run.runtime import JailRecord
 from brig.run.teardown import KillOutcome
 from brig.stack import CompiledJail
-from tests.conftest import launch, teardown_group, teardown_pgid, workload_argv
+from tests.conftest import (
+    launch,
+    teardown_group,
+    teardown_pgid,
+    tether_has_ended,
+    workload_argv,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -176,21 +182,70 @@ def test_a_start_on_a_tether_that_has_ended_is_refused_and_makes_nothing(
 ) -> None:
     """Decided for TASK-0079.25 (point 2): refuse, rather than start a process
     its watcher would kill at once. The control: the same jail starts while the
-    tether lives."""
+    tether lives. The tether has ended when every write end is closed
+    (`tether_has_ended`), and the control's own watcher, which ends its group
+    then, has a moment to: the test waits for that, as a group left to it
+    reads as a leak."""
     runtime = HostRuntime()
     read_end, write_end = os.pipe()
     record = runtime.create(
         _compiled_jail(), cwd=jail_dir, jail_id="records-eof", jail_dir=jail_dir, tether=read_end
     )
+    ours = os.dup(read_end)  # to see when every write end is closed
     os.close(read_end)
-    supervisor = runtime.supervisor(record)
-    control = supervisor.start(["/usr/bin/true"], cwd=jail_dir, io=IoPolicy())
-    assert supervisor.wait(control, 10.0) == 0
+    try:
+        supervisor = runtime.supervisor(record)
+        control = supervisor.start(["/usr/bin/true"], cwd=jail_dir, io=IoPolicy())
+        assert supervisor.wait(control, 10.0) == 0
 
-    os.close(write_end)
-    with pytest.raises(TetherClosed, match="tether has ended"):
-        supervisor.start(workload_argv(run_id, "sleep 100"), cwd=jail_dir, io=IoPolicy())
-    assert [r.id for r in _records.scan(jail_dir).records] == [control.id]
+        os.close(write_end)
+        assert tether_has_ended(ours), "a copy of the tether's write end stayed open"
+        with pytest.raises(TetherClosed, match="tether has ended"):
+            supervisor.start(workload_argv(run_id, "sleep 100"), cwd=jail_dir, io=IoPolicy())
+        assert [r.id for r in _records.scan(jail_dir).records] == [control.id]
+        assert _wait_for(lambda: not _live_members(control.pgid)), (
+            f"the control's group {control.pgid} outlived the tether"
+        )
+    finally:
+        os.close(ours)
+
+
+def test_a_tether_has_not_ended_while_any_copy_of_its_write_end_is_open(
+    run_id: str, jail_dir: str
+) -> None:
+    """What `TetherClosed` promises and what it does not (SPEC.md section 8): the tether has
+    ended when every write end is closed, so a copy that a forked child still holds, between its
+    fork and its exec, keeps it open and a start is not refused; the start goes ahead and its
+    watcher ends it once the copy is gone. The control: with the copy closed too, the same
+    start is refused."""
+    runtime = HostRuntime()
+    read_end, write_end = os.pipe()
+    record = runtime.create(
+        _compiled_jail(), cwd=jail_dir, jail_id="records-copy", jail_dir=jail_dir, tether=read_end
+    )
+    ours = os.dup(read_end)
+    os.close(read_end)
+    copy = os.dup(write_end)  # the child that another thread forked, still before its exec
+    supervisor = runtime.supervisor(record)
+    started = []
+    try:
+        os.close(write_end)
+        assert not tether_has_ended(ours, timeout=0.2)  # a copy remains
+        started.append(
+            supervisor.start(workload_argv(run_id, "sleep 100"), cwd=jail_dir, io=IoPolicy())
+        )  # not refused
+        os.close(copy)
+        copy = -1
+        assert tether_has_ended(ours)
+        assert _wait_for(lambda: not _live_members(started[0].pgid)), "its watcher did not end it"
+        with pytest.raises(TetherClosed):  # the control
+            supervisor.start(workload_argv(f"{run_id}b", "sleep 100"), cwd=jail_dir, io=IoPolicy())
+    finally:
+        os.close(ours)
+        if copy != -1:
+            os.close(copy)
+        for process in started:
+            _kill_group(process.pgid)
 
 
 def test_each_process_has_its_own_exit_record_read_by_any_supervisor(jail_dir: str) -> None:

@@ -2225,7 +2225,15 @@ review left to the implementation, and three edges it found:
    checks `wrap` of its own argv.
 2. **A start on a tether that has ended is refused** (`TetherClosed`), before
    anything is made: a process started then would be killed at once by its own
-   watcher. A tether that ends after the check is the watcher's to act on.
+   watcher. A tether that ends after the check is the watcher's to act on. A tether
+   has ended when **every** write end is closed, so one the embedder's close has not
+   ended yet is still open while a child that another thread of the embedder forked
+   has not exec'd (it holds a copy of every descriptor until then): measured under
+   load, the hangup came 1.5 to 2.4 ms after the close, and a start made in that window
+   is not refused (it goes ahead and its watcher, or the supervised jail's own, ends it
+   when the copy goes: `SupervisorGone` for a start under way). The check reads the
+   pipe's state with no wait and promises no more (TASK-0079.06, 2026-10-15; no
+   change of behaviour).
 3. **The jail's tether fd.** `create` duplicates the read end (not
    inheritable) and the creating process holds the duplicate in memory, so the
    embedder may close its own once `create` returns, as after `launch` before.

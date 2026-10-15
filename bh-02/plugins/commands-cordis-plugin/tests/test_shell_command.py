@@ -51,6 +51,19 @@ async def _written(path: Path) -> int:
     return int(path.read_text())
 
 
+async def _gone(pid: int, within: float = 5.0) -> bool:
+    """Whether `pid` stops running within `within` seconds. `run_command` returns when the output
+    it read from a program it killed ends, and the kernel closes that program's descriptors while
+    it exits, a moment before it is a zombie (measured under load: `R`, then `Z` 0.4 ms later), so
+    a program the command has killed can still be running when the command returns."""
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        if not _alive(pid):
+            return True
+        await asyncio.sleep(0.01)
+    return not _alive(pid)
+
+
 def _config(tmp_path: Path, timeout: float = 30.0) -> ShellCommandConfig:
     return ShellCommandConfig(cwd=str(tmp_path), timeout=timeout, shell="/bin/sh")
 
@@ -84,7 +97,7 @@ async def test_a_command_past_its_timeout_is_stopped_with_what_it_started(tmp_pa
     ran = await run_command("sleep 30 & echo $! > child; echo started; wait", _config(tmp_path, 0.5))
     assert time.monotonic() - started < 5
     assert ran.status is None and ran.output == "started\n"
-    assert not _alive(int((tmp_path / "child").read_text()))  # the whole process group ended
+    assert await _gone(int((tmp_path / "child").read_text()))  # the whole process group ended
     note, told = answer(ran, 0.5)
     assert note["text"] == (
         f"started\nstopped at its timeout, 0.5 s (the shell-command row's `timeout` sets it); {_NEXT}"
@@ -106,7 +119,7 @@ async def test_a_program_left_holding_the_output_ends_with_the_command_one_that_
     started = time.monotonic()
     ran = await run_command("sleep 30 & echo $! > held; echo done", _config(tmp_path))
     assert ran == Ran(ran.command, "done\n", 0) and time.monotonic() - started < 5
-    assert not _alive(int((tmp_path / "held").read_text()))  # nobody would read what it printed
+    assert await _gone(int((tmp_path / "held").read_text()))  # nobody would read what it printed
     ran = await run_command("sleep 30 > /dev/null 2>&1 & echo $! > free", _config(tmp_path))
     free = int((tmp_path / "free").read_text())
     try:
@@ -124,7 +137,7 @@ async def test_a_command_cancelled_while_it_runs_ends_with_its_process_group(tmp
     running.cancel()
     with pytest.raises(asyncio.CancelledError):
         await running
-    assert not _alive(child)
+    assert await _gone(child)
 
 
 async def test_a_long_output_keeps_its_start_and_its_end(tmp_path: Path) -> None:

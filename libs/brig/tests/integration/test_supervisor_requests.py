@@ -36,6 +36,7 @@ from brig.run import (
 )
 from brig.run._supervised import host_pid_of
 from brig.run._supervisor_program import SUPERVISOR_SOURCE
+from tests.conftest import tether_has_ended
 from tests.supervised_jail import (
     cleanup,
     create_jail,
@@ -328,16 +329,21 @@ def test_a_start_on_a_jail_whose_tether_has_ended_is_refused_before_anything_is_
     jail_dir = new_jail_dir()
     watched, tether = os.pipe()
     jail = create_jail(jail_dir, tether=watched)
+    ours = os.dup(watched)  # to see when every write end is closed
     os.close(watched)
     try:
-        assert run_to_end(jail.start(sh("echo yes")))[1] == "yes\n"
+        assert run_to_end(jail.start(sh("echo yes")))[1] == "yes\n"  # the control: it lives
         procs = os.path.join(jail_dir, "procs")
         before = sorted(os.listdir(procs))
-        os.close(tether)  # every write end is closed: the tether has ended
+        os.close(tether)
+        # The tether has ended when every write end is closed, which closing ours does not make
+        # so at once if a child another thread forked still holds a copy (`tether_has_ended`).
+        assert tether_has_ended(ours), "a copy of the tether's write end stayed open"
         with pytest.raises(TetherClosed):
             jail.start(sh("echo too late"))
         assert sorted(os.listdir(procs)) == before, "a refused start made something"
     finally:
+        os.close(ours)
         _ended(jail)
         cleanup(jail_dir)
 
