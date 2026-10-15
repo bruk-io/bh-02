@@ -163,8 +163,9 @@ public names are those its code binds at the top, as the compiler reads it (so o
 the object it held counts), and any new or changed after it; a helper is one whose value is a
 callable with `__bh_helper__ is True` itself, so an object that answers every attribute with
 something truthy is not one. That line is the Python process's, so the host reads it as data and
-words it in pure functions (`client.startup_ran`, `client.signed`): control characters (C0, DEL,
-C1) are stripped, each signature is cut at 160 characters and ends in `…`, one that could not be
+words it in pure functions (`client.startup_ran`, `client.signed`): control and format characters
+(C0, DEL, C1, bidi overrides, zero-width) are stripped, a name that is not an identifier (a file
+can bind any string through `globals()`) is counted with the hidden ones, each signature is cut at 160 characters and ends in `…`, one that could not be
 read is `name(...)`, and a last line that is not that shape is said not to be a listing and never
 quoted. The first input is told `(PATH ran first: helpers run_tests(path='.', *, quiet=True),
 changed(); 3 other names hidden)`, in the order the file made them; a file with none, `PATH ran

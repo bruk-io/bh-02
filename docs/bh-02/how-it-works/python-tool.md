@@ -83,8 +83,9 @@ name and signature, and how many other names the file bound, not which:
 
 A file with no helper says `no helpers; N names hidden`. Unmarked names exist and work, they are
 only not told, so a long startup file costs the model a few signatures and a count, not every name.
-`help(name)` shows a helper's docstring. Control characters are stripped from a signature, one over
-160 characters is cut there, and one Python can't read is `name(...)`.
+`help(name)` shows a helper's docstring. Control and format characters are stripped from a
+signature, one over 160 characters is cut there, and one Python can't read is `name(...)`; a name
+that is not an identifier is counted as hidden, never listed.
 
 `@helper` returns the function itself, with one attribute set, so a file you also run outside bh-02
 can define a stand-in: `try: helper` / `except NameError:` and `def helper(f): return f`.

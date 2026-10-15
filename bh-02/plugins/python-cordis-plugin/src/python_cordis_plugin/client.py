@@ -46,17 +46,18 @@ The model is told what each file made for it by signature, not by name: the Pyth
 that runs the file prints, last, one line of JSON naming each marked function and the signature
 text `inspect.signature` gave (or None), and how many other public names the file bound. That
 line is the Python process's, so the host reads it as data and says it in pure functions
-(`startup_ran`, `signed`): control characters stripped, each signature cut at `_CUT`, and
-`name(...)` for one that could not be read.
+(`startup_ran`, `signed`): control and format characters stripped, each signature cut at `_CUT`,
+`name(...)` for one that could not be read, and a name Python could not have written (not an
+identifier) counted with the hidden ones, never listed.
 """
 
 import asyncio
 import contextlib
 import json
 import os
-import re
 import shutil
 import tempfile
+import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,7 +78,9 @@ _LINE_LIMIT = 1 << 20
 _CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a startup file in the person's config directory
 _CUT = 160  # the longest signature, in characters, the model is told of a helper
 _READ = 4 * _CUT  # how much of one the Python process sends: the host cleans it, then cuts it at `_CUT`
-_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f]")  # C0, DEL and C1: what no line the model reads may hold
+# Unicode's control (C0, DEL, C1) and format (bidi overrides, zero-width) categories: what no line
+# the model reads as bh-02's own may hold, since they break the line, or reorder or hide its text
+_STRIPPED = frozenset({"Cc", "Cf"})
 
 
 @runtime_checkable
@@ -247,21 +250,29 @@ def _bound(line: str) -> _Bound | None:
                         found.append((name, signature))
                     case _:
                         return None
-            return _Bound(tuple(found), hidden)
+            # a file can bind any string as a name (`globals()[...]`): one Python could not have
+            # written is counted with the hidden names, so the aside's wording stays bh-02's
+            named = tuple(each for each in found if each[0].isidentifier())
+            return _Bound(named, hidden + len(found) - len(named))
         case _:
             return None
 
 
 def signed(name: str, signature: str | None) -> str:
     """A helper as the model is told it: `name` and its `signature` text (`inspect.signature`'s,
-    parentheses included), `name(...)` when there is none. Control characters (C0, DEL, C1) are
-    stripped, the file being model-written and a default's repr anything, and the signature, once
-    stripped, is cut at `_CUT` characters and ends in `…` when it was cut."""
-    shown = _CONTROL.sub("", name)
+    parentheses included), `name(...)` when there is none. Control and format characters
+    (`_STRIPPED`) are stripped, the file being model-written and a default's repr anything, and
+    the signature, once stripped, is cut at `_CUT` characters and ends in `…` when it was cut."""
+    shown = _plain(name)
     if signature is None:
         return f"{shown}(...)"
-    text = _CONTROL.sub("", signature)
+    text = _plain(signature)
     return f"{shown}{text[:_CUT]}…" if len(text) > _CUT else f"{shown}{text}"
+
+
+def _plain(text: str) -> str:
+    """`text` without its control and format characters (`_STRIPPED`)."""
+    return "".join(char for char in text if unicodedata.category(char) not in _STRIPPED)
 
 
 def _names(count: int, other: bool) -> str:
