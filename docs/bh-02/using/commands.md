@@ -14,7 +14,7 @@ narrower one it names fewer, the least everyday first.
 | `Enter` | sends the message or command in the composer |
 | `Ctrl+J`, `Shift+Enter` | start a new line in the composer (`Shift+Enter` in a terminal that tells it apart from `Enter`) |
 | `Esc` | stops the running reply, as `Ctrl+C` does, once nothing nearer wants it: it closes the command list, declines a question or closes the palette first, and only that. With no reply running it does nothing. |
-| `Ctrl+C` | copies the text you have selected and clears the selection; with nothing selected it stops the running reply. It never quits, and it doesn't stop a command ([Copying](#copying)) |
+| `Ctrl+C` | stops the running reply, unless text is selected that has not been copied yet: then it copies that and clears the selection. A mouse selection was copied when you let go, so `Ctrl+C` after one stops the reply. It never quits, and it doesn't stop a command ([Copying](#copying)) |
 | `PageUp` / `PageDown` | scroll the conversation a page while you type; the cursor stays where it is. Scrolled up, the conversation stops following new output until you scroll back to its end |
 | `Up` / `Down` | on the composer's first / last line: the line you sent before, and forward again; past the newest, `Down` gives back what you were typing ([Recalling lines](#recalling-lines-you-sent)) |
 | `Ctrl+T` | copies the newest reply ([Copying](#copying)) |
@@ -159,10 +159,12 @@ part of what a selection copies.
 
 Select text in the conversation with the mouse and it is copied as you let go: bh-02 says
 `Copied 120 characters` for a few seconds. A click, or a selection of one character, copies
-nothing. `Ctrl+C` copies what is selected too (and the text selected in the composer), and clears
-the selection, so a second `Ctrl+C` stops the running reply as it does when nothing is selected; it
-never stops a reply while there is a selection to copy. `Cmd+C` copies the selection as well, in a
-terminal that passes it on to programs. `Ctrl+T` copies the newest reply whole, as the model wrote
+nothing, and the selection stays shown. `Ctrl+C` stops the running reply, also with a selection
+showing, if that selection was copied already (as a mouse selection is, when you let go, or by
+`Cmd+C`): stopping comes first. It copies a selection that has not been copied yet (one of a single
+character, one made without the mouse, or text selected in the composer, which the mouse does not
+copy) and clears it, so the `Ctrl+C` after that stops the reply. `Cmd+C` copies the selection as
+well, in a terminal that passes it on to programs. `Ctrl+T` copies the newest reply whole, as the model wrote
 it: all its text, with the markdown as written and a blank line between the parts that tool calls
 split; `Nothing to copy: no reply yet` says there is none.
 

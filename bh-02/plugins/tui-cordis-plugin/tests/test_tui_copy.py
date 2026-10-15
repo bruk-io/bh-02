@@ -117,19 +117,83 @@ async def test_a_click_or_a_one_character_selection_copies_nothing_and_says_noth
         assert app.clipboard == "" and _told(app) == []
 
 
-async def test_ctrl_c_with_text_selected_copies_it_and_stops_nothing_a_second_one_stops_the_reply() -> None:
+async def test_ctrl_c_after_a_mouse_selection_was_copied_stops_the_reply_on_the_first_press() -> None:
+    """The mouse copied "brave" as it let go and left it selected. Ctrl-C is the stop: it must
+    not copy the same text a second time and leave the reply running."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE, notifications=True) as pilot:
+        block = await _say(app, pilot)
+        turn = await _reply_running(app, pilot)
+        await _select(pilot, block, 6, 10)
+        assert app.clipboard == "brave" and _told(app) == ["Copied 5 characters"]
+        assert app.screen.get_selected_text() == "brave"  # still shown selected
+        _forget(app)
+        await pilot.press("ctrl+c")
+        await asyncio.wait_for(turn, 1)  # the first press stopped it
+        assert app.clipboard == "" and _told(app) == ["Copied 5 characters"]  # and copied nothing again
+
+
+@pytest.mark.parametrize("how", ["one character", "all of the screen"])
+async def test_ctrl_c_copies_a_selection_not_copied_yet_and_stops_nothing_a_second_one_stops_the_reply(
+    how: str,
+) -> None:
+    """Copy on select leaves two kinds of selection uncopied: one of a single character (the
+    mouse copies two or more), and one made without the mouse (Textual's select all, which
+    ends in no mouse up). Ctrl-C copies those, clears them, and the next one is the stop."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE, notifications=True) as pilot:
+        block = await _say(app, pilot)
+        turn = await _reply_running(app, pilot)
+        if how == "one character":
+            app.screen.selections = {block: Selection.from_offsets(Offset(3, 0), Offset(4, 0))}
+            app.screen.post_message(events.TextSelected())
+            await pilot.pause()
+            wanted = "l"
+        else:
+            app.screen.text_select_all()
+            await pilot.pause()
+            wanted = app.screen.get_selected_text() or ""
+        assert wanted and app.clipboard == ""  # copy on select did not copy it
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+        assert app.clipboard == wanted and not turn.done()  # copied, and the reply runs on
+        assert app.screen.get_selected_text() is None  # cleared, so the next one is a stop
+        await pilot.press("ctrl+c")
+        await asyncio.wait_for(turn, 1)
+
+
+async def test_a_selection_after_a_copied_one_is_a_new_selection_and_ctrl_c_copies_it() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
         turn = await _reply_running(app, pilot)
         await _select(pilot, block, 6, 10)  # "brave", copied as the mouse let go
-        _forget(app)  # what Ctrl-C copies is what is asked
+        app.screen.selections = {block: Selection.from_offsets(Offset(3, 0), Offset(4, 0))}  # not "brave"
+        app.screen.post_message(events.TextSelected())
+        await pilot.pause()
+        assert app.clipboard == "brave"  # one character is not copied by the mouse
         await pilot.press("ctrl+c")
         await pilot.pause()
-        assert app.clipboard == "brave" and not turn.done()  # copied, and the reply runs on
-        assert app.screen.get_selected_text() is None  # cleared, so the next one is a stop
+        assert app.clipboard == "l" and not turn.done()
+
+
+async def test_a_selection_copied_by_cmd_c_is_not_copied_again_by_ctrl_c() -> None:
+    """Whoever copies the screen's selection, it is copied: Cmd-C here (Textual's own
+    `super+c`), then Ctrl-C is the stop."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE, notifications=True) as pilot:
+        await _say(app, pilot)
+        turn = await _reply_running(app, pilot)
+        app.screen.text_select_all()
+        await pilot.pause()
+        wanted = app.screen.get_selected_text() or ""
+        await pilot.press("super+c")
+        await pilot.pause()
+        assert wanted and app.clipboard == wanted and not turn.done()
+        _forget(app)
         await pilot.press("ctrl+c")
         await asyncio.wait_for(turn, 1)
+        assert app.clipboard == ""
 
 
 async def test_ctrl_c_with_no_selection_stops_a_reply_as_before() -> None:
@@ -251,6 +315,32 @@ async def test_esc_stops_a_reply_and_never_copies_a_selection() -> None:
         assert app.clipboard == ""
 
 
+@pytest.mark.parametrize("running", [True, False])
+@pytest.mark.parametrize("focus", [Transcript, Composer])
+async def test_esc_clears_a_selection_as_textual_does_copies_nothing_and_still_stops_a_reply(
+    focus: type, running: bool
+) -> None:
+    """The README says Esc "also clears a selection, Textual's own" (the screen's escape key),
+    with the focus in the transcript (where a mouse selection leaves it) or the composer, a
+    reply running or not. The app's Esc binding is not a priority one, so the key still reaches
+    the screen: as a priority binding it would stop the reply and leave the selection."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE, notifications=True) as pilot:
+        block = await _say(app, pilot)
+        turn = await _reply_running(app, pilot) if running else None
+        await _select(pilot, block, 6, 10)
+        app.query_one(focus).focus()
+        await pilot.pause()
+        assert app.screen.get_selected_text() == "brave"
+        _forget(app)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen.get_selected_text() is None  # cleared
+        assert app.clipboard == ""  # and not copied
+        if turn is not None:
+            await asyncio.wait_for(turn, 1)  # the reply was stopped as well
+
+
 async def test_with_a_question_up_ctrl_c_answers_it_no_and_nothing_is_copied() -> None:
     app = BhApp(grace=0.05)
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
@@ -283,7 +373,7 @@ async def test_what_was_copied_is_said_off_the_conversation_so_a_streaming_reply
         turn = await _reply_running(app, pilot)
         await _select(pilot, block, 0, 8)
         app.post_message(Shown({"type": "text", "text": " and the rest."}))
-        await pilot.press("ctrl+c")
+        await pilot.press("super+c")  # the selection again, by Cmd-C: Ctrl-C would be the stop
         await pilot.press("ctrl+t")
         await pilot.pause()
         assert _told(app) == ["Copied 9 characters", "Copied 9 characters", "Copied 41 characters"]

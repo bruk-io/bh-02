@@ -14,9 +14,10 @@ commands (Esc closes it), a question (Esc declines it) and the palette (Esc clos
 reply running it does nothing. Ctrl-P opens the command palette.
 
 Copying goes to the terminal's clipboard through Textual (`copy_to_clipboard`, an OSC 52
-sequence), and every way of copying says how much in one line: Ctrl-C with text selected (it
-stops nothing then, and a second Ctrl-C stops the reply), Cmd-C (Textual's own `super+c`),
-a mouse selection finished in the transcript (copied at once), and Ctrl-T for the newest reply.
+sequence), and every way of copying says how much in one line: Ctrl-C with text selected that
+has not been copied yet (it stops nothing then; a selection already copied, as a mouse selection
+is when it ends, leaves Ctrl-C to stop the reply), Cmd-C (Textual's own `super+c`), a mouse
+selection finished in the transcript (copied at once), and Ctrl-T for the newest reply.
 
 While a reply runs, a line above the composer says for how long (`Working`, redrawn by a timer
 that starts and stops with the reply).
@@ -48,6 +49,8 @@ from typing import Any
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.selection import Selection
+from textual.widget import Widget
 from textual.widgets import OptionList, TextArea
 
 from tui_cordis_plugin import frame, render, theme
@@ -86,6 +89,9 @@ _COMMAND_RUNS = (
 )
 
 type _Question = tuple[Mapping[str, Any], asyncio.Future[bool]]
+# A selection of the screen as it was copied: where it is (each widget and its range) and what it
+# reads there (the text under the same range changes as output arrives).
+type _Taken = tuple[tuple[tuple[Widget, Selection], ...], str]
 
 # How long the line saying what was copied stays on screen.
 _TOLD_FOR = 3.0
@@ -153,6 +159,7 @@ class BhApp(App[None]):
         self._replying = 0  # replies streaming now (started, not yet ended)
         self._typed: list[str] = []  # lines typed while one streams, drawn once it ends
         self._hangups = 0  # checks in a row that found the terminal gone
+        self._copied: _Taken | None = None  # the screen's selection as last copied
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         return dict(theme.VARIABLES)
@@ -398,42 +405,52 @@ class BhApp(App[None]):
         screen.dismiss(False)
 
     def action_interrupt(self) -> None:
-        """Ctrl-C: copy the text that is selected, if any, and stop nothing (`_copy_selection`);
-        otherwise stop the running turn (`_stop`)."""
+        """Ctrl-C: copy the text that is selected and not copied yet, and stop nothing
+        (`_copy_selection`); otherwise stop the running turn (`_stop`)."""
         if not self._copy_selection():
             self._stop()
 
     def _copy_selection(self) -> bool:
-        """Copy the text selected now, clear the selection (or a second Ctrl-C would copy it
-        again and never stop anything), and say whether there was any. It is the composer's own
-        selection when the composer has the focus and some, else the screen's (the transcript's,
-        which Textual keeps). Never while a question is up: Ctrl-C then answers it no, as ever."""
+        """Copy the text selected now, clear the selection, and say whether it did. It is the
+        composer's own selection when the composer has the focus and some, else the screen's (the
+        transcript's, which Textual keeps), but not one that was copied already: a mouse selection
+        is copied when it ends and stays shown, so the Ctrl-C that follows stops the reply (which
+        comes first) and never copies it a second time. Never while a question is up: Ctrl-C then answers
+        it no, as ever."""
         if self._asking is not None:
             return False
         composer = self.query_one(Composer)
         selected = composer.selected_text if self.focused is composer else ""
         if selected:
             composer.move_cursor(composer.cursor_location)  # the cursor alone: nothing selected
-        elif selected := self.screen.get_selected_text() or "":
+        elif (selected := self.screen.get_selected_text() or "") and self._copied != self._taken(selected):
             self.screen.clear_selection()
         else:
             return False
         self.copy_to_clipboard(selected)
         return True
 
+    def _taken(self, text: str) -> _Taken:
+        """The screen's selection now, reading `text`, as `_copied` remembers it."""
+        return tuple(self.screen.selections.items()), text
+
     def copy_to_clipboard(self, text: str) -> None:
         """Copy `text` to the terminal's clipboard (Textual writes OSC 52, which a terminal may
         ignore, and keeps its own record in `clipboard`) and say how much in one line. Every
         copy comes through here, Textual's own too (Cmd-C, a cut or a copy in the composer),
-        so each says the same. A toast, not a line of the conversation: one there would split
-        a reply that is still streaming."""
+        so each says the same, and a copy of the screen's selection is remembered (`_copied`)
+        whoever made it. A toast, not a line of the conversation: one there would split a reply
+        that is still streaming."""
         super().copy_to_clipboard(text)
         self.notify(render.copied_line(text), timeout=_TOLD_FOR, markup=False)
+        if text and text == self.screen.get_selected_text():
+            self._copied = self._taken(text)
 
     def on_text_selected(self, event: events.TextSelected) -> None:
         """A mouse selection ended (the screen says so at every mouse up, a click included):
         what is selected is copied at once. A click, or one character, copies nothing and says
-        nothing. The selection stays shown."""
+        nothing. The selection stays shown, remembered as copied (`copy_to_clipboard`), so a
+        Ctrl-C after it stops the reply."""
         if len(text := self.screen.get_selected_text() or "") >= _COPY_ON_SELECT:
             self.copy_to_clipboard(text)
 

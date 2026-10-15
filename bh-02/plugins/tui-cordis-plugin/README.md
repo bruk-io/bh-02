@@ -155,9 +155,15 @@ and the line it showed). `BhApp` overrides `copy_to_clipboard` to say how much i
 way of copying says it alike, Textual's own included. The line is a toast, not a line of the
 conversation: one there would split a reply that is still streaming (the transcript draws the
 person's own lines only once the reply ends, for the same reason). Four ways: **Ctrl-C** with text
-selected copies it, clears the selection and stops nothing (the composer's own selection when it has
-the focus, else the transcript's, which Textual keeps), and with none stops the reply as before, so
-a second Ctrl-C after a copy stops it; never while a question is up (Ctrl-C then answers it no).
+selected that has not been copied yet copies it, clears the selection and stops nothing (the
+composer's own selection when it has the focus, else the transcript's, which Textual keeps), and
+otherwise stops the reply as before, so a second Ctrl-C after a copy stops it. A selection counts as
+copied once any copy of it was made (`BhApp.copy_to_clipboard` remembers it, with where it is and
+what it reads, so a different selection or new text under the same range is new): a mouse
+selection is copied as it ends and stays shown, and the Ctrl-C that follows must stop the reply, not
+copy the same text again. What copy on select leaves uncopied is a selection of one character, one
+made without a mouse up (Textual's select all), and the composer's own; Ctrl-C copies those. Never
+while a question is up (Ctrl-C then answers it no).
 **Cmd-C** is Textual's own `super+c`, bound by the screen's copy and by the text area's: the priority
 Ctrl-C binding never shadowed it, and it reaches the app only where the terminal passes Cmd to
 programs (the kitty keyboard protocol). A **mouse selection** in the transcript is copied when the
@@ -169,7 +175,9 @@ so a reply that stops for tool calls and goes on comes whole; when the newest me
 yet it is the one before; with none, it says `Nothing to copy: no reply yet`. It is a free key:
 the text area binds no `ctrl+t`, nor does a screen or the app, and no terminal keeps it, while
 Ctrl-O (Claude Code's), Ctrl-R, Ctrl-G and Ctrl-N are keys readline and Claude Code give other
-meanings. Esc never copies (it also clears a selection, Textual's own).
+meanings. Esc never copies (it also clears a selection: Textual's own, the screen's escape key, which the
+app's non-priority Esc binding leaves to run; a test presses it with the focus in the transcript and
+in the composer, a reply running or not).
 
 **The transcript** draws a turn as it streams: a block per event, a CSS class per kind. Text
 and thinking grow one `Stream`, which settles its text into pieces of a couple of dozen lines
