@@ -253,19 +253,27 @@ def destroy_with_grace(jail: Jail, grace: float) -> KillReport:
     tests that time the ladder's escalation (the handle-era teardown took
     `grace=` until decision-183)."""
     record = jail._record()
+    instance, link = record.supervisor, None if record.held is None else record.held.link
     return kill_named(
         known=record.processes,
         jail_dir=record.jail_dir,
         helper_pids=record.helper_pids,
         helper_stamps=record.helper_stamps,
+        supervisor=None if instance is None else (instance.pid, instance.start_time),
+        end_of_file=None if link is None else link.close,
         grace=grace,
     )
 
 
 def teardown_group(process: Process, *, timeout: float = 20.0) -> None:
     """`teardown_pgid` for a process's group, waiting on the process between
-    passes so this process's exit waiter reaps its leader."""
+    passes so this process's exit waiter reaps its leader. A supervised jail
+    (decision-192) outlives its processes, so its instance is destroyed too:
+    a test that removes the jail directory next would otherwise race the
+    supervisor's own end, which writes into it."""
     teardown_pgid(process._record.pgid, wait=process.wait, timeout=timeout)
+    if process._jail._record().supervisor is not None:
+        process._jail.destroy()
 
 
 def teardown_pgid(

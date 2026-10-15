@@ -938,7 +938,7 @@ class BrigJail:
         finally:
             os.close(watched)
         if wire is not None:
-            wire.arm(process.pid)  # brig's process leads its own group
+            wire.arm(running.destroy)  # brig's teardown: every process of the jail, a setsid() one too
         started = _Jailed(running, process, facts, jail_dir, placed, lock, record, tether, wire)
         try:
             await _until_listening(endpoint, _READY_TIMEOUT_S)

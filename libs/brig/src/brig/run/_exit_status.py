@@ -70,7 +70,7 @@ from collections.abc import Sequence
 from typing import Final
 
 #: The wrapper program, run as `python -I -c WRAPPER_SOURCE <exit file>
-#: <ready fd> <argv...>`: isolated, because it runs in the workload's working
+#: <ready fd> <tether fd or -> <fds to keep or -> <argv...>`: isolated, because it runs in the workload's working
 #: directory, which `-c` would put first on its import path (decision-169;
 #: the watcher it starts runs the same way). Kept as a string rather than a module so that
 #: running it needs no importable `brig` inside the launched environment and
@@ -88,7 +88,8 @@ import sys
 exit_file = sys.argv[1]
 ready_fd = int(sys.argv[2])
 tether_fd = None if sys.argv[3] == "-" else int(sys.argv[3])
-argv = sys.argv[4:]
+keep_fds = () if sys.argv[4] == "-" else tuple(int(fd) for fd in sys.argv[4].split(","))
+argv = sys.argv[5:]
 
 #: The tether's watcher (decision-167): blocks on the tether until every write end is gone,
 #: then ends its own process group, the jail's. SIGINT is ignored, because `interrupt` is for
@@ -133,7 +134,7 @@ try:
             stdin=subprocess.DEVNULL,
         )
         os.close(tether_fd)
-    proc = subprocess.Popen(argv)
+    proc = subprocess.Popen(argv, pass_fds=keep_fds)
 except OSError as exc:
     os.write(ready_fd, ("err:%s: %s" % (type(exc).__name__, exc)).encode())
     os.close(ready_fd)
@@ -177,9 +178,15 @@ class WorkloadSpawnFailed(OSError):
 
 
 def wrapper_argv(
-    python: str, exit_file: str, ready_fd: int, argv: Sequence[str], tether_fd: int | None = None
+    python: str,
+    exit_file: str,
+    ready_fd: int,
+    argv: Sequence[str],
+    tether_fd: int | None = None,
+    keep_fds: Sequence[int] = (),
 ) -> tuple[str, ...]:
-    """`python -I -c WRAPPER_SOURCE <exit file> <ready fd> <tether fd or -> <argv...>`.
+    """`python -I -c WRAPPER_SOURCE <exit file> <ready fd> <tether fd or -> <fds to keep or ->
+    <argv...>`.
 
     `exit_file` is the process's own exit record, `<jail_dir>/procs/<id>/exit`
     (`brig/run/_records.py`, decision-181). `tether_fd` (decision-167) is the
@@ -187,9 +194,15 @@ def wrapper_argv(
     it to the watcher it starts before the workload; `-` when the jail is not
     tethered.
 
+    `keep_fds` are descriptors the wrapper inherits and its child keeps (the
+    supervisor's control socket, decision-191): `subprocess` closes every other
+    one; `-` when none. The wrapper's own, the ready pipe and the tether, are
+    never among them.
+
     `argv` is the process's already-wrapped argv and is passed through
     untouched -- the wrapper prepends nothing to it, which is what keeps
     the jail's `wrap_prefix` a faithful prefix for every start to reproduce.
     """
     tether = "-" if tether_fd is None else str(tether_fd)
-    return (python, "-I", "-c", WRAPPER_SOURCE, exit_file, str(ready_fd), tether, *argv)
+    keep = ",".join(str(fd) for fd in keep_fds) or "-"
+    return (python, "-I", "-c", WRAPPER_SOURCE, exit_file, str(ready_fd), tether, keep, *argv)

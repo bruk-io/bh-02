@@ -197,7 +197,7 @@ def write(jail_dir: str, record: ProcessRecord) -> str:
     return path
 
 
-def _is_process_id(value: object) -> bool:
+def is_process_id(value: object) -> bool:
     """Whether `value` is an int a process or group id can hold (2 up to 2**31)."""
     return type(value) is int and 1 < value < _PID_LIMIT
 
@@ -227,7 +227,7 @@ def from_json(raw: object, expected_id: str) -> ProcessRecord | str:
     if raw["id"] != expected_id:
         return f"names id {raw['id']!r}, not its directory's {expected_id!r}"
     pid, pgid = raw["pid"], raw["pgid"]
-    if not (_is_process_id(pid) and _is_process_id(pgid)):
+    if not (is_process_id(pid) and is_process_id(pgid)):
         return f"'pid'/'pgid' must both be ints from 2 to {_PID_LIMIT - 1}, got {pid!r}/{pgid!r}"
     order = raw["order"]
     if type(order) is not int or order < 0:

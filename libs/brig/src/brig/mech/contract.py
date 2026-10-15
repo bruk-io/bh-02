@@ -51,7 +51,7 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from brig.core import Axis, DataValue, EventKind, Graded, Spec
-from brig.core.runtime import Capability, RuntimeKind, channel_dir
+from brig.core.runtime import Capability, RuntimeKind, SupervisorPlan, channel_dir
 
 # Type aliases
 ArgvTransformer = Callable[[tuple[str, ...]], tuple[str, ...]]
@@ -346,6 +346,11 @@ class Step:
         events: This mechanism's optional sensor feed (SPEC.md §6, §11), or
                 `None` for a mechanism that has nothing to sense. Defaults
                 to `None` so no pre-M3 construction site breaks.
+        supervisor: `None`, or the plan of a jail whose PID 1 is brig's own
+                supervisor (SPEC.md §6, decision-190): `wrap` then wraps the
+                supervisor's argv, never a workload's, and every process of the
+                jail is a request to it. At most one mechanism of a stack
+                declares one. Defaults to `None`.
     """
 
     wrap: ArgvTransformer
@@ -356,6 +361,7 @@ class Step:
     grades: Mapping[Axis, Graded]
     denial_signatures: tuple[re.Pattern[str], ...]
     events: EventSource | None = None
+    supervisor: SupervisorPlan | None = None
 
     def __post_init__(self) -> None:
         # Defensive copy for env: prevent caller mutations from affecting this Step

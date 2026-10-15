@@ -100,6 +100,25 @@ def forget(pid: int) -> None:
         _EXITS.pop(pid, None)
 
 
+def record_status(
+    pid: int, returncode: int, *, jail_id: str, sensors: tuple[EventSource, ...] = ()
+) -> None:
+    """Record that `pid` ended with `returncode` (`Popen.returncode`'s convention), and the
+    `Event`s `sensors` make of that ending. `watch` does this for a process it reaped; a
+    supervised jail's process is reaped by its supervisor, which reports the status, and
+    `LinkedSupervisor.wait` records it here, so `Process.exit_events` answers the same way
+    for both (decision-192)."""
+    outcome = ExitOutcome(returncode=returncode)
+    payloads = [
+        payload
+        for payload in (sensor.classify_exit(outcome) for sensor in sensors)
+        if payload is not None
+    ]
+    record = ExitRecord(returncode=returncode, events=stamp_all(payloads, jail_id))
+    with _LOCK:
+        _EXITS[pid] = record
+
+
 def watch(
     proc: subprocess.Popen[bytes],
     *,
@@ -122,14 +141,6 @@ def watch(
                 _WATCHED.discard(pid)
         if code is None:
             return  # nothing observed; wait() will say so rather than guess
-        outcome = ExitOutcome(returncode=code)
-        payloads = [
-            payload
-            for payload in (sensor.classify_exit(outcome) for sensor in sensors)
-            if payload is not None
-        ]
-        record = ExitRecord(returncode=code, events=stamp_all(payloads, jail_id))
-        with _LOCK:
-            _EXITS[pid] = record
+        record_status(pid, code, jail_id=jail_id, sensors=sensors)
 
     threading.Thread(target=_run, name=f"brig-exit-{pid}", daemon=True).start()

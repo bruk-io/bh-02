@@ -11,17 +11,19 @@ measured), so the jail ends instead, at once, and the next input's jail holds th
 `wires` turns the held paths into what to watch (each one's directory, by name), `decoded` reads
 the kernel's inotify records, and `lifted` decides which held paths those events took away: all
 three pure. `Tripwire` is the shell: an inotify descriptor, set up before bubblewrap starts, and
-a thread that waits on it and kills the jail's process group at the first lift.
+a thread that waits on it and ends the jail, by whatever the caller armed it with, at the first
+lift: on Linux brig's `Jail.destroy`, since a jail's programs are children of brig's supervisor
+and not one process group (brig's decision-190), so killing the program's group would leave a
+program in a session of its own running with the mount lifted.
 """
 
 import contextlib
 import ctypes
 import os
 import select
-import signal
 import struct
 import threading
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 
 __all__ = ["Tripwire", "decoded", "lifted", "tripped_for", "wires"]
@@ -90,9 +92,9 @@ def tripped_for(paths: Sequence[str]) -> str:
 class Tripwire:
     """An inotify descriptor watching the directories of a jail's held paths (`wires`), made
     before bubblewrap starts so nothing that happens from then on is missed, and, once the jail
-    runs, a thread that kills its process group at the first event that lifts a hold
-    (`lifted`) and keeps why (`tripped`). Built only on Linux; `stop` before the jail's
-    placeholders are removed, which would read as lifts."""
+    runs, a thread that ends the jail at the first event that lifts a hold (`lifted`) and keeps
+    why (`tripped`). Built only on Linux; `stop` before the jail's placeholders are removed, which
+    would read as lifts."""
 
     def __init__(self, held: Iterable[str]) -> None:
         self.tripped = ""
@@ -114,12 +116,14 @@ class Tripwire:
         self._stop_r, self._stop_w = os.pipe()
         self._thread: threading.Thread | None = None
 
-    def arm(self, group: int) -> None:
-        """Start the thread that ends process group `group` at the first lift."""
-        self._thread = threading.Thread(target=self._watch, args=(group,), name="bh-02 tripwire", daemon=True)
+    def arm(self, end: Callable[[], object]) -> None:
+        """Start the thread that calls `end`, which ends the jail, at the first lift. `end` must
+        not need the jail's cooperation. What it raises is swallowed here: this thread has nowhere
+        to report it (the terminal is the app's)."""
+        self._thread = threading.Thread(target=self._watch, args=(end,), name="bh-02 tripwire", daemon=True)
         self._thread.start()
 
-    def _watch(self, group: int) -> None:
+    def _watch(self, end: Callable[[], object]) -> None:
         while True:
             ready, _, _ = select.select([self._fd, self._stop_r], [], [])
             if self._stop_r in ready:
@@ -131,8 +135,8 @@ class Tripwire:
             events = [(self._dirs.get(wd, ""), mask, name) for wd, mask, name in decoded(data)]
             if paths := lifted(events, self._watched):
                 self.tripped = tripped_for(paths)  # first: whoever sees the jail gone asks why
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.killpg(group, signal.SIGKILL)
+                with contextlib.suppress(Exception):
+                    end()
                 return
 
     def stop(self) -> None:

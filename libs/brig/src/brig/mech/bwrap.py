@@ -35,12 +35,17 @@ mount stacks over an earlier one.** One rule, no exceptions: LATER WINS,
 and the stages are ordered so that "later" means "more specific and more
 restrictive".
 
-    1. `--unshare-all --cap-drop ALL`      namespaces: mount, pid, ipc, uts,
-                                           cgroup, user (try), and NET --
+    1. `--unshare-all --as-pid-1`,         namespaces: mount, pid, ipc, uts,
+       `--cap-drop ALL`, `--chdir /`       cgroup, user (try), and NET --
                                            the network axis's whole
-                                           enforcement (deny-all); and no
+                                           enforcement (deny-all); the
+                                           command is the pid namespace's
+                                           init, brig's supervisor
+                                           (decision-190, below); no
                                            capability for the workload
-                                           (decision-177, below).
+                                           (decision-177, below); and a
+                                           working directory the jail can't
+                                           write.
     2. `--proc /proc`,                     the jail's OWN furniture: a proc
        `--ro-bind /proc/sys /proc/sys`,    for its own pid namespace, its
        `--dev /dev`                        sysctls read-only (decision-177),
@@ -104,6 +109,12 @@ restrictive".
        `--ro-bind /dev/null DEST` (file)   A file reads EACCES (bwrap mounts
        or `--perms 0000 --tmpfs DEST       nodev); a directory is an empty,
        --remount-ro DEST` (directory)      mode-0000, read-only tmpfs.
+    7a. `--perms 0444 --ro-bind-data 0     the supervisor's own program, read
+        /.brig-supervisor.py`              from the host's memory through
+                                           descriptor 0 and bound read-only
+                                           at the root of the jail's tmpfs
+                                           (decision-190), after every mount
+                                           so none covers it.
     8. `--remount-ro /`                    the jail's own root tmpfs, read-only
                                            (decision-166). Every directory
                                            bwrap made to hang a mount on is a
@@ -113,7 +124,24 @@ restrictive".
                                            (in the jail only). Last, since a
                                            mount point cannot be made on a
                                            read-only root.
-    9. `--` then the workload's argv.
+    9. `--` then the argv of the jail's PID 1: the supervisor, never a
+       workload's (decision-190).
+
+**The jail's PID 1 is brig's supervisor, and the render says what it runs
+(decision-190).** A bwrap jail is no longer made around one workload: it is
+made around `brig.run`'s supervisor, `--as-pid-1`, so the kernel drops every
+`SIGKILL` and `SIGSTOP` a process of the jail sends it, and a process of the
+jail is a request to it (SPEC.md section 8, decision-191). `Bwrap.compile` hands
+the runtime a `SupervisorPlan` (`Step.supervisor`) naming the interpreter it
+runs under (`python -I`, from `Bwrap(interpreter=...)`, `/usr/bin/python3` by
+default), and **refuses a `Spec` that does not mount that interpreter**
+(`InterpreterNotMounted`): the allowlist denies by absence, and a jail whose
+PID 1 cannot start is no jail. The program's source is delivered by
+`--ro-bind-data` from descriptor 0 (the runtime opens it as the spawn's stdin),
+stage 7a, at `SUPERVISOR_SOURCE_PATH` at the root of the jail's own tmpfs; a
+`Spec` that mounts `/` or names that path would cover or replace it, so it is
+refused (`SupervisorSourceCovered`). The working directory is `/`, which stage
+8 makes read-only: the supervisor runs from a directory the jail can't write.
 
 **A jail started as root holds no capabilities (decision-177).** Run as
 root, bwrap maps the jail's uid 0 to the host's and keeps every capability
@@ -274,7 +302,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, ReadModel, Spec
-from brig.core.runtime import RuntimeKind, channel_dir
+from brig.core.runtime import SUPERVISOR_SOURCE_PATH, RuntimeKind, SupervisorPlan, channel_dir
 from brig.mech.contract import ArgvTransformer, CompileCtx, Step
 
 #: Absolute, never the bare name `bwrap` (decision-026 rule 1's family, the
@@ -284,6 +312,10 @@ from brig.mech.contract import ArgvTransformer, CompileCtx, Step
 #: see `Bwrap.__init__` -- because unlike `sandbox-exec` this binary is not
 #: shipped by the OS and a distribution may put it elsewhere.
 DEFAULT_BWRAP_PATH: Final[str] = "/usr/bin/bwrap"
+
+#: The interpreter the supervisor runs under inside the jail (decision-190), when the
+#: mechanism is given none: the system's own, which a `Spec` that mounts `/usr` has.
+DEFAULT_INTERPRETER: Final[str] = "/usr/bin/python3"
 
 _LINUX: Final[str] = "linux"
 
@@ -299,9 +331,9 @@ _ENETUNREACH_SIGNATURE: Final[re.Pattern[str]] = re.compile(r"Network is unreach
 _FS_READ_DETAIL: Final[str] = (
     "bwrap enforces fs_read as an allowlist: the jail's root is a fresh "
     "namespace containing only what this mechanism mounts into it -- "
-    "spec.fs.read_allows read-only, the write roots, the declared channel's "
-    "own directory and the channel directory, and the jail's own /proc and "
-    "/dev furniture. A path "
+    "spec.fs.read_allows read-only, the write roots, the channel directory, "
+    "the jail's own /proc and /dev furniture, and the supervisor's own "
+    "program, bound read-only from memory at the root of its tmpfs. A path "
     "outside that set is not readable because it does not exist inside the "
     "jail, so it denies by ABSENCE (ENOENT) and not by a denial message; "
     "this axis is proved by an ABSENCE probe plus the battery's positive "
@@ -422,6 +454,19 @@ class ChannelInsideWriteDeny(ValueError):
     Names the channel directory and the `write_denies` entry -- the same
     refusal, for the same reason, that `brig.mech.seatbelt.profile` makes on
     its own side."""
+
+
+class InterpreterNotMounted(ValueError):
+    """Raised when the interpreter the supervisor runs under (`Bwrap(interpreter=...)`,
+    decision-190) is not under a path the `Spec` mounts: the allowlist denies by
+    absence, so the jail's PID 1 could not start. Names the interpreter and the
+    mounted roots, and says what to do."""
+
+
+class SupervisorSourceCovered(ValueError):
+    """Raised when a path the `Spec` names is at or above `SUPERVISOR_SOURCE_PATH`, where
+    the supervisor's program is bound (decision-190): a mount of `/` would cover it, and
+    any other entry there would replace it. Names the path."""
 
 
 def _resolve(path: str, resolved: Mapping[str, str]) -> str:
@@ -547,6 +592,7 @@ def render_bwrap_prefix(
     resolved: Mapping[str, str],
     path_exists: Mapping[str, bool],
     jail_dir: str,
+    interpreter: str,
     path_is_dir: Mapping[str, bool] | None = None,
     bwrap_path: str = DEFAULT_BWRAP_PATH,
 ) -> tuple[str, ...]:
@@ -578,14 +624,18 @@ def render_bwrap_prefix(
         jail_dir: The jail directory, resolved (`CompileCtx.jail_dir`):
               sealed against any write root or channel directory above it
               (decision-173).
+        interpreter: The interpreter the jail's PID 1, brig's supervisor, runs
+              under, as a path inside the jail: the `Spec` must mount it
+              (decision-190).
         path_is_dir: Every `read_denies` entry stage 7 masks, mapped to
               whether it is a directory (decision-164).
         bwrap_path: Absolute path to the `bwrap` binary.
 
     Raises:
         ReadModelUnsupported, NetworkUnsupported, UnresolvedPath,
-        UnknownPathExistence, UnknownPathKind, ChannelInsideWriteDeny --
-        each naming its own subject; see the classes' own docstrings.
+        UnknownPathExistence, UnknownPathKind, ChannelInsideWriteDeny,
+        InterpreterNotMounted, SupervisorSourceCovered -- each naming its own
+        subject; see the classes' own docstrings.
     """
     if spec.fs.read_model is not ReadModel.ALLOW_LIST:
         raise ReadModelUnsupported(
@@ -599,14 +649,19 @@ def render_bwrap_prefix(
         )
 
     # Stage 1 and 2: the namespaces, then the jail's own furniture.
-    # `--cap-drop ALL` and the read-only `/proc/sys` are decision-177: as
+    # `--as-pid-1` makes the command, brig's supervisor, the pid namespace's init
+    # (decision-190), and `--chdir /` its working directory, which stage 8 makes
+    # read-only. `--cap-drop ALL` and the read-only `/proc/sys` are decision-177: as
     # root the workload is the host's uid 0, and without them a read-only
     # bind could be remounted writable and a sysctl written.
     args: list[str] = [
         bwrap_path,
         "--unshare-all",
+        "--as-pid-1",
         "--cap-drop",
         "ALL",
+        "--chdir",
+        "/",
         "--proc",
         "/proc",
         "--ro-bind",
@@ -721,6 +776,13 @@ def render_bwrap_prefix(
         else:
             args += ["--ro-bind", _NULL, path]
 
+    # Stage 7a: the supervisor's program, from descriptor 0 (decision-190), after every
+    # mount so none stacks over it, and before the root goes read-only: its mount point is
+    # a file bwrap makes in the jail's own tmpfs. A Spec the supervisor could not start
+    # under is refused here, after every refusal about the mounts themselves.
+    _refuse_unmountable_supervisor(spec, interpreter)
+    args += ["--perms", "0444", "--ro-bind-data", "0", SUPERVISOR_SOURCE_PATH]
+
     # Stage 8: the jail's own root, read-only (decision-166). bwrap builds the
     # jail on a fresh tmpfs, and every directory it makes to hang a mount on
     # -- `/tmp` above a write root, the parents of a workspace -- is a
@@ -730,6 +792,40 @@ def render_bwrap_prefix(
     # read-only root; the mounts above keep their own flags.
     args += ["--remount-ro", "/", "--"]
     return tuple(args)
+
+
+def _refuse_unmountable_supervisor(spec: Spec, interpreter: str) -> None:
+    """Refuse a `Spec` the jail's PID 1 could not start under (decision-190): one that
+    does not mount `interpreter` (it is under no read or write root), or one that names a
+    path at or above where the supervisor's program is bound.
+
+    Raises:
+        InterpreterNotMounted: no read or write root of `spec` holds `interpreter`.
+        SupervisorSourceCovered: a path of `spec` is at or above `SUPERVISOR_SOURCE_PATH`.
+    """
+    mounted = (*spec.fs.read_allows, *spec.fs.write_allows)
+    if not any(_is_subpath(interpreter, root) for root in mounted):
+        raise InterpreterNotMounted(
+            f"the jail's PID 1 is brig's supervisor, run under {interpreter!r}, and the Spec "
+            f"mounts nothing that holds it (read_allows and write_allows: {', '.join(mounted) or 'none'}). "
+            "Add the interpreter's directory to read_allows, or build the mechanism with the "
+            "interpreter the Spec does mount (`Bwrap(interpreter=...)`, "
+            "`strict_linux(python=...)`)"
+        )
+    named = (
+        *spec.fs.read_allows,
+        *spec.fs.write_allows,
+        *spec.fs.write_denies,
+        *spec.fs.read_denies,
+    )
+    for path in named:
+        if _is_subpath(SUPERVISOR_SOURCE_PATH, path):
+            raise SupervisorSourceCovered(
+                f"the Spec names {path!r}, which is at or above {SUPERVISOR_SOURCE_PATH!r}, "
+                "where the supervisor's program is bound read-only at the root of the jail's "
+                "tmpfs: a mount there would cover or replace it. Name the directories the jail "
+                "needs, not the root"
+            )
 
 
 def pins(write_allows: tuple[str, ...], write_denies: tuple[str, ...]) -> tuple[str, ...]:
@@ -818,6 +914,12 @@ class Bwrap:
             `compile` may no more perform I/O than it may read a clock --
             the same posture `ConnectProxy(python=...)` takes for the
             interpreter it spawns its helper with.
+        interpreter: Absolute path, inside the jail, of the Python the jail's
+            PID 1 (brig's supervisor) runs under, `DEFAULT_INTERPRETER` by
+            default (decision-190). The `Spec` must mount it.
+
+    Raises:
+        ValueError: `interpreter` is not an absolute path.
     """
 
     name = "bwrap"
@@ -826,8 +928,11 @@ class Bwrap:
     #: (decision-179).
     runtime: RuntimeKind | None = RuntimeKind.HOST
 
-    def __init__(self, bwrap_path: str = DEFAULT_BWRAP_PATH) -> None:
+    def __init__(
+        self, bwrap_path: str = DEFAULT_BWRAP_PATH, interpreter: str = DEFAULT_INTERPRETER
+    ) -> None:
         self._bwrap_path = bwrap_path
+        self._supervisor = SupervisorPlan(interpreter)
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         """Refuses on a non-linux platform (`PlatformUnsupported`) and then
@@ -845,6 +950,7 @@ class Bwrap:
             resolved=ctx.resolved_paths,
             path_exists=ctx.path_exists,
             jail_dir=ctx.jail_dir,
+            interpreter=self._supervisor.interpreter,
             path_is_dir=ctx.path_is_dir,
             bwrap_path=self._bwrap_path,
         )
@@ -869,6 +975,7 @@ class Bwrap:
                 Axis.NETWORK: Graded(Grade.ENFORCED, _NETWORK_DETAIL),
             },
             denial_signatures=(_EROFS_SIGNATURE, _ENETUNREACH_SIGNATURE),
+            supervisor=self._supervisor,
         )
 
 
@@ -878,11 +985,14 @@ bwrap: Bwrap = Bwrap()
 
 __all__ = (
     "DEFAULT_BWRAP_PATH",
+    "DEFAULT_INTERPRETER",
     "Bwrap",
     "ChannelInsideWriteDeny",
+    "InterpreterNotMounted",
     "NetworkUnsupported",
     "PlatformUnsupported",
     "ReadModelUnsupported",
+    "SupervisorSourceCovered",
     "UnknownPathExistence",
     "UnknownPathKind",
     "UnresolvedPath",

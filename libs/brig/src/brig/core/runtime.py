@@ -6,9 +6,14 @@ the runtime a mechanism needs and `stack` can grade a runtime's axes without
 importing `run` (SPEC.md sections 6 and 7, decision-179). Each enum holds only
 the members something in brig can produce: more arrive with the runtimes that
 need them.
+
+`SupervisorPlan` is what a mechanism hands the runtime when its jail runs brig's
+own supervisor as PID 1 (SPEC.md section 6, decision-190): the interpreter the
+supervisor runs under inside the jail, and where its source is bound.
 """
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum
 from typing import Final, assert_never
 
@@ -49,6 +54,33 @@ class Scope(Enum):
 
     JAIL = "JAIL"
     PROCESS = "PROCESS"
+
+
+#: Where a supervised jail's supervisor program is bound inside it (decision-190): a file at
+#: the root of the jail's own tmpfs, which `bwrap` delivers read-only from the host's memory
+#: (`--ro-bind-data`), so nothing on the host's disk is its source and nothing the jail can
+#: write is.
+SUPERVISOR_SOURCE_PATH: Final = "/.brig-supervisor.py"
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisorPlan:
+    """A jail whose PID 1 is brig's supervisor (SPEC.md section 6, decision-190).
+
+    `interpreter` is the absolute path, inside the jail, of the Python the supervisor
+    runs under (`python -I`); the mechanism has checked that the `Spec` mounts it. The
+    program itself is `run`'s, and it is bound at `SUPERVISOR_SOURCE_PATH`."""
+
+    interpreter: str
+
+    def __post_init__(self) -> None:
+        """Raises:
+        ValueError: `interpreter` is not an absolute path."""
+        if not self.interpreter.startswith("/"):
+            raise ValueError(
+                f"SupervisorPlan.interpreter must be an absolute path inside the jail, got "
+                f"{self.interpreter!r}"
+            )
 
 
 #: The two axes a runtime grades rather than a mechanism (SPEC.md section 7,

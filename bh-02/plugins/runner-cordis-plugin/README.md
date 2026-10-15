@@ -244,9 +244,12 @@ rest of the session). A held *directory* is not affected by what happens inside 
 So the jail watches the directory of every path it holds (`tripwired`: each write deny under a
 writable root, and each secret it holds there, `held`: one that is there, masked, and an absent
 one no input can create, under a write deny), with inotify from bh-02, set up after its placeholders are
-made and before bubblewrap mounts over them (`tripwire.py`). At the first such change it kills
-the jail's process group, a running input and anything an input left in the background with
-it. The next input starts a new jail, which holds the path again, and its answer, which the
+made and before bubblewrap mounts over them (`tripwire.py`). At the first such change it ends
+the jail (brig's `Jail.destroy`: since brig's decision-190 a jail's programs are children of its
+supervisor, not one process group, so ending the jail is what ends a program in a session of its
+own as well, `test_the_tripwire_ends_the_whole_jail_a_program_in_a_session_of_its_own_included`),
+a running input and anything an input left in the background with it. The next input starts a
+new jail, which holds the path again, and its answer, which the
 person sees in the conversation, starts `(the REPL was started again, because something on the
 host replaced or removed .../.git/config (a `git config`, an editor's save), which lifts the
 jail's hold on it, so bh-02 ended the jail; the next one holds it again; what earlier inputs

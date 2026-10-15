@@ -41,6 +41,11 @@ decision-185 (TASK-0079.33) `EndpointRefused`, what `Process.connect` and
 `Process.wait_ready` raise when what answers a reserved socket is not its
 process's own listener.
 
+**A supervised jail's exceptions are re-exported too** (decision-191, TASK-0079.06):
+`SupervisorFailed` (`Jail.create`: the jail's supervisor never said it was ready),
+`SupervisorGone` (a request on a closed control socket) and `SupervisorUnresponsive` (a
+request unanswered at its host-side deadline, and the jail destroyed for it).
+
 Readiness is `Process.wait_ready`, through the runtime's own dial
 (`readiness.py` holds its poll); `Jail.wait_ready(channel)` is gone
 (decision-186).
@@ -76,6 +81,8 @@ from brig.core import EventKind as EventKind
 from brig.core.runtime import RuntimeKind as RuntimeKind
 from brig.run._exit_status import WorkloadSpawnFailed as WorkloadSpawnFailed
 from brig.run._records import JailDirInUse as JailDirInUse
+from brig.run._supervisor_link import SupervisorGone as SupervisorGone
+from brig.run._supervisor_link import SupervisorUnresponsive as SupervisorUnresponsive
 from brig.run._tether import TetherClosed as TetherClosed
 from brig.run._waiters import ExitRecord as ExitRecord
 from brig.run.compile_ctx import build_compile_ctx as build_compile_ctx
@@ -90,6 +97,7 @@ from brig.run.exec_ import ExecWrapNotAPrefix as ExecWrapNotAPrefix
 from brig.run.host import HelperFailed as HelperFailed
 from brig.run.host import HostRuntime as HostRuntime
 from brig.run.host import LaunchRefused as LaunchRefused
+from brig.run.host import SupervisorFailed as SupervisorFailed
 from brig.run.jail import JAIL_VERSION as JAIL_VERSION
 from brig.run.jail import Jail as Jail
 from brig.run.jail import Process as Process
@@ -133,6 +141,9 @@ __all__ = (  # noqa: RUF022
     "Reservation",
     "ReservationRefused",
     "RuntimeKind",
+    "SupervisorFailed",
+    "SupervisorGone",
+    "SupervisorUnresponsive",
     "TetherClosed",
     "UnknownChannel",
     "WaitReadyTimeout",

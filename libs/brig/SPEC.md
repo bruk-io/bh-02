@@ -59,8 +59,14 @@ change that violates one is a spec change first, code second.
    sender's claim.
 7. **Control must not require cooperation.** Interrupt and kill are delivered
    by mechanism-level means that work when the jail is spinning, wedged, or
-   hostile. Teardown is process-group/tree-shaped, and its deliverability is
-   itself graded in the report.
+   hostile. Teardown reaches everything the jail contains (process group, tree,
+   namespace, container), never a single process, and is verified; its
+   deliverability is itself graded in the report, per scope: the jail's, and
+   one process's. (Ruled 2026-10-15, decision-189, TASK-0079.06: the
+   "namespace" case is a supervised bwrap jail, whose instance is a pid
+   namespace that ends with its PID 1, §8; the grade at the process scope is
+   TASK-0079.08's, and until a battery proves one no grade above `unenforced`
+   is claimed.)
 8. **Events are evidence, never the boundary.** Telemetry is best-effort by
    nature. No security claim may rest on an event having been emitted.
 9. **Nothing crosses the boundary anonymously.** The exclusivity claim —
@@ -104,7 +110,9 @@ Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──create──�
   and capabilities; refuses stacks whose requirements it cannot honor.
   `HostRuntime` (`brig/run/host.py`) is today's: host process groups, the
   exit wrapper, the tether, a sibling per exec. The `subprocess` launcher
-  (§8) is the embedder's door to it.
+  (§8) is the embedder's door to it. For a bwrap jail `create` starts brig's
+  supervisor as the jail's PID 1 and every process is a request to it
+  (decision-190, decision-191, decision-192).
 - **Handle** — the running jail as the embedder holds it: serializable,
   rehydratable in a later process, owner of teardown, the anchor for
   observation and communication.
@@ -881,7 +889,8 @@ be the copy decision-152 deleted the event stream for).
 - **The mount order IS the policy**, because bwrap applies operations in the
   order they appear and a later mount stacks over an earlier one. One rule —
   later wins — with the stages ordered so that later means more specific:
-  (1) `--unshare-all --cap-drop ALL` (decision-177, below); (2) the jail's
+  (1) `--unshare-all --as-pid-1 --cap-drop ALL --chdir /` (decision-190 and
+  decision-177, below); (2) the jail's
   own furniture, `--proc /proc`, `/proc/sys` bound read-only over it
   (decision-177) and `--dev /dev`, first among the mounts so every
   spec-derived mount stacks on top of it; (3) `read_allows` as `--ro-bind`; (4) the channel directory
@@ -901,9 +910,12 @@ be the copy decision-152 deleted the event stream for).
   root or channel directory) reaches: one outside is unwritable already, and
   its `--ro-bind` would put into the jail a path the allowlist left out, a
   read grant made by a deny (2026-09-28, decision-165); (7) the `read_denies` carve-outs that exist
-  inside a mounted tree (decision-164, below); (8) `--remount-ro /`, the
+  inside a mounted tree (decision-164, below); (7a) `--perms 0444
+  --ro-bind-data 0 /.brig-supervisor.py`, the supervisor's own program, after
+  every mount (decision-190, below); (8) `--remount-ro /`, the
   jail's own root tmpfs made read-only, last of all (decision-166, below); (9)
-  `--`, then the workload's argv.
+  `--`, then the argv of the jail's PID 1, brig's supervisor, never a
+  workload's (decision-190).
 - **The jail's root is read-only (2026-09-28, decision-166), and until it was,
   "a write outside every write root is denied" was false.** bwrap builds the
   jail on a fresh tmpfs and makes every directory a mount hangs on (`/tmp`
@@ -1104,6 +1116,71 @@ be the copy decision-152 deleted the event stream for).
 
 (Implementing task: this phase.)
 
+**bwrap's jail is made around brig's supervisor, and the mechanism says what
+it runs (2026-10-15, decision-190).** decision-0001's migration step 4a, the
+mechanism's half; §8 is the runtime's. Until now a bwrap jail was one `bwrap`
+around one workload, so an instance held one process and a second one meant a
+second `bwrap`, every namespace and mount again (`EQUIVALENT_PROFILE`, §9). A
+jail that holds several processes in one instance needs something inside it to
+start them, and what ends a jail at the process scope has to survive what the
+workloads do. So the command `bwrap` runs is no workload but **brig's own
+supervisor**, PID 1 of the jail's pid namespace, and a workload is a request to
+it. Ruled:
+
+- **The mechanism hands the runtime a plan.** `Bwrap.compile` returns a `Step`
+  whose `supervisor` is a `SupervisorPlan` (`core.runtime`) naming the interpreter
+  the supervisor runs under, and `Stack.compile` carries the one plan into
+  `CompiledJail.supervisor` (two mechanisms declaring one is `SupervisorConflict`,
+  law 2; seatbelt and every other mechanism declare none and compile exactly as
+  before). The stack's whole composed wrap (the `rlimits` trampoline outermost,
+  `bwrap`, `env_scrub` innermost) is applied once, to the supervisor's argv; a
+  workload is never wrapped again, so the scrubbed environment and `RLIMIT_CPU` reach
+  it by inheritance from the supervisor, as the decision says. The supervisor's own
+  CPU time is bounded only by that same per-process limit, never by the sum over the
+  jail: the gap the report's `control` detail names.
+- **`--as-pid-1`, so the kernel drops every `SIGKILL` and `SIGSTOP` a process
+  of the jail sends it** (measured by TASK-0079.01 with a bare PID 1, and again
+  with the real supervisor, `tests/e2e/test_supervised_jail.py`), while a `SIGKILL`
+  from the host still lands: the pid namespace ends with its init, and a `setsid()`
+  child ends with it. `--chdir /` puts the supervisor in a directory the jail can't
+  write: stage 8 makes the jail's root read-only.
+- **The interpreter is `Bwrap(interpreter=...)`, `/usr/bin/python3` by default,
+  `strict_linux(python=...)` through the preset, and a `Spec` that does not mount
+  it is refused** (`InterpreterNotMounted`, naming the interpreter, the roots and
+  what to change): the allowlist denies by absence, and a jail whose PID 1 cannot
+  start is no jail. "Mounts it" is lexical, a read or write root at or above the path;
+  a link inside the root that leads outside it (Debian's `/usr/bin/python3` is one,
+  into `/etc/alternatives`) is the `Spec` author's to mount, and the supervisor's
+  failure to start is reported with its stderr (`SupervisorFailed`, §8). The
+  supervisor runs `python -I`: no working or script directory on its import path, no
+  `PYTHON*` variable, no user site directory, as decision-169 holds every
+  interpreter brig starts on the host to, and any Python 3.9 or later with `pidfd_open`
+  (Linux 5.3) will do (tested here on 3.11, 3.12, 3.13 and 3.15).
+- **Its program is delivered by `--ro-bind-data`, from the host's memory.** The
+  runtime opens the source as an anonymous memory file and hands it to the jail's
+  spawn as stdin; `bwrap` reads descriptor 0 to the end and binds a read-only copy
+  at `/.brig-supervisor.py`, mode 0444, after every mount (stage 7a) so none stacks
+  over it and before the root goes read-only (its mount point is a file in the
+  jail's own tmpfs). Nothing on the host's disk is the source, so nothing a jail can
+  write is, and `jail_dir`, which the allowlist hides, stages nothing. A `Spec` that
+  names a path at or above that one (`/`, say) is refused (`SupervisorSourceCovered`):
+  a bind of the host's root would make `bwrap` create the file in it. bwrap closes
+  descriptor 0 when it has read it, so the supervisor's first act is to reopen
+  `/dev/null` there, before anything else could take the number.
+- **Grades don't move.** `fs_read`, `fs_write` and `network` are `enforced` as
+  before (the `fs_read` detail now names the supervisor's program among what the
+  jail holds), and `control` and `channel_exclusivity` stay `unenforced`, the
+  `HOST` runtime's static grades, until a battery that plants survivors proves a
+  higher one (TASK-0079.08, law 10). Seatbelt has no PID 1 to be and no
+  namespace to end a process by; it keeps `EQUIVALENT_PROFILE` and a group-shaped
+  stop, unchanged and untested here.
+
+`render_bwrap_prefix` takes the interpreter as a required keyword and refuses
+last among its own refusals (an unmountable `Spec` still reports a
+`ChannelInsideWriteDeny` first). The preset's `python` parameter is the one
+`confined_egress_darwin(python)` has. Implementing task: TASK-0079.06. (Ruled
+2026-10-15, decision-190.)
+
 Deliberately absent: a cooperative filesystem guard (see §4), and `ulimit -u`
 / `RLIMIT_NPROC` anywhere (per-user on darwin and commonly on linux; capping
 it strangles the operator's desktop and masquerades as a policy denial — a
@@ -1268,7 +1345,10 @@ class Supervisor(Protocol):
 ```
 
 - `HostRuntime` — host process groups: each start detached, in a new process
-  group, stdio to files. (The `subprocess` launcher until decision-183.)
+  group, stdio to files. (The `subprocess` launcher until decision-183.) In a
+  jail whose stack declares a supervisor (bwrap's) only the first of those is
+  host-started: the supervisor, PID 1 of the jail, and every other process is a
+  request to it (decision-191).
 
 **One launcher, and the roster is exactly what exists (2026-09-08,
 decision-158).** This list held three entries at various times and never held
@@ -1458,6 +1538,102 @@ makes before the first spawn. So:
 `Handle`, until TASK-0079.28 deletes it. Implementing task: TASK-0079.25.
 (Ruled 2026-10-12, decision-181.) *(It is deleted: decision-183, §3.)*
 
+**A supervised jail: `create` starts the supervisor, and every process after
+it is a request (2026-10-15, decision-191).** decision-0001's migration step 4a,
+the runtime's half; §6 (decision-190) is the mechanism's and §9 (decision-192)
+the embedder's. When the compiled jail declares a supervisor, `HostRuntime.create`
+does what it did, then starts one process, brig's supervisor, under the whole
+composed wrap, and returns once it has said it is ready. Ruled:
+
+- **How it starts.** `(*wrap_prefix, interpreter, "-I", "/.brig-supervisor.py",
+  <fd>)` under the same exit wrapper as any start, detached in a process group of
+  its own, tethered when the jail is (decision-167), its stdout and stderr files in
+  `<jail_dir>/supervisor/`, host-opened and sealed from the jail as the rest of the
+  jail directory is (decision-173). Its stdin is its own source (§6), and `<fd>` is
+  its end of a `SOCK_SEQPACKET` socketpair the host made first: the exit wrapper
+  gained an argument naming descriptors it and its child keep (`subprocess` closes
+  every other), and nothing else holds that end. The supervisor makes it
+  close-on-exec and each process it starts closes every descriptor above 2 before its
+  exec, so the socket is passed to nothing the supervisor starts. A wrap that is not a
+  pure prefix refuses the create (`ExecWrapNotAPrefix`), as it refused every start.
+  The group the exit wrapper leads is **the instance**: `SupervisorRecord`, its pid
+  and start stamp, is what `destroy` and `alive` identify it by (decision-155), and
+  ending it ends the namespace.
+- **The program (`brig/run/_supervisor_program.py`) is the standard library and
+  nothing else**, in the syntax of the oldest Python it supports, kept as text for
+  that reason. It imports every module it needs, `array` (which `socket.send_fds`
+  imports late on newer Pythons) and `warnings` (which `os.execvpe` imports late, found
+  by running the bwrap tiers in `scripts/linux-jail-check`'s Ubuntu container, where
+  starting `bash` by name was refused) included, **before it says it is ready, and
+  then refuses every import** with a finder first on `sys.meta_path`: "every import done
+  before any process starts" is a promise that fails loudly where it is broken. A
+  rehearsal first does each kind of thing it will ever do once (a search of the path
+  for a program, a socket pass, a start, a wait, a signal, a stop), so whatever an
+  interpreter loads late for them is loaded in the process every other is forked from
+  and not in a child that is gone with it. It
+  makes itself undumpable (`prctl(PR_SET_DUMPABLE, 0)`, refusing to start if it cannot),
+  installs a handler for `SIGCHLD` and for no other signal (the handler does nothing;
+  the wake-up descriptor does the work), checks it is PID 1, and fails closed: an
+  exception it cannot handle ends it, and with it, by the kernel's rule for a pid
+  namespace's init, everything in the jail.
+- **The wire.** One JSON object per message, a request `{"id": n, "op": ...}` and
+  its reply `{"id": n, "ok": ...}`, descriptors by `SCM_RIGHTS`, a message at most
+  1 MiB; the supervisor sends `{"hello": 1, "protocol": 1, "python": ...}` once,
+  when it is ready, and the host refuses another protocol. Five ops. `start` carries
+  the process's id (brig's 16 hex, the same as its records directory), argv and
+  cwd and three descriptors, stdin, stdout and stderr, which the host opened (so the
+  jail needs no writable directory for `IoPolicy`); the supervisor forks, makes the
+  child leader of a process group of its own (the parent does it too, so the group
+  exists before the reply), holds it at a gate, and replies with its pid in the jail
+  and a pidfd. `go` opens the gate: the child takes its three descriptors as 0, 1 and
+  2, closes the rest, restores the signal dispositions CPython changed (`SIGPIPE`,
+  `SIGXFSZ`) and execs with the environment the supervisor was started with, read
+  from the kernel's copy (`/proc/self/environ`) so a variable CPython set on itself
+  (`LC_CTYPE`) is not inherited by every process of the jail; the reply to `go` says the
+  exec happened or why it did not, which is `WorkloadSpawnFailed`. `signal` is `killpg`
+  of the process's group by its id, `wait` is an answer when the process has ended or a
+  deadline in the request passes (several outstanding at once, none blocking another),
+  `stop` is `SIGTERM`, a grace period, `SIGKILL`, a grace period, verified by the
+  supervisor and again by the host. A process is always named by its id, never a
+  number the jail could influence. Requests from several threads are in flight at once
+  and a reply finds its caller by id (`brig/run/_supervisor_link.py`).
+- **A request has a host-side deadline, and a missed one ends the jail.** A start's
+  two requests and a signal have 30 s, a wait's chunk (at most 5 s, asked again for
+  a longer one) 10 s more than itself, a stop twice its grace and 10 s: a supervisor that
+  does not answer is spinning, wedged or hostile, and law 7 is that control does not
+  wait on it. A miss runs the ladder against the instance's group (`SIGKILL` lands
+  on a `SIGSTOP`ped init from the host), closes the socket and raises
+  `SupervisorUnresponsive` to the caller; a closed socket is `SupervisorGone`; a start
+  that never says it is ready within 60 s, or whose socket closes first (a mount `bwrap`
+  refused, an interpreter that is not there), ends the instance and raises
+  `SupervisorFailed` carrying what the supervisor's stderr said.
+- **End-of-file on the socket ends everything.** The supervisor reads it as the host
+  being gone and exits at once; the kernel ends everything in its pid namespace with it,
+  a `setsid()` child included. That is what the host's death does (the kernel closes its
+  end, `SIGKILL` included), what `destroy` does just before the instance's ladder
+  (below, §9), and what collecting a `Jail` nobody holds does: a supervised jail lives as
+  long as the object holding its end, tether or none. The tether still runs, outside
+  everything, for a supervisor that does not read it.
+- **What a process of the jail could do to the supervisor, and why it can't.** It
+  signals it: `SIGKILL`, `SIGSTOP` and every signal without a handler are dropped by
+  the kernel for a namespace's init, and `SIGCHLD`'s handler only wakes it (observed:
+  `kill -9`, `-STOP`, `-TERM`, `-INT`, `-USR1` all return 0 and the supervisor stays
+  `S` and answers). It reads or changes it through `/proc`, `ptrace` or `pidfd_getfd`:
+  undumpable, so `environ`, `mem`, `maps` and `fd/*` are `EACCES` and attach and
+  `pidfd_getfd` `EPERM` for a caller without `CAP_SYS_PTRACE`, which `--cap-drop ALL`
+  leaves none (observed; `cmdline` and `stat` stay readable and hold the control
+  descriptor's number and the program's path, nothing else). It reaches the control
+  socket: no process holds it, and a socket cannot be opened through `/proc`. It writes
+  its program: read-only, from memory. It overruns the supervisor's input: the
+  supervisor's input is the host's. What it can still do is starve it (a fork bomb, a
+  full descriptor table, memory), which is a missed deadline, which ends the jail:
+  failing closed, and `destroy` never needs the supervisor to answer.
+- **Unchanged.** The tether (decision-167), the channel directory and the verified dial
+  (decisions 184-186), `JAIL_LIFETIME` helpers, `LAUNCH_SCOPED` ones, the exit wrapper's
+  own record of how the supervisor ended (`<jail_dir>/supervisor/exit`, read by nothing).
+
+Implementing task: TASK-0079.06. (Ruled 2026-10-15, decision-191.)
+
 ## 9. The Jail (the Handle until decision-183)
 
 The shape since decision-183 (§3); "the handle" in the rulings below, which
@@ -1588,7 +1764,9 @@ verification rung lets it reach the per-item boundary, so the item is `FAILED`
   instance*; `seatbelt` can only start a sibling under an *identical
   profile* — equivalent enforcement, different instance — and the
   `ExecHandle` says which. The empty stack execs a plain process, graded
-  accordingly.
+  accordingly. *Amended 2026-10-15 (decision-192, TASK-0079.06):* bwrap does
+  it by a request to the supervisor that is the jail's PID 1, not by entering
+  a namespace: every process of a bwrap jail is `SAME_INSTANCE`.
 - `interactive=True` wires the caller's tty to a pty on the exec'd process.
   That pty is shared media for as long as it lives (it appears in
   `shared_media` accounting), and
@@ -2153,6 +2331,75 @@ status ("recorded, not invented"); the waiter's is the wrapper's, which differs
 when teardown kills the wrapper after it wrote. `wait()` returning means the
 process's leader has left; a workload that left children in its group still
 holds the jail directory, and `create` rightly refuses until they are gone.
+
+**A supervised jail's processes and ending (2026-10-15, decision-192).**
+decision-0001's migration step 4a, the embedder's half; §6 (decision-190) and §8
+(decision-191) are the mechanism's and the runtime's. In a jail whose PID 1 is
+brig's supervisor a `Process` is one of its processes, and the notes above
+about a process's leader, its exit record and its group hold for a jail the host
+starts. For a supervised one, ruled:
+
+- **A process is recorded before it runs a byte, as the host sees it.** `start` is the
+  two requests of §8. Between them the host turns the pidfd the supervisor sent into
+  the process's pid in the host's pid namespace (`/proc/self/fdinfo`, the kernel's own
+  translation between the two), reads when that process started, checks that it leads
+  a process group of its own, and writes `record.json` (`pid`, `pgid` and `start_time`
+  as every record has them; `argv` the workload's own, since the wrap is around the
+  supervisor and not around it); a pid the host cannot name, or a start time it cannot
+  read, refuses the start with the process still held at the gate, and the process is
+  told not to run. So the record is written before the process exists to be anyone, and
+  the window decision-181 named, a process running unrecorded for the length of a spawn,
+  does not exist here. A failed exec removes the record's directory, as a failed spawn
+  always did.
+- **Identity checks are the host's own, unchanged.** `Process.pid` is the process itself,
+  leading its own group, never the exit wrapper (there is none per process): `alive`, the
+  verified dial (decision-185: the peer is the process's group, led by the process
+  recorded, and in a pid namespace a co-tenant's group is refused), and a rehydrated
+  jail's per-process teardown ask what they always asked. What the host does **to** a
+  process is a request by its id (`interrupt` is a `signal` of `SIGINT`, `stop` a `stop`,
+  `wait` a `wait`), because a number the jail could influence is not what the supervisor
+  acts on. A `stop` is verified twice, by the supervisor inside and by the host's own
+  scan of the process table, and `ENDED` is reported only when both agree. Its reach is
+  the process's group, as before: a child that left it with `setsid()` is outside it, until
+  each process has a pid namespace of its own (TASK-0079.07); `destroy` ends those.
+- **`fidelity` is `SAME_INSTANCE`.** Every process of the jail is in the one mount, network
+  and pid namespace the supervisor holds, observed from inside (`readlink /proc/self/ns/*`
+  is one answer for all of them and another for any other jail), and what separates
+  them is what each process's own group and the kernel's user-id rules do, nothing more.
+  `ExecFidelity.SAME_INSTANCE`'s docstring said no mechanism could deliver it; this one
+  does.
+- **`destroy` runs the same ladder per process first, then the instance.** Each process's
+  group is ended by the four rungs (a workload that handles `SIGTERM` still gets its
+  grace), as it was; then the instance, `"supervisor"` in the `KillReport`'s closed
+  vocabulary (§9's `KILL_ITEM_KINDS` gains it, beside `workload_group`, `exec_sibling`,
+  `helper` and `container` to come), whose identity is the instance group's pgid:
+  just before its ladder the link is closed, so the supervisor takes end-of-file and the
+  jail ends at once (`SIGTERM` is dropped by a namespace's init, so the ladder alone would
+  wait out its grace), and the ladder verifies and falls back to `SIGKILL`. A supervisor
+  found running before and gone after is `ENDED`, never `ALREADY_GONE`: the verification
+  rung observed it. A rehydrated jail, which has no link, is ended by the ladder alone,
+  and waits out one grace period on the supervisor. `alive` is true while the instance
+  group's leader holds its identity, a process in it or none.
+- **The dict carries the instance** (`supervisor`, `null` or the pid and start stamp,
+  `JAIL_VERSION` 9) **and a rehydrated jail has no supervisor**: its link is a socket, which
+  can't cross `to_dict`, so `start` and `probe` are absent and `interrupt`, `stop` and
+  `wait` are absent on its processes (§9's law: absent, never raising); it can be
+  destroyed, and `alive` and the rest of what teardown needs answer from the dict.
+- **A status is the supervisor's report, and lives in the process that asked.** A
+  supervised process has no exit record on disk (its exit wrapper is the supervisor's, and
+  there is none for it): `wait` is answered by the supervisor, and a status once learned
+  is kept by the link and recorded as the exit events' source (`Process.exit_events`
+  answers as for any process, a sensor's reading of the ending included), so it is answered
+  after the jail is gone. A status the supervisor never reported before the jail ended is
+  `ExitStatusUnobservable`, as a `SIGKILL`ed process's always was.
+- **The environment is fixed when the jail is created.** decision-152's "composed fresh at
+  each start" holds for a jail whose processes the host starts; a supervised jail's
+  processes inherit the supervisor's, which is the creating process's environment through
+  the composed wrap at `create`, scrubbed as the stack scrubs it (SCRUB and no allowed
+  name: empty). `Jail.start` has no `env`, so nothing a caller could change per start
+  is lost.
+
+Implementing task: TASK-0079.06. (Ruled 2026-10-15, decision-192.)
 
 ## 10. Communication with jails
 

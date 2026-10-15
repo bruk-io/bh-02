@@ -11,10 +11,12 @@ SPEC.md §9, the fixed ladder, verbatim:
 > relocated into teardown, and law 7 makes deliverability itself a graded
 > claim rather than an assumption.
 
-And SPEC.md law 7: "Control must not require cooperation. Interrupt and
-kill are delivered by mechanism-level means that work when the jail is
-spinning, wedged, or hostile. Teardown is process-group/tree-shaped, and
-its deliverability is itself graded in the report."
+And SPEC.md law 7 (as decision-189 amended it): "Control must not require
+cooperation. Interrupt and kill are delivered by mechanism-level means that
+work when the jail is spinning, wedged, or hostile. Teardown reaches
+everything the jail contains (process group, tree, namespace, container),
+never a single process, and is verified; its deliverability is itself graded
+in the report, per scope: the jail's, and one process's."
 
 **The pgid signalled here was read at spawn, and the pid-reuse seam that
 created was ACCEPTED by decision-144 and is CLOSED by decision-155
@@ -106,10 +108,11 @@ _POLL_INTERVAL_S: Final = 0.02
 
 #: SPEC.md §9: closed vocabulary of kinds that a KillReport item can hold.
 #: Ordered as the spec lists them. A jail produces "workload_group",
-#: "exec_sibling" and "helper" today; M10 adds "container". `"pane"` went
-#: with the `tmux` launcher (decision-154, 2026-09-08) -- it named a thing
-#: only that launcher could produce, and nothing will ever produce one now.
-KILL_ITEM_KINDS: Final = ("workload_group", "exec_sibling", "helper", "container")
+#: "exec_sibling", "helper" and, in a supervised jail, "supervisor" (decision-192);
+#: M10 adds "container". `"pane"` went with the `tmux` launcher (decision-154,
+#: 2026-09-08) -- it named a thing only that launcher could produce, and nothing will
+#: ever produce one now.
+KILL_ITEM_KINDS: Final = ("workload_group", "exec_sibling", "helper", "supervisor", "container")
 
 
 class KillOutcome(Enum):
@@ -127,7 +130,8 @@ class KillItem:
     """One torn-down (or already-gone, or un-teardownable) thing the
     jail names. `kind` is `"workload_group"` for the workload item and
     `"exec_sibling"` for each exec sibling (task-027, decision-042); the
-    two kinds a jail can produce today, alongside `"helper"`;
+    two kinds a jail can produce today, alongside `"helper"` and, for the
+    instance of a supervised jail, `"supervisor"` (decision-192);
     `"container"` is M10's to add. `identity` is the pgid, as text, for
     every kind a jail produces."""
 
@@ -507,12 +511,26 @@ def kill_named(
     jail_dir: str,
     helper_pids: tuple[int, ...],
     helper_stamps: tuple[str, ...],
+    supervisor: tuple[int, str] | None = None,
+    end_of_file: Callable[[], None] | None = None,
     grace: float = DEFAULT_GRACE_S,
 ) -> KillReport:
     """Tear down EVERYTHING a jail names, through the same ladder
-    (`_run_ladder`), per process in start order, then every `JAIL_LIFETIME`
-    helper (decision-181). The returned `KillReport` is the record: nothing
-    is written anywhere (decision-152). `HostRuntime.destroy` comes here.
+    (`_run_ladder`), per process in start order, then the instance of a
+    supervised jail (`supervisor`: the pid and start stamp of the leader of
+    the group that holds its PID 1, decision-192: `"supervisor"`, whose end is
+    the kernel's end of every process in the jail's pid namespace), then every
+    `JAIL_LIFETIME` helper (decision-181). The returned `KillReport` is the
+    record: nothing is written anywhere (decision-152). `HostRuntime.destroy`
+    comes here.
+
+    `end_of_file` (a supervised jail's control socket, closed) is called just
+    before the supervisor's own ladder: the supervisor's PID 1 drops the ladder's
+    `SIGTERM`, so the ladder alone would wait out its grace, and end-of-file is
+    the prompt end it was built to take. The ladder still runs and verifies,
+    `SIGKILL` included, so a supervisor that does not take it is ended without
+    it (law 7). A supervisor found running before and gone after is `ENDED`,
+    by the verification rung's own observation, never `ALREADY_GONE`.
 
     The processes are `known`, the ones the caller holds in memory, in start
     order, then every record under `<jail_dir>/procs` whose id `known` does
@@ -566,6 +584,24 @@ def kill_named(
     }
     items.extend(_disagreeing_item(kinds[record.id], jail_dir, record) for record in disagreeing)
     items.extend(_unreadable_item(unreadable) for unreadable in scanned.unreadable)
+
+    # The instance of a supervised jail (decision-192): its group holds PID 1 of the jail's
+    # pid namespace, so ending it ends everything the jail holds, a `setsid()` child
+    # included. After the processes, so a report reads `workload_group` first as ever.
+    if supervisor is not None:
+        pid, stamp = supervisor
+        running = end_of_file is not None and group_alive(pid)
+        if end_of_file is not None:
+            end_of_file()
+        item = end_group("supervisor", pid, pid, stamp, grace=grace)
+        if running and item.outcome is KillOutcome.ALREADY_GONE:
+            item = KillItem(
+                "supervisor",
+                item.identity,
+                KillOutcome.ENDED,
+                "ended by end-of-file on its control socket; its group was found empty",
+            )
+        items.append(item)
 
     # `Step.helpers` with JAIL_LIFETIME (SPEC.md §6). Each ran with
     # `start_new_session=True`, so its pid is its own pgid and the same

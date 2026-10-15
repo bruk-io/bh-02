@@ -516,6 +516,53 @@ async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_h
         await started.stop()
 
 
+_LISTEN_WITH_A_SESSION_OF_ITS_OWN = """
+import socket, subprocess, sys, time
+subprocess.Popen(["/bin/sleep", sys.argv[2]], start_new_session=True)
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+time.sleep(600)
+"""
+
+
+async def test_the_tripwire_ends_the_whole_jail_a_program_in_a_session_of_its_own_included(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The program an input runs starts another in a session of its own (out of its process group),
+    then the host removes a placeholder the jail holds: the tripwire ends the jail, and the
+    program that left the group goes with it. The control: until the host does, both run.
+
+    A jail's processes are brig's supervisor's children (brig's decision-190), so the program's
+    group is no longer the jail's: killing it would leave the other program running, with the
+    mount lifted, until the owner stopped the jail. The tripwire ends the jail, not the group."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    (project / "pkg").mkdir(parents=True)
+    absent = project / "pkg" / "local.env"
+    marker = f"{uuid.uuid4().int % 10**9 + 10**9}.{uuid.uuid4().int % 10**6:06d}"
+    one = BrigJail(
+        BrigConfig(),
+        Host(credentials=(str(absent),), secrets=(str(absent),)),
+        lock=str(tmp_path / "jails.lock"),
+    )
+    sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
+    endpoint = str(sock_dir / "k.sock")
+    argv = [sys.executable, "-I", "-c", _LISTEN_WITH_A_SESSION_OF_ITS_OWN, endpoint, marker]
+    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+    try:
+        assert await _until(lambda: bool(_marked_groups(marker)), 5.0), "CONTROL failed: it never ran"
+        assert started.ended() == "" and absent.is_dir()  # held
+        absent.rmdir()  # the host undoes a mount the jail holds
+        assert await _until(lambda: not _marked_groups(marker), 10.0), (
+            "the program in a session of its own outlived the tripwire"
+        )
+        assert str(absent) in started.ended()
+    finally:
+        await started.stop()
+
+
 _LISTEN_THEN_APPEND = """
 import socket, sys, time
 server = socket.socket(socket.AF_UNIX)
@@ -1348,7 +1395,12 @@ real = Jail.create
 
 def create(compiled, **rest):
     wrap = (lambda argv: (*argv, "--appended")) if how == "refused" else (lambda argv: tuple(argv))
-    return real(dataclasses.replace(compiled, wrap=wrap, helpers=(*compiled.helpers, helper)), **rest)
+    # No bubblewrap in either, so no supervisor either: its program is bound by bubblewrap
+    # (brig's decision-190), and a start is brig's own to refuse here (decision-181).
+    return real(
+        dataclasses.replace(compiled, wrap=wrap, supervisor=None, helpers=(*compiled.helpers, helper)),
+        **rest,
+    )
 
 Jail.create = create
 
@@ -1785,18 +1837,18 @@ def test_a_linux_jail_trips_on_every_write_deny_under_a_writable_root_and_every_
     assert "/elsewhere/chat.toml" not in paths  # outside every writable root: nothing is mounted
 
 
-async def test_on_linux_the_tripwire_ends_a_process_group_when_a_held_file_is_renamed_over(
+async def test_on_linux_the_tripwire_ends_what_it_was_armed_with_when_a_held_file_is_renamed_over(
     tmp_path: Path,
 ) -> None:
-    """The shell, without bubblewrap: a held file renamed over ends the group and says why;
-    a file beside it changing does nothing."""
+    """The shell, without bubblewrap: a held file renamed over calls what the wire was armed with
+    (here, a kill of a process group) and says why; a file beside it changing does nothing."""
     if sys.platform != "linux":
         pytest.skip("inotify is Linux's")
     held = tmp_path / "config"
     held.write_text("a")
     victim = subprocess.Popen(["sleep", "30"], start_new_session=True)
     wire = Tripwire([str(held)])
-    wire.arm(victim.pid)
+    wire.arm(lambda: os.killpg(victim.pid, signal.SIGKILL))
     try:
         (tmp_path / "beside").write_text("b")  # not held: nothing happens
         await asyncio.sleep(0.1)

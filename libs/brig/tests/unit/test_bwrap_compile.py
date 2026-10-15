@@ -32,9 +32,10 @@ from brig.core import (
     ReadModel,
     Spec,
 )
-from brig.mech import CompileCtx
+from brig.mech import CompileCtx, Step
 from brig.mech.bwrap import (
     DEFAULT_BWRAP_PATH,
+    DEFAULT_INTERPRETER,
     Bwrap,
     ChannelInsideWriteDeny,
     NetworkUnsupported,
@@ -43,7 +44,6 @@ from brig.mech.bwrap import (
     UnknownPathExistence,
     UnknownPathKind,
     UnresolvedPath,
-    bwrap,
     pins,
 )
 from brig.mech.env_scrub import env_scrub
@@ -52,6 +52,20 @@ from brig.run.host import _derive_wrap_prefix
 from brig.stack import Stack
 
 _JAIL_DIR = "/run/brig/jail0"
+
+
+class _BwrapWhoseInterpreterIsMounted(Bwrap):
+    """`Bwrap` whose supervisor interpreter (decision-190) is under the first path the `Spec`
+    mounts, so a test about where a mount lands in the argv does not need `/usr` in its `Spec`.
+    The tests of the interpreter itself build `Bwrap` directly."""
+
+    def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
+        roots = (*spec.fs.read_allows, *spec.fs.write_allows)
+        interpreter = f"{roots[0].rstrip('/')}/python3" if roots else DEFAULT_INTERPRETER
+        return Bwrap(self._bwrap_path, interpreter).compile(spec, ctx)
+
+
+bwrap = _BwrapWhoseInterpreterIsMounted()
 
 
 def _ctx(
@@ -146,9 +160,15 @@ def test_golden_argv_for_the_reference_spec() -> None:
     assert step.wrap(("/bin/true", "arg")) == (
         DEFAULT_BWRAP_PATH,
         "--unshare-all",
+        # The command is the pid namespace's init: brig's supervisor, whose argv is the
+        # one after `--` (decision-190).
+        "--as-pid-1",
         # No capability for the workload, whoever runs bwrap (decision-177).
         "--cap-drop",
         "ALL",
+        # A working directory the jail can't write: stage 8 makes `/` read-only.
+        "--chdir",
+        "/",
         # Stage 2: the jail's own furniture, before anything spec-derived;
         # its sysctls read-only (decision-177).
         "--proc",
@@ -196,6 +216,13 @@ def test_golden_argv_for_the_reference_spec() -> None:
         "--ro-bind",
         _HOOKS,
         _HOOKS,
+        # Stage 7a: the supervisor's program, read from descriptor 0 and bound read-only
+        # after every mount, so none covers it (decision-190).
+        "--perms",
+        "0444",
+        "--ro-bind-data",
+        "0",
+        "/.brig-supervisor.py",
         # Stage 8: the jail's own root tmpfs, read-only, last -- decision-166.
         # Until it was, a write outside every write root landed in it.
         "--remount-ro",
@@ -633,6 +660,7 @@ def test_a_read_carve_out_inside_a_root_is_masked_last_by_its_kind() -> None:
         "--ro-bind", "/dev/null", _ABSENT,
         "--ro-bind", "/dev/null", _SECRET,
         "--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE,
+        "--perms", "0444", "--ro-bind-data", "0", "/.brig-supervisor.py",
         "--remount-ro", "/",
         "--", "w",
     )  # fmt: skip
@@ -673,7 +701,7 @@ def test_a_read_carve_out_that_holds_a_root_is_masked_too() -> None:
         path_is_dir={_STATE: True},
     )
     argv = bwrap.compile(spec, ctx).wrap(("w",))
-    assert argv[-10:-4] == ("--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE)
+    assert argv[-15:-9] == ("--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE)
 
 
 @pytest.mark.unit
@@ -708,7 +736,7 @@ def test_a_write_carve_out_no_writable_tree_reaches_is_not_mounted() -> None:
     )
     argv = bwrap.compile(spec, ctx).wrap(("w",))
     assert layer not in argv
-    assert argv[-7:-4] == ("--ro-bind", _HOOKS, _HOOKS)
+    assert argv[-12:-9] == ("--ro-bind", _HOOKS, _HOOKS)
 
 
 @pytest.mark.unit
@@ -799,8 +827,11 @@ def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
     assert argv == (
         DEFAULT_BWRAP_PATH,
         "--unshare-all",
+        "--as-pid-1",
         "--cap-drop",
         "ALL",
+        "--chdir",
+        "/",
         "--proc",
         "/proc",
         "--ro-bind",
@@ -847,6 +878,12 @@ def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
         "--ro-bind",
         _ABOVE_HOOKS,
         _ABOVE_HOOKS,
+        # The supervisor's program, after every mount (decision-190).
+        "--perms",
+        "0444",
+        "--ro-bind-data",
+        "0",
+        "/.brig-supervisor.py",
         "--remount-ro",
         "/",
         "--",
@@ -857,13 +894,13 @@ def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
 @pytest.mark.unit
 def test_the_seal_is_shown_where_each_writable_tree_puts_the_jail_directory() -> None:
     """A write root spelled through a link mounts the jail directory at the
-    spec's spelling, so that is where it is sealed; `/` reaches it at its own
+    spec's spelling, so that is where it is sealed; `/run` reaches it at its own
     path. The source is always the resolved jail directory."""
-    for root, resolved_root, dest in (("/r", _ABOVE, "/r/jail0"), ("/", "/", _JAIL_DIR)):
+    for root, resolved_root, dest in (("/r", _ABOVE, "/r/jail0"), ("/run", "/run", _JAIL_DIR)):
         spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, write_allows=(root,)))
         argv = bwrap.compile(spec, _ctx(resolved={root: resolved_root})).wrap(())
         seal = ("--ro-bind", _JAIL_DIR, dest, "--bind-try", f"{_JAIL_DIR}/tmp", f"{dest}/tmp")
-        assert argv[-9:-3] == seal, argv
+        assert argv[-14:-8] == seal, argv
 
 
 @pytest.mark.unit
