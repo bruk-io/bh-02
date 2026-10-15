@@ -170,6 +170,21 @@ cut at its last line end or space, which ends a line there on screen (a paragrap
 drawn as two), so a long paragraph costs the same at its end as at its start too. Thinking folds to one line once the reply moves on. A result or a call hangs
 beside its marker and an input's code has a left border, so wrapped lines keep their gutter.
 
+**Clipped blocks open.** A tool result is cut at 12 lines, a diff or the code a call carries at 40, and
+`▶ 8 more lines` stands under what shows (`render.Clip`, pure: the lines, how they are drawn, how many
+show; `Clipped`, the widget). A click on that line, or Enter or Space once it has the focus (Tab and
+Shift+Tab reach it: Shift+Tab from the composer is the newest), shows every line (`▼ 8 more lines`),
+and the same closes it, as a finished thinking block opens. Closed is how every new block starts,
+and what was opened is not kept in the history. The rest is drawn at the first opening, not before:
+code is highlighted whole and cut, so a string that began above the cut is still one below it, and
+a block nobody opens costs what its first lines do (a result is at most 20,000 characters
+from the Python tool; 2,000 lines took about 0.1 s to draw on opening and 10,000 about 1 s, on
+the event loop, once, when the person asked). Opening only changes the block's height. It does not use
+Textual's `Collapsible`, which scrolls itself into view when it toggles, and a scroll releases the
+transcript's anchor: a transcript following its end (its layout pins it to the new end) goes on
+following, and one scrolled away stays where it is. The label is not selectable, so it is not copied.
+A click leaves the focus on the label, as it does on a thinking block's title.
+
 **History.** With `history` in its config (a session's layer sets `{"history":
 "<session>/events.jsonl"}`), the app appends every entry the transcript draws to that file
 (JSON lines: the events, streamed runs joined, and the ui's own `user`, `turn_end` and

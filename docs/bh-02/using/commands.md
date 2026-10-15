@@ -14,6 +14,7 @@ reach the model: slash commands, and `!` followed by a shell command.
 | `Cmd+C` | copies the selection in a terminal that passes Cmd to programs ([Copying](#copying)) |
 | `Ctrl+T` | copies the newest reply ([Copying](#copying)) |
 | `Esc` | stops the running reply, as `Ctrl+C` does, once nothing nearer wants it: it closes the command list, declines a question or closes the palette first, and only that. With no reply running it does nothing. |
+| `Shift+Tab`, then `Enter` or `Space` | `Shift+Tab` in the composer puts the focus on the `▶ N more lines` line of the newest cut tool result, diff or code; `Enter` or `Space` opens or closes it ([Long results](#long-results)). `Tab` moves on, and back to the composer. |
 | `Ctrl+P` | opens the command palette |
 | `Ctrl+Q` | leaves bh-02 (so do `/exit` and `/quit`) |
 
@@ -132,6 +133,17 @@ and the edit is sent and joins the lines; the line you recalled stays as it was.
 for the run only: a new run, a resumed session's too, starts with none. In a line that takes several rows, `Up` moves the
 cursor up until it is on the first row. While the command list is open its `Up` and `Down` move its
 highlight, and a recalled command doesn't open it until you edit it, so `Up` goes on through your lines.
+
+## Long results
+
+A tool result is shown cut at 12 lines, and a diff or the code a call carries at 40, with
+`▶ 8 more lines` under what shows. Click that line to show every line (it reads `▼ 8 more lines`
+then), and click it again to close it. From the keyboard, `Shift+Tab` in the composer puts the
+focus on the newest such line (`Shift+Tab` again goes to the one before it), `Enter` or `Space` opens
+or closes it, and `Tab` goes on to the next one and, past the newest, back to the composer. Opening a block doesn't scroll the conversation:
+at its end it stays at its end and goes on following new output, and scrolled up it stays where
+it is. New output starts cut, and a session you resume shows its results cut again. The line isn't
+part of what a selection copies.
 
 ## Copying
 
