@@ -6,10 +6,11 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-15 02:28'
-updated_date: '2026-10-15 18:34'
+updated_date: '2026-10-15 18:35'
 labels:
   - tests
   - size-3
+  - finish-moved
 dependencies: []
 priority: medium
 type: task
@@ -46,4 +47,6 @@ Evidence: the worker's log shows its last four full runs under -n auto green (27
 Close evidence (2026-10-15):
 - AC #2, whole check before and after: scripts/check with serial tests, 478 s wall (TASK-0102's recorded after; tests 487 s, the step that sets the wall time); with -n auto --dist loadgroup, 155 s wall (tests 153.81 s, 2796 passed, 31 skipped) on head 96492f9, exit 0. The test step went from about 8 min to about 2.5 min.
 - AC #1: the worker's last four full runs under -n auto (2778 passed) and the batch's full check on 96492f9 are five green runs in a row; the fifth is on a later head with TASK-0100 and TASK-0099.05 on top of this commit, not on 894daf6 itself. Neither deferred flake (TASK-0086.01, TASK-0097) failed in it.
+
+Finish moved (2026-10-15): AC #4 (the atomic write of pyproject.toml's src list in scripts/arch-check) was added after acceptance and before any code, from TASK-0102's close review: TASK-0102 made arch-check run beside pytest, ruff and mypy, which all read that file at startup, so a truncate-then-write could be read half done. It joined this task rather than a new one because this task already changed scripts/check and scripts/arch-check.
 <!-- SECTION:NOTES:END -->
