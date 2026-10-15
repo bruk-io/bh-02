@@ -9,6 +9,7 @@ reach the model: slash commands, and `!` followed by a shell command.
 |---|---|
 | `Enter` | sends the message or command in the composer |
 | `Up` / `Down` | on the composer's first / last line: the line you sent before, and forward again; past the newest, `Down` gives back what you were typing ([Recalling lines](#recalling-lines-you-sent)) |
+| `PageUp` / `PageDown` | scroll the conversation a page while you type; the cursor stays where it is. Scrolled up, the conversation stops following new output until you scroll back to its end |
 | `Ctrl+C` | stops the running reply. It never quits, and it doesn't stop a command. |
 | `Esc` | stops the running reply, as `Ctrl+C` does, once nothing nearer wants it: it closes the command list, declines a question or closes the palette first, and only that. With no reply running it does nothing. |
 | `Ctrl+P` | opens the command palette |

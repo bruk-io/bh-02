@@ -197,6 +197,22 @@ class Transcript(VerticalScroll):
     def on_mount(self) -> None:
         self.anchor()  # follow the end until the person scrolls away
 
+    def page(self, *, up: bool) -> None:
+        """Scroll a page up or down at once (PageUp, PageDown in the composer). It goes through
+        `scroll_to`, as the mouse wheel does: up from the end releases the anchor (it stops
+        following new output) and reaching the end anchors it again. Two cases `scroll_to`
+        would get wrong are handled here: with nothing to scroll, or down from the end, it
+        would release the anchor with no movement to restore it, and the transcript would not
+        follow the output that came next."""
+        if not self.allow_vertical_scroll:
+            return
+        if up:
+            self.scroll_page_up(animate=False)
+        elif self.scroll_y + self.scrollable_content_region.height >= self.max_scroll_y:
+            self.scroll_end(animate=False, immediate=True)  # the end itself: following again
+        else:
+            self.scroll_page_down(animate=False)
+
     def user(self, text: str) -> None:
         """Add a message the person sent."""
         self._settle_usage()

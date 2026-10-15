@@ -2,7 +2,9 @@
 terminal tells them apart) starts a new line. While the list of commands (`Completions`) is
 open it also takes Up, Down, Tab and Escape, and Enter when it should (decision-0003); with it
 closed, Up on the first line and Down on the last go back and forward through the lines sent
-this run (`recall`). The list's keys come first: a key it takes never reaches the history."""
+this run (`recall`). The list's keys come first: a key it takes never reaches the history.
+PageUp and PageDown are not the list's: they ask the app to scroll the conversation a page
+(`Paged`), the focus staying here."""
 
 from textual import events
 from textual.message import Message
@@ -15,6 +17,7 @@ from tui_cordis_plugin.widgets.completions import Completions
 __all__ = ["Composer"]
 
 _NEWLINE_KEYS = frozenset({"shift+enter", "ctrl+j"})
+_PAGE_KEYS = frozenset({"pageup", "pagedown"})
 
 
 class Composer(TextArea):
@@ -47,6 +50,13 @@ class Composer(TextArea):
             super().__init__()
             self.entry = entry
 
+    class Paged(Message):
+        """The person pressed PageUp (`up`) or PageDown: the conversation scrolls a page."""
+
+        def __init__(self, *, up: bool) -> None:
+            super().__init__()
+            self.up = up
+
     def __init__(self, *, id: str | None = None, completions: Completions | None = None) -> None:
         super().__init__("", id=id, soft_wrap=True, show_line_numbers=False, compact=False)
         self._completions = completions
@@ -77,8 +87,8 @@ class Composer(TextArea):
         self.move_cursor(self.document.end)
 
     async def on_key(self, event: events.Key) -> None:
-        """Send on Enter; a new line on the newline keys; Up and Down through the history. Runs
-        before TextArea's own handling."""
+        """Send on Enter; a new line on the newline keys; Up and Down through the history; a page
+        on PageUp and PageDown. Runs before TextArea's own handling."""
         listed = self._completing
         if listed is not None and self._list_key(listed, event):
             event.prevent_default()
@@ -97,6 +107,10 @@ class Composer(TextArea):
             if self._completions is not None:
                 self._completions.close()  # a command is one line
             self.insert("\n")
+        elif event.key in _PAGE_KEYS:
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.Paged(up=event.key == "pageup"))
         elif self._history_key(event.key):
             event.prevent_default()
             event.stop()

@@ -120,6 +120,14 @@ and reading waits once it is large), and gives the loop a turn after every event
 that yields everything at once still leaves Ctrl-C heard mid-reply. The app joins each run of
 streamed text before drawing and recording it.
 
+**Paging.** PageUp and PageDown in the composer scroll the transcript a page (`Composer.Paged`, which
+the app answers with `Transcript.page`) and leave the focus and the cursor where they are, with the
+slash list open too (they are not its keys); with a question up they are the modal's. A transcript
+follows new output while it is at its end; a page up releases it and reaching the end anchors it
+again, as the mouse wheel does (both are Textual's `scroll_to`). `page` guards the two cases
+`scroll_to` gets wrong: with nothing to scroll, or a page down from the end, it would release the
+anchor with no movement to restore it, and the output that came next would not be followed.
+
 **The transcript** draws a turn as it streams: a block per event, a CSS class per kind. Text
 and thinking grow one `Stream`, which settles its text into pieces of a couple of dozen lines
 and re-draws only the open one, so a chunk costs the same at line 2,000 as at line 1 (a Pilot

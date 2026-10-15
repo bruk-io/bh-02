@@ -185,6 +185,13 @@ class BhApp(App[None]):
     def on_composer_submitted(self, message: Composer.Submitted) -> None:
         self.send(message.text)
 
+    def on_composer_paged(self, message: Composer.Paged) -> None:
+        """PageUp or PageDown in the composer: the conversation scrolls a page, at once as the
+        composer's own cursor does, and the focus stays where it is. Scrolling up releases the
+        transcript's anchor, so it stops following new output; scrolling back to its end anchors
+        it again: what the mouse wheel does, since both go through `scroll_to`."""
+        self.query_one(Transcript).page(up=message.up)
+
     def palette_entries(self) -> Sequence[PaletteEntry]:
         """What the command palette lists: the commands rows offer now, `/help`, `/exit`."""
         return frame.palette_entries(self.frame.offered_commands())
