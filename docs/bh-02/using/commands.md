@@ -145,9 +145,14 @@ A tool result is shown cut at 12 lines, and a diff or the code a call carries at
 `▶ 8 more lines` under what shows. Click that line to show every line (it reads `▼ 8 more lines`
 then), and click it again to close it. From the keyboard, `Shift+Tab` in the composer puts the
 focus on the newest such line (`Shift+Tab` again goes to the one before it), `Enter` or `Space` opens
-or closes it, and `Tab` goes on to the next one and, past the newest, back to the composer. Opening a block doesn't scroll the conversation:
-at its end it stays at its end and goes on following new output, and scrolled up it stays where
-it is. New output starts cut, and a session you resume shows its results cut again. The line isn't
+or closes it, and `Tab` goes on to the next one and, past the newest, back to the composer.
+
+Reaching a line by keyboard scrolls the conversation to it, if it is off screen, and as with any
+scroll up the conversation then stops following new output until you are back at its end (`PageDown`
+until you are). Opening or closing a block never scrolls: at its end the conversation stays at its
+end and goes on following new output, and scrolled up it stays where it is.
+
+New output starts cut, and a session you resume shows its results cut again. The line isn't
 part of what a selection copies.
 
 ## Copying

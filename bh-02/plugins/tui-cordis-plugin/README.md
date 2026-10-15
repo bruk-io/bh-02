@@ -191,8 +191,12 @@ from the Python tool; 2,000 lines took about 0.1 s to draw on opening and 10,000
 the event loop, once, when the person asked). Opening only changes the block's height. It does not use
 Textual's `Collapsible`, which scrolls itself into view when it toggles, and a scroll releases the
 transcript's anchor: a transcript following its end (its layout pins it to the new end) goes on
-following, and one scrolled away stays where it is. The label is not selectable, so it is not copied.
-A click leaves the focus on the label, as it does on a thinking block's title.
+following, and one scrolled away stays where it is. Reaching a line by keyboard is different and
+deliberate: Shift+Tab onto a line that is off screen scrolls the transcript to it (Textual scrolls to
+what takes the focus, a scroll like any other), so the transcript stops following new output until
+it is back at its end, as TASK-0089.04 has it for PageUp; a test follows that through (Shift+Tab,
+Enter, PageDown to the end, then new output is followed again). The label is not selectable, so it is
+not copied. A click leaves the focus on the label, as it does on a thinking block's title.
 
 **History.** With `history` in its config (a session's layer sets `{"history":
 "<session>/events.jsonl"}`), the app appends every entry the transcript draws to that file

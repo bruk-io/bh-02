@@ -300,6 +300,44 @@ async def test_opening_a_block_in_a_transcript_scrolled_away_leaves_it_where_it_
         assert transcript.scroll_y == transcript.max_scroll_y and "back at the end" in _screen(app)
 
 
+@pytest.mark.parametrize("focus", ["on the line", "back on the composer"])
+async def test_reaching_a_line_off_screen_by_the_keyboard_scrolls_to_it_and_stops_following_until_the_end(
+    focus: str,
+) -> None:
+    """Focusing a line shows it (Textual scrolls to what takes the focus), and a transcript scrolled
+    up stops following new output, as TASK-0089.04 has it: until it is back at its end. Opening
+    the block then scrolls nothing."""
+    app = BhApp()
+    async with app.run_test(size=_SIZE) as pilot:
+        transcript = await _fill(app, pilot)  # following the end, the block far above it
+        (block,) = _clipped(app)
+        line = _toggle(block)
+        assert line.region.bottom <= transcript.region.y  # off screen, above the transcript's view
+        end = transcript.max_scroll_y
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert app.focused is line
+        assert transcript.region.y <= line.region.y < transcript.region.bottom  # scrolled into view
+        assert transcript.scroll_y < end  # which is not the end any more
+        shown = transcript.scroll_y
+        await pilot.press("enter")
+        await pilot.pause()
+        assert block.opened and transcript.scroll_y == shown  # opening scrolls nothing
+        await _draw(app, pilot, {"type": "text", "text": "while scrolled up\n\n"})
+        assert transcript.scroll_y == shown and "while scrolled up" not in _screen(app)  # not following
+        if focus == "back on the composer":
+            await pilot.press("tab")
+            assert isinstance(app.focused, Composer)
+        for _ in range(40):  # PageDown, the transcript's own with the focus on the line, the composer's else
+            if transcript.scroll_y >= transcript.max_scroll_y:
+                break
+            await pilot.press("pagedown")
+            await pilot.pause()
+        assert transcript.scroll_y == transcript.max_scroll_y  # back at its end
+        await _draw(app, pilot, {"type": "text", "text": "back at the end again\n\n"})
+        assert transcript.scroll_y == transcript.max_scroll_y and "back at the end again" in _screen(app)
+
+
 # What it sits beside.
 
 
