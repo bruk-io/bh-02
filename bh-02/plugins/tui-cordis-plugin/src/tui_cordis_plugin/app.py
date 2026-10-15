@@ -8,8 +8,10 @@ Leaving: Ctrl-Q, or `/exit` or `/quit` in the composer. The terminal going away 
 closed: SIGHUP, or, with no controlling terminal, stdin at end of file) leaves the same way, so
 the composition unwinds rather than the process dying where it stands or spinning on a dead
 fd. Ctrl-C interrupts the running turn and never quits; with no turn running it says how to
-leave, and while a command runs (a `!` one may take minutes) that Ctrl-C doesn't stop it.
-Ctrl-P opens the command palette.
+leave, and while a command runs (a `!` one may take minutes) that Ctrl-C doesn't stop it. Esc
+stops a running reply as Ctrl-C does, once nothing nearer wants it: the composer's list of
+commands (Esc closes it), a question (Esc declines it) and the palette (Esc closes it); with no
+reply running it does nothing. Ctrl-P opens the command palette.
 
 Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
 withdraws its own (shown or queued), and Ctrl-C with one up answers no to every open question
@@ -95,6 +97,8 @@ class BhApp(App[None]):
     BINDINGS = [
         Binding("ctrl+c", "interrupt", "Interrupt", priority=True, show=False),
         Binding("ctrl+q", "quit", "Quit", priority=True, show=False),
+        # Not priority: the list of commands, the question and the palette take Esc first.
+        Binding("escape", "stop_reply", "Stop the reply", show=False),
     ]
     # No app `CSS`: each widget styles itself (its DEFAULT_CSS). App CSS outranks every
     # DEFAULT_CSS, and a `Screen { background: ... }` here would match the approval modal too,
@@ -374,6 +378,14 @@ class BhApp(App[None]):
             self.query_one(Transcript).note(f"Nothing is running. {_HOW_TO_LEAVE}")
         elif self.bridge.interrupt_held:
             self.set_timer(_UNHEARD_GRACE, self._unheard)
+
+    def action_stop_reply(self) -> None:
+        """Esc: stop the running reply exactly as Ctrl-C does (`action_interrupt`). With no
+        reply running it does nothing, and says nothing: Esc is pressed out of habit, and the
+        composer is not its business. It reaches here only when the list of commands, a question
+        and the palette have passed on it."""
+        if self.bridge.turn_running:
+            self.action_interrupt()
 
     def _unheard(self) -> None:
         """A Ctrl-C held for the line being handled went unheard: a command is running (no turn

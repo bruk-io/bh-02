@@ -35,8 +35,11 @@ questions are a no. Ctrl-C is a priority binding that interrupts the running tur
 quits; one pressed after a line is sent and before its turn listens (or during a command: a
 slash command, a `!` one) is held for the turn, and the next read drops it. Held and still
 unheard a moment later, it was pressed during a command, which it doesn't stop, and the app
-says so, and that leaving does. `confirm()` comes from plain coroutines (not Textual
-workers), so the modal is `push_screen` with a callback resolving a future. Questions are
+says so, and that leaving does. Esc stops a running reply exactly as Ctrl-C does
+(`stop_reply`, a binding that is not priority, so it is the last to want the key: the list of
+commands closes on it, a question is declined by it and the palette closed by it, and only
+that); with no reply running, a command included, it does nothing and says nothing. `confirm()` comes from
+plain coroutines (not Textual workers), so the modal is `push_screen` with a callback resolving a future. Questions are
 shown one at a time, the rest queued; an interrupted turn cancels its future and its modal
 comes down wherever it is (anything shown over it is popped first); Ctrl-C with a question up
 answers every open one no and interrupts the turn. No palette opens over a question. A
