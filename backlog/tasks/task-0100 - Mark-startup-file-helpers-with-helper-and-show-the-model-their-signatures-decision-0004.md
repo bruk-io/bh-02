@@ -7,10 +7,11 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-14 15:57'
-updated_date: '2026-10-15 18:30'
+updated_date: '2026-10-15 18:40'
 labels:
   - python
   - size-2
+  - finish-moved
 dependencies:
   - TASK-0099.02
 references:
@@ -64,4 +65,6 @@ Evidence (root; tester+tini where said):
 - scripts/check bh-02/plugins/python-cordis-plugin: exit 0 (format, lint, types, 73 tests, gates incl. worker-stdlib-only and the purity budget, docs build; tokens skipped: no bh-01 dist). scripts/check bh-02/app --no-gates --no-docs: exit 0 (199 passed, 1 skipped). scripts/arch-check --no-fix: exit 0.
 - AC1: test_a_startup_file_s_helpers_are_listed_by_signature_and_its_other_names_only_counted (two @helper functions + one plain name: both by signature, 1 other name hidden), the person/project pair test, and the real-jail test. AC2: tests/test_python_listing.py (control characters, cut at 160, name(...), wording, malformed lines) and test_a_helper_s_signature_is_cleaned_cut_or_dots_whatever_its_defaults_repr_does through the real process. AC3: test_help_shows_a_helper_s_docstring_and_helper_returns_what_it_marks (help(run_tests) prints the docstring; helper(f) is f).
 - AC4: `_keep` (once, confined only), the plugin README, docs/bh-02/how-it-works/python-tool.md (new Helpers subsection) and GLOSSARY.md (`helper`) say the convention; the worker is still standard library only (gate passed). "scripts/check passes" for the whole workspace is left to the reviewer: only the per-member checks above were run.
+
+Finish moved (recorded 2026-10-15): AC #3 was reworded in c467e69, when decision-0004 was accepted (Fable for the owner), before any code: "an input that binds helper itself keeps it" left the criterion, since the decision covers it in point 1. The build kept it anyway, and the review confirmed a rebound `helper` is kept (test_helper_is_bound_for_an_unconfined_input_too_and_a_rebound_one_is_kept).
 <!-- SECTION:NOTES:END -->
