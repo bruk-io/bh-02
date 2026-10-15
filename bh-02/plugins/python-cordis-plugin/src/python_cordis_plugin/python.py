@@ -58,6 +58,10 @@ and a later input, with `uses` still there, edits one of those files:
     text = p.read_text()
     assert text.count("retries = 3") == 1, text.count("retries = 3")
     p.write_text(text.replace("retries = 3", "retries = 5"))"""
+_HELPERS = (
+    "`@helper` on a function in a startup file lists it with its signature when the REPL starts; "
+    "`help(name)` shows its docstring; a startup file's other names are not listed."
+)
 _USE = (
     "How to use it:",
     "- Work in Python, not through a shell: an input that only runs cat, grep, sed or ls "
@@ -153,9 +157,12 @@ def instructions_for(
 
 def _keep(confined: bool, startup: Sequence[str], theirs: Sequence[str]) -> str:
     """What the model is told of the startup files: the project's (`startup`) are its own to
-    write and grow; the person's (`theirs`), which come first, are theirs and not its to edit."""
+    write and grow; the person's (`theirs`), which come first, are theirs and not its to edit.
+    Confined, the files run when the REPL starts, and it is told what `@helper` does in them
+    (once: the prompt is fixed for a conversation, the signatures arrive with the first input's
+    output). Unconfined nothing is listed, so nothing of it is said."""
     runs = (
-        "a new REPL runs it before your first input and says what it defined."
+        "a new REPL runs it before your first input."
         if confined
         else "when it is there, a new REPL says so, and you run it as an input of your own (here "
         "every input is put to the person, so it does not run unasked)."
@@ -176,4 +183,6 @@ def _keep(confined: bool, startup: Sequence[str], theirs: Sequence[str]) -> str:
             f"The person may keep helpers of their own in {' and '.join(theirs)}: {runs} That file "
             "is theirs, not yours to edit."
         )
+    if confined and said:
+        said.append(_HELPERS)
     return " ".join(said)

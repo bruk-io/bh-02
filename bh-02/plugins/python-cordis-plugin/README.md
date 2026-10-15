@@ -108,10 +108,9 @@ across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/startup.py
 config directory (that variable's value, else `~/.config`, as for the models file), one
 starting `~/` in their home, any other from `root`; a single string is one file, and anything
 but a name or a list of names is the row's config error. Confined, the process runs each that is
-there as an input of its own and says which names it defined (each its code binds at the top,
-as the compiler reads it, so one bound again to the object it held counts, and any new or
-changed after it; on a line of their own, after whatever the file printed), or its traceback;
-one failing doesn't stop the next, and one that isn't there is passed over. A UTF-8 byte order
+there as an input of its own and says what it made for the model (its helpers by signature, and
+how many other names it bound: `@helper`, below), or its traceback; one failing doesn't stop the
+next, and one that isn't there is passed over. A UTF-8 byte order
 mark is no part of either file, as `python file.py` has it. One that ends the Python
 process (`os._exit`, a crash) would end every new one: the input it cut short says which file it was,
 after what the opening had to tell by then (that the REPL was started again, and why, which is
@@ -151,6 +150,33 @@ Each file runs once, at its first place in the list. Whose a file is goes by how
 by where it is read: one named from the root is the project's, one named from the person's config
 directory, their home or `/` is theirs. `instructions_for` tells the model that only the
 project's startup file is its to edit, and names the person's, which comes before it, as theirs.
+
+`helper` is in the namespace when the Python process starts, before any startup file runs
+(`worker._helper`, bound once, so an input that binds its own keeps it, as with `tools`): it sets
+`__bh_helper__ = True` on what it decorates and returns it unchanged, so a decorated function is
+the same function, and a file run outside bh-02 can define a stand-in (`try: helper` / `except
+NameError: def helper(f): return f`). Confined, a startup file's input prints, last and on a line
+of its own, one line of JSON (`client._startup_input`): the file's helpers, each name and
+`str(inspect.signature(...))` (null when that fails: a builtin without a signature, a default
+whose `repr` raises), at most 640 characters of it, and how many other public names it bound. The
+public names are those its code binds at the top, as the compiler reads it (so one bound again to
+the object it held counts), and any new or changed after it; a helper is one whose value is a
+callable with `__bh_helper__ is True` itself, so an object that answers every attribute with
+something truthy is not one. That line is the Python process's, so the host reads it as data and
+words it in pure functions (`client.startup_ran`, `client.signed`): control characters (C0, DEL,
+C1) are stripped, each signature is cut at 160 characters and ends in `…`, one that could not be
+read is `name(...)`, and a last line that is not that shape is said not to be a listing and never
+quoted. The first input is told `(PATH ran first: helpers run_tests(path='.', *, quiet=True),
+changed(); 3 other names hidden)`, in the order the file made them; a file with none, `PATH ran
+next: no helpers; 3 names hidden`; one that bound nothing, `PATH ran first and defined:
+nothing`. Undecorated names exist and work, and are only counted. `help(name)` shows a helper's
+docstring, as for any function, and `_keep` tells the model that once, in the `python` section,
+which stays fixed for a conversation: the signatures arrive with the first input's output, never
+in the prompt. They are told at startup only: a REPL started again runs the files and tells them
+again, a helper an input defines later is not announced, and after `/compact` they live only in
+the model's summary. Unconfined, nothing is listed (the model runs the file as an input of its
+own, which the person is asked about), though `helper` is bound all the same, so a file that
+uses `@helper` runs.
 
 The namespace's `__name__` is `__kernel__`: a startup file may test it, and renaming it would
 break that silently.

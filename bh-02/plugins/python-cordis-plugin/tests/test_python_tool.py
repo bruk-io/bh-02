@@ -51,12 +51,12 @@ async def test_a_traceback_shows_each_line_and_the_input_it_came_from() -> None:
 
 async def test_a_name_this_repl_never_had_says_the_repl_is_new() -> None:
     async with _process(Unjailed(), PythonProcessConfig()) as k:
-        missing = await k.run("helper()")
-        assert "NameError" in missing and "'helper' has not been defined in this REPL" in missing
+        missing = await k.run("toolbox()")
+        assert "NameError" in missing and "'toolbox' has not been defined in this REPL" in missing
         assert "earlier session, or before /clear or a restart" in missing
-        await k.run("helper = 1")
-        await k.run("del helper")
-        again = await k.run("helper")
+        await k.run("toolbox = 1")
+        await k.run("del toolbox")
+        again = await k.run("toolbox")
         assert "NameError" in again and "has not been defined" not in again  # it had been: no hint
 
 
@@ -67,7 +67,7 @@ async def test_the_project_s_startup_file_runs_first_when_inputs_are_confined(tm
     )
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("sh('ls')")
-        assert first == "(.bh-02/startup.py ran first and defined: TOOLS, sh)\n'ls'"
+        assert first == "(.bh-02/startup.py ran first: no helpers; 2 names hidden)\n'ls'"
         assert await k.run("TOOLS") == "2"  # told once, then plain inputs
     (tmp_path / ".bh-02" / "startup.py").write_text("raise RuntimeError('broken helper')\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
@@ -111,8 +111,8 @@ async def test_the_person_s_startup_file_runs_before_the_project_s(tmp_path: Pat
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("sh('ls'), WIDTH")
         assert first == (
-            f"({person} ran first and defined: WIDTH, show. "
-            ".bh-02/startup.py ran next and defined: WIDTH, sh)\n('<ls>', 100)"
+            f"({person} ran first: no helpers; 2 names hidden. "
+            ".bh-02/startup.py ran next: no helpers; 2 names hidden)\n('<ls>', 100)"
         )
         assert await k.run("[n for n in globals() if n.startswith('_bh')]") == "[]"
         assert await k.run("show(1)") == "'<1>'"  # told once, then plain inputs
@@ -121,11 +121,11 @@ async def test_the_person_s_startup_file_runs_before_the_project_s(tmp_path: Pat
 async def test_a_startup_file_that_is_not_there_is_passed_over(tmp_path: Path) -> None:
     person = _person_s("HELPER = 1\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:  # the project has none
-        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
+        assert await k.run("HELPER") == f"({person} ran first: no helpers; 1 name hidden)\n1"
     person.unlink()
     _project_s(tmp_path, "TOOLS = 2\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:  # the person has none
-        assert await k.run("TOOLS") == "(.bh-02/startup.py ran first and defined: TOOLS)\n2"
+        assert await k.run("TOOLS") == "(.bh-02/startup.py ran first: no helpers; 1 name hidden)\n2"
     (tmp_path / ".bh-02" / "startup.py").unlink()
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:  # neither: nothing to tell
         assert await k.run("1") == "1"
@@ -143,14 +143,14 @@ async def test_a_failing_startup_file_says_why_and_the_next_one_still_runs(tmp_p
             f'File "{person}", line 5, in <module>\n' in first
             and "RuntimeError: broken person helper" in first
         )
-        assert first.endswith(". .bh-02/startup.py ran next and defined: TOOLS)\n2")
+        assert first.endswith(". .bh-02/startup.py ran next: no helpers; 1 name hidden)\n2")
         assert await k.run("show(3)") == "3"
     person.write_text("HELPER = 1\n")
     project.write_text("raise ValueError('broken project helper')\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("HELPER")
         assert first.startswith(
-            f"({person} ran first and defined: HELPER. .bh-02/startup.py ran next and failed, so what "
+            f"({person} ran first: no helpers; 1 name hidden. .bh-02/startup.py ran next and failed, so what "
             "it defines is missing:\n"
         )
         assert "ValueError: broken project helper" in first and first.endswith(")\n1")
@@ -177,7 +177,7 @@ async def test_a_startup_file_that_ends_the_repl_is_named_and_passed_over_after(
         assert passed.startswith(
             f"(the REPL was started again; what earlier inputs defined is gone. {person} was not run: it "
             "ended the REPL's process when it last ran, so what it defines is missing (`/restart python` "
-            "runs it again). .bh-02/startup.py ran next and defined: TOOLS)\n"
+            "runs it again). .bh-02/startup.py ran next: no helpers; 1 name hidden)\n"
         ), passed
         assert passed.endswith("\n2") and await k.run("TOOLS + 1") == "3"
 
@@ -189,7 +189,7 @@ async def test_a_startup_file_that_ends_the_repl_keeps_what_the_opening_had_to_t
     person = _person_s("HELPER = 1\n")
     jail = Tripping()
     async with _process(jail, PythonProcessConfig(root=str(tmp_path))) as k:
-        assert await k.run("kept = HELPER") == f"({person} ran first and defined: HELPER)"
+        assert await k.run("kept = HELPER") == f"({person} ran first: no helpers; 1 name hidden)"
         _person_s("import os\nos._exit(3)\n")
         await jail.trip("the host undid the jail's hold on /w/local.env; the next one holds it again")
         ended = await k.run("kept")
@@ -236,7 +236,7 @@ async def test_a_startup_file_stopped_part_way_is_not_run_again_in_that_repl(tmp
         told = await asyncio.wait_for(k.run("sorted(n for n in globals() if not n.startswith('_'))"), 5)
     assert told == (
         f"({person} was stopped as it ran, so what it defines may be missing, and no startup file after "
-        "it ran)\n['A', 'time']"
+        "it ran)\n['A', 'helper', 'time']"
     ), told
     person.write_text(
         "import time\nwhile True:\n    try:\n        time.sleep(60)\n"
@@ -253,7 +253,7 @@ async def test_a_startup_file_stopped_part_way_is_not_run_again_in_that_repl(tmp
     assert told == (
         f"(the REPL was started again; what earlier inputs defined is gone. {person} was not run: it would "
         "not stop at Ctrl-C when it last ran, so what it defines is missing (`/restart python` runs it "
-        "again). .bh-02/startup.py ran next and defined: TOOLS)\n2"
+        "again). .bh-02/startup.py ran next: no helpers; 1 name hidden)\n2"
     ), told
 
 
@@ -264,8 +264,8 @@ async def test_a_startup_file_s_names_are_what_its_code_binds_on_a_line_of_their
     _project_s(tmp_path, "WIDTH = 80\nTOOLS = 2\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("WIDTH") == (
-            f"({person} ran first and defined: WIDTH. "
-            ".bh-02/startup.py ran next and defined: TOOLS, WIDTH)\n80"
+            f"({person} ran first: no helpers; 1 name hidden. "
+            ".bh-02/startup.py ran next: no helpers; 2 names hidden)\n80"
         )
 
 
@@ -277,8 +277,120 @@ async def test_a_startup_file_saved_with_a_byte_order_mark_runs(tmp_path: Path) 
     (tmp_path / ".bh-02" / "startup.py").write_bytes(b"\xef\xbb\xbfB = 2\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("A + B") == (
-            f"({person} ran first and defined: A. .bh-02/startup.py ran next and defined: B)\n3"
+            f"({person} ran first: no helpers; 1 name hidden. "
+            ".bh-02/startup.py ran next: no helpers; 1 name hidden)\n3"
         )
+
+
+_TOOLBOX = """\
+@helper
+def run_tests(path=".", *, quiet=True):
+    \"\"\"Run the tests under PATH and print the failures.\"\"\"
+    return path
+
+
+@helper
+def changed():
+    \"\"\"The files git says changed.\"\"\"
+    return []
+
+
+TOOLS = 2
+"""
+
+
+async def test_a_startup_file_s_helpers_are_listed_by_signature_and_its_other_names_only_counted(
+    tmp_path: Path,
+) -> None:
+    """`helper` is bound before the file runs, so `@helper` needs no import. The first input is told
+    each marked function as `name(signature)`, in the order the file made them, and how many other
+    public names the file bound, not which."""
+    _project_s(tmp_path, _TOOLBOX)
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        first = await k.run("run_tests()")
+        assert first == (
+            "(.bh-02/startup.py ran first: helpers run_tests(path='.', *, quiet=True), changed(); "
+            "1 other name hidden)\n'.'"
+        )
+        assert "TOOLS" not in first
+        assert await k.run("TOOLS") == "2"  # hidden is not gone, and it is told once
+
+
+async def test_a_startup_file_with_no_helper_says_how_many_names_it_hides(tmp_path: Path) -> None:
+    """Both files are told, the second as `ran next`: one with helpers and none hidden says no
+    count, one with none says it has none; one that bound nothing keeps the word it always had."""
+    person = _person_s("@helper\ndef show(x):\n    return f'<{x}>'\n")
+    _project_s(tmp_path, "WIDTH = 100\nTOOLS = 2\n")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        assert await k.run("show(WIDTH)") == (
+            f"({person} ran first: helpers show(x). "
+            ".bh-02/startup.py ran next: no helpers; 2 names hidden)\n'<100>'"
+        )
+    person.write_text("# nothing here\n")
+    _project_s(tmp_path, "ONE = 1\n")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        assert await k.run("ONE") == (
+            f"({person} ran first and defined: nothing. "
+            ".bh-02/startup.py ran next: no helpers; 1 name hidden)\n1"
+        )
+
+
+async def test_a_helper_s_signature_is_cleaned_cut_or_dots_whatever_its_defaults_repr_does(
+    tmp_path: Path,
+) -> None:
+    """A default's repr can be anything and the file is model-written: raw control characters go,
+    a long one is cut at 160 characters, and one that raises, or a `__signature__` Python
+    rejects, is `name(...)`: the listing never fails the file."""
+    _project_s(
+        tmp_path,
+        "class Raw:\n    def __repr__(self):\n        return '<\\x1b[31m\\nred>'\n\n"
+        "class Long:\n    def __repr__(self):\n        return 'L' * 500\n\n"
+        "class Boom:\n    def __repr__(self):\n        raise RuntimeError('no repr')\n\n"
+        "@helper\ndef colored(a=Raw()): pass\n\n"
+        "@helper\ndef long(a=Long()): pass\n\n"
+        "@helper\ndef boom(a=Boom()): pass\n\n"
+        "@helper\ndef unreadable(): pass\n\n"
+        "unreadable.__signature__ = 5\n",
+    )
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        first = await k.run("1")
+    assert first == (
+        "(.bh-02/startup.py ran first: helpers colored(a=<[31mred>), "
+        f"long(a={'L' * 157}…, boom(...), unreadable(...); 3 other names hidden)\n1"
+    ), first
+
+
+async def test_help_shows_a_helper_s_docstring_and_helper_returns_what_it_marks(tmp_path: Path) -> None:
+    _project_s(tmp_path, _TOOLBOX)
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        await k.run("1")
+        shown = await k.run("help(run_tests)")
+        assert "Run the tests under PATH and print the failures." in shown
+        assert "run_tests(path='.', *, quiet=True)" in shown
+        assert await k.run("def f(): pass\nhelper(f) is f and f.__bh_helper__ is True") == "True"
+        assert await k.run("helper(run_tests) is run_tests") == "True"
+
+
+async def test_helper_is_bound_for_an_unconfined_input_too_and_a_rebound_one_is_kept() -> None:
+    """The worker binds `helper` once, beside `tools`, so an input that binds its own keeps it
+    (as `tools` is kept): only the attribute counts, never the name."""
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
+        assert await k.run("def f(): pass\nhelper(f) is f") == "True"
+        await k.run("def helper(f): return 'mine'")
+        assert await k.run("helper(len)") == "'mine'"
+        assert await k.run("helper(len)") == "'mine'"  # not bound again before the next input
+
+
+async def test_a_stand_in_cannot_pass_for_a_helper_by_answering_to_any_attribute(tmp_path: Path) -> None:
+    """The listing reads `__bh_helper__` and takes only `True` itself, so an object that answers
+    every attribute with something truthy is not a helper, but is counted among the hidden."""
+    _project_s(
+        tmp_path,
+        "class Anything:\n    def __getattr__(self, name):\n        return 'yes'\n\n"
+        "def plain():\n    pass\n\nmock = Anything()\n",
+    )
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        assert await k.run("1") == "(.bh-02/startup.py ran first: no helpers; 3 names hidden)\n1"
 
 
 def test_startup_is_a_file_name_or_a_list_of_them() -> None:
@@ -319,7 +431,8 @@ async def test_the_person_s_startup_file_runs_in_a_jail_that_cannot_read_it(tmp_
     async with _process(Hiding(os.environ["XDG_CONFIG_HOME"]), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run(f"open({str(person)!r})")
         assert first.startswith(
-            f"({person} ran first and defined: show. .bh-02/startup.py ran next and defined: TOOLS)\n"
+            f"({person} ran first: no helpers; 1 name hidden. "
+            ".bh-02/startup.py ran next: no helpers; 1 name hidden)\n"
         )
         assert "PermissionError: [Errno 13] the jail hides it" in first  # an input can't read it
         failed = await k.run("show(0)")
@@ -341,7 +454,7 @@ async def test_a_person_s_file_whose_way_leads_through_the_project_is_read_only_
     person = config / "bh-02" / "startup.py"
     (dotfiles / "bh-02" / "startup.py").write_text("HELPER = 1\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
+        assert await k.run("HELPER") == f"({person} ran first: no helpers; 1 name hidden)\n1"
     hidden = tmp_path_factory.mktemp("hidden")
     (hidden / "secret.py").write_text("SECRET = 'a stand-in, not a secret'\n")
     (dotfiles / "bh-02" / "startup.py").unlink()
@@ -353,7 +466,7 @@ async def test_a_person_s_file_whose_way_leads_through_the_project_is_read_only_
     (dotfiles / "bh-02" / "startup.py").unlink()
     (dotfiles / "bh-02" / "startup.py").symlink_to(_project_s(tmp_path, "TOOLS = 2\n"))
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:  # the project's own, once
-        assert await k.run("TOOLS") == f"({person} ran first and defined: TOOLS)\n2"
+        assert await k.run("TOOLS") == f"({person} ran first: no helpers; 1 name hidden)\n2"
 
 
 async def test_run_from_the_home_directory_the_person_s_file_is_read_in_the_jail_and_still_theirs(
@@ -369,7 +482,7 @@ async def test_run_from_the_home_directory_the_person_s_file_is_read_in_the_jail
     person.parent.mkdir(parents=True)
     person.write_text("HELPER = 1\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"
+        assert await k.run("HELPER") == f"({person} ran first: no helpers; 1 name hidden)\n1"
         told = k.instructions()
         assert "go in .bh-02/startup.py, the project's startup file" in told
         assert f"own in {person}, which comes before it, and that file is theirs." in told
@@ -413,7 +526,9 @@ async def test_a_person_s_file_whose_way_leads_through_any_root_an_input_writes_
     (dotfiles / "bh-02" / "startup.py").unlink()
     (dotfiles / "bh-02" / "startup.py").write_text("HELPER = 1\n")
     async with _process(Writing(str(hidden), [str(dotfiles)]), PythonProcessConfig(root=str(project))) as k:
-        assert await k.run("HELPER") == f"({person} ran first and defined: HELPER)\n1"  # read in the jail
+        assert (
+            await k.run("HELPER") == f"({person} ran first: no helpers; 1 name hidden)\n1"
+        )  # read in the jail
 
 
 async def test_a_startup_file_is_named_from_home_or_the_config_directory_on_the_host(
@@ -432,14 +547,14 @@ async def test_a_startup_file_is_named_from_home_or_the_config_directory_on_the_
     )
     async with _process(Hiding(str(home)), config) as k:
         assert await k.run("A + B") == (
-            f"({home}/.config/bh-02/startup.py ran first and defined: A. "
-            f"{home}/helpers.py ran next and defined: B)\n3"
+            f"({home}/.config/bh-02/startup.py ran first: no helpers; 1 name hidden. "
+            f"{home}/helpers.py ran next: no helpers; 1 name hidden)\n3"
         )
         told = k.instructions()
         assert f"helpers of their own in {home}/.config/bh-02/startup.py and {home}/helpers.py" in told
     one = PythonProcessConfig(root=str(tmp_path), startup="~/helpers.py")  # a single string is one file
     async with _process(Confined(), one) as k:
-        assert await k.run("B") == f"({home}/helpers.py ran first and defined: B)\n2"
+        assert await k.run("B") == f"({home}/helpers.py ran first: no helpers; 1 name hidden)\n2"
 
 
 def test_the_model_is_told_only_the_project_s_startup_file_is_its_to_edit() -> None:
@@ -454,6 +569,20 @@ def test_the_model_is_told_only_the_project_s_startup_file_is_its_to_edit() -> N
     assert "Only the project's" not in instructions_for(True)  # no file of the person's to name
     alone = instructions_for(True, (), theirs=theirs)  # only the person's
     assert "go in" not in alone and "That file is theirs, not yours to edit." in alone
+
+
+def test_the_model_is_told_once_what_helper_does_in_a_startup_file_it_runs() -> None:
+    """The prompt is fixed for a conversation, so the convention is told once, in words, and the
+    signatures come with the first input; unconfined nothing is listed, so nothing is said."""
+    said = (
+        "`@helper` on a function in a startup file lists it with its signature when the REPL starts; "
+        "`help(name)` shows its docstring; a startup file's other names are not listed."
+    )
+    mine, theirs = (".bh-02/startup.py",), ("/home/me/.config/bh-02/startup.py",)
+    assert instructions_for(True, mine, theirs=theirs).count(said) == 1
+    assert said in instructions_for(True, mine) and said in instructions_for(True, (), theirs=theirs)
+    assert said not in instructions_for(True, ()) and "@helper" not in instructions_for(False, mine)
+    assert "says what it defined" not in instructions_for(True, mine)  # what it said before
 
 
 def test_under_an_allowlist_the_model_is_told_how_to_see_the_person_s_helpers() -> None:
@@ -808,7 +937,7 @@ async def test_a_call_runs_its_code_and_the_namespace_holds_only_what_inputs_put
             "language": "python",
         }
         names = await k.run("sorted(n for n in globals() if not n.startswith('__'))")
-        assert names == "[]"  # no functions of the host's: an input is plain Python
+        assert names == "['helper']"  # no function of the host's but bh-02's one marker: plain Python
 
 
 async def test_a_confined_python_process_says_so_and_tells_the_model_it_runs_in_a_jail() -> None:

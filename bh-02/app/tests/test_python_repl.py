@@ -121,7 +121,7 @@ async def test_unjailed_inputs_share_a_namespace_of_plain_python_and_each_is_ask
     assert _asked() == list(inputs)  # every input, with its code, before it ran
     assert "[1] 42" in out  # the namespace outlived the input that set it
     assert "[2] 'read with open()'" in out  # a file, read with plain Python
-    assert "[3] ['x']" in out  # nothing in the namespace but what inputs put there
+    assert "[3] ['helper', 'x']" in out  # nothing in the namespace but what inputs put there, and `helper`
     assert "[4] Traceback" in out and "NameError" in out
     assert "[5] denied: the person said no to this call" in out
     assert not (tmp_path / "declined.txt").exists()  # a no ran nothing
@@ -825,9 +825,36 @@ async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_hom
     async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
         out = await process.run(f"import os\nprint(os.path.exists({str(person)!r}))\nshow(TOOLS)")
     assert out.startswith(
-        f"({person} ran first and defined: show. .bh-02/startup.py ran next and defined: TOOLS)\n"
+        f"({person} ran first: no helpers; 1 name hidden. "
+        ".bh-02/startup.py ran next: no helpers; 1 name hidden)\n"
     ), out
     assert out.endswith("\nFalse\n'<2>'"), out  # the jail can't see the person's file; its helper runs
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_on_linux_a_startup_file_s_helpers_are_listed_by_signature_from_inside_the_jail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The listing is made in the jail, by the standard library alone (`inspect`, `json`), for the
+    person's file the host sent and the project's the jail read: each marked function by its
+    signature, the other names counted."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "startup.py"
+    person.parent.mkdir(parents=True)
+    person.write_text("@helper\ndef show(x):\n    return f'<{x}>'\n")
+    project = tmp_path / "project"
+    (project / ".bh-02").mkdir(parents=True)
+    (project / ".bh-02" / "startup.py").write_text(
+        "@helper\ndef run(cmd, *, quiet=True):\n    return cmd\n\nTOOLS = 2\n"
+    )
+    async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
+        out = await process.run("show(run('ls'))")
+    assert out == (
+        f"({person} ran first: helpers show(x). "
+        ".bh-02/startup.py ran next: helpers run(cmd, *, quiet=True); 1 other name hidden)\n'<ls>'"
+    ), out
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -874,7 +901,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     jail = BrigJail(BrigConfig(), _Host(trusted=trusted))
     async with _python(jail, PythonProcessConfig(root=str(home))) as process:  # session A, from home
         said = [await process.run(code) for code in inputs]
-    assert said[0].startswith(f"({person} ran first and defined: HELPER)\n"), said[0]
+    assert said[0].startswith(f"({person} ran first: no helpers; 1 name hidden)\n"), said[0]
     assert [s.rsplit("\n", 1)[-1] for s in said] == ["DENIED"] * len(inputs), said
     with contextlib.suppress(FileNotFoundError):
         (home / "planted").unlink()  # the link it made in the home, before the refused rename
@@ -886,7 +913,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
         BrigJail(BrigConfig(), _Host(trusted=trusted)), PythonProcessConfig(root=str(project))
     ) as process:
         seen = await process.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), HELPER")
-    assert seen == f"({person} ran first and defined: HELPER)\n('HELPER = 1\\n', 1)", seen
+    assert seen == f"({person} ran first: no helpers; 1 name hidden)\n('HELPER = 1\\n', 1)", seen
     assert "STAND-IN" not in seen
 
 

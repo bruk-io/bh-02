@@ -40,12 +40,21 @@ choose what a later one reads there: brig's `trusted`.) A startup file that ends
 passed over by the workers after it, until `/restart python`, and the input it cut short says
 which it was, after what the opening had to tell by then (that the worker was started again,
 and why).
+
+The model is told what each file made for it by signature, not by name: the Python process binds
+`helper` (`worker._helper`) before any file runs, a file marks a function `@helper`, and the input
+that runs the file prints, last, one line of JSON naming each marked function and the signature
+text `inspect.signature` gave (or None), and how many other public names the file bound. That
+line is the Python process's, so the host reads it as data and says it in pure functions
+(`startup_ran`, `signed`): control characters stripped, each signature cut at `_CUT`, and
+`name(...)` for one that could not be read.
 """
 
 import asyncio
 import contextlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -53,7 +62,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from sys import executable
 from types import TracebackType
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, assert_never, runtime_checkable
 
 from host_paths import config_home, walked
 from python_cordis_plugin.python import PYTHON, instructions_for
@@ -66,6 +75,9 @@ _WORKER = Path(__file__).with_name("worker.py")
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
 _LINE_LIMIT = 1 << 20
 _CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a startup file in the person's config directory
+_CUT = 160  # the longest signature, in characters, the model is told of a helper
+_READ = 4 * _CUT  # how much of one the Python process sends: the host cleans it, then cuts it at `_CUT`
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f]")  # C0, DEL and C1: what no line the model reads may hold
 
 
 @runtime_checkable
@@ -208,14 +220,90 @@ def _told(asides: Sequence[str]) -> str:
     return f"({'. '.join(asides)})\n" if asides else ""
 
 
+@dataclass(frozen=True, slots=True)
+class _Bound:
+    """What a startup file's input said it made: its helpers, each as its name and the text of its
+    signature (None: `inspect.signature` could not read it), and how many other public names it
+    bound, which are not told."""
+
+    helpers: tuple[tuple[str, str | None], ...]
+    hidden: int
+
+
+def _bound(line: str) -> _Bound | None:
+    """What the startup input's last line says, or None when it is not the shape `_startup_input`
+    prints: `{"helpers": [[name, signature or null], ...], "hidden": count}`. The line is the
+    Python process's, so nothing about it is taken on trust."""
+    try:
+        said = json.loads(line)
+    except ValueError, RecursionError:  # not JSON, a number past Python's limit, nested past its stack
+        return None
+    match said:
+        case {"helpers": list() as helpers, "hidden": int() as hidden} if hidden >= 0:
+            found: list[tuple[str, str | None]] = []
+            for each in helpers:
+                match each:
+                    case [str() as name, str() | None as signature]:
+                        found.append((name, signature))
+                    case _:
+                        return None
+            return _Bound(tuple(found), hidden)
+        case _:
+            return None
+
+
+def signed(name: str, signature: str | None) -> str:
+    """A helper as the model is told it: `name` and its `signature` text (`inspect.signature`'s,
+    parentheses included), `name(...)` when there is none. Control characters (C0, DEL, C1) are
+    stripped, the file being model-written and a default's repr anything, and the signature, once
+    stripped, is cut at `_CUT` characters and ends in `…` when it was cut."""
+    shown = _CONTROL.sub("", name)
+    if signature is None:
+        return f"{shown}(...)"
+    text = _CONTROL.sub("", signature)
+    return f"{shown}{text[:_CUT]}…" if len(text) > _CUT else f"{shown}{text}"
+
+
+def _names(count: int, other: bool) -> str:
+    return f"{count} {'other ' if other else ''}name{'' if count == 1 else 's'}"
+
+
+def startup_ran(name: str, when: str, line: str) -> str:
+    """What the model is told of the startup file `name` that ran `when` (`first` or `next`),
+    from the last line of the output of its input (`_startup_input`): its helpers by signature
+    and how many other names are hidden, `no helpers; N names hidden` for a file with none, and
+    for one that bound nothing the word it always had. A line that is not what the input prints
+    is said not to be, never quoted."""
+    match _bound(line):
+        case None:
+            return (
+                f"{name} ran {when}; what it bound could not be listed "
+                "(its input's last line was not the listing)"
+            )
+        case _Bound((), 0):
+            return f"{name} ran {when} and defined: nothing"
+        case _Bound((), hidden):
+            return f"{name} ran {when}: no helpers; {_names(hidden, other=False)} hidden"
+        case _Bound(helpers, hidden):
+            listed = ", ".join(signed(each, signature) for each, signature in helpers)
+            others = f"; {_names(hidden, other=True)} hidden" if hidden else ""
+            return f"{name} ran {when}: helpers {listed}{others}"
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
 def _startup_input(path: str, source: str | None = None) -> str:
     """The input that runs a startup file in the namespace and prints, last and on a line of its
-    own, the public names it defined or bound afresh ("nothing" for none): each its code stores
-    at the top (as the compiler says: the same object bound again counts) or that is new or
-    changed after it. `source` is its text when the host read it (the person's own, which a jail
-    that reads by allowlist can't see), registered with `linecache` under `path` so a traceback
-    shows its lines; without it the worker reads `path` itself, in the jail. Either way a UTF-8
-    byte order mark is no part of it. The input's own names are gone after it, however it ends."""
+    own, one line of JSON (`_bound` reads it): the file's helpers, each the name of a callable it
+    bound that carries `__bh_helper__ = True` itself (`@helper`; an object that answers every
+    attribute with something truthy is not one) and the text of its `inspect.signature`, at most
+    `_READ` characters, or null when that could not be made; and how many of the file's other
+    public names there are. The public names are those its code stores at the top (as the
+    compiler says: the same object bound again counts) or that are new or changed after it.
+    `source` is its text when the host read it (the person's own, which a jail that reads by
+    allowlist can't see), registered with `linecache` under `path` so a traceback shows its
+    lines; without it the worker reads `path` itself, in the jail. Either way a UTF-8 byte order
+    mark is no part of it. The input's own names are gone after it, however it ends."""
     read = (
         [
             f"    _bh_source = {source!r}",
@@ -235,14 +323,28 @@ def _startup_input(path: str, source: str | None = None) -> str:
             *read,
             f"    _bh_code = compile(_bh_source, {path!r}, 'exec')",
             "    exec(_bh_code, globals())",
-            "    import dis as _bh_dis",
+            "    import dis as _bh_dis, inspect as _bh_inspect, json as _bh_json",
             "    _bh_bound = {i.argval for i in _bh_dis.get_instructions(_bh_code)"
             " if i.opname == 'STORE_NAME'}",
-            "    print('\\n' + (', '.join(sorted(n for n, v in globals().items() if not n.startswith('_')"
-            " and (n in _bh_bound or n not in _bh_before or _bh_before[n] is not v))) or 'nothing'))",
+            "    def _bh_marked(v):",  # an object may raise on any attribute but its own: not a helper then
+            "        try:",
+            "            return callable(v) and getattr(v, '__bh_helper__', False) is True",
+            "        except Exception:",
+            "            return False",
+            "    def _bh_signature(v):",  # a default's repr can be anything, and raise
+            "        try:",
+            f"            return str(_bh_inspect.signature(v))[:{_READ}]",
+            "        except Exception:",
+            "            return None",
+            "    _bh_public = {n: v for n, v in globals().items() if not n.startswith('_')"
+            " and (n in _bh_bound or n not in _bh_before or _bh_before[n] is not v)}",
+            "    _bh_found = [[n, _bh_signature(v)] for n, v in _bh_public.items() if _bh_marked(v)]",
+            "    print('\\n' + _bh_json.dumps("
+            "{'helpers': _bh_found, 'hidden': len(_bh_public) - len(_bh_found)}))",
             "finally:",
             "    for _bh_name in ('_bh_before', '_bh_source', '_bh_code', '_bh_bound', '_bh_path',"
-            " '_bh_lines', '_bh_dis', '_bh_name'):",
+            " '_bh_lines', '_bh_dis', '_bh_inspect', '_bh_json', '_bh_marked', '_bh_signature',"
+            " '_bh_public', '_bh_found', '_bh_name'):",
             "        globals().pop(_bh_name, None)",
         ]
     )
@@ -523,7 +625,7 @@ class PythonProcess:
                 )
             else:
                 lines = ran.output.strip().splitlines()
-                asides.append(f"{startup.name} ran {when} and defined: {lines[-1] if lines else 'nothing'}")
+                asides.append(startup_ran(startup.name, when, lines[-1] if lines else ""))
         return _told(asides)
 
     def _ready(self, read: bool) -> list[_Ready]:

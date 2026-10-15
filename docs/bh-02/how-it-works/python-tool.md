@@ -9,7 +9,7 @@ Python REPL of its own that persists for the run.
 ## What an input can do
 
 Each call is an input to one Python process, the one the runner started. It is plain Python, not
-IPython, and nothing of bh-02's is in its namespace but `tools` (below). An input:
+IPython, and nothing of bh-02's is in its namespace but `tools` and `helper` (below). An input:
 
 - reads and edits files with `open` or `pathlib`;
 - runs programs (`git`, a test runner, `python`) with `subprocess`, in the project directory;
@@ -67,9 +67,31 @@ A new Python process can run setup code before the first input, when it is jaile
    helpers you want in every project;
 2. the project's: `.bh-02/startup.py`, the only one the model is told it may edit.
 
-The first input is told which names each defined, or its traceback. One failing doesn't stop the
-other. Without the jail they don't run unasked: the model is told to run them as inputs, which you
-are asked about like any other.
+The first input is told what each made for the model, or its traceback. One failing doesn't stop
+the other. Without the jail they don't run unasked: the model is told to run them as inputs, which
+you are asked about like any other, and nothing is listed.
+
+### Helpers
+
+A function in a startup file is a helper when it is marked `@helper`. `helper` is already in the
+namespace when a startup file runs, so it needs no import. The first input is told each helper by
+name and signature, and how many other names the file bound, not which:
+
+```text
+(.bh-02/startup.py ran first: helpers run_tests(path='.', *, quiet=True), changed(); 3 other names hidden)
+```
+
+A file with no helper says `no helpers; N names hidden`. Unmarked names exist and work, they are
+only not told, so a long startup file costs the model a few signatures and a count, not every name.
+`help(name)` shows a helper's docstring. Control characters are stripped from a signature, one over
+160 characters is cut there, and one Python can't read is `name(...)`.
+
+`@helper` returns the function itself, with one attribute set, so a file you also run outside bh-02
+can define a stand-in: `try: helper` / `except NameError:` and `def helper(f): return f`.
+
+The model is told this once, at startup: a new REPL runs the files and tells them again, a helper
+the model defines in a later input is not announced, and after `/compact` the signatures live only
+in the model's summary.
 
 bh-02 reads your file itself and sends its text in, since a Linux jail has no home directory in
 it. So whatever your file holds, the model can read. The project's file is read inside the jail.
