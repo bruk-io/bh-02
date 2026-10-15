@@ -3,10 +3,11 @@ id: TASK-0103
 title: >-
   Run the test suite on every core with pytest-xdist, keeping tests that share
   host state apart
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-15 02:28'
-updated_date: '2026-10-15 12:37'
+updated_date: '2026-10-15 12:38'
 labels:
   - tests
   - size-3
