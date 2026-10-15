@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-14 15:56'
-updated_date: '2026-10-14 18:42'
+updated_date: '2026-10-15 02:28'
 labels:
   - naming
   - finish-moved
@@ -57,4 +57,6 @@ Accepted 2026-10-14 by Fable standing in for the owner (he delegated these decis
 TASK-0099.01 wrote decision-0005 (proposed, awaiting the owner): the rule, subagents:parent, the sweep, the rename table. It filed TASK-0099.04 (extensions:extensions to extensions:process) and TASK-0099.05 (the rule into bh-02/CLAUDE.md, after .02, .03 and .04), and added to .02 and .03.
 
 Finish line changed after work started (owner, 2026-10-14): no backwards compatibility. Must-not-break's translation lines replaced; AC #3 now asks that no old name is translated or read and that a stale layer fails at boot with the loader's error. TASK-0099.07 removes the translation machinery; .03 and .04's criteria changed to match.
+
+TASK-0099.09 (boot-failure messages) moved out to TASK-0101 and deferred by the owner (2026-10-15: only critical bugs this run); it was never part of this intent's finish line. The old child is archived.
 <!-- SECTION:NOTES:END -->

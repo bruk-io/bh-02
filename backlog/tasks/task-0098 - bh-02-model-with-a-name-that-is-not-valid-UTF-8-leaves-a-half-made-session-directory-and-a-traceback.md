@@ -6,10 +6,12 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-14 14:06'
+updated_date: '2026-10-15 02:27'
 labels:
   - app
   - size-1
 dependencies: []
+priority: low
 type: bug
 ---
 
@@ -24,3 +26,9 @@ Found while fixing TASK-0094. A --model value from argv bytes that are not UTF-8
 - [ ] #1 bh-02 --model <name that is not valid UTF-8> exits with a one-line usage error naming the problem, makes no session directory, and a test shows it
 - [ ] #2 a resume with --model and such a name changes nothing and says the same (a test)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Deferred by the owner (2026-10-15): this run fixes only critical bugs; this one is not critical (no data loss, no security exposure, a workaround exists). Not to be started without the owner's word.
+<!-- SECTION:NOTES:END -->
