@@ -83,7 +83,7 @@ __all__ = [
 ]
 
 _WORKER = Path(__file__).with_name("worker.py")
-_LINE_LIMIT = 1 << 20  # the worker caps each text it sends at 20,000 characters, as the kernel does
+_LINE_LIMIT = 1 << 20  # each text the worker sends is capped at 20,000 characters, as the Python process's is
 _ANSWER_S = 30.0  # a load's answer: the worker waits up to 10 s for an extension's rows to come up
 _STATUS = "status.json"
 _FIELD = "extensions"

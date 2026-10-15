@@ -38,7 +38,7 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
         for row in read_layer(str(layer)):
             rows[row.id] = row if row.use else Row(row.id, rows[row.id].use, row.config)
     assert {"loop", "ui", "chat", "python", "runner", "system", "tools"} <= set(rows)
-    assert not {"kernel", "jail"} & set(rows)  # the kernel plugin's rows, before the python and runner ones
+    assert "jail" not in rows  # a row id from before the python and runner plugins
     assert not {"actions", "fs", "approve", "guard"} & set(rows)  # the tool rows of before CodeAct
     assert rows["tools"].use == "agent:tools" and rows["loop"].config == {"requires": ["python"]}
     for row in rows.values():

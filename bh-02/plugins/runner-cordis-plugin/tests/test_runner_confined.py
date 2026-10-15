@@ -1,5 +1,5 @@
 """The policy as a function, and the row. Real inputs in a real jail are
-bh-02/app/tests/test_python_repl.py's: they need a kernel, which is another plugin."""
+bh-02/app/tests/test_python_repl.py's: they need a Python process, which is another plugin's."""
 
 import asyncio
 import contextlib
@@ -134,7 +134,7 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
     assert dict(spec.env.set) == {"TMPDIR": "/tmp/j/tmp"} and "PATH" in spec.env.allow_names
     # The channel by name; its socket's directory is a write root (above), as brig granted it
     # per channel until its decision-186.
-    assert [c.name for c in spec.channels] == ["kernel"]
+    assert [c.name for c in spec.channels] == ["program"]
 
 
 #: The made-up home, resolved the way `spec_for` resolves a root (`Path.resolve`): on macOS
@@ -317,12 +317,12 @@ def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
 
 def test_a_linux_jail_reads_the_system_the_interpreter_and_what_the_command_names() -> None:
     readable = readable_roots(
-        argv=["/w/.venv/bin/python", "-I", "/w/src/kernel/worker.py", "/tmp/k/k.sock"],
+        argv=["/w/.venv/bin/python", "-I", "/w/src/python_cordis_plugin/worker.py", "/tmp/k/k.sock"],
         interpreter=("/opt/py", "/w/.venv"),
         system=SYSTEM_READABLE,
     )
     assert readable[: len(SYSTEM_READABLE)] == SYSTEM_READABLE
-    assert {"/opt/py", "/w/.venv", "/w/.venv/bin", "/w/src/kernel"} <= set(readable)
+    assert {"/opt/py", "/w/.venv", "/w/.venv/bin", "/w/src/python_cordis_plugin"} <= set(readable)
     assert "/w" not in readable  # not the workspace root, whose local.env an input must not read
     assert len(readable) == len(set(readable))
 
@@ -709,28 +709,32 @@ async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp
     """The runner starts two programs, the Python process and the extensions process, each
     from a command of its own. What a start is (the trees its program reads, which name the
     program's own directory; the roots it writes; its notice and grades) is that start's: the
-    second start replaces none of the first's, so the kernel never tells the model the
+    second start replaces none of the first's, so the Python process's notice never names the
     extensions' worker's trees. The jail's own grades are what was known before either."""
     project = tmp_path / "project"
     project.mkdir()
     credential = project / "local.env"  # where bh-02 looks for its credential, absent: held
-    for name in ("kernel", "extensions"):
+    for name in ("python", "extensions"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "worker.py").write_text(_LISTEN)
     one = BrigJail(BrigConfig(), Host(credentials=(str(credential),), secrets=(str(credential),)))
     before = dict(one.report())
     started = []
     try:
-        for name in ("kernel", "extensions"):
+        for name in ("python", "extensions"):
             endpoint = _endpoint()
             argv = [sys.executable, "-I", str(tmp_path / name / "worker.py"), endpoint]
             started.append(await one.start(argv, cwd=str(project), endpoint=endpoint))
-        kernel, extensions = started
-        assert str(tmp_path / "kernel") in kernel.reads(), kernel.reads()
-        assert str(tmp_path / "extensions") not in kernel.reads()  # the second start's, not the first's
+        python_process, extensions = started
+        assert str(tmp_path / "python") in python_process.reads(), python_process.reads()
+        assert (
+            str(tmp_path / "extensions") not in python_process.reads()
+        )  # the second start's, not the first's
         assert str(tmp_path / "extensions") in extensions.reads()
-        assert kernel.writes() == extensions.writes() == (str(project.resolve()),)
-        assert str(credential) in kernel.notice() and kernel.report()["fs_read"] == "best_effort"
+        assert python_process.writes() == extensions.writes() == (str(project.resolve()),)
+        assert (
+            str(credential) in python_process.notice() and python_process.report()["fs_read"] == "best_effort"
+        )
         assert one.report() == before
     finally:
         for each in started:
@@ -933,8 +937,8 @@ async def test_an_input_creating_the_project_s_own_absent_local_env_leaves_the_j
         await started.stop()
 
 
-# A bh-02 that crashes once its jailed kernel is up: no `stop`, so nothing it made is removed.
-# Its worker listens for a moment and exits, as an orphaned kernel with no host would be ended.
+# A bh-02 that crashes once its jailed Python process is up: no `stop`, so nothing it made is removed.
+# Its worker listens for a moment and exits, as an orphaned Python process with no host would be ended.
 _CRASH = """
 import asyncio, os, sys, tempfile
 from pathlib import Path
@@ -1613,7 +1617,7 @@ async def test_git_init_on_the_host_works_while_a_jail_runs_in_a_project_that_is
 ) -> None:
     """A project that isn't a repository has no `.git`, so the jail holds `.git` itself (an empty
     directory) rather than a `.git/config` directory inside it, which would break the person's
-    own `git init`. That works on the host while the kernel runs; inside the jail `.git` stays
+    own `git init`. That works on the host while the Python process runs; inside the jail `.git` stays
     what it was held as, and the new repository outlives the jail."""
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -1640,7 +1644,7 @@ async def test_git_init_on_the_host_works_while_a_jail_runs_in_a_project_that_is
 async def test_a_second_jail_s_carve_out_outlives_the_first_jail_in_the_same_project(
     tmp_path: Path,
 ) -> None:
-    """Two kernels in one project (two sessions). The first makes the empty `.claude/` it mounts
+    """Two Python processes in one project (two sessions). The first makes the empty `.claude/` it mounts
     over; the second, starting while it lives, binds that directory read-only over itself. When
     the first stops it must not remove it: removed on the host, the second's bind is detached
     and the second writes `.claude/settings.json`, which Claude Code would run hooks from.

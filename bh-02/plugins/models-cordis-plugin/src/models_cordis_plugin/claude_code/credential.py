@@ -4,7 +4,7 @@ The token is a Claude Code OAuth token (`claude setup-token` makes one), kept as
 `CLAUDE_CODE_OAUTH_TOKEN` in the git-ignored `local.env` at the repository root. bh-02 reads
 that file itself (`parse_env`, pure, over one read) and hands the value to the CLI child alone,
 through the SDK options' `env`: never into bh-02's own `os.environ`, so no other child (the
-kernel, the jail) can inherit it.
+Python process, the jail) can inherit it.
 
 The token is never held in a named local of a long-lived frame nor in anything whose repr
 shows it: Textual prints a crash with every frame's locals, and `ChildEnv`'s repr names its keys

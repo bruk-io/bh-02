@@ -95,7 +95,7 @@ def test_a_row_is_listed_while_the_layers_name_it_enabled() -> None:
 
     assert frame.listed([Entry("loop")], "loop")
     assert not frame.listed([Entry("loop", disabled=True)], "loop")
-    assert not frame.listed([Entry("kernel")], "loop")
+    assert not frame.listed([Entry("tools")], "loop")
 
 
 def test_the_first_push_reads_the_row_s_phase_from_the_loader_s_status() -> None:
@@ -110,24 +110,24 @@ def test_a_row_is_starting_from_its_unloading_until_it_is_active_or_down_for_goo
     for kind, row in [("unloading", "loop"), ("unloading", "chat"), ("inactive", "chat"), ("bind", "x")]:
         starting = frame.starting_after(starting, kind, row)
     assert starting == {"loop"}  # the chat row is down, not coming up: it follows the model
-    assert frame.starting_after(starting, "reload", "kernel") == {"loop", "kernel"}
+    assert frame.starting_after(starting, "reload", "tools") == {"loop", "tools"}
     assert frame.starting_after(starting, "active", "loop") == frozenset()
     assert frame.starting_after(starting, "failed-inactive", "loop") == frozenset()
 
 
 def test_no_line_waits_on_a_row_heard_coming_up_binding_no_key() -> None:
     """`status` binds no key, so no line waits on it, not even while it first comes up;
-    `kernel` binds one, and a kernel heard binding (even one whose reload came before the ui
+    `tools` binds one, and a row heard binding one (even one whose reload came before the ui
     listened) is waited on when it comes up again."""
     keyless = frame.Keyless()
-    for kind, row in [("bind", "kernel"), ("active", "kernel"), ("reload", "status")]:
+    for kind, row in [("bind", "tools"), ("active", "tools"), ("reload", "status")]:
         keyless = frame.keyless_after(keyless, kind, row)
     assert keyless.unwaited == {"status"}  # its first setup: nothing bound yet
     keyless = frame.keyless_after(keyless, "active", "status")
     assert keyless.unwaited == keyless.rows == {"status"}
-    for kind, row in [("reload", "kernel"), ("reload", "status")]:  # a /clear
+    for kind, row in [("reload", "tools"), ("reload", "status")]:  # a /clear
         keyless = frame.keyless_after(keyless, kind, row)
-    assert keyless.unwaited == {"status"}  # the kernel is waited on from its reload
+    assert keyless.unwaited == {"status"}  # `tools` is waited on from its reload
     keyless = frame.keyless_after(keyless, "active", "early")  # came up unheard
     assert "early" not in keyless.unwaited
     changed = frame.keyless_after(frame.keyless_after(keyless, "bind", "status"), "active", "status")

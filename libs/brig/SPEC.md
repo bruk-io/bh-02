@@ -313,7 +313,7 @@ Notes:
   The algebra is unchanged in shape: read denies union in the meet and grow
   in the denies clause under both models, and the two models stay
   incomparable. (Ruled 2026-09-28, decision-164. First embedder: a
-  jailed kernel on Linux, whose project root is a write root and whose
+  jailed Python process on Linux, whose project root is a write root and whose
   `local.env` is the credential it must not read.)
 - **Threat lists ship as data, not defaults.** brig provides curated,
   documented tuples the embedder folds in explicitly:
@@ -913,7 +913,7 @@ be the copy decision-152 deleted the event stream for).
   so it was not an escape, but it was a denial the `fs_write` grade claimed
   and the jail did not make, and a cell told "denied" by the policy was told
   "wrote" by the kernel. `--remount-ro /` after every mount fixes it; the
-  mounts keep their own flags. (Found by an embedder's jailed-kernel tests, the
+  mounts keep their own flags. (Found by the tests of an embedder's jailed Python process, the
   first to write outside the workspace at a path whose parent the jail had
   made: `tests/integration/test_bwrap_fs.py` pins it now.)
 - **A jail started as root holds no capabilities, and its `/proc/sys` is

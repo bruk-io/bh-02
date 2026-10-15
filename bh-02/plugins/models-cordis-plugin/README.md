@@ -315,7 +315,7 @@ runs the loop. It is `claude_code/` (`ClaudeCodeModel`, `ClaudeCodeConfig`): `mo
 the named model's id, `state` the session's own directory (which the session layer sets on the
 model row), `env_file` where the credential is, `cwd` the project directory.
 
-Why this shape, and not the two bh-02 ran before: Claude Code's own loop (the first stack) would
+Why this shape, and not the two bh-02 ran before: Claude Code's own loop (the first of them) would
 own the conversation, the approvals and the tool, and the plain Messages API with the
 subscription token (the second) answered only on Haiku, since the subscription reaches every
 model only through Claude Code. As a `model` under the loop, the same shape as the `openai`

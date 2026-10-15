@@ -254,7 +254,7 @@ def spec_for(
             ),
         ),
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=tuple(config.env), set=(("TMPDIR", scratch),)),
-        channels=(Channel(name="kernel", kind=ChannelKind.LISTEN),),
+        channels=(Channel(name="program", kind=ChannelKind.LISTEN),),
     )
 
 
@@ -395,7 +395,7 @@ def told_reads(trees: Sequence[str], own: Sequence[str]) -> tuple[str, ...]:
     """The trees a jail reads, as the model is told them: each once, none that another of them
     holds (bh-02's own code, or the interpreter's environment, inside the project), the jail's
     own directories (its scratch and the program's socket, named anew at every start) as `$TMPDIR`
-    alone, so the prompt is the same from one kernel to the next (the claude-code provider starts
+    alone, so the prompt is the same from one start to the next (the claude-code provider starts
     Claude Code again when it changes)."""
     kept = [t for t in trees if not any(t == o or t.startswith(o + "/") for o in own)]
     outer = [t for t in kept if not any(t.startswith(o + "/") for o in kept)]
@@ -946,7 +946,7 @@ class BrigJail:
             log = Path(process.stderr_path)
             detail = log.read_text(errors="replace")[-2000:] if log.is_file() else ""
             await started.stop()
-            raise RuntimeError(f"the jailed kernel never listened: {error}\n{detail}") from error
+            raise RuntimeError(f"the jailed program never listened: {error}\n{detail}") from error
         return started
 
     def compile(

@@ -297,7 +297,7 @@ _SEALED_JAIL_DIR = "/private/tmp/bh-j-1"
 def _sealed_spec(root: str) -> Spec:
     return Spec(
         fs=FsPolicy(write_allows=(root,), write_denies=("/private/tmp/.git/hooks",)),
-        channels=(Channel(name="kernel", kind=ChannelKind.LISTEN),),
+        channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
 
 

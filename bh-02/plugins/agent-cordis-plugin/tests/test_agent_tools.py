@@ -245,9 +245,9 @@ async def _reply(rt: Runtime, message: str) -> list[Json]:
     return [event async for event in rt.root.get("loop").reply(message)]
 
 
-async def test_without_a_kernel_row_another_row_s_tool_runs_a_turn_end_to_end() -> None:
+async def test_without_a_python_row_another_row_s_tool_runs_a_turn_end_to_end() -> None:
     """CodeAct is the shipped default, not a requirement: the loop depends on `tools`, never on
-    `kernel`, and a composition whose only tool is a layer row's runs a turn through it."""
+    the `python` row, and a composition whose only tool is a layer row's runs a turn through it."""
     rt, model, approval = _composition([[_call("c1", "echo", text="hi")], [_text("done")]], requires=["echo"])
     rt.mount(_echo_row, id="echo")
     await rt.settle()
@@ -256,11 +256,11 @@ async def test_without_a_kernel_row_another_row_s_tool_runs_a_turn_end_to_end() 
     result = next(e for e in events if e["type"] == "tool_result")
     assert result["content"] == "echo: hi"
     assert approval.asked[0]["runs"] == "host" and approval.asked[0]["title"] == "Call echo with this input?"
-    assert "kernel" not in resolve("agent:loop").inject and "tools" in resolve("agent:loop").inject
+    assert "python" not in resolve("agent:loop").inject and "tools" in resolve("agent:loop").inject
 
 
 async def test_the_first_message_waits_for_the_tools_the_loop_requires() -> None:
-    """After `/clear` the loop and the kernel restart together: a message typed at once waits for
+    """After `/clear` the loop and the python row restart together: a message typed at once waits for
     `python` (here `echo`) to register again rather than begin a conversation without it."""
     rt, model, _ = _composition([[_text("hello")]], requires=["echo"])
     await rt.settle()
@@ -288,7 +288,7 @@ async def test_a_required_tool_that_never_registers_fails_the_message_saying_whi
 
 
 async def test_a_tool_s_row_restarting_reloads_nothing_and_the_list_stays_the_same() -> None:
-    """The kernel row re-registers `python` on every restart: the loop, which depends only on the
+    """The python row re-registers `python` on every restart: the loop, which depends only on the
     broker, stays up, offers the list it began with, and a call runs through the new registration."""
     rt, model, _ = _composition(
         [[_text("first")], [_call("c1", "echo", text="again")], [_text("done")]], requires=["echo"]

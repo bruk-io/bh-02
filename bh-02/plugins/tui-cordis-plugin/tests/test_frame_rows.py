@@ -72,7 +72,7 @@ def test_the_model_field_follows_the_model_row_as_it_reloads() -> None:
     remove: Callable[[], None] = model_field.show()
     assert frame.fields() == {"model": "none (claude-code)"}
     loader.entries_now = [_Entry("model", {"default": "haiku"})]  # /model edited the session's layer
-    model_field.lifecycle(_Event("active", "kernel"))  # another row: nothing to read
+    model_field.lifecycle(_Event("active", "tools"))  # another row: nothing to read
     assert frame.fields() == {"model": "none (claude-code)"}
     model_field.lifecycle(_Event("active", "model"))
     assert frame.fields() == {"model": "haiku (claude-code)"}
@@ -104,7 +104,7 @@ def test_the_model_field_says_the_new_model_is_starting_until_its_row_is_active(
     for kind in ("inactive", "reload", "bind"):
         model_field.lifecycle(_Event(kind, "loop"))
         assert frame.fields() == {"model": "haiku (starting…)"}
-    model_field.lifecycle(_Event("unloading", "kernel"))  # another row's: not the model's
+    model_field.lifecycle(_Event("unloading", "tools"))  # another row's: not the model's
     model_field.lifecycle(_Event("active", "loop"))
     assert frame.fields() == {"model": "haiku"}
 

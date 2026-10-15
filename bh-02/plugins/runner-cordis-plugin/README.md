@@ -102,8 +102,9 @@ policy seam, not this).
   where each session's `claude/` holds its Claude Code child's config and messaging peer token.
   A third, of a run with another `XDG_STATE_HOME`, is not known to this one and is not hidden;
 - **network**: none; the program's own LISTEN socket is the one way in or out. brig's Spec
-  names the channel, not its path (brig's decision-186), so the directory the owner chose for
-  the socket is a write root of the policy's own, as brig granted it per channel until then,
+  names the channel (`program`, whichever program it is), not its path (brig's decision-186), so
+  the directory the owner chose for the socket is a write root of the policy's own, as brig
+  granted it per channel until then,
   and the runner waits for it to accept a connection itself (TASK-0079.31 moves the owners to a
   socket brig reserves and dials with its check). The runner
   starts two programs, each with a jail of its own compiled from this one policy: the Python
