@@ -192,8 +192,11 @@ class BhApp(App[None]):
             self._follow_composer()
 
     def _follow_composer(self) -> None:
+        """The list follows the composer's text, but stays shut while a question is up and
+        while the text is a line recalled from the history (Up and Down are then the history's)."""
+        composer = self.query_one(Composer)
         self.query_one(Completions).update_for(
-            self.query_one(Composer).text, self.palette_entries, allowed=self._asking is None
+            composer.text, self.palette_entries, allowed=self._asking is None and not composer.recalled
         )
 
     def on_descendant_blur(self, event: events.DescendantBlur) -> None:
@@ -218,11 +221,13 @@ class BhApp(App[None]):
         self.choose(entry)
 
     def choose(self, entry: PaletteEntry) -> None:
-        """Run a palette entry; one that takes arguments goes in the composer to finish."""
+        """Run a palette entry (it joins the lines Up recalls); one that takes arguments goes in
+        the composer to finish."""
+        composer = self.query_one(Composer)
         if not entry.takes_arguments:
+            composer.remember(entry.call)
             self.send(entry.call)
             return
-        composer = self.query_one(Composer)
         composer.text = f"{entry.call} "
         composer.move_cursor(composer.document.end)
         composer.focus()

@@ -8,6 +8,7 @@ reach the model: slash commands, and `!` followed by a shell command.
 | Key | What it does |
 |---|---|
 | `Enter` | sends the message or command in the composer |
+| `Up` / `Down` | on the composer's first / last line: the line you sent before, and forward again; past the newest, `Down` gives back what you were typing ([Recalling lines](#recalling-lines-you-sent)) |
 | `Ctrl+C` | stops the running reply. It never quits, and it doesn't stop a command. |
 | `Ctrl+P` | opens the command palette |
 | `Ctrl+Q` | leaves bh-02 (so do `/exit` and `/quit`) |
@@ -112,3 +113,14 @@ commands that contain what you typed; at most eight rows show, and the list scro
 
 A click on a row runs it. The list closes when you send, when a question comes up or when the
 composer loses focus. Every other key works as without it.
+
+## Recalling lines you sent
+
+`Up` on the composer's first line puts the line you sent before in the composer, and `Up` again
+the one before that; `Down` on its last line goes forward, and past the newest it gives back what
+you were typing when you first pressed `Up`. A line you sent is a message, a command or a
+`!` line, including a command you chose from the list or the palette. Edit a recalled line and send it
+and the edit is sent and joins the lines; the line you recalled stays as it was. The lines are kept
+for the run only: a new run, a resumed session's too, starts with none. In a line that takes several rows, `Up` moves the
+cursor up until it is on the first row. While the command list is open its `Up` and `Down` move its
+highlight, and a recalled command doesn't open it until you edit it, so `Up` goes on through your lines.

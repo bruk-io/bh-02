@@ -59,7 +59,18 @@ prefix matches then substring matches, at most 8 rows. Up/Down move the highligh
 without running, Enter takes the highlight only when it was moved or the text is a strict prefix
 of its call (otherwise the text is sent as typed), Esc closes it for the line, Ctrl-J and
 Shift+Enter close it. It never takes focus and closes on a question or when the composer loses
-focus. Control characters are stripped from every entry (`frame.palette_entries`) for both views. `tui:status` shows the running session's id (from
+focus. Control characters are stripped from every entry (`frame.palette_entries`) for both views.
+
+**History.** Up on the composer's first line (a long line counts as the rows it is drawn in)
+recalls the line sent before, Down on its last line goes forward, and past the newest Down gives
+back the draft that was being typed (`recall`, pure: a frozen `Recall` of the lines sent and where
+the person is in them, and steps that return the next one or None, when the key is the text area's
+as before). It is in memory for the run: every line sent joins it (a message, a `/command`, a `!`
+line, and a command run from the list or the palette, as sent), none is ever changed (an edited
+recalled line sent is one more line), and sending ends the walk. A recalled line has the cursor at
+its end. Layers: the slash list's Up and Down come first, so with it open they move its
+highlight; a recalled line keeps the list shut until it is edited (or the list would take the
+next Up from the history), and a question up holds the keys itself. `tui:status` shows the running session's id (from
 the `session` value, `(resumed)` after it on a resume), and asks
 the `models` value which model the model row names now and on which provider (`models.current()`;
 `config.model_row`, `model`, names the row whose lifecycle it follows): `sonnet (claude-code)`
