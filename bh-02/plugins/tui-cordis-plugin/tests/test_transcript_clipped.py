@@ -66,7 +66,7 @@ async def _click(pilot: Pilot[None], block: Clipped) -> None:
 
 async def test_a_long_result_and_long_code_start_clipped_each_with_a_line_that_opens_it() -> None:
     app = BhApp()
-    async with app.run_test(size=_SIZE) as pilot:
+    async with app.run_test(size=(80, 70)) as pilot:  # tall enough to see all of what shows
         await _draw(app, pilot, _call(50), _result(20), _result(5, call="d", word="short"))
         code, result = _clipped(app)
         assert (code.opened, result.opened) == (False, False)

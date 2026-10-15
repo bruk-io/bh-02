@@ -1,8 +1,8 @@
 """The Textual app, and `running`, which runs it on the event loop already running cordis.
 
-Layout, in bh-01's words: the conversation (Transcript over Composer), the whole width, and a
-StatusBar along the bottom. The app owns the screen: its input, output and frame post it
-messages (`messages.py`) and it draws them.
+Layout, in bh-01's words: the conversation (Transcript over Composer), the whole width, a line
+naming the everyday keys (Keys) under the composer, and a StatusBar along the bottom. The app owns
+the screen: its input, output and frame post it messages (`messages.py`) and it draws them.
 
 Leaving: Ctrl-Q, or `/exit` or `/quit` in the composer. The terminal going away (its window
 closed: SIGHUP, or, with no controlling terminal, stdin at end of file) leaves the same way, so
@@ -70,6 +70,7 @@ from tui_cordis_plugin.widgets import (
     CommandsProvider,
     Completions,
     Composer,
+    Keys,
     StatusBar,
     Transcript,
     Working,
@@ -162,6 +163,7 @@ class BhApp(App[None]):
         listed = Completions(id="completions")
         yield listed
         yield Composer(id="composer", completions=listed)
+        yield Keys(id="keys")
         yield StatusBar(id="status-bar")
 
     def on_mount(self) -> None:

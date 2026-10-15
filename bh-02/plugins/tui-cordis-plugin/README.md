@@ -4,7 +4,7 @@ bh-02's ui: a Textual app bound as `input`, `output` (whose `confirm` asks about
 modal) and `frame` by `tui:ui`, and small rows that push into the app's frame: the status
 bar's fields (`tui:status`: the session's id and the model; `tui:grades`: the jail's grades)
 and the palette's commands (`tui:palette`). The screen is the conversation (the transcript over the composer),
-the whole width, and the status bar along the bottom. Imports nothing from any other plugin;
+the whole width, a line naming the everyday keys under the composer, and the status bar along the bottom. Imports nothing from any other plugin;
 the shapes are in `../../CONTRACTS.md`.
 
 - **Value half** (no cordis): `app.py` (the `BhApp` and `running`, which runs it on the event loop
@@ -119,6 +119,15 @@ them (`Shown` carries a future the app settles once drawn; the next batch gather
 and reading waits once it is large), and gives the loop a turn after every event, so a reply
 that yields everything at once still leaves Ctrl-C heard mid-reply. The app joins each run of
 streamed text before drawing and recording it.
+
+**The keys line.** One line under the composer names the everyday keys (`widgets/keys.py`, `render.keys_line`,
+pure): `Enter send  Ctrl-J new line  Esc stop  PgUp/PgDn scroll  ↑/↓ history  Ctrl-T copy reply  Ctrl-P
+palette  Ctrl-Q quit`, 116 cells, then the same with the keys and words short (`↵ send  ^J newline ...`, 86) and
+with one-space gaps (79, which is what fits an 80-column terminal beside the line's left margin), then fewer of
+them as the width falls, copy first and then history, scroll, new line, send, palette and stop, never quit. The
+widest that fits is shown, again whenever the width changes. The keys are the ones the code binds, and a
+test presses every key the line names (read from the line itself) and sees it do what it says; the docs'
+Keys table (`docs/bh-02/using/commands.md`) is checked to list the same ones. Ctrl-O is still bound to nothing.
 
 **Working.** While a reply runs, a line between the transcript and the composer says so and for how
 long: `Working · 12s`, then `Working · 1m 05s`, then `Working · 1h 02m` (`render.working_line`, pure).

@@ -8,7 +8,7 @@ it is tested without an app.
 """
 
 import re
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, assert_never
 
@@ -30,6 +30,7 @@ __all__ = [
     "fence_after",
     "is_quiet_stop",
     "jail_forms",
+    "keys_line",
     "lifecycle_line",
     "session_forms",
     "markdown",
@@ -345,6 +346,66 @@ def _elapsed(seconds: float) -> str:
     if hours:
         return f"{hours}h {minutes:02d}m"
     return f"{minutes}m {whole:02d}s" if minutes else f"{whole}s"
+
+
+@dataclass(frozen=True)
+class _Hint:
+    """One everyday key the screen names: what it does (`what`, also its place in the order they
+    are given up in), and how that reads in full and in short (`^J newline`)."""
+
+    what: str
+    key: str
+    does: str
+    short_key: str
+    short_does: str
+
+
+# The keys the screen names, in the order it names them. Each is the key as the code binds it
+# (Composer.on_key, BhApp.BINDINGS, Textual's own `ctrl+p`); a test presses every one of them.
+_HINTS: tuple[_Hint, ...] = (
+    _Hint("send", "Enter", "send", "↵", "send"),
+    _Hint("new line", "Ctrl-J", "new line", "^J", "newline"),
+    _Hint("stop", "Esc", "stop", "Esc", "stop"),
+    _Hint("scroll", "PgUp/PgDn", "scroll", "PgUp/Dn", "scroll"),
+    _Hint("history", "↑/↓", "history", "↑↓", "history"),
+    _Hint("copy", "Ctrl-T", "copy reply", "^T", "copy"),
+    _Hint("palette", "Ctrl-P", "palette", "^P", "palette"),
+    _Hint("quit", "Ctrl-Q", "quit", "^Q", "quit"),
+)
+# What a line too narrow for all of them gives up, first to last: quit is never given up.
+_GIVEN_UP = ("copy", "history", "scroll", "new line", "send", "palette", "stop")
+_KEY = "bold $text-primary"
+
+
+def keys_line(width: int) -> Content:
+    """The everyday keys on one line of at most `width` cells, each key bold and its use after it
+    (`Enter send  Ctrl-J new line  Esc stop ...`): in full when there is room, else with the keys
+    as short as `^J` and the words shortened, else with fewer of them, the least everyday first
+    (`_GIVEN_UP`), down to quit alone, which a narrower line crops. The first that fits is it."""
+    line = Content("")
+    for line in _key_lines():
+        if line.cell_length <= width:
+            return line
+    return line
+
+
+def _key_lines() -> Iterator[Content]:
+    """Every form of the line, fullest first."""
+    yield _hint_line(_HINTS, short=False, gap="  ")
+    yield _hint_line(_HINTS, short=True, gap="  ")
+    kept = _HINTS
+    yield _hint_line(kept, short=True, gap=" ")
+    for given_up in _GIVEN_UP:
+        kept = tuple(hint for hint in kept if hint.what != given_up)
+        yield _hint_line(kept, short=True, gap=" ")
+
+
+def _hint_line(hints: tuple[_Hint, ...], *, short: bool, gap: str) -> Content:
+    parts: list[str | tuple[str, str]] = []
+    for hint in hints:
+        key, does = (hint.short_key, hint.short_does) if short else (hint.key, hint.does)
+        parts += [gap, (key, _KEY), f" {does}"] if parts else [(key, _KEY), f" {does}"]
+    return Content.assemble(*parts)
 
 
 def copied_line(text: str) -> str:

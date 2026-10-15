@@ -3,6 +3,7 @@
 from tui_cordis_plugin.widgets.approval import GRACE, ApprovalScreen
 from tui_cordis_plugin.widgets.completions import Completions
 from tui_cordis_plugin.widgets.composer import Composer
+from tui_cordis_plugin.widgets.keys import Keys
 from tui_cordis_plugin.widgets.palette import CommandsProvider
 from tui_cordis_plugin.widgets.status_bar import StatusBar
 from tui_cordis_plugin.widgets.transcript import Clipped, Stream, Transcript
@@ -16,6 +17,7 @@ __all__ = [
     "CommandsProvider",
     "Completions",
     "Composer",
+    "Keys",
     "StatusBar",
     "Stream",
     "Transcript",

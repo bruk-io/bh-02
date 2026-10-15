@@ -5,18 +5,23 @@ reach the model: slash commands, and `!` followed by a shell command.
 
 ## Keys
 
+The line under the composer names the everyday ones (`Enter send  Ctrl-J new line  Esc stop ...`). On
+an 80-column terminal it fits all eight in a short form (`^J` is `Ctrl+J`, `↵` is `Enter`), and on a
+narrower one it names fewer, the least everyday first.
+
 | Key | What it does |
 |---|---|
 | `Enter` | sends the message or command in the composer |
-| `Up` / `Down` | on the composer's first / last line: the line you sent before, and forward again; past the newest, `Down` gives back what you were typing ([Recalling lines](#recalling-lines-you-sent)) |
-| `PageUp` / `PageDown` | scroll the conversation a page while you type; the cursor stays where it is. Scrolled up, the conversation stops following new output until you scroll back to its end |
-| `Ctrl+C` | copies the text you have selected and clears the selection; with nothing selected it stops the running reply. It never quits, and it doesn't stop a command ([Copying](#copying)) |
-| `Cmd+C` | copies the selection in a terminal that passes Cmd to programs ([Copying](#copying)) |
-| `Ctrl+T` | copies the newest reply ([Copying](#copying)) |
+| `Ctrl+J`, `Shift+Enter` | start a new line in the composer (`Shift+Enter` in a terminal that tells it apart from `Enter`) |
 | `Esc` | stops the running reply, as `Ctrl+C` does, once nothing nearer wants it: it closes the command list, declines a question or closes the palette first, and only that. With no reply running it does nothing. |
-| `Shift+Tab`, then `Enter` or `Space` | `Shift+Tab` in the composer puts the focus on the `▶ N more lines` line of the newest cut tool result, diff or code; `Enter` or `Space` opens or closes it ([Long results](#long-results)). `Tab` moves on, and back to the composer. |
+| `Ctrl+C` | copies the text you have selected and clears the selection; with nothing selected it stops the running reply. It never quits, and it doesn't stop a command ([Copying](#copying)) |
+| `PageUp` / `PageDown` | scroll the conversation a page while you type; the cursor stays where it is. Scrolled up, the conversation stops following new output until you scroll back to its end |
+| `Up` / `Down` | on the composer's first / last line: the line you sent before, and forward again; past the newest, `Down` gives back what you were typing ([Recalling lines](#recalling-lines-you-sent)) |
+| `Ctrl+T` | copies the newest reply ([Copying](#copying)) |
+| `Cmd+C` | copies the selection in a terminal that passes Cmd to programs ([Copying](#copying)) |
 | `Ctrl+P` | opens the command palette |
 | `Ctrl+Q` | leaves bh-02 (so do `/exit` and `/quit`) |
+| `Shift+Tab`, then `Enter` or `Space` | `Shift+Tab` in the composer puts the focus on the `▶ N more lines` line of the newest cut tool result, diff or code; `Enter` or `Space` opens or closes it ([Long results](#long-results)). `Tab` moves on, and back to the composer. |
 
 While a reply runs, a line above the composer says so and for how long (`Working · 12s`, then
 `Working · 1m 05s`); it appears once the reply has run for a second and goes when the reply ends, is
