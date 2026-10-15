@@ -9,16 +9,17 @@ sub-agent's event log. Each block below is the command's own `--help`.
 Usage: bh-02 [OPTIONS] [COMMAND] [ARGS]...
 
   A coding agent in a terminal app. The model acts in Python, through the
-  python tool, in a persistent Python process inside a jail. Claude is reached
-  through Claude Code on the Claude subscription, with the
-  CLAUDE_CODE_OAUTH_TOKEN in local.env (`claude setup-token` makes one); any
-  OpenAI-compatible model can be added to the models file. Every run is a
-  session that `--resume` continues.
+  python tool, in a persistent Python process inside a jail. Its models are
+  the endpoints in the models file: Claude through Claude Code (on the Claude
+  subscription, with the CLAUDE_CODE_OAUTH_TOKEN in local.env that `claude
+  setup-token` makes, or through a gateway), and any OpenAI-compatible model.
+  Every run is a session that `--resume` continues.
 
 Options:
-  --model TEXT   The model to start on, by name: sonnet (the default), opus,
-                 haiku, or one of yours in ~/.config/bh-02/models.toml
-                 ($XDG_CONFIG_HOME/bh-02/models.toml); /model lists them.
+  --model TEXT   The model to start on, by name, ENDPOINT/MODEL: one of your
+                 endpoints' in ~/.config/bh-02/models.toml
+                 ($XDG_CONFIG_HOME/bh-02/models.toml), whose `default` is used
+                 otherwise; /model lists them.
   --patch FILE   A layer file applied over the shipped composition.
                  Repeatable.
   --trace FILE   Append every row's lifecycle event to FILE (the app owns the

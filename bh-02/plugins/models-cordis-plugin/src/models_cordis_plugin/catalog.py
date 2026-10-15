@@ -6,7 +6,7 @@ as they compose now, `/model`'s edit included) and the models file with it, so i
 anything that goes stale and never has to reload: `/model` and the status bar depend on it,
 not on `model`, which a switch replaces.
 
-The one thing it keeps is what the models file's endpoints (`discover = true`) listed
+The one thing it keeps is what the models file's discovering endpoints (`discover = true`) listed
 (`openai.Discovery`). `refresh` fills it, awaited by `/model` when it lists and by nothing else,
 so `listed` (which `/model`'s choices and the composer's completion call, on the event loop, once
 per key) and `current` (the status bar's) read it and never ask a server.
@@ -27,10 +27,10 @@ from models_cordis_plugin.named import (
     Named,
     chosen,
     derived,
-    endpoint,
     find,
     from_file,
     key_name,
+    named_models,
     not_a_model,
     problem,
     said_names,
@@ -43,7 +43,7 @@ from models_cordis_plugin.openai import (
     Key,
     Listed,
     Unlisted,
-    authorization,
+    headers_for,
     httpx_get,
     matching,
     missing_key,
@@ -103,8 +103,8 @@ class Catalog:
     @property
     def problem(self) -> str | None:
         """Why the models file is not read, said so the person can fix it: it is in the project,
-        which the model's code can write, or it can't be read or is not TOML (the built-ins and the
-        row's `extra` are still listed, and can be switched to). None when it is read, there or not."""
+        which the model's code can write, or it can't be read or is not TOML (the row's `extra` is
+        still listed, and can be switched to). None when it is read, there or not."""
         return known(self._config() or ModelConfig()).why
 
     @property
@@ -125,72 +125,72 @@ class Catalog:
         return None
 
     def listed(self) -> list[dict[str, Any]]:
-        """Every model, in order (the built-ins, the file's, the row's `extra`, then each endpoint's
-        listed models): `name`, `provider`, `id`, `current` (the one the model row names),
-        `default` (on the model a new session starts on when no layer names one: where that came
-        from, `built in` or `the models file`), `where` (an openai model's base_url), and `problem`
-        or `shadows` when there is one. An endpoint's models are what its last `refresh` found, in
-        its `include`, and the model row names and the default when they are of it, so the marks
-        are always there; this never asks a server. A models file that can't be read, is not TOML, or
-        is in the project is not read, and lists none (`problem` says why); it never raises."""
+        """Every model, in order (each endpoint's of the file, then of the row's `extra`): `name`,
+        `provider`, `id`, `current` (the one the model row names), `default` (on the model a new
+        session starts on when no layer names one: where that came from, `the models file`),
+        `where` (a model's base_url, when it has one), and `problem` when there is one. An endpoint's
+        models are the ones its `models` names, in order, then what its last `refresh` found, in its
+        `include`, and the model row's and the default when they are of it, so the marks are always
+        there; this never asks a server. A models file that can't be read, is not TOML, or is in the
+        project is not read, and lists none (`problem` says why); it never raises."""
         config = self._config() or ModelConfig()
         found = known(config)
         current = self.current()["name"]
         standing = None if found.unread is not None else found.standing  # an unread default is unknown
-        return [
-            *(
-                _listed(named, named.name == current, _default(named, standing))
-                for named in found.models
-                if not endpoint(named)
-            ),
-            *self._discovered(found.models, current, standing),
-        ]
+        return self._served(found.models, current, standing)
 
-    def _discovered(
+    def _served(
         self, models: Sequence[Named], current: str, standing: Intended | None
     ) -> list[dict[str, Any]]:
-        """The models each endpoint of `models` lists, from what `refresh` kept: those its
-        `include` lets through (at most `SHOWN`), and the model row's and the default, when they
-        are of it; sorted by id."""
+        """The models each endpoint of `models` serves: the ones its `models` names, in order, then,
+        sorted by id, those its server listed when `refresh` last asked (`discover`: those its
+        `include` lets through, at most `SHOWN`, and none a named model already has) and the model
+        row's and the default, when they are of it and named by id."""
         out: list[dict[str, Any]] = []
         for host in models:
-            if not endpoint(host) or problem(host) is not None:
+            if not host.endpoint or problem(host) is not None:
                 continue
-            found = self._discovery.found(_key(host))
+            named = named_models(host)
+            found = self._discovery.found(_key(host)) if host.table.get("discover") is True else None
             ids = matching(found.ids, host.table.get("include", ())) if isinstance(found, Listed) else ()
             prefix = f"{host.name}/"
+            given = {model.name.removeprefix(prefix) for model in named}
             pinned = (
                 name.removeprefix(prefix)
                 for name in (current, standing.name if standing else None)
                 if isinstance(name, str) and name.startswith(prefix)
             )
-            for model_id in sorted({*ids[:SHOWN], *filter(None, pinned)}):
-                named = derived(host, model_id)
-                out.append(_listed(named, named.name == current, _default(named, standing)))
+            listed = {model_id for model_id in ids[:SHOWN] if model_id not in {model.id for model in named}}
+            unnamed = sorted({*listed, *filter(None, pinned)} - given)
+            for model in [*named, *(derived(host, model_id) for model_id in unnamed)]:
+                out.append(_listed(model, model.name == current, _default(model, standing)))
         return out
 
     def endpoints(self) -> list[dict[str, Any]]:
-        """Each endpoint of the models file: `name`, `where` (its base_url) and `notes`, what to
-        say of it besides its models, one line each: why it has none (the server isn't there,
-        refused the key, has no /models, a key's line is missing, its table has a problem), or
-        what its list leaves out. Read from what `refresh` kept; this never asks a server."""
+        """Each endpoint with something to say besides its models: `name`, `where` (its base_url)
+        and `notes`, one line each: its table's problem (it serves no model then), or, for one that
+        discovers, why its server listed none (the server isn't there, refused the key, has no
+        /models, a key's line is missing) or what its list leaves out. Read from what `refresh` kept;
+        this never asks a server."""
         found = known(self._config() or ModelConfig())
         out: list[dict[str, Any]] = []
         for host in found.models:
-            if not endpoint(host):
+            if not host.endpoint:
                 continue
             url = str(host.table.get("base_url") or "")
             if (why := problem(host)) is not None:
                 lines: tuple[str, ...] = (why,)
-            else:
+            elif host.table.get("discover") is True:
                 lines = notes(
                     models_url(url), self._discovery.found(_key(host)), host.table.get("include", ())
                 )
+            else:
+                continue
             out.append({"name": host.name, "where": url, "notes": list(lines)})
         return out
 
     async def refresh(self) -> None:
-        """Ask each endpoint of the models file for its models, all at once, and keep what they
+        """Ask each discovering endpoint of the models file for its models, all at once, and keep what they
         say for `listed` and `endpoints` (`openai.Discovery.refresh`: one that was listed a moment ago
         is not asked again). `/model` awaits this when it lists; nothing else does. It never
         raises for a server: an endpoint that can't be asked is said by `endpoints`. A models
@@ -205,7 +205,7 @@ class Catalog:
         wanted = {
             _key(host): partial(_ask, host, config.env_file, self._searched)
             for host in models
-            if endpoint(host) and problem(host) is None
+            if host.endpoint and host.table.get("discover") is True and problem(host) is None
         }
         async with self._refreshing:
             await self._discovery.refresh(wanted)
@@ -214,7 +214,8 @@ class Catalog:
         """The model the row names now: `name` and `provider` (empty when it names no model
         there is, or the row is another component: then `name` is that component), and `unusable`,
         why it can't be used, when it can't (the status bar says so; `name` is the default's own text
-        when it is a name, else `default`, so it is never blank). Never raises."""
+        when it is a name, `none` when nothing names a model, else `default`, so it is never blank).
+        Never raises."""
         entry = self._entry()
         config = self._config()
         if config is None:
@@ -224,7 +225,8 @@ class Catalog:
         except ModelsError as error:  # the row's own config is wrong: a layer's default is still its name
             return {"name": _shown(config.default), "provider": "", "unusable": error.message}
         if isinstance(outcome, ModelsError):
-            return {"name": _shown(name), "provider": "", "unusable": outcome.message}
+            unchosen = name is None and known(config).unread is None  # no default, not an unread one
+            return {"name": "none" if unchosen else _shown(name), "provider": "", "unusable": outcome.message}
         return {"name": outcome.name, "provider": outcome.provider}
 
     def check(self, name: str) -> str | None:
@@ -248,8 +250,9 @@ class Catalog:
             if why is not None:  # its models may be there, but are not read
                 return f"no model named {name!r}; the models are {names}; {why}"
             return (
-                f"no model named {name!r}; the models are {names}. To add one, give it a table in the "
-                f'models file {source}: [{name}] provider = "openai", id = "...", base_url = "https://.../v1"'
+                f"no model named {name!r}; the models are {names}. To add one, give it an endpoint in the "
+                f'models file {source}: [ENDPOINT] provider = "openai", base_url = "https://.../v1", then '
+                '[ENDPOINT.models.MODEL] id = "...", and /model ENDPOINT/MODEL'
             )
         if (why := not_a_model(found)) is not None:
             return why
@@ -264,8 +267,6 @@ def _listed(named: Named, current: bool, default: str | None) -> dict[str, Any]:
         out["where"] = url
     if (why := problem(named)) is not None:
         out["problem"] = why
-    if named.shadows:
-        out["shadows"] = f"shadows the built-in {named.name!r} ({named.source})"
     return out
 
 
@@ -276,24 +277,28 @@ def _shown(name: object) -> str:
 
 
 def _default(named: Named, standing: Intended | None) -> str | None:
-    """Where the default model came from (`built in`, `the models file`) when `named` is it; None
+    """Where the default model came from (`the models file`) when `named` is it; None
     for no default known (`standing` None: the models file can't be read)."""
     return standing.origin if standing is not None and named.name == standing.name else None
 
 
 def _key(host: Named) -> Key:
-    """What an endpoint's listing is kept under: its base_url and the name of its key's line."""
-    return str(host.table.get("base_url")), key_name(host.table.get("key"))
+    """What an endpoint's listing is kept under: its base_url and how it gets its key (the name of its
+    key's line, or its key_command)."""
+    command = host.table.get("key_command")
+    return str(host.table.get("base_url")), command if isinstance(command, str) else key_name(
+        host.table.get("key")
+    )
 
 
-def _ask(host: Named, env_file: str | None, searched: Sequence[str]) -> Ask | Unlisted:
+async def _ask(host: Named, env_file: str | None, searched: Sequence[str]) -> Ask | Unlisted:
     """The request for an endpoint's models: where, and the headers with its key, read from
-    local.env now (`openai.authorization`: header only). A key whose line is not there is no
-    request: it is the endpoint's answer, said so the person can fix it."""
+    local.env or printed by its key_command now (`openai.headers_for`: header only). A key that
+    can't be had is no request: it is the endpoint's answer, said so the person can fix it."""
     if (why := missing_key(host, env_file, searched)) is not None:
         return Unlisted(why)
     try:
-        headers = authorization(host, env_file, searched)
+        headers = await headers_for(host, env_file, searched)
     except ModelsError as error:
         return Unlisted(error.message)
     headers["Accept"] = "application/json"

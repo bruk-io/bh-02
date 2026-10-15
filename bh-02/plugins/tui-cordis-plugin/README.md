@@ -54,7 +54,7 @@ The frame. `tui:palette` pushes the `commands` broker's `specs` method itself, w
 palette (Ctrl-P) calls each time it opens, so a command registered
 after the push is offered with no reload; choosing one sends `/name` through the input as if
 typed, or puts `/name ` in the composer when it takes arguments; a spec's `choices` (read each
-time it opens too) are entries of their own that run at once (`/model haiku`, one per model).
+time it opens too) are entries of their own that run at once (`/model claude/haiku`, one per model).
 `/help` and `/exit` are the ui's own entries. Typing a one-line `/` in the composer
 shows the same entries as a list between the transcript and the composer (decision-0003): read
 once when it opens (a command registered meanwhile shows at the next opening), filtered per key,
@@ -76,9 +76,9 @@ highlight; a recalled line keeps the list shut until it is edited (or the list w
 next Up from the history), and a question up holds the keys itself. `tui:status` shows the running session's id (from
 the `session` value, `(resumed)` after it on a resume), and asks
 the `models` value which model the model row names now and on which provider (`models.current()`;
-`config.model_row`, `model`, names the row whose lifecycle it follows): `sonnet (claude-code)`
-(narrow: `sonnet`). It observes lifecycle events to show it again at each of that row's events:
-`sonnet (claude-code, starting…)` (narrow: `sonnet…`) from the row's unloading (or `reload`) until it is active again, so a
+`config.model_row`, `model`, names the row whose lifecycle it follows): `claude/sonnet (claude-code)`
+(narrow: `claude/sonnet`). It observes lifecycle events to show it again at each of that row's events:
+`claude/sonnet (claude-code, starting…)` (narrow: `claude/sonnet…`) from the row's unloading (or `reload`) until it is active again, so a
 `/model` or `/clear` shows the new model at once and that it is still starting (the Claude
 CLI takes seconds); its first push reads the row's state from the loader's `status()`. It
 depends on the loader, `models`, `session`, `frame` and its config, none of which `/clear` or

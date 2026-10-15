@@ -79,7 +79,7 @@ plugin:
 
 No plugin imports another; they agree on keys and shapes, written down in
 [`bh-02/CONTRACTS.md`](bh-02/CONTRACTS.md). So each part is swapped with one line in a layer:
-another model, another jail, another interface. `/model opus` edits the session's own layer
+another model, another jail, another interface. `/model claude/opus` edits the session's own layer
 file and the loader swaps the model row, while the conversation carries on. `/clear` restarts
 three rows. `/rows` shows the program as it is running. [`bh-02/GLOSSARY.md`](bh-02/GLOSSARY.md)
 defines every term.
@@ -116,17 +116,24 @@ the project, but it can't reach the network, read credentials, or touch what cou
 (`.git/hooks`, shell rc files, bh-02's own layers). With `--no-jail`, every input asks first.
 Ctrl-C stops a reply, Ctrl-P opens the command palette, `bh-02 --resume` continues a session.
 
-`sonnet`, `opus` and `haiku` are built in. Add any OpenAI-compatible model (OpenAI, OpenRouter,
-Groq, vLLM, LM Studio, Ollama, ...) to `~/.config/bh-02/models.toml`, then `/model NAME`.
+bh-02 has no models built in: name yours in `~/.config/bh-02/models.toml`, one table per endpoint
+(Claude through Claude Code, or any OpenAI-compatible server: OpenAI, OpenRouter, Groq, vLLM, LM
+Studio, Ollama, ...) with its models under it, then `/model ENDPOINT/MODEL`.
 That file must be outside the project bh-02 runs in, where the model's code can't write it:
 one inside it (bh-02 run from your home directory, say) is not read, and `/model` says why.
 
 ```toml
-[qwen]
+default = "claude/sonnet"
+
+[claude]                      # Claude through Claude Code, on the subscription token in local.env
+provider = "claude-code"
+models = { sonnet = { id = "sonnet" }, opus = { id = "opus" } }
+
+[local]
 provider = "openai"
-id = "qwen3-coder"
 base_url = "http://localhost:11434/v1"
 key = "SOME_API_KEY"          # optional: the name of a line in local.env, never the key itself
+models = { qwen = { id = "qwen3-coder" } }
 ```
 
 ### Changing it
@@ -163,7 +170,7 @@ The techniques above, and where to read them in real code:
 | **A resource's lifetime is a row's** (`enter`) | `warden:supervised`, `python:tool`, `tui:ui` | a process starts when its row loads and is terminated when it unloads; the Python process lives exactly as long as the `python` row; the terminal app's lifetime is the `ui` row's |
 | **A broker** (`acquire`, the remover as undo) | warden's `processes`; bh-02's `commands`, `frame` and `system` | each supervised process registers itself; slash commands register into `commands`; the status bar and palette are entries rows `acquire` in the app's `frame`; sections of the model's prompt are entries in `system`; each gone when its row goes |
 | **One key, swappable providers** | bh-02's `model`, `runner`, `ui` rows | Claude or any OpenAI-compatible model behind `model`; brig's sandbox or none behind `runner`; tests put fakes in the same rows with `--patch` (`bh_02.testing`) |
-| **Reshaping by editing a layer** | `/model` (bh-02); adding a process (warden) | `/model opus` writes the session's layer file and the loader swaps one row; a new `[[plugin]]` block in warden's layer starts one more process, touching nothing else |
+| **Reshaping by editing a layer** | `/model` (bh-02); adding a process (warden) | `/model claude/opus` writes the session's layer file and the loader swaps one row; a new `[[plugin]]` block in warden's layer starts one more process, touching nothing else |
 | **An operator over the loader** | `commands:operator` | `/rows`, `/explain`, `/restart` and `/clear` act on the running program through the loader's handle, queued as the operator row's own background work so a restart never cancels the command asking for it |
 | **Work a row owns, and its end** (`background`, `done`) | `chat:converse`, bh-02's bootstrap | the conversation is the chat row's background task, bound as `done`; the bootstrap waits on it and follows a new `done` when the chat row reloads, so `/model` never ends the session |
 | **Watching the program change** (`observe`) | `tui:ui` | the terminal app hears every lifecycle event and shows `↻ model reloaded` as rows reload |

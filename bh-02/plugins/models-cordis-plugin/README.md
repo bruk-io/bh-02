@@ -10,11 +10,10 @@ bh-02's model: named models over their providers, switched by name. Three rows:
 
 The model row's config (`ModelConfig`):
 - `default`: the model's name; `--model` and `/model` set it. Unset (None) when no layer names a
-  model, which is not the same as naming `sonnet`: then the models file's `default` is the
-  model, else `sonnet` (below).
+  model: then the models file's `default` is the model, else none is chosen (below).
 - `models`: the models file, when not the default one.
-- `extra`: models of the row's own, one table per name as in the file (a migrated layer
-  writes one: an old Ollama row is an `extra` OpenAI-compatible model).
+- `extra`: endpoints of the row's own, one table per name as in the file (a layer writes them),
+  without `discover` or `key_command`, which only the models file may name.
 - `state`, `env_file`, `cwd`: the claude-code provider's (below). `env_file` is also where the
   openai provider reads a model's key. Unset, `local.env` is looked for where the `host`
   value's `credentials` say (below). A models file must be outside `cwd` as well as the
@@ -22,48 +21,70 @@ The model row's config (`ModelConfig`):
 
 ## Named models
 
-Three places name models, each over the last (`named.py`, pure but for reading the file):
-- the built-ins: `sonnet`, `opus` and `haiku`, Claude through Claude Code by its aliases;
+Two places name models, the second over the first (`named.py`, pure but for reading the file):
 - the models file, `$XDG_CONFIG_HOME/bh-02/models.toml` (else `~/.config/bh-02/models.toml`);
 - the row's `extra`.
 
-A later one of the same name wins: `extra` over the file, and a user's model over a built-in
-(allowed, and `/model` marks it as shadowing the built-in). The file is one table per model (or per endpoint that lists its own,
-[below](#discovering-an-endpoints-models)):
+There are no built-in models: every model is one an endpoint serves, so what a session runs on, and
+what it spends, is always written down by the person. Claude on the subscription is a `claude-code`
+endpoint naming Claude Code's aliases (`models = { sonnet = { id = "sonnet" } }`).
+
+A later endpoint of the same name wins: `extra` over the file. The file is one table per
+**endpoint**, a server and how to reach it, the same shape for every provider; its models are
+under its `models`, each named `ENDPOINT/MODEL` (`named.derived`: the endpoint's settings with the
+model's own over them):
 
 ```toml
-[llama]                                   # Ollama is an OpenAI-compatible endpoint at /v1
+[ollama]                                  # Ollama is an OpenAI-compatible endpoint at /v1
 provider = "openai"
-id = "llama3.2"
 base_url = "http://localhost:11434/v1"
+models = { llama = { id = "llama3.2" } }  # ollama/llama; inline, or as [ollama.models.llama]
 
 [router]
 provider = "openai"
-id = "anthropic/claude-sonnet-4"
 base_url = "https://openrouter.ai/api/v1"
 key = "OPENROUTER_API_KEY"                # a line of local.env, never the key itself
-max_tokens = 4096                         # optional, sent only when set
-temperature = 0.2                         # optional, sent only when set
+max_tokens = 4096                         # optional, sent only when set; its models share it
 
-[opus-4-1]
+[router.models.sonnet]                    # router/sonnet
+id = "anthropic/claude-sonnet-4"
+temperature = 0.2                         # a model's own setting, over its endpoint's
+
+[subscription]
+provider = "claude-code"                  # no base_url: the subscription token
+models.opus41 = { id = "claude-opus-4-1" }
+
+[work]                                    # Claude through a gateway (below)
 provider = "claude-code"
-id = "claude-opus-4-1"
+base_url = "https://gateway.example/anthropic"
+key_command = "my-token-helper"           # Claude Code's apiKeyHelper
+key_ttl_ms = 300000                       # optional
+experimental_betas = false                # optional: for a gateway that refuses the beta headers
+models.opus = { id = "claude-opus-5-5" }
 
-[local-server]                            # an endpoint: its models are named local-server/ID
+[local-server]                            # also lists what its server serves, local-server/ID
 provider = "openai"
 discover = true
 base_url = "http://localhost:1234/v1"
 include = ["qwen*"]                       # optional: the ids matching one of these globs
 ```
 
+A model's own table takes `id` and, for `openai`, `max_tokens` and `temperature`; everything about
+reaching the server is its endpoint's. `ENDPOINT/ID`, an id the endpoint's `models` doesn't name, is
+that id on the endpoint (`derived`), with no network. A table with an `id` of its own (the format
+before endpoints) is that table's problem, which says how to move the id under its `models`. An
+endpoint's name may not hold `/`.
+
 A top-level `default = "NAME"` above the tables makes NAME the model a session starts on. The
-model is chosen, lowest first, by the built-in `sonnet`, the file's `default`, a layer's model
-row `default` (the session's own layer, which `/model` and `--model` write; a layer that sets no
-`default` leaves the file's in force, one that names `sonnet` chooses it: `ModelConfig.default`
-is None for none, `named.intended`), then `--model`. So a resumed session keeps the model its
+model is chosen, lowest first, by the file's `default`, a layer's model row `default` (the
+session's own layer, which `/model` and `--model` write; a layer that sets no `default` leaves the
+file's in force: `ModelConfig.default` is None for none, `named.intended`), then `--model`. With
+none of them, no model is chosen: the row binds `Unusable`, each step says `no model is chosen` with
+the models there are and an endpoint and `default` to write (`named.chosen`), and the status bar
+shows `none (unusable)`. So a resumed session keeps the model its
 layer names, and `/model` and `--model` still switch. The app writes the model a new session
 starts on into its layer when it creates it (`bh_02.sessions.create`: `--model`, else the file's
-`default`, else `sonnet`), so a session keeps it whatever the file says later; only a layer from
+`default`; neither records none), so a session keeps it whatever the file says later; only a layer from
 before that, naming none, follows the file's `default` as it is now (and `/model` of that name
 there says "already"). The default chooses the spend, so it is read only where the tables are:
 from a models file outside the project (below), never from one in it. The shell reads the file
@@ -79,38 +100,41 @@ layer names a model. The shell never hides it: for a default that is not a name 
 empty string, a list), and for a file that is not TOML, has a key that is no table, or can't be
 read, it records no model in the new session's layer (its `stack` in `bh-02 sessions` is
 `default`), so the row's error shows; a default that names no model is a name, and is recorded.
-A `[default]` table is a model named `default`.
+A `[default]` table is an endpoint named `default`.
 
 **A models file that can't be read** (not TOML, a key that is no table, a path that is no file)
-is not a failure of every model: `known` names the built-ins and the row's `extra` behind it, as
-behind a file refused in the project, with `why` saying what is wrong and what to do. A layer's
-choice runs (`/model sonnet` always works); a row no layer names a model for has no default to
-follow, so it says the file's problem (`resolution`). `Catalog.listed` lists the built-ins and
-`problem` is the line `/model` ends with; none of them raises.
+is not a failure of the row: `known` names the row's `extra` behind it, as behind a file refused in
+the project, with `why` saying what is wrong and what to do. A layer's choice of an `extra` model
+runs; a row no layer names a model for has no default to follow, so it says the file's problem
+(`resolution`). `Catalog.listed` lists the `extra` models and `problem` is the line `/model` ends
+with; none of them raises.
 
 A table's problems are said with what to do, and a model that can't be used still binds: an
-unknown name (the message lists the models and shows a table to add), no provider, an unknown
-provider or setting, no id, no `base_url` or one that is not an http(s) URL with a host and a
-numeric port (a malformed one is that model's problem alone, never the catalog's), a row
-`extra` that is not one table per model or a `default` that is not a name, a `key` that is not the
-name of a line (capitals, digits and `_`: a value that isn't one may be the key itself, so it
-is never quoted back) or that names `CLAUDE_CODE_OAUTH_TOKEN` (below), a `max_tokens` or
-`temperature` of the wrong type (`ModelsError(kind, message)`, CONTRACTS.md: Errors). Each step
+unknown name (the message lists the models and shows an endpoint to add), no provider, an unknown
+provider or setting (an endpoint's, or a model's), an `id` on the endpoint itself, no models, a
+model with no id, no `base_url` or one that is not an http(s) URL with a host and a numeric port (a
+malformed one is that endpoint's problem alone, never the catalog's), a row `extra` that is not one
+table per endpoint or a `default` that is not a name, a `key` that is not the name of a line
+(capitals, digits and `_`: a value that isn't one may be the key itself, so it is never quoted back)
+or that names `CLAUDE_CODE_OAUTH_TOKEN` (below), both `key` and `key_command`, a claude-code
+`base_url` without a `key_command` or the other way round, a `max_tokens`, `temperature`,
+`key_ttl_ms` or `experimental_betas` of the wrong type (`ModelsError(kind, message)`, CONTRACTS.md:
+Errors). An endpoint's problem is any of its models' too, so none of them is used while it has one. Each step
 raises it (`Unusable`), so a typo in the models file is a message in the conversation, and
 `/model` another model fixes it. `/model NAME` checks first
 (`models.check`), so it never switches to one. The models file is read when the model row
 starts and each time `models` is asked, never watched: an edit takes effect at the next
 `/model` or launch (`/restart model` for the model already chosen).
 
-A provider can also be `module:attribute`, a factory given the model's table (its settings are
-its own). It is there for tests: bh-02's fakes (`bh_02.testing:echo_provider`) are models of
+A provider can also be `module:attribute`, an endpoint whose factory is given each model's table,
+its endpoint's with its own over it (its settings are its own). It is there for tests: bh-02's fakes (`bh_02.testing:echo_provider`) are models of
 this kind, so a real launch switches between a fake and any other model under this row. It
 imports whatever module the models file names, so name only code you trust. A factory that
 can't be imported, or raises, is a model that can't be used, like any other (`Unusable`).
 
 **The models file must be outside the project.** It is trusted whole: a factory it names runs
-in bh-02's own, unjailed process, and a `key` it names is read from local.env and sent to the
-table's `base_url`. The project is the working directory, which the jail lets the model's code
+in bh-02's own, unjailed process, a `key_command` it names runs as the person, and a `key` it names
+is read from local.env and sent to the table's `base_url`. The project is the working directory, which the jail lets the model's code
 write (the python row's root), and the model row's `cwd` too when a layer sets one. A models file in
 it would let the model choose both, so it is not read (`providers.known`, `named.in_project`),
 however it got there: bh-02 run from the home directory (`~/.config` is then in the project),
@@ -119,8 +143,8 @@ project's when the file as named, or any place reading it goes through (each dir
 on the way, links followed, to where it ends: `host_paths.passes`, the walk the python row's startup
 files and memory files outside the project are held to), is under the project's root as named or as
 resolved: the model could repoint a link there, or swap a directory there for one, and so choose
-what is read. Whether the file is there does not matter (the model could write one). The
-built-ins and the row's `extra` still work; the reason is said where the models file's problems
+what is read. Whether the file is there does not matter (the model could write one). The row's
+`extra` still works; the reason is said where the models file's problems
 are: `models.problem`, which `/model` shows in place of where to add models, and the error of a
 name only that file could have named (`/model NAME`, and each step of a model row whose
 `default` is one).
@@ -139,10 +163,10 @@ which a switch replaces.
 `models:switch` (`switch.py`, its row in `wiring.py`) registers `/model` with `commands`, beside
 the catalog it reads, so the commands plugin knows nothing of how a model is chosen and a
 composition without the catalog keeps the operator's commands. `/model` lists the models (the
-`models` value: the built-ins, the models file's, the model row's own, then each endpoint's
-[discovered](#discovering-an-endpoints-models) ones, after asking the endpoints: `models.refresh`), the one the model row
-names marked `●`, each with its provider and id, the one a new session starts on when no layer
-names one marked `(default: built in)` or `(default: the models file)`, and says where the models
+`models` value: each endpoint's of the models file, then of the model row's own, each with its
+[discovered](#discovering-an-endpoints-models) ones after its named ones, after asking the endpoints:
+`models.refresh`), the one the model row names marked `●`, each with its provider and id, the one a
+new session starts on when no layer names one marked `(default: the models file)`, and says where the models
 file is, or, when it is not read (`models.problem`: it is in the project, or can't be read), why and
 where it must be instead. When the models file's `default` is refused (`models.default_problem`: no
 name, no model, or a model whose table has a problem) it says so in a line above that, with what to
@@ -162,7 +186,7 @@ run after the command has answered, since it restarts the chat row the command's
 shown in; one that fails is told through `output.notice` there. The chat row reads its next
 line only once the reload is done, so a line typed meanwhile reaches the new model. Its spec
 carries `choices`, one per usable model, which the palette offers as entries of their own
-(`/model haiku`); they read `models.listed` and never ask a server (below). The row depends on `models`, not on `model`, so a switch reloads the model
+(`/model claude/haiku`); they read `models.listed` and never ask a server (below). The row depends on `models`, not on `model`, so a switch reloads the model
 row and what uses it, never the row running the switch. The answer ends with `restarting`
 (CONTRACTS.md: event), naming the model row, which the ui names in what a line typed meanwhile
 says it waits for.
@@ -202,32 +226,39 @@ that request's `Authorization` header: never in an environment, never in anythin
 shows it. A key named but not there says which file and what line to add, at `/model NAME`
 (which looks for the line, never reads it out, and does not switch) and again at a request if
 the line is removed since; no key sends none.
+
+A `key_command` instead is a command that prints the key (`key_command.py`): run through the
+person's shell, with bh-02's environment and no input, when a request needs a key, its stdout
+trimmed. The request's headers are kept for `key_ttl_ms` (5 minutes when unset, Claude Code's own
+default for its `apiKeyHelper`) so the command doesn't run every step, and dropped when the server
+answers 401 or 403, so the next step runs it again. One that can't start, runs past 60 s, exits
+non-zero or prints nothing is an `authentication_failed` naming the command, never what it
+printed; so is a key a header can't carry. `/model NAME` doesn't run it to check. Only the models
+file may name one: a layer's `extra` that does is that table's problem.
 Connecting times out after 10 s; reading does not (a local model can take minutes to its first
 token). Closing the step (Ctrl-C) closes the HTTP stream.
 
 ## Discovering an endpoint's models
 
-A table of the models file with `discover = true` is an endpoint, not a model: it names the
-models its server lists, `ENDPOINT/ID`, instead of one table each (`named.endpoint`, `find`;
-`openai/listing.py` pure, `openai/discovery.py` the I/O and the cache). It is an `openai` table
-(`base_url`, `key`, `max_tokens`, `temperature`, which its models share) with no `id`, and an
-optional `include`, a list of globs (`fnmatch`: `*`, `?`, `[abc]`, case-sensitive) tried on the
-id; its name may not hold `/`. What is wrong with one is that table's `problem`, said like any
-other.
+An `openai` endpoint of the models file with `discover = true` also offers the models its server
+lists, `ENDPOINT/ID`, beside the ones its `models` names (`named.find`; `openai/listing.py` pure,
+`openai/discovery.py` the I/O and the cache), narrowed by an optional `include`, a list of globs
+(`fnmatch`: `*`, `?`, `[abc]`, case-sensitive) tried on the id. What is wrong with one is that
+table's `problem`, said like any other.
 
-- **Names resolve with no network.** `named.find(name, models)` is the one pure rule: the table of
-  that exact name, else `ENDPOINT/ID` for an endpoint, split at the first `/` (the id keeps the
-  rest, and `:`), derived from the endpoint's table (`derived`: its provider, `base_url`, `key` and
-  settings, the id as the model's). `chosen`, `check`, `current` and `listed` all go through it, so
+- **Names resolve with no network.** `named.find(name, models)` is the one pure rule: the endpoint of
+  that exact name, else `ENDPOINT/MODEL`, split at the first `/` (the rest keeps its
+  `/` and `:`), derived from the endpoint's table (`derived`: its provider, `base_url`, key and
+  settings, with the table its `models` gives MODEL over them, or MODEL as the id). `chosen`, `check`, `current` and `listed` all go through it, so
   `--model`, `/model NAME`, a layer's `default` and the file's `default` mean the model with no
   request, the status bar shows `local/qwen (openai)`, and the model row has no way to ask a server at
   all: an id the server lacks is the first step's 404. The endpoint alone names no model
   (`not_a_model` says to name one of its models). An endpoint whose table has a problem (an `id`
-  beside `discover`, a bad `include` or `base_url`) names no model either: `derived` hands back the
+  on it, a bad `include` or `base_url`) names no model either: `derived` hands back the
   table itself, so `--model local/x`, `/model local/x` and a `default` are refused with that problem
   and what to write, and the model row binds `Unusable` as for any table with one.
 - **Only `/model` asks.** `Catalog.refresh()`, awaited by `/model` with no argument in its own
-  coroutine, asks each endpoint `GET <base_url>/models` through a `Get` (`openai/discovery.py`: an
+  coroutine, asks each discovering endpoint `GET <base_url>/models` through a `Get` (`openai/discovery.py`: an
   async call returning a `Reply` or a `Down`, never raising for a server that isn't there; `httpx_get`
   is the real one, `testing.FakeGet` the tests'), all at once: connecting within 3 s, the whole
   request within 6 s, no redirect followed (a key goes to its `base_url` alone), at most 1 MiB read
@@ -237,16 +268,17 @@ other.
   loop, per key), `endpoints` and `current` (the status bar's) only read what the last `refresh`
   kept, so nothing else ever triggers it (decision-0003).
 - **The cache** (`Discovery`, in the catalog row, lost with it) is kept under the endpoint's
-  `base_url` and the name of its key's line, holding ids and never the key. `refresh` asks an endpoint
+  `base_url` and the name of its key's line (or its `key_command`), holding ids and never the key. `refresh` asks an endpoint
   again only when it has no listing, the last one failed, or it is 30 s old: retyping `/model` doesn't
   ask a hosted endpoint again, and typing it once the server is started does at once. A reader never
   expires it (a stale id is a suggestion: resolution never depends on it); a refresh that fails drops
   the ids it had, and one that no longer finds the endpoint in the file forgets it. `include` is
   applied on read, so editing it needs no new request.
-- **What `/model` shows.** `listed` adds each endpoint's models after the `extra` ones, sorted, at most
-  200 of them (`SHOWN`), as `{name, provider, id, current, where}`; the model row's model and the
-  default, when they are `ENDPOINT/ID` names, are listed even if the server doesn't list them, so
-  the marks always show. `endpoints()` gives each endpoint's `name`, `where` and `notes`, the lines
+- **What `/model` shows.** `listed` gives each endpoint's named models in order, then, sorted, the
+  ids its server listed that none of them is, at most 200 (`SHOWN`), as `{name, provider, id,
+  current, where}`; the model row's model and the default, when they are `ENDPOINT/ID` names, are
+  listed even if the server doesn't list them, so the marks always show. `endpoints()` gives each
+  endpoint with a problem or `discover` its `name`, `where` and `notes`, the lines
   `model_list` prints after the models: why it listed none (the server isn't there or took too long,
   HTTP 401/403, no `/models`, a redirect, an answer that isn't a model list, a key's line missing from
   `local.env`, the table's problem), `include` matching nothing, more than 200, entries of its list that give no
@@ -259,10 +291,11 @@ other.
   entries of the list that gave no usable id, missing or refused. An
   id is only ever a name and the `model` of a request's body: never a path, an argument or part of a
   URL.
-- **Trust.** Endpoints come only from the models file, which is not read when it is in the project
-  (above), so the model's code can't add one; a table of a layer's `extra` that says `discover` is
-  that table's problem and asks nothing (`endpoint` is false for it). The key is read from `local.env`
-  for the one request and goes in its `Authorization` header only (`openai.authorization`, whose
+- **Trust.** Discovering endpoints come only from the models file, which is not read when it is in
+  the project (above), so the model's code can't add one; a table of a layer's `extra` that says
+  `discover` is that table's problem and asks nothing. The key is read from `local.env` (or printed by
+  its `key_command`) for the request and goes in its `Authorization` header only (`openai.headers_for`
+  over `openai.authorization`, whose
   withheld-token wall applies); a line that is missing, or that holds what a header can't carry
   (anything but printable ASCII), asks nothing and is said, without the key. Whatever a library
   says of a failure goes through `wire.scrubbed` and a control strip first, and a body is never quoted.
@@ -337,7 +370,8 @@ bh-02's loop does all of the following:
 
 Claude Code does none of that. It runs with no built-in tool (`tools=[]`), no settings file
 or CLAUDE.md (`setting_sources=[]`), and no connector (`strict_mcp_config`,
-`ENABLE_CLAUDEAI_MCP_SERVERS=0`). Its system prompt is the request's system message, after a
+`ENABLE_CLAUDEAI_MCP_SERVERS=0`). Through a gateway it is given one settings layer, bh-02's own
+(below), and still reads none of the person's. Its system prompt is the request's system message, after a
 line of the provider's own: Claude Code names the declared tool `mcp__bh__python`, so the line
 says that is bh-02's `python`. It does not compact (`DISABLE_AUTO_COMPACT`).
 
@@ -482,6 +516,27 @@ git-ignored `local.env` at the repository root (mode 600), so `uv run bh-02` nee
   file it read (the row's `env_file` when set), whether that file is missing or lacks the
   variable, and to make a token with `claude setup-token`.
 
+### Through a gateway
+
+A `claude-code` endpoint with `base_url` and `key_command` sends Claude Code's requests to that
+Anthropic-compatible gateway instead, with the key the command prints: a company's own route to
+Claude, where there is no subscription token. The provider (`ClaudeCodeConfig.gateway`, a
+`credential.Gateway`) starts the CLI with the SDK's `settings` set to a layer of bh-02's own,
+inline JSON (`credential.gateway_settings`: `apiKeyHelper` is the command, `env` sets
+`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_API_KEY_HELPER_TTL_MS` from `key_ttl_ms`, and
+`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` for `experimental_betas = false`), still with
+`setting_sources=[]`, so the person's own settings stay out. Measured on a gateway, with the pinned
+CLI: the flag layer is applied though no setting source is, the CLI runs the helper itself, and a
+`[1m]` id works. A helper's key the gateway refuses is `authentication_failed` naming the gateway and
+the command (`failure_of`); the CLI retries it for about three minutes first (measured).
+- **No token.** The child's environment is `credential.gateway_env`: the fixed settings,
+  `CLAUDE_CONFIG_DIR`, and `CLAUDE_CODE_OAUTH_TOKEN` set empty, so a token in bh-02's own
+  environment never reaches it (the SDK merges that environment under the options' `env`). `local.env`
+  is not read.
+- **bh-02 never holds the key.** The CLI runs the command; bh-02 only names it. The base URL goes in
+  the settings layer, not the environment, so the detached launcher's scrub of `ANTHROPIC_*` (below)
+  stays as it is.
+
 ### Detached, and on the subscription only
 
 The SDK starts the CLI through this plugin's `claude-code-detached` console script
@@ -489,7 +544,8 @@ The SDK starts the CLI through this plugin's `claude-code-detached` console scri
 group and the CLI exits on SIGINT: in a session of its own, the terminal's SIGINT never reaches
 it, and a stop is the loop closing its step. It then `execve`s the SDK's bundled CLI with every
 `ANTHROPIC_*` and `CLAUDE_*` variable removed but the ones the SDK and the options set (the
-token, `CLAUDE_CONFIG_DIR`, the SDK's entry point and version). The SDK merges bh-02's
+token, `CLAUDE_CONFIG_DIR`, the SDK's entry point and version). A gateway's base URL is not among
+them: it reaches the CLI in its settings layer (above). The SDK merges bh-02's
 environment into the child's, and its options can override a key but not remove one; without
 the scrub, a shell's `CLAUDE_CODE_USE_BEDROCK=1` sent the steps to Bedrock (measured: the
 start timed out), and `CLAUDE_CODE_MAX_OUTPUT_TOKENS` and the like would change the steps.
@@ -513,8 +569,13 @@ Bump the pin deliberately, and run the e2e tests.
 - `test_models_file_trust.py`, on files and links in temporary directories: a models file in
   the project as named, through `$XDG_CONFIG_HOME`, from the home directory, a link to one in
   it, a directory on its path linked into it and a link in it on the way out are not read (the
-  built-ins and `extra` still are, and the catalog, `/model NAME` and the step say why); one
+  `extra` still is, and the catalog, `/model NAME` and the step say why); one
   outside is read; a key naming the Claude Code token is refused and nothing reaches the server.
+- `test_models_key_command.py`: a `key_command`'s key, what a failing one says (never what it
+  printed), the openai provider keeping its headers for `key_ttl_ms` and dropping a refused key
+  (against `StubServer`), discovery asking with it, and `extra` refusing it.
+- `test_models_gateway.py`: the gateway's settings layer and token-less environment, the provider
+  starting `FakeClaudeCode` with both and no `local.env`, and what a refused key says.
 - `test_models_wiring.py` drives the rows by hand: the named model's provider, entered; a
   model that can't be used, binding anyway; a factory provider; the catalog.
 - `test_openai_stub.py` runs the openai provider against `openai.testing.StubServer`, a

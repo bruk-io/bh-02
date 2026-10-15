@@ -53,7 +53,7 @@ doesn't have gets).
 | `status` | `tui:status` | |
 | `grades` | `tui:grades` | |
 | `palette` | `tui:palette` | |
-| `model` | `models:model` (`default`: none, so the models file's `default`, else `sonnet`) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
+| `model` | `models:model` (`default`: none, so the models file's `default`, else no model) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
 | `models` | `models:catalog` | |
 | `transcript` | `agent:transcript` | `path` (the session's `transcript.jsonl`) |
 | `asides` | `agent:asides` | |

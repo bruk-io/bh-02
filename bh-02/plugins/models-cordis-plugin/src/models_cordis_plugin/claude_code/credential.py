@@ -1,23 +1,32 @@
-"""The one credential, and the environment the Claude Code CLI is started with.
+"""The credential, and the environment the Claude Code CLI is started with.
 
-The token is a Claude Code OAuth token (`claude setup-token` makes one), kept as
-`CLAUDE_CODE_OAUTH_TOKEN` in the git-ignored `local.env` at the repository root. bh-02 reads
+On the subscription, the token is a Claude Code OAuth token (`claude setup-token` makes one), kept
+as `CLAUDE_CODE_OAUTH_TOKEN` in the git-ignored `local.env` at the repository root. bh-02 reads
 that file itself (`parse_env`, pure, over one read) and hands the value to the CLI child alone,
 through the SDK options' `env`: never into bh-02's own `os.environ`, so no other child (the
 Python process, the jail) can inherit it.
+
+Through a gateway (a claude-code endpoint with `base_url` and `key_command`), bh-02 holds no
+credential at all: the CLI is given a settings layer of its own (`gateway_settings`, the SDK's
+`settings`, which is `--settings`) naming the gateway as `ANTHROPIC_BASE_URL` and the command as
+its `apiKeyHelper`, which the CLI runs and runs again when the key's `key_ttl_ms` is up. The
+token's variable is set empty (`gateway_env`), so a token in bh-02's own environment never reaches
+that CLI. The layer is all the CLI reads of settings: the person's own still are not.
 
 The token is never held in a named local of a long-lived frame nor in anything whose repr
 shows it: Textual prints a crash with every frame's locals, and `ChildEnv`'s repr names its keys
 only. An error about the credential names the variable and the file, never a value.
 """
 
+import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from models_cordis_plugin.local_env import parse_env
 
-__all__ = ["TOKEN_VARIABLE", "ChildEnv", "child_env"]
+__all__ = ["TOKEN_VARIABLE", "ChildEnv", "Gateway", "child_env", "gateway_env", "gateway_settings"]
 
 TOKEN_VARIABLE: Final = "CLAUDE_CODE_OAUTH_TOKEN"
 
@@ -30,6 +39,39 @@ _FIXED: Final[Mapping[str, str]] = {
     # a stream that fails mid-step is an error the step reads, never a non-streaming retry it can't see
     "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": "1",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class Gateway:
+    """Where the CLI sends its requests instead of Anthropic (`base_url`, an Anthropic-compatible
+    API), the command that prints its key (`key_command`, Claude Code's `apiKeyHelper`), how long a
+    key is used (`key_ttl_ms`; Claude Code's own default when None), and whether the CLI may send
+    Anthropic's experimental beta headers (`experimental_betas`: false for a gateway that refuses
+    them)."""
+
+    base_url: str
+    key_command: str
+    key_ttl_ms: int | None = None
+    experimental_betas: bool = True
+
+
+def gateway_settings(gateway: Gateway) -> str:
+    """The settings layer, as JSON, that sends the CLI's requests through `gateway`."""
+    env = {"ANTHROPIC_BASE_URL": gateway.base_url}
+    if gateway.key_ttl_ms is not None:
+        env["CLAUDE_CODE_API_KEY_HELPER_TTL_MS"] = str(gateway.key_ttl_ms)
+    if not gateway.experimental_betas:
+        env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
+    return json.dumps({"apiKeyHelper": gateway.key_command, "env": env})
+
+
+def gateway_env(config_dir: str) -> ChildEnv:
+    """The CLI child's environment through a gateway: Claude Code's own state in `config_dir`, the
+    fixed settings, and the token's variable empty (the gateway's key comes from its helper)."""
+    env = ChildEnv(_FIXED)
+    env["CLAUDE_CONFIG_DIR"] = config_dir
+    env[TOKEN_VARIABLE] = ""
+    return env
 
 
 class ChildEnv(dict[str, str]):

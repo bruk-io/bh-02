@@ -173,22 +173,6 @@ def test_the_model_command_offers_each_usable_model_as_a_choice() -> None:
     assert spec["choices"]() == []  # read each time; a broken file offers none, /model says why
 
 
-def test_the_model_list_marks_a_shadowed_built_in() -> None:
-    listed = [
-        {
-            "name": "sonnet",
-            "provider": "openai",
-            "id": "x",
-            "current": True,
-            "shadows": "shadows the built-in 'sonnet' (f)",
-        }
-    ]
-    assert model_list(listed, "f").splitlines()[:2] == [
-        "● sonnet  openai  x",
-        "    shadows the built-in 'sonnet' (f)",
-    ]
-
-
 def test_the_model_list_says_what_each_endpoint_has_to_say_one_line_each_before_the_footer() -> None:
     listed = [{"name": "sonnet", "provider": "claude-code", "id": "sonnet", "current": True}]
     endpoints = [

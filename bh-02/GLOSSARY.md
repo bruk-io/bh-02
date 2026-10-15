@@ -44,10 +44,12 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **stack** (a fiber's, in cordis): the undos a fiber has recorded, run last first when it unloads.
 - **loop** (row and key): the agent loop, `agent:loop`: sends the conversation to the model, runs each call it asks for through its tool, and nudges a step that didn't count ([The loop](../docs/bh-02/how-it-works/loop.md)).
 - **model** (row and key), **the model row**: the model itself, one step at a time (`models:model`), the one its `default` names, chosen by `--model NAME` or `/model NAME`.
-- **named model**: a name the model row can take, with its provider and id: the built-ins `sonnet`, `opus` and `haiku`, and yours in the models file.
-- **endpoint** (a table of the models file with `discover = true`): an OpenAI-compatible server that lists its own models, named `ENDPOINT/ID` (split at the first `/`: `local/qwen2.5-coder:7b`); a name means its model with no network call, and only `/model` asks the server for its list ([Models](../docs/bh-02/using/models.md#listing-an-endpoints-models-discover)).
+- **named model**: a name the model row can take, with its provider and id: an endpoint's model in the models file (`ENDPOINT/MODEL`); bh-02 has none built in.
+- **endpoint** (a table of the models file): a server and how to reach it, with its models under its `models`, each named `ENDPOINT/MODEL` (split at the first `/`: `local/qwen`); `ENDPOINT/ID` names any id on it, a name means its model with no network call, and with `discover = true` `/model` also asks an OpenAI-compatible server for its list ([Models](../docs/bh-02/using/models.md#adding-your-own-the-models-file)).
+- **gateway** (a `claude-code` endpoint's `base_url`): an Anthropic-compatible server Claude Code sends its requests to instead of Anthropic, with its key from the endpoint's `key_command` rather than the subscription token ([Models](../docs/bh-02/using/models.md#claude-through-a-gateway)).
+- **key_command** (an endpoint's setting): a command that prints the key, run as you when a request needs one, instead of a `key` line in `local.env` ([Models](../docs/bh-02/using/models.md#the-key)).
 - **model provider** (a model's `provider` field): what reaches a model: `claude-code` (Claude through Claude Code, on the subscription) or `openai` (any OpenAI-compatible endpoint).
-- **models file**: `~/.config/bh-02/models.toml` (`$XDG_CONFIG_HOME/bh-02/models.toml`): your models, one table each, read only from outside the project ([Models](../docs/bh-02/using/models.md#adding-your-own-the-models-file)).
+- **models file**: `~/.config/bh-02/models.toml` (`$XDG_CONFIG_HOME/bh-02/models.toml`): your endpoints and their models, one table per endpoint, read only from outside the project ([Models](../docs/bh-02/using/models.md#adding-your-own-the-models-file)).
 - **models** (row and key): `models:catalog`: the models there are and which one the model row names, for `/model` and the status bar.
 - **step**: one call to the model: it answers, or asks for calls to run.
 - **nudge**: the loop telling the model why its last step didn't count (cut off, silent, unreadable), a bounded number of times.
@@ -135,7 +137,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **shell** (row): `bh_02.bootstrap:shell`, pinned: the shell's wait for the chat's `done`, declared as a dependency so cordis checks it like any other.
 - **done** (key): what the chat binds; the shell waits on it, and follows it across a restart of the chat row.
 - **usage**: tokens and cost, per model step and summed for the session, in the status bar.
-- **credential**: `CLAUDE_CODE_OAUTH_TOKEN` in `local.env` at the repository root, read by the model row alone ([models-cordis-plugin](plugins/models-cordis-plugin/README.md)).
+- **credential**: `CLAUDE_CODE_OAUTH_TOKEN` in `local.env` at the repository root, read by the model row alone; a claude-code endpoint through a gateway has none ([models-cordis-plugin](plugins/models-cordis-plugin/README.md#the-credential)).
 - **fakes**: stand-in models in `bh_02.testing` that a `--patch` or a models file names, to run bh-02 without a login ([Writing a plugin](../docs/bh-02/extending/plugins.md#trying-it-without-a-login-fake-models)).
 - **gate**: the architecture check (pypeeker) that `scripts/check` runs: which packages may import which, and what must stay pure.
 - **value half**, **wiring**: a plugin's two parts: the plain library (no cordis), and `wiring.py`, the components that bind it.

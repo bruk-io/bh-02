@@ -1,7 +1,14 @@
 """Claude through Claude Code (the Claude Agent SDK, on a Claude subscription): the
 `claude-code` provider of the `model` row."""
 
-from models_cordis_plugin.claude_code.credential import TOKEN_VARIABLE, ChildEnv, child_env
+from models_cordis_plugin.claude_code.credential import (
+    TOKEN_VARIABLE,
+    ChildEnv,
+    Gateway,
+    child_env,
+    gateway_env,
+    gateway_settings,
+)
 from models_cordis_plugin.claude_code.declared import CALL_ID, Parking, permission_for, server_for
 from models_cordis_plugin.claude_code.detach import scrubbed
 from models_cordis_plugin.claude_code.provider import (
@@ -33,6 +40,7 @@ __all__ = [
     "ClaudeCodeConfig",
     "ClaudeCodeError",
     "Deliver",
+    "Gateway",
     "Held",
     "Parking",
     "Rebuild",
@@ -43,6 +51,8 @@ __all__ = [
     "cost_of",
     "digest",
     "failure_of",
+    "gateway_env",
+    "gateway_settings",
     "model_id",
     "permission_for",
     "plain_name",

@@ -25,15 +25,15 @@ from models_cordis_plugin.openai import OpenAIModel, authorization
 from models_cordis_plugin.openai.testing import StubServer
 
 _FILE = """\
-[llama]
+[ollama]
 provider = "openai"
-id = "llama3.2"
 base_url = "http://localhost:11434/v1"
+models.llama.id = "llama3.2"
 
-[sonnet]
+[remote]
 provider = "openai"
-id = "not-claude"
 base_url = "https://example.com/v1"
+models.sonnet.id = "not-claude"
 """
 _REFUSED = "is not read: it is in the project"
 _WHERE = "Keep your models file outside the project, and not a link into it"
@@ -137,10 +137,12 @@ class _Loader:
         return self.now
 
 
-_EXTRA = {"mine": {"provider": "openai", "id": "qwen3", "base_url": "http://gpu:11434/v1"}}
+_EXTRA = {
+    "mine": {"provider": "openai", "base_url": "http://gpu:11434/v1", "models": {"qwen": {"id": "qwen3"}}}
+}
 
 
-async def test_xdg_config_home_in_the_project_leaves_the_built_ins_and_extra_and_says_why(
+async def test_xdg_config_home_in_the_project_leaves_extra_and_says_why(
     places: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project, _, _ = places
@@ -149,19 +151,21 @@ async def test_xdg_config_home_in_the_project_leaves_the_built_ins_and_extra_and
     config = {"cwd": str(project), "extra": _EXTRA}
     values = Catalog(_Loader(_Entry("model", "models:model", config)))
     listed = {m["name"]: m for m in values.listed()}
-    assert list(listed) == ["sonnet", "opus", "haiku", "mine"]  # not llama, and sonnet is the built-in
-    assert listed["sonnet"]["provider"] == "claude-code" and "shadows" not in listed["sonnet"]
+    assert list(listed) == ["mine/qwen"]  # not the file's (remote/sonnet, ollama/llama)
     assert str(values.problem).startswith(f"the models file {path} {_REFUSED} ({project})")
-    assert values.check("haiku") is None and values.check("mine") is None
-    assert str(values.check("llama")) == (
-        f"no model named 'llama'; the models are sonnet, opus, haiku, mine; {values.problem}"
+    assert values.check("remote/sonnet") is not None and values.check("mine/qwen") is None
+    assert str(values.check("ollama/llama")) == (
+        "no model named 'ollama/llama'; the models are mine/qwen; or ENDPOINT/ID, an "
+        f"id on an endpoint (mine); {values.problem}"
     )
-    assert resolved(ModelConfig(**config)).provider == "claude-code"  # sonnet, built in
-    assert resolved(ModelConfig(default="mine", **config)).id == "qwen3"  # the row's extra
+    with pytest.raises(ModelsError) as unchosen:  # the file's default can't be read: none is chosen
+        resolved(ModelConfig(**config))
+    assert unchosen.value.message.startswith("no model is chosen") and _REFUSED in unchosen.value.message
+    assert resolved(ModelConfig(default="mine/qwen", **config)).id == "qwen3"  # the row's extra
     with pytest.raises(ModelsError) as raised:
-        resolved(ModelConfig(default="llama", **config))
+        resolved(ModelConfig(default="ollama/llama", **config))
     assert raised.value.kind == "unknown_model" and str(values.problem) in raised.value.message
-    async with opened(ModelConfig(default="llama", **config)) as value:  # binds, and each step says why
+    async with opened(ModelConfig(default="ollama/llama", **config)) as value:  # binds, each step says why
         assert isinstance(value, Unusable) and _REFUSED in value.error.message
 
 
@@ -175,7 +179,7 @@ def test_run_from_home_the_default_models_file_is_in_the_project(
     monkeypatch.chdir(home)  # no `cwd`: the working directory is the project
     _models(home / ".config" / "bh-02" / "models.toml")
     values = Catalog(_Loader(_Entry("model", "models:model", {})))
-    assert [m["name"] for m in values.listed()] == ["sonnet", "opus", "haiku"]
+    assert values.listed() == []  # none of the file's models
     assert _REFUSED in str(values.problem)
 
 
@@ -189,7 +193,7 @@ def test_the_working_directory_counts_even_when_the_row_s_cwd_names_another(
     monkeypatch.chdir(project)
     _models(project / ".config" / "bh-02" / "models.toml")
     values = Catalog(_Loader(_Entry("model", "models:model", {"cwd": str(elsewhere)})))
-    assert _REFUSED in str(values.problem) and "llama" not in [m["name"] for m in values.listed()]
+    assert _REFUSED in str(values.problem) and "ollama/llama" not in [m["name"] for m in values.listed()]
 
 
 def test_a_models_file_outside_the_project_is_read_and_has_no_problem(
@@ -199,12 +203,13 @@ def test_a_models_file_outside_the_project_is_read_and_has_no_problem(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     _models(home / ".config" / "bh-02" / "models.toml")
     values = Catalog(_Loader(_Entry("model", "models:model", {"cwd": str(project)})))
-    assert values.problem is None and "llama" in [m["name"] for m in values.listed()]
-    assert resolved(ModelConfig(default="llama", cwd=str(project))).provider == "openai"
+    assert values.problem is None and "ollama/llama" in [m["name"] for m in values.listed()]
+    assert resolved(ModelConfig(default="ollama/llama", cwd=str(project))).provider == "openai"
 
 
 def _keyed(key: str) -> Named:
-    table = {"provider": "openai", "id": "x", "base_url": "https://h/v1", "key": key}
+    """The endpoint `m`, whose one model is `m/x`, with `key`."""
+    table = {"provider": "openai", "base_url": "https://h/v1", "key": key, "models": {"x": {"id": "x"}}}
     (named,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
     return named
 
@@ -214,17 +219,18 @@ async def test_a_key_naming_the_claude_code_token_is_refused_and_never_sent(tmp_
     env.write_text("CLAUDE_CODE_OAUTH_TOKEN=fake-token-for-tests\nOTHER_KEY=fake-other\n")
     named = _keyed("CLAUDE_CODE_OAUTH_TOKEN")
     said = str(problem(named))
-    assert said.startswith("model 'm' (/c/models.toml): key may not name CLAUDE_CODE_OAUTH_TOKEN")
+    assert said.startswith("'m' (/c/models.toml): key may not name CLAUDE_CODE_OAUTH_TOKEN")
     assert "the Claude Code CLI alone" in said and "fake-token-for-tests" not in said
     with pytest.raises(ModelsError) as raised:
-        chosen("m", [named], "/c/models.toml")
+        chosen("m/x", [named], "/c/models.toml")
     assert raised.value.kind == "model_config"
     with pytest.raises(ModelsError) as sent:  # the last wall, at the request itself
         authorization(named, str(env))
     assert sent.value.kind == "model_config" and "fake-token-for-tests" not in sent.value.message
     with StubServer() as stub:
-        table = {**named.table, "base_url": stub.base_url}
-        async with OpenAIModel(Named("m", "openai", "x", table, "/c/models.toml"), str(env)) as model:
+        table = {**named.table, "base_url": stub.base_url, "id": "x"}
+        del table["models"]
+        async with OpenAIModel(Named("m/x", "openai", "x", table, "/c/models.toml"), str(env)) as model:
             with pytest.raises(ModelsError):
                 async for _ in model.complete([{"role": "user", "content": "hi"}], []):
                     pass

@@ -7,7 +7,7 @@ directories (`host.trusted`: `~/.config/bh-02/agents/NAME.toml`, the file's name
 one table of four fields:
 
     prompt = \"\"\"You are agent {name}, a reviewer: ...\"\"\"   # its section of the prompt
-    model = "haiku"                                       # optional: the session's model
+    model = "claude/haiku"                                # optional: the session's model
     steps = 30                                            # optional: model steps it may take
     tools = ["python"]                                    # optional: every row it may be given
 
@@ -128,7 +128,7 @@ def parsed_type(name: str, text: str, source: str, grantable: Sequence[str]) -> 
     if model is not None and (not isinstance(model, str) or not model):
         raise ValueError(
             f"{where}: `model` is {model!r}, not a model's name; write one, such as "
-            'model = "haiku", or take it out for the session\'s model'
+            'model = "claude/haiku", or take it out for the session\'s model'
         )
     steps = data.get("steps", STEPS)
     if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1:

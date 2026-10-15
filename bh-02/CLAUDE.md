@@ -116,9 +116,10 @@ What to keep when changing it; the detail is where each line points.
   `host.secrets`. The policy is one pure function, `spec_for`
   ([runner plugin's README](plugins/runner-cordis-plugin/README.md)).
 - **Each owner stops its own program** on `/release`; the runner never stops a row's program.
-- **Claude Code only carries steps**: no built-in tool, settings, CLAUDE.md or compaction; bh-02's
-  tools are only declared to it, and any end but tools or an answer is interrupted, so the loop
-  decides. The SDK is pinned for the internals it leans on (models plugin).
+- **Claude Code only carries steps**: no built-in tool, settings (but a gateway's one layer of
+  bh-02's own), CLAUDE.md or compaction; bh-02's tools are only declared to it, and any end but
+  tools or an answer is interrupted, so the loop decides. The SDK is pinned for the internals it
+  leans on (models plugin).
 - **The app owns the terminal**: no child inherits fd 2, `--trace` takes a file, and the shell
   speaks once the app has exited. `confirm()` runs in cordis's coroutines, not Textual workers,
   so the approval modal is `push_screen` with a callback (tui plugin).

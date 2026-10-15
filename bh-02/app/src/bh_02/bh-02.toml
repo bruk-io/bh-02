@@ -22,7 +22,8 @@ use = "subagents:parent"
 id = "agents-status"
 use = "subagents:status"
 
-# The model, by name: `default` (`sonnet`), which `--model` and `/model` set in the session's layer.
+# The model, by name: `default` (`ENDPOINT/MODEL`; unset, the models file's), which `--model` and
+# `/model` set in the session's layer.
 [[plugin]]
 id = "model"
 use = "models:model"

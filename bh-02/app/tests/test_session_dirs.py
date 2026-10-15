@@ -51,12 +51,16 @@ def test_a_new_session_records_the_models_file_s_default_and_a_resume_keeps_it(
 ) -> None:
     """The session's layer names the model it started on, so changing the file's `default`
     later moves new sessions only."""
-    _models_default(_own_config, 'default = "llama"\n[llama]\nprovider = "openai"\nid = "x"\n')
+    _models_default(
+        _own_config,
+        'default = "local/llama"\n[local]\nprovider = "openai"\nbase_url = "http://localhost:1/v1"\n'
+        '[local.models.llama]\nid = "x"\n',
+    )
     first = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
-    assert _recorded(first) == "llama" and first.stack == "llama"
-    assert json.loads((first.dir / "meta.json").read_text())["stack"] == "llama"
+    assert _recorded(first) == "local/llama" and first.stack == "local/llama"
+    assert json.loads((first.dir / "meta.json").read_text())["stack"] == "local/llama"
     _models_default(_own_config, 'default = "opus"\n')
-    assert _recorded(first) == "llama"  # still on the first model
+    assert _recorded(first) == "local/llama"  # still on the first model
     assert _recorded(create(tmp_path / "s", "/work/a", model=None, no_jail=False)) == "opus"
     assert _recorded(create(tmp_path / "s", "/work/a", model="haiku", no_jail=False)) == "haiku"  # --model
 
@@ -88,7 +92,7 @@ async def test_a_models_file_default_of_an_endpoint_s_model_starts_the_session_o
 async def test_the_model_flag_naming_a_model_of_a_broken_endpoint_starts_the_session_and_its_model_says_why(
     _own_config: Path, tmp_path: Path
 ) -> None:
-    """TASK-0095: `--model local/x:7b` over an endpoint table with a problem (an id beside `discover`) is
+    """TASK-0095: `--model local/x:7b` over an endpoint table with a problem (an id of its own) is
     recorded as it is typed; the model row still binds, so bh-02 starts, and refuses each step with the
     table's problem. Nothing is asked of the server."""
     with StubServer(models=["x:7b"]) as server:
@@ -99,9 +103,9 @@ async def test_the_model_flag_naming_a_model_of_a_broken_endpoint_starts_the_ses
         made = create(tmp_path / "s", "/work/a", model="local/x:7b", no_jail=False)
         assert _recorded(made) == "local/x:7b"
         async with opened(ModelConfig(default=_recorded(made))) as model:
-            with pytest.raises(ModelsError, match="an endpoint names no id, it lists its models") as step:
+            with pytest.raises(ModelsError, match="names an id, as a single model's table did") as step:
                 [c async for c in model.complete([{"role": "user", "content": "hi"}], [])]
-        assert step.value.message.startswith("model 'local' (")
+        assert step.value.message.startswith("endpoint 'local' (")
     assert server.requests == []
 
 
@@ -118,9 +122,16 @@ def test_a_model_name_above_u_ffff_is_recorded_in_the_layer_and_read_back_as_typ
     assert _recorded(made) == other
 
 
-def test_a_new_session_with_no_file_default_records_sonnet(_own_config: Path, tmp_path: Path) -> None:
+def test_a_new_session_with_no_file_default_records_no_model_and_the_row_says_what_to_write(
+    _own_config: Path, tmp_path: Path
+) -> None:
+    """There are no built-in models: with nothing naming one, the session records none, and the model
+    row says no model is chosen and what to add."""
     made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
-    assert _recorded(made) == "sonnet" and made.stack == "sonnet"
+    assert _recorded(made) is None and made.stack == "default"
+    with pytest.raises(ModelsError, match="no model is chosen") as said:
+        resolved(ModelConfig(default=_recorded(made)))
+    assert said.value.kind == "unknown_model"
 
 
 @pytest.mark.parametrize(
@@ -131,7 +142,7 @@ def test_a_new_session_with_no_file_default_records_sonnet(_own_config: Path, tm
 def test_a_models_file_that_is_not_toml_or_whose_default_is_no_name_pins_no_model(
     _own_config: Path, tmp_path: Path, text: str
 ) -> None:
-    """TASK-0087's `Unusable` must show: a pinned sonnet would hide that the file's default can't be
+    """TASK-0087's `Unusable` must show: a pinned model would hide that the file's default can't be
     read, so the session's layer names no model and the model row says what is wrong with the file."""
     _models_default(_own_config, text)
     made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
@@ -159,9 +170,9 @@ def test_a_models_file_in_the_project_gives_a_new_session_no_default(
     """The default chooses the spend: a file the model's code can write does not choose it."""
     project = tmp_path / "project"
     monkeypatch.setenv("XDG_CONFIG_HOME", str(project / ".config"))
-    _models_default(project / ".config" / "bh-02", 'default = "opus"\n')
+    _models_default(project / ".config" / "bh-02", _OPUS)
     made = create(tmp_path / "s", str(project), model=None, no_jail=False)
-    assert _recorded(made) == "sonnet"
+    assert _recorded(made) is None and made.stack == "default"
 
 
 def _outcome(config: ModelConfig) -> tuple[str, str]:
@@ -187,12 +198,12 @@ class _Case:
 
 _DIRECTORY = "<a directory>"
 _ENDPOINT = '[local]\nprovider = "openai"\ndiscover = true\nbase_url = "http://localhost:1/v1"\n'
-_OPUS = 'default = "opus"\n'
+_OPUS = 'default = "cc/opus"\n[cc]\nprovider = "claude-code"\nmodels.opus.id = "opus"\n'
 _CONTRACT = {
-    "a trusted default": _Case(_OPUS, "opus"),
-    "no file": _Case(None, "sonnet"),
-    "a default table, which is a model": _Case(
-        '[default]\nprovider = "claude-code"\nid = "opus"\n', "sonnet"
+    "a trusted default": _Case(_OPUS, "cc/opus"),
+    "no file": _Case(None, None, works=False),  # no built-in models: nothing is chosen
+    "a default table, which is an endpoint": _Case(
+        '[default]\nprovider = "claude-code"\nmodels.opus.id = "opus"\n', None, works=False
     ),
     "an endpoint's model": _Case('default = "local/x:7b"\n' + _ENDPOINT, "local/x:7b"),
     "no model": _Case('default = "nosuch"\n', "nosuch", works=False),
@@ -203,9 +214,9 @@ _CONTRACT = {
     "a list": _Case('default = ["opus"]\n', None, works=False),
     "a directory": _Case(_DIRECTORY, None, works=False),
     # the default chooses the spend: a file the model's code can write chooses nothing, however it is reached
-    "in the project": _Case(_OPUS, "sonnet", where="project"),
-    "through a link into the project": _Case(_OPUS, "sonnet", where="link"),
-    "in the project, create told another directory": _Case(_OPUS, "sonnet", where="elsewhere"),
+    "in the project": _Case(_OPUS, None, works=False, where="project"),
+    "through a link into the project": _Case(_OPUS, None, works=False, where="link"),
+    "in the project, create told another directory": _Case(_OPUS, None, works=False, where="elsewhere"),
 }
 
 
@@ -261,7 +272,7 @@ def test_a_session_s_layer_keeps_a_transcript_and_names_its_model_on_the_model_r
     ]
     assert session_layer(Path("/s/2"), model=None, no_jail=False)[-1] == Row(
         "model", config={"state": "/s/2/claude"}
-    )  # no --model: no default here (the models file's, else sonnet), and the jail the harness ships
+    )  # no --model: no default here (the models file's, else none), and the jail the harness ships
 
 
 def test_choosing_a_model_keeps_the_row_s_other_config() -> None:
@@ -373,7 +384,7 @@ def test_resume_takes_a_prefix_or_the_last_part_and_refuses_an_ambiguous_one(
     assert runner.invoke(main, ["--patch", str(patch)]).exit_code == 0
     assert runner.invoke(main, ["--patch", str(patch)]).exit_code == 0
     lines = runner.invoke(main, ["sessions"]).output.splitlines()
-    assert all(line.endswith(f"sonnet  patched: {patch.name}") for line in lines)  # not only "sonnet"
+    assert all(line.endswith(f"default  patched: {patch.name}") for line in lines)  # not only "default"
     first, second = sorted(line.split()[0] for line in lines)
     import fragile
 

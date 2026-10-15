@@ -4,22 +4,27 @@ Each step is one streamed POST to `<base_url>/chat/completions` (`wire.py` build
 folds what comes back). A model's `key` names a line of `local.env`, read when a request is
 made and put only in that request's `Authorization` header: never in an environment, never in
 anything whose repr shows it, and taken out of anything the server says back before an error
-quotes it. A model with no key sends none (a local server), and one whose key names the Claude
-Code token sends nothing at all (`named.withheld`: that is the CLI's alone). Usage is asked for
+quotes it. A model with a `key_command` has the key that command prints instead
+(`key_command.py`), in the same header, which is kept for `key_ttl_ms` (dropped sooner when the
+server refuses it) so the command does not run for every step. A model with no key sends none (a
+local server), and one whose key names the Claude Code token sends nothing at all
+(`named.withheld`: that is the CLI's alone). Usage is asked for
 (`stream_options`) until the server refuses a step for it; that step is sent again without it,
 and so is every later one. Closing the step (the person stopped the reply) closes the HTTP
 stream with it.
 """
 
 import json
+import time
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from contextlib import aclosing
 from pathlib import Path
 from typing import Any, Final
 
 import httpx2
 
+from models_cordis_plugin.key_command import DEFAULT_TTL_MS, command_key
 from models_cordis_plugin.local_env import ENV_FILE, parse_env, token_file
 from models_cordis_plugin.named import ModelsError, Named, key_name, withheld
 from models_cordis_plugin.openai.wire import (
@@ -33,7 +38,7 @@ from models_cordis_plugin.openai.wire import (
     stream_error,
 )
 
-__all__ = ["OpenAIModel", "authorization", "missing_key"]
+__all__ = ["OpenAIModel", "authorization", "headers_for", "missing_key"]
 
 type Json = Mapping[str, Any]
 
@@ -84,6 +89,29 @@ def authorization(named: Named, env_file: str | None, searched: Sequence[str] = 
     return headers
 
 
+async def headers_for(named: Named, env_file: str | None, searched: Sequence[str] = ()) -> dict[str, str]:
+    """The request's headers, as `authorization` makes them, but for a model with a `key_command`:
+    `Authorization: Bearer <what it prints>`, run now (`key_command.command_key`).
+
+    Raises:
+        ModelsError: the key can't be had (`authorization`'s reasons, or the command's), or what the
+            command printed can't go in a header.
+    """
+    command = named.table.get("key_command")
+    if not isinstance(command, str):
+        return authorization(named, env_file, searched)
+    headers = _Headers({"Content-Type": "application/json", "Accept": "text/event-stream"})
+    # straight into the header: no local of this frame holds the key (a crash prints locals)
+    headers["Authorization"] = "Bearer " + await command_key(named.name, command)
+    if not _carried(headers["Authorization"]):
+        raise ModelsError(
+            "authentication_failed",
+            f"model {named.name!r}'s key_command `{command}` printed something a request header can't "
+            "carry (a key is one line of printable ASCII). Run it in a terminal to check what it prints.",
+        )
+    return headers
+
+
 def _carried(value: str) -> bool:
     """Whether a header's `value` can go out as it is: printable ASCII (httpx2 raises
     `UnicodeEncodeError` for a character outside it, and a control character is no header's)."""
@@ -111,8 +139,8 @@ def _unsendable_line(name: str, key: str, path: Path | None) -> str:
 
 def missing_key(named: Named, env_file: str | None, searched: Sequence[str] = ()) -> str | None:
     """Why `named`'s key can't be sent (it names a line local.env doesn't have), said so the
-    person can fix it; None when the model names no key or the line is there. Never quotes
-    the key: it only asks whether the line is there."""
+    person can fix it; None when the model names no key, has a `key_command` (which is not run to
+    find out), or the line is there. Never quotes the key: it only asks whether the line is there."""
     key = key_name(named.table.get("key"))
     if key is None:
         return None
@@ -140,14 +168,36 @@ class OpenAIModel:
         transport: httpx2.AsyncBaseTransport | None = None,
         *,
         searched: Sequence[str] = (),
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._named = named
         self._env_file = env_file
         self._searched = tuple(searched)
         self._client = httpx2.AsyncClient(timeout=_TIMEOUT, transport=transport)
         url = str(named.table["base_url"]).rstrip("/") + "/chat/completions"
-        self._where = Where(named.name, url, named.id, key_name(named.table.get("key")), named.source)
+        command = named.table.get("key_command")
+        self._command = command if isinstance(command, str) else None
+        self._where = Where(
+            named.name, url, named.id, key_name(named.table.get("key")), named.source, self._command
+        )
         self._usage = True  # whether to ask for usage: until the server refuses it (`rejects_usage`)
+        self._clock = clock
+        ttl = named.table.get("key_ttl_ms", DEFAULT_TTL_MS)
+        self._ttl = (ttl if isinstance(ttl, int) else DEFAULT_TTL_MS) / 1000
+        self._kept: tuple[float, dict[str, str]] | None = None  # a key_command's headers, and until when
+
+    async def _headers(self) -> dict[str, str]:
+        """This step's headers (`headers_for`); a key_command's are kept for `key_ttl_ms`.
+
+        Raises:
+            ModelsError: the key can't be had.
+        """
+        if self._kept is not None and self._clock() < self._kept[0]:
+            return self._kept[1]
+        headers = await headers_for(self._named, self._env_file, self._searched)
+        if self._command is not None:
+            self._kept = (self._clock() + self._ttl, headers)
+        return headers
 
     async def __aenter__(self) -> OpenAIModel:
         return self
@@ -159,7 +209,7 @@ class OpenAIModel:
         """Stream one step's chunks (CONTRACTS.md: chunk)."""
         where = self._where
         try:
-            headers = authorization(self._named, self._env_file, self._searched)
+            headers = await self._headers()
             for usage in (True, False) if self._usage else (False,):
                 body = request_for(self._named.id, messages, tools, self._named.table, usage=usage)
                 async with self._client.stream("POST", where.url, json=body, headers=headers) as response:
@@ -168,6 +218,8 @@ class OpenAIModel:
                         if usage and rejects_usage(response.status_code, scrubbed(said, headers)):
                             self._usage = False  # asked again without it, now and from now on
                             continue
+                        if response.status_code in (401, 403):
+                            self._kept = None  # a refused key_command key: the next step runs it again
                         raise http_error(response.status_code, said, where, headers)
                     async with aclosing(_streamed(response, where, headers)) as chunks:
                         async for chunk in chunks:

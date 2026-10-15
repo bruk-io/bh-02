@@ -1317,7 +1317,7 @@ def _scripted(table: Mapping[str, Any]) -> _Model:
 async def test_a_model_switch_through_models_switch_ends_the_running_children_with_a_notice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`/model beta` as a person types it, over the models plugin's own rows: `models:switch` edits
+    """`/model s/beta` as a person types it, over the models plugin's own rows: `models:switch` edits
     the session's layer and queues the reload in `jobs`, the loader swaps the model row, and the
     agents row, which consumes `model`, reloads with it: its running children end, each with a
     note. A child started after it runs on the new model."""
@@ -1326,9 +1326,9 @@ async def test_a_model_switch_through_models_switch_ends_the_running_children_wi
     beta = _Model(parent=[], child=[_text("on beta")])
     monkeypatch.setitem(_SCRIPTS, "alpha", alpha)
     monkeypatch.setitem(_SCRIPTS, "beta", beta)
-    served = {name: {"provider": f"{__name__}:_scripted", "id": name} for name in ("alpha", "beta")}
+    served = {"s": {"provider": f"{__name__}:_scripted", "models": {n: {"id": n} for n in ("alpha", "beta")}}}
     layer = tmp_path / "session.toml"
-    model_row = Row("model", "models:model", {"default": "alpha", "extra": served})
+    model_row = Row("model", "models:model", {"default": "s/alpha", "extra": served})
     layer.write_text(format_layer([model_row], "This session's own layer; /model edits it."))
     screen = _Screen()
     rows = _rows(
@@ -1342,12 +1342,12 @@ async def test_a_model_switch_through_models_switch_ends_the_running_children_wi
     booted = await _booted(rows, [layer])
     rt = booted.runtime
     await _two_children(rt, alpha)
-    answer = await _bounded(rt.root.get("commands").run("/model beta"))
-    assert answer[0]["text"].startswith("switching to beta")
+    answer = await _bounded(rt.root.get("commands").run("/model s/beta"))
+    assert answer[0]["text"].startswith("switching to s/beta")
     await _bounded(rt.root.get("jobs").settled())
     await _bounded(rt.settle())
-    assert read_layer(layer)[0].config is not None and read_layer(layer)[0].config["default"] == "beta"
-    assert rt.root.get("models").current()["name"] == "beta"
+    assert read_layer(layer)[0].config is not None and read_layer(layer)[0].config["default"] == "s/beta"
+    assert rt.root.get("models").current()["name"] == "s/beta"
     assert _children(rt) == [] and alpha.closed == 2
     assert len([n for n in screen.notes() if "ended before it answered" in n]) == 2
     started = await _bounded(rt.root.get("tools").get("agent").run({"prompt": "p", "type": "general"}))

@@ -194,11 +194,11 @@ def listed(entries: Sequence[Any], row: str) -> bool:
 
 
 def model_forms(model: ModelShown, phase: str) -> tuple[str, ...]:
-    """The model field in `phase`, then a shorter form for a narrow status bar: `sonnet
-    (claude-code)` then `sonnet` when it is up, `sonnet (claude-code, starting…)` then `sonnet…`
-    while the model row comes up, `sonnet (claude-code, failed)` then `sonnet ✗` when it failed. A
-    model the row can't use says so, `typo (unusable)` then `typo ✗`, whatever the phase adds. No
-    provider: the name alone."""
+    """The model field in `phase`, then a shorter form for a narrow status bar: `claude/sonnet
+    (claude-code)` then `claude/sonnet` when it is up, `claude/sonnet (claude-code, starting…)` then
+    `claude/sonnet…` while the model row comes up, `claude/sonnet (claude-code, failed)` then
+    `claude/sonnet ✗` when it failed. A model the row can't use says so, `typo (unusable)` then
+    `typo ✗`, whatever the phase adds. No provider: the name alone."""
     said = {_STARTING: "starting…", _FAILED: "failed"}.get(phase)
     flagged = "unusable" if model.unusable else ""
     inside = ", ".join(part for part in (model.provider, flagged, said) if part)
@@ -286,7 +286,7 @@ _OWN = (
 
 def palette_entries(specs: Sequence[Mapping[str, Any]]) -> list[PaletteEntry]:
     """The palette's entries: every command offered (CONTRACTS.md: a spec is name, help,
-    usage, and `choices`, the arguments offered as entries of their own: `/model haiku`),
+    usage, and `choices`, the arguments offered as entries of their own: `/model claude/haiku`),
     then `/help` and `/exit`; a call offered twice shows once, the first one. A command's
     `choices` that fail to read (a models file mid-edit) offer none this time. Control
     characters (C0, DEL, C1) are stripped from each entry's call, help and usage: a command's

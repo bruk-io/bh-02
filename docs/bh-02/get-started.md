@@ -55,6 +55,25 @@ file from any directory you work in.
 Without a token bh-02 still starts, and each message answers with an error that says where to
 put one.
 
+## Your models
+
+bh-02 has no models built in: you name the ones it may use, and which it starts on, in
+`~/.config/bh-02/models.toml` (`$XDG_CONFIG_HOME/bh-02/models.toml` when that variable is set).
+For Claude on your subscription:
+
+```toml
+default = "claude/sonnet"
+
+[claude]
+provider = "claude-code"
+models = { sonnet = { id = "sonnet" }, opus = { id = "opus" }, haiku = { id = "haiku" } }
+```
+
+Each table is an endpoint, and its models are named `ENDPOINT/MODEL`: `claude/sonnet`,
+`claude/opus`, `claude/haiku`. `default` is the one a new session starts on. Without a models file
+bh-02 still starts, and each message says to add one. [Models](using/models.md) has the rest:
+other Claude models, a company gateway, and OpenAI-compatible servers.
+
 ## A first session
 
 Run bh-02 in the project you want to work on. With the tool installed:
@@ -71,7 +90,7 @@ bar along the bottom. The status bar shows the session's id, the model and its p
 well the jail holds, for example:
 
 ```text
-session: 20261008-225453-f7e7 │ model: sonnet (claude-code) │ jail: jailed fs_write ✓ network ✓ fs_read ~ env ✓
+session: 20261008-225453-f7e7 │ model: claude/sonnet (claude-code) │ jail: jailed fs_write ✓ network ✓ fs_read ~ env ✓
 ```
 
 Type a message and press Enter. The model answers, and runs Python as it works: each call is an

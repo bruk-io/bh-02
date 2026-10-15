@@ -42,8 +42,9 @@ from cordis.loader import read_layer
 __all__ = ["credential_search", "main"]
 
 _MODEL_HELP = (
-    "The model to start on, by name: sonnet (the default), opus, haiku, or one of yours in "
-    "~/.config/bh-02/models.toml ($XDG_CONFIG_HOME/bh-02/models.toml); /model lists them."
+    "The model to start on, by name, ENDPOINT/MODEL: one of your endpoints' in "
+    "~/.config/bh-02/models.toml ($XDG_CONFIG_HOME/bh-02/models.toml), whose `default` is used "
+    "otherwise; /model lists them."
 )
 _PATCH_HELP = "A layer file applied over the shipped composition. Repeatable."
 _TRACE_HELP = "Append every row's lifecycle event to FILE (the app owns the terminal)."
@@ -79,10 +80,10 @@ def main(
     resume: str | None,
 ) -> None:
     """A coding agent in a terminal app. The model acts in Python, through the python tool, in a
-    persistent Python process inside a jail. Claude is reached through Claude Code on the Claude
-    subscription, with the CLAUDE_CODE_OAUTH_TOKEN in local.env (`claude setup-token` makes
-    one); any OpenAI-compatible model can be added to the models file. Every run is a session
-    that `--resume` continues."""
+    persistent Python process inside a jail. Its models are the endpoints in the models file: Claude
+    through Claude Code (on the Claude subscription, with the CLAUDE_CODE_OAUTH_TOKEN in local.env
+    that `claude setup-token` makes, or through a gateway), and any OpenAI-compatible model. Every
+    run is a session that `--resume` continues."""
     if ctx.invoked_subcommand is not None:
         return
     try:

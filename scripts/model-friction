@@ -8,7 +8,7 @@ the conversation since its last /clear. Run it after using bh-02 for a while: th
 come up most are where the prompt, the Python process or the loop should change next.
 
     scripts/model-friction                 # every session here
-    scripts/model-friction --model qwen    # only the sessions that started on one model
+    scripts/model-friction --model local/qwen    # only the sessions that started on one model
     scripts/model-friction --examples 5    # more examples per signal
     scripts/model-friction --json          # the findings, for another tool
 
@@ -359,7 +359,7 @@ def _report(found: Sequence[Finding], totals: Totals, examples: int) -> str:
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--sessions", help="bh-02's sessions directory (default: its state directory's)")
-    parser.add_argument("--model", help="only the sessions that started on this model (by its name)")
+    parser.add_argument("--model", help="only the sessions that started on this model (by its name, ENDPOINT/MODEL)")
     parser.add_argument("--examples", type=int, default=3, help="examples per signal (default 3)")
     parser.add_argument("--json", action="store_true", help="print the findings as JSON lines")
     args = parser.parse_args(argv)

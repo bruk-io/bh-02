@@ -3,7 +3,6 @@ models there are; and `/model`, which lists them and switches by name."""
 
 from models_cordis_plugin.catalog import Catalog
 from models_cordis_plugin.named import (
-    BUILT_IN,
     CLAUDE_CODE,
     OPENAI,
     ModelConfig,
@@ -11,6 +10,7 @@ from models_cordis_plugin.named import (
     Named,
     chosen,
     combined,
+    find,
     in_project,
     models_file,
     parsed,
@@ -21,7 +21,6 @@ from models_cordis_plugin.switch import Switch, SwitchConfig, model_list
 from models_cordis_plugin.wiring import CatalogConfig, catalog, model, set_model, shadowing, switch
 
 __all__ = [
-    "BUILT_IN",
     "CLAUDE_CODE",
     "OPENAI",
     "Catalog",
@@ -35,6 +34,7 @@ __all__ = [
     "catalog",
     "chosen",
     "combined",
+    "find",
     "in_project",
     "known",
     "model",

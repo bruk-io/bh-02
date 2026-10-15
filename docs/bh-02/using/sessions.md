@@ -25,8 +25,9 @@ bh-02 sessions
 
 This lists the sessions started in the current directory, newest first, one line each: the id, when
 it started, and the model it started on (its stack; an earlier bh-02's session says `claude` or
-`ollama`, and one whose models file's `default` couldn't be used says `default`: it follows that
-default, and the first message says what is wrong with it), then `patched:` and the names of any
+`ollama`, and one that started with no model named (no `--model`, no `default` in the models file) or whose
+`default` couldn't be used says `default`: it follows that default, and the first message says what
+to write or what is wrong with it), then `patched:` and the names of any
 `--patch` files it started with (`patched: echo.toml`). That label is what the session started on,
 not always the model that answered: `/model` switches, a patch can replace the `loop` row, and a
 resume with other patches keeps the label it started with.
@@ -48,7 +49,7 @@ rest of the session's state, not by the model's code). `bh-02 watch ID NAME` fol
 ```sh
 bh-02 --resume              # the newest session in this directory
 bh-02 --resume 07f8         # a session by its id, the start of it, or its last part
-bh-02 --resume --model opus # carry on with another model
+bh-02 --resume --model claude/opus # carry on with another model
 ```
 
 An id that matches more than one session is refused, with the matches listed: give more of it.

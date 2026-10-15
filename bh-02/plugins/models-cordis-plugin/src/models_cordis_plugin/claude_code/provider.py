@@ -4,7 +4,9 @@ bh-02's own `agent:loop` runs the loop (CONTRACTS.md: model): it classifies each
 runs every call through its tool (python's as an input in the Python process; asking the person
 when unjailed) and keeps the transcript. Claude Code is the subscription's sanctioned way to the
 model, and nothing else: it runs no built-in tool, loads no settings, CLAUDE.md or connector,
-and the tools it knows are only declared to it (`declared.py`). Each call to `complete` streams
+and the tools it knows are only declared to it (`declared.py`). Through a gateway it is given one
+settings layer of bh-02's, which sends its requests there and names the command for its key
+(`credential.py`), and nothing else. Each call to `complete` streams
 exactly one model step:
 
 - a new user line starts a query (`Send`);
@@ -77,7 +79,13 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
-from models_cordis_plugin.claude_code.credential import TOKEN_VARIABLE, child_env
+from models_cordis_plugin.claude_code.credential import (
+    TOKEN_VARIABLE,
+    Gateway,
+    child_env,
+    gateway_env,
+    gateway_settings,
+)
 from models_cordis_plugin.claude_code.declared import Parking, permission_for, server_for
 from models_cordis_plugin.claude_code.reconcile import (
     CLEAN,
@@ -155,20 +163,24 @@ class ClaudeCodeError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ClaudeCodeConfig:
-    """`model`: `sonnet` (the default), `opus`, `haiku` or a model id: anything the subscription
-    reaches through Claude Code (`/model` and `--model` set it). `state`: the directory this
+    """`model`: the id Claude Code is given, as the named model's `id` writes it: one of its aliases
+    (`sonnet`, `opus`, `haiku`) or a model id, anything its route reaches (the model row always
+    gives one; `sonnet` only when built with none). `state`: the directory this
     conversation's Claude Code state lives in (its `CLAUDE_CONFIG_DIR`, the saved session, the
     CLI's stderr); a session's layer points it into the session's directory, and without one a
     temporary directory is used and removed. `env_file`: where the credential is; when unset,
     the first `local.env` of `searched` that is a file (the `host` value's `credentials`:
     above bh-02's install and its environment, nearest first). `cwd`: the project Claude Code
-    is told it works in (bh-02's working directory when unset)."""
+    is told it works in (bh-02's working directory when unset). `gateway`: where Claude Code sends
+    its requests and how it gets their key, instead of the subscription token (None: the
+    subscription)."""
 
     model: str = "sonnet"
     state: str | None = None
     env_file: str | None = None
     cwd: str | None = None
     searched: tuple[str, ...] = ()
+    gateway: Gateway | None = None
 
 
 class Session(Protocol):
@@ -190,11 +202,18 @@ def model_id(name: str, seen: str | None = None) -> str:
     return seen or _ALIASES.get(name, name)
 
 
-def failure_of(error: str | None, detail: str) -> ClaudeCodeError:
+def failure_of(error: str | None, detail: str, gateway: Gateway | None = None) -> ClaudeCodeError:
     """The readable, recoverable error for a step Claude Code reported failed: its error kind
-    (`AssistantMessage.error`), and what it said about it."""
+    (`AssistantMessage.error`), and what it said about it. `gateway`: the one the step went through,
+    whose key is its command's, not the subscription token."""
     kind = error or "result_error"
     message = _ERRORS.get(kind, "Claude couldn't finish the step. Send the message again.")
+    if kind == "authentication_failed" and gateway is not None:
+        return ClaudeCodeError(
+            kind,
+            f"The gateway {gateway.base_url} refused the key its key_command printed. Run "
+            f"`{gateway.key_command}` in a terminal to check it prints a key, then send the message again.",
+        )
     if kind == "authentication_failed":
         return ClaudeCodeError(kind, message)  # Claude Code's own advice (`/login`) is not bh-02's
     return ClaudeCodeError(kind, f"{message} ({detail})" if detail else message)
@@ -389,12 +408,17 @@ class ClaudeCodeModel:
     async def _start(self, system: str, specs: list[dict[str, Any]], resume: str | None) -> None:
         """Start Claude Code for this conversation: `resume` is the session to continue."""
         root = self._dir()
-        path = token_file(self._config.env_file, self._config.searched)
-        env = child_env(path, str(root / "config"))
-        if env is None:
-            raise ClaudeCodeError(
-                "authentication_failed", _no_token(path, exists=path is not None and path.is_file())
-            )
+        gateway = self._config.gateway
+        if gateway is not None:
+            env = gateway_env(str(root / "config"))
+        else:
+            path = token_file(self._config.env_file, self._config.searched)
+            found = child_env(path, str(root / "config"))
+            if found is None:
+                raise ClaudeCodeError(
+                    "authentication_failed", _no_token(path, exists=path is not None and path.is_file())
+                )
+            env = found
         cli = _detached_cli()
         if cli is None:
             raise ClaudeCodeError(
@@ -407,6 +431,7 @@ class ClaudeCodeModel:
             system_prompt=_carried(system, specs),
             tools=[],  # no built-in tool
             setting_sources=[],  # no settings file, no CLAUDE.md
+            settings=None if gateway is None else gateway_settings(gateway),  # bh-02's layer alone
             strict_mcp_config=True,  # only the server given here: the account's connectors stay out
             include_partial_messages=True,  # the raw stream events, which `Step` folds
             max_turns=_MAX_TURNS,
@@ -659,7 +684,7 @@ class ClaudeCodeModel:
                             )
                             if not is_error and failure is None:
                                 detail = detail or "it ended the query without a step"
-                            raise failure_of(failure.error if failure else None, detail)
+                            raise failure_of(failure.error if failure else None, detail, self._config.gateway)
         except ClaudeSDKError as error:
             self._held = replace(self._held, ended=FAILED)
             await self._end()
