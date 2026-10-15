@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-15 21:00'
-updated_date: '2026-10-15 21:27'
+updated_date: '2026-10-15 21:49'
 labels:
   - python
   - size-1
@@ -26,7 +26,7 @@ Asked by the owner (2026-10-15): keep tools and helpers separate, but make it ob
 <!-- AC:BEGIN -->
 - [x] #1 The python section uses "helper" only for a startup file's @helper function, and says in one place that the model's own functions, helpers and tools are three different things: where each runs (the REPL in the jail, or bh-02 outside it), whether a call is asked about, and how long each lasts
 - [x] #2 GLOSSARY.md's helper and tools (in an input) lines say the same; the python tool's doc page says it where it explains helpers and tools
-- [ ] #3 The python plugin's tests pass with the new wording, and scripts/check passes
+- [x] #3 The python plugin's tests pass with the new wording, and scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
