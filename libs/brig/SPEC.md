@@ -1329,7 +1329,7 @@ class Runtime(Protocol):
     def processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]: ...
     def process_alive(self, jail: JailRecord, process: ProcessRecord) -> bool: ...
     def tethered(self, jail: JailRecord) -> bool | None: ...
-    def destroy(self, jail: JailRecord) -> KillReport: ...
+    def destroy(self, jail: JailRecord, *, grace: float = 2.0) -> KillReport: ...  # decision-193
     def supervisor(self, jail: JailRecord) -> Supervisor | None: ...
     def reserve(self, jail: JailRecord, channel: str) -> Reservation: ...      # decision-184
     def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None: ...
@@ -1601,8 +1601,9 @@ composed wrap, and returns once it has said it is ready. Ruled:
   two requests and a signal have 30 s, a wait's chunk (at most 5 s, asked again for
   a longer one) 10 s more than itself, a stop twice its grace and 10 s: a supervisor that
   does not answer is spinning, wedged or hostile, and law 7 is that control does not
-  wait on it. A miss runs the ladder against the instance's group (`SIGKILL` lands
-  on a `SIGSTOP`ped init from the host), closes the socket and raises
+  wait on it. A miss ends the instance's group at once (`SIGKILL`, no `SIGTERM` first, and no
+  grace for a workload that is starving the supervisor to act in: decision-193; the
+  host's `SIGKILL` lands on a `SIGSTOP`ped init), closes the socket and raises
   `SupervisorUnresponsive` to the caller; a closed socket is `SupervisorGone`; a start
   that never says it is ready within 60 s, or whose socket closes first (a mount `bwrap`
   refused, an interpreter that is not there), ends the instance and raises
@@ -1654,10 +1655,15 @@ class Jail:
     def channel(self, name: str) -> Reservation         # decision-184, §10
     def processes(self) -> tuple[Process, ...]          # start order
     def alive(self) -> bool
-    def destroy(self) -> KillReport                    # tree/group teardown of EVERYTHING
+    def destroy(self, *, grace: float = 2.0) -> KillReport
+                                                       # tree/group teardown of EVERYTHING
                                                        # the jail names: every process's
                                                        # group in start order, then
-                                                       # helpers, containers
+                                                       # helpers, containers; grace=0 ends
+                                                       # it at once (decision-193)
+    @property
+    def instance_group(self) -> int | None             # decision-193: the process group that
+                                                       # holds a supervised jail's PID 1
     def probe(self, battery) -> ProbeReport            # §12; absent when start is
     # fields: report, spec, signatures, channels, compile_events, jail_id, jail_dir
 
@@ -2009,7 +2015,10 @@ group, a grace period, `SIGKILL` to the group, then *verify* the survivors are
 actually gone — and only then report, per item. The verification rung is not
 optional. A `KillReport` that records something as ended because a signal was
 *sent* is law 1's grading dishonesty relocated into teardown, and law 7 makes
-deliverability itself a graded claim rather than an assumption.
+deliverability itself a graded claim rather than an assumption. The grace period
+is `destroy`'s keyword, `grace` (default 2.0 s); `grace=0` skips the first two
+rungs and sends `SIGKILL` at once, for a caller that must not give a workload a
+period in which to act (decision-193).
 
 **The ladder runs per item, and there is only one ladder.** Every group the
 handle names — the workload group first, then each exec sibling, then helpers,
@@ -2378,8 +2387,9 @@ starts. For a supervised one, ruled:
   wait out its grace), and the ladder verifies and falls back to `SIGKILL`. A supervisor
   found running before and gone after is `ENDED`, never `ALREADY_GONE`: the verification
   rung observed it. A rehydrated jail, which has no link, is ended by the ladder alone,
-  and waits out one grace period on the supervisor. `alive` is true while the instance
-  group's leader holds its identity, a process in it or none.
+  and waits out one grace period on the supervisor. That is the order of a plain
+  `destroy()`; `destroy(grace=0)` reverses it (decision-193). `alive` is true while
+  the instance group's leader holds its identity, a process in it or none.
 - **The dict carries the instance** (`supervisor`, `null` or the pid and start stamp,
   `JAIL_VERSION` 9) **and a rehydrated jail has no supervisor**: its link is a socket, which
   can't cross `to_dict`, so `start` and `probe` are absent and `interrupt`, `stop` and
@@ -2400,6 +2410,55 @@ starts. For a supervised one, ruled:
   is lost.
 
 Implementing task: TASK-0079.06. (Ruled 2026-10-15, decision-192.)
+
+**A teardown can end a jail at once, and a jail whose hold the host lifted is ended so
+(2026-10-15, decision-193).** The closing review of TASK-0079.06 measured what
+decision-192's order costs a caller who must not wait. bh-02's tripwire (the host
+replaced or removed a path the jail holds with a mount, so the mount inside the jail is
+gone) was armed with `destroy()`, which ladders each process first: `SIGTERM`, up to
+2.0 s for a workload that ignores it, `SIGKILL`, and only then the instance. A workload
+that ignored `SIGTERM` and wrote the absent secret every 10 ms planted it on the host in
+3 of 3 runs, the jail ending after 2.01 to 2.06 s; the `killpg(SIGKILL)` it replaced
+ended the jail in 0.01 s. A grace period is a window a hostile workload uses. Ruled:
+
+- **`Jail.destroy(*, grace: float = 2.0)` and `Runtime.destroy(jail, *, grace)`.** §9's
+  grace period was always a keyword; the surface now has it. `grace=0` skips the first
+  two rungs: `SIGKILL` goes to the group at once and the verification rung follows (it
+  still waits up to 2.0 s for the table to show the group empty: `SIGKILL` cannot be
+  ignored, but the kernel needs a moment to remove what it killed). A negative `grace` is
+  a `ValueError`. Nothing changes for a plain `destroy()`: a workload that handles
+  `SIGTERM` still gets its grace. `Process.stop` is as it was.
+- **At once, in a supervised jail, is the instance first.** The first signal is
+  `SIGKILL` to the instance's group (its leader running, as for any group at `grace=0`),
+  ahead of every process-table scan and every item: the supervisor, PID 1 of the jail's
+  pid namespace, ends, and the kernel ends every process in the namespace with it, a
+  `setsid()` child included, as fast as the `killpg` it replaces (the namespace's init is
+  safe from a signal sent inside it; the host's is not). Then each item is verified in
+  the report's usual order, the processes, then the instance, its link closed just
+  before its item as it always was (a socket nobody reads by then), then the helpers. A
+  process whose leader held its identity just before the signal and whose group is then
+  found empty is `ENDED`, never `ALREADY_GONE`, which stays for what was gone before
+  (the detail says it ended with the jail's pid namespace when its group was empty
+  already by the time its own ladder looked).
+- **At `grace=0` a group whose leader runs is signalled before anything else is read.**
+  The pre-signal scan that reports `ALREADY_GONE` for an empty group is a `ps` run before
+  the kill, which on a loaded machine is what the window is made of; the leader's
+  identity is a `/proc` read. A group whose leader is not running is scanned first, as
+  it always was, since a group of zombies is gone and a signal to it says it was there.
+  `ENDED` is a group the verification observed empty after the signal reached it.
+- **A missed deadline and a supervisor that never said it was ready end the instance at
+  once too** (`grace=0`, decision-191): the host has already waited out the deadline.
+- **`Jail.instance_group`: which process group holds the jail.** A supervised jail's PID 1
+  and bwrap's own process are in one group, which lives exactly as long as the jail's pid
+  and mount namespaces do: the first program ending, or a `setsid()` child outliving it,
+  changes nothing. `None` for a jail with no supervisor, whose programs' own groups are
+  all there is. It is the number `to_dict()["supervisor"]["pid"]` carries, and what an
+  embedder that records "which jail holds this" for a later process to test with
+  `group_alive` records (bh-02's runner, for the placeholders a jail holds): a program's
+  own pid is not it, because a program may end while the jail goes on.
+
+Implementing task: TASK-0079.06, reopened by its closing review. (Ruled 2026-10-15,
+decision-193.)
 
 ## 10. Communication with jails
 

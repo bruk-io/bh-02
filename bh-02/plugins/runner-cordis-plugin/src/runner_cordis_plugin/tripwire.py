@@ -12,9 +12,13 @@ measured), so the jail ends instead, at once, and the next input's jail holds th
 the kernel's inotify records, and `lifted` decides which held paths those events took away: all
 three pure. `Tripwire` is the shell: an inotify descriptor, set up before bubblewrap starts, and
 a thread that waits on it and ends the jail, by whatever the caller armed it with, at the first
-lift: on Linux brig's `Jail.destroy`, since a jail's programs are children of brig's supervisor
-and not one process group (brig's decision-190), so killing the program's group would leave a
-program in a session of its own running with the mount lifted.
+lift: on Linux brig's `Jail.destroy(grace=0)`, since a jail's programs are children of brig's
+supervisor and not one process group (brig's decision-190), so killing the program's group would
+leave a program in a session of its own running with the mount lifted, and since a grace period
+is a window: a program that ignores `SIGTERM` and writes the absent secret every 10 ms did, in
+every run, when the jail was ended with `SIGTERM` first and 2 s to answer it (brig's
+decision-193). What cannot be ended says so (`unended_for`), and a teardown that raised is
+followed by a kill of the jail's group; the jail never keeps running with no trace.
 """
 
 import contextlib
@@ -26,7 +30,7 @@ import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 
-__all__ = ["Tripwire", "decoded", "lifted", "tripped_for", "wires"]
+__all__ = ["Tripwire", "decoded", "lifted", "tripped_for", "unended_for", "wires"]
 
 # inotify(7)'s event bits: the ones that undo a mount on a name in a watched directory, and those
 # that say the directory itself, or the queue, is gone.
@@ -89,6 +93,17 @@ def tripped_for(paths: Sequence[str]) -> str:
     )
 
 
+def unended_for(left: str) -> str:
+    """What to add to `tripped_for` when ending the jail did not complete (`left`: what it could
+    not end, or why the teardown failed; "" for nothing, which adds nothing)."""
+    if not left:
+        return ""
+    return (
+        f"; ending it did not complete: {left}. It may still be running: list its processes "
+        "(`ps -eo pid,pgid,args`) and end them yourself"
+    )
+
+
 class Tripwire:
     """An inotify descriptor watching the directories of a jail's held paths (`wires`), made
     before bubblewrap starts so nothing that happens from then on is missed, and, once the jail
@@ -116,14 +131,31 @@ class Tripwire:
         self._stop_r, self._stop_w = os.pipe()
         self._thread: threading.Thread | None = None
 
-    def arm(self, end: Callable[[], object]) -> None:
-        """Start the thread that calls `end`, which ends the jail, at the first lift. `end` must
-        not need the jail's cooperation. What it raises is swallowed here: this thread has nowhere
-        to report it (the terminal is the app's)."""
-        self._thread = threading.Thread(target=self._watch, args=(end,), name="bh-02 tripwire", daemon=True)
+    def arm(self, end: Callable[[], str], *, fallback: Callable[[], object]) -> None:
+        """Start the thread that calls `end`, which ends the jail at once (no grace for anything
+        in it) and returns what it could not end, "" for nothing, at the first lift. `end` must
+        not need the jail's cooperation. When it raises, `fallback` is called, a plain kill of the
+        jail's group, and the exception is what `tripped` says it could not do: this thread has
+        nowhere to report it (the terminal is the app's), so the person reads it in `tripped`."""
+        self._thread = threading.Thread(
+            target=self._watch, args=(end, fallback), name="bh-02 tripwire", daemon=True
+        )
         self._thread.start()
 
-    def _watch(self, end: Callable[[], object]) -> None:
+    def _ended(self, end: Callable[[], str], fallback: Callable[[], object]) -> str:
+        """`end`'s answer; if it raised, what `fallback` was for and why."""
+        try:
+            return end()
+        except Exception as error:
+            with contextlib.suppress(Exception):
+                fallback()
+            return (
+                f"brig's teardown raised {type(error).__name__}: {error}, so the jail's "
+                "process group was sent SIGKILL directly, which does not reach a program in a "
+                "session of its own"
+            )
+
+    def _watch(self, end: Callable[[], str], fallback: Callable[[], object]) -> None:
         while True:
             ready, _, _ = select.select([self._fd, self._stop_r], [], [])
             if self._stop_r in ready:
@@ -135,8 +167,7 @@ class Tripwire:
             events = [(self._dirs.get(wd, ""), mask, name) for wd, mask, name in decoded(data)]
             if paths := lifted(events, self._watched):
                 self.tripped = tripped_for(paths)  # first: whoever sees the jail gone asks why
-                with contextlib.suppress(Exception):
-                    end()
+                self.tripped += unended_for(self._ended(end, fallback))
                 return
 
     def stop(self) -> None:

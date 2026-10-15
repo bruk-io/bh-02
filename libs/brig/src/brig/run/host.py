@@ -90,6 +90,7 @@ from brig.run.runtime import (
     reserved_socket,
 )
 from brig.run.teardown import (
+    DEFAULT_GRACE_S,
     KillOutcome,
     KillReport,
     UnreadableProcessTable,
@@ -495,7 +496,7 @@ def _launch_supervisor(
     _waiters.watch(proc, jail_id=jail_id)  # reaped when its wrapper ends, as every start's is
 
     def unresponsive() -> None:
-        end_group("supervisor", pid, pid, stamp)
+        end_group("supervisor", pid, pid, stamp, grace=0.0)  # a deadline passed: at once
 
     link = SupervisorLink(host_end, unresponsive=unresponsive)
     try:
@@ -511,7 +512,7 @@ def _launch_supervisor(
         problem = f"it said nothing within {_SUPERVISOR_READY_TIMEOUT_S}s"
     if problem is not None:
         link.close()
-        item = end_group("supervisor", pid, pid, stamp)
+        item = end_group("supervisor", pid, pid, stamp, grace=0.0)
         said = _log_tail(stderr_path)
         raise SupervisorFailed(
             f"brig's supervisor did not start in jail {jail_id!r}: {problem}. Its stderr "
@@ -750,7 +751,7 @@ class HostRuntime:
         del jail
         return _identity.identity_holds(process.pid, process.start_time)
 
-    def destroy(self, jail: JailRecord) -> KillReport:
+    def destroy(self, jail: JailRecord, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
         """SPEC.md section 9's ladder per process in start order -- the ones
         `jail` holds, then every other record under `procs/` -- then every
         `JAIL_LIFETIME` helper, each verified (`teardown.kill_named`). Total:
@@ -760,7 +761,8 @@ class HostRuntime:
         first, as in any jail, and then the instance: the link is closed just before its
         ladder, so the supervisor reads end-of-file and ends everything it holds, which is the
         prompt end (a supervisor's PID 1 drops the ladder's `SIGTERM`, so the ladder alone would
-        wait out its grace), and the ladder verifies it, `SIGKILL` included."""
+        wait out its grace), and the ladder verifies it, `SIGKILL` included. With `grace` 0
+        it is the other way about: the instance is killed first, at once (decision-193)."""
         held = jail.held
         return kill_named(
             known=jail.processes,
@@ -773,6 +775,7 @@ class HostRuntime:
                 else (jail.supervisor.pid, jail.supervisor.start_time)
             ),
             end_of_file=None if held is None or held.link is None else held.link.close,
+            grace=grace,
         )
 
     def supervisor(self, jail: JailRecord) -> Supervisor | None:

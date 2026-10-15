@@ -87,7 +87,9 @@ def test_a_request_the_supervisor_does_not_answer_destroys_the_jail_at_its_deadl
         began = time.monotonic()
         with pytest.raises(SupervisorUnresponsive, match="did not answer 'signal' within 1.0s"):
             victim.interrupt()
-        assert time.monotonic() - began < 15.0
+        # At once (decision-193): the deadline, then a SIGKILL the stopped init cannot defer; a
+        # ladder that sent SIGTERM first would add its 2 s grace to a SIGSTOPped init's.
+        assert time.monotonic() - began < 2.5
 
         # Destroyed without it: the stopped init took the SIGKILL of the ladder, and its namespace,
         # the sleeper in it, went with it.

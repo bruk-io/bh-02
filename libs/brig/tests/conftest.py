@@ -91,7 +91,6 @@ import pytest
 
 from brig.run import HostRuntime, IoPolicy, Jail, KillReport, Process
 from brig.run.runtime import Runtime
-from brig.run.teardown import kill_named
 from brig.stack import CompiledJail
 
 # How often the background poller samples `/bin/ps` for the run-id token,
@@ -248,21 +247,10 @@ def launch(
 
 
 def destroy_with_grace(jail: Jail, grace: float) -> KillReport:
-    """`jail.destroy()` with the ladder's grace period shortened: the same
-    `teardown.kill_named` over the record `destroy` passes its runtime, for
-    tests that time the ladder's escalation (the handle-era teardown took
-    `grace=` until decision-183)."""
-    record = jail._record()
-    instance, link = record.supervisor, None if record.held is None else record.held.link
-    return kill_named(
-        known=record.processes,
-        jail_dir=record.jail_dir,
-        helper_pids=record.helper_pids,
-        helper_stamps=record.helper_stamps,
-        supervisor=None if instance is None else (instance.pid, instance.start_time),
-        end_of_file=None if link is None else link.close,
-        grace=grace,
-    )
+    """`jail.destroy(grace=grace)`: the ladder's grace period shortened, for tests that time its
+    escalation (the handle-era teardown took `grace=` until decision-183, and `Jail.destroy`
+    took it again with decision-193)."""
+    return jail.destroy(grace=grace)
 
 
 def teardown_group(process: Process, *, timeout: float = 20.0) -> None:

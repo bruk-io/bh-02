@@ -42,7 +42,7 @@ from brig.run._records import RESERVED_NAMES
 from brig.run._records import ProcessRecord as ProcessRecord
 from brig.run._supervisor_link import SupervisorLink
 from brig.run._tether import HeldTether
-from brig.run.teardown import KillReport
+from brig.run.teardown import DEFAULT_GRACE_S, KillReport
 from brig.stack import CompiledJail
 
 
@@ -362,9 +362,11 @@ class Runtime(Protocol):
         decision-171)."""
         ...
 
-    def destroy(self, jail: JailRecord) -> KillReport:
+    def destroy(self, jail: JailRecord, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
         """End everything the instance holds, verified, one item per thing
-        (law 7)."""
+        (law 7). `grace` is how long a process has after `SIGTERM`; 0 gives
+        none (decision-193): `SIGKILL` at once, the instance first where there
+        is one."""
         ...
 
     def supervisor(self, jail: JailRecord) -> Supervisor | None:

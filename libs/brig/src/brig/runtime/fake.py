@@ -39,7 +39,7 @@ from brig.run.runtime import (
     reservation_refusal,
     reserved_socket,
 )
-from brig.run.teardown import KillItem, KillOutcome, KillReport
+from brig.run.teardown import DEFAULT_GRACE_S, KillItem, KillOutcome, KillReport
 from brig.stack import CompiledJail
 
 #: The first pid a `FakeRuntime` hands out. Linux caps pids at 2**22.
@@ -102,6 +102,7 @@ class FakeRuntime:
         self._tokens = 0
         self._capabilities = capabilities
         self.calls: list[Call] = []
+        self.graces: list[float] = []
         self._running: set[int] = set()
         self._started: dict[str, list[ProcessRecord]] = {}
         self._tethered: dict[str, bool] = {}
@@ -204,10 +205,13 @@ class FakeRuntime:
         self.calls.append(Call("alive", Scope.JAIL, jail))
         return any(self.running(process) for process in self._processes(jail))
 
-    def destroy(self, jail: JailRecord) -> KillReport:
+    def destroy(self, jail: JailRecord, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
         """Ends every process of `jail`, one item each in start order: the
-        first `workload_group`, every later one `exec_sibling`."""
+        first `workload_group`, every later one `exec_sibling`. `grace` is kept
+        in `graces`, one per call: the fake ends everything at once whatever it
+        is."""
         self.calls.append(Call("destroy", Scope.JAIL, jail))
+        self.graces.append(grace)
         return KillReport(
             items=tuple(
                 KillItem(

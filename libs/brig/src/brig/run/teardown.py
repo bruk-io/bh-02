@@ -309,13 +309,15 @@ def _wait_until_group_gone(pgid: int, leader_pid: int, deadline: float) -> bool:
         time.sleep(_POLL_INTERVAL_S)
 
 
-def _signal_group(pgid: int, sig: signal.Signals) -> None:
+def _signal_group(pgid: int, sig: signal.Signals) -> bool:
     """Signal the process **group** -- never a single pid; that
     distinction is the entire subject of this module (SPEC.md §9's
     "single-pid SIGKILL that leaves the interesting child alive"). A group
     that has already vanished raises `ProcessLookupError`, which is not a
     failure here -- the verification rung is what actually decides the
-    outcome, not whether this call raised.
+    outcome, not whether this call raised. Returns whether there was a group
+    to signal: `False` for one that had already vanished, `True` otherwise
+    (also when `EPERM` said a member exists that could not be signalled).
 
     `PermissionError` is suppressed for the same reason, for a
     platform-specific fact task-027 surfaced (confirmed on darwin, this
@@ -328,8 +330,35 @@ def _signal_group(pgid: int, sig: signal.Signals) -> None:
     escalation rung would crash `destroy` outright on exactly the
     jail-rehydrated-elsewhere path SPEC.md §9 exists to cover, instead of
     reporting `FAILED` honestly if the group truly never clears."""
-    with contextlib.suppress(ProcessLookupError, PermissionError):
+    try:
         os.killpg(pgid, sig)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _end_at_once(pgid: int, leader_pid: int, leader_stamp: str) -> tuple[KillOutcome, str]:
+    """The ladder for `grace=0` (decision-193): `SIGKILL` to the group, and with its leader
+    running, which `/proc` says in microseconds, nothing is read before it: no scan of the
+    process table (a `ps`, on a loaded machine the length of a window a hostile workload
+    uses) comes between the decision and the signal. A leader that is not running leaves
+    the group to the scan, as the ladder always did, since a group of zombies is gone
+    and a signal to it still says it was there. Then the verification rung, as ever. A group
+    found empty is `ALREADY_GONE`; one the verification then observed empty is `ENDED`. The
+    group is given `DEFAULT_GRACE_S` to leave the table, as after any `SIGKILL`: it cannot
+    ignore the signal, but the kernel needs a moment to remove what it killed."""
+    if not _identity.identity_holds(leader_pid, leader_stamp) and not _group_member_pids(pgid):
+        return KillOutcome.ALREADY_GONE, "process group had already ended before kill() ran"
+    if not _signal_group(pgid, signal.SIGKILL):
+        return KillOutcome.ALREADY_GONE, "process group had already ended before kill() ran"
+    if _wait_until_group_gone(pgid, leader_pid, time.monotonic() + DEFAULT_GRACE_S):
+        return KillOutcome.ENDED, ""
+    return (
+        KillOutcome.FAILED,
+        f"process group {pgid} still had member(s) {DEFAULT_GRACE_S}s after SIGKILL",
+    )
 
 
 def _run_ladder(
@@ -347,7 +376,8 @@ def _run_ladder(
        `ALREADY_GONE` and signal nothing (decision-155).
     1. If the group is already gone (idempotent re-call, or the process
        had already exited on its own), report `ALREADY_GONE` -- no signal
-       sent.
+       sent. (With `grace` 0 this and the next rung are skipped:
+       `_end_at_once`, decision-193.)
     2. `SIGTERM` to the group, then verify for up to `grace` seconds.
     3. If anything survives, `SIGKILL` to the group, then verify again for
        up to `grace` seconds.
@@ -395,6 +425,8 @@ def _run_ladder(
         )
 
     _reap_leader(leader_pid)
+    if grace <= 0:
+        return _end_at_once(pgid, leader_pid, leader_stamp)
     if not _group_member_pids(pgid):
         return KillOutcome.ALREADY_GONE, "process group had already ended before kill() ran"
 
@@ -505,6 +537,32 @@ def end_group(
     return KillItem(kind=kind, identity=str(pgid), outcome=outcome, detail=detail)
 
 
+def _ended_by(item: KillItem, how: str) -> KillItem:
+    """`item`, an `ALREADY_GONE` the verification found after a signal that ended it by
+    way of something else, as `ENDED` saying how: what the jail's teardown killed is not
+    reported as having been gone before it ran. Any other outcome is as it was."""
+    if item.outcome is not KillOutcome.ALREADY_GONE:
+        return item
+    return KillItem(item.kind, item.identity, KillOutcome.ENDED, how)
+
+
+def _kill_instance_first(pid: int, stamp: str) -> bool:
+    """`SIGKILL` to the group that holds a supervised jail's PID 1, at once (decision-193):
+    the kernel ends every process of the jail's pid namespace with its init, a `setsid()`
+    child included. The same guards as the ladder's, read from `/proc` and no more: an
+    unknown stamp, an own or init group, a leader that is gone or has become another
+    process are signalled nothing here and the instance's own ladder says why. Whether the
+    signal reached a running instance; total."""
+    try:
+        if stamp == _identity.UNKNOWN or _unsignalable(pid, os.getpgrp()) is not None:
+            return False
+        if not _identity.identity_holds(pid, stamp):  # gone, a zombie, or another process now
+            return False
+        return _signal_group(pid, signal.SIGKILL)
+    except Exception:
+        return False
+
+
 def kill_named(
     *,
     known: Sequence[_records.ProcessRecord],
@@ -531,6 +589,14 @@ def kill_named(
     `SIGKILL` included, so a supervisor that does not take it is ended without
     it (law 7). A supervisor found running before and gone after is `ENDED`,
     by the verification rung's own observation, never `ALREADY_GONE`.
+
+    `grace` 0 ends everything at once (decision-193): in a supervised jail the
+    instance is first, `SIGKILL` to its group ahead of every process-table scan
+    and every item, so the namespace's end is every process's end; then the
+    processes (each reported `ENDED` when its leader held its identity before
+    the signal and its group is found empty, never `ALREADY_GONE`), then the
+    link, then the instance's own item, then the helpers, the report's order
+    as ever. Every group's ladder signals `SIGKILL` first and scans after.
 
     The processes are `known`, the ones the caller holds in memory, in start
     order, then every record under `<jail_dir>/procs` whose id `known` does
@@ -568,6 +634,13 @@ def kill_named(
         for record in scanned.records
         if record.id in held and _records.disagrees(held[record.id], record)
     )
+    at_once = grace <= 0 and supervisor is not None
+    running_before = frozenset(
+        process.id
+        for process in processes
+        if at_once and _identity.identity_holds(process.pid, process.start_time)
+    )
+    instance_hit = supervisor is not None and at_once and _kill_instance_first(*supervisor)
     items: list[KillItem] = [
         end_group(
             "workload_group" if position == 0 else "exec_sibling",
@@ -578,6 +651,13 @@ def kill_named(
         )
         for position, process in enumerate(processes)
     ]
+    if instance_hit:
+        items = [
+            _ended_by(item, "ended with the jail's pid namespace: its instance was killed first")
+            if process.id in running_before
+            else item
+            for item, process in zip(items, processes, strict=True)
+        ]
     kinds = {
         process.id: "workload_group" if position == 0 else "exec_sibling"
         for position, process in enumerate(processes)
@@ -590,16 +670,16 @@ def kill_named(
     # included. After the processes, so a report reads `workload_group` first as ever.
     if supervisor is not None:
         pid, stamp = supervisor
-        running = end_of_file is not None and group_alive(pid)
+        running = instance_hit or (not at_once and end_of_file is not None and group_alive(pid))
         if end_of_file is not None:
             end_of_file()
         item = end_group("supervisor", pid, pid, stamp, grace=grace)
-        if running and item.outcome is KillOutcome.ALREADY_GONE:
-            item = KillItem(
-                "supervisor",
-                item.identity,
-                KillOutcome.ENDED,
-                "ended by end-of-file on its control socket; its group was found empty",
+        if running:
+            item = _ended_by(
+                item,
+                "ended by SIGKILL at once; its group was found empty"
+                if instance_hit
+                else "ended by end-of-file on its control socket; its group was found empty",
             )
         items.append(item)
 

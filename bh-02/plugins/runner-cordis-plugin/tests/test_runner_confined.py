@@ -6,6 +6,7 @@ import contextlib
 import ctypes
 import os
 import signal
+import socket
 import struct
 import subprocess
 import sys
@@ -53,9 +54,11 @@ from runner_cordis_plugin import (
     spec_for,
     stack_for,
     still_made,
+    still_running,
     told_reads,
     tripwired,
     uncovered,
+    unended_for,
     wires,
 )
 
@@ -452,6 +455,33 @@ def _recorded_group(tmp_path: Path) -> int:
     return group
 
 
+def _holds_pid_1(group: int) -> bool:
+    """Whether a process of `group` is PID 1 of a pid namespace of its own (`NSpid` ends in 1):
+    a jail's instance, the supervisor's group, and not the group of a program in it."""
+    table = subprocess.run(["/bin/ps", "-Ao", "pid=,pgid="], capture_output=True, text=True, check=True)
+    for line in table.stdout.splitlines():
+        pid, _, pgid = line.strip().partition(" ")  # ps pads a short pid with spaces
+        if pgid.strip() != str(group):
+            continue
+        with contextlib.suppress(OSError):
+            for status in Path(f"/proc/{pid}/status").read_text().splitlines():
+                if status.startswith("NSpid:"):
+                    ids = status.split()[1:]
+                    if len(ids) > 1 and ids[-1] == "1":
+                        return True
+    return False
+
+
+def _jail_group(tmp_path: Path) -> int:
+    """The group the one running bubblewrap jail's record names, which is the jail itself: the
+    process group that holds PID 1 of its namespaces (`Jail.instance_group`), so that it is gone
+    means the jail is, whatever its programs started in a session of their own, and not that a
+    program's own group ended."""
+    group = _recorded_group(tmp_path)
+    assert _holds_pid_1(group), f"the record names group {group}, which holds no PID 1: not a jail's"
+    return group
+
+
 async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_holds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -493,7 +523,7 @@ async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_h
         assert f"{secret}, {absent}" in started.notice()
         await asyncio.sleep(0.5)
         assert not seen.exists() and absent.is_dir() and started.ended() == ""  # held
-        group = _recorded_group(tmp_path)
+        group = _jail_group(tmp_path)
         (project / "saved.tmp").write_text("NEW=1\n")
         (project / "saved.tmp").replace(secret)  # an editor's save
         assert await _gone(group)  # the jail ended itself
@@ -502,7 +532,7 @@ async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_h
         await started.stop()
     started = await jailed()
     try:
-        group = _recorded_group(tmp_path)
+        group = _jail_group(tmp_path)
         absent.rmdir()  # a placeholder removed by hand
         assert await _gone(group)
         assert str(absent) in started.ended()
@@ -563,6 +593,141 @@ async def test_the_tripwire_ends_the_whole_jail_a_program_in_a_session_of_its_ow
         await started.stop()
 
 
+# A hostile program: it ignores SIGTERM, starts a second program in a session of its own that
+# ignores it too and stamps argv[3] every 10 ms, and itself tries to create argv[2] every 10 ms.
+_HOSTILE_IGNORING_SIGTERM = """
+import signal, socket, subprocess, sys, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+STAMP = (
+    "import signal, sys, time\\n"
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\\n"
+    "while True:\\n"
+    "    open(sys.argv[1], 'w').write(str(time.time()))\\n"
+    "    time.sleep(0.01)\\n"
+)
+subprocess.Popen([sys.executable, "-I", "-c", STAMP, sys.argv[3]], start_new_session=True)
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+while True:
+    time.sleep(0.01)
+    try:
+        open(sys.argv[2], "w").write("PLANTED=1")
+    except OSError:
+        pass
+"""
+
+
+async def test_a_jail_whose_hold_the_host_lifted_ends_at_once_whatever_its_programs_do_with_sigterm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The host removes a placeholder the jail holds, so the mount inside is gone and an input
+    may create the secret's file on the host. Programs that ignore SIGTERM (one of them in a
+    session of its own) keep trying every 10 ms. The tripwire ends the jail with SIGKILL and no
+    SIGTERM first (brig's `destroy(grace=0)`, decision-193), so how long the jail survives it is
+    the kernel's, milliseconds, and not the 2 s grace a teardown that sent SIGTERM first gives
+    a program that ignores it: measured 2.01 to 2.06 s, the secret planted on the host 3 times
+    in 3. The control: the same programs run, and both are writing, until the host lifts it.
+
+    Not asserted: that nothing is planted. A program trying every 10 ms can land one in the few
+    milliseconds the kill takes, and a test that depends on missing it would flake; the bound is
+    on how long the jail survives, which is what decides how many it can land."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    (project / "pkg").mkdir(parents=True)
+    absent, stamp = project / "pkg" / "local.env", project / "stamp"
+    one = BrigJail(
+        BrigConfig(),
+        Host(credentials=(str(absent),), secrets=(str(absent),)),
+        lock=str(tmp_path / "jails.lock"),
+    )
+    endpoint = _endpoint()
+    argv = [sys.executable, "-I", "-c", _HOSTILE_IGNORING_SIGTERM, endpoint, str(absent), str(stamp)]
+    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+    try:
+        assert await _until(stamp.exists, 5.0), "CONTROL failed: the second program never ran"
+        first = stamp.read_text()
+        await asyncio.sleep(0.2)
+        assert stamp.read_text() != first and absent.is_dir() and started.ended() == "", "CONTROL failed"
+        group = _jail_group(tmp_path)
+        lifted_at = time.time()
+        began = time.monotonic()
+        absent.rmdir()  # the host undoes a mount the jail holds
+        assert await _gone(group, within=5.0), "the jail outlived the tripwire by 5 s"
+        survived = time.monotonic() - began
+        assert survived < 1.0, (
+            f"the jail survived the tripwire for {survived:.2f} s (a SIGTERM's grace is 2 s)"
+        )
+        last = float(stamp.read_text() or "0")
+        await asyncio.sleep(0.5)
+        assert float(stamp.read_text() or "0") == last, "the program in a session of its own kept running"
+        assert last - lifted_at < 1.0
+        assert str(absent) in started.ended() and "did not complete" not in started.ended()
+    finally:
+        await started.stop()
+        if absent.is_file():  # what the one that got in left on the host, for the next test's sake
+            absent.unlink()
+
+
+# Starts a server in a session of its own, listens, and after a moment writes argv[2] and exits:
+# the jail's program ends while a program of its own keeps running in the jail.
+_LISTEN_LEAVE_A_SERVER_AND_END = """
+import socket, subprocess, sys, time
+subprocess.Popen([sys.executable, "-I", "-c", "import time; time.sleep(120)"], start_new_session=True)
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+time.sleep(0.8)
+open(sys.argv[2], "w").write("ending")
+"""
+
+
+def _nothing_listens(endpoint: str) -> bool:
+    with socket.socket(socket.AF_UNIX) as client:
+        try:
+            client.connect(endpoint)
+        except OSError:
+            return True
+    return False
+
+
+async def test_the_sweep_leaves_a_jail_a_server_holds_after_the_program_that_started_it_ended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The model's code starts a server in a session of its own and the program ends: the jail
+    does not, because the server is in it. Its record names the jail (the instance's group), not
+    the program's, so a later bh-02's sweep finds the jail running and leaves the placeholders it
+    holds. The record named the program's own group before, which is gone by then, and the sweep
+    removed the placeholders from under a running jail, detaching the mounts that hold them.
+    (The first jail's lock is another file here: the sweep runs when no running jail's bh-02 is
+    left to hold the lock, so its bh-02 is the one that is gone.)"""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    records = tmp_path / "state" / "bh-02" / "jails"
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "one.lock"))
+    endpoint, ending = _endpoint(), project / "ending"
+    argv = [sys.executable, "-I", "-c", _LISTEN_LEAVE_A_SERVER_AND_END, endpoint, str(ending)]
+    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+    try:
+        group = _jail_group(tmp_path)
+        (record,) = records.iterdir()
+        held = project / ".claude"
+        assert held.is_dir() and await _until(ending.exists, 10.0), "CONTROL failed: the program never ran"
+        assert await _until(lambda: _nothing_listens(endpoint), 10.0), "the program did not end"
+        assert group_alive(group), "the jail ended with its program: CONTROL failed, nothing is left to hold"
+        other = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "other.lock"))
+        endpoint_2 = _endpoint()
+        argv_2 = [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint_2, str(tmp_path / "elsewhere")]
+        await (await other.start(argv_2, cwd=str(project), endpoint=endpoint_2)).stop()  # it swept
+        assert held.is_dir() and record.exists(), "the sweep removed what a running jail holds"
+    finally:
+        await started.stop()
+    assert not (project / ".claude").exists() and not list(records.iterdir())  # now it is gone
+
+
 _LISTEN_THEN_APPEND = """
 import socket, sys, time
 server = socket.socket(socket.AF_UNIX)
@@ -603,7 +768,7 @@ async def test_a_linux_jail_ends_when_the_host_renames_over_a_write_deny_and_a_n
     try:
         await asyncio.sleep(0.5)
         assert "planted" not in config.read_text() and started.ended() == ""  # held
-        group = _recorded_group(tmp_path)
+        group = _jail_group(tmp_path)
         git = await asyncio.create_subprocess_exec("git", "-C", str(project), "config", "user.name", "Pat")
         assert await git.wait() == 0
         assert await _gone(group)  # the jail ended itself
@@ -697,7 +862,10 @@ class _Plain:
             return True
         return False
 
-    def destroy(self) -> Any:
+    instance_group = None  # no supervisor: the program's own group is all there is
+
+    def destroy(self, *, grace: float = 2.0) -> Any:
+        del grace  # SIGKILL whatever it is
         if self._process is not None:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(self._process.pid, signal.SIGKILL)
@@ -1848,7 +2016,12 @@ async def test_on_linux_the_tripwire_ends_what_it_was_armed_with_when_a_held_fil
     held.write_text("a")
     victim = subprocess.Popen(["sleep", "30"], start_new_session=True)
     wire = Tripwire([str(held)])
-    wire.arm(lambda: os.killpg(victim.pid, signal.SIGKILL))
+
+    def end() -> str:
+        os.killpg(victim.pid, signal.SIGKILL)
+        return ""
+
+    wire.arm(end, fallback=lambda: pytest.fail("the fallback is for a teardown that raised"))
     try:
         (tmp_path / "beside").write_text("b")  # not held: nothing happens
         await asyncio.sleep(0.1)
@@ -1856,7 +2029,74 @@ async def test_on_linux_the_tripwire_ends_what_it_was_armed_with_when_a_held_fil
         (tmp_path / "config.new").write_text("c")
         (tmp_path / "config.new").replace(held)
         assert await asyncio.to_thread(victim.wait, 2) == -signal.SIGKILL
-        assert str(held) in wire.tripped
+        assert str(held) in wire.tripped and "did not complete" not in wire.tripped
     finally:
         wire.stop()
         victim.kill()
+
+
+@pytest.mark.parametrize("how", ["raised", "failed"])
+async def test_a_teardown_that_did_not_end_the_jail_says_so_and_one_that_raised_is_followed_by_a_kill(
+    tmp_path: Path, how: str
+) -> None:
+    """A teardown that raised must not leave the jail running with no trace: the wire kills the
+    jail's group directly (`fallback`) and `tripped` says brig's teardown raised and what the kill
+    does not reach. One that returned what it could not end (a `FAILED` item) is not killed again
+    (brig has just sent `SIGKILL` and verified), and `tripped` names it. Control: a teardown that
+    ended everything adds nothing."""
+    if sys.platform != "linux":
+        pytest.skip("inotify is Linux's")
+    held = tmp_path / "config"
+    held.write_text("a")
+    victim = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    wire = Tripwire([str(held)])
+    killed: list[str] = []
+
+    def end() -> str:
+        if how == "raised":
+            raise OSError("no teardown today")
+        return "workload_group 4242: still had members"
+
+    wire.arm(end, fallback=lambda: (killed.append("group"), os.killpg(victim.pid, signal.SIGKILL)))
+    try:
+        (tmp_path / "config.new").write_text("c")
+        (tmp_path / "config.new").replace(held)
+        if how == "raised":
+            assert await asyncio.to_thread(victim.wait, 2) == -signal.SIGKILL
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not wire.tripped.count("did not complete"):
+            await asyncio.sleep(0.02)
+        assert "did not complete" in wire.tripped and str(held) in wire.tripped, wire.tripped
+        if how == "raised":
+            assert killed == ["group"] and "no teardown today" in wire.tripped
+        else:
+            assert killed == [] and "workload_group 4242: still had members" in wire.tripped
+            assert victim.poll() is None
+    finally:
+        wire.stop()
+        victim.kill()
+
+
+def test_what_a_teardown_could_not_end_is_named_and_nothing_added_when_it_ended_everything() -> None:
+    outcomes = sys.modules["runner_cordis_plugin.jail"].KillOutcome  # brig's, as the row holds it
+
+    def item(kind: str, outcome: Any, detail: str) -> SimpleNamespace:
+        return SimpleNamespace(kind=kind, identity="77", outcome=outcome, detail=detail)
+
+    failed_outcome = SimpleNamespace(value="FAILED")  # anything but ended or gone
+    ended = SimpleNamespace(
+        items=(item("workload_group", outcomes.ENDED, ""), item("supervisor", outcomes.ALREADY_GONE, ""))
+    )
+    failed = SimpleNamespace(
+        items=(
+            item("workload_group", outcomes.ENDED, ""),
+            item("helper", failed_outcome, "EPERM"),
+            item("supervisor", failed_outcome, "x"),
+        )
+    )
+    assert still_running(ended) == "" and unended_for("") == ""
+    assert still_running(failed) == "helper 77: EPERM; supervisor 77: x"
+    note = unended_for(still_running(failed))
+    assert (
+        note.startswith("; ending it did not complete: helper 77: EPERM") and "ps -eo pid,pgid,args" in note
+    )

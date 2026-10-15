@@ -21,6 +21,7 @@ from brig.core import Spec, unenforced_report
 from brig.core.runtime import RuntimeKind, Scope
 from brig.run import ExecFidelity, HostRuntime, Jail, KillOutcome, Process
 from brig.run.jail import JAIL_VERSION
+from brig.run.teardown import DEFAULT_GRACE_S
 from brig.runtime.fake import FakeRuntime
 from brig.stack import CompiledJail, Stack
 
@@ -83,6 +84,24 @@ def test_a_launch_is_create_then_start_and_a_sibling_is_a_second_start() -> None
         ("exec_sibling", str(sibling.pid), KillOutcome.ENDED),
     ]
     assert not first.alive() and not jail.alive()
+
+
+def test_destroy_passes_its_grace_to_the_runtime_and_refuses_a_negative_one() -> None:
+    """decision-193: `destroy(grace=...)` reaches the runtime as given, 2.0 s by default and 0
+    for "at once", and a negative one is refused before the runtime is asked, with what to pass.
+    A jail with no supervisor has no instance group."""
+    runtime = FakeRuntime()
+    jail = _create(runtime)
+    jail.start(["sleep", "100"])
+
+    jail.destroy()
+    jail.destroy(grace=0)
+    jail.destroy(grace=0.25)
+    assert runtime.graces == [DEFAULT_GRACE_S, 0, 0.25]
+    with pytest.raises(ValueError, match=r"got -1\.0; pass 0 to end the jail at once"):
+        jail.destroy(grace=-1.0)
+    assert len(runtime.graces) == 3, "a refused destroy still asked the runtime"
+    assert jail.instance_group is None
 
 
 def test_a_process_is_waited_signalled_and_stopped_through_the_supervisor() -> None:

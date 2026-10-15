@@ -59,7 +59,7 @@ from brig.run.runtime import (
     Supervisor,
     SupervisorRecord,
 )
-from brig.run.teardown import KillReport
+from brig.run.teardown import DEFAULT_GRACE_S, KillReport
 from brig.stack import CompiledJail
 
 JAIL_VERSION: Final = 9
@@ -540,11 +540,37 @@ class Jail:
         gone."""
         return self._runtime.alive(self._record())
 
-    def destroy(self) -> KillReport:
+    def destroy(self, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
         """End every process, then every helper, verified, one item each
         (SPEC.md section 9's ladder): the first process `workload_group`,
-        every later one `exec_sibling`. Always there."""
-        return self._runtime.destroy(self._record())
+        every later one `exec_sibling`. Always there.
+
+        `grace` is how long a process has after `SIGTERM` before `SIGKILL`.
+        `grace=0` gives none: `SIGKILL` at once, and in a supervised jail the
+        instance first, so a program in a session of its own goes with it
+        (decision-193). It is for a caller that must not let a workload act
+        while it is ended: a hold the host lifted, a deadline missed.
+
+        Raises:
+            ValueError: `grace` is negative.
+        """
+        if grace < 0:
+            raise ValueError(
+                f"destroy's grace is the seconds a process has after SIGTERM, 0 or more, "
+                f"got {grace!r}; pass 0 to end the jail at once with SIGKILL (decision-193)"
+            )
+        return self._runtime.destroy(self._record(), grace=grace)
+
+    @property
+    def instance_group(self) -> int | None:
+        """The process group that holds a supervised jail's PID 1, which lives as long as the
+        jail's namespaces do: the first program ending, or a `setsid()` child outliving it,
+        changes nothing about it. `None` for a jail with no supervisor, whose programs' own
+        groups are all there is (decision-193). It is what a record of "which jail holds
+        this" names for another process to test with `group_alive`; a program's own pid is
+        not it."""
+        supervisor = self._record().supervisor
+        return None if supervisor is None else supervisor.pid
 
     def to_dict(self) -> dict[str, Any]:
         """Versioned, JSON-native: everything `destroy`, `alive` and a

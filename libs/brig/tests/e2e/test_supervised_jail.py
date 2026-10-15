@@ -29,6 +29,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -42,9 +43,11 @@ from brig.run import (
     KillOutcome,
     RuntimeKind,
     WorkloadSpawnFailed,
+    group_alive,
 )
 from brig.run._supervisor_program import SUPERVISOR_SOURCE
 from tests.supervised_jail import (
+    INTERPRETER,
     cleanup,
     create_jail,
     instance_group,
@@ -611,6 +614,106 @@ def test_destroy_reports_the_processes_then_the_instance_and_leaves_nothing() ->
         assert not jail.alive() and not first.alive() and not second.alive()
         again = jail.destroy()
         assert all(item.outcome is KillOutcome.ALREADY_GONE for item in again.items), again
+    finally:
+        _ended(jail)
+        cleanup(jail_dir)
+
+
+# A program that answers SIGTERM by saying it came and carrying on, which a program that
+# ignores it is, plus a second one in a session of its own, which a ladder per group never
+# names, and both stamp a file every 10 ms so that a test sees them run.
+_STUBBORN = """
+import os, signal, subprocess, sys, time
+ws, name, role = sys.argv[1:4]
+def on_term(*_):
+    open(os.path.join(ws, "term-" + name), "w").write("SIGTERM")
+signal.signal(signal.SIGTERM, on_term)
+if role == "parent":
+    subprocess.Popen(
+        [sys.executable, "-I", __file__, ws, name + "-child", "child"], start_new_session=True
+    )
+while True:
+    open(os.path.join(ws, "tick-" + name), "w").write(str(time.time()))
+    time.sleep(0.01)
+"""
+
+
+@pytest.mark.parametrize("grace", [0, 0.6], ids=["at-once", "with-grace"])
+def test_destroy_at_once_sends_no_sigterm_and_ends_the_instance_first_a_setsid_child_included(
+    grace: float,
+) -> None:
+    """decision-193. Two programs ignore SIGTERM (each starts another in a session of its own),
+    and `destroy(grace=0)` ends the jail with the kernel's end of its namespace: none of them is
+    told SIGTERM (no handler ran), and nothing runs a moment after, in well under what the
+    ladder's grace gives a program that ignores it. The control, the same jail destroyed with a
+    grace period of 0.6 s: every group is sent SIGTERM first (the handlers ran) and each of the
+    two waits out the grace period, so it takes longer than that."""
+    jail_dir = new_jail_dir()
+    workspace = tempfile.mkdtemp(prefix="bg-ws-", dir="/tmp")
+    Path(workspace, "stubborn.py").write_text(_STUBBORN)
+    jail = create_jail(jail_dir, workspace=workspace)
+    names = (f"a{_marker()}", f"b{_marker()}")
+    try:
+        for name in names:
+            jail.start([INTERPRETER, "-I", f"{workspace}/stubborn.py", workspace, name, "parent"])
+        ticks = [
+            Path(workspace, f"tick-{name}{suffix}") for name in names for suffix in ("", "-child")
+        ]
+        assert until(lambda: all(tick.exists() for tick in ticks), 10.0), "CONTROL: they never ran"
+        first = [tick.read_text() for tick in ticks]
+        time.sleep(0.2)
+        assert [tick.read_text() for tick in ticks] != first, "CONTROL: they are not running"
+
+        began = time.monotonic()
+        report = jail.destroy(grace=grace)
+        elapsed = time.monotonic() - began
+
+        assert [item.kind for item in report.items] == [
+            "workload_group",
+            "exec_sibling",
+            "supervisor",
+        ]
+        assert all(item.outcome is KillOutcome.ENDED for item in report.items), report
+        assert until(lambda: not any(running_with(name) for name in names), 5.0), (
+            "something survived"
+        )
+        last = [tick.read_text() for tick in ticks]
+        time.sleep(0.3)
+        assert [tick.read_text() for tick in ticks] == last, (
+            "a program of the jail is still running"
+        )
+        told = sorted(path.name for path in Path(workspace).glob("term-*"))
+        if grace == 0:
+            assert told == [], f"SIGTERM was sent first: {told}"
+            assert elapsed < 1.0, f"destroy(grace=0) took {elapsed:.2f} s"
+        else:
+            assert told == sorted(f"term-{name}" for name in names), told  # the setsid children not
+            assert elapsed > 2 * grace, f"two programs ignoring SIGTERM took {elapsed:.2f} s"
+    finally:
+        _ended(jail)
+        cleanup(jail_dir, workspace)
+
+
+def test_the_instance_group_names_the_jail_whose_program_ended_and_the_jail_did_not() -> None:
+    """decision-193. A program starts another in a session of its own and ends: its own group is
+    gone and the jail, which the other holds, is not. `Jail.instance_group` is the group that holds
+    PID 1, found in the process table the way the other tests find it, and it lives as long as the
+    jail does, which is the number a record of which jail holds a placeholder has to name."""
+    jail_dir = new_jail_dir()
+    jail = create_jail(jail_dir)
+    marker, _ = unique_sleep()
+    try:
+        program = jail.start(sh(f"setsid /bin/sleep {marker} & exit 0"))
+        assert until(lambda: bool(running_with(marker)))
+        assert program.wait(10) == 0
+        group = jail.instance_group
+        assert group is not None and group == instance_group(jail)
+        assert supervisor_host_pid(group) > 1  # a process of that group is PID 1 of its namespace
+        assert until(lambda: not group_alive(program.pid)), "CONTROL: the program's own group ended"
+        assert group_alive(group) and running_with(marker) and jail.alive()
+        _ended(jail)
+        assert not group_alive(group) and not jail.alive()
+        assert until(lambda: not running_with(marker), 5.0)
     finally:
         _ended(jail)
         cleanup(jail_dir)
