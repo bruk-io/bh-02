@@ -3,7 +3,7 @@ id: TASK-0105
 title: >-
   Make helpers and tools plainly different things to the model in the python
   section
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-15 21:00'
@@ -62,4 +62,11 @@ Asked by the owner (2026-10-15): keep tools and helpers separate, but make it ob
   - bh-02/GLOSSARY.md, the helper line: replaced whole with the wording the close review gives.
 - Flagged, not changed: bh-02/plugins/python-cordis-plugin/README.md:23 still says "that helpers worth keeping go in the project's startup file" (developer docs).
 - `scripts/check bh-02/plugins/python-cordis-plugin`: exit 0 (format, lint, types, 75 passed, gates, docs built; tokens skipped, no bh-01 dist).
+
+Closed on the independent review (Opus low, did not do the work): CLOSE, with should-fixes fixed in a648b22 by the same worker.
+- AC #1: the section printed both ways (confined with the person's file, and --no-jail) names three kinds of function once: the model's own, helpers and tools, with where each runs, whether a call is asked about and how long each lasts; each statement holds under --no-jail too (helper is bound in every namespace; "the same limits" is true both ways; nothing claims a listing). The startup aside reads inspect.getsource(NAME); the tools-changed aside reads "run by bh-02 when you call one". Should-fix fixed in a648b22: _keep said "helpers worth having" and "helpers of their own" for any startup-file function, now "functions"; so "helper" names only an @helper function wherever the model reads it.
+- The test change for --no-jail is not a weakened check (reviewer): decision-0004 point 7 protects that nothing is listed unconfined, and the test still asserts the listing sentence is absent there.
+- AC #2: GLOSSARY's tools (in an input) and helper lines (the latter rewritten in a648b22, no longer a run-on), the plugin README and python-tool.md's table (a helper column; its "how long" cell now true under --no-jail, a648b22) agree with the section.
+- AC #3: the python plugin 75 passed; the batch's full scripts/check on a648b22 exit 0, 3062 passed, 31 skipped.
+Nits answered: "run by bh-02" is loose for an extension's tool, which bh-02 runs in its extensions process (the doc table says where); the docstrings in client.py and wiring.py are for developers and stay. The owner is weighing dropping @helper for Python's own public-name convention (a decision not yet written), which would reword these lines again.
 <!-- SECTION:NOTES:END -->
