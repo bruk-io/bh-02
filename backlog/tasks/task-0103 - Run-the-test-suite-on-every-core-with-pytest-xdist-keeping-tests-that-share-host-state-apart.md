@@ -3,7 +3,7 @@ id: TASK-0103
 title: >-
   Run the test suite on every core with pytest-xdist, keeping tests that share
   host state apart
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15 02:28'
 updated_date: '2026-10-15 18:35'
@@ -49,4 +49,12 @@ Close evidence (2026-10-15):
 - AC #1: the worker's last four full runs under -n auto (2778 passed) and the batch's full check on 96492f9 are five green runs in a row; the fifth is on a later head with TASK-0100 and TASK-0099.05 on top of this commit, not on 894daf6 itself. Neither deferred flake (TASK-0086.01, TASK-0097) failed in it.
 
 Finish moved (2026-10-15): AC #4 (the atomic write of pyproject.toml's src list in scripts/arch-check) was added after acceptance and before any code, from TASK-0102's close review: TASK-0102 made arch-check run beside pytest, ruff and mypy, which all read that file at startup, so a truncate-then-write could be read half done. It joined this task rather than a new one because this task already changed scripts/check and scripts/arch-check.
+
+Closed on the independent review (Opus low, did not do the work): CLOSE, on the condition that AC #2's whole-check numbers are recorded (done in the notes above).
+- AC #1 met narrowly: five green runs in a row as the notes say. The jail-lock group (conftest.py) names exactly the four files that start a jail on the per-user lock, with a true reason. The reviewer checked brig's /tmp paths (per-pid), the real-launch tests (--no-jail, XDG dirs under tmp_path), test_command_line.py and test_arch_check.py (gates under tmp_path) and found them safe ungrouped.
+- AC #2 met: scripts/check passes -n auto --dist loadgroup, also for scripts/check MEMBER; 478 s to 155 s.
+- AC #3 met: the batch check exit 0.
+- AC #4 met: replace_file writes through mkstemp in the same directory, keeps the mode, os.replace, unlinks the temporary file on any failure, writes only on change; tests cover each, a concurrent reader included.
+- Bare pytest stays serial (addopts has no -n).
+Nits answered here, none filed: the guard test finds a jail-starting file by `BrigJail(` or `runner:confined"`, so a jail started from a conftest fixture or a helper module would slip past it (none does today; the group's reason says what belongs); os.replace turns a symlinked pyproject.toml into a file (not one here); captured output still hides a 2.5 min test run until it ends.
 <!-- SECTION:NOTES:END -->
