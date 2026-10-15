@@ -12,9 +12,13 @@ own directory, with the repository root on PYTHONPATH so any gate can load the s
 in pypeeker_rules/.
 
 `pypeeker check` does not build the index, and against a missing one it reports nothing and
-exits 0. So for each gate this first writes `[tool.pypeeker].src` from the globs in
-`[tool.arch-check].src` (the layout, not a hand-kept list, decides what is checked), indexes
-every path, fails on any indexing error, then runs `check --strict` (plain `check` hides
+exits 0. It does refresh the entries the index has (a changed file is indexed again, a deleted
+one dropped) but never adds one: a new module in an indexed path, or a new path, is not in what
+it checks, so it passes silently. So for each gate this first writes `[tool.pypeeker].src` from
+the globs in `[tool.arch-check].src` (the layout, not a hand-kept list, decides what is
+checked), indexes each path that holds a file with no index entry (all of them on a fresh
+checkout, none when nothing was added; every run indexing all of them was 37 processes, about
+2.4 s each), fails on any indexing error, then runs `check --strict` (plain `check` hides
 heuristic findings).
 """
 
@@ -24,11 +28,15 @@ import re
 import subprocess
 import sys
 import tomllib
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import click
 
 ROOT = Path(__file__).resolve().parent.parent
+PYPEEKER = ("uv", "run", "--quiet", "pypeeker")  # pypeeker, from the workspace environment
+# pypeeker's IndexStore keeps the entry of src/a.py at .pypeeker/index/src/a.py.json
+INDEX = Path(".pypeeker") / "index"
 
 
 def gates() -> list[Path]:
@@ -43,9 +51,7 @@ def gates() -> list[Path]:
 def pypeeker(gate: Path, *args: str, capture: bool) -> subprocess.CompletedProcess[str]:
     """Run pypeeker from the workspace environment, in the gate's directory."""
     env = {**os.environ, "PYTHONPATH": str(ROOT)}
-    return subprocess.run(
-        ["uv", "run", "--quiet", "pypeeker", *args], cwd=gate, text=True, capture_output=capture, env=env
-    )
+    return subprocess.run([*PYPEEKER, *args], cwd=gate, text=True, capture_output=capture, env=env)
 
 
 def expanded(gate: Path, patterns: list[str]) -> list[str]:
@@ -75,6 +81,30 @@ def sync_src(gate: Path) -> list[str]:
     return paths
 
 
+def sources(gate: Path, path: str) -> tuple[str, ...]:
+    """The files `pypeeker index PATH` would index, relative to the gate: the .py files beneath a
+    directory, or the file itself. A path that is neither (a src entry pointing nowhere) names
+    itself, so it has no index entry and `pypeeker index` is the one to refuse it."""
+    target = gate / path
+    if target.is_dir():
+        return tuple(str(file.relative_to(gate)) for file in sorted(target.rglob("*.py")))
+    return (str(target.relative_to(gate)),)
+
+
+def indexed(gate: Path) -> frozenset[str]:
+    """The source files the gate's index has an entry for, relative to the gate."""
+    root = gate / INDEX
+    return frozenset(str(entry.relative_to(root)).removesuffix(".json") for entry in root.rglob("*.json"))
+
+
+def without_index(files: Mapping[str, Sequence[str]], entries: frozenset[str]) -> tuple[str, ...]:
+    """The paths (keys of `files`, each with its source files) that hold a file `entries` lacks.
+
+    A file whose indexing failed has no entry, so its path is named again on every run and the
+    error is reported again."""
+    return tuple(path for path, found in files.items() if not entries.issuperset(found))
+
+
 def index(gate: Path, path: str) -> None:
     """Index one path, exiting non-zero if pypeeker fails or reports indexing errors."""
     result = pypeeker(gate, "index", path, capture=True)
@@ -92,8 +122,9 @@ def index(gate: Path, path: str) -> None:
 
 
 def run_gate(gate: Path, fix: bool) -> int:
-    """Index one gate's sources, apply pypeeker autofixes, then run check --strict."""
-    for path in sync_src(gate):
+    """Index what has no index in one gate's sources, apply pypeeker autofixes, then run check --strict."""
+    paths = sync_src(gate)
+    for path in without_index({path: sources(gate, path) for path in paths}, indexed(gate)):
         index(gate, path)
     if fix:
         # --fix prints a JSON report rather than findings; report what it applied, then run a

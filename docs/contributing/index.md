@@ -48,7 +48,9 @@ scripts/check
 --check`), lint (`ruff check`), types (`mypy`, strict), the tests (`pytest`), the architecture
 gates, the build of these docs, and, when bh-01 is checked out beside this repository, bh-02's
 terminal theme against bh-01's tokens. Each step reports and the run goes on, so one pass shows
-everything that is red; the exit code is non-zero if any step failed.
+everything that is red; the exit code is non-zero if any step failed. The steps share nothing, so
+they run at the same time and the run takes as long as the tests; each step's output is printed
+whole, in the order above, once it has finished.
 
 ```sh
 scripts/check bh-02/plugins/python-cordis-plugin   # the same for one member (the gates and docs still see everything)
@@ -80,7 +82,8 @@ on keys and shapes in their CONTRACTS.md), only a plugin's `wiring.py` and the a
 cordis, nothing reaches past cordis's public modules or into another module's `_private` names, a
 package's `__init__.py` only re-exports, importing a module changes nothing, and functions are
 pure unless a gate's budget names them. Run the gates through the script, never a bare `pypeeker
-check`: the script builds the index first, and without one a check passes with nothing checked.
+check`: the script builds the index first (of the files that have none; pypeeker refreshes the rest),
+and without one a check passes with nothing checked.
 When a gate fails, its message says which rule and why; fix the code rather than widen the rule.
 
 ## Habits worth keeping

@@ -29,7 +29,7 @@ layout. Then `uv sync --all-packages`.
 
 ```
 uv sync --all-packages
-scripts/check                                             # the one definition of green: format, lint, types, tests, gates
+scripts/check                                             # the one definition of green: format, lint, types, tests, gates, docs; the steps run at once (it takes as long as the tests)
 scripts/check bh-02/plugins/python-cordis-plugin          # the same for one member (the gates always see everything)
 uv run pytest -q                                          # every member
 uv run pytest libs/cordis -q                              # one member
@@ -90,9 +90,12 @@ PyPI, switch back to `"mypy>=2.4"`.
 `scripts/arch-check` runs every pypeeker gate: the root one (`[tool.pypeeker]` in the root
 `pyproject.toml`, rules from `pypeeker_rules/apps.py`: what spans packages) and one per library
 that keeps its own (`libs/*/pyproject.toml`: internal layering and purity budgets). It writes
-each gate's `[tool.pypeeker].src` from the globs in `[tool.arch-check].src`, indexes every path,
+each gate's `[tool.pypeeker].src` from the globs in `[tool.arch-check].src`, indexes each path that
+holds a file with no index entry (all of them on a fresh checkout, none when nothing was added),
 then runs `check --strict`. **Always use the script, not a bare `pypeeker check`**: `check`
-doesn't build the index, and against a missing index it passes silently.
+doesn't build the index, and against a missing index it passes silently. It refreshes the entries
+the index has (a changed file is indexed again, a deleted one dropped) but never adds one, so a new
+module in an indexed path, or a new member, is not in what it checks until the script has indexed it.
 
 Root-gate rules that apply everywhere (area-specific ones are in the area CLAUDE.md files):
 - **`cordis-public-api`**: outside cordis, import from `cordis`, `cordis.loader`, `cordis.composition` or `cordis.testing`, never deeper.
