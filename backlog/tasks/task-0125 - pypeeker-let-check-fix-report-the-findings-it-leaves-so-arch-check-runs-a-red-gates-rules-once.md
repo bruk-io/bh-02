@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 14:12'
-updated_date: '2026-10-16 23:33'
+updated_date: '2026-10-16 23:35'
 labels:
   - gates
   - size-2
@@ -27,7 +27,7 @@ From TASK-0120. scripts/arch-check now runs the plain check first and only runs 
 <!-- AC:BEGIN -->
 - [x] #1 pypeeker (upstream) gives the findings a --fix run leaves, as text in its report or a marker in check's output, and the root pin names the merged commit, uv.lock regenerated with uv
 - [x] #2 scripts/arch-check runs a gate's rules once when no fix applies, findings and exit code unchanged, shown by a test, and its time on a gate with findings is recorded before and after
-- [ ] #3 A clean gate's `scripts/arch-check` run with --fix is no slower than before this task (TASK-0120 left it at the plain check's cost), measured paired on the same machine
+- [x] #3 A clean gate's `scripts/arch-check` run with --fix is no slower than before this task (TASK-0120 left it at the plain check's cost), measured paired on the same machine
 <!-- AC:END -->
 
 ## Implementation Plan
