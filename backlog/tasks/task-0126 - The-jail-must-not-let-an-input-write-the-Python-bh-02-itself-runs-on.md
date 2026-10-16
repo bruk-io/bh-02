@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 22:06'
-updated_date: '2026-10-16 22:26'
+updated_date: '2026-10-16 22:27'
 labels:
   - runner
   - security
@@ -46,4 +46,6 @@ Evidence AC2 (seen failing): with the fix's line removed (*interpreter dropped f
 Evidence AC3: real bwrap jail, as tester under tini (runuser -u tester -- env HOME=/home/tester tini -s -- .venv/bin/python -m pytest -p no:cacheprovider): test_a_linux_jail_refuses_an_input_that_writes_the_interpreter_bh_02_runs_on PASSED (not skipped), and FAILED with the line removed (above).
 Checks: runner tests + bh-02/app/tests/test_python_repl.py as tester under tini (-n 2 --dist loadgroup): 122 passed, 2 skipped, 58 s (was 119+2 before; +3 tests), the machine shared with two other workers, no timing claimed. scripts/check bh-02/plugins/runner-cordis-plugin under tini exit 0: format, lint, types (7 source files), tests 82 passed 1 skipped, every gate (root, brig, cordis, cordis-helpers, host-paths), docs; tokens skipped (no bh-01 dist). scripts/arch-check --no-fix under tini exit 0 (docs/bh-02/using/jail.md is outside a member).
 NOT held, found while measuring, not fixed (a policy call, needs the link's directory denied, which a mount of the file cannot do): the entry of a link in a writable directory, and a link directory on the way to the file. In the incident layout the venv's python leads through uv's cpython-3.15-linux-x86_64-gnu (a link to the versioned directory) under ~/.local/share/uv/python: measured in bwrap with only the file denied, an input could mv that link away and plant a tree of its own at its name (rc 0), and the next uv run / .venv/bin/python would execute it. Closing it means denying ~/.local/share/uv/python (or each link's directory) when under a writable root. README says so under the writes bullet.
+
+Orchestrator ruling, 2026-10-16: criterion 1 is met by denying the interpreter files (each name followed to the file it leads to), not the link names. Measured by the worker in bwrap: a read-only bind on a link lands on its target, brig resolves write denies to the realpath on bwrap and seatbelt alike, and a link spelling in the denies would make TASK-0124's supervisor_interpreter accept a replaceable link as PID 1's Python. Every write to the interpreter, through any of its names, is refused in a real jail. The links on the way to it (a link's own entry, uv's cpython-3.15-<platform> link to the versioned directory) are not held by a file mount: filed separately as a policy question for the owner.
 <!-- SECTION:NOTES:END -->
