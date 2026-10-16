@@ -3,7 +3,7 @@ id: TASK-0128
 title: >-
   Prove in a real jail that no directory on the way to bh-02's interpreter can
   be renamed
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 23:20'
@@ -133,4 +133,6 @@ INFO    -  Documentation built in 6.66 seconds
 == tokens
    skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer): CLOSED. AC1 met: dirs derived match the 6 from _a_uv_python_in (uv, uv/python, cpython-3.15.0-linux, its bin, venv, venv/bin), deepest first; host asserted (is_dir, no *.moved, file present); 3/3 runs passed, not skipped. AC2 met on the worker's notes (uv and venv renamed with pins no-op'd); the reviewer's own plant copy was refused by the read-only hook. Full scripts/check exit 0, tree clean. Wait: one line per dir, 10 s bound, then fails on read/assert rather than hanging (FileNotFoundError if never written: clear enough). Nits, not filed: runner README 'The tests:' (line 142) does not name the new test; sibling tests keep the racy said.exists() wait.
 <!-- SECTION:NOTES:END -->
