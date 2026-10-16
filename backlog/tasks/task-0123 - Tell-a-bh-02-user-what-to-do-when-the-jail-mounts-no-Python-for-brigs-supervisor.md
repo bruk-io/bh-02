@@ -3,11 +3,11 @@ id: TASK-0123
 title: >-
   Tell a bh-02 user what to do when the jail mounts no Python for brig's
   supervisor
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 13:48'
-updated_date: '2026-10-16 22:01'
+updated_date: '2026-10-16 22:08'
 labels:
   - runner
   - size-1
@@ -44,4 +44,6 @@ What changed (bh-02/plugins/runner-cordis-plugin): BrigJail.compile catches brig
 Evidence AC1: test_python_repl.py::test_on_linux_a_host_with_no_interpreter_the_jail_mounts_does_not_start_and_says_brig_s_reason passes as tester under tini (1 passed). Planted: with the catch's raise replaced by a bare raise (brig's error crosses unchanged), test_a_host_whose_jail_mounts_no_interpreter_is_refused_with_what_a_person_does FAILED (1 failed); restored, then green.
 Evidence AC2: git diff d552a08 -- libs/brig is empty.
 Checks: runner tests + bh-02/app/tests/test_python_repl.py as tester under tini (-n 2 --dist loadgroup): 117 passed, 2 skipped, 95 s; machine shared with two other workers, no timing claimed. ruff format --check and ruff check on the changed files: clean. scripts/check is run once at the end of the batch (TASK-0124's commit), not here.
+
+Review (closing reviewer): CLOSE. AC1 met: _no_python_message names install python3 / runner:unconfined / bh-02 --no-jail (both exist: cli.py --no-jail, sessions.py runner:unconfined), brig's reason, raised from InterpreterNotMounted (cause kept); runner tests + test_python_repl.py as tester under tini: 119 passed, 2 skipped. AC2 met: git diff d552a08 -- libs/brig empty. Full check deferred to the batch run (TASK-0124) by instruction. Findings: none blocking; nit: message ends without a period.
 <!-- SECTION:NOTES:END -->
