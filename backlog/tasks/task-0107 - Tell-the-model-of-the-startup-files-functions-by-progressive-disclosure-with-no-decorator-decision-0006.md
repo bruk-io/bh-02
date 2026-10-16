@@ -3,7 +3,7 @@ id: TASK-0107
 title: >-
   Tell the model of the startup files' functions by progressive disclosure, with
   no decorator (decision-0006)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 02:03'
@@ -91,4 +91,6 @@ Evidence (root unless said; Python 3.15.0b4):
 - Not verified: darwin (seatbelt) path; scripts/linux-jail-check (Docker) was not run; the listing line is still bounded by the worker's 20,000-character output cap (a file with hundreds of functions is said not to be listable, as before; public-by-default makes it likelier, no task filed: it needs ~250 functions).
 
 Review (closing reviewer): scripts/check from the repo root, run 1: exit 1, "1 failed, 3075 passed, 31 skipped" — test_agents_wiring.py::test_agent_stop_ends_the_child_and_its_python_program (subagents plugin, untouched by this commit; passes 3/3 alone). Run 2: exit 0, "3076 passed, 31 skipped in 161.42s"; format, lint, types, gates, docs ok; tokens skipped (no bh-01 dist). python plugin + test_python_repl.py: 126 passed, 1 skipped.
+
+CLOSE. All four criteria met: AC1 _TOLD (confined only) and _DOCSTRINGS (either way) in python.py, tested; AC2 no startup-sense 'helper' left in code, prompt, GLOSSARY or docs (remaining uses are jail/credential helpers and cordis-helpers), #helpers anchor renamed with its one link updated, @helper NameError test present; AC3 scripts/check exit 0 on second run; AC4 tests for __all__ incl. imported, private, import-only, 600 shared budget. Findings: should-fix, test_agent_stop_ends_the_child_and_its_python_program flaky under full parallel load (outside scope, not filed: one occurrence). Nit: the worker's listing line is still bounded by the 20,000-character output cap (known, noted by worker).
 <!-- SECTION:NOTES:END -->
