@@ -4,6 +4,7 @@ bh-02/app/tests/test_python_repl.py's: they need a Python process, which is anot
 import asyncio
 import contextlib
 import ctypes
+import errno
 import os
 import shutil
 import signal
@@ -1866,6 +1867,68 @@ async def test_a_linux_jail_refuses_an_input_that_changes_a_link_on_the_way_to_t
         assert len(came_to) == 3 * len(chain) and "done" not in came_to.values(), came_to
         assert {link: os.readlink(link) for link in chain} == before  # on the host: every link as it was
         assert not [*project.rglob("*.moved"), *project.rglob("*.planted")] and file.is_file()
+    finally:
+        await started.stop()
+
+
+# Listens; once the jail has seen it listen, tries to rename each directory in argv[2:-1] to its name
+# with `.moved` added, and says what each came to in argv[-1], waits. The directories are those
+# between the project and the interpreter file or a link on the way to it, deepest first.
+_LISTEN_THEN_RENAME_THE_DIRECTORIES = """
+import os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+directories, said = sys.argv[2:-1], sys.argv[-1]
+came_to = []
+for directory in directories:
+    try:
+        os.rename(directory, directory + ".moved")
+        came_to.append(directory + ": done")
+    except OSError as error:
+        came_to.append(directory + ": " + os.strerror(error.errno))
+open(said, "w").write("\\n".join(came_to))
+time.sleep(60)
+"""
+
+
+async def test_a_linux_jail_refuses_a_rename_of_a_directory_on_the_way_to_the_interpreter_bh_02_runs_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In a real jail, with the layout a project opened at the home directory holds (uv's Python and a
+    venv whose `python` goes through uv's link, all under the project, which an input may write): an
+    input can rename no directory between the project and the interpreter file or a link on the way to
+    it, `uv` and `venv` included. rename(2) refuses only a mount point, and `uv` is not one: renamed, it
+    would carry its mounts with it, the read-only deny on `uv/python` among them, so a Python planted at
+    its old name is the one the next `uv run` on the host would run. brig's pins (decision-168) hold it:
+    each existing directory between a write root and a deny is bound over itself, so `uv` and `venv` are
+    mount points, which rename refuses as busy; the directories inside a read-only deny refuse as
+    read-only. The directories are tried deepest first, so each is tried at its own name; on the host
+    every one is still at its name, nothing is left as `*.moved`, and the file is as it was."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "records"))
+    project = tmp_path / "project"
+    venv, file, chain = _a_uv_python_in(project)
+    root = project.resolve()
+    between = {p for f in (file, *chain) for p in f.parents if p.is_relative_to(root) and p != root}
+    dirs = sorted(between, key=lambda p: (-len(p.parts), str(p)))
+    monkeypatch.setattr("runner_cordis_plugin.jail.host_executable", str(venv / "bin" / "python3"))
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
+    endpoint, said = _endpoint(), project / "said"
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_RENAME_THE_DIRECTORIES, endpoint]
+    argv += [*map(str, dirs), str(said)]
+    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+    try:
+        for _ in range(200):  # the file exists before the child writes it: wait for every line
+            if said.exists() and len(said.read_text().splitlines()) == len(dirs):
+                break
+            await asyncio.sleep(0.05)
+        came_to = dict(line.split(": ") for line in said.read_text().splitlines())
+        assert list(came_to) == [str(d) for d in dirs], came_to  # every directory was tried
+        assert set(came_to.values()) <= {os.strerror(errno.EBUSY), os.strerror(errno.EROFS)}, came_to
+        assert [d for d in dirs if not d.is_dir()] == [] and not list(project.rglob("*.moved"))  # the host
+        assert file.is_file()
     finally:
         await started.stop()
 
