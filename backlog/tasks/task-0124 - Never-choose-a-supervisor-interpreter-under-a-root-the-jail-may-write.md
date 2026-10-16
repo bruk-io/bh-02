@@ -1,11 +1,11 @@
 ---
 id: TASK-0124
 title: Never choose a supervisor interpreter under a root the jail may write
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 13:48'
-updated_date: '2026-10-16 22:06'
+updated_date: '2026-10-16 22:07'
 labels:
   - runner
   - security
@@ -44,4 +44,6 @@ Evidence AC1: planted, the writable check removed from whole() (candidate under 
 Evidence AC2: the existing test_the_supervisor_runs_under_the_first_interpreter_the_jail_holds_whole passes unchanged. runner tests + bh-02/app/tests/test_python_repl.py as tester under tini (-n 2 --dist loadgroup): 119 passed, 2 skipped, 67 s, the machine shared with two other workers, no timing claimed.
 Checks (root, under tini): scripts/check bh-02/plugins/runner-cordis-plugin exit 0: format (13 files formatted), lint, types (7 source files), tests 79 passed 1 skipped, every gate, docs. scripts/check bh-02/app --no-gates --no-docs exit 0: format, lint, types, 238 passed 1 skipped, tokens skipped. scripts/arch-check not run: nothing outside a member changed. brig unchanged (git diff d552a08 -- libs/brig is empty).
 Observation, not filed: in bh-02's own venv layout with the project at the home directory, spec_for leaves <base_prefix>/bin/python3 writable by an input, and the host runs bh-02 on that interpreter; a later host start could run what an input wrote there. TASK-0124 closes only the PID 1 path. spec_for would need to deny the base binary too (a policy decision, to be sized by the owner).
+
+Review: CLOSE. AC1 met: whole() needs spelling and target each under a mounted root and, under a writable root, under a deny; component-wise is_relative_to (sibling-prefix test); link-into-writable target refused; refused-everything falls to /usr/bin/python3 (brig's TASK-0123 message). AC2 met: one pure function; runner tests as tester under tini 79 passed 1 skipped. Nit, not filed: containment is lexical, so a spelling with '..' would pass; candidates come from host_interpreters/resolve, so no realistic path. Host-side hole is TASK-0126.
 <!-- SECTION:NOTES:END -->
