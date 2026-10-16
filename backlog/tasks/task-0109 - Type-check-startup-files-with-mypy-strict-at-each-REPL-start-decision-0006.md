@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 02:51'
-updated_date: '2026-10-16 05:00'
+updated_date: '2026-10-16 05:05'
 labels:
   - python
   - size-3
@@ -31,7 +31,7 @@ Build decision-0006 point 7's typing half: mypy --strict, bh-02's flags and no p
 - [x] #1 Confined, at each REPL start, mypy --strict with no project config checks each startup file in the jail, and the aside names each told function with an error and its error codes, never mypy's messages; tests cover an untyped function, a type error, an unfound import and a clean file
 - [x] #2 A startup file that declares a name the REPL provides with a bare annotation (tools: Any) passes mypy and keeps the REPL's binding, and the python section tells the model to declare such names so
 - [x] #3 The mypy line for CI and a pre-commit hook is documented, and mypy's cold and warm cost at REPL start on the shipped mypy is measured and recorded on this task
-- [ ] #4 scripts/check passes
+- [x] #4 scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -83,4 +83,6 @@ Tests (all new fail without the code): test_python_startup_types.py (pure mappin
 Planted violations, each seen failing and restored: drop `--strict` from MYPY_FLAGS (28 failed, among them test_an_untyped_function_has_no_untyped_def); drop `--config-file=` (test_no_configuration_the_project_or_the_person_holds_loosens_it); do not strip MYPY* (test_a_startup_file_can_not_steer_mypy_through_the_environment); copy made and mypy run in the program's cwd (test_what_mypy_can_import_is_what_the_repl_can: {} != import-not-found); host accepts any code (test_a_code_outside_the_closed_set_..., test_the_aside_never_says_what_a_tool_wrote); no retry without cache (test_a_cache_mypy_can_not_use_...).
 
 Proof (root unless noted): scripts/check bh-02/plugins/python-cordis-plugin exit 0 (format, lint, types, 173 tests, gates, docs; tokens skipped: no bh-01 dist). scripts/check bh-02/app --no-gates --no-docs exit 0 (210 passed, 1 skipped). scripts/arch-check exit 0 (needed `_mypied` in the purity budget, with its reason). su tester -c 'tini -s -- .venv/bin/python -m pytest -q -p no:cacheprovider -n 4 --dist loadgroup bh-02/plugins/python-cordis-plugin bh-02/app/tests/test_python_repl.py bh-02/app/tests/test_command_check_examples.py': 221 passed, 1 skipped (seatbelt). Not verified: scripts/linux-jail-check (the Docker daemon is not answering in this container: `Cannot connect to the Docker daemon`), darwin (seatbelt). AC #4 (scripts/check passes) is NOT ticked: the full scripts/check is the reviewer's.
+
+Reviewer: scripts/check (full, repo root, run directly) exit 0: format ok, lint ok, types ok (194 files), tests 3171 passed 31 skipped in 191.88s, gates ok, docs ok, tokens skipped (no bh-01 dist). Working tree unchanged after the run.
 <!-- SECTION:NOTES:END -->
