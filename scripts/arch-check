@@ -27,6 +27,16 @@ then runs `check --strict` (plain `check` hides heuristic findings). It writes t
 it changes (a member was added), through a temporary file and a rename, because scripts/check runs
 pytest, ruff and mypy beside it and each reads pyproject.toml as it starts.
 
+With `--fix` (the default) the plain `check --strict` still comes first, and a gate that passes it is done:
+one `pypeeker check` run, as with `--no-fix`. Only a gate with findings goes on to `check --strict --fix`,
+which prints a JSON report of the fixes it applied and a count of the findings left (not the findings),
+exits non-zero exactly when findings remain, and runs the rules again only if it applied a fix. If it
+applied nothing the findings are the plain check's, already printed; if it applied some and exited 0
+the gate is clean; if it applied some and findings remain, a plain check runs again to print them.
+(Running `--fix` first and the plain check after, as this did, ran the rules twice in the commonest
+case, a clean gate; and `--fix`'s own run costs more than a plain check, since it also collects each
+fixable rule's repairs, so a clean gate is not better off with `--fix` alone.)
+
 The gates share nothing (each has its own pyproject.toml, its own .pypeeker and its own sources),
 so they run at the same time and the run takes as long as the slowest gate, the root one, not as
 long as all of them. Each gate's output is captured and printed whole, in gate order (the root,
@@ -51,6 +61,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -212,9 +223,17 @@ def index(gate: Path, paths: Sequence[str]) -> str | None:
     return None
 
 
+def applied_note(report: Mapping[str, Any]) -> str:
+    """The line saying what `pypeeker check --fix` applied, from its JSON `report`; empty if nothing."""
+    if not report.get("tx_id"):
+        return ""
+    return f"pypeeker applied {len(report.get('fixes', []))} fix(es): tx {report['tx_id']}\n"
+
+
 def run_gate(gate: Path, fix: bool) -> Outcome:
     """Drop the index entries outside one gate's sources (failing if one is still listed), index what has
-    no index in them, apply pypeeker autofixes, then run check --strict."""
+    no index in them, run check --strict, and with `fix`, if it has findings, apply pypeeker's autofixes
+    and report what is left."""
     paths = sync_src(gate)
     dropped = outside_src(paths, indexed(gate))
     drop_entries(gate, dropped)
@@ -224,19 +243,23 @@ def run_gate(gate: Path, fix: bool) -> Outcome:
     if unindexed := without_index({path: sources(gate, path) for path in paths}, entries):
         if (problem := index(gate, unindexed)) is not None:
             return Outcome(False, problem)
-    applied = ""
-    if fix:
-        # --fix prints a JSON report rather than findings; report what it applied, then run a
-        # plain check below so the findings and the exit code are the usual ones.
-        result = pypeeker(gate, "check", "--strict", "--fix", capture=True)
-        try:
-            fixed = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return Outcome(False, result.stdout + result.stderr)
-        if fixed.get("tx_id"):
-            applied = f"pypeeker applied {len(fixed.get('fixes', []))} fix(es): tx {fixed['tx_id']}\n"
     checked = pypeeker(gate, "check", "--strict", capture=True)
-    return Outcome(checked.returncode == 0, applied + checked.stdout + checked.stderr)
+    printed = checked.stdout + checked.stderr
+    if checked.returncode == 0 or not fix:
+        return Outcome(checked.returncode == 0, printed)
+    # Findings, so a fix may apply. `check --fix` prints a JSON report (a count of what is left, and the
+    # findings its fixes address), not the findings, and exits non-zero exactly when findings remain.
+    result = pypeeker(gate, "check", "--strict", "--fix", capture=True)
+    try:
+        applied = applied_note(json.loads(result.stdout))
+    except json.JSONDecodeError:
+        return Outcome(False, result.stdout + result.stderr)
+    if applied and result.returncode == 0:
+        return Outcome(True, applied)
+    if not applied and result.returncode != 0:
+        return Outcome(False, printed)  # nothing changed, so these are the findings
+    rechecked = pypeeker(gate, "check", "--strict", capture=True)  # what is left is not what was printed
+    return Outcome(rechecked.returncode == 0, applied + rechecked.stdout + rechecked.stderr)
 
 
 def gate_name(gate: Path) -> str:

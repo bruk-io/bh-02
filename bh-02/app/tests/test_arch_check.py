@@ -14,6 +14,7 @@ non-zero exit if any gate failed."""
 import importlib.util
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import tomllib
@@ -385,6 +386,157 @@ def test_a_gate_whose_orphan_entries_are_not_where_drop_entries_looks_fails_nami
     assert out.endswith(":\n  members/b/src/b/__init__.py\n  members/b/src/b/mod.py")
     assert arch_check.indexed(gate) >= {"members/b/src/b/__init__.py", "members/b/src/b/mod.py"}
     assert index_calls == []  # the run stopped there, before indexing or checking
+
+
+@pytest.fixture
+def checks(arch_check: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """The arguments of each `pypeeker check` the script runs, in order: each is a run of the gate's
+    rules, and a `--fix` runs them a second time inside itself only when it applied something."""
+    calls: list[tuple[str, ...]] = []
+    pypeeker = arch_check.pypeeker
+
+    def spy(gate: Path, *args: str, capture: bool) -> object:
+        if args[0] == "check":
+            calls.append(args)
+        return pypeeker(gate, *args, capture=capture)
+
+    monkeypatch.setattr(arch_check, "pypeeker", spy)
+    return calls
+
+
+_PLAIN = ("check", "--strict")
+_FIX = ("check", "--strict", "--fix")
+_UNUSED_IMPORT = "import os\n\n\ndef ok() -> int:\n    return 1\n"  # what `--fix` removes
+
+
+@pytest.fixture
+def fixing_gate(gate: Path) -> Path:
+    """The gate, with the rule whose violation `--fix` repairs (an unused import) as well."""
+    (gate / "pyproject.toml").write_text(_FIXING_GATE)
+    return gate
+
+
+def test_a_clean_gate_with_fix_runs_one_check_and_no_fix(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    """`--fix` after every plain check ran the rules twice, and `--fix` alone costs more than a check."""
+    outcome = arch_check.run_gate(fixing_gate, fix=True)
+
+    assert (outcome.ok, outcome.output) == (True, "")
+    assert checks == [_PLAIN]
+
+
+def test_findings_no_fix_applies_to_are_reported_as_the_check_printed_them_and_fail_the_gate(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    """The `--fix` that applied nothing says only how many findings are left; the ones printed
+    stand, so there is no third run."""
+    (fixing_gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
+
+    outcome = arch_check.run_gate(fixing_gate, fix=True)
+
+    assert outcome.ok is False
+    assert outcome.output.startswith("members/a/src/a/__init__.py:1: [init-reexport-only]")
+    assert outcome.output.count("\n") == 1 and "applied" not in outcome.output
+    assert checks == [_PLAIN, _FIX]
+
+
+def test_a_fix_that_leaves_the_gate_clean_is_reported_and_is_not_checked_again(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    """`--fix` runs the rules again after it applied, so that it knows what is left, and exits 0."""
+    (fixing_gate / "members/a/src/a/mod.py").write_text(_UNUSED_IMPORT)
+
+    outcome = arch_check.run_gate(fixing_gate, fix=True)
+
+    assert outcome.ok is True
+    assert outcome.output.startswith("pypeeker applied 1 fix(es): tx ") and outcome.output.count("\n") == 1
+    assert "import os" not in (fixing_gate / "members/a/src/a/mod.py").read_text()
+    assert checks == [_PLAIN, _FIX]
+
+
+def test_findings_left_after_a_fix_are_checked_again_and_reported_after_what_was_applied(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    """The findings printed before the fix are stale (a fix moves lines), so these are read afresh."""
+    (fixing_gate / "members/a/src/a/mod.py").write_text(_UNUSED_IMPORT)
+    (fixing_gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
+
+    outcome = arch_check.run_gate(fixing_gate, fix=True)
+
+    assert outcome.ok is False
+    note, finding, *rest = outcome.output.splitlines()
+    assert note.startswith("pypeeker applied 1 fix(es): tx ")
+    assert finding.startswith("members/a/src/a/__init__.py:1: [init-reexport-only]") and rest == []
+    assert "import os" not in (fixing_gate / "members/a/src/a/mod.py").read_text()
+    assert checks == [_PLAIN, _FIX, _PLAIN]
+
+
+def test_the_exit_code_with_fix_is_non_zero_exactly_when_findings_are_left(
+    arch_check: ModuleType, workspace: Path
+) -> None:
+    (workspace / "libs/one/members/a/src/a/mod.py").write_text(_UNUSED_IMPORT)  # fixed
+    (workspace / "libs/two/members/a/src/a/__init__.py").write_text(_DEFINES)  # not
+
+    code, lines = _invoke(arch_check, "--fix")
+
+    assert code == 1
+    assert [line for line in lines if line.startswith("   ")] == ["   ok", "   ok", "   FAILED: libs/two"]
+    assert "import os" not in (workspace / "libs/one/members/a/src/a/mod.py").read_text()
+
+
+def _fix_says(
+    arch_check: ModuleType, monkeypatch: pytest.MonkeyPatch, code: int, stdout: str, stderr: str = ""
+) -> list[tuple[str, ...]]:
+    """Every `pypeeker check --fix` answers with this; the other calls reach pypeeker. The `check`
+    calls made, in order."""
+    saying = subprocess.CompletedProcess(["pypeeker"], code, stdout=stdout, stderr=stderr)
+    pypeeker = arch_check.pypeeker
+    called: list[tuple[str, ...]] = []
+
+    def fake(gate: Path, *args: str, capture: bool) -> subprocess.CompletedProcess[str]:
+        if args[0] == "check":
+            called.append(args)
+        if args == _FIX:
+            return saying
+        result: subprocess.CompletedProcess[str] = pypeeker(gate, *args, capture=capture)
+        return result
+
+    monkeypatch.setattr(arch_check, "pypeeker", fake)
+    return called
+
+
+def test_output_that_is_not_the_fix_report_fails_the_gate_with_what_pypeeker_said(
+    arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
+    called = _fix_says(arch_check, monkeypatch, 2, "", "Error: no such option\n")
+
+    outcome = arch_check.run_gate(gate, fix=True)
+
+    assert (outcome.ok, outcome.output) == (False, "Error: no such option\n")
+    assert called == [_PLAIN, _FIX]  # nothing to look again for
+
+
+def test_a_fix_that_applied_nothing_and_says_the_gate_is_clean_is_not_believed(
+    arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check had findings and `--fix` changed nothing, so its exit 0 and the findings disagree."""
+    (gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
+    report = '{"fixes": [], "skipped_conflicts": [], "declined": [], "residual_violations": 0, "tx_id": null}'
+    called = _fix_says(arch_check, monkeypatch, 0, report)
+
+    outcome = arch_check.run_gate(gate, fix=True)
+
+    assert outcome.ok is False and "[init-reexport-only]" in outcome.output
+    assert called == [_PLAIN, _FIX, _PLAIN]
+
+
+def test_a_gate_without_fix_runs_one_plain_check(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    assert arch_check.run_gate(fixing_gate, fix=False).ok is True
+    assert checks == [_PLAIN]
 
 
 def test_the_src_list_is_written_through_a_temporary_file_renamed_over_the_old_one(
