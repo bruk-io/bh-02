@@ -20,7 +20,7 @@ dev = [
     # mypy 2.4.0-dev: the first mypy that types PEP 661 sentinels. Move back to "mypy>=2.4" once released.
     "mypy @ git+https://github.com/python/mypy@539f6e67b6743d39ce1c643f4cea08fa60602093",
     # pypeeker is pre-1.0 and past its breaking DSL rewrite; pin a commit, never track main.
-    "pypeeker @ git+https://github.com/brukhabtu/pypeeker@67b0a1b",
+    "pypeeker @ git+https://github.com/brukhabtu/pypeeker@cd78c2c",
     # brig's property tests
     "hypothesis>=6.112",
     # the documentation site (mkdocs.yml, docs/): MkDocs, the plugin that includes the READMEs,

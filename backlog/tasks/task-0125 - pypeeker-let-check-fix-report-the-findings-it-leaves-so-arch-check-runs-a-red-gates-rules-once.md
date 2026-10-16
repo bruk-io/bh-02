@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 14:12'
-updated_date: '2026-10-16 23:26'
+updated_date: '2026-10-16 23:33'
 labels:
   - gates
   - size-2
@@ -25,7 +25,7 @@ From TASK-0120. scripts/arch-check now runs the plain check first and only runs 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 pypeeker (upstream) gives the findings a --fix run leaves, as text in its report or a marker in check's output, and the root pin names the merged commit, uv.lock regenerated with uv
+- [x] #1 pypeeker (upstream) gives the findings a --fix run leaves, as text in its report or a marker in check's output, and the root pin names the merged commit, uv.lock regenerated with uv
 - [x] #2 scripts/arch-check runs a gate's rules once when no fix applies, findings and exit code unchanged, shown by a test, and its time on a gate with findings is recorded before and after
 - [ ] #3 A clean gate's `scripts/arch-check` run with --fix is no slower than before this task (TASK-0120 left it at the plain check's cost), measured paired on the same machine
 <!-- AC:END -->
@@ -106,4 +106,6 @@ What this does and does not show: a clean gate's --fix run now does the plain ch
 ## Left / worth doing, not filed (unsized)
 - pypeeker: --fix-until-clean on a clean run still collects repairs in its first round (and hashes the whole tree); the same early return would fit _run_fixpoint's first iteration, with the report's iteration record kept as it is. bh-02 does not use the flag.
 - AC1's root pin naming the merged commit, uv.lock regenerated: the orchestrator's (this branch's tests read residual_findings, so they pass only on a pypeeker with 8f0e223; the skip needs f558226). Criterion 3 and 'scripts/check passes': the reviewer's.
+
+Orchestrator, 2026-10-16: pypeeker PR #150 (8f0e223 and f558226 with TASK-173's c5c1e01) squash-merged as cd78c2c after CI passed; the root pin now names cd78c2c and uv.lock was regenerated with `uv lock` (pypeeker 67b0a1b0 -> cd78c2cd). On this tree: `uv run pytest bh-02/app/tests/test_arch_check.py -q` 40 passed; `scripts/arch-check` (default --fix, clean tree, warm index) exit 0, five gates ok, 38.4 s wall (the plain check's cost the worker measured: 37.7 s).
 <!-- SECTION:NOTES:END -->
