@@ -189,6 +189,46 @@ def test_a_path_is_without_an_index_when_any_of_its_files_is(arch_check: ModuleT
     assert arch_check.without_index(files, frozenset({"a/src/x.py", "a/src/y.py", "b/src/z.py"})) == ()
 
 
+def test_a_src_path_holds_the_files_beneath_it_by_whole_path_components(arch_check: ModuleType) -> None:
+    """`libs/ab` is not beneath `libs/a`, and neither is the file `libs/a.py`."""
+    entries = frozenset({"libs/a/x.py", "libs/a/deep/y.py", "libs/ab/z.py", "libs/a.py"})
+
+    assert arch_check.outside_src(["libs/a"], entries) == ("libs/a.py", "libs/ab/z.py")
+
+
+def test_a_src_path_nested_in_another_and_a_file_directly_in_a_src_root_are_both_held(
+    arch_check: ModuleType,
+) -> None:
+    entries = frozenset({"m/a/src/x.py", "m/a/src/sub/y.py", "m/a/other/z.py", "m/a/src/sub/deep/w.py"})
+
+    assert arch_check.outside_src(["m/a/src", "m/a/src/sub"], entries) == ("m/a/other/z.py",)
+
+
+def test_a_file_that_is_itself_a_src_path_holds_only_itself(arch_check: ModuleType) -> None:
+    assert arch_check.outside_src(["tools/t.py"], frozenset({"tools/t.py", "tools/u.py"})) == ("tools/u.py",)
+    assert arch_check.outside_src([], frozenset({"x/y.py"})) == ("x/y.py",)
+
+
+def test_an_index_entry_outside_src_is_dropped_and_one_inside_src_is_kept(
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], indexed_paths: list[str]
+) -> None:
+    """A member that leaves src keeps its files on disk, and its index entries are dropped: the gate
+    would neither check nor refresh them. The member still in src keeps its own entries."""
+    _member(gate, "b")
+    assert _run(arch_check, gate, capfd) == (0, "")
+    assert "members/b/src/b/mod.py" in arch_check.indexed(gate)
+    (gate / "pyproject.toml").write_text(_GATE.replace("members/*/src", "members/a/src"))
+    (gate / "members/b/src/b/__init__.py").write_text(_DEFINES)  # a violation, once b is out of src
+    indexed_paths.clear()
+
+    code, out = _run(arch_check, gate, capfd)
+
+    assert (code, out) == (0, "")
+    assert arch_check.indexed(gate) == {"members/a/src/a/__init__.py", "members/a/src/a/mod.py"}
+    assert (gate / "members/b/src/b/__init__.py").read_text() == _DEFINES
+    assert indexed_paths == []
+
+
 def test_the_src_list_is_written_through_a_temporary_file_renamed_over_the_old_one(
     arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
