@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 12:19'
-updated_date: '2026-10-16 14:12'
+updated_date: '2026-10-16 14:17'
 labels:
   - gates
   - scripts
@@ -27,7 +27,7 @@ From TASK-0116 (its worker measured it; its close review noted it). scripts/arch
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Its wall time with --fix before and after is recorded in the notes
-- [ ] #2 scripts/arch-check (with --fix) runs a clean gate's rules once; a gate with findings still reports the findings left and exits non-zero (it still runs them twice when no fix applies, until TASK-0125), shown by tests
+- [x] #2 scripts/arch-check (with --fix) runs a clean gate's rules once; a gate with findings still reports the findings left and exits non-zero (it still runs them twice when no fix applies, until TASK-0125), shown by tests
 <!-- AC:END -->
 
 ## Implementation Plan
