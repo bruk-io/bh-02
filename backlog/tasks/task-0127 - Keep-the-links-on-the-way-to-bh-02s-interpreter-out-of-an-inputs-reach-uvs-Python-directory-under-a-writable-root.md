@@ -3,7 +3,7 @@ id: TASK-0127
 title: >-
   Keep the links on the way to bh-02's interpreter out of an input's reach (uv's
   Python directory under a writable root)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 22:27'
@@ -71,4 +71,6 @@ TASK-0124/0126 tests updated, not weakened: test_a_jail_denies_the_interpreter_b
 Checks: runner tests + bh-02/app/tests/test_python_repl.py as tester under tini (-n 2 --dist loadgroup): 126 passed, 2 skipped (seatbelt, darwin's), exit 0 (was 122 + 2; +4 tests). scripts/check bh-02/plugins/runner-cordis-plugin under tini, exit 0 read directly: format, lint, types, tests 86 passed 1 skipped, every gate, docs; tokens skipped (no bh-01 dist). The first run failed one gate (no-impure-functions on _links_on_the_way): fixed by the budget entry. scripts/arch-check --no-fix under tini exit 0 (root pyproject and docs are outside the member). The machine was shared with one other worker; no timing claimed. Not done: the full scripts/check (the reviewer's).
 
 No repro: the failing plant needs the fix's deny commented out of spec_for, which a reviewer may not edit; the worker's run with it removed (links replaced and renamed) is recorded above.
+
+Review: CLOSE. AC1 and AC2 met (tester run 126 passed, 2 skipped). Decide split done. Root-is-holder exception accepted, README states it. Should-fix filed as draft: ancestor-directory rename above a deny mount (unprobed).
 <!-- SECTION:NOTES:END -->
