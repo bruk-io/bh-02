@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0008
+id: TASK-0128
 title: >-
   Prove in a real jail that no directory on the way to bh-02's interpreter can
   be renamed
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-10-16 23:20'
 updated_date: '2026-10-16 23:24'
