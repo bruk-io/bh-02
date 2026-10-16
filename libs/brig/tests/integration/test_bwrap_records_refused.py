@@ -87,17 +87,24 @@ def _write_through(jail_dir: str, directory: str) -> tuple[str, list[str]]:
     compiled = Stack([bwrap]).compile(
         spec, ctx=build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     )
-    _jail, process = launch(
+    jail, process = launch(
         compiled,
         argv=["/bin/sh", "-c", _SCRIPT, "sh", directory],
         cwd="/",
         jail_id="bwrap-records-refused",
         jail_dir=jail_dir,
     )
-    process.wait(timeout=_WAIT_TIMEOUT_S)
-    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
-        stdout = f.read()
-    landed = sorted(name for name in _FORGED if os.path.lexists(os.path.join(directory, name)))
+    try:
+        process.wait(timeout=_WAIT_TIMEOUT_S)
+        with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
+            stdout = f.read()
+        landed = sorted(name for name in _FORGED if os.path.lexists(os.path.join(directory, name)))
+    finally:
+        # Ends the jail's supervisor, its PID 1 since TASK-0079.06, and waits for it: left
+        # running, it writes its exit record into `<jail_dir>/supervisor` while the fixture
+        # removes the jail directory ("Directory not empty", seen in CI), and the leak sweep
+        # meets it still exiting.
+        jail.destroy()
     return stdout, landed
 
 
