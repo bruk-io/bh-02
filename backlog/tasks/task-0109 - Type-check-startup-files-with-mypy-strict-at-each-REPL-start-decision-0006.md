@@ -1,7 +1,7 @@
 ---
 id: TASK-0109
 title: Type-check startup files with mypy --strict at each REPL start (decision-0006)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 02:51'
@@ -85,4 +85,6 @@ Planted violations, each seen failing and restored: drop `--strict` from MYPY_FL
 Proof (root unless noted): scripts/check bh-02/plugins/python-cordis-plugin exit 0 (format, lint, types, 173 tests, gates, docs; tokens skipped: no bh-01 dist). scripts/check bh-02/app --no-gates --no-docs exit 0 (210 passed, 1 skipped). scripts/arch-check exit 0 (needed `_mypied` in the purity budget, with its reason). su tester -c 'tini -s -- .venv/bin/python -m pytest -q -p no:cacheprovider -n 4 --dist loadgroup bh-02/plugins/python-cordis-plugin bh-02/app/tests/test_python_repl.py bh-02/app/tests/test_command_check_examples.py': 221 passed, 1 skipped (seatbelt). Not verified: scripts/linux-jail-check (the Docker daemon is not answering in this container: `Cannot connect to the Docker daemon`), darwin (seatbelt). AC #4 (scripts/check passes) is NOT ticked: the full scripts/check is the reviewer's.
 
 Reviewer: scripts/check (full, repo root, run directly) exit 0: format ok, lint ok, types ok (194 files), tests 3171 passed 31 skipped in 191.88s, gates ok, docs ok, tokens skipped (no bh-01 dist). Working tree unchanged after the run.
+
+Review verdict: CLOSE. AC1-3 met per code (startup_check.py MYPY_FLAGS --strict --config-file=, MYPY* scrubbed, -I in scratch copy, closed MYPY_CODES + 'mypy' fallback, messages never reach host) and tests with planted failures recorded; AC4 proven by reviewer's full scripts/check exit 0. uv.lock change minimal (2 lines, same rev 539f6e6 as root pin); purity entry _mypied has its reason. Should-fix (not filed): the cache lives in the model-writable project tree (.bh-02/mypy_cache); it is git-ignored (meets decision-0006's letter) but a model that forges cache meta matching a startup file's hash could make a later check report clean - consider a host-owned cache or validating it, no realistic path today since the model can also just edit the file. Nit: _mypied falls back to no cache silently, so a persistently broken cache costs cold time with no signal beyond docs.
 <!-- SECTION:NOTES:END -->
