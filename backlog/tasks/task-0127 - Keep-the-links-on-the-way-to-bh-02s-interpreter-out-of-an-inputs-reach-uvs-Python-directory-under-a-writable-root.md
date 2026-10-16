@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-16 22:27'
+updated_date: '2026-10-16 22:59'
 labels:
   - runner
   - security
@@ -26,3 +27,9 @@ Found by TASK-0126's worker, measured in bwrap. TASK-0126 denies writing the int
 - [ ] #1 The owner's chosen rule is written in the runner README's host section and decided by a pure function beside spec_for
 - [ ] #2 In a real bwrap jail, in the layout above, an input can neither replace nor rename any link on the way from sys.executable to the interpreter file, and a test plants it; seen failing before the fix
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner's decision, 2026-10-16 (in conversation): deny each link's directory. For every link on the way from sys.executable (and <sys.base_prefix>/bin/python3) to the interpreter file, deny writing the directory that holds that link when it lies under a root the jail may write (for uv: ~/.local/share/uv/python). Generic across uv, pyenv and other layouts; a project opened at the home directory keeps working confined.
+<!-- SECTION:NOTES:END -->
