@@ -551,8 +551,8 @@ def _key_problem(named: Named, where: str) -> str | None:
     if named.provider == CLAUDE_CODE and ("base_url" in table) != (command is not None):
         return (
             f"{where}: a gateway needs both base_url (where Claude Code sends its requests) and "
-            "key_command (the command that prints its key, Claude Code's apiKeyHelper); without "
-            "either, Claude Code runs on the subscription token in local.env"
+            "key_command (the command that prints its key, Claude Code's apiKeyHelper); give both, "
+            "or neither, which uses the subscription token in local.env"
         )
     if named.provider == CLAUDE_CODE and _BETAS in table and "base_url" not in table:
         return f"{where}: experimental_betas is for a gateway; add base_url and key_command, or remove it"

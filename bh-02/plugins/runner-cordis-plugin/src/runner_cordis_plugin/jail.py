@@ -5,7 +5,11 @@ work is, compiled, launched, graded.
 (`write`) and a scratch directory of the jail's own. What it may not, even inside those: the
 composition's layer files (an input rewriting one would reshape the program running it, outside
 the jail), every path the host imports code from (`sys.path` entries and the interpreter's
-prefix), the directory of every package bh-02 runs code from (`code`: bh-02's own, cordis's,
+prefix), the interpreter bh-02 runs on (its files: in a venv layout the base's binary is on
+neither of those, and the next start on the host would run what an input wrote there; and the
+directory of every link on the way to it, which a mount on the file cannot hold: an input
+could rename the link and plant a Python of its own at its name), the
+directory of every package bh-02 runs code from (`code`: bh-02's own, cordis's,
 brig's and each plugin's, as installed; under a writable root when bh-02 works on its own
 checkout, an editable install), whose modules bh-02 imports in its own process, brig's own
 self-modification list (`.git/hooks`, `.git/config`, shell rc
@@ -75,6 +79,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from sys import base_prefix, prefix
+from sys import executable as host_executable
 from sys import path as import_path
 from sys import platform as host_platform
 from typing import Protocol, runtime_checkable
@@ -90,7 +95,7 @@ from brig.core import (
     ReadModel,
     Spec,
 )
-from brig.mech.bwrap import DEFAULT_BWRAP_PATH, DEFAULT_INTERPRETER
+from brig.mech.bwrap import DEFAULT_BWRAP_PATH, DEFAULT_INTERPRETER, InterpreterNotMounted
 from brig.run import (
     HostRuntime,
     IoPolicy,
@@ -120,6 +125,7 @@ __all__ = [
     "holding",
     "host_interpreters",
     "identity",
+    "link_directories",
     "made_by_the_jail",
     "mountable",
     "notice_for",
@@ -142,6 +148,9 @@ __all__ = [
 ]
 
 _READY_TIMEOUT_S = 10.0
+
+#: How many links one lookup follows before the kernel gives up (ELOOP): `_links_on_the_way` stops there.
+_MAX_LINKS = 40
 
 #: The system tree a Linux jail may read: what the interpreter links against and reads at
 #: start (`/lib`, `/usr/lib`, `/etc/ld.so.cache`, locale data) and what an input runs (`/bin/sh`,
@@ -211,6 +220,8 @@ def spec_for(
     secrets: Sequence[str] = (),
     trusted: Sequence[str] = (),
     code: Sequence[str] = (),
+    interpreters: Sequence[str] = (),
+    links: Sequence[str] = (),
     memory: str = "",
 ) -> Spec:
     """The jail's Spec. `host` is every path the host process loads code from; any under a
@@ -218,7 +229,10 @@ def spec_for(
     `secrets` (absolute) may not be read, wherever they are. `trusted` (absolute directories:
     bh-02's configuration, whose files the host reads and trusts) and `code` (absolute: the
     directory of every package bh-02 runs code from) may not be written where they are under a
-    writable root. `memory` (absolute: the project's auto memory directory, '' for none) may be
+    writable root. `interpreters` (absolute, resolved: the files of the interpreter bh-02 itself
+    runs on, `_interpreter_files`) may not be written where they are under one either, nor the
+    directory of each of `links` (absolute: the links on the way to them, `_links_on_the_way`;
+    `link_directories`). `memory` (absolute: the project's auto memory directory, '' for none) may be
     written, as a root of its own outside the project: no self-modification list applies there,
     since nothing reads it but the memory row, through no link."""
     roots = [str(Path(root, w).resolve()) for w in config.write]
@@ -246,6 +260,17 @@ def spec_for(
     # hook finds is on no `sys.path`, and a `src` that is the project itself is not denied there.
     # Only strictly under a root, as `trusted`: one the project is would leave it read-only.
     running = [c for c in code if any(c.startswith(r + "/") for r in roots)]
+    # The interpreter bh-02 itself runs on, under a root an input may write (bh-02 run from a
+    # directory that holds the uv-managed Python, the home directory say): the next bh-02 start on
+    # the host would run what an input wrote there, outside any jail. `host` denies the standard
+    # library and the venv's prefix, but in a venv layout the base's own binary is on neither (with
+    # no venv the whole prefix is, and this adds nothing). Files only: a deny on a link is the mount
+    # on what it leads to, so the file is what holds. Strictly under a root, as `host`.
+    allows = (*writable, str(Path(endpoint).parent))
+    interpreter = [i for i in interpreters if i not in allows and any(i.startswith(r + "/") for r in allows)]
+    # And the links on the way to it, which a mount on the file does not hold (the entry of a link
+    # can be renamed, and an input plant its own interpreter at the name): their directories.
+    holders = link_directories(links, allows)
     denies = [
         *layers,
         *under,
@@ -254,6 +279,8 @@ def spec_for(
         *kept,
         *configured,
         *running,
+        *interpreter,
+        *holders,
     ]
     return Spec(
         fs=FsPolicy(
@@ -261,7 +288,7 @@ def spec_for(
             # (brig's decision-186), so the directory the owner chose for its socket is granted
             # here, as brig granted it per channel until then. TASK-0079.31 moves the owners to a
             # socket brig reserves, and this goes.
-            write_allows=(*writable, str(Path(endpoint).parent)),
+            write_allows=allows,
             write_denies=tuple(dict.fromkeys(denies)),
             read_denies=(
                 *(str(Path(home, name)) for name in CREDENTIAL_READ_DENIES_HOME_RELATIVE),
@@ -271,6 +298,24 @@ def spec_for(
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=tuple(config.env), set=(("TMPDIR", scratch),)),
         channels=(Channel(name="program", kind=ChannelKind.LISTEN),),
     )
+
+
+def link_directories(links: Sequence[str], writable: Sequence[str]) -> tuple[str, ...]:
+    """The directories an input may not write, so that it cannot change a link on the way to the
+    interpreter bh-02 runs on. `links` is that chain as the host found it (`_links_on_the_way`):
+    where each link's own entry sits, absolute, in the directory that physically holds it.
+
+    A mount on the interpreter's file holds the file, not the links that lead to it: the entry of
+    a link in a writable directory can be renamed, and a Python of the input's own planted at its
+    name (a project opened at the home directory holds uv's `cpython-3.15-<platform>` link to the
+    versioned directory the venv's `python` goes through, and the next `uv run` on the host would
+    execute what it planted). Only the directory that holds the link refuses that. So, for each
+    link, its directory, when it lies strictly under a root in `writable` (the roots the jail may
+    write; elsewhere an input changes nothing). Not a root itself, as for `host`: the project is
+    the directory that holds the link, and denying it would leave the project read-only. Each once,
+    in the order the links are met."""
+    holders = (str(PurePosixPath(link).parent) for link in links)
+    return tuple(dict.fromkeys(h for h in holders if any(h.startswith(r + "/") for r in writable)))
 
 
 def allowlisted(spec: Spec, readable: Sequence[str], hold: Collection[str] = ()) -> Spec:
@@ -455,33 +500,129 @@ def host_interpreters() -> tuple[str, ...]:
     return (DEFAULT_INTERPRETER, str(Path(base_prefix, "bin", "python3")))
 
 
-def supervisor_interpreter(found: Mapping[str, str], mounted: Sequence[str]) -> str:
+def supervisor_interpreter(
+    found: Mapping[str, str],
+    mounted: Sequence[str],
+    *,
+    writable: Sequence[str] = (),
+    denied: Sequence[str] = (),
+) -> str:
     """The interpreter brig's supervisor, the jail's PID 1, runs under (`strict_linux(python=...)`):
     the first of `found` that the jail holds whole. `found` is each candidate as spelled, best
     first, with the path it resolves to; `mounted` is the Spec's read roots (the system, the
-    interpreter's trees, bh-02's code: bound read-only), never its write roots, where an input
-    could replace what runs as the jail's PID 1. brig checks the spelling only, and leaves a link
-    that leads out of the roots to the Spec's author (Debian's `/usr/bin/python3` goes to
+    interpreter's trees, bh-02's code: bound read-only). brig checks the spelling only, and leaves a
+    link that leads out of the roots to the Spec's author (Debian's `/usr/bin/python3` goes to
     `/etc/alternatives`), so a candidate counts when its spelling and its target are both at or
     under a root: a link out of them would dangle in the jail, and a jail whose PID 1 can't start
     is no jail.
 
-    When none qualifies, brig's own default: a Spec that does not mount it is refused by brig,
-    by name (`InterpreterNotMounted`: the interpreter, the roots and what to change), and one that
-    does mount it but has no Python there fails to start with the supervisor's own stderr
-    (`SupervisorFailed`). Nothing here hides either."""
+    `writable` is the Spec's write roots and `denied` its write denies. An input could replace what
+    runs as the jail's PID 1, so a path under a writable root counts only where a write deny holds
+    it. bh-02's base interpreter lies under the project when the project is the home directory (a
+    uv-managed Python under `~/.local`), and `spec_for` denies the standard library the host imports
+    from there, the interpreter's file and the directory of each link on the way to it
+    (`link_directories`): the `bin/python3` link that leads to it is held by its directory, as a deny
+    on the link itself, a mount on the file, would not hold its entry. A candidate that is not on
+    that way, a link in the project `spec_for` was not handed, is not held, and not a Python the
+    jail holds (unless bh-02 runs on that interpreter itself, when `prefix` is in the host and the
+    whole tree is denied).
+
+    When none qualifies, brig's own default: a Spec that does not mount it is refused by brig
+    (`InterpreterNotMounted`), which `BrigJail.compile` turns into the runner's own error
+    (`_no_python_message`). One that does mount it but has no Python there fails to start with
+    the supervisor's own stderr (`SupervisorFailed`). Nothing here hides either."""
+
+    def under(roots: Sequence[str], path: str) -> bool:
+        return any(PurePosixPath(path).is_relative_to(root) for root in roots)
+
+    def whole(path: str) -> bool:
+        return under(mounted, path) and (not under(writable, path) or under(denied, path))
+
     for spelled, target in found.items():
-        if all(
-            any(PurePosixPath(path).is_relative_to(root) for root in mounted) for path in (spelled, target)
-        ):
+        if whole(spelled) and whole(target):
             return spelled
     return DEFAULT_INTERPRETER
+
+
+def _no_python_message(looked_for: Sequence[str], python: str) -> str:
+    """What the person reads when brig refuses the jail for want of a Python it mounts: the
+    candidates looked for (`host_interpreters`), brig's reason in bh-02's terms (`python`, the
+    one brig refused, is under no path the jail mounts), and the steps a bh-02 user takes, as the
+    missing-bwrap error names them. brig's own text (its advice is for code that embeds brig)
+    stays on the exception's `__cause__`."""
+    looked = ", ".join(looked_for) or "none"
+    return (
+        "runner:confined cannot start its jail on this host: the jail runs brig's supervisor as its "
+        "PID 1, under a Python the jail mounts, and none of the Pythons looked for "
+        f"({looked}) is one. brig refused the jail (InterpreterNotMounted): {python} is under no path "
+        "the jail mounts. Install python3, or use `runner:unconfined` for the runner row (or "
+        "`bh-02 --no-jail`), knowing it confines nothing"
+    )
 
 
 def _present(candidates: Sequence[str]) -> dict[str, str]:
     """Each of `candidates` that is an executable file on this host (through its links), with the
     path it resolves to: what `supervisor_interpreter` chooses among."""
     return {c: str(Path(c).resolve()) for c in candidates if Path(c).is_file() and os.access(c, os.X_OK)}
+
+
+def _interpreter_files(spelled: Sequence[str]) -> tuple[str, ...]:
+    """The files the interpreter bh-02 itself runs on is: where each name in `spelled` (how the host
+    reaches it: `sys.executable`, the base installation's `bin/python3`) leads once every link on
+    the way is followed, as `spec_for` is handed `host`'s paths, resolved. The file, not the names:
+    a write through any of them reaches it, and a mount holds it, where the entry of a link in a
+    writable directory is held by none. A name that is empty (an embedded interpreter has no
+    `sys.executable`) leads nowhere and is left out."""
+    return tuple(dict.fromkeys(str(Path(name).resolve()) for name in spelled if name))
+
+
+def _stepped(
+    here: PurePosixPath, pending: Sequence[str], led_to: str | None
+) -> tuple[PurePosixPath, tuple[str, ...]]:
+    """One step of the kernel's lookup of a path, as `_links_on_the_way` takes it: `here` is the
+    directory reached, as it physically is (no link in it), and `pending` what is left to look up,
+    its first component the one just looked at, which `led_to` says is a link (to this text) or
+    not (`None`). Returns the directory the lookup is in and what is left. A component that is not
+    a link is entered (`..` leaves); a link is replaced by what it leads to, which starts at `/` if
+    absolute and at the directory that holds the link if not."""
+    part, rest = pending[0], tuple(pending[1:])
+    if led_to is None:
+        return (here.parent if part == ".." else here / part), rest
+    target = PurePosixPath(led_to)
+    if target.is_absolute():
+        return PurePosixPath(target.anchor), (*target.parts[1:], *rest)
+    return here, (*target.parts, *rest)
+
+
+def _links_on_the_way(spelled: Sequence[str]) -> tuple[str, ...]:
+    """Every link on the way from each name in `spelled` (`_interpreter_files`) to the file it leads
+    to, the entry of each as it sits on disk: the link `python3` in a venv, the `python` it leads to,
+    a link to a directory in the middle of a path (uv's `cpython-3.15-<platform>`, which the venv's
+    `python` goes through), one the target of another leads through, in the order met. Walked one
+    component at a time (`_stepped`), so each link is found in the directory that physically holds
+    it (a name reached through a link to a directory is that directory's, which is where a mount
+    lands), and what `link_directories` decides on is where the entries are. The kernel's own limit
+    on links in one lookup ends a loop, which is no interpreter.
+
+    Raises:
+        OSError: a link was replaced as it was read (the host changed its Python while a jail
+            started).
+    """
+    found: list[str] = []
+    for name in spelled:
+        if not name:
+            continue
+        path = PurePosixPath(name)
+        here = PurePosixPath(path.anchor) if path.is_absolute() else PurePosixPath(Path.cwd())
+        pending, followed = (path.parts[1:] if path.is_absolute() else path.parts), 0
+        while pending and followed <= _MAX_LINKS:
+            entry = Path(here, pending[0])
+            led_to = os.readlink(entry) if entry.is_symlink() else None
+            if led_to is not None:
+                found.append(str(entry))
+                followed += 1
+            here, pending = _stepped(here, pending, led_to)
+    return tuple(dict.fromkeys(found))
 
 
 def stack_for(platform: str, python: str = DEFAULT_INTERPRETER) -> Stack:
@@ -1049,10 +1190,16 @@ class BrigJail:
         author: Sequence[tuple[str, str]] = (),
     ) -> tuple[CompiledJail, Mapping[str, str]]:
         """The jail for `argv` in `cwd`, compiled, and its grades. `author` (Linux: `git_author`)
-        is set in the worker's environment besides the policy's own."""
+        is set in the worker's environment besides the policy's own.
+
+        Raises:
+            RuntimeError: on Linux, no Python the jail mounts is among the interpreters
+                (`_no_python_message`); brig's `InterpreterNotMounted` is its cause.
+        """
         scratch = str(Path(jail_dir, "tmp"))
         Path(scratch).mkdir(parents=True, exist_ok=True)
         host = [str(Path(p).resolve()) for p in (*import_path, prefix) if p]
+        names = (host_executable, str(Path(base_prefix, "bin", "python3")))  # how the host reaches its Python
         spec = spec_for(
             root=cwd,
             endpoint=endpoint,
@@ -1064,6 +1211,8 @@ class BrigJail:
             secrets=self._host.secrets,
             trusted=self._host.trusted,
             code=self._host.code,
+            interpreters=_interpreter_files(names),
+            links=_links_on_the_way(names),
             memory=self._host.auto_memory,
         )
         python = DEFAULT_INTERPRETER
@@ -1077,9 +1226,17 @@ class BrigJail:
             denies = uncovered(mountable(spec.fs.write_denies, self._instead(spec)))
             spec = replace(spec, fs=replace(spec.fs, write_denies=denies))
             spec = replace(spec, env=replace(spec.env, set=(*spec.env.set, *author)))
-            python = supervisor_interpreter(_present(self._interpreters), spec.fs.read_allows)
+            python = supervisor_interpreter(
+                _present(self._interpreters),
+                spec.fs.read_allows,
+                writable=spec.fs.write_allows,
+                denied=spec.fs.write_denies,
+            )
         ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
-        jail = stack_for(self._platform, python).compile(spec, ctx=ctx)
+        try:
+            jail = stack_for(self._platform, python).compile(spec, ctx=ctx)
+        except InterpreterNotMounted as error:
+            raise RuntimeError(_no_python_message(self._interpreters, python)) from error
         report = {axis.value: grade.grade.value for axis, grade in jail.report.axes.items()}
         holds = held(spec, self._absent_secrets(spec)) if self._platform == "linux" else ()
         return jail, graded(report, holds)

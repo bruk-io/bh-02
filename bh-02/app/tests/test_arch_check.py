@@ -12,6 +12,7 @@ the gate's name, everything it wrote, `ok` or `FAILED: name`, in the order of th
 non-zero exit if any gate failed."""
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -416,21 +417,20 @@ def fixing_gate(gate: Path) -> Path:
     return gate
 
 
-def test_a_clean_gate_with_fix_runs_one_check_and_no_fix(
+def test_a_clean_gate_with_fix_runs_one_check_and_it_is_the_fix(
     arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
 ) -> None:
-    """`--fix` after every plain check ran the rules twice, and `--fix` alone costs more than a check."""
+    """The one run of the rules says whether the gate is clean, so there is no plain check before it."""
     outcome = arch_check.run_gate(fixing_gate, fix=True)
 
     assert (outcome.ok, outcome.output) == (True, "")
-    assert checks == [_PLAIN]
+    assert checks == [_FIX]
 
 
-def test_findings_no_fix_applies_to_are_reported_as_the_check_printed_them_and_fail_the_gate(
+def test_findings_no_fix_applies_to_run_the_rules_once_and_are_reported_as_a_check_prints_them(
     arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
 ) -> None:
-    """The `--fix` that applied nothing says only how many findings are left; the ones printed
-    stand, so there is no third run."""
+    """Nothing applied, so the one `--fix` run is the only run of the rules; its report gives the findings."""
     (fixing_gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
 
     outcome = arch_check.run_gate(fixing_gate, fix=True)
@@ -438,7 +438,10 @@ def test_findings_no_fix_applies_to_are_reported_as_the_check_printed_them_and_f
     assert outcome.ok is False
     assert outcome.output.startswith("members/a/src/a/__init__.py:1: [init-reexport-only]")
     assert outcome.output.count("\n") == 1 and "applied" not in outcome.output
-    assert checks == [_PLAIN, _FIX]
+    assert checks == [_FIX]
+    checks.clear()
+    assert arch_check.run_gate(fixing_gate, fix=False) == arch_check.Outcome(False, outcome.output)
+    assert checks == [_PLAIN]
 
 
 def test_a_fix_that_leaves_the_gate_clean_is_reported_and_is_not_checked_again(
@@ -452,13 +455,13 @@ def test_a_fix_that_leaves_the_gate_clean_is_reported_and_is_not_checked_again(
     assert outcome.ok is True
     assert outcome.output.startswith("pypeeker applied 1 fix(es): tx ") and outcome.output.count("\n") == 1
     assert "import os" not in (fixing_gate / "members/a/src/a/mod.py").read_text()
-    assert checks == [_PLAIN, _FIX]
+    assert checks == [_FIX]
 
 
-def test_findings_left_after_a_fix_are_checked_again_and_reported_after_what_was_applied(
+def test_findings_left_after_a_fix_come_from_its_report_after_what_was_applied(
     arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
 ) -> None:
-    """The findings printed before the fix are stale (a fix moves lines), so these are read afresh."""
+    """The report's findings are read after the fix (a fix moves lines), so no plain check is needed."""
     (fixing_gate / "members/a/src/a/mod.py").write_text(_UNUSED_IMPORT)
     (fixing_gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
 
@@ -469,7 +472,8 @@ def test_findings_left_after_a_fix_are_checked_again_and_reported_after_what_was
     assert note.startswith("pypeeker applied 1 fix(es): tx ")
     assert finding.startswith("members/a/src/a/__init__.py:1: [init-reexport-only]") and rest == []
     assert "import os" not in (fixing_gate / "members/a/src/a/mod.py").read_text()
-    assert checks == [_PLAIN, _FIX, _PLAIN]
+    assert checks == [_FIX]
+    assert arch_check.run_gate(fixing_gate, fix=False).output == f"{finding}\n"  # what a check prints now
 
 
 def test_the_exit_code_with_fix_is_non_zero_exactly_when_findings_are_left(
@@ -509,27 +513,59 @@ def _fix_says(
 def test_output_that_is_not_the_fix_report_fails_the_gate_with_what_pypeeker_said(
     arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
     called = _fix_says(arch_check, monkeypatch, 2, "", "Error: no such option\n")
 
     outcome = arch_check.run_gate(gate, fix=True)
 
     assert (outcome.ok, outcome.output) == (False, "Error: no such option\n")
-    assert called == [_PLAIN, _FIX]  # nothing to look again for
+    assert called == [_FIX]  # nothing to look again for
 
 
-def test_a_fix_that_applied_nothing_and_says_the_gate_is_clean_is_not_believed(
+def test_an_error_envelope_fails_the_gate_with_what_pypeeker_said(
     arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The check had findings and `--fix` changed nothing, so its exit 0 and the findings disagree."""
-    (gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
-    report = '{"fixes": [], "skipped_conflicts": [], "declined": [], "residual_violations": 0, "tx_id": null}'
-    called = _fix_says(arch_check, monkeypatch, 0, report)
+    envelope = '{"error": "could not write src/a.py", "code": "apply-failed", "tx_id": "abc"}\n'
+    called = _fix_says(arch_check, monkeypatch, 1, envelope)
 
     outcome = arch_check.run_gate(gate, fix=True)
 
-    assert outcome.ok is False and "[init-reexport-only]" in outcome.output
-    assert called == [_PLAIN, _FIX, _PLAIN]
+    assert (outcome.ok, outcome.output) == (False, envelope)
+    assert called == [_FIX]
+
+
+def test_a_report_that_counts_findings_but_does_not_give_them_fails_the_gate_with_the_report(
+    arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What a pypeeker older than `residual_findings` says: a count, so no finding to print."""
+    report = (
+        '{"fixes": [], "skipped_conflicts": [], "declined": [], "residual_violations": 1, "tx_id": null}\n'
+    )
+    called = _fix_says(arch_check, monkeypatch, 1, report)
+
+    outcome = arch_check.run_gate(gate, fix=True)
+
+    assert (outcome.ok, outcome.output) == (False, report)
+    assert called == [_FIX]
+
+
+def test_a_report_with_findings_is_printed_whole_after_the_applied_line_and_before_stderr(
+    arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report = json.dumps(
+        {
+            "fixes": [{"fix_id": "a"}, {"fix_id": "b"}],
+            "residual_violations": 2,
+            "residual_findings": ["a.py:1: [rule] first", "b.py:2: [rule] second"],
+            "tx_id": "t1",
+        }
+    )
+    _fix_says(arch_check, monkeypatch, 1, report, "a warning\n")
+
+    outcome = arch_check.run_gate(gate, fix=True)
+
+    assert outcome == arch_check.Outcome(
+        False, "pypeeker applied 2 fix(es): tx t1\na.py:1: [rule] first\nb.py:2: [rule] second\na warning\n"
+    )
 
 
 def test_a_gate_without_fix_runs_one_plain_check(

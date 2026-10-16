@@ -62,9 +62,10 @@ is kept the same way, with what it said and that it failed.
 
 The `model` row (`models:model`) is one model step per call. Two providers fill it:
 
-- **`claude-code`**: Claude through Claude Code (the Claude Agent SDK), the route your
-  subscription supports. Claude Code only carries steps: it runs none of its own tools, loads no
-  settings or `CLAUDE.md`, and doesn't compact. The `python` tool is declared to it through an
+- **`claude-code`**: Claude through Claude Code (the Claude Agent SDK), the route for a
+  subscription token or a company gateway. Claude Code only carries steps: it runs none of its own
+  tools, loads no settings (but a gateway's one layer of bh-02's) or `CLAUDE.md`, and doesn't
+  compact. The `python` tool is declared to it through an
   in-process MCP server and never runs there: a call waits for the loop's next request to bring
   its result. One Claude Code process holds a conversation, and its state is kept in the session's
   `claude/` directory, so `--resume` continues it.

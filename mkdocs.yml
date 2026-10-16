@@ -19,6 +19,12 @@ exclude_docs: |
   /theme/
   /hooks/
 
+# a link to a heading its page does not have (`page.md#no-such-heading`) is a warning, which
+# --strict fails on; mkdocs 1.6 reports it at info by default, so the docs step would pass it
+validation:
+  links:
+    anchors: warn
+
 theme:
   name: null
   custom_dir: docs/theme

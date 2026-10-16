@@ -93,7 +93,7 @@ macOS, and on Linux with bubblewrap installed (the `bubblewrap` package); elsewh
 ```sh
 git clone https://github.com/bruk-io/bh-02 && cd bh-02
 uv sync --all-packages
-claude setup-token                        # Claude Code makes a token for your subscription
+claude setup-token                        # the subscription's token; a gateway (base_url, key_command) needs none
 echo 'CLAUDE_CODE_OAUTH_TOKEN=<the token>' > local.env && chmod 600 local.env   # git-ignored
 cd ~/some/project && ~/path/to/bh-02/.venv/bin/bh-02
 ```
@@ -125,7 +125,7 @@ one inside it (bh-02 run from your home directory, say) is not read, and `/model
 ```toml
 default = "claude/sonnet"
 
-[claude]                      # Claude through Claude Code, on the subscription token in local.env
+[claude]                      # Claude through Claude Code, with the subscription token in local.env
 provider = "claude-code"
 models = { sonnet = { id = "sonnet" }, opus = { id = "opus" } }
 
