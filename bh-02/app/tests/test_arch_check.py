@@ -14,6 +14,7 @@ non-zero exit if any gate failed."""
 import importlib.util
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import tomllib
@@ -327,6 +328,215 @@ def test_an_index_entry_outside_src_is_dropped_and_one_inside_src_is_kept(
     assert arch_check.indexed(gate) == {"members/a/src/a/__init__.py", "members/a/src/a/mod.py"}
     assert (gate / "members/b/src/b/__init__.py").read_text() == _DEFINES
     assert index_calls == []
+
+
+def test_an_entry_dropped_and_still_listed_is_named_and_one_never_dropped_is_not(
+    arch_check: ModuleType,
+) -> None:
+    """What was dropped, against what the index lists after: only an entry in both is a problem."""
+    dropped = ["m/b/x.py", "m/b/y.py", "m/b/z.py"]
+    listed = frozenset({"m/a/x.py", "m/b/y.py", "m/b/z.py"})  # m/a/x.py is inside src: kept, never dropped
+
+    problem = arch_check.left_behind(dropped, listed)
+
+    assert problem is not None
+    assert problem.endswith(":\n  m/b/y.py\n  m/b/z.py")
+    assert "dropped 2 index entries" in problem and "m/a/x.py" not in problem and "m/b/x.py" not in problem
+    assert "INDEX" in problem and "index_store.py" in problem  # where to look
+
+
+def test_nothing_is_left_behind_when_every_dropped_entry_is_gone_or_none_was_dropped(
+    arch_check: ModuleType,
+) -> None:
+    assert arch_check.left_behind(["m/b/x.py"], frozenset({"m/a/x.py"})) is None
+    assert arch_check.left_behind([], frozenset({"m/a/x.py"})) is None
+    assert arch_check.left_behind([], frozenset()) is None
+
+
+@pytest.fixture
+def layout_moved(arch_check: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """pypeeker keeps its entries somewhere `drop_entries` no longer looks: the real `drop_entries`, run
+    as if the entries lived in `.pypeeker/index-v2`, unlinks nothing (the file is not there), as it
+    would after a change to pypeeker's storage; everything else still reads and writes `.pypeeker/index`."""
+    drop = arch_check.drop_entries
+
+    def drop_where_the_entries_are_not(gate: Path, entries: Sequence[str]) -> None:
+        with monkeypatch.context() as moved:
+            moved.setattr(arch_check, "INDEX", Path(".pypeeker") / "index-v2")
+            drop(gate, entries)
+
+    monkeypatch.setattr(arch_check, "drop_entries", drop_where_the_entries_are_not)
+
+
+@pytest.mark.usefixtures("layout_moved")
+def test_a_gate_whose_orphan_entries_are_not_where_drop_entries_looks_fails_naming_them(
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
+) -> None:
+    """Without the check the run is green and every symbol lookup still reads the orphans: the drop
+    would be a silent no-op, the slowdown it was written to remove back with nothing said."""
+    _member(gate, "b")
+    assert _run(arch_check, gate, capfd) == (0, "")
+    (gate / "pyproject.toml").write_text(_GATE.replace("members/*/src", "members/a/src"))  # b leaves src
+    index_calls.clear()
+
+    code, out = _run(arch_check, gate, capfd)
+
+    assert code == 1
+    assert out.startswith("arch-check: dropped 2 index entries that are still listed")
+    assert out.endswith(":\n  members/b/src/b/__init__.py\n  members/b/src/b/mod.py")
+    assert arch_check.indexed(gate) >= {"members/b/src/b/__init__.py", "members/b/src/b/mod.py"}
+    assert index_calls == []  # the run stopped there, before indexing or checking
+
+
+@pytest.fixture
+def checks(arch_check: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """The arguments of each `pypeeker check` the script runs, in order: each is a run of the gate's
+    rules, and a `--fix` runs them a second time inside itself only when it applied something."""
+    calls: list[tuple[str, ...]] = []
+    pypeeker = arch_check.pypeeker
+
+    def spy(gate: Path, *args: str, capture: bool) -> object:
+        if args[0] == "check":
+            calls.append(args)
+        return pypeeker(gate, *args, capture=capture)
+
+    monkeypatch.setattr(arch_check, "pypeeker", spy)
+    return calls
+
+
+_PLAIN = ("check", "--strict")
+_FIX = ("check", "--strict", "--fix")
+_UNUSED_IMPORT = "import os\n\n\ndef ok() -> int:\n    return 1\n"  # what `--fix` removes
+
+
+@pytest.fixture
+def fixing_gate(gate: Path) -> Path:
+    """The gate, with the rule whose violation `--fix` repairs (an unused import) as well."""
+    (gate / "pyproject.toml").write_text(_FIXING_GATE)
+    return gate
+
+
+def test_a_clean_gate_with_fix_runs_one_check_and_no_fix(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    """`--fix` after every plain check ran the rules twice, and `--fix` alone costs more than a check."""
+    outcome = arch_check.run_gate(fixing_gate, fix=True)
+
+    assert (outcome.ok, outcome.output) == (True, "")
+    assert checks == [_PLAIN]
+
+
+def test_findings_no_fix_applies_to_are_reported_as_the_check_printed_them_and_fail_the_gate(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    """The `--fix` that applied nothing says only how many findings are left; the ones printed
+    stand, so there is no third run."""
+    (fixing_gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
+
+    outcome = arch_check.run_gate(fixing_gate, fix=True)
+
+    assert outcome.ok is False
+    assert outcome.output.startswith("members/a/src/a/__init__.py:1: [init-reexport-only]")
+    assert outcome.output.count("\n") == 1 and "applied" not in outcome.output
+    assert checks == [_PLAIN, _FIX]
+
+
+def test_a_fix_that_leaves_the_gate_clean_is_reported_and_is_not_checked_again(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    """`--fix` runs the rules again after it applied, so that it knows what is left, and exits 0."""
+    (fixing_gate / "members/a/src/a/mod.py").write_text(_UNUSED_IMPORT)
+
+    outcome = arch_check.run_gate(fixing_gate, fix=True)
+
+    assert outcome.ok is True
+    assert outcome.output.startswith("pypeeker applied 1 fix(es): tx ") and outcome.output.count("\n") == 1
+    assert "import os" not in (fixing_gate / "members/a/src/a/mod.py").read_text()
+    assert checks == [_PLAIN, _FIX]
+
+
+def test_findings_left_after_a_fix_are_checked_again_and_reported_after_what_was_applied(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    """The findings printed before the fix are stale (a fix moves lines), so these are read afresh."""
+    (fixing_gate / "members/a/src/a/mod.py").write_text(_UNUSED_IMPORT)
+    (fixing_gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
+
+    outcome = arch_check.run_gate(fixing_gate, fix=True)
+
+    assert outcome.ok is False
+    note, finding, *rest = outcome.output.splitlines()
+    assert note.startswith("pypeeker applied 1 fix(es): tx ")
+    assert finding.startswith("members/a/src/a/__init__.py:1: [init-reexport-only]") and rest == []
+    assert "import os" not in (fixing_gate / "members/a/src/a/mod.py").read_text()
+    assert checks == [_PLAIN, _FIX, _PLAIN]
+
+
+def test_the_exit_code_with_fix_is_non_zero_exactly_when_findings_are_left(
+    arch_check: ModuleType, workspace: Path
+) -> None:
+    (workspace / "libs/one/members/a/src/a/mod.py").write_text(_UNUSED_IMPORT)  # fixed
+    (workspace / "libs/two/members/a/src/a/__init__.py").write_text(_DEFINES)  # not
+
+    code, lines = _invoke(arch_check, "--fix")
+
+    assert code == 1
+    assert [line for line in lines if line.startswith("   ")] == ["   ok", "   ok", "   FAILED: libs/two"]
+    assert "import os" not in (workspace / "libs/one/members/a/src/a/mod.py").read_text()
+
+
+def _fix_says(
+    arch_check: ModuleType, monkeypatch: pytest.MonkeyPatch, code: int, stdout: str, stderr: str = ""
+) -> list[tuple[str, ...]]:
+    """Every `pypeeker check --fix` answers with this; the other calls reach pypeeker. The `check`
+    calls made, in order."""
+    saying = subprocess.CompletedProcess(["pypeeker"], code, stdout=stdout, stderr=stderr)
+    pypeeker = arch_check.pypeeker
+    called: list[tuple[str, ...]] = []
+
+    def fake(gate: Path, *args: str, capture: bool) -> subprocess.CompletedProcess[str]:
+        if args[0] == "check":
+            called.append(args)
+        if args == _FIX:
+            return saying
+        result: subprocess.CompletedProcess[str] = pypeeker(gate, *args, capture=capture)
+        return result
+
+    monkeypatch.setattr(arch_check, "pypeeker", fake)
+    return called
+
+
+def test_output_that_is_not_the_fix_report_fails_the_gate_with_what_pypeeker_said(
+    arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
+    called = _fix_says(arch_check, monkeypatch, 2, "", "Error: no such option\n")
+
+    outcome = arch_check.run_gate(gate, fix=True)
+
+    assert (outcome.ok, outcome.output) == (False, "Error: no such option\n")
+    assert called == [_PLAIN, _FIX]  # nothing to look again for
+
+
+def test_a_fix_that_applied_nothing_and_says_the_gate_is_clean_is_not_believed(
+    arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check had findings and `--fix` changed nothing, so its exit 0 and the findings disagree."""
+    (gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
+    report = '{"fixes": [], "skipped_conflicts": [], "declined": [], "residual_violations": 0, "tx_id": null}'
+    called = _fix_says(arch_check, monkeypatch, 0, report)
+
+    outcome = arch_check.run_gate(gate, fix=True)
+
+    assert outcome.ok is False and "[init-reexport-only]" in outcome.output
+    assert called == [_PLAIN, _FIX, _PLAIN]
+
+
+def test_a_gate_without_fix_runs_one_plain_check(
+    arch_check: ModuleType, fixing_gate: Path, checks: list[tuple[str, ...]]
+) -> None:
+    assert arch_check.run_gate(fixing_gate, fix=False).ok is True
+    assert checks == [_PLAIN]
 
 
 def test_the_src_list_is_written_through_a_temporary_file_renamed_over_the_old_one(

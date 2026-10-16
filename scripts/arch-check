@@ -17,14 +17,25 @@ one dropped) but never adds one: a new module in an indexed path, or a new path,
 it checks, so it passes silently. So for each gate this first writes `[tool.pypeeker].src` from
 the globs in `[tool.arch-check].src` (the layout, not a hand-kept list, decides what is
 checked), drops the index entry of each file no src path holds (pypeeker's refresh keeps one
-whose file still exists, and find_symbol and the call graph read every entry), indexes each path
-that holds a file with no index entry (all of them on a fresh checkout, none when nothing was
-added) in one `pypeeker index` call per gate, not one per path (a call reconciles pypeeker's
+whose file still exists, and find_symbol and the call graph read every entry; if one is still
+listed afterwards, pypeeker's layout has changed under the unlink and the gate fails saying so),
+indexes each path that holds a file with no index entry (all of them on a fresh checkout, none when
+nothing was added) in one `pypeeker index` call per gate, not one per path (a call reconciles pypeeker's
 cross-file symbol tree, which reads every entry written so far, so a call per path cost paths
 times files: the root gate's 29 paths took 55 s cold, in one call 4 s), fails on any indexing error,
 then runs `check --strict` (plain `check` hides heuristic findings). It writes that list only when
 it changes (a member was added), through a temporary file and a rename, because scripts/check runs
 pytest, ruff and mypy beside it and each reads pyproject.toml as it starts.
+
+With `--fix` (the default) the plain `check --strict` still comes first, and a gate that passes it is done:
+one `pypeeker check` run, as with `--no-fix`. Only a gate with findings goes on to `check --strict --fix`,
+which prints a JSON report of the fixes it applied and a count of the findings left (not the findings),
+exits non-zero exactly when findings remain, and runs the rules again only if it applied a fix. If it
+applied nothing the findings are the plain check's, already printed; if it applied some and exited 0
+the gate is clean; if it applied some and findings remain, a plain check runs again to print them.
+(Running `--fix` first and the plain check after, as this did, ran the rules twice in the commonest
+case, a clean gate; and `--fix`'s own run costs more than a plain check, since it also collects each
+fixable rule's repairs, so a clean gate is not better off with `--fix` alone.)
 
 The gates share nothing (each has its own pyproject.toml, its own .pypeeker and its own sources),
 so they run at the same time and the run takes as long as the slowest gate, the root one, not as
@@ -50,6 +61,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -157,10 +169,32 @@ def outside_src(paths: Sequence[str], entries: frozenset[str]) -> tuple[str, ...
     return tuple(sorted(e for e in entries if not any(Path(e).is_relative_to(path) for path in paths)))
 
 
+def left_behind(dropped: Sequence[str], entries: frozenset[str]) -> str | None:
+    """None when none of the `dropped` entries is in `entries` (what the index lists now); else the
+    problem, naming each one that is."""
+    left = [entry for entry in dropped if entry in entries]
+    if not left:
+        return None
+    names = "".join(f"\n  {entry}" for entry in left)
+    return (
+        f"arch-check: dropped {len(left)} index entries that are still listed; pypeeker may keep its entries "
+        f"somewhere `drop_entries` does not look now (compare INDEX and `drop_entries` with "
+        f"pypeeker/storage/index_store.py):{names}"
+    )
+
+
 def drop_entries(gate: Path, entries: Sequence[str]) -> None:
     """Remove the index entry of each source file in `entries`, at the path IndexStore keeps it (under
     `.pypeeker/index`, with `.json` added: the file `IndexStore.remove` unlinks). pypeeker has no command
-    for this: its check drops an entry only when the source file is gone."""
+    for this: its check drops an entry only when the source file is gone.
+
+    This is a coupling to pypeeker's storage layout, which is pre-1.0 and may change. If it does, the
+    unlink finds no file (`missing_ok`, since an entry may already be gone) and drops nothing, and says
+    nothing: the orphans stay, and every symbol lookup and the call graph read them again, so the gate
+    slows again with no error. `run_gate` therefore reads the index once more after this and fails the
+    gate, naming each entry it meant to drop that is still listed (`left_behind`): a layout change
+    becomes a failing run, not a slower one. The read is of the layout `indexed` assumes, so a change that
+    moves the listing too is for the clean-gate test in test_arch_check.py to notice."""
     for entry in entries:
         (gate / INDEX / f"{entry}.json").unlink(missing_ok=True)
 
@@ -189,27 +223,43 @@ def index(gate: Path, paths: Sequence[str]) -> str | None:
     return None
 
 
+def applied_note(report: Mapping[str, Any]) -> str:
+    """The line saying what `pypeeker check --fix` applied, from its JSON `report`; empty if nothing."""
+    if not report.get("tx_id"):
+        return ""
+    return f"pypeeker applied {len(report.get('fixes', []))} fix(es): tx {report['tx_id']}\n"
+
+
 def run_gate(gate: Path, fix: bool) -> Outcome:
-    """Drop the index entries outside one gate's sources, index what has no index in them, apply pypeeker
-    autofixes, then run check --strict."""
+    """Drop the index entries outside one gate's sources (failing if one is still listed), index what has
+    no index in them, run check --strict, and with `fix`, if it has findings, apply pypeeker's autofixes
+    and report what is left."""
     paths = sync_src(gate)
-    drop_entries(gate, outside_src(paths, indexed(gate)))
-    if unindexed := without_index({path: sources(gate, path) for path in paths}, indexed(gate)):
+    dropped = outside_src(paths, indexed(gate))
+    drop_entries(gate, dropped)
+    entries = indexed(gate)
+    if (problem := left_behind(dropped, entries)) is not None:
+        return Outcome(False, problem)
+    if unindexed := without_index({path: sources(gate, path) for path in paths}, entries):
         if (problem := index(gate, unindexed)) is not None:
             return Outcome(False, problem)
-    applied = ""
-    if fix:
-        # --fix prints a JSON report rather than findings; report what it applied, then run a
-        # plain check below so the findings and the exit code are the usual ones.
-        result = pypeeker(gate, "check", "--strict", "--fix", capture=True)
-        try:
-            fixed = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return Outcome(False, result.stdout + result.stderr)
-        if fixed.get("tx_id"):
-            applied = f"pypeeker applied {len(fixed.get('fixes', []))} fix(es): tx {fixed['tx_id']}\n"
     checked = pypeeker(gate, "check", "--strict", capture=True)
-    return Outcome(checked.returncode == 0, applied + checked.stdout + checked.stderr)
+    printed = checked.stdout + checked.stderr
+    if checked.returncode == 0 or not fix:
+        return Outcome(checked.returncode == 0, printed)
+    # Findings, so a fix may apply. `check --fix` prints a JSON report (a count of what is left, and the
+    # findings its fixes address), not the findings, and exits non-zero exactly when findings remain.
+    result = pypeeker(gate, "check", "--strict", "--fix", capture=True)
+    try:
+        applied = applied_note(json.loads(result.stdout))
+    except json.JSONDecodeError:
+        return Outcome(False, result.stdout + result.stderr)
+    if applied and result.returncode == 0:
+        return Outcome(True, applied)
+    if not applied and result.returncode != 0:
+        return Outcome(False, printed)  # nothing changed, so these are the findings
+    rechecked = pypeeker(gate, "check", "--strict", capture=True)  # what is left is not what was printed
+    return Outcome(rechecked.returncode == 0, applied + rechecked.stdout + rechecked.stderr)
 
 
 def gate_name(gate: Path) -> str:

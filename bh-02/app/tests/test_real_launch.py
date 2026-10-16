@@ -292,6 +292,24 @@ def test_ctrl_c_says_a_bang_command_runs_on_and_ctrl_q_leaves_at_once_ending_it(
     assert not _alive(shell)  # the command ended with bh-02
 
 
+def test_a_bang_command_that_runs_for_seconds_shows_the_working_line_until_it_answers(
+    launch: Launch,
+) -> None:
+    """The line a reply has (`Working · 2s`, redrawn by a timer) is there while a `!` command
+    runs, though nothing streams for it, and is not drawn again once it has answered: the real
+    chat row hands the line out, runs the command and reads again."""
+    app = launch("fake")
+    ready = app.wait_for(_READY, 60)
+    app.type("!sleep 4; echo slept")
+    first = app.wait_for("Working · ", 20, after=ready)  # about a second in, not before
+    app.wait_for("Working · ", 10, after=first)  # and the timer redraws it
+    answered = app.wait_for("exit status 0; the model reads this with your next message", 20, after=first)
+    app.settle(2.5)  # long enough for two more ticks, if it were still running
+    assert "Working" not in app.text()[answered:]
+    app.press(b"\x11")
+    assert app.exit_code() == 0
+
+
 def test_the_transcript_draws_every_kind_of_event_and_a_long_reply(launch: Launch) -> None:
     app = launch("showcase")
     ready = app.wait_for(_READY, 60)

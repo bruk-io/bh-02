@@ -8,6 +8,10 @@ and the next `read()` drops it (a command is not interrupted, and a held Ctrl-C 
 the next turn); the app says so when a held one is still unheard a moment later
 (`interrupt_held`: a command is running, not a turn starting).
 
+The bridge also says when a line is being handled (`handling`, and `Handling` posted to the app at every
+change): from the line handed out until the chat row reads again, or until a command's answer says it restarts
+rows. A command running streams nothing, so this is how the app knows to time it (`Working`).
+
 A line typed while nobody reads (the chat row is down because a row it depends on is coming
 back up: `/model` restarts the model, `/clear` the loop and its transcript, each of which
 may take a moment) waits
@@ -17,9 +21,10 @@ lifecycle), so the app can say the line is waiting and for what (`waiting_on`).
 A command that restarts rows queues the restart in `jobs`, and the chat row reads its next line
 only once that is done (CONTRACTS.md: jobs), so a line typed right after `/model` waits in the
 bridge for the new model rather than going to the old one. The command says which rows in its
-answer (a `restarting` event), which the output hands the bridge (`announce`) only so a line
-kept meanwhile can say what it waits for; it holds nothing back, and is forgotten at the next
-read.
+answer (a `restarting` event), which the output hands the bridge (`announce`) so a line kept
+meanwhile can say what it waits for, and so the app knows the command has answered (`handling`
+ends there, not at the read the restart delays); it holds nothing back, and is forgotten at the
+next read.
 
 Whatever ends the app (Ctrl-Q, `/exit`, a crash) ends the bridge, and that settles everything
 waiting on it: a pending `read()` returns None (or raises `AppCrashed` after a crash, so the
@@ -42,6 +47,7 @@ from tui_cordis_plugin import frame, render
 from tui_cordis_plugin.messages import (
     Asked,
     FrameChanged,
+    Handling,
     Noted,
     Shown,
     TurnEnded,
@@ -66,9 +72,11 @@ class AppCrashed(Exception):
 
 
 class Bridge:
-    """The state the app and its ports share, on one event loop."""
+    """The state the app and its ports share, on one event loop. `post`, when given, is how it
+    tells the app a line began or stopped being handled (`Handling`)."""
 
-    def __init__(self) -> None:
+    def __init__(self, post: Post | None = None) -> None:
+        self._post = post
         self._lines: deque[str] = deque()
         self._readers: deque[asyncio.Future[str | None]] = deque()
         self._interrupts: set[asyncio.Future[None]] = set()
@@ -83,10 +91,25 @@ class Bridge:
         self._keyless = frame.Keyless()  # rows that bind no key: no line waits on them
         self._unnoted = False  # a line was kept while no row was coming up: it has not said it waits
         self._announced: frozenset[str] = frozenset()  # rows a command said it restarts, until a read
+        self._told = False  # what the app was last told `handling` is
 
     @property
     def ended(self) -> bool:
         return self._ended
+
+    @property
+    def handling(self) -> bool:
+        """Whether a line is being handled: handed out to the chat row, which has not read
+        since (a reply streaming, a command running), unless its answer said it restarts rows
+        (the chat row then reads only once they are up, and the command has answered), or the
+        app has ended."""
+        return self._busy and not self._announced and not self._ended
+
+    def _tell(self) -> None:
+        """Tell the app when `handling` is not what it was last told."""
+        if self._post is not None and self.handling != self._told:
+            self._told = self.handling
+            self._post(Handling(self._told))
 
     @property
     def crash(self) -> AppCrashed | None:
@@ -141,6 +164,7 @@ class Bridge:
         if self._ended or not (rows := frozenset(rows) - self._announced):
             return frozenset()
         self._announced |= rows
+        self._tell()  # the command has answered: what follows is the restart
         return self._to_note()
 
     def _to_note(self) -> frozenset[str]:
@@ -159,6 +183,7 @@ class Bridge:
             if not reader.done():
                 self._busy = True
                 reader.set_result(line)
+                self._tell()
                 return True
         self._lines.append(line)
         self._unnoted = self._unnoted or not self.waiting_on
@@ -172,15 +197,17 @@ class Bridge:
         """
         self._interrupt_held = False
         self._announced = frozenset()
+        self._busy = False  # a line kept for this read is a line of its own, handled from here
+        self._tell()
         if self._lines:
             kept = self._lines.popleft()
             self._busy = True
             self._unnoted = self._unnoted and bool(self._lines)
+            self._tell()
             return kept
         if self._ended:
             self._raise_crash()
             return None
-        self._busy = False
         reader: asyncio.Future[str | None] = asyncio.get_running_loop().create_future()
         self._readers.append(reader)
         line = await reader
@@ -258,6 +285,7 @@ class Bridge:
         for drawn in list(self._draws):
             if not drawn.done():
                 drawn.set_result(None)
+        self._tell()  # nothing is being handled once nobody is left to read the answer
 
     def _raise_crash(self) -> None:
         if self._crash is not None:

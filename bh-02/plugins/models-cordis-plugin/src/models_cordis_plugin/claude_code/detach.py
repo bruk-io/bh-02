@@ -1,4 +1,4 @@
-"""`claude-code-detached`: run Claude Code's CLI in a session of its own, on the subscription only.
+"""`claude-code-detached`: run Claude Code's CLI in a session of its own, with its environment scrubbed.
 
 A terminal's Ctrl-C signals its whole foreground process group, and the SDK starts the CLI in
 bh-02's. The CLI exits on SIGINT, which would end the Claude Code session whenever the person
@@ -7,12 +7,12 @@ group (`setsid`) and becomes the CLI (`execve`, same pid), so Ctrl-C reaches bh-
 bh-02 stops a step with the SDK's own `interrupt()`.
 
 The SDK always merges bh-02's environment into the child's; its options can override a key but
-not remove one. So this is also where the variables that would take the CLI off the
-subscription are dropped: every `ANTHROPIC_*` (an API key, a base URL) and every `CLAUDE_*`
-(`CLAUDE_CODE_USE_BEDROCK`, `_VERTEX`, `_FOUNDRY`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, ...) but the
-few the SDK and bh-02's options set, so a shell's settings can't route, bill or limit the
-session, whose one credential is the `CLAUDE_CODE_OAUTH_TOKEN` the options pass. The rest
-(PATH, HOME, locale, proxies) passes through.
+not remove one. So this is also where every `ANTHROPIC_*` (an API key, a base URL) and every
+`CLAUDE_*` (`CLAUDE_CODE_USE_BEDROCK`, `_VERTEX`, `_FOUNDRY`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, ...)
+is dropped but the few the SDK and bh-02's options set, so a shell's settings can't route, bill or
+limit the session. The kept ones are the credential's variable (`CLAUDE_CODE_OAUTH_TOKEN`: the
+subscription token, or empty through a gateway), `CLAUDE_CONFIG_DIR`, and what the SDK sets for
+itself. The rest (PATH, HOME, locale, proxies) passes through.
 """
 
 import importlib.util
