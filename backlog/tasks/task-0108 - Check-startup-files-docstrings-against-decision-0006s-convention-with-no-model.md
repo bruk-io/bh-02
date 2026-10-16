@@ -3,7 +3,7 @@ id: TASK-0108
 title: >-
   Check startup files' docstrings against decision-0006's convention, with no
   model
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 02:03'
@@ -79,4 +79,6 @@ Timing added to a REPL start, a real bwrap jail, one startup file telling one do
 Not verified: scripts/linux-jail-check (the Docker daemon is not answering in this container: `Cannot connect to the Docker daemon`), darwin (seatbelt). AC #4 (scripts/check passes) is NOT ticked: the full scripts/check is the reviewer's. Typing (mypy) left to TASK-0109. A computed `__all__` (not a list/tuple literal) is read by the rule as none: its underscored names get no `example` finding (the live listing still tells them).
 
 Reviewer: scripts/check (repo root, full) exit 0: format ok, lint ok, types ok (194 files), tests 3134 passed 31 skipped in 165s, gates ok, docs ok, tokens skipped (no bh-01 dist). Working tree clean after it.
+
+Verdict CLOSE. All four criteria met; scripts/check exit 0. Gate entries each carry a reason; budget entries are the program's shell (main, _read, _ruffed) and the click command, the pure core (examples, ruff_findings, summary, startup_checked, _missed) split out. ruff runs with --isolated and bh-02's selection only; aside carries told names and codes from the closed CODES set. Nits only, nothing filed: aside tests rewritten via a _bare helper rather than kept verbatim (by design); computed __all__ read as none (documented).
 <!-- SECTION:NOTES:END -->
