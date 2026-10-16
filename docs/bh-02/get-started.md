@@ -7,8 +7,8 @@ a first session.
 ## What you need
 
 - [uv](https://docs.astral.sh/uv/). It fetches Python 3.15 for you.
-- A Claude subscription, and Claude Code's `claude` command to make a token for it. You can also
-  use a model of your own instead: see [Models](using/models.md).
+- A Claude subscription (Claude Code's `claude` command makes its token) or a company gateway to
+  Claude. You can also use a model of your own instead: see [Models](using/models.md).
 - For the jail: macOS, or Linux with bubblewrap installed (the `bubblewrap` package). Anywhere
   else, run bh-02 with `--no-jail`.
 
@@ -37,8 +37,8 @@ a renamed plugin is reported as unresolved.
 
 ## The credential
 
-bh-02 reaches Claude through Claude Code, on your subscription. It needs a Claude Code OAuth
-token in a file of its own:
+bh-02 reaches Claude through Claude Code, with your subscription's token or a company gateway. A
+subscription needs a Claude Code OAuth token in a file of its own:
 
 1. Run `claude setup-token`. It makes a long-lived token for your subscription.
 2. At the root of the checkout, create a file named `local.env` with one line:
@@ -52,8 +52,8 @@ file from any directory you work in.
     Keep the token in `local.env` and nowhere else. Where it goes, and the rules for keeping it,
     are in [the credential](reference/plugins/models.md#the-credential).
 
-Without a token bh-02 still starts, and each message answers with an error that says where to
-put one.
+Without a token bh-02 still starts, and each subscription message answers with an error that says
+where to put one. A gateway endpoint needs no token: see [Models](using/models.md#claude-through-a-gateway).
 
 ## Your models
 

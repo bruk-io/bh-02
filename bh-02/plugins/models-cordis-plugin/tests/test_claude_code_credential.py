@@ -96,7 +96,7 @@ def test_the_credential_is_the_nearest_searched_file_and_never_a_directory(tmp_p
     assert child_env(near / "local.env", "/c") is None  # a directory named there reads as no token
 
 
-def test_the_detached_launcher_drops_every_variable_that_would_leave_the_subscription() -> None:
+def test_the_detached_launcher_drops_every_variable_that_would_change_the_steps() -> None:
     kept = {
         TOKEN_VARIABLE: _FAKE,
         "CLAUDE_CONFIG_DIR": "/state/config",

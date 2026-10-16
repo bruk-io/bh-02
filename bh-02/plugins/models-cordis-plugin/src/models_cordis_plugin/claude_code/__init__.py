@@ -1,4 +1,4 @@
-"""Claude through Claude Code (the Claude Agent SDK, on a Claude subscription): the
+"""Claude through Claude Code (the Claude Agent SDK, with a subscription token or a gateway): the
 `claude-code` provider of the `model` row."""
 
 from models_cordis_plugin.claude_code.credential import (

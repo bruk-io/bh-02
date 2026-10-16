@@ -340,9 +340,9 @@ kept) or redeclares them (cache lost) is not measured. Until an SDK carries the 
 
 ## claude-code: Claude through Claude Code
 
-Claude, on a Claude subscription, as the model under bh-02's own `agent:loop`. The model is
-reached through the Claude Agent SDK, which is Claude Code: the subscription's sanctioned
-route. bh-02 never imitates Claude Code's requests by hand. The shape is pi's
+Claude, with a subscription token or through a company gateway, as the model under bh-02's own
+`agent:loop`. The model is reached through the Claude Agent SDK, which is Claude Code: the
+subscription's sanctioned route. bh-02 never imitates Claude Code's requests by hand. The shape is pi's
 (`pi-claude-agent-sdk`, `pi-claude-bridge`): Claude Code carries the model's steps, and bh-02
 runs the loop. It is `claude_code/` (`ClaudeCodeModel`, `ClaudeCodeConfig`): `model` is
 the named model's id, `state` the session's own directory (which the session layer sets on the

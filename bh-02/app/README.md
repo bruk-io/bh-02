@@ -1,7 +1,7 @@
 # bh-02
 
-The coding harness in a terminal app: a model (Claude through Claude Code on the Claude
-subscription, or any OpenAI-compatible model you name, driven by bh-02's own loop) acts in
+The coding harness in a terminal app: a model (Claude through Claude Code, with a subscription
+token or a company gateway, or any OpenAI-compatible model you name, driven by bh-02's own loop) acts in
 Python, through the tools rows register (the shipped one, `python`, runs in a jailed Python
 process), inside a Textual TUI (`tui:ui`), with every part of the program a plugin that can be
 replaced while it runs. `bh_02` is the shell: `cli.py` (the `bh-02` command), `bootstrap.py`
