@@ -62,7 +62,7 @@ What a resume brings back, and what it doesn't:
 - **Back**: the conversation, the last 400 entries of the screen, the model the session last
   used, and the jail it started with. The status bar marks the session `(resumed)`.
 - **Not back**: the Python namespace. It lasts one run, so the model starts with an empty REPL
-  and is told so. Helpers you want every time belong in a startup file
+  and is told so. Functions you want every time belong in a startup file
   ([The python tool](../how-it-works/python-tool.md)).
 - **Refused**: `--no-jail`. A resumed session keeps the jail it started with.
 

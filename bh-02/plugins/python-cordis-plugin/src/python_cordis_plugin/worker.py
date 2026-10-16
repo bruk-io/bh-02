@@ -2,8 +2,8 @@
 
 Run by path (``python -I worker.py SOCKET``), usually inside a jail. It imports the standard
 library and nothing else, so nothing of the host crosses into the jail with it. The namespace
-holds what inputs put there, and `helper` (`_helper`, bound once, so an input's own is kept): an
-input is plain Python, and the jail decides what it may touch.
+holds what inputs put there and nothing of bh-02's but `tools`: an input is plain Python, and the
+jail decides what it may touch.
 
 Wire: newline-delimited JSON. The host sends ``{"op": "hello"}`` once (a readiness probe
 connects and closes without a word, so the worker keeps accepting until one speaks), then
@@ -62,28 +62,11 @@ _HELLO_S = 60.0  # the host says hello within milliseconds of the worker listeni
 _READ, _WRITE = "read", "write"  # the kinds of opening the host may ask to be asked about
 _LOOK_S = 0.5  # how often a worker waiting for its hello checks that its parent is still there
 _TOOLS = "tools"  # the name an input calls bh-02's other tools by: `tools.NAME(...)`
-_HELPER = "helper"  # the name `@helper` marks a function by, in every input's namespace
 
 
 class ToolError(Exception):
     """A call to one of bh-02's tools that did not run (declined, unknown, its arguments wrong)
     or failed: why, as bh-02 says it. `tools.Error` in an input."""
-
-
-def _helper[F: Callable[..., Any]](function: F) -> F:
-    """Mark `function` as a helper, and return it: when it is defined in a startup file, the model
-    is told its name and signature as the REPL starts (`help(name)` shows its docstring), where
-    the file's other names are only counted. The same function, with one attribute set, so a file
-    run outside bh-02 can define a stand-in (`def helper(f): return f`).
-
-    Raises:
-        AttributeError: `function` takes no attributes (a builtin, a bound method).
-    """
-    function.__bh_helper__ = True  # type: ignore[attr-defined]
-    return function
-
-
-_helper.__name__ = _helper.__qualname__ = "helper"  # `help(helper)` and its tracebacks name it so
 
 
 def _function(
@@ -237,9 +220,7 @@ class _Repl:
     def __init__(self, channel: _Channel, root: str) -> None:
         self._channel = channel
         # `__kernel__` is kept: a startup file may test `__name__`, and a rename would break that silently.
-        # `helper` is bound once, before any startup file runs, and never again: an input that binds
-        # its own keeps it, as it keeps its own `tools`
-        self._namespace: dict[str, Any] = {"__name__": "__kernel__", _HELPER: _helper}
+        self._namespace: dict[str, Any] = {"__name__": "__kernel__"}
         self.running = False  # an input is running, parsed or failing included: SIGINT interrupts it
         self._hearing = False  # the input's own code is running: what it opens is heard
         self._inputs = 0

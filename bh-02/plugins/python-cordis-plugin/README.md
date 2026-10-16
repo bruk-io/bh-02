@@ -21,7 +21,9 @@ the process it last started, never another program the runner started), `stopped
 elsewhere=)`, what the model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
 long as this run of bh-02 (a /model switch keeps it; a start, a resume, /clear or a Python process
 that died empties it), and that functions worth keeping go in the project's startup file (`startup`), the
-only one that is its to edit, the person's own (`theirs`), which comes first, being theirs; how to use it (work in
+only one that is its to edit, the person's own (`theirs`), which comes first, being theirs, which of a startup
+file's functions are told to it and what each costs in context (confined only: unconfined nothing is
+listed) and the docstring convention for the file it writes; how to use it (work in
 Python, not through a shell, shown by an input that searches and keeps what it found and a later
 one that edits with it; build up state and re-read what changed, print what matters, run
 programs with `subprocess.run(..., capture_output=True, text=True, timeout=...)` and treat what
@@ -101,15 +103,15 @@ it when the call did not run or failed. What changed in them since the model was
 told before the input's own output. An input that binds `tools` itself keeps its own: the
 namespace's is a view of the registry, never where a tool is registered.
 
-A new Python process's first input is also told what the startup files did (`startup`, helpers kept
+A new Python process's first input is also told what the startup files did (`startup`, functions kept
 across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/startup.py` (else
-`~/.config/bh-02/startup.py`), for the helpers they want in every project, then the project's,
+`~/.config/bh-02/startup.py`), for the functions they want in every project, then the project's,
 `.bh-02/startup.py`, the model's own. A name starting `$XDG_CONFIG_HOME/` is in the person's
 config directory (that variable's value, else `~/.config`, as for the models file), one
 starting `~/` in their home, any other from `root`; a single string is one file, and anything
 but a name or a list of names is the row's config error. Confined, the process runs each that is
-there as an input of its own and says what it made for the model (its helpers by signature, and
-how many other names it bound: `@helper`, below), or its traceback; one failing doesn't stop the
+there as an input of its own and says which of its functions are told to the model, by signature
+up to a budget and then by name (below), or its traceback; one failing doesn't stop the
 next, and one that isn't there is passed over. A UTF-8 byte order
 mark is no part of either file, as `python file.py` has it. One that ends the Python
 process (`os._exit`, a crash) would end every new one: the input it cut short says which file it was,
@@ -128,10 +130,10 @@ model, and nothing needs keeping from it. Where each is read is the point:
   directory in it, so the Python process can't see it: the host expands its name, reads it and sends
   its source in the input (registered with `linecache`, so a traceback shows its lines). It
   runs in the model's REPL, so whatever it holds the model can read. In a Linux jail the file
-  itself is not there: its helpers run and `inspect.getsource` shows them (through
-  `linecache`), but `open` on its path finds nothing, a helper that reads a file beside it
+  itself is not there: its functions run and `inspect.getsource` shows them (through
+  `linecache`), but `open` on its path finds nothing, a function that reads a file beside it
   finds nothing either, and `__file__` is not set (nor for the project's: each runs as an
-  input). The model is told how to see one (`inspect.getsource(NAME)`, NAME a helper as the startup line lists it).
+  input). The model is told how to see one (`inspect.getsource(NAME)`, NAME a function as the startup line lists it).
 - But only when reading it goes nowhere an input may write (`host_paths.walked`, the walk the
   models file and memory files outside the project are held to: each directory and link on the
   way, as named and as resolved): the
@@ -151,33 +153,50 @@ by where it is read: one named from the root is the project's, one named from th
 directory, their home or `/` is theirs. `instructions_for` tells the model that only the
 project's startup file is its to edit, and names the person's, which comes before it, as theirs.
 
-`helper` is in the namespace when the Python process starts, before any startup file runs
-(`worker._helper`, bound once, so an input that binds its own keeps it, as with `tools`): it sets
-`__bh_helper__ = True` on what it decorates and returns it unchanged, so a decorated function is
-the same function, and a file run outside bh-02 can define a stand-in (`try: helper` / `except
-NameError: def helper(f): return f`). Confined, a startup file's input prints, last and on a line
-of its own, one line of JSON (`client._startup_input`): the file's helpers, each name and
+Which functions the model is told of is decision-0006's point 1, and the Python process decides it,
+where the objects are. Confined, a startup file's input prints, last and on a line of its own, one
+line of JSON (`client._startup_input`): `{"told": [[name, signature], ...]}`, each name with
 `str(inspect.signature(...))` (null when that fails: a builtin without a signature, a default
-whose `repr` raises), at most 640 characters of it, and how many other public names it bound. The
-public names are those its code binds at the top, as the compiler reads it (so one bound again to
-the object it held counts), and any new or changed after it; a helper is one whose value is a
-callable with `__bh_helper__ is True` itself, so an object that answers every attribute with
-something truthy is not one. That line is the Python process's, so the host reads it as data and
-words it in pure functions (`client.startup_ran`, `client.signed`): control and format characters
-(C0, DEL, C1, bidi overrides, zero-width) are stripped, a name that is not an identifier (a file
-can bind any string through `globals()`) is counted with the hidden ones, each signature is cut at 160 characters and ends in `…`, one that could not be
-read is `name(...)`, and a last line that is not that shape is said not to be a listing and never
-quoted. The first input is told `(PATH ran first: helpers run_tests(path='.', *, quiet=True),
-changed(); 3 other names hidden)`, in the order the file made them; a file with none, `PATH ran
-next: no helpers; 3 names hidden`; one that bound nothing, `PATH ran first and defined:
-nothing`. Undecorated names exist and work, and are only counted. `help(name)` shows a helper's
-docstring, as for any function, and `_keep` tells the model that once, in the `python` section,
-which stays fixed for a conversation: the signatures arrive with the first input's output, never
-in the prompt. They are told at startup only: a REPL started again runs the files and tells them
-again, a helper an input defines later is not announced, and after `/compact` they live only in
-the model's summary. Unconfined, nothing is listed (the model runs the file as an input of its
-own, which the person is asked about), though `helper` is bound all the same, so a file that
-uses `@helper` runs.
+whose `repr` raises), at most 640 characters of it. A name is told when it has no leading
+underscore and its value is a function, method or class that is `callable`, was not an object the
+namespace held before the file ran, and has the namespace's `__name__` as its `__module__`: a def,
+a class or a lambda the file's code made. An import is not one (its `__module__` is another
+module's), nor is `partial(...)` of one; a name bound to what an earlier file made (the project's
+`display = show` for the person's `show`) is not told again; an instance, a callable one too, is
+data, not a function or a class; a value that raises when asked is left alone, and the file does not
+fail for it. When the file binds `__all__` (a list or a tuple that is a new object after the file
+ran: one an earlier file left is that file's), the told names are exactly the callables it names,
+imported ones and underscored ones included, in its order; a name it lists that the file never bound
+is nothing to tell, and so is an entry that is no name. Everything else the file bound works as it
+does and is not told, nor counted. That line is the Python process's, so the host reads it as data
+and words it in pure functions (`client.startup_ran`, `client.signed`): control and format
+characters (C0, DEL, C1, bidi overrides, zero-width) are stripped, a name that is not an
+identifier (a file can bind any string through `globals()`) is left out, each signature is cut at
+160 characters and ends in `…`, one that could not be read is `name(...)`, and a last line that is
+not that shape is said not to be a listing and never quoted.
+
+The signatures are told up to 600 characters across the REPL's startup files (`client._BUDGET`),
+the person's file first, counted as the model reads them (`name(signature)`, after the cleaning
+and the cut, not the separators). The first function that does not fit ends the signatures, and
+it and every function after it, in that file and in the files that run after it, is told by name
+only, so nothing is left out. The budget is threaded through the opening's loop as a value
+(`startup_ran(name, when, line, left)` returns the aside and what is left), not kept on
+`PythonProcess`. The first input is told `(PATH ran first: functions run_tests(path='.', *,
+quiet=True), changed(); by name only: more, other)`; a file that tells none, `PATH ran next: no
+public functions`. `help(name)` shows a function's docstring and `inspect.getsource(name)` its
+source, as for any function: both are pulled, and cost nothing until the model asks. `_keep` says
+all this once, in the `python` section, which stays fixed for a conversation (which functions are
+told, what they cost, and the docstring convention for a file the model writes); the signatures
+arrive with the first input's output, never in the prompt. They are told at startup only: a REPL
+started again runs the files and tells them again, a function an input defines later is not
+announced, and after `/compact` they live only in the model's summary. Unconfined, nothing is
+listed (the model runs the file as an input of its own, which the person is asked about), so the
+section does not say it is, though it says the docstring convention. There is no decorator and
+nothing of bh-02's in a startup file: it runs unchanged outside bh-02, and one that still marks its
+functions with decision-0004's decorator fails at start with a `NameError` (the name is no longer
+bound), reported on the startup line like any failing file. The line is bounded by the Python
+process's output cap (20,000 characters): a file with so many functions that it passes that is said
+not to be listable.
 
 The namespace's `__name__` is `__kernel__`: a startup file may test it, and renaming it would
 break that silently.

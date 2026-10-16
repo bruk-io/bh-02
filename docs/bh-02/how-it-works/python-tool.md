@@ -9,7 +9,7 @@ Python REPL of its own that persists for the run.
 ## What an input can do
 
 Each call is an input to one Python process, the one the runner started. It is plain Python, not
-IPython, and nothing of bh-02's is in its namespace but `tools` and `helper` (below). An input:
+IPython, and nothing of bh-02's is in its namespace but `tools` (below). An input:
 
 - reads and edits files with `open` or `pathlib`;
 - runs programs (`git`, a test runner, `python`) with `subprocess`, in the project directory;
@@ -36,9 +36,9 @@ a tool added mid-conversation can be called from code at once, even where the mo
 of tools stays as the conversation began (TASK-0057's `fixed` providers). The namespace is a
 view of the registry, never where a tool is registered.
 
-A function the model defines in an input, a helper and a registered tool differ in what holds them:
+A function the model defines in an input, a function a startup file defines and a registered tool differ in what holds them:
 
-| | A function defined in an input | A helper (`@helper` in a startup file) | A registered tool |
+| | A function defined in an input | A function a startup file defines | A registered tool |
 |---|---|---|---|
 | Where it lives | the Python process's namespace | the Python process's namespace, put there by its startup file | `tools`, the registry a row (or an extension) registers into |
 | How long | until the process ends (`/clear`, a restart, a resume) | as long as its startup file: a new REPL runs the file again (with `--no-jail`, once the model runs it) | as long as its row: an extension's lasts as long as its file, across sessions |
@@ -46,8 +46,8 @@ A function the model defines in an input, a helper and a registered tool differ 
 | Asked about, told asides | no: the input that calls it was | no: the input that calls it was | each call, as any tool call |
 | Where it runs | in the Python process | in the Python process, with an input's limits | where its row says: an extension's in the extensions process, a layer row's in bh-02 |
 
-A function worth keeping between sessions goes in the project's startup file, marked `@helper` so a
-new REPL tells the model of it; a capability the model should have as a tool, or that should run
+A function worth keeping between sessions goes in the project's startup file, where a new REPL
+tells the model of it; a capability the model should have as a tool, or that should run
 outside the Python process, is an extension's tool.
 
 ## How long the namespace lasts
@@ -64,35 +64,46 @@ why when it knows. The transcript is the record; the namespace is a cache.
 A new Python process can run setup code before the first input, when it is jailed:
 
 1. yours: `~/.config/bh-02/startup.py` (`$XDG_CONFIG_HOME/bh-02/startup.py` when that is set), for
-   helpers you want in every project;
+   functions you want in every project;
 2. the project's: `.bh-02/startup.py`, the only one the model is told it may edit.
 
 The first input is told what each made for the model, or its traceback. One failing doesn't stop
 the other. Without the jail they don't run unasked: the model is told to run them as inputs, which
 you are asked about like any other, and nothing is listed.
 
-### Helpers
+### Startup functions
 
-A function in a startup file is a helper when it is marked `@helper`. `helper` is already in the
-namespace when a startup file runs, so it needs no import. The first input is told each helper by
-name and signature, and how many other names the file bound, not which:
+The model is told of a startup file's public functions: the functions and classes the file defines
+under a name with no leading underscore. When the file sets `__all__`, exactly the callables it
+names instead, imported ones included. An import is not a function the file defines, and a name
+with a leading underscore works but is not told; nothing is marked, so the file runs unchanged
+outside bh-02. The first input is told each by name and signature, in the order the file made them:
 
 ```text
-(.bh-02/startup.py ran first: helpers run_tests(path='.', *, quiet=True), changed(); 3 other names hidden)
+(.bh-02/startup.py ran first: functions run_tests(path='.', *, quiet=True), changed())
 ```
 
-A file with no helper says `no helpers; N names hidden`. Unmarked names exist and work, they are
-only not told, so a long startup file costs the model a few signatures and a count, not every name.
-`help(name)` shows a helper's docstring. Control and format characters are stripped from a
-signature, one over 160 characters is cut there, and one Python can't read is `name(...)`; a name
-that is not an identifier is counted as hidden, never listed.
+That costs the model context in every session, so it is bounded: the first 600 characters of
+signatures across your file and the project's, in the order they run, then the rest by name only,
+so nothing is left out:
 
-`@helper` returns the function itself, with one attribute set, so a file you also run outside bh-02
-can define a stand-in: `try: helper` / `except NameError:` and `def helper(f): return f`.
+```text
+(.bh-02/startup.py ran next: functions fast(x); by name only: slow, slower)
+```
 
-The model is told this once, at startup: a new REPL runs the files and tells them again, a helper
+A file that tells none says `no public functions`. Keep public only what is worth telling every
+session, with a short signature. The docstring and the source cost nothing until the model asks:
+`help(name)` shows a function's docstring, `inspect.getsource(name)` its source. The model is told
+the docstring convention for the file it writes: a summary line; what the signature doesn't say, in
+the project's own field style (Google's when it has none), never the types again; then examples in
+reST, a doctest block (`>>>` calls with their output) when the output is fixed, a `::` block when it
+isn't. Control and format characters are stripped from a signature, one over 160 characters is cut
+there, and one Python can't read is `name(...)`; a name that is not an identifier is left out.
+
+The model is told this once, at startup: a new REPL runs the files and tells them again, a function
 the model defines in a later input is not announced, and after `/compact` the signatures live only
-in the model's summary.
+in the model's summary. A file that still marks its functions with the old decorator fails at start
+with a `NameError`, reported on the startup line as any failing file is.
 
 bh-02 reads your file itself and sends its text in, since a Linux jail has no home directory in
 it. So whatever your file holds, the model can read. The project's file is read inside the jail.

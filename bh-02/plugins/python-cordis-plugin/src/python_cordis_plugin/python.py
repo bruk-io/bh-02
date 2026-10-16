@@ -58,9 +58,20 @@ and a later input, with `uses` still there, edits one of those files:
     text = p.read_text()
     assert text.count("retries = 3") == 1, text.count("retries = 3")
     p.write_text(text.replace("retries = 3", "retries = 5"))"""
-_HELPERS = (
-    "`@helper` on a function in a startup file lists it with its signature when the REPL starts; "
-    "`help(name)` shows its docstring; a startup file's other names are not listed."
+_TOLD = (
+    "A startup file's public functions are told to you, by signature, when a REPL starts: the "
+    "functions and classes it defines under a name with no leading underscore, or exactly the "
+    "callables its `__all__` names, imported ones too. Each costs its signature in context in every "
+    "session, and past 600 characters of signatures you are told names only: keep public only what "
+    "is worth that, with a short signature. A function left out (a leading underscore, or not in "
+    "`__all__`) works all the same, untold. `help(name)` (its docstring) and `inspect.getsource(name)` "
+    "(its source) cost nothing until you ask."
+)
+_DOCSTRINGS = (
+    "A startup function's docstring should have a summary line; then what its signature doesn't "
+    "say, in the project's own field style (Google's when it has none), never the types again; then "
+    "examples in reST: a doctest block (`>>>` calls with their output, a blank line before and "
+    "after) when the output is fixed, a `::` block when it isn't."
 )
 _USE = (
     "How to use it:",
@@ -94,15 +105,15 @@ _USE = (
     "- Several calls in one message run in order, one input each. The person sees every input "
     "and its output as it runs, so say what a result means rather than repeat it.",
     "- Three kinds of function are here, and they are different things. Your own: what an input "
-    "defines, plain Python in this REPL, gone when the REPL ends. Helpers: functions a startup "
-    "file marks `@helper`, also plain Python in this REPL; a helper runs as your own code does, "
-    "with the same limits, and is kept in its startup file rather than only in the REPL. Tools: "
-    "bh-02's own, `tools.NAME(arg=...)`; a call leaves the REPL and is run by bh-02, exactly as "
-    "your own call to that tool would be (asked about when that call would be, with bh-02's "
-    "asides), so a tool can do what your code can't, such as start a sub-agent. A tool call "
-    "returns its result as text, and raises tools.Error when it did not run or failed. `tools` "
-    "lists them, help(tools.NAME) shows what one takes, and an aside before an input's output "
-    "says when they change. Don't bind `tools` yourself.",
+    "defines, plain Python in this REPL, gone when the REPL ends. The startup files': what a "
+    "startup file defines, also plain Python in this REPL; it runs as your own code does, with the "
+    "same limits, and is kept in its file rather than only in the REPL. Tools: bh-02's own, "
+    "`tools.NAME(arg=...)`; a call leaves the REPL and is run by bh-02, exactly as your own call to "
+    "that tool would be (asked about when that call would be, with bh-02's asides), so a tool can "
+    "do what your code can't, such as start a sub-agent. A tool call returns its result as text, "
+    "and raises tools.Error when it did not run or failed. `tools` lists them, help(tools.NAME) "
+    "shows what one takes, and an aside before an input's output says when they change. Don't "
+    "bind `tools` yourself.",
 )
 
 
@@ -129,7 +140,7 @@ def instructions_for(
     the person's own, which run before them and are not), how to use it, and where its code
     runs. `reads`, the trees the jail lets code read when it reads by allowlist (a Linux jail), is
     said plainly, so the model spends no steps on reads that can't succeed, and so is how to see
-    a helper of the person's, whose file is usually not among them. `elsewhere`, the directories
+    a function of the person's, whose file is usually not among them. `elsewhere`, the directories
     outside the project the jail lets code write (a row's, such as the project's auto memory),
     is named with the project, so the model knows its code can write there too."""
     writes = " and ".join(["the project directory", *elsewhere])
@@ -153,8 +164,8 @@ def instructions_for(
         if confined and theirs:
             where += (
                 " The person's startup file runs in the REPL even where your code finds no such "
-                "file (bh-02 reads it for the REPL): inspect.getsource(NAME) shows one of its "
-                "helpers, NAME as the startup line lists it."
+                "file (bh-02 reads it for the REPL): inspect.getsource(NAME) shows the source of "
+                "one of its functions, NAME as the startup line lists it."
             )
     keep = _keep(confined, (startup,) if isinstance(startup, str) else startup, theirs)
     return "\n".join([f"{_REPL} {keep}".rstrip(), "", *_USE, "", where])
@@ -163,9 +174,10 @@ def instructions_for(
 def _keep(confined: bool, startup: Sequence[str], theirs: Sequence[str]) -> str:
     """What the model is told of the startup files: the project's (`startup`) are its own to
     write and grow; the person's (`theirs`), which come first, are theirs and not its to edit.
-    Confined, the files run when the REPL starts, and it is told what `@helper` does in them
-    (once: the prompt is fixed for a conversation, the signatures arrive with the first input's
-    output). Unconfined nothing is listed, so nothing of it is said."""
+    Confined, the files run when the REPL starts, and it is told which of their functions are told
+    to it and what they cost (once: the prompt is fixed for a conversation, the signatures arrive
+    with the first input's output); unconfined nothing is listed, so none of that is said. The
+    docstring convention is said of the project's file, the model's to write, either way."""
     runs = (
         "a new REPL runs it before your first input."
         if confined
@@ -189,5 +201,7 @@ def _keep(confined: bool, startup: Sequence[str], theirs: Sequence[str]) -> str:
             "is theirs, not yours to edit."
         )
     if confined and said:
-        said.append(_HELPERS)
+        said.append(_TOLD)
+    if startup:
+        said.append(_DOCSTRINGS)
     return " ".join(said)

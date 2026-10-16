@@ -41,14 +41,15 @@ passed over by the workers after it, until `/restart python`, and the input it c
 which it was, after what the opening had to tell by then (that the worker was started again,
 and why).
 
-The model is told what each file made for it by signature, not by name: the Python process binds
-`helper` (`worker._helper`) before any file runs, a file marks a function `@helper`, and the input
-that runs the file prints, last, one line of JSON naming each marked function and the signature
-text `inspect.signature` gave (or None), and how many other public names the file bound. That
-line is the Python process's, so the host reads it as data and says it in pure functions
-(`startup_ran`, `signed`): control and format characters stripped, each signature cut at `_CUT`,
-`name(...)` for one that could not be read, and a name Python could not have written (not an
-identifier) counted with the hidden ones, never listed.
+The model is told what each file made for it, function by function: the input that runs a file
+prints, last, one line of JSON naming each function the file tells and the signature text
+`inspect.signature` gave (or None), and which are told is decided there, in the Python process (the
+public functions and classes the file defines, or exactly the callables its `__all__` names;
+`_startup_input`). That line is the Python process's, so the host reads it as data and says it in
+pure functions (`startup_ran`, `signed`): control and format characters stripped, each signature
+cut at `_CUT`, `name(...)` for one that could not be read, a name Python could not have written (not
+an identifier) left out, and signatures told up to `_BUDGET` characters across the REPL's startup
+files, in the order they run, then names only.
 """
 
 import asyncio
@@ -63,7 +64,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from sys import executable
 from types import TracebackType
-from typing import Any, Protocol, assert_never, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from host_paths import config_home, walked
 from python_cordis_plugin.python import PYTHON, instructions_for
@@ -76,8 +77,12 @@ _WORKER = Path(__file__).with_name("worker.py")
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
 _LINE_LIMIT = 1 << 20
 _CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a startup file in the person's config directory
-_CUT = 160  # the longest signature, in characters, the model is told of a helper
+_CUT = 160  # the longest signature, in characters, the model is told of a function
 _READ = 4 * _CUT  # how much of one the Python process sends: the host cleans it, then cuts it at `_CUT`
+# The most characters of signatures (`name(signature)`, cleaned and cut) the model is told across a
+# REPL's startup files, the person's first; the first function that does not fit, and every one
+# after it, is told by name only. The python section says the same number (`python._TOLD`).
+_BUDGET = 600
 # Unicode's control (C0, DEL, C1) and format (bidi overrides, zero-width) categories: what no line
 # the model reads as bh-02's own may hold, since they break the line, or reorder or hide its text
 _STRIPPED = frozenset({"Cc", "Cf"})
@@ -139,7 +144,7 @@ class Rule(Protocol):
 class PythonProcessConfig:
     """`root` is the working directory inputs run in; `grace` how long an interrupted input gets
     to say it ended before the worker is stopped and started again; `startup` the files a new
-    Python process runs, in order, before its first input, when its inputs are confined: helpers kept
+    Python process runs, in order, before its first input, when its inputs are confined: functions kept
     across sessions. The person's own first (`$XDG_CONFIG_HOME/` is their config directory: that
     variable's value, else `~/.config`, as for the models file; `~/` is their home), then the
     project's (a relative name is from `root`), the one the model may write. A single string is
@@ -223,43 +228,33 @@ def _told(asides: Sequence[str]) -> str:
     return f"({'. '.join(asides)})\n" if asides else ""
 
 
-@dataclass(frozen=True, slots=True)
-class _Bound:
-    """What a startup file's input said it made: its helpers, each as its name and the text of its
-    signature (None: `inspect.signature` could not read it), and how many other public names it
-    bound, which are not told."""
-
-    helpers: tuple[tuple[str, str | None], ...]
-    hidden: int
-
-
-def _bound(line: str) -> _Bound | None:
-    """What the startup input's last line says, or None when it is not the shape `_startup_input`
-    prints: `{"helpers": [[name, signature or null], ...], "hidden": count}`. The line is the
-    Python process's, so nothing about it is taken on trust."""
+def _bound(line: str) -> tuple[tuple[str, str | None], ...] | None:
+    """What the startup input's last line says: the functions the file told, each as its name and
+    the text of its signature (None: `inspect.signature` could not read it), or None when the line is
+    not the shape `_startup_input` prints: `{"told": [[name, signature or null], ...]}`. The line is
+    the Python process's, so nothing about it is taken on trust: a file can bind any string as a
+    name (`globals()[...]`), and one Python could not have written is left out, so it can't word the
+    aside."""
     try:
         said = json.loads(line)
     except ValueError, RecursionError:  # not JSON, a number past Python's limit, nested past its stack
         return None
     match said:
-        case {"helpers": list() as helpers, "hidden": int() as hidden} if hidden >= 0:
+        case {"told": list() as told}:
             found: list[tuple[str, str | None]] = []
-            for each in helpers:
+            for each in told:
                 match each:
                     case [str() as name, str() | None as signature]:
                         found.append((name, signature))
                     case _:
                         return None
-            # a file can bind any string as a name (`globals()[...]`): one Python could not have
-            # written is counted with the hidden names, so the aside's wording stays bh-02's
-            named = tuple(each for each in found if each[0].isidentifier())
-            return _Bound(named, hidden + len(found) - len(named))
+            return tuple(each for each in found if each[0].isidentifier())
         case _:
             return None
 
 
 def signed(name: str, signature: str | None) -> str:
-    """A helper as the model is told it: `name` and its `signature` text (`inspect.signature`'s,
+    """A function as the model is told it: `name` and its `signature` text (`inspect.signature`'s,
     parentheses included), `name(...)` when there is none. Control and format characters
     (`_STRIPPED`) are stripped, the file being model-written and a default's repr anything, and
     the signature, once stripped, is cut at `_CUT` characters and ends in `…` when it was cut."""
@@ -275,44 +270,61 @@ def _plain(text: str) -> str:
     return "".join(char for char in text if unicodedata.category(char) not in _STRIPPED)
 
 
-def _names(count: int, other: bool) -> str:
-    return f"{count} {'other ' if other else ''}name{'' if count == 1 else 's'}"
+def _fitted(
+    told: Sequence[tuple[str, str | None]], left: int
+) -> tuple[tuple[str, ...], tuple[str, ...], int]:
+    """`told`, in order, split at the budget: the functions whose signed text (`signed`: the text
+    the model reads, cleaned and cut) fits in what is `left` of it, the names of those that follow
+    the first that does not, and what is left. The first that does not fit ends the signatures and
+    closes the budget (0 left), so no later function, in this file or the next, is shown out of its
+    place."""
+    shown: list[str] = []
+    for each, signature in told:
+        text = signed(each, signature)
+        if len(text) > left:
+            return tuple(shown), tuple(_plain(name) for name, _ in told[len(shown) :]), 0
+        shown.append(text)
+        left -= len(text)
+    return tuple(shown), (), left
 
 
-def startup_ran(name: str, when: str, line: str) -> str:
-    """What the model is told of the startup file `name` that ran `when` (`first` or `next`),
-    from the last line of the output of its input (`_startup_input`): its helpers by signature
-    and how many other names are hidden, `no helpers; N names hidden` for a file with none, and
-    for one that bound nothing the word it always had. A line that is not what the input prints
-    is said not to be, never quoted."""
-    match _bound(line):
-        case None:
-            return (
-                f"{name} ran {when}; what it bound could not be listed "
-                "(its input's last line was not the listing)"
-            )
-        case _Bound((), 0):
-            return f"{name} ran {when} and defined: nothing"
-        case _Bound((), hidden):
-            return f"{name} ran {when}: no helpers; {_names(hidden, other=False)} hidden"
-        case _Bound(helpers, hidden):
-            listed = ", ".join(signed(each, signature) for each, signature in helpers)
-            others = f"; {_names(hidden, other=True)} hidden" if hidden else ""
-            return f"{name} ran {when}: helpers {listed}{others}"
-        case _ as unreachable:
-            assert_never(unreachable)
+def startup_ran(name: str, when: str, line: str, left: int) -> tuple[str, int]:
+    """What the model is told of the startup file `name` that ran `when` (`first` or `next`), from
+    the last line of the output of its input (`_startup_input`), and what is left of the REPL's
+    budget of signatures (`left` characters, `_BUDGET` for the first file that ran) once it has
+    spent its share: the functions it told by signature, up to `left`, then by name only; `no
+    public functions` for a file that told none. A line that is not what the input prints is said
+    not to be, never quoted, and spends nothing."""
+    told = _bound(line)
+    if told is None:
+        return (
+            f"{name} ran {when}; what it bound could not be listed "
+            "(its input's last line was not the listing)",
+            left,
+        )
+    if not told:
+        return f"{name} ran {when}: no public functions", left
+    shown, bare, left = _fitted(told, left)
+    parts = [*([", ".join(shown)] if shown else []), *([f"by name only: {', '.join(bare)}"] if bare else [])]
+    return f"{name} ran {when}: functions {'; '.join(parts)}", left
 
 
 def _startup_input(path: str, source: str | None = None) -> str:
     """The input that runs a startup file in the namespace and prints, last and on a line of its
-    own, one line of JSON (`_bound` reads it): the file's helpers, each the name of a callable it
-    bound that carries `__bh_helper__ = True` itself (`@helper`; an object that answers every
-    attribute with something truthy is not one) and the text of its `inspect.signature`, at most
-    `_READ` characters, or null when that could not be made; and how many of the file's other
-    public names there are. The public names are those its code stores at the top (as the
-    compiler says: the same object bound again counts) or that are new or changed after it.
-    `source` is its text when the host read it (the person's own, which a jail that reads by
-    allowlist can't see), registered with `linecache` under `path` so a traceback shows its
+    own, one line of JSON (`_bound` reads it): the functions the file tells, each the name of a
+    callable and the text of its `inspect.signature`, at most `_READ` characters, or null when that
+    could not be made. Which are told is point 1 of decision-0006, decided here, where the objects
+    are. When the file binds `__all__` (a list or a tuple that is a new or changed object after it
+    ran, not one an earlier file left in the namespace), exactly the callables it names, in its
+    order, imported ones included: a name it lists that the file never bound, or that is no
+    callable, is nothing to tell. Otherwise each name with no leading underscore whose value is a
+    function, method or class made by this file: one that is `callable`, was not an object the
+    namespace already held (so a name bound to what an earlier file made is not told again) and
+    whose `__module__` is the namespace's `__name__` (a def, a class or a lambda the file's code
+    made, not an import, nor a `partial` of one; an instance, even a callable one, is data). In the
+    order the namespace holds them. A value that raises when asked is not told: the file does not
+    fail for it. `source` is its text when the host read it (the person's own, which a jail that
+    reads by allowlist can't see), registered with `linecache` under `path` so a traceback shows its
     lines; without it the worker reads `path` itself, in the jail. Either way a UTF-8 byte order
     mark is no part of it. The input's own names are gone after it, however it ends."""
     read = (
@@ -334,12 +346,12 @@ def _startup_input(path: str, source: str | None = None) -> str:
             *read,
             f"    _bh_code = compile(_bh_source, {path!r}, 'exec')",
             "    exec(_bh_code, globals())",
-            "    import dis as _bh_dis, inspect as _bh_inspect, json as _bh_json",
-            "    _bh_bound = {i.argval for i in _bh_dis.get_instructions(_bh_code)"
-            " if i.opname == 'STORE_NAME'}",
-            "    def _bh_marked(v):",  # an object may raise on any attribute but its own: not a helper then
+            "    import inspect as _bh_inspect, json as _bh_json",
+            "    _bh_held = {id(v) for v in _bh_before.values()}",
+            "    def _bh_made(v):",  # an object may raise on any attribute: not told then
             "        try:",
-            "            return callable(v) and getattr(v, '__bh_helper__', False) is True",
+            "            return (callable(v) and (_bh_inspect.isroutine(v) or _bh_inspect.isclass(v))"
+            " and id(v) not in _bh_held and v.__module__ == __name__)",
             "        except Exception:",
             "            return False",
             "    def _bh_signature(v):",  # a default's repr can be anything, and raise
@@ -347,15 +359,19 @@ def _startup_input(path: str, source: str | None = None) -> str:
             f"            return str(_bh_inspect.signature(v))[:{_READ}]",
             "        except Exception:",
             "            return None",
-            "    _bh_public = {n: v for n, v in globals().items() if not n.startswith('_')"
-            " and (n in _bh_bound or n not in _bh_before or _bh_before[n] is not v)}",
-            "    _bh_found = [[n, _bh_signature(v)] for n, v in _bh_public.items() if _bh_marked(v)]",
+            "    _bh_all = globals().get('__all__')",
+            "    if isinstance(_bh_all, (list, tuple)) and ("
+            "'__all__' not in _bh_before or _bh_before['__all__'] is not _bh_all):",
+            "        _bh_told = [n for n in dict.fromkeys(n for n in _bh_all if isinstance(n, str))"
+            " if callable(globals().get(n))]",
+            "    else:",
+            "        _bh_told = [n for n, v in globals().items() if not n.startswith('_') and _bh_made(v)]",
             "    print('\\n' + _bh_json.dumps("
-            "{'helpers': _bh_found, 'hidden': len(_bh_public) - len(_bh_found)}))",
+            "{'told': [[n, _bh_signature(globals()[n])] for n in _bh_told]}))",
             "finally:",
-            "    for _bh_name in ('_bh_before', '_bh_source', '_bh_code', '_bh_bound', '_bh_path',"
-            " '_bh_lines', '_bh_dis', '_bh_inspect', '_bh_json', '_bh_marked', '_bh_signature',"
-            " '_bh_public', '_bh_found', '_bh_name'):",
+            "    for _bh_name in ('_bh_before', '_bh_source', '_bh_code', '_bh_path', '_bh_lines',"
+            " '_bh_inspect', '_bh_json', '_bh_held', '_bh_made', '_bh_signature', '_bh_all', '_bh_told',"
+            " '_bh_name'):",
             "        globals().pop(_bh_name, None)",
         ]
     )
@@ -588,7 +604,7 @@ class PythonProcess:
         confined = self.confined
         try:
             ready = await asyncio.to_thread(self._ready, confined)
-        except Exception as error:  # the input still runs, and says why its helpers are missing
+        except Exception as error:  # the input still runs, and says why its functions are missing
             ready = []
             asides.append(f"the startup files could not be looked at ({error}), so none ran")
         if ready and not confined:
@@ -599,6 +615,7 @@ class PythonProcess:
                 f"are put to the person, so run {'it' if one else 'them'} as an input of your own if you "
                 f"want {'it' if one else 'them'}: {runs}"
             )
+        spare = _BUDGET  # of the signatures the model is told, what the files after this one may spend
         for index, startup in enumerate(ready if confined else ()):
             if startup.name in self._passed:
                 asides.append(
@@ -636,7 +653,8 @@ class PythonProcess:
                 )
             else:
                 lines = ran.output.strip().splitlines()
-                asides.append(startup_ran(startup.name, when, lines[-1] if lines else ""))
+                told, spare = startup_ran(startup.name, when, lines[-1] if lines else "", spare)
+                asides.append(told)
         return _told(asides)
 
     def _ready(self, read: bool) -> list[_Ready]:

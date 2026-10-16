@@ -121,7 +121,7 @@ async def test_unjailed_inputs_share_a_namespace_of_plain_python_and_each_is_ask
     assert _asked() == list(inputs)  # every input, with its code, before it ran
     assert "[1] 42" in out  # the namespace outlived the input that set it
     assert "[2] 'read with open()'" in out  # a file, read with plain Python
-    assert "[3] ['helper', 'x']" in out  # nothing in the namespace but what inputs put there, and `helper`
+    assert "[3] ['x']" in out  # nothing in the namespace but what inputs put there
     assert "[4] Traceback" in out and "NameError" in out
     assert "[5] denied: the person said no to this call" in out
     assert not (tmp_path / "declined.txt").exists()  # a no ran nothing
@@ -811,7 +811,7 @@ async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_hom
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The Linux jail reads by allowlist: the person's config directory is not in it. The host
-    reads the person's startup file and sends its source, so its helpers are there all the same;
+    reads the person's startup file and sends its source, so its functions are there all the same;
     the project's is read inside the jail, which can see the project."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
@@ -825,35 +825,35 @@ async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_hom
     async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
         out = await process.run(f"import os\nprint(os.path.exists({str(person)!r}))\nshow(TOOLS)")
     assert out.startswith(
-        f"({person} ran first: no helpers; 1 name hidden. "
-        ".bh-02/startup.py ran next: no helpers; 1 name hidden)\n"
+        f"({person} ran first: functions show(x). .bh-02/startup.py ran next: no public functions)\n"
     ), out
-    assert out.endswith("\nFalse\n'<2>'"), out  # the jail can't see the person's file; its helper runs
+    assert out.endswith("\nFalse\n'<2>'"), out  # the jail can't see the person's file; its function runs
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_on_linux_a_startup_file_s_helpers_are_listed_by_signature_from_inside_the_jail(
+async def test_on_linux_a_startup_file_s_functions_are_listed_by_signature_from_inside_the_jail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The listing is made in the jail, by the standard library alone (`inspect`, `json`), for the
-    person's file the host sent and the project's the jail read: each marked function by its
-    signature, the other names counted."""
+    person's file the host sent and the project's the jail read: each public function by its
+    signature, and what a file does not tell (a private name, an import) is not there."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "startup.py"
     person.parent.mkdir(parents=True)
-    person.write_text("@helper\ndef show(x):\n    return f'<{x}>'\n")
+    person.write_text("def show(x):\n    return f'<{x}>'\n")
     project = tmp_path / "project"
     (project / ".bh-02").mkdir(parents=True)
     (project / ".bh-02" / "startup.py").write_text(
-        "@helper\ndef run(cmd, *, quiet=True):\n    return cmd\n\nTOOLS = 2\n"
+        "import json\n\n\ndef run(cmd, *, quiet=True):\n    return cmd\n\n\n"
+        "def _go():\n    pass\n\n\nTOOLS = 2\n"
     )
     async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
         out = await process.run("show(run('ls'))")
     assert out == (
-        f"({person} ran first: helpers show(x). "
-        ".bh-02/startup.py ran next: helpers run(cmd, *, quiet=True); 1 other name hidden)\n'<ls>'"
+        f"({person} ran first: functions show(x). "
+        ".bh-02/startup.py ran next: functions run(cmd, *, quiet=True))\n'<ls>'"
     ), out
 
 
@@ -873,7 +873,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     xdg.mkdir(parents=True)
     (home / ".config").mkdir()  # the default directory's parent, without a bh-02 of its own
     person = xdg / "startup.py"
-    person.write_text("HELPER = 1\n")
+    person.write_text("MARK = 1\n")
     key = home / ".ssh" / "id_ed25519"  # a file the jail hides (brig's credential list)
     key.parent.mkdir()
     key.write_text("-----BEGIN STAND-IN KEY, NOT A SECRET-----\nc3RhbmQtaW4K\n")
@@ -888,7 +888,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
 
     default = home / ".config" / "bh-02" / "startup.py"
     inputs = [
-        attempt(f"open({str(person)!r}, 'w').write('HELPER = 2')"),
+        attempt(f"open({str(person)!r}, 'w').write('MARK = 2')"),
         attempt(f"os.symlink({str(key)!r}, 'planted'); os.replace('planted', {str(person)!r})"),
         attempt(
             f"os.makedirs({str(default.parent)!r}, exist_ok=True); os.symlink({str(key)!r}, {str(default)!r})"
@@ -901,19 +901,19 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     jail = BrigJail(BrigConfig(), _Host(trusted=trusted))
     async with _python(jail, PythonProcessConfig(root=str(home))) as process:  # session A, from home
         said = [await process.run(code) for code in inputs]
-    assert said[0].startswith(f"({person} ran first: no helpers; 1 name hidden)\n"), said[0]
+    assert said[0].startswith(f"({person} ran first: no public functions)\n"), said[0]
     assert [s.rsplit("\n", 1)[-1] for s in said] == ["DENIED"] * len(inputs), said
     with contextlib.suppress(FileNotFoundError):
         (home / "planted").unlink()  # the link it made in the home, before the refused rename
-    assert person.read_text() == "HELPER = 1\n" and not person.is_symlink()
+    assert person.read_text() == "MARK = 1\n" and not person.is_symlink()
     assert not default.exists() and not (xdg / "models.toml").exists()
     project = tmp_path / "work" / "project"  # session B, in another project
     project.mkdir(parents=True)
     async with _python(
         BrigJail(BrigConfig(), _Host(trusted=trusted)), PythonProcessConfig(root=str(project))
     ) as process:
-        seen = await process.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), HELPER")
-    assert seen == f"({person} ran first: no helpers; 1 name hidden)\n('HELPER = 1\\n', 1)", seen
+        seen = await process.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), MARK")
+    assert seen == f"({person} ran first: no public functions)\n('MARK = 1\\n', 1)", seen
     assert "STAND-IN" not in seen
 
 
