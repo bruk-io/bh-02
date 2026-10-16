@@ -3,11 +3,11 @@ id: TASK-0119
 title: >-
   arch-check: say so when dropping a gate's orphan index entries leaves any
   behind
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 12:14'
-updated_date: '2026-10-16 13:36'
+updated_date: '2026-10-16 14:17'
 labels:
   - gates
   - scripts
@@ -49,4 +49,6 @@ TASK-0119 worker notes (branch wt-w1, from ac91bcc).
 - Planted and seen failing: with the left_behind check removed from run_gate the integration test fails (assert 0 == 1: the run is green with the orphans still indexed, the silent no-op); script restored (cmp against the saved good copy) and 30 passed again.
 - scripts/check bh-02/app --no-gates --no-docs: exit 0 (format, lint, types, 228 passed 1 skipped; tokens skipped, no bh-01 dist).
 - scripts/arch-check runs once at the end of TASK-0120, which follows this on the same files.
+
+Review: CLOSE. AC1 met: run_gate re-reads indexed() once after drop_entries and hands that same read to without_index (two reads, as before); left_behind names each dropped entry still listed; the layout_moved integration test exits 1 naming b's entries, seen failing with the check removed; a clean gate drops nothing so left_behind returns None. test_arch_check.py 38 passed on re-run; full scripts/check green at eedde1e. AC2 met: drop_entries' docstring says a layout change makes the missing_ok unlink a silent no-op that slows the gate, that run_gate's re-read catches it, and what it cannot catch. Findings: none blocking or should-fix; no drafts filed.
 <!-- SECTION:NOTES:END -->
