@@ -27,15 +27,16 @@ then runs `check --strict` (plain `check` hides heuristic findings). It writes t
 it changes (a member was added), through a temporary file and a rename, because scripts/check runs
 pytest, ruff and mypy beside it and each reads pyproject.toml as it starts.
 
-With `--fix` (the default) the plain `check --strict` still comes first, and a gate that passes it is done:
-one `pypeeker check` run, as with `--no-fix`. Only a gate with findings goes on to `check --strict --fix`,
-which prints a JSON report of the fixes it applied and a count of the findings left (not the findings),
-exits non-zero exactly when findings remain, and runs the rules again only if it applied a fix. If it
-applied nothing the findings are the plain check's, already printed; if it applied some and exited 0
-the gate is clean; if it applied some and findings remain, a plain check runs again to print them.
-(Running `--fix` first and the plain check after, as this did, ran the rules twice in the commonest
-case, a clean gate; and `--fix`'s own run costs more than a plain check, since it also collects each
-fixable rule's repairs, so a clean gate is not better off with `--fix` alone.)
+With `--fix` (the default) a gate runs `check --strict --fix` once, and nothing else: it prints a JSON report
+of the fixes it applied and the findings left (`residual_findings`, the lines a plain check prints, in its
+order), and exits non-zero exactly when findings remain. Exit 0 is a clean gate (after the fixes, if it
+applied any); otherwise the findings are the report's, so a gate whose findings no fix applies to runs its
+rules once, and one that applied a fix runs them twice (before and after, inside pypeeker) with no
+third run to read what is left. With `--no-fix` it is one plain `check --strict`.
+(A plain check first, kept for a clean gate, was cheaper there, 36 s against 54 s for `--fix` on the root
+gate, since `--fix` also collects each fixable rule's repairs; but every gate with findings then ran the
+rules twice, the plain check and `--fix`, which is what the report's findings remove. The clean gate pays
+that collection now.)
 
 The gates share nothing (each has its own pyproject.toml, its own .pypeeker and its own sources),
 so they run at the same time and the run takes as long as the slowest gate, the root one, not as
@@ -230,10 +231,29 @@ def applied_note(report: Mapping[str, Any]) -> str:
     return f"pypeeker applied {len(report.get('fixes', []))} fix(es): tx {report['tx_id']}\n"
 
 
+def fix_outcome(result: subprocess.CompletedProcess[str]) -> Outcome:
+    """How a gate ended, from one `pypeeker check --strict --fix` run: the applied-fix line (if it applied
+    any), then the findings left, as the report gives them, then anything it wrote to stderr; ok exactly
+    when it exited 0, which pypeeker does only when no finding remains. Output that is not the report (a
+    usage error, a traceback), an error envelope, or a failing report with no findings in it (a pypeeker
+    older than `residual_findings`) fails the gate with what pypeeker said, in place of findings it did
+    not give."""
+    try:
+        report = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return Outcome(False, result.stdout + result.stderr)
+    if result.returncode == 0:
+        return Outcome(True, applied_note(report) + result.stderr)
+    if not (findings := report.get("residual_findings")):
+        return Outcome(False, result.stdout + result.stderr)
+    lines = "".join(f"{finding}\n" for finding in findings)
+    return Outcome(False, applied_note(report) + lines + result.stderr)
+
+
 def run_gate(gate: Path, fix: bool) -> Outcome:
     """Drop the index entries outside one gate's sources (failing if one is still listed), index what has
-    no index in them, run check --strict, and with `fix`, if it has findings, apply pypeeker's autofixes
-    and report what is left."""
+    no index in them, then run check --strict: with `fix`, as `check --strict --fix` (pypeeker applies its
+    autofixes and the report gives the findings left), else plain."""
     paths = sync_src(gate)
     dropped = outside_src(paths, indexed(gate))
     drop_entries(gate, dropped)
@@ -243,23 +263,10 @@ def run_gate(gate: Path, fix: bool) -> Outcome:
     if unindexed := without_index({path: sources(gate, path) for path in paths}, entries):
         if (problem := index(gate, unindexed)) is not None:
             return Outcome(False, problem)
+    if fix:
+        return fix_outcome(pypeeker(gate, "check", "--strict", "--fix", capture=True))
     checked = pypeeker(gate, "check", "--strict", capture=True)
-    printed = checked.stdout + checked.stderr
-    if checked.returncode == 0 or not fix:
-        return Outcome(checked.returncode == 0, printed)
-    # Findings, so a fix may apply. `check --fix` prints a JSON report (a count of what is left, and the
-    # findings its fixes address), not the findings, and exits non-zero exactly when findings remain.
-    result = pypeeker(gate, "check", "--strict", "--fix", capture=True)
-    try:
-        applied = applied_note(json.loads(result.stdout))
-    except json.JSONDecodeError:
-        return Outcome(False, result.stdout + result.stderr)
-    if applied and result.returncode == 0:
-        return Outcome(True, applied)
-    if not applied and result.returncode != 0:
-        return Outcome(False, printed)  # nothing changed, so these are the findings
-    rechecked = pypeeker(gate, "check", "--strict", capture=True)  # what is left is not what was printed
-    return Outcome(rechecked.returncode == 0, applied + rechecked.stdout + rechecked.stderr)
+    return Outcome(checked.returncode == 0, checked.stdout + checked.stderr)
 
 
 def gate_name(gate: Path) -> str:
