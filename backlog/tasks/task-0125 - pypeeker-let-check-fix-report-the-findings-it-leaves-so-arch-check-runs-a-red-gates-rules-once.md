@@ -3,7 +3,7 @@ id: TASK-0125
 title: >-
   pypeeker: let check --fix report the findings it leaves, so arch-check runs a
   red gate's rules once
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 14:12'
@@ -108,4 +108,6 @@ What this does and does not show: a clean gate's --fix run now does the plain ch
 - AC1's root pin naming the merged commit, uv.lock regenerated: the orchestrator's (this branch's tests read residual_findings, so they pass only on a pypeeker with 8f0e223; the skip needs f558226). Criterion 3 and 'scripts/check passes': the reviewer's.
 
 Orchestrator, 2026-10-16: pypeeker PR #150 (8f0e223 and f558226 with TASK-173's c5c1e01) squash-merged as cd78c2c after CI passed; the root pin now names cd78c2c and uv.lock was regenerated with `uv lock` (pypeeker 67b0a1b0 -> cd78c2cd). On this tree: `uv run pytest bh-02/app/tests/test_arch_check.py -q` 40 passed; `scripts/arch-check` (default --fix, clean tree, warm index) exit 0, five gates ok, 38.4 s wall (the plain check's cost the worker measured: 37.7 s).
+
+Reviewer: CLOSED. AC1 met: pin, uv.lock and .venv name cd78c2c; cli._finding_lines renders plain check, --baseline and residual_findings alike. AC2 met: one --fix call per gate; non-JSON, error envelope and findings-less failing report fail with pypeeker's text; test_arch_check.py 40 passed. AC3 met: paired medians 37.7 vs 38.1 s within spread, control 56.6 s; reviewer run scripts/arch-check exit 0 in 38.3 s, tree untouched. Skip in fix_run.plan_check_fixes is safe: remediations and findings come from the same rules over the same corpus, fixpoint path returns before it. Findings (not filed): nit, scripts/arch-check docstring lines 36-39 still say the clean gate pays the repairs collection, stale since cd78c2c; nit, fix_outcome assumes a JSON object (a JSON list/scalar would raise AttributeError rather than fail cleanly); worker's open idea, the same skip for --fix-until-clean's first round, unfiled. Full-tier record-check not run: brief forbids jail tests with sibling workers running.
 <!-- SECTION:NOTES:END -->
