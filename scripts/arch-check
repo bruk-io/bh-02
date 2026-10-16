@@ -33,10 +33,9 @@ order), and exits non-zero exactly when findings remain. Exit 0 is a clean gate 
 applied any); otherwise the findings are the report's, so a gate whose findings no fix applies to runs its
 rules once, and one that applied a fix runs them twice (before and after, inside pypeeker) with no
 third run to read what is left. With `--no-fix` it is one plain `check --strict`.
-(A plain check first, kept for a clean gate, was cheaper there, 36 s against 54 s for `--fix` on the root
-gate, since `--fix` also collects each fixable rule's repairs; but every gate with findings then ran the
-rules twice, the plain check and `--fix`, which is what the report's findings remove. The clean gate pays
-that collection now.)
+(No plain check first: every gate with findings would run its rules twice, the plain check and `--fix`,
+which is what the report's findings remove. A clean gate's `--fix` costs what a plain check does, since
+pypeeker collects no repairs when a run found nothing: a clean five-gate run took 38 s either way.)
 
 The gates share nothing (each has its own pyproject.toml, its own .pypeeker and its own sources),
 so they run at the same time and the run takes as long as the slowest gate, the root one, not as
