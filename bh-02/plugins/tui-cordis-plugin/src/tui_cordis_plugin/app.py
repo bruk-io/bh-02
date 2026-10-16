@@ -21,8 +21,9 @@ selection finished in the transcript (copied at once), and Ctrl-T for the newest
 or a selection in the transcript gives the focus back to the composer as the mouse lets go, so
 typing carries on (`_return_focus`).
 
-While a reply runs, a line above the composer says for how long (`Working`, redrawn by a timer
-that starts and stops with the reply).
+While a reply runs or a command does, a line above the composer says for how long (`Working`,
+redrawn by a timer that starts and stops with them): a reply is what streams (`TurnStarted`,
+`TurnEnded`), a command is a line the bridge says is being handled (`Handling`).
 
 Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
 withdraws its own (shown or queued), and Ctrl-C with one up answers no to every open question
@@ -61,6 +62,7 @@ from tui_cordis_plugin.history import History, Replay, merged
 from tui_cordis_plugin.messages import (
     Asked,
     FrameChanged,
+    Handling,
     Noted,
     Shown,
     TurnEnded,
@@ -153,12 +155,13 @@ class BhApp(App[None]):
         for each in theme.themes():
             self.register_theme(each)
         self.theme = theme.NAME
-        self.bridge = Bridge()
+        self.bridge = Bridge(self.post_message)
         self.frame = Frame(self.post_message)
         self.ready = asyncio.Event()
         self._asking: tuple[ApprovalScreen, asyncio.Future[bool]] | None = None
         self._queued: deque[_Question] = deque()
         self._replying = 0  # replies streaming now (started, not yet ended)
+        self._handling = False  # a line is being handled (the bridge's word: `Handling`)
         self._typed: list[str] = []  # lines typed while one streams, drawn once it ends
         self._hangups = 0  # checks in a row that found the terminal gone
         self._copied: _Taken | None = None  # the screen's selection as last copied
@@ -315,19 +318,33 @@ class BhApp(App[None]):
         self._record({"type": "user", "text": line})
 
     def on_turn_started(self, message: TurnStarted) -> None:
-        if not self._replying:
-            self.query_one(Working).begin()  # the first of the replies streaming now
         self._replying += 1
+        self._follow_working()
 
     def on_turn_ended(self, message: TurnEnded) -> None:
         self.query_one(Transcript).end_turn()
         self._record({"type": "turn_end"})
         self._replying = max(0, self._replying - 1)
+        self._follow_working()
         if not self._replying:
-            self.query_one(Working).end()
             typed, self._typed = self._typed, []
             for line in typed:
                 self._draw_typed(line)
+
+    def on_handling(self, message: Handling) -> None:
+        """A line began or stopped being handled: a command running has nothing streaming, so
+        this is how the app knows it is."""
+        self._handling = message.busy
+        self._follow_working()
+
+    def _follow_working(self) -> None:
+        """The line that says for how long runs while a reply streams or a line is being handled
+        (a command running), from the first of them and until the last ends."""
+        working = self.query_one(Working)
+        if self._replying or self._handling:
+            working.begin()
+        else:
+            working.end()
 
     def on_noted(self, message: Noted) -> None:
         self.query_one(Transcript).note(message.text, message.kind)

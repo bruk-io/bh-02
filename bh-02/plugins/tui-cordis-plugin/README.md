@@ -129,16 +129,23 @@ widest that fits is shown, again whenever the width changes. The keys are the on
 test presses every key the line names (read from the line itself) and sees it do what it says; the docs'
 Keys table (`docs/bh-02/using/commands.md`) is checked to list the same ones. Ctrl-O is still bound to nothing.
 
-**Working.** While a reply runs, a line between the transcript and the composer says so and for how
-long: `Working · 12s`, then `Working · 1m 05s`, then `Working · 1h 02m` (`render.working_line`, pure).
-The `Working` widget redraws it from a Textual timer (`set_interval`, every `WORKING_EVERY`, one second),
-never a loop or a wait: the timer starts when the first of the replies streaming begins
-(`TurnStarted`) and stops when the last ends (`TurnEnded`, which the output posts whether the reply
-finished, was stopped with Ctrl-C or Esc, or failed), and the next reply counts from its own start.
-The first tick comes a second in and the line is hidden until then, so a reply that ends sooner (a
-command's answer goes through the same stream) never flashes it or moves the transcript. It is the
-reply's line: a command still running (`!`, `/compact`) shows nothing until it answers. `BhApp(clock=,
-working_every=)` are the seams a test drives.
+**Working.** While a reply runs or a command does (`!`, `/compact`), a line between the transcript and the composer
+says so and for how long: `Working · 12s`, then `Working · 1m 05s`, then `Working · 1h 02m` (`render.working_line`,
+pure). The `Working` widget redraws it from a Textual timer (`set_interval`, every `WORKING_EVERY`, one second),
+never a loop or a wait: the timer starts with the first of what is running and stops when the last of it ends, and
+the next one counts from its own start. A reply is what is streaming: from `TurnStarted` to `TurnEnded`, which the
+output posts whether the reply finished, was stopped with Ctrl-C or Esc, or failed. A command is a line being
+handled, which the bridge knows and the stream does not (a command is shown only once it answers, and its own notes
+are streams that start and end: `/compact` says it is asking the model, then runs for as long as the summary takes):
+a line is handled from the moment it is handed out to the chat row until the chat row reads again (`Bridge.handling`),
+or, for a command whose answer restarts rows (`/clear`, `/model NAME`, `/compact`: the chat row reads again only
+once they are up), until that answer is shown. The bridge posts `Handling` at every change, and the app times the
+line while a reply streams or a line is being handled, so a command's answer ends it. The app is told by message,
+never by asking the bridge afterwards, so a line read right after a reply (one typed meanwhile and kept) is a new
+one: the count starts again from zero. The first tick comes a second in and the line is hidden until then, so a
+command that answers sooner (most do) never flashes it or moves the transcript. The line is the same for both: it
+says only that something runs and for how long. Esc, Ctrl-C and the note a held Ctrl-C leaves are the bridge's and
+`stop_reply`'s as before and know nothing of it. `BhApp(clock=, working_every=)` are the seams a test drives.
 
 **Paging.** PageUp and PageDown in the composer scroll the transcript a page (`Composer.Paged`, which
 the app answers with `Transcript.page`) and leave the focus and the cursor where they are, with the

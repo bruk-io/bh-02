@@ -11,7 +11,7 @@ from typing import Any
 
 from textual.message import Message
 
-__all__ = ["Asked", "FrameChanged", "Noted", "Shown", "TurnEnded", "TurnStarted", "Withdrawn"]
+__all__ = ["Asked", "FrameChanged", "Handling", "Noted", "Shown", "TurnEnded", "TurnStarted", "Withdrawn"]
 
 
 class Shown(Message):
@@ -31,6 +31,16 @@ class TurnStarted(Message):
 
 class TurnEnded(Message):
     """A reply's stream ended: whatever streams next starts a block of its own."""
+
+
+class Handling(Message):
+    """A line began or stopped being handled (the bridge's `handling`): `busy` says which. A line
+    is handled from when it is handed out to the chat row until the chat row reads again, so a
+    command still running (a `!` one, `/compact`) is, though nothing is streaming for it."""
+
+    def __init__(self, busy: bool) -> None:
+        super().__init__()
+        self.busy = busy
 
 
 class Noted(Message):
