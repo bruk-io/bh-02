@@ -8,7 +8,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 05:42'
-updated_date: '2026-10-16 06:16'
+updated_date: '2026-10-16 06:18'
 labels:
   - subagents
   - size-1
@@ -47,4 +47,6 @@ Fix: test_agents_wiring.py, test_unloading_the_agents_row_retires_every_child_it
 - Before the fix (from the description, not re-run here): the whole plugin failed this test 4 of 25 rounds, assert (1 == 2) on model.closed.
 - The file alone, as tester under tini (tini -s -- .venv/bin/python -m pytest -q -p no:cacheprovider -n auto --dist loadgroup .../test_agents_wiring.py): 48 passed, exit 0.
 - Criterion 2: the whole plugin (-n auto --dist loadgroup) 50 rounds running as tester under tini, the brief loop in two halves of 25 (about 14 s a round): 50 of 50 passed, no round printed a failure. The file's other tests ran in every round.\n- scripts/check bh-02/plugins/subagents-cordis-plugin, run as root under tini, exit 0: format, lint, types (6 files), tests (119 passed), gates, docs ok; tokens skipped (no /home/user/bh-01/dist).\n- Not verified: the other _up callers (lines 430, 521, 548, 1402) were only read, not changed; none asserts a model.closed count across a restart in the lines I read.
+
+No repro: the failure (4 of 25 whole-plugin rounds, assert 1 == 2 on model.closed) was recorded in the description before the fix; a passing test can't be recorded as a repro, as TASK-0110's close did.
 <!-- SECTION:NOTES:END -->
