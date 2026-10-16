@@ -3,11 +3,11 @@ id: TASK-0114
 title: >-
   Resolve a function by its symbol id without scanning every symbol: find_symbol
   costs the impurity sweep 22 s a run (pypeeker, then bump the pin)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 08:19'
-updated_date: '2026-10-16 13:16'
+updated_date: '2026-10-16 13:17'
 labels:
   - gates
   - size-2
@@ -100,4 +100,6 @@ modified_files above are pypeeker's paths (repository /home/user/pypeeker, commi
 Pin part of criterion 1 (orchestrator, 2026-10-16): the pypeeker change landed as part of brukhabtu/pypeeker PR #148 (CI green), squash-merged as 67b0a1b0121fa48d89c6cecaa82624592bfa8386. The commits reviewed were 04e2249 (TASK-0113), f6ea736 (TASK-0114) and 8fd3239 (TASK-0117) on pypeeker branch ccr-8cdd69a0-gt1lov (the workers' wt-* commits 7370f98, ae3f719 and 184d2ac re-applied without change). bh-02 commit 2bcfefe pins pypeeker@67b0a1b; uv.lock regenerated with `uv lock` (pypeeker 7905d240 -> 67b0a1b0, nothing else).
 - After the pin, on a quiet machine: scripts/arch-check --no-fix exit 0 in 56.4, 49.9, 49.8 s (TASK-0111 measured 115.6 s warm before any of TASK-0113..0118).
 - Full scripts/check: exit 0 in 208 s; format, lint, types, tests (3186 passed, 31 skipped), gates (all five ok), docs, tokens.
+
+Review: APPROVE. find_symbol still re-reads the store; the symbol table is memoised per Corpus, and every write builds a new Corpus, so a sweep can't see a stale table. The b:f vs a.b:f change is a correction and is documented. Criterion 2 met at 6.2 s median (14.1 s before), same findings on a planted impure function. Pin and lock checked in 2bcfefe: pypeeker@67b0a1b, only pypeeker changed in uv.lock; full check green per the orchestrator. Findings: two nits, no drafts (board notes name ae3f719 instead of f6ea736/67b0a1b; the test widens its use of the private _resolve_function).
 <!-- SECTION:NOTES:END -->
