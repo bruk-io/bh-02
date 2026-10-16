@@ -23,6 +23,16 @@ added; every run indexing all of them was 37 processes, about 2.4 s each), fails
 error, then runs `check --strict` (plain `check` hides heuristic findings). It writes that list only
 when it changes (a member was added), through a temporary file and a rename, because scripts/check
 runs pytest, ruff and mypy beside it and each reads pyproject.toml as it starts.
+
+The gates share nothing (each has its own pyproject.toml, its own .pypeeker and its own sources),
+so they run at the same time and the run takes as long as the slowest gate, the root one, not as
+long as all of them. Each gate's output is captured and printed whole, in gate order (the root,
+then each library), once it has finished: a gate that ends early waits for the ones before it to
+be printed, as scripts/check does for its steps. `--fix` runs at the same time too: pypeeker
+applies a gate's fixes as one transaction, kept under that gate's own .pypeeker and written to
+files in that gate's own src (and to temporary directories it makes for itself), so two gates
+fixing at once touch nothing in common as long as no file is in two gates' src, which the layout
+keeps (each library has its own gate, and the root one's src does not include libs/).
 """
 
 import contextlib
@@ -34,7 +44,9 @@ import subprocess
 import sys
 import tempfile
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -151,41 +163,70 @@ def drop_entries(gate: Path, entries: Sequence[str]) -> None:
         (gate / INDEX / f"{entry}.json").unlink(missing_ok=True)
 
 
-def index(gate: Path, path: str) -> None:
-    """Index one path, exiting non-zero if pypeeker fails or reports indexing errors."""
+@dataclass(frozen=True)
+class Outcome:
+    """How a gate ended: whether it passed, and everything it wrote (stdout and stderr)."""
+
+    ok: bool
+    output: str
+
+
+def index(gate: Path, path: str) -> str | None:
+    """Index one path; None when pypeeker did, else what it reported (a failure or indexing errors)."""
     result = pypeeker(gate, "index", path, capture=True)
     if result.returncode != 0:
-        click.echo(result.stdout + result.stderr, err=True)
-        sys.exit(result.returncode)
+        return result.stdout + result.stderr
     try:
         errors = json.loads(result.stdout).get("errors", [])
     except json.JSONDecodeError:
-        click.echo(f"pypeeker index {path}: unexpected output\n{result.stdout}", err=True)
-        sys.exit(2)
+        return f"pypeeker index {path}: unexpected output\n{result.stdout}"
     if errors:
-        click.echo(f"pypeeker index {path}: {json.dumps(errors, indent=2)}", err=True)
-        sys.exit(1)
+        return f"pypeeker index {path}: {json.dumps(errors, indent=2)}"
+    return None
 
 
-def run_gate(gate: Path, fix: bool) -> int:
+def run_gate(gate: Path, fix: bool) -> Outcome:
     """Drop the index entries outside one gate's sources, index what has no index in them, apply pypeeker
     autofixes, then run check --strict."""
     paths = sync_src(gate)
     drop_entries(gate, outside_src(paths, indexed(gate)))
     for path in without_index({path: sources(gate, path) for path in paths}, indexed(gate)):
-        index(gate, path)
+        if (problem := index(gate, path)) is not None:
+            return Outcome(False, problem)
+    applied = ""
     if fix:
         # --fix prints a JSON report rather than findings; report what it applied, then run a
         # plain check below so the findings and the exit code are the usual ones.
         result = pypeeker(gate, "check", "--strict", "--fix", capture=True)
         try:
-            report = json.loads(result.stdout)
+            fixed = json.loads(result.stdout)
         except json.JSONDecodeError:
-            click.echo(result.stdout + result.stderr, err=True)
-            sys.exit(result.returncode or 2)
-        if report.get("tx_id"):
-            click.echo(f"pypeeker applied {len(report.get('fixes', []))} fix(es): tx {report['tx_id']}")
-    return pypeeker(gate, "check", "--strict", capture=False).returncode
+            return Outcome(False, result.stdout + result.stderr)
+        if fixed.get("tx_id"):
+            applied = f"pypeeker applied {len(fixed.get('fixes', []))} fix(es): tx {fixed['tx_id']}\n"
+    checked = pypeeker(gate, "check", "--strict", capture=True)
+    return Outcome(checked.returncode == 0, applied + checked.stdout + checked.stderr)
+
+
+def gate_name(gate: Path) -> str:
+    """The gate as the repository names it: `(root)`, or its directory (`libs/brig`)."""
+    return "(root)" if gate == ROOT else gate.relative_to(ROOT).as_posix()
+
+
+def report(gate: Path, outcome: Outcome) -> bool:
+    """Print a gate's name, everything it wrote and its verdict; whether it passed."""
+    click.echo(click.style(f"== {gate_name(gate)}", bold=True))
+    if outcome.output:
+        click.echo(outcome.output, nl=not outcome.output.endswith("\n"))
+    verdict = "   ok" if outcome.ok else f"   FAILED: {gate_name(gate)}"
+    click.echo(click.style(verdict, fg="green" if outcome.ok else "red"))
+    return outcome.ok
+
+
+def outcomes(found: Sequence[Path], fix: bool) -> Iterator[Outcome]:
+    """Every gate started at once; each outcome yielded in the gates' order, as it is ready."""
+    with ThreadPoolExecutor(max_workers=len(found)) as pool:
+        yield from pool.map(lambda gate: run_gate(gate, fix), found)
 
 
 @click.command()
@@ -195,11 +236,10 @@ def run_gate(gate: Path, fix: bool) -> int:
     help="Apply certain-confidence autofixes as one transaction first (default), or only report.",
 )
 def main(fix: bool) -> None:
-    """Run every gate; exit non-zero if any fails."""
-    failed = [gate for gate in gates() if run_gate(gate, fix) != 0]
-    for gate in failed:
-        click.echo(f"gate failed: {gate.relative_to(ROOT) if gate != ROOT else '(root)'}", err=True)
-    sys.exit(1 if failed else 0)
+    """Run every gate at the same time; exit non-zero if any fails."""
+    found = gates()
+    results = [report(gate, outcome) for gate, outcome in zip(found, outcomes(found, fix), strict=True)]
+    sys.exit(0 if all(results) else 1)
 
 
 if __name__ == "__main__":

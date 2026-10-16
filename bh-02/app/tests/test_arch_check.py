@@ -5,7 +5,11 @@ new member passes silently unless the script indexes it first.
 
 Each test builds a small gate (a `pyproject.toml` with the `init-reexport-only` rule, whose
 violation is a definition in a package `__init__.py`) and runs the script's `run_gate` over it
-with the workspace's own pypeeker."""
+with the workspace's own pypeeker.
+
+The script runs its gates at the same time and reports each as `scripts/check` reports its steps:
+the gate's name, everything it wrote, `ok` or `FAILED: name`, in the order of the gates, with a
+non-zero exit if any gate failed."""
 
 import importlib.util
 import os
@@ -18,8 +22,10 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from click.testing import CliRunner
 
-_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "arch-check"
+_REPOSITORY = Path(__file__).resolve().parents[3]
+_SCRIPT = _REPOSITORY / "scripts" / "arch-check"
 
 _GATE = """\
 [tool.arch-check]
@@ -30,6 +36,9 @@ src = []
 plugins = ["pypeeker_rules.apps"]
 rules = ["init-reexport-only"]
 """
+_FIXING_GATE = _GATE.replace(
+    'rules = ["init-reexport-only"]', 'rules = ["init-reexport-only", "unused-imports"]'
+)
 _REEXPORTS = 'from {name}.mod import ok\n\n__all__ = ["ok"]\n'
 _DEFINES = "def defined_here() -> int:\n    return 1\n"  # what init-reexport-only forbids in an __init__
 
@@ -53,9 +62,10 @@ def indexed_paths(arch_check: ModuleType, monkeypatch: pytest.MonkeyPatch) -> li
     asked: list[str] = []
     index = arch_check.index
 
-    def spy(gate: Path, path: str) -> None:
+    def spy(gate: Path, path: str) -> str | None:
         asked.append(path)
-        index(gate, path)
+        problem: str | None = index(gate, path)
+        return problem
 
     monkeypatch.setattr(arch_check, "index", spy)
     return asked
@@ -80,10 +90,35 @@ def gate(tmp_path: Path) -> Path:
     return gate
 
 
+@pytest.fixture
+def workspace(arch_check: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A repository in miniature: the root gate and two libraries' gates (`libs/one`, `libs/two`),
+    each with a member `a` that breaks no rule, and the script's `ROOT` moved to it."""
+    root = tmp_path / "workspace"
+    for gate in (root, root / "libs" / "one", root / "libs" / "two"):
+        gate.mkdir(parents=True, exist_ok=True)
+        (gate / "pyproject.toml").write_text(_FIXING_GATE)
+        _member(gate, "a")
+    (root / "pypeeker_rules").symlink_to(
+        _REPOSITORY / "pypeeker_rules"
+    )  # the rules each gate loads from ROOT
+    monkeypatch.setattr(arch_check, "ROOT", root)
+    return root
+
+
+def _invoke(arch_check: ModuleType, *options: str) -> tuple[int, list[str]]:
+    """`main` with the options: its exit code and the lines it printed."""
+    result = CliRunner().invoke(arch_check.main, list(options))
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    return result.exit_code, result.output.splitlines()
+
+
 def _run(arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str]) -> tuple[int, str]:
-    """The gate's exit code and what pypeeker printed."""
-    code: int = arch_check.run_gate(gate, fix=False)
-    return code, capfd.readouterr().out
+    """The gate's exit code (0 if it passed) and what it reported. It wrote nothing to the terminal
+    itself: gates run side by side, so what each says is its outcome, which `main` prints whole."""
+    outcome = arch_check.run_gate(gate, fix=False)
+    assert capfd.readouterr() == ("", "")
+    return (0 if outcome.ok else 1), outcome.output
 
 
 def test_a_clean_gate_passes_and_leaves_nothing_without_an_index(
@@ -159,26 +194,28 @@ def test_a_member_added_before_the_first_run_is_indexed_with_the_rest(
 
 
 def test_a_file_that_cannot_be_indexed_fails_every_run_not_only_the_first(
-    arch_check: ModuleType, gate: Path
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A directory named like a module cannot be read; no entry is written, so each run asks again."""
     (gate / "members/a/src/a/broken.py").mkdir()
 
     for _ in range(2):
-        with pytest.raises(SystemExit) as stopped:
-            arch_check.run_gate(gate, fix=False)
-        assert stopped.value.code == 1
+        code, out = _run(arch_check, gate, capfd)
+        assert code == 1
+        assert out.startswith("pypeeker index members/a/src: ") and "broken.py" in out
 
 
-def test_a_src_entry_that_points_nowhere_is_refused(arch_check: ModuleType, tmp_path: Path) -> None:
+def test_a_src_entry_that_points_nowhere_is_refused(
+    arch_check: ModuleType, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """With no `[tool.arch-check]` globs the gate's `src` is taken as written, and a path with no
     files must not read as one with nothing to index."""
     (tmp_path / "pyproject.toml").write_text('[tool.pypeeker]\nsrc = ["nowhere"]\nrules = []\n')
 
-    with pytest.raises(SystemExit) as stopped:
-        arch_check.run_gate(tmp_path, fix=False)
+    code, out = _run(arch_check, tmp_path, capfd)
 
-    assert stopped.value.code != 0
+    assert code != 0
+    assert out != ""
 
 
 def test_a_path_is_without_an_index_when_any_of_its_files_is(arch_check: ModuleType) -> None:
@@ -317,3 +354,121 @@ def test_a_process_reading_the_file_while_the_list_changes_never_reads_part_of_i
         watching.join()
 
     assert torn == []
+
+
+def _gates(workspace: Path) -> list[Path]:
+    """The workspace's gates in the order the script reports them."""
+    return [workspace, workspace / "libs" / "one", workspace / "libs" / "two"]
+
+
+def test_the_gates_are_the_root_then_each_library_that_keeps_one(
+    arch_check: ModuleType, workspace: Path
+) -> None:
+    (workspace / "libs" / "plain").mkdir()
+    (workspace / "libs" / "plain" / "pyproject.toml").write_text("[project]\nname = 'plain'\n")
+
+    assert arch_check.gates() == _gates(workspace)
+
+
+def test_gates_run_at_the_same_time(
+    arch_check: ModuleType, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each waits at a barrier the others must reach, so all end ok only if they overlapped."""
+    meeting = threading.Barrier(3, timeout=30)
+    asked: list[bool] = []
+
+    def run_gate(gate: Path, fix: bool) -> object:
+        asked.append(fix)
+        meeting.wait()
+        return arch_check.Outcome(True, "")
+
+    monkeypatch.setattr(arch_check, "run_gate", run_gate)
+
+    assert [outcome.ok for outcome in arch_check.outcomes(_gates(workspace), fix=True)] == [True] * 3
+    assert asked == [True] * 3  # the `--fix` choice reaches every gate
+
+
+def test_each_gate_prints_whole_in_gate_order_whichever_ends_first(
+    arch_check: ModuleType, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The root gate only ends once the last library's has, and still prints first."""
+    last_ended = threading.Event()
+
+    def run_gate(gate: Path, fix: bool) -> object:
+        if gate == workspace:
+            ended = last_ended.wait(timeout=30)
+            return arch_check.Outcome(ended, "root: out\nroot: more\n")
+        if gate.name == "two":
+            last_ended.set()
+        return arch_check.Outcome(True, f"{gate.name}: out\n")
+
+    monkeypatch.setattr(arch_check, "run_gate", run_gate)
+
+    code, lines = _invoke(arch_check, "--no-fix")
+
+    assert code == 0
+    assert lines == [
+        "== (root)",
+        "root: out",
+        "root: more",
+        "   ok",
+        "== libs/one",
+        "one: out",
+        "   ok",
+        "== libs/two",
+        "two: out",
+        "   ok",
+    ]
+
+
+def test_gates_that_all_pass_exit_zero_and_each_says_so(arch_check: ModuleType, workspace: Path) -> None:
+    code, lines = _invoke(arch_check, "--no-fix")
+
+    assert code == 0
+    assert lines == ["== (root)", "   ok", "== libs/one", "   ok", "== libs/two", "   ok"]
+
+
+def test_a_failed_gate_is_named_the_others_still_report_and_the_exit_is_non_zero(
+    arch_check: ModuleType, workspace: Path
+) -> None:
+    (workspace / "libs/one/members/a/src/a/__init__.py").write_text(_DEFINES)
+
+    code, lines = _invoke(arch_check, "--no-fix")
+
+    assert code == 1
+    assert lines[:3] == ["== (root)", "   ok", "== libs/one"]
+    assert lines[3].startswith("members/a/src/a/__init__.py:1: [init-reexport-only]")
+    assert lines[4:] == ["   FAILED: libs/one", "== libs/two", "   ok"]
+
+
+def test_a_gate_that_cannot_be_indexed_is_named_and_the_others_still_report(
+    arch_check: ModuleType, workspace: Path
+) -> None:
+    (workspace / "members/a/src/a/broken.py").mkdir()
+
+    code, lines = _invoke(arch_check, "--no-fix")
+
+    assert code == 1
+    assert lines[0] == "== (root)" and lines[1].startswith("pypeeker index members/a/src: ")
+    assert lines[-5:] == ["   FAILED: (root)", "== libs/one", "   ok", "== libs/two", "   ok"]
+
+
+def test_every_gate_applies_its_fixes_and_says_so_when_they_run_at_once(
+    arch_check: ModuleType, workspace: Path
+) -> None:
+    """Three gates each hold an unused import `--fix` removes; each lands its own transaction."""
+    for gate in _gates(workspace):
+        (gate / "members/a/src/a/mod.py").write_text("import os\n\n\ndef ok() -> int:\n    return 1\n")
+
+    code, lines = _invoke(arch_check, "--fix")
+
+    assert code == 0
+    applied = "pypeeker applied 1 fix(es):"  # then " tx " and the transaction's id
+    assert [line.split(" tx ")[0] for line in lines] == [
+        *("== (root)", applied, "   ok"),
+        *("== libs/one", applied, "   ok"),
+        *("== libs/two", applied, "   ok"),
+    ]
+    for gate in _gates(workspace):
+        assert "import os" not in (gate / "members/a/src/a/mod.py").read_text()
+        assert len(list((gate / ".pypeeker" / "transactions").glob("*.jsonl"))) == 1
