@@ -62,6 +62,10 @@ class HeldTether:
     def fd(self) -> int:
         """The read end to hand to a start's wrapper.
 
+        The tether is at end-of-file once every write end is closed: a copy that a child
+        forked by another thread still holds, before its exec, keeps it open for a moment,
+        and a start made then is not refused (SPEC.md section 8, TASK-0079.25 point 2).
+
         Raises:
             TetherClosed: the tether is at end-of-file, or this hold was released.
         """

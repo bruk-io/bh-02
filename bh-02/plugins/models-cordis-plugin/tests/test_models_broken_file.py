@@ -2,10 +2,10 @@
 list, the status bar's model) and `/model NAME` say and still do (TASK-0093).
 
 The file is one problem for the whole file (not TOML, a key that is no table, a path that can't be
-read): the built-in models stay usable behind it, as behind a file refused in the project, so
-`/model sonnet` always gets the person out. A default that is no name, or names no model, or whose
-table has a problem, is TASK-0087's `Unusable`, said with what to write, and the file's other models
-and the built-ins are untouched."""
+read): the model row's `extra` stays usable behind it, as behind a file refused in the project, so
+`/model` of one of its models gets the person out (there are no built-in models to fall back on). A
+default that is no name, or names no model, or whose table has a problem, is TASK-0087's
+`Unusable`, said with what to write, and the file's other models and `extra` are untouched."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,13 +27,17 @@ from models_cordis_plugin import (
     set_model,
 )
 
-_LLAMA = '[llama]\nprovider = "openai"\nid = "llama3.2"\nbase_url = "http://localhost:11434/v1"\n'
+_LLAMA = (
+    '[ollama]\nprovider = "openai"\nbase_url = "http://localhost:11434/v1"\nmodels.llama.id = "llama3.2"\n'
+)
 _ENDPOINT = '[local]\nprovider = "openai"\ndiscover = true\nbase_url = "http://localhost:1234/v1"\n'
+# the model row's own endpoint, which a layer gives it: usable whatever the models file says
+_EXTRA = {"sub": {"provider": "claude-code", "models": {"haiku": {"id": "haiku"}}}}
 
 # What can't be read: its text, and what the row says of it.
 _UNREAD = {
     "not toml": ("default = [\n", "is not TOML", "fix it"),
-    "a key that is no table": ('llama = "x"\n', "'llama' is not a table", "each model is one, e.g."),
+    "a key that is no table": ('llama = "x"\n', "'llama' is not a table", "each endpoint is one, e.g."),
     "a directory": (None, "can't read the models file", "fix it or remove it"),
 }
 # A default that can't be used: the file's text, and what the row says of it.
@@ -44,7 +48,7 @@ _BAD_DEFAULTS = {
     "no model": ('default = "gone"\n' + _LLAMA, "no model named 'gone', the default in the models file"),
     "a broken endpoint's model": (
         'default = "local/x:7b"\n' + _ENDPOINT.replace("true\n", 'true\nid = "y"\n') + _LLAMA,
-        "an endpoint names no id",
+        "names an id, as a single model's table did",
     ),
 }
 
@@ -86,7 +90,7 @@ def _catalog(path: Path, **config: Any) -> Catalog:
 
 
 @pytest.mark.parametrize("kind", _UNREAD)
-async def test_a_file_that_can_not_be_read_is_the_row_s_error_but_the_built_ins_stay_usable(
+async def test_a_file_that_can_not_be_read_is_the_row_s_error_but_the_row_s_extra_stays_usable(
     tmp_path: Path, kind: str
 ) -> None:
     text, fragment, todo = _UNREAD[kind]
@@ -98,14 +102,16 @@ async def test_a_file_that_can_not_be_read_is_the_row_s_error_but_the_built_ins_
     assert todo in raised.value.message  # what to do
     async with opened(config) as value:
         assert isinstance(value, Unusable) and value.error.message == raised.value.message
-    assert resolved(ModelConfig(models=str(path), default="haiku")).name == "haiku"  # a layer's choice runs
-    values = _catalog(path)
-    assert values.check("sonnet") is None  # so /model sonnet gets the person out
-    assert "no model named 'llama'" in str(values.check("llama"))
-    assert fragment in str(values.check("llama"))  # and the file's problem is said with it
-    assert [m["name"] for m in values.listed()] == ["sonnet", "opus", "haiku"]  # never a raise
+    chosen = ModelConfig(models=str(path), default="sub/haiku", extra=_EXTRA)
+    assert resolved(chosen).name == "sub/haiku"  # a layer's choice of its own model runs
+    values = _catalog(path, extra=_EXTRA)
+    assert values.check("sub/haiku") is None  # so /model sub/haiku gets the person out
+    assert "no model named 'ollama/llama'" in str(values.check("ollama/llama"))
+    assert fragment in str(values.check("ollama/llama"))  # and the file's problem is said with it
+    assert [m["name"] for m in values.listed()] == ["sub/haiku"]  # never a raise
     assert values.problem is not None and fragment in values.problem
-    assert "only the built-in models" in values.problem
+    assert "only the model row's `extra` is offered" in values.problem
+    assert _catalog(path).listed() == []  # with no extra, nothing: the problem says what to fix
 
 
 @pytest.mark.parametrize("kind", _UNREAD)
@@ -114,11 +120,11 @@ def test_the_status_bar_and_the_list_say_a_file_that_can_not_be_read(tmp_path: P
     path = _file(tmp_path, text)
     now = _catalog(path).current()  # the file's default is unknown, so the row has no model: never blank
     assert now["name"] == "default" and now["provider"] == "" and fragment in now["unusable"]
-    chosen = _catalog(path, default="haiku").current()
-    assert chosen == {"name": "haiku", "provider": "claude-code"}  # a layer's choice is usable
-    values = _catalog(path)
+    chosen = _catalog(path, default="sub/haiku", extra=_EXTRA).current()
+    assert chosen == {"name": "sub/haiku", "provider": "claude-code"}  # a layer's choice is usable
+    values = _catalog(path, extra=_EXTRA)
     said = model_list(values.listed(), values.path, values.problem)
-    assert said.startswith("  sonnet") and "\n/model NAME switches; only the built-in models" in said
+    assert said.startswith("  sub/haiku") and "\n/model NAME switches; only the model row's `extra`" in said
     assert fragment in said  # the file's problem, as the footer
 
 
@@ -134,9 +140,9 @@ async def test_a_default_that_can_not_be_used_is_the_row_s_error_and_everything_
     assert fragment in raised.value.message
     async with opened(config) as value:
         assert isinstance(value, Unusable)  # TASK-0087: bound, so bh-02 starts; each step says why
-    assert resolved(ModelConfig(models=str(path), default="haiku")).name == "haiku"
-    values = _catalog(path)
-    assert values.check("haiku") is None and values.check("llama") is None  # /model fixes it
+    assert resolved(ModelConfig(models=str(path), default="sub/haiku", extra=_EXTRA)).name == "sub/haiku"
+    values = _catalog(path, extra=_EXTRA)
+    assert values.check("sub/haiku") is None and values.check("ollama/llama") is None  # /model fixes it
     assert values.problem is None  # the file itself reads fine
     why = values.default_problem
     assert why is not None and fragment in why  # /model's list says the default was refused
@@ -175,8 +181,8 @@ def test_a_default_a_session_recorded_from_the_file_says_it_came_from_the_file(t
 def test_a_default_that_is_fine_or_absent_or_not_read_has_no_problem_to_say(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert _catalog(_file(tmp_path / "a", 'default = "llama"\n' + _LLAMA)).default_problem is None
-    assert _catalog(_file(tmp_path / "b", _LLAMA)).default_problem is None  # none given: sonnet, built in
+    assert _catalog(_file(tmp_path / "a", 'default = "ollama/llama"\n' + _LLAMA)).default_problem is None
+    assert _catalog(_file(tmp_path / "b", _LLAMA)).default_problem is None  # none given: the row says it
     assert _catalog(tmp_path / "none.toml").default_problem is None  # no file at all
     unread = _catalog(_file(tmp_path / "c", "default = [\n"))
     assert unread.default_problem is None and unread.problem is not None  # the file is the problem
@@ -191,8 +197,8 @@ def test_a_default_that_is_fine_or_absent_or_not_read_has_no_problem_to_say(
 
 
 def test_a_usable_model_has_no_unusable_mark(tmp_path: Path) -> None:
-    path = _file(tmp_path, 'default = "llama"\n' + _LLAMA)
-    assert _catalog(path).current() == {"name": "llama", "provider": "openai"}
+    path = _file(tmp_path, 'default = "ollama/llama"\n' + _LLAMA)
+    assert _catalog(path).current() == {"name": "ollama/llama", "provider": "openai"}
     assert _catalog(path, default="typo").current()["unusable"].startswith("no model named 'typo'")
 
 
@@ -217,7 +223,7 @@ async def _switch(path: Path, tmp_path: Path, name: str, **config: Any) -> tuple
 
 
 _ENDPOINT_PROBLEMS = {
-    "an id beside discover": _ENDPOINT.replace("true\n", 'true\nid = "y"\n'),
+    "an id beside discover": _ENDPOINT.replace("true\n", 'true\nid = "y"\n'),  # a single model's table
     "discover that is no bool": _ENDPOINT.replace("true", '"yes"'),
     "include with no discover": _ENDPOINT.replace("discover = true\n", 'include = ["q*"]\n'),
     "an include that is no list": _ENDPOINT + 'include = "q*"\n',
@@ -226,9 +232,10 @@ _ENDPOINT_PROBLEMS = {
 
 
 _BROKEN_KINDS = [*_ENDPOINT_PROBLEMS, *_BAD_DEFAULTS, *_UNREAD, "table and default"]
-# every kind of breakage with a built-in to switch to, and (but a file that can't be read) a file model
-_SWITCHES = [(kind, "haiku") for kind in _BROKEN_KINDS] + [
-    (kind, "llama") for kind in _BROKEN_KINDS if kind not in _UNREAD
+# every kind of breakage with the row's `extra` model to switch to, and (but a file that can't be
+# read) a file model
+_SWITCHES = [(kind, "sub/haiku") for kind in _BROKEN_KINDS] + [
+    (kind, "ollama/llama") for kind in _BROKEN_KINDS if kind not in _UNREAD
 ]
 
 
@@ -237,7 +244,7 @@ async def test_model_name_of_a_valid_model_still_switches_while_a_table_or_the_d
     tmp_path: Path, kind: str, target: str
 ) -> None:
     """TASK-0095's close review: `/model NAME` of a model that is fine switches whatever else in the
-    models file is broken: a table, the file's default, the file itself (the built-ins then), both."""
+    models file is broken: a table, the file's default, the file itself (the row's `extra` then), both."""
     if kind in _ENDPOINT_PROBLEMS:
         text: str | None = _ENDPOINT_PROBLEMS[kind] + _LLAMA
     elif kind in _BAD_DEFAULTS:
@@ -246,7 +253,7 @@ async def test_model_name_of_a_valid_model_still_switches_while_a_table_or_the_d
         text = _UNREAD[kind][0]
     else:
         text = 'default = "gone"\n' + _ENDPOINT_PROBLEMS["an id beside discover"] + _LLAMA
-    answer, queued, layer = await _switch(_file(tmp_path, text), tmp_path, target)
+    answer, queued, layer = await _switch(_file(tmp_path, text), tmp_path, target, extra=_EXTRA)
     assert [type(a) for a in answer] == [dict, dict] and f"switching to {target}" in str(answer[0]["text"])
     (row,) = read_layer(layer)
     assert (row.config or {})["default"] == target  # recorded in the session's layer

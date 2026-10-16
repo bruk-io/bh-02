@@ -16,6 +16,7 @@ names and shapes in [`CONTRACTS.md`](../CONTRACTS.md). The words used here are i
 uv run bh-02                                       # a new session
 uv run bh-02 --resume [ID]                         # continue this directory's newest session (or ID: all of it, its start, or its last part)
 uv run bh-02 sessions                              # list them
+uv run bh-02 check-examples FILE...                # a startup file's docstring examples, with no session (exit 1 on a finding)
 uv run bh-02 --no-jail | --model NAME | --patch mine.toml | --trace trace.log
 uv tool install --editable ./bh-02/app --reinstall # an installed bh-02, after a pull that adds or renames a plugin
 ```
@@ -53,7 +54,7 @@ doesn't have gets).
 | `status` | `tui:status` | |
 | `grades` | `tui:grades` | |
 | `palette` | `tui:palette` | |
-| `model` | `models:model` (`default`: none, so the models file's `default`, else `sonnet`) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
+| `model` | `models:model` (`default`: none, so the models file's `default`, else no model) | `default` (with `--model`, and as `/model` sets it); `state` (the session's `claude/`: Claude Code's own session, which a resume continues) |
 | `models` | `models:catalog` | |
 | `transcript` | `agent:transcript` | `path` (the session's `transcript.jsonl`) |
 | `asides` | `agent:asides` | |

@@ -1,6 +1,6 @@
 """Any OpenAI-compatible `/chat/completions` endpoint: the `openai` provider of the `model` row."""
 
-from models_cordis_plugin.openai.client import OpenAIModel, authorization, missing_key
+from models_cordis_plugin.openai.client import OpenAIModel, authorization, headers_for, missing_key
 from models_cordis_plugin.openai.discovery import Ask, Discovery, Get, Key, httpx_get
 from models_cordis_plugin.openai.listing import (
     SHOWN,
@@ -38,6 +38,7 @@ __all__ = [
     "Unlisted",
     "Where",
     "authorization",
+    "headers_for",
     "http_error",
     "httpx_get",
     "matching",

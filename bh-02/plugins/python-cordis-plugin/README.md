@@ -9,7 +9,7 @@ runner for `/release`. It binds no key. Whether an input runs unasked is the `ap
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `PythonProcess`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/startup.py`, then the project's `.bh-02/startup.py`) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file) |
+| `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `PythonProcess`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/startup.py`, then the project's `.bh-02/startup.py`), `mypy_cache` (where mypy keeps its cache for the type check of those files: default `.bh-02/mypy_cache`, from `root`) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file) |
 
 `PythonProcess` (`client.py`) is the value the row enters (given `tools` too, the `Calls` it offers
 an input: `specs()`, `call(name, input)`): `call(input)`, `instructions()`, `run(code) -> str`, `confined` (the `approval` rule's), `report()`, `notice()` and `reads()` (its own start's:
@@ -20,8 +20,10 @@ the process it last started, never another program the runner started), `stopped
 (`shown_call`: its code, whole) and `instructions_for(confined, startup, reads, theirs=,
 elsewhere=)`, what the model is told: that `python` is the CodeAct tool bh-02 ships, a Python REPL of its own that lasts as
 long as this run of bh-02 (a /model switch keeps it; a start, a resume, /clear or a Python process
-that died empties it), and that helpers worth keeping go in the project's startup file (`startup`), the
-only one that is its to edit, the person's own (`theirs`), which comes first, being theirs; how to use it (work in
+that died empties it), and that functions worth keeping go in the project's startup file (`startup`), the
+only one that is its to edit, the person's own (`theirs`), which comes first, being theirs, which of a startup
+file's functions are told to it and what each costs in context (confined only: unconfined nothing is
+listed) and the docstring convention for the file it writes; how to use it (work in
 Python, not through a shell, shown by an input that searches and keeps what it found and a later
 one that edits with it; build up state and re-read what changed, print what matters, run
 programs with `subprocess.run(..., capture_output=True, text=True, timeout=...)` and treat what
@@ -101,17 +103,16 @@ it when the call did not run or failed. What changed in them since the model was
 told before the input's own output. An input that binds `tools` itself keeps its own: the
 namespace's is a view of the registry, never where a tool is registered.
 
-A new Python process's first input is also told what the startup files did (`startup`, helpers kept
+A new Python process's first input is also told what the startup files did (`startup`, functions kept
 across sessions, in order): the person's own, `$XDG_CONFIG_HOME/bh-02/startup.py` (else
-`~/.config/bh-02/startup.py`), for the helpers they want in every project, then the project's,
+`~/.config/bh-02/startup.py`), for the functions they want in every project, then the project's,
 `.bh-02/startup.py`, the model's own. A name starting `$XDG_CONFIG_HOME/` is in the person's
 config directory (that variable's value, else `~/.config`, as for the models file), one
 starting `~/` in their home, any other from `root`; a single string is one file, and anything
 but a name or a list of names is the row's config error. Confined, the process runs each that is
-there as an input of its own and says which names it defined (each its code binds at the top,
-as the compiler reads it, so one bound again to the object it held counts, and any new or
-changed after it; on a line of their own, after whatever the file printed), or its traceback;
-one failing doesn't stop the next, and one that isn't there is passed over. A UTF-8 byte order
+there as an input of its own and says which of its functions are told to the model, by signature
+up to a budget and then by name (below), or its traceback; one failing doesn't stop the
+next, and one that isn't there is passed over. A UTF-8 byte order
 mark is no part of either file, as `python file.py` has it. One that ends the Python
 process (`os._exit`, a crash) would end every new one: the input it cut short says which file it was,
 after what the opening had to tell by then (that the REPL was started again, and why, which is
@@ -129,10 +130,10 @@ model, and nothing needs keeping from it. Where each is read is the point:
   directory in it, so the Python process can't see it: the host expands its name, reads it and sends
   its source in the input (registered with `linecache`, so a traceback shows its lines). It
   runs in the model's REPL, so whatever it holds the model can read. In a Linux jail the file
-  itself is not there: its helpers run and `inspect.getsource` shows them (through
-  `linecache`), but `open` on its path finds nothing, a helper that reads a file beside it
+  itself is not there: its functions run and `inspect.getsource` shows them (through
+  `linecache`), but `open` on its path finds nothing, a function that reads a file beside it
   finds nothing either, and `__file__` is not set (nor for the project's: each runs as an
-  input). The model is told how to see one (`inspect.getsource(helper)`).
+  input). The model is told how to see one (`inspect.getsource(NAME)`, NAME a function as the startup line lists it).
 - But only when reading it goes nowhere an input may write (`host_paths.walked`, the walk the
   models file and memory files outside the project are held to: each directory and link on the
   way, as named and as resolved): the
@@ -151,6 +152,178 @@ Each file runs once, at its first place in the list. Whose a file is goes by how
 by where it is read: one named from the root is the project's, one named from the person's config
 directory, their home or `/` is theirs. `instructions_for` tells the model that only the
 project's startup file is its to edit, and names the person's, which comes before it, as theirs.
+
+Which functions the model is told of is decision-0006's point 1, and the Python process decides it,
+where the objects are. Confined, a startup file's input prints, last and on a line of its own, one
+line of JSON (`client._startup_input`): `{"told": [[name, signature], ...]}`, each name with
+`str(inspect.signature(...))` (null when that fails: a builtin without a signature, a default
+whose `repr` raises), at most 640 characters of it. A name is told when it has no leading
+underscore and its value is a function, method or class that is `callable`, was not an object the
+namespace held before the file ran, and has the namespace's `__name__` as its `__module__`: a def,
+a class or a lambda the file's code made. An import is not one (its `__module__` is another
+module's), nor is `partial(...)` of one; a name bound to what an earlier file made (the project's
+`display = show` for the person's `show`) is not told again; an instance, a callable one too, is
+data, not a function or a class; a value that raises when asked is left alone, and the file does not
+fail for it. When the file binds `__all__` (a list or a tuple that is a new object after the file
+ran: one an earlier file left is that file's), the told names are exactly the callables it names,
+imported ones and underscored ones included, in its order; a name it lists that the file never bound
+is nothing to tell, and so is an entry that is no name. Everything else the file bound works as it
+does and is not told, nor counted. That line is the Python process's, so the host reads it as data
+and words it in pure functions (`client.startup_ran`, `client.signed`): control and format
+characters (C0, DEL, C1, bidi overrides, zero-width) are stripped, a name that is not an
+identifier (a file can bind any string through `globals()`) is left out, each signature is cut at
+160 characters and ends in `…`, one that could not be read is `name(...)`, and a last line that is
+not that shape is said not to be a listing and never quoted.
+
+The signatures are told up to 600 characters across the REPL's startup files (`client._BUDGET`),
+the person's file first, counted as the model reads them (`name(signature)`, after the cleaning
+and the cut, not the separators). The first function that does not fit ends the signatures, and
+it and every function after it, in that file and in the files that run after it, is told by name
+only, so nothing is left out. The budget is threaded through the opening's loop as a value
+(`startup_ran(name, when, line, left)` returns the aside and what is left), not kept on
+`PythonProcess`. The first input is told `(PATH ran first: functions run_tests(path='.', *,
+quiet=True), changed(); by name only: more, other)`; a file that tells none, `PATH ran next: no
+public functions`. `help(name)` shows a function's docstring and `inspect.getsource(name)` its
+source, as for any function: both are pulled, and cost nothing until the model asks. `_keep` says
+all this once, in the `python` section, which stays fixed for a conversation (which functions are
+told, what they cost, and the docstring convention for a file the model writes); the signatures
+arrive with the first input's output, never in the prompt. They are told at startup only: a REPL
+started again runs the files and tells them again, a function an input defines later is not
+announced, and after `/compact` they live only in the model's summary. Unconfined, nothing is
+listed (the model runs the file as an input of its own, which the person is asked about), so the
+section does not say it is, though it says the docstring convention. There is no decorator and
+nothing of bh-02's in a startup file: it runs unchanged outside bh-02, and one that still marks its
+functions with decision-0004's decorator fails at start with a `NameError` (the name is no longer
+bound), reported on the startup line like any failing file. The line is bounded by the Python
+process's output cap (20,000 characters): a file with so many functions that it passes that is said
+not to be listable.
+
+Each file that told something is then checked against the docstring convention and for types
+(decision-0006's point 7), in the jail and after the file, by a second input (`client._check_input`)
+that runs `startup_check.py` as a program: `python -I startup_check.py --ruff --mypy --cache-dir=DIR
+--json NAME` (the project's file, which the jail reads) or `... --name NAME -` with the text on stdin
+(the person's, which the host handed in), under the Python process's own interpreter
+(`sys.executable`, whose environment every jail reads), with a timeout (120 s of the input; mypy gets
+90 of them, cold on a file that imports textual it takes 13). Ruff runs as `sys.executable -m ruff` with bh-02's flags only
+(`startup_check.RUFF_FLAGS`: `--isolated --no-fix --select D101,D103,D205,D415,D419`, `--output-format
+json`, `--stdin-filename NAME`), so no configuration the model could write loosens it. The program's
+pure core reads the text and executes none of it: `examples` is bh-02's own rule (`ast` and
+`doctest.DocTestParser`: for each function and class the file tells, an example, a doctest block or a
+`::` literal block that has a blank line before it, code `example`; doctest blocks that parse, each
+with a blank line before it, code `doctest`), and `ruff_findings` keeps ruff's findings that are on a
+told definition (its line for `D101`/`D103`, its docstring's lines for the rest) and drops a private
+function's, a method's and the module's. `mypy_findings` gives each error in mypy's `--output json`
+(one object a line, with the code) to the told function or class its line is in, a decorator's and a
+method's included, else to `ELSEWHERE` (`<file>`, no function's name): an import, a statement, a
+private function. The code is mypy's when `MYPY_CODES` has it (written out, its 78 names compared with
+`mypy.errorcodes.error_codes` by a test, so a mypy that adds one fails there), else `mypy`, so what
+reaches the host is always a name from the closed set `CODES`. Which functions are told is decided again there, from the
+syntax (the public ones the file defines, or the ones its literal `__all__`, `=` or `+=`, names; the
+last definition of a name), and the host takes the names the live listing also told. The program
+prints one line, `{"misses": [[name, [code, ...]], ...]}`, codes only; the host reads it as data like
+the listing (`client.startup_checked`): a name the file did not tell, or a code outside
+`startup_check.CODES`, is dropped or makes the line not the report, a message is never said, and
+the aside is `PATH findings: a D103, example, no-untyped-def; b doctest; elsewhere in the file:
+import-not-found`, in the order the file told its functions, codes in `CODES` order (ruff's, bh-02's,
+mypy's), the file's own last, or nothing when nothing misses. A check that did not run
+(the program failed, timed out, or printed something else) is `PATH docstrings and types could not be
+checked`; a finding stops no file and hides no function. A file that failed, or told nothing, is
+not checked. A function with no docstring has no example, so it breaks `example` beside ruff's
+`D103`; ruff calls a name with a leading underscore private even when `__all__` names it (no `D103`),
+and reads a set or a string `__all__` as naming nothing public, so those miss `example` alone.
+
+**mypy** runs as `sys.executable -I -m mypy --strict --config-file= --output json
+--cache-dir=DIR` (`startup_check.MYPY_FLAGS`; bh-02's flags only: no configuration file, since a
+project's can name plugins mypy imports and the model writes it), in `_mypied`, over a copy of the
+text named `bh_startup.py` alone in a directory under `$TMPDIR` (the jail's scratch; removed after),
+with that directory as its working directory and every `MYPY*` variable taken out of its environment
+(`MYPY_CACHE_DIR` beats `--cache-dir`, `MYPYPATH` adds modules to find, `MYPY_NUM_WORKERS`: a startup
+file runs in the Python process, which starts the check with its environment). What it can import is
+what the REPL can: the REPL is `python -I`, so its path is the interpreter's (the standard library,
+site-packages, the editable installs' `.pth` entries) and neither the working directory nor the
+file's own, and mypy is the same interpreter with `-I`, so `pyinfo` reads the same path and keeps
+its first entry; mypy adds the working directory and the file's directory itself, which is why the
+copy is alone in its directory and the program runs there. A module beside the startup file or in
+the project is an `import-not-found` (tested against the real REPL); a package bh-02 depends on is
+found; an installed package with no types is `import-untyped`, a strict finding; a `sys.path.insert`
+in the file is invisible to mypy (`# type: ignore[import-not-found]`). A name the REPL provides
+(`tools`, or one an earlier startup file made: each file is checked alone) is declared with a bare
+annotation, `tools: Any`, which binds nothing when the file runs (the worker only rebuilds `tools`
+unless an input bound its own) and satisfies mypy; the python section tells the model so.
+
+The cache is the python row's `mypy_cache`, `.bh-02/mypy_cache` under the root by default (or
+absolute): the writable roots of a jail are the project, its scratch (new at every start, so cold at
+every start: 3.3 s against 0.3 s warm for one file, measured in a real bubblewrap jail on the pinned
+mypy) and the model's auto memory (its notes). mypy puts a `.gitignore` of `*` and a `CACHEDIR.TAG`
+in its cache directory, so git ignores it with no line in the project's own, and the project's own
+`.mypy_cache` is a different directory. The cache is sqlite shards in this mypy; several starts at
+once share one (four cold runs at once on one cache all reported, by hand), and a cache that is damaged or a directory that can't be written makes mypy
+exit 2 with an internal error, so the program tries again with no cache (`--cache-dir=/dev/null`):
+cold, correct, and never deleting anything (delete the directory if it keeps doing that).
+
+mypy is a runtime dependency of this plugin, at the root's pin: a git commit of mypy 2.4.0-dev, the
+first that types PEP 661 sentinels, which `uv.lock` holds once. Move both to `mypy>=2.4` from PyPI
+when it is released (and the plugin's `[tool.uv.sources]` entry goes).
+
+`startup_check.py` is a program of its own, standard library only (the gate's `worker-stdlib-only`),
+run by path and never imported by the Python process or the app's command line, because importing
+this package imports cordis. `bh-02 check-examples FILE...` (the app's `cli.py`) finds it by the
+plugin's name, with no import (`importlib.util.find_spec`), and runs `startup_check.py FILE...` under
+its own interpreter: the example rule alone, one line a finding, exit status 1 on a finding, 0 on
+none, 2 for a usage error or a file it can't check (unreadable, not UTF-8, not Python). It needs no
+session or model, and is for the person, a pre-commit hook and CI, beside ruff's line:
+
+```sh
+ruff check --isolated --no-fix --select D101,D103,D205,D415,D419 .bh-02/startup.py
+bh-02 check-examples .bh-02/startup.py
+mypy --strict --config-file= .bh-02/startup.py
+```
+
+mypy's line is run in the project, which mypy also searches (the working directory and the file's
+own), so a startup file that imports a module beside it passes there and is an `import-not-found` at
+a REPL start. Pin the mypy version CI installs, as the ruff one: the codes are its rules.
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: startup-ruff
+        name: startup file docstrings (ruff)
+        entry: ruff check --isolated --no-fix --select D101,D103,D205,D415,D419
+        language: system
+        files: (^|/)startup\.py$
+      - id: startup-examples
+        name: startup file docstring examples (bh-02)
+        entry: bh-02 check-examples
+        language: system
+        files: (^|/)startup\.py$
+      - id: startup-mypy
+        name: startup file types (mypy)
+        entry: mypy --strict --config-file=
+        language: system
+        files: (^|/)startup\.py$
+```
+
+```yaml
+# a CI step
+- name: Startup file docstrings and types
+  run: |
+    ruff check --isolated --no-fix --select D101,D103,D205,D415,D419 .bh-02/startup.py
+    bh-02 check-examples .bh-02/startup.py
+    mypy --strict --config-file= .bh-02/startup.py
+```
+
+`_keep` says what the check is in the `python` section: confined, that the startup files are checked
+at REPL start, for a docstring and for types strictly, what the startup line's codes mean (and
+`elsewhere in the file`), that a finding stops and hides nothing, and the three commands to run in an
+input for the detail (`python -m ruff check ...`, `python -m python_cordis_plugin.startup_check FILE`,
+`python -m mypy --strict --config-file= FILE`, `python` being `sys.executable`; the second imports
+this package, which works in the model's REPL and costs a moment). Unconfined nothing is listed or
+checked, so it is given the three commands to check the file it writes. Either way, for a project
+startup file, it is told in one sentence to declare a name the REPL provides with a bare annotation
+(`tools: Any`). ruff is a runtime dependency of this plugin (so the app's), at the version the codes
+were measured on or later; mypy at the pin above.
 
 The namespace's `__name__` is `__kernel__`: a startup file may test it, and renaming it would
 break that silently.

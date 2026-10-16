@@ -2,7 +2,7 @@
 id: decision-0004
 title: 'Show the startup files'' helpers to the model by signature, marked with @helper'
 date: '2026-10-14 15:55'
-status: accepted
+status: superseded
 ---
 ## Context
 
@@ -91,3 +91,6 @@ aside's text), `python.py` (`_keep`'s sentence), the plugin README,
 changes, both applied above: unconfined stays as today (was: the model runs the listing input),
 and the `/compact` limit is written down. Built by TASK-0100, after TASK-0099.02 renames the
 startup files and the python row's class.
+
+Superseded 2026-10-16 by decision-0006: no decorator and no "helper"; a startup file's public
+functions are told by progressive disclosure.

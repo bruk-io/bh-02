@@ -37,10 +37,12 @@ from typing import Final, Protocol
 
 from brig.core.runtime import Capability, RuntimeKind, channel_dir
 from brig.mech import ArgvTransformer, EventSource
+from brig.run import _records
 from brig.run._records import RESERVED_NAMES
 from brig.run._records import ProcessRecord as ProcessRecord
+from brig.run._supervisor_link import SupervisorLink
 from brig.run._tether import HeldTether
-from brig.run.teardown import KillReport
+from brig.run.teardown import DEFAULT_GRACE_S, KillReport
 from brig.stack import CompiledJail
 
 
@@ -163,6 +165,30 @@ def reserved_socket(chan: str, token: str) -> str:
     return f"{chan}/{token}.sock"
 
 
+def refuse_foreign_reservation(jail: JailRecord, channel: Reservation) -> None:
+    """Refuse a `channel` that is not a socket the runtime would reserve in `jail`'s channel
+    directory, or that a process the jail knows (in memory or under `procs/`) already binds
+    (decision-184). Reads the filesystem for the records. Nothing is made or spawned.
+
+    Raises:
+        ReservationRefused: `channel` is not this jail's, saying why.
+    """
+    taken = frozenset(
+        process.bound_path
+        for process in (*jail.processes, *_records.scan(jail.jail_dir).records)
+        if process.bound_path is not None
+    )
+    reason = reservation_refusal(
+        channel, chan=channel_dir_of(jail), endpoint=channel.bound_path, taken=taken
+    )
+    if reason is not None:
+        raise ReservationRefused(
+            f"start: the reservation for channel {channel.channel!r} is not this "
+            f"jail's: {reason}. Reserve one with jail.channel({channel.channel!r}) "
+            "for each start"
+        )
+
+
 def channel_dir_of(jail: JailRecord) -> str:
     """`jail`'s channel directory as a process inside it sees it: under the
     jail directory resolved, as every mechanism grants it
@@ -184,13 +210,28 @@ class Held:
     """What the process that created a jail holds of it in memory, and nothing
     serialized does (decision-181): the compiled `wrap`, so each start checks
     that `wrap` of its own argv is the jail's prefix followed by the argv; the
-    sensors, which the exit waiter asks about each process's ending; and the
-    jail's hold on its tether, which every start's watcher reads. A record
-    rehydrated in another process has none of it."""
+    sensors, which the exit waiter asks about each process's ending; the
+    jail's hold on its tether, which every start's watcher reads; and, in a
+    supervised jail, the link to its supervisor (decision-191), the only way
+    anything starts in it: a socket cannot cross `to_dict`, so a record
+    rehydrated in another process has none of it, and no supervisor."""
 
     wrap: ArgvTransformer
     sensors: tuple[EventSource, ...] = ()
     tether: HeldTether | None = None
+    link: SupervisorLink | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisorRecord:
+    """The instance of a supervised jail, as `destroy` and `alive` identify it
+    (decision-192): the host process that leads the group holding brig's
+    supervisor, the jail's PID 1, as `pid` and the moment it started
+    (`start_time`, brig/run/_identity.py): an identity, not a number. Never
+    a pid the jail named: nothing a jail says is a kill target."""
+
+    pid: int
+    start_time: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +245,9 @@ class JailRecord:
     start order; a runtime finds later ones in its own records (for
     `HostRuntime`, under `<jail_dir>/procs`). `helper_pids` and
     `helper_stamps` are the `JAIL_LIFETIME` helpers `destroy` must end too, one
-    stamp per pid. `held` is what the creating process holds in memory (`Held`),
+    stamp per pid. `supervisor` is the instance of a supervised jail
+    (decision-192), `None` for a jail whose processes are started by the
+    host. `held` is what the creating process holds in memory (`Held`),
     never compared or shown."""
 
     kind: RuntimeKind
@@ -216,6 +259,7 @@ class JailRecord:
     processes: tuple[ProcessRecord, ...] = ()
     helper_pids: tuple[int, ...] = ()
     helper_stamps: tuple[str, ...] = ()
+    supervisor: SupervisorRecord | None = None
     held: Held | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -318,9 +362,11 @@ class Runtime(Protocol):
         decision-171)."""
         ...
 
-    def destroy(self, jail: JailRecord) -> KillReport:
+    def destroy(self, jail: JailRecord, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
         """End everything the instance holds, verified, one item per thing
-        (law 7)."""
+        (law 7). `grace` is how long a process has after `SIGTERM`; 0 gives
+        none (decision-193): `SIGKILL` at once, the instance first where there
+        is one."""
         ...
 
     def supervisor(self, jail: JailRecord) -> Supervisor | None:

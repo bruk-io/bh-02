@@ -1,11 +1,11 @@
 ---
 id: TASK-0099
 title: 'Names in bh-02 say what they name, by one written rule'
-status: To Do
+status: Done
 assignee:
   - '@bruk'
 created_date: '2026-10-14 15:56'
-updated_date: '2026-10-15 02:28'
+updated_date: '2026-10-15 18:39'
 labels:
   - naming
   - finish-moved
@@ -44,9 +44,9 @@ One naming rule, written where a plugin author reads it, and the names that brea
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 One naming rule is written in bh-02/CLAUDE.md, with the reason for it; GLOSSARY.md carries the renamed terms
-- [ ] #2 No two plugins' names differ by a letter, no component repeats its plugin's name, and no GLOSSARY.md term has two meanings without a label saying which
-- [ ] #3 No old name is translated or read anywhere (outdated.py's renames, bh-02 update-layer, the resume translation and the kernel.py fallback are gone), and a layer naming a use no plugin provides fails at boot with the loader's error; scripts/check passes
+- [x] #1 One naming rule is written in bh-02/CLAUDE.md, with the reason for it; GLOSSARY.md carries the renamed terms
+- [x] #2 No two plugins' names differ by a letter, no component repeats its plugin's name, and no GLOSSARY.md term has two meanings without a label saying which
+- [x] #3 No old name is translated or read anywhere (outdated.py's renames, bh-02 update-layer, the resume translation and the kernel.py fallback are gone), and a layer naming a use no plugin provides fails at boot with the loader's error; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -59,4 +59,10 @@ TASK-0099.01 wrote decision-0005 (proposed, awaiting the owner): the rule, subag
 Finish line changed after work started (owner, 2026-10-14): no backwards compatibility. Must-not-break's translation lines replaced; AC #3 now asks that no old name is translated or read and that a stale layer fails at boot with the loader's error. TASK-0099.07 removes the translation machinery; .03 and .04's criteria changed to match.
 
 TASK-0099.09 (boot-failure messages) moved out to TASK-0101 and deferred by the owner (2026-10-15: only critical bugs this run); it was never part of this intent's finish line. The old child is archived.
+
+Closed on the independent review (Opus low, did not do the work) of the intent on head 96492f9, against its own finish line: CLOSE.
+- AC #1 met: the rule and its reason are in bh-02/CLAUDE.md (TASK-0099.05); GLOSSARY.md carries the renamed terms, the plugin `subagents` by name since defa84f.
+- AC #2 met: the plugins are agent, chat, commands, extensions, memory, models, python, runner, subagents and tui, no two a letter or a plural apart; none of the 30 uses in the shipped layer repeats its plugin's word but `models:model` and `tui:ui`, the two the rule keeps by name; `tools` and `python` carry their labels.
+- AC #3 met: bh_02/outdated.py is gone; outside tests no .py in bh-02/ or libs/, and no .md under bh-02/, mentions update-layer, outdated or kernel.py; no agents:agents, extensions:extensions or KernelConfig remains; test_booting.py:317-328 shows a layer naming `nonesuch:loop` failing at boot with the loader's "loop: unresolved:" error; the batch's full scripts/check exits 0.
+The open question answered "the old startup-file name keeps working for good" was overturned by the owner (no backwards compatibility, decision-0005's Amended section, TASK-0099.07); the finish-moved label and AC #3's wording record it. TASK-0099.09 was deferred to TASK-0101.
 <!-- SECTION:NOTES:END -->

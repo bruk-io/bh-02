@@ -13,8 +13,10 @@ def _styles(content: Content) -> dict[str, str]:
 def test_an_input_is_its_name_over_its_code_highlighted_and_other_calls_one_line() -> None:
     call = {"name": "python", "input": {"code": "x = 1\nprint(x)"}}
     assert render.tool_call_head(call) == "python"
-    code = render.tool_call_code(call)
-    assert code is not None and code.plain == "x = 1\nprint(x)"
+    clip = render.tool_call_code(call)
+    assert clip is not None and clip.hidden == 0
+    code = render.clip_head(clip)
+    assert code.plain == "x = 1\nprint(x)"
     assert _styles(code).get("print", "").startswith("$")  # highlighted, in the theme's tokens
     invented = {"name": "read_file", "input": {"path": "a.txt"}}  # a call a model made up
     assert render.tool_call_head(invented) == "read_file(path='a.txt')"
@@ -22,20 +24,67 @@ def test_an_input_is_its_name_over_its_code_highlighted_and_other_calls_one_line
 
 
 def test_long_code_is_cut_and_says_how_much() -> None:
-    code = render.tool_call_code({"name": "python", "input": {"code": "\n".join(map(str, range(45)))}})
-    assert code is not None and code.plain.splitlines()[-2:] == ["39", "… 5 more lines"]
+    clip = render.tool_call_code({"name": "python", "input": {"code": "\n".join(map(str, range(45)))}})
+    assert clip is not None and clip.hidden == 5
+    assert render.clip_head(clip).plain.splitlines()[-1] == "39"
+    assert render.clip_rest(clip).plain == "40\n41\n42\n43\n44"
+    assert render.clip_label(clip, opened=False) == "▶ 5 more lines"
+    assert render.clip_label(clip, opened=True) == "▼ 5 more lines"
 
 
-def test_a_long_result_is_cut_to_a_glance() -> None:
-    body = render.tool_result_body({"content": "\n".join(str(n) for n in range(20))})
-    assert body.plain.splitlines() == [*map(str, range(12)), "… 8 more lines"]
-    assert _styles(body) == {"\n… 8 more lines": "$text-muted"}
-    assert render.tool_result_body({"content": ""}).plain == "(no output)"
+def test_a_long_result_is_cut_to_a_glance_and_its_rest_is_what_opening_it_adds() -> None:
+    clip = render.tool_result_body({"content": "\n".join(str(n) for n in range(20))})
+    assert clip.hidden == 8
+    assert render.clip_head(clip).plain.splitlines() == [*map(str, range(12))]
+    assert render.clip_rest(clip).plain.splitlines() == [*map(str, range(12, 20))]
+    assert render.clip_label(clip, opened=False) == "▶ 8 more lines"
+    only = render.tool_result_body({"content": "\n".join(str(n) for n in range(13))})
+    assert render.clip_label(only, opened=False) == "▶ 1 more line"  # not "1 more lines"
+    empty = render.tool_result_body({"content": ""})
+    assert render.clip_head(empty).plain == "(no output)" and empty.hidden == 0
+
+
+def test_a_result_that_fits_is_not_cut() -> None:
+    """Twelve lines of a result and forty of code or a diff are whole; one more is cut."""
+    assert render.tool_result_body({"content": "\n".join(map(str, range(12)))}).hidden == 0
+    assert render.tool_result_body({"content": "\n".join(map(str, range(13)))}).hidden == 1
+    code = {"name": "python", "input": {"code": "\n".join(map(str, range(40)))}}
+    clip = render.tool_call_code(code)
+    assert clip is not None and clip.hidden == 0
+    diff = "@@ -1 +1 @@\n" + "\n".join(f"+{n}" for n in range(39))
+    assert render.tool_result_body({"content": diff}).hidden == 0
+    assert render.tool_result_body({"content": diff + "\n+x"}).hidden == 1
+
+
+def test_the_rest_of_a_diff_is_coloured_as_the_first_lines_are() -> None:
+    diff = "@@ -1,50 +1,50 @@\n" + "\n".join(f"{'-' if n % 2 else '+'}line {n}" for n in range(60))
+    clip = render.tool_result_body({"content": diff})
+    assert clip.hidden == 61 - 40
+    head, rest = render.clip_head(clip), render.clip_rest(clip)
+    assert head.plain.splitlines()[0] == "@@ -1,50 +1,50 @@" and rest.plain.splitlines()[0] == "-line 39"
+    assert _styles(rest)["-line 39"] == "$text-error" and _styles(rest)["+line 40"] == "$text-success"
+
+
+def test_the_rest_of_code_is_highlighted_from_its_first_line_not_from_the_cut() -> None:
+    """A string that began above the cut goes on being one below it: the rest is cut from the
+    whole highlighted, not highlighted by itself."""
+    lines = ["x = 1"] * 38 + ['s = """a docstring', "print(1)  # still in the string", '"""', "print(2)"]
+    clip = render.tool_call_code({"name": "python", "input": {"code": "\n".join(lines)}})
+    assert clip is not None and clip.hidden == 2 and clip.shown == 40
+    rest = render.clip_rest(clip)
+    assert rest.plain.splitlines() == ['"""', "print(2)"]
+    inside = render.clip_rest(render.Clip("code", tuple(lines), 39))  # cut inside the string
+    assert inside.plain.splitlines()[0] == "print(1)  # still in the string"
+    line = "print(1)  # still in the string"
+    assert _styles(inside)[line] == "$text-success 90%"  # a string, as in the whole
+    first = {str(span.style) for span in inside.spans if span.start < len(line)}
+    assert first == {"$text", "$text-success 90%"}  # no call inside it...
+    assert _styles(render.code(line))["print"] == "$text-accent"  # ...unlike the line highlighted alone
 
 
 def test_a_unified_diff_is_coloured_line_by_line() -> None:
     diff = "--- a/x.py\n+++ b/x.py\n@@ -1,2 +1,2 @@\n keep\n-old\n+new"
-    body = render.tool_result_body({"content": diff, "is_error": False})
+    body = render.clip_head(render.tool_result_body({"content": diff, "is_error": False}))
     assert body.plain == diff
     assert _styles(body) == {
         "--- a/x.py": "bold",
@@ -46,8 +95,8 @@ def test_a_unified_diff_is_coloured_line_by_line() -> None:
     }
     # an error is never read as a diff (its colour is the widget's), and text with a stray
     # `+` or `-` is not a diff without a hunk header
-    assert render.tool_result_body({"content": diff, "is_error": True}).spans == []
-    assert render.tool_result_body({"content": "-1\n+2"}).spans == []
+    assert render.clip_head(render.tool_result_body({"content": diff, "is_error": True})).spans == []
+    assert render.clip_head(render.tool_result_body({"content": "-1\n+2"})).spans == []
 
 
 def test_markdown_ish_prose() -> None:

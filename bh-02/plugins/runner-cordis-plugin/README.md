@@ -203,14 +203,18 @@ them as it would over directories it made): first it records them, in bh-02's st
 (`$XDG_STATE_HOME/bh-02/jails/`, else `~/.local/state/bh-02/jails/`, one file per jail), then makes
 each and at once marks it as its own (an extended attribute, `user.bh-02.placeholder`, holding the
 jail's id; where the filesystem takes none, the record keeps the directory's inode and change time
-instead). Once bubblewrap is started the record names its process group. A session that crashed, or
+instead). Once bubblewrap is started the record names the jail's process group: a Linux jail's
+instance (brig's `Jail.instance_group`, the group that holds its PID 1, which lives as long as the
+jail does), not the program's, which may end while a server it started in a session of its own keeps
+the jail running. A session that crashed, or
 stopped while another ran, leaves its record, and the next bh-02 jail to start with none running
 removes what it names: only an empty directory still marked as that jail's, never one the person has
 put something in or made again since, and nothing a record names by path alone (an empty directory
 there may be the person's: `test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove`). A
 record whose process group still runs is left alone, placeholders and all, until it has ended
 (removing one would detach that jail's mount; the moment between a killed bh-02 and its jail ending,
-below, is such a time: `test_the_sweep_leaves_a_record_whose_process_group_still_runs`).
+below, is such a time: `test_the_sweep_leaves_a_record_whose_process_group_still_runs`, and a program
+that started a server and ended: `test_the_sweep_leaves_a_jail_a_server_holds_after_the_program_that_started_it_ended`).
 
 **The jail ends with bh-02.** Each jail is launched tethered (brig SPEC.md section 8,
 decision-167): bh-02 holds the write end of a pipe nothing else holds, and brig's watcher, in the
@@ -244,9 +248,18 @@ rest of the session). A held *directory* is not affected by what happens inside 
 So the jail watches the directory of every path it holds (`tripwired`: each write deny under a
 writable root, and each secret it holds there, `held`: one that is there, masked, and an absent
 one no input can create, under a write deny), with inotify from bh-02, set up after its placeholders are
-made and before bubblewrap mounts over them (`tripwire.py`). At the first such change it kills
-the jail's process group, a running input and anything an input left in the background with
-it. The next input starts a new jail, which holds the path again, and its answer, which the
+made and before bubblewrap mounts over them (`tripwire.py`). At the first such change it ends
+the jail (brig's `Jail.destroy(grace=0)`: since brig's decision-190 a jail's programs are children
+of its supervisor, not one process group, so ending the jail is what ends a program in a session of
+its own as well, `test_the_tripwire_ends_the_whole_jail_a_program_in_a_session_of_its_own_included`;
+and with no grace, `SIGKILL` first and no `SIGTERM`, since a program that ignores `SIGTERM` got the
+2 s of a plain `destroy()` to write the secret on the host: 3 runs in 3, where the first `SIGKILL`
+is now 0.6 to 1.1 ms after the host's removal and the jail gone 5 to 13 ms after it on the machine
+that measured it, `test_a_jail_whose_hold_the_host_lifted_ends_at_once_whatever_its_programs_do_with_sigterm`),
+a running input and anything an input left in the background with it. If ending it fails, or
+brig's teardown raises, the answer says so and names what may still run, and a teardown that
+raised is followed by a plain `SIGKILL` of the jail's group. The next input starts a
+new jail, which holds the path again, and its answer, which the
 person sees in the conversation, starts `(the REPL was started again, because something on the
 host replaced or removed .../.git/config (a `git config`, an editor's save), which lifts the
 jail's hold on it, so bh-02 ended the jail; the next one holds it again; what earlier inputs

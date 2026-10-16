@@ -5,12 +5,27 @@ reach the model: slash commands, and `!` followed by a shell command.
 
 ## Keys
 
+The line under the composer names the everyday ones (`Enter send  Ctrl-J new line  Esc stop ...`). On
+an 80-column terminal it fits all eight in a short form (`^J` is `Ctrl+J`, `↵` is `Enter`), and on a
+narrower one it names fewer, the least everyday first.
+
 | Key | What it does |
 |---|---|
 | `Enter` | sends the message or command in the composer |
-| `Ctrl+C` | stops the running reply. It never quits, and it doesn't stop a command. |
+| `Ctrl+J`, `Shift+Enter` | start a new line in the composer (`Shift+Enter` in a terminal that tells it apart from `Enter`) |
+| `Esc` | stops the running reply, as `Ctrl+C` does, once nothing nearer wants it: it closes the command list, declines a question or closes the palette first, and only that. With no reply running it does nothing. |
+| `Ctrl+C` | stops the running reply, unless text is selected that has not been copied yet: then it copies that and clears the selection. A mouse selection was copied when you let go, so `Ctrl+C` after one stops the reply. It never quits, and it doesn't stop a command ([Copying](#copying)) |
+| `PageUp` / `PageDown` | scroll the conversation a page while you type; the cursor stays where it is. Scrolled up, the conversation stops following new output until you scroll back to its end |
+| `Up` / `Down` | on the composer's first / last line: the line you sent before, and forward again; past the newest, `Down` gives back what you were typing ([Recalling lines](#recalling-lines-you-sent)) |
+| `Ctrl+T` | copies the newest reply ([Copying](#copying)) |
+| `Cmd+C` | copies the selection in a terminal that passes Cmd to programs ([Copying](#copying)) |
 | `Ctrl+P` | opens the command palette |
 | `Ctrl+Q` | leaves bh-02 (so do `/exit` and `/quit`) |
+| `Shift+Tab`, then `Enter` or `Space` | `Shift+Tab` in the composer puts the focus on the `▶ N more lines` line of the newest cut tool result, diff or code; `Enter` or `Space` opens or closes it ([Long results](#long-results)). `Tab` moves on, and back to the composer. |
+
+While a reply runs, a line above the composer says so and for how long (`Working · 12s`, then
+`Working · 1m 05s`); it appears once the reply has run for a second and goes when the reply ends, is
+stopped or fails. A command still running (`!`, `/compact`) shows no such line until it answers.
 
 A line you send while a reply runs waits for the reply to end. One you send while a command's
 restart runs (`/clear`, `/compact`, `/model NAME`, `/restart`) waits for the restart, and reaches
@@ -94,12 +109,12 @@ you press it while one runs. It is stopped after 120 seconds (the `shell-command
 
 `Ctrl+P` opens a palette of the commands. Choosing one runs it, or puts it in the composer when it
 takes arguments, for you to finish. `/model` has an entry for each model you can switch to, such
-as `/model haiku`. Shell commands aren't in the palette: you type those.
+as `/model claude/haiku`. Shell commands aren't in the palette: you type those.
 
 ## Completing a command as you type
 
 Type `/` in the composer and the commands that match appear in a list above it, the same ones
-the palette shows (including arguments such as `/model haiku`). Prefix matches come first, then
+the palette shows (including arguments such as `/model claude/haiku`). Prefix matches come first, then
 commands that contain what you typed; at most eight rows show, and the list scrolls.
 
 | Key | While the list is open |
@@ -112,3 +127,49 @@ commands that contain what you typed; at most eight rows show, and the list scro
 
 A click on a row runs it. The list closes when you send, when a question comes up or when the
 composer loses focus. Every other key works as without it.
+
+## Recalling lines you sent
+
+`Up` on the composer's first line puts the line you sent before in the composer, and `Up` again
+the one before that; `Down` on its last line goes forward, and past the newest it gives back what
+you were typing when you first pressed `Up`. A line you sent is a message, a command or a
+`!` line, including a command you chose from the list or the palette. Edit a recalled line and send it
+and the edit is sent and joins the lines; the line you recalled stays as it was. The lines are kept
+for the run only: a new run, a resumed session's too, starts with none. In a line that takes several rows, `Up` moves the
+cursor up until it is on the first row. While the command list is open its `Up` and `Down` move its
+highlight, and a recalled command doesn't open it until you edit it, so `Up` goes on through your lines.
+
+## Long results
+
+A tool result is shown cut at 12 lines, and a diff or the code a call carries at 40, with
+`▶ 8 more lines` under what shows. Click that line to show every line (it reads `▼ 8 more lines`
+then), and click it again to close it. From the keyboard, `Shift+Tab` in the composer puts the
+focus on the newest such line (`Shift+Tab` again goes to the one before it), `Enter` or `Space` opens
+or closes it, and `Tab` goes on to the next one and, past the newest, back to the composer.
+
+Reaching a line by keyboard scrolls the conversation to it, if it is off screen, and as with any
+scroll up the conversation then stops following new output until you are back at its end (`PageDown`
+until you are). Opening or closing a block never scrolls: at its end the conversation stays at its
+end and goes on following new output, and scrolled up it stays where it is.
+
+New output starts cut, and a session you resume shows its results cut again. The line isn't
+part of what a selection copies.
+
+## Copying
+
+Select text in the conversation with the mouse and it is copied as you let go: bh-02 says
+`Copied 120 characters` for a few seconds. A click, or a selection of one character, copies
+nothing, and the selection stays shown. `Ctrl+C` stops the running reply, also with a selection
+showing, if that selection was copied already (as a mouse selection is, when you let go, or by
+`Cmd+C`): stopping comes first. It copies a selection that has not been copied yet (one of a single
+character, one made without the mouse, or text selected in the composer, which the mouse does not
+copy) and clears it, so the `Ctrl+C` after that stops the reply. `Cmd+C` copies the selection as
+well, in a terminal that passes it on to programs. `Ctrl+T` copies the newest reply whole, as the model wrote
+it: all its text, with the markdown as written and a blank line between the parts that tool calls
+split; `Nothing to copy: no reply yet` says there is none.
+
+bh-02 copies through the terminal: it sends the text in an OSC 52 escape sequence, which a
+terminal that supports it puts on your clipboard, over SSH too. bh-02 cannot see whether the
+terminal did, so `Copied` means bh-02 asked. A terminal that keeps `Cmd+C` for itself never gives
+bh-02 the key and copies its own selection of the screen instead, which is not the selection
+bh-02 shows; select with the mouse, which copies as you let go, or use `Ctrl+T`.

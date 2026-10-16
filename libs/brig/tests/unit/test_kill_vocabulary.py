@@ -18,21 +18,22 @@ from brig.run.teardown import KILL_ITEM_KINDS, KillItem, KillOutcome
 class TestKillItemVocabularyClosure:
     """Acceptance Criterion #1: set-equality pin."""
 
-    def test_kill_item_kinds_has_exactly_four_values(self) -> None:
+    def test_kill_item_kinds_has_exactly_five_values(self) -> None:
         """KILL_ITEM_KINDS contains exactly the kinds named by SPEC.md §9.
         Five until decision-154 (2026-09-08) deleted the `tmux` launcher
         and `"pane"` with it: nothing can produce one now, and a kind
         nothing produces is a vocabulary entry that lies about what a
-        report can contain."""
-        expected = {"workload_group", "exec_sibling", "helper", "container"}
+        report can contain. `"supervisor"` joined with a supervised jail's
+        instance (decision-192, TASK-0079.06)."""
+        expected = {"workload_group", "exec_sibling", "helper", "supervisor", "container"}
         assert set(KILL_ITEM_KINDS) == expected
 
     def test_kill_item_kinds_is_tuple_in_exact_order(self) -> None:
         """KILL_ITEM_KINDS is a tuple (not just any iterable) in the exact
         order the spec lists them: workload_group, exec_sibling, helper,
-        container. This is load-bearing for audit trails and report
-        ordering."""
-        expected_order = ("workload_group", "exec_sibling", "helper", "container")
+        supervisor, container. This is load-bearing for audit trails and
+        report ordering."""
+        expected_order = ("workload_group", "exec_sibling", "helper", "supervisor", "container")
         assert expected_order == KILL_ITEM_KINDS
         assert isinstance(KILL_ITEM_KINDS, tuple)
 
@@ -54,12 +55,14 @@ class TestKillItemVocabularyMutation:
             "workload_group",
             "exec_sibling",
             "helper",
+            "supervisor",
             "container",
         }
         assert KILL_ITEM_KINDS == (
             "workload_group",
             "exec_sibling",
             "helper",
+            "supervisor",
             "container",
         )
 
@@ -87,6 +90,7 @@ class TestKillItemRefusalOnBadKind:
         assert "workload_group" in error_str
         assert "exec_sibling" in error_str
         assert "helper" in error_str
+        assert "supervisor" in error_str
         assert "container" in error_str
 
     def test_kill_item_construction_raises_on_unknown_kind(self) -> None:

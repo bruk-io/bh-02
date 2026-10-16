@@ -21,6 +21,7 @@ from brig.core import Spec, unenforced_report
 from brig.core.runtime import RuntimeKind, Scope
 from brig.run import ExecFidelity, HostRuntime, Jail, KillOutcome, Process
 from brig.run.jail import JAIL_VERSION
+from brig.run.teardown import DEFAULT_GRACE_S
 from brig.runtime.fake import FakeRuntime
 from brig.stack import CompiledJail, Stack
 
@@ -85,6 +86,24 @@ def test_a_launch_is_create_then_start_and_a_sibling_is_a_second_start() -> None
     assert not first.alive() and not jail.alive()
 
 
+def test_destroy_passes_its_grace_to_the_runtime_and_refuses_a_negative_one() -> None:
+    """decision-193: `destroy(grace=...)` reaches the runtime as given, 2.0 s by default and 0
+    for "at once", and a negative one is refused before the runtime is asked, with what to pass.
+    A jail with no supervisor has no instance group."""
+    runtime = FakeRuntime()
+    jail = _create(runtime)
+    jail.start(["sleep", "100"])
+
+    jail.destroy()
+    jail.destroy(grace=0)
+    jail.destroy(grace=0.25)
+    assert runtime.graces == [DEFAULT_GRACE_S, 0, 0.25]
+    with pytest.raises(ValueError, match=r"got -1\.0; pass 0 to end the jail at once"):
+        jail.destroy(grace=-1.0)
+    assert len(runtime.graces) == 3, "a refused destroy still asked the runtime"
+    assert jail.instance_group is None
+
+
 def test_a_process_is_waited_signalled_and_stopped_through_the_supervisor() -> None:
     runtime = FakeRuntime(exit_status=7)
     jail = _create(runtime)
@@ -113,12 +132,14 @@ def test_a_wait_that_reaches_its_deadline_is_a_timeout() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_dict_is_version_8_and_round_trips_with_the_runtime_passed() -> None:
+def test_the_dict_is_version_9_and_round_trips_with_the_runtime_passed() -> None:
     runtime = FakeRuntime()
     jail = _create(runtime)
     first = jail.start(["sleep", "100"])
     d = jail.to_dict()
-    assert d["version"] == JAIL_VERSION == 8  # 8 since decision-186: channels name no path
+    # 8 since decision-186 (channels name no path), 9 since decision-192 (`supervisor`)
+    assert d["version"] == JAIL_VERSION == 9
+    assert d["supervisor"] is None  # a fake jail has no supervisor
     assert d["runtime"] == "FAKE" and d["tethered"] is False
     assert [p["id"] for p in d["processes"]] == [first.id]
     assert not {"pid", "pgid", "argv", "launcher_name"} & set(d)
@@ -155,7 +176,7 @@ def test_a_runtime_passed_under_another_kind_is_refused() -> None:
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"version": 7}, "unsupported version 7, expected 8"),
+        ({"version": 8}, "unsupported version 8, expected 9"),
         ({"pid": 1}, r"unknown key\(s\) \['pid'\]"),
         ({"runtime": "DOCKER"}, "'DOCKER' is no runtime kind"),
         ({"tethered": "yes"}, "'tethered' must be a bool"),
@@ -167,6 +188,43 @@ def test_a_dict_brig_did_not_write_is_refused(change: dict[str, object], message
     d = {**_create(runtime).to_dict(), **change}
     with pytest.raises(ValueError, match=message):
         Jail.from_dict(d, runtimes={RuntimeKind.FAKE: runtime})
+
+
+@pytest.mark.parametrize(
+    ("supervisor", "message"),
+    [
+        (5, "'supervisor' must be null or"),
+        ({"pid": 4242}, "'supervisor' must be null or"),
+        ({"pid": 4242, "start_time": "x", "pgid": 1}, "'supervisor' must be null or"),
+        ({"pid": 0, "start_time": "x"}, "not an identity brig records"),
+        ({"pid": 1, "start_time": "x"}, "not an identity brig records"),
+        ({"pid": 2**31, "start_time": "x"}, "not an identity brig records"),
+        ({"pid": "4242", "start_time": "x"}, "not an identity brig records"),
+        ({"pid": 4242, "start_time": 7}, "not an identity brig records"),
+    ],
+)
+def test_a_supervisor_that_is_not_an_identity_brig_records_is_refused(
+    supervisor: object, message: str
+) -> None:
+    """decision-192: a supervised jail's dict names its instance by pid and start stamp, and
+    nothing a dict says that could not be one is let through (law 2; a record is kill
+    authority). The control is the next test: a well-formed one rehydrates."""
+    runtime = FakeRuntime()
+    d = {**_create(runtime).to_dict(), "supervisor": supervisor}
+    with pytest.raises(ValueError, match=message):
+        Jail.from_dict(d, runtimes={RuntimeKind.FAKE: runtime})
+
+
+def test_a_dict_naming_a_supervisor_round_trips_and_its_processes_are_the_same_instance() -> None:
+    runtime = FakeRuntime()
+    jail = _create(runtime)
+    jail.start(["sleep", "100"])
+    d = {**jail.to_dict(), "supervisor": {"pid": 4242, "start_time": "linux-starttime:9"}}
+    again = Jail.from_dict(json.loads(json.dumps(d)), runtimes={RuntimeKind.FAKE: runtime})
+    assert again.to_dict() == d
+    assert [p.fidelity for p in again.processes()] == [ExecFidelity.SAME_INSTANCE]
+    # The control: the same jail without one is PLAIN, as it was.
+    assert [p.fidelity for p in jail.processes()] == [ExecFidelity.PLAIN]
 
 
 def test_a_dict_missing_a_key_or_naming_a_bad_process_is_refused() -> None:

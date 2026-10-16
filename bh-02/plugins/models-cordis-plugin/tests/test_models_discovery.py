@@ -108,12 +108,12 @@ async def test_model_lists_what_each_endpoint_serves_named_endpoint_slash_id(tmp
     catalog = _catalog(tmp_path, get, text)
     said = str(await _switch(tmp_path, catalog).run("")).splitlines()
     at = "http://localhost:1234/v1"
-    assert [line.split() for line in said[3:6]] == [  # a name, its provider, its id, where: aligned
+    assert [line.split() for line in said[0:3]] == [  # a name, its provider, its id, where: aligned
         ["local/Qwen/Q:7b", "openai", "Qwen/Q:7b", "at", at],
         ["local/llama3.2:latest", "openai", "llama3.2:latest", "at", at],
         ["local/qwen2.5-coder:7b", "openai", "qwen2.5-coder:7b", "at", at],
     ]
-    assert said[6:] == [
+    assert said[3:] == [
         "  far: no list from http://far:8080/v1/models (no luck); its models are not listed",
         f"/model NAME switches; add models in {catalog.path}",
     ]  # one line, not an error, and the list it could make is made
@@ -149,13 +149,16 @@ async def test_a_model_of_an_endpoint_means_a_model_with_no_network_call(tmp_pat
     assert row.config == {"state": "/s/claude", "default": "local/other:1b"}  # a layer's default
 
 
-_BROKEN = _FILE + 'id = "x"\n'  # an endpoint with an id beside discover = true: its table's problem
+_BROKEN = _FILE + 'id = "x"\n'  # an endpoint with an id, as a single model's table had: its table's problem
 
 
 def _why(tmp_path: Path) -> str:
     return (
-        f"model 'local' ({tmp_path / 'models.toml'}): an endpoint names no id, it lists its models "
-        "(named local/ID). Remove id, or remove discover for a single model"
+        f"endpoint 'local' ({tmp_path / 'models.toml'}) names an id, as a single model's table did: a "
+        "table is an endpoint now, and its models are under it. Move the id to a model of it, "
+        '`[local.models.MODEL]` with `id = "x"` (named local/MODEL), and keep the rest here; e.g.\n'
+        '[local]\nprovider = "openai"\nbase_url = "https://HOST/v1"\nkey = "LINE_IN_LOCAL_ENV"\n\n'
+        '[local.models.MODEL]\nid = "MODEL ID"'
     )
 
 
@@ -187,7 +190,7 @@ async def test_the_models_file_s_default_naming_a_model_of_a_broken_endpoint_is_
         resolved(config)
     assert raised.value.message == _why(tmp_path)
     async with opened(config) as model:
-        with pytest.raises(ModelsError, match="an endpoint names no id"):
+        with pytest.raises(ModelsError, match="names an id, as a single model's table did"):
             [chunk async for chunk in model.complete([{"role": "user", "content": "hi"}], [])]
     assert get.calls == []
 
@@ -216,7 +219,7 @@ async def test_the_choices_and_the_status_bar_never_ask_a_server_and_offer_what_
     switch = _switch(tmp_path, catalog)
     choices = switch.spec()["choices"]
     for _ in range(3):  # the palette's every key
-        assert [c["args"] for c in choices()] == ["sonnet", "opus", "haiku"]
+        assert [c["args"] for c in choices()] == []  # nothing found yet, and no built-ins to offer
         catalog.current()  # the status bar's
     await asyncio.sleep(0.05)  # a task the choices scheduled would have run by now
     assert get.calls == []
@@ -346,14 +349,16 @@ async def test_endpoints_come_only_from_the_trusted_models_file(
     await refused.refresh()
     assert get.calls == [] and _discovered(refused) == [] and refused.endpoints() == []
     assert refused.problem is not None and "is not read: it is in the project" in refused.problem
-    # a layer's `extra` is no endpoint either: its table is a problem, and nothing is asked
+    # a layer's `extra` never discovers: its table is a problem, it serves nothing, and nothing is asked
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     extra = {"far": {"provider": "openai", "discover": True, "base_url": "http://far:8080/v1"}}
     catalog = _catalog(tmp_path, get, "", extra=extra)
     await catalog.refresh()
-    assert get.calls == [] and _discovered(catalog) == [] and catalog.endpoints() == []
-    (far,) = [m for m in catalog.listed() if m["name"] == "far"]
-    assert "discover is read only from the models file, never from a layer" in far["problem"]
+    assert get.calls == [] and _discovered(catalog) == []
+    assert catalog.listed() == []
+    (far,) = catalog.endpoints()  # what /model says of it: its problem
+    assert far["name"] == "far" and len(far["notes"]) == 1
+    assert "discover is read only from the models file, never from a layer" in far["notes"][0]
 
 
 async def test_a_listing_is_not_asked_for_again_while_fresh_and_a_failure_never_is(tmp_path: Path) -> None:
@@ -427,5 +432,5 @@ async def test_a_refresh_that_can_not_be_made_is_no_error(tmp_path: Path) -> Non
     broken = _catalog(tmp_path, get, "[local\n")  # a models file that is not TOML: `problem` says so
     await broken.refresh()
     assert get.calls == []
-    assert [m["name"] for m in broken.listed()] == ["sonnet", "opus", "haiku"]  # the built-ins, no raise
+    assert broken.listed() == []  # no raise
     assert broken.problem is not None and "is not TOML" in broken.problem

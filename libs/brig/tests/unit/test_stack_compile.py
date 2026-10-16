@@ -464,7 +464,7 @@ def test_compiled_jail_env_is_defensively_copied() -> None:
 
 
 @pytest.mark.unit
-def test_compiled_jail_has_exactly_twelve_fields() -> None:
+def test_compiled_jail_has_exactly_thirteen_fields() -> None:
     """Deliverable: CompiledJail's field set is pinned to the named fields
     -- "exactly what the launcher and the report need, and no more." A
     missing or invented field is red (same idiom as
@@ -494,6 +494,7 @@ def test_compiled_jail_has_exactly_twelve_fields() -> None:
         "signatures",
         "sensors",
         "runtime",
+        "supervisor",
     }
     actual_fields = {f.name for f in dataclasses.fields(brig.stack.CompiledJail)}
     assert actual_fields == expected_fields, (

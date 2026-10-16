@@ -149,14 +149,14 @@ session's layer run as they do with Claude:
   and a resume restored it;
 - `slow_model`: `echo_model`, taking 3 s to start.
 
-And three are providers a models file names for a model of its own, under the shipped
-`models:model` row, so `--model` picks one and `/model` switches between them (or to an
+And three are providers a models file names for an endpoint of its own, under the shipped
+`models:model` row, so `--model e/fake` picks one and `/model` switches between them (or to an
 OpenAI-compatible model) as between Claude and any other:
 
 ```toml
-[fake]
+[e]
 provider = "bh_02.testing:echo_provider"
-id = "fake"
+models = { fake = { id = "fake" } }
 ```
 
 - `echo_provider`: `echo_model`'s step, said as `[ID] echo: ...`, so a screen shows which model

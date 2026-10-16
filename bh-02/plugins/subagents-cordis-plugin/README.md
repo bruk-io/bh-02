@@ -33,7 +33,7 @@ first of a name wins, and one named like a shipped type replaces it):
 
 ```toml
 prompt = """You are agent {name}, a reviewer: ..."""   # its section of the prompt; {name} is the agent's
-model = "haiku"                                       # optional: the session's model
+model = "claude/haiku"                                # optional: the session's model
 steps = 30                                            # optional: model steps it may take
 tools = ["python"]                                    # optional: every row in the agents row's `tools`
 ```

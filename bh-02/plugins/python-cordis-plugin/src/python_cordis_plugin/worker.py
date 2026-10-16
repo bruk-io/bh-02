@@ -2,7 +2,8 @@
 
 Run by path (``python -I worker.py SOCKET``), usually inside a jail. It imports the standard
 library and nothing else, so nothing of the host crosses into the jail with it. The namespace
-holds only what inputs put there: an input is plain Python, and the jail decides what it may touch.
+holds what inputs put there and nothing of bh-02's but `tools`: an input is plain Python, and the
+jail decides what it may touch.
 
 Wire: newline-delimited JSON. The host sends ``{"op": "hello"}`` once (a readiness probe
 connects and closes without a word, so the worker keeps accepting until one speaks), then
@@ -218,12 +219,12 @@ class _Repl:
 
     def __init__(self, channel: _Channel, root: str) -> None:
         self._channel = channel
-        # `__kernel__` is kept: a startup file may test `__name__`, and a rename would break that silently
+        # `__kernel__` is kept: a startup file may test `__name__`, and a rename would break that silently.
         self._namespace: dict[str, Any] = {"__name__": "__kernel__"}
         self.running = False  # an input is running, parsed or failing included: SIGINT interrupts it
         self._hearing = False  # the input's own code is running: what it opens is heard
         self._inputs = 0
-        self._had: set[str] = set()  # every name the namespace has held since the worker started
+        self._had = set(self._namespace)  # every name the namespace has held since the worker started
         self._saved: str | None = None  # where a cut output is kept whole: made at the first cut
         self._under = os.path.join(root, "")  # the root, ending in a separator
         # The globals the import system's own code runs with: the frozen importlib modules'.

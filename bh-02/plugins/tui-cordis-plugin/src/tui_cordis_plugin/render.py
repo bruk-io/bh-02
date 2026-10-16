@@ -8,25 +8,33 @@ it is tested without an app.
 """
 
 import re
-from collections.abc import AsyncIterator, Iterable, Mapping
-from typing import Any
+from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal, assert_never
 
 from textual.content import Content
 from textual.highlight import highlight
 
 __all__ = [
+    "Clip",
     "approval_language",
     "approval_lines",
     "approval_heading",
     "approval_title",
     "asked_by_a_sub_agent",
+    "clip_head",
+    "clip_label",
+    "clip_rest",
     "code",
+    "copied_line",
     "fence_after",
     "is_quiet_stop",
     "jail_forms",
+    "keys_line",
     "lifecycle_line",
     "session_forms",
     "markdown",
+    "newest_reply",
     "noted",
     "of_a_sub_agent",
     "settle_point",
@@ -37,6 +45,7 @@ __all__ = [
     "usage_line",
     "usage_sum",
     "waiting_line",
+    "working_line",
 ]
 
 type Event = Mapping[str, Any]
@@ -146,26 +155,74 @@ def tool_call_head(event: Event) -> str:
     return name if block is not None and not args else f"{name}({args})"
 
 
-def tool_call_code(event: Event) -> Content | None:
-    """The code a tool call carries (an input's), highlighted; else None.
-    A long one is cut, and says how much was left out."""
+def tool_call_code(event: Event) -> Clip | None:
+    """The code a tool call carries (an input's), cut to its first lines; else None."""
     input: Mapping[str, Any] = event.get("input") or {}
     block = _block_key(input)
     if block is None:
         return None
     body = str(input[block]).strip("\n").splitlines() or [""]
-    shown = code("\n".join(body[:_MAX_CODE_LINES]))
-    return _with_more(shown, len(body) - _MAX_CODE_LINES)
+    return Clip("code", tuple(body), _MAX_CODE_LINES)
 
 
-def tool_result_body(event: Event) -> Content:
+def tool_result_body(event: Event) -> Clip:
     """A tool's result, cut to a glance; a unified diff coloured line by line (and allowed
     more lines, since a diff is worth reading). An error's colour is the widget's to give."""
     body = str(event.get("content", "")).rstrip("\n").splitlines() or ["(no output)"]
     if not event.get("is_error") and any(_HUNK.match(line) for line in body):
-        shown = Content("\n").join(_diff_line(line) for line in body[:_MAX_DIFF_LINES])
-        return _with_more(shown, len(body) - _MAX_DIFF_LINES)
-    return _with_more(Content("\n".join(body[:_MAX_RESULT_LINES])), len(body) - _MAX_RESULT_LINES)
+        return Clip("diff", tuple(body), _MAX_DIFF_LINES)
+    return Clip("text", tuple(body), _MAX_RESULT_LINES)
+
+
+type _ClipKind = Literal["text", "diff", "code"]
+
+
+@dataclass(frozen=True)
+class Clip:
+    """A block of lines cut to a glance: every line it has (`lines`, as `kind` says to draw
+    them), and how many show while it is closed (`shown`). What is left out is drawn only when
+    the person opens it (`clip_rest`), so a block nobody opens costs what its first lines do."""
+
+    kind: _ClipKind
+    lines: tuple[str, ...]
+    shown: int
+
+    @property
+    def hidden(self) -> int:
+        """How many lines closing it leaves out: none when it fits."""
+        return max(0, len(self.lines) - self.shown)
+
+
+def clip_head(clip: Clip) -> Content:
+    """The lines a clip shows while it is closed."""
+    return _drawn(clip.kind, clip.lines[: clip.shown])
+
+
+def clip_rest(clip: Clip) -> Content:
+    """The lines a clip leaves out, as they are in the whole: code is highlighted from its first
+    line (a string that began above the cut goes on being one), so it is drawn whole and cut."""
+    if clip.kind == "code":
+        whole = _drawn(clip.kind, clip.lines).split("\n", allow_blank=True)
+        return Content("\n").join(whole[clip.shown :])
+    return _drawn(clip.kind, clip.lines[clip.shown :])
+
+
+def clip_label(clip: Clip, *, opened: bool) -> str:
+    """What the line that opens and closes a clip says: how many lines it leaves out, with the
+    glyph of its state (`▶` closed, `▼` open, as a thinking block's)."""
+    return f"{'▼' if opened else '▶'} {clip.hidden} more line{'' if clip.hidden == 1 else 's'}"
+
+
+def _drawn(kind: _ClipKind, lines: tuple[str, ...]) -> Content:
+    match kind:
+        case "text":
+            return Content("\n".join(lines))
+        case "diff":
+            return Content("\n").join(_diff_line(line) for line in lines)
+        case "code":
+            return code("\n".join(lines))
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _markdown_line(line: str) -> Content:
@@ -200,11 +257,6 @@ def _inline(text: str) -> Content:
 def _diff_line(line: str) -> Content:
     style = next((style for prefix, style in _DIFF.items() if line.startswith(prefix)), "")
     return Content.styled(line, style) if style else Content(line)
-
-
-def _with_more(shown: Content, hidden: int) -> Content:
-    """`shown`, and a muted line saying how many more lines were left out, if any were."""
-    return Content.assemble(shown, (f"\n… {hidden} more lines", _MUTED)) if hidden > 0 else shown
 
 
 def _block_key(input: Mapping[str, Any]) -> str | None:
@@ -279,6 +331,101 @@ def waiting_line(rows: Iterable[str]) -> str:
     named = sorted(rows)
     them = "it is" if len(named) == 1 else "they are"
     return f"⧗ waiting for {', '.join(named)} to start; this message is sent once {them} up"
+
+
+def working_line(seconds: float) -> str:
+    """What the screen says while a reply runs: that it is working, and for how long."""
+    return f"Working · {_elapsed(seconds)}"
+
+
+def _elapsed(seconds: float) -> str:
+    """A time as the person reads it, whole seconds first and minutes once there are some:
+    `7s`, `1m 05s`, `1h 02m` (the seconds are left out once there are hours)."""
+    minutes, whole = divmod(max(0, int(seconds)), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes}m {whole:02d}s" if minutes else f"{whole}s"
+
+
+@dataclass(frozen=True)
+class _Hint:
+    """One everyday key the screen names: what it does (`what`, also its place in the order they
+    are given up in), and how that reads in full and in short (`^J newline`)."""
+
+    what: str
+    key: str
+    does: str
+    short_key: str
+    short_does: str
+
+
+# The keys the screen names, in the order it names them. Each is the key as the code binds it
+# (Composer.on_key, BhApp.BINDINGS, Textual's own `ctrl+p`); a test presses every one of them.
+_HINTS: tuple[_Hint, ...] = (
+    _Hint("send", "Enter", "send", "↵", "send"),
+    _Hint("new line", "Ctrl-J", "new line", "^J", "newline"),
+    _Hint("stop", "Esc", "stop", "Esc", "stop"),
+    _Hint("scroll", "PgUp/PgDn", "scroll", "PgUp/Dn", "scroll"),
+    _Hint("history", "↑/↓", "history", "↑↓", "history"),
+    _Hint("copy", "Ctrl-T", "copy reply", "^T", "copy"),
+    _Hint("palette", "Ctrl-P", "palette", "^P", "palette"),
+    _Hint("quit", "Ctrl-Q", "quit", "^Q", "quit"),
+)
+# What a line too narrow for all of them gives up, first to last: quit is never given up.
+_GIVEN_UP = ("copy", "history", "scroll", "new line", "send", "palette", "stop")
+_KEY = "bold $text-primary"
+
+
+def keys_line(width: int) -> Content:
+    """The everyday keys on one line of at most `width` cells, each key bold and its use after it
+    (`Enter send  Ctrl-J new line  Esc stop ...`): in full when there is room, else with the keys
+    as short as `^J` and the words shortened, else with fewer of them, the least everyday first
+    (`_GIVEN_UP`), down to quit alone, which a narrower line crops. The first that fits is it."""
+    line = Content("")
+    for line in _key_lines():
+        if line.cell_length <= width:
+            return line
+    return line
+
+
+def _key_lines() -> Iterator[Content]:
+    """Every form of the line, fullest first."""
+    yield _hint_line(_HINTS, short=False, gap="  ")
+    yield _hint_line(_HINTS, short=True, gap="  ")
+    kept = _HINTS
+    yield _hint_line(kept, short=True, gap=" ")
+    for given_up in _GIVEN_UP:
+        kept = tuple(hint for hint in kept if hint.what != given_up)
+        yield _hint_line(kept, short=True, gap=" ")
+
+
+def _hint_line(hints: tuple[_Hint, ...], *, short: bool, gap: str) -> Content:
+    parts: list[str | tuple[str, str]] = []
+    for hint in hints:
+        key, does = (hint.short_key, hint.short_does) if short else (hint.key, hint.does)
+        parts += [gap, (key, _KEY), f" {does}"] if parts else [(key, _KEY), f" {does}"]
+    return Content.assemble(*parts)
+
+
+def copied_line(text: str) -> str:
+    """What copying `text` says, in one short line: how much went to the clipboard."""
+    return f"Copied {len(text)} character{'' if len(text) == 1 else 's'}"
+
+
+def newest_reply(blocks: Iterable[tuple[str, str]]) -> str | None:
+    """The newest reply's text, from the transcript's blocks (a (kind, text) pair each, oldest
+    first, the text of a `text` block as the model wrote it): every `text` block after the
+    message it answers (a `user` block), in order, a blank line between, so a reply that stops
+    for tool calls and goes on is whole. While the newest message has no text yet, the newest
+    reply is the one before it. None when the model has said nothing."""
+    said: list[str] = []
+    for kind, text in reversed(list(blocks)):
+        if kind == "user" and said:
+            break
+        if kind == "text" and text.strip():
+            said.append(text.strip())
+    return "\n\n".join(reversed(said)) or None
 
 
 def approval_title(request: Event) -> str:

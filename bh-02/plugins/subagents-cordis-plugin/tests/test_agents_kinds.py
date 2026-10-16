@@ -60,7 +60,10 @@ def test_a_type_file_naming_only_its_prompt_gets_the_session_model_30_steps_and_
         ),
         ('model = "haiku"', "`prompt` is missing; write the type's section of a sub-agent's prompt there"),
         ('prompt = "  "', "`prompt` is '  '; write the type's section"),
-        ('prompt = "x"\nmodel = 3', '`model` is 3, not a model\'s name; write one, such as model = "haiku"'),
+        (
+            'prompt = "x"\nmodel = 3',
+            '`model` is 3, not a model\'s name; write one, such as model = "claude/haiku"',
+        ),
         ('prompt = "x"\nmodel = ""', "`model` is '', not a model's name"),
         (
             'prompt = "x"\nsteps = 0',

@@ -40,6 +40,26 @@ choose what a later one reads there: brig's `trusted`.) A startup file that ends
 passed over by the workers after it, until `/restart python`, and the input it cut short says
 which it was, after what the opening had to tell by then (that the worker was started again,
 and why).
+
+The model is told what each file made for it, function by function: the input that runs a file
+prints, last, one line of JSON naming each function the file tells and the signature text
+`inspect.signature` gave (or None), and which are told is decided there, in the Python process (the
+public functions and classes the file defines, or exactly the callables its `__all__` names;
+`_startup_input`). That line is the Python process's, so the host reads it as data and says it in
+pure functions (`startup_ran`, `signed`): control and format characters stripped, each signature
+cut at `_CUT`, `name(...)` for one that could not be read, a name Python could not have written (not
+an identifier) left out, and signatures told up to `_BUDGET` characters across the REPL's startup
+files, in the order they run, then names only.
+
+Each file that told something is then checked against the docstring convention and for types, in the jail
+(decision-0006's point 7): a second input runs `startup_check.py` by path as a program under the Python
+process's own interpreter, over the file's text, which runs ruff and mypy with bh-02's flags only and bh-02's
+example rule and prints one line of JSON naming each told function that misses and the codes it breaks, and
+the codes of what is outside them (`_check_input`). The host reads that line as data too
+(`startup_checked`): only a name the file told, only a code from the closed set (`CODES`), never a tool's
+message, which quotes the file. A finding is advice: it never stops a file running or hides a function, and
+a check that did not run is said, once, as such. mypy's cache is the project's (`mypy_cache`): a REPL start
+is the first check there, which takes seconds, and every other takes a fraction of one.
 """
 
 import asyncio
@@ -48,6 +68,7 @@ import json
 import os
 import shutil
 import tempfile
+import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,15 +78,30 @@ from typing import Any, Protocol, runtime_checkable
 
 from host_paths import config_home, walked
 from python_cordis_plugin.python import PYTHON, instructions_for
+from python_cordis_plugin.startup_check import CODES, ELSEWHERE
 
 __all__ = ["Access", "Jailed", "PythonProcess", "PythonProcessConfig", "Rule", "Runner", "worker_argv"]
 
 _WORKER = Path(__file__).with_name("worker.py")
+# the docstring and type check: a program of its own, run by path in the jail like the worker
+_CHECK = Path(__file__).with_name("startup_check.py")
+# How long the check gets in the Python process: ruff and the rule take milliseconds, mypy a fraction of a
+# second warm and, cold, seconds (13 for a file that imports textual); it gets 90 s of this, ruff 20.
+_CHECK_S = 120.0
 # The longest line the worker sends: its output and its error are capped at 20,000 characters
 # each, and JSON escapes a character to at most 12 bytes (a surrogate pair, `\ud83d\ude00`),
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
 _LINE_LIMIT = 1 << 20
 _CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a startup file in the person's config directory
+_CUT = 160  # the longest signature, in characters, the model is told of a function
+_READ = 4 * _CUT  # how much of one the Python process sends: the host cleans it, then cuts it at `_CUT`
+# The most characters of signatures (`name(signature)`, cleaned and cut) the model is told across a
+# REPL's startup files, the person's first; the first function that does not fit, and every one
+# after it, is told by name only. The python section says the same number (`python._TOLD`).
+_BUDGET = 600
+# Unicode's control (C0, DEL, C1) and format (bidi overrides, zero-width) categories: what no line
+# the model reads as bh-02's own may hold, since they break the line, or reorder or hide its text
+_STRIPPED = frozenset({"Cc", "Cf"})
 
 
 @runtime_checkable
@@ -124,15 +160,19 @@ class Rule(Protocol):
 class PythonProcessConfig:
     """`root` is the working directory inputs run in; `grace` how long an interrupted input gets
     to say it ended before the worker is stopped and started again; `startup` the files a new
-    Python process runs, in order, before its first input, when its inputs are confined: helpers kept
+    Python process runs, in order, before its first input, when its inputs are confined: functions kept
     across sessions. The person's own first (`$XDG_CONFIG_HOME/` is their config directory: that
     variable's value, else `~/.config`, as for the models file; `~/` is their home), then the
     project's (a relative name is from `root`), the one the model may write. A single string is
-    one file."""
+    one file. `mypy_cache` is the directory (from `root`, or absolute) where mypy keeps its cache for
+    the type check of those files at each start: in the project because that is where a jail can
+    write that outlives it (mypy puts a `.gitignore` of `*` in it, so git ignores it), and a cache is
+    what makes the check take a fraction of a second, not seconds."""
 
     root: str = "."
     grace: float = 5.0
     startup: Sequence[str] = ("$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py")
+    mypy_cache: str = ".bh-02/mypy_cache"
 
     def __post_init__(self) -> None:
         names = (self.startup,) if isinstance(self.startup, str) else self.startup
@@ -141,6 +181,11 @@ class PythonProcessConfig:
                 "`startup` must be a file name or a list of them, as in "
                 '`startup = ["$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py"]`, '
                 f"not {self.startup!r}"
+            )
+        if not isinstance(self.mypy_cache, str) or not self.mypy_cache:
+            raise TypeError(
+                "`mypy_cache` must be a directory name, from the root or absolute, as in "
+                f'`mypy_cache = ".bh-02/mypy_cache"`, not {self.mypy_cache!r}'
             )
 
 
@@ -208,14 +253,150 @@ def _told(asides: Sequence[str]) -> str:
     return f"({'. '.join(asides)})\n" if asides else ""
 
 
+def _bound(line: str) -> tuple[tuple[str, str | None], ...] | None:
+    """What the startup input's last line says: the functions the file told, each as its name and
+    the text of its signature (None: `inspect.signature` could not read it), or None when the line is
+    not the shape `_startup_input` prints: `{"told": [[name, signature or null], ...]}`. The line is
+    the Python process's, so nothing about it is taken on trust: a file can bind any string as a
+    name (`globals()[...]`), and one Python could not have written is left out, so it can't word the
+    aside."""
+    try:
+        said = json.loads(line)
+    except ValueError, RecursionError:  # not JSON, a number past Python's limit, nested past its stack
+        return None
+    match said:
+        case {"told": list() as told}:
+            found: list[tuple[str, str | None]] = []
+            for each in told:
+                match each:
+                    case [str() as name, str() | None as signature]:
+                        found.append((name, signature))
+                    case _:
+                        return None
+            return tuple(each for each in found if each[0].isidentifier())
+        case _:
+            return None
+
+
+def signed(name: str, signature: str | None) -> str:
+    """A function as the model is told it: `name` and its `signature` text (`inspect.signature`'s,
+    parentheses included), `name(...)` when there is none. Control and format characters
+    (`_STRIPPED`) are stripped, the file being model-written and a default's repr anything, and
+    the signature, once stripped, is cut at `_CUT` characters and ends in `…` when it was cut."""
+    shown = _plain(name)
+    if signature is None:
+        return f"{shown}(...)"
+    text = _plain(signature)
+    return f"{shown}{text[:_CUT]}…" if len(text) > _CUT else f"{shown}{text}"
+
+
+def _plain(text: str) -> str:
+    """`text` without its control and format characters (`_STRIPPED`)."""
+    return "".join(char for char in text if unicodedata.category(char) not in _STRIPPED)
+
+
+def _fitted(
+    told: Sequence[tuple[str, str | None]], left: int
+) -> tuple[tuple[str, ...], tuple[str, ...], int]:
+    """`told`, in order, split at the budget: the functions whose signed text (`signed`: the text
+    the model reads, cleaned and cut) fits in what is `left` of it, the names of those that follow
+    the first that does not, and what is left. The first that does not fit ends the signatures and
+    closes the budget (0 left), so no later function, in this file or the next, is shown out of its
+    place."""
+    shown: list[str] = []
+    for each, signature in told:
+        text = signed(each, signature)
+        if len(text) > left:
+            return tuple(shown), tuple(_plain(name) for name, _ in told[len(shown) :]), 0
+        shown.append(text)
+        left -= len(text)
+    return tuple(shown), (), left
+
+
+def startup_ran(name: str, when: str, line: str, left: int) -> tuple[str, int]:
+    """What the model is told of the startup file `name` that ran `when` (`first` or `next`), from
+    the last line of the output of its input (`_startup_input`), and what is left of the REPL's
+    budget of signatures (`left` characters, `_BUDGET` for the first file that ran) once it has
+    spent its share: the functions it told by signature, up to `left`, then by name only; `no
+    public functions` for a file that told none. A line that is not what the input prints is said
+    not to be, never quoted, and spends nothing."""
+    told = _bound(line)
+    if told is None:
+        return (
+            f"{name} ran {when}; what it bound could not be listed "
+            "(its input's last line was not the listing)",
+            left,
+        )
+    if not told:
+        return f"{name} ran {when}: no public functions", left
+    shown, bare, left = _fitted(told, left)
+    parts = [*([", ".join(shown)] if shown else []), *([f"by name only: {', '.join(bare)}"] if bare else [])]
+    return f"{name} ran {when}: functions {'; '.join(parts)}", left
+
+
+def _missed(line: str) -> dict[str, tuple[str, ...]] | None:
+    """What the check input's last line says: each name that misses (`ELSEWHERE`: what is outside the
+    told functions) and the codes it breaks, in `CODES` order, or None when the line is not the shape
+    `startup_check.py --json` prints, `{"misses": [[name, [code, ...]], ...]}`, with every code one of
+    `CODES`. The line is the Python process's, so nothing about it is taken on trust."""
+    try:
+        said = json.loads(line)
+    except ValueError, RecursionError:  # not JSON, a number past Python's limit, nested past its stack
+        return None
+    match said:
+        case {"misses": list() as misses}:
+            found: dict[str, tuple[str, ...]] = {}
+            for each in misses:
+                match each:
+                    case [str() as name, list() as codes] if all(code in CODES for code in codes):
+                        found[name] = tuple(code for code in CODES if code in codes)
+                    case _:
+                        return None
+            return found
+        case _:
+            return None
+
+
+def startup_checked(name: str, told: Sequence[str], line: str) -> str:
+    """What the model is told of the docstring and type check of the startup file `name`, from the last
+    line of its input (`_check_input`; "" when it printed none: the check did not run) and the `told`
+    names the file's own input listed, in their order: each that misses and the codes it breaks, then
+    the codes of what is elsewhere in the file (an import, a statement, a private function), never a
+    tool's message, which quotes the file. A name the check says but the file did not tell is not
+    said. "" when nothing misses; a check that did not run is said not to have."""
+    found = _missed(line)
+    if found is None:
+        return f"{name} docstrings and types could not be checked"
+    misses = [f"{_plain(each)} {', '.join(found[each])}" for each in told if found.get(each)]
+    if elsewhere := found.get(ELSEWHERE):
+        misses.append(f"elsewhere in the file: {', '.join(elsewhere)}")
+    return f"{name} findings: " + "; ".join(misses) if misses else ""
+
+
+def _last(output: str) -> str:
+    """The last line of an input's `output`, "" for none: where a startup input prints its line."""
+    lines = output.strip().splitlines()
+    return lines[-1] if lines else ""
+
+
 def _startup_input(path: str, source: str | None = None) -> str:
     """The input that runs a startup file in the namespace and prints, last and on a line of its
-    own, the public names it defined or bound afresh ("nothing" for none): each its code stores
-    at the top (as the compiler says: the same object bound again counts) or that is new or
-    changed after it. `source` is its text when the host read it (the person's own, which a jail
-    that reads by allowlist can't see), registered with `linecache` under `path` so a traceback
-    shows its lines; without it the worker reads `path` itself, in the jail. Either way a UTF-8
-    byte order mark is no part of it. The input's own names are gone after it, however it ends."""
+    own, one line of JSON (`_bound` reads it): the functions the file tells, each the name of a
+    callable and the text of its `inspect.signature`, at most `_READ` characters, or null when that
+    could not be made. Which are told is point 1 of decision-0006, decided here, where the objects
+    are. When the file binds `__all__` (a list or a tuple that is a new or changed object after it
+    ran, not one an earlier file left in the namespace), exactly the callables it names, in its
+    order, imported ones included: a name it lists that the file never bound, or that is no
+    callable, is nothing to tell. Otherwise each name with no leading underscore whose value is a
+    function, method or class made by this file: one that is `callable`, was not an object the
+    namespace already held (so a name bound to what an earlier file made is not told again) and
+    whose `__module__` is the namespace's `__name__` (a def, a class or a lambda the file's code
+    made, not an import, nor a `partial` of one; an instance, even a callable one, is data). In the
+    order the namespace holds them. A value that raises when asked is not told: the file does not
+    fail for it. `source` is its text when the host read it (the person's own, which a jail that
+    reads by allowlist can't see), registered with `linecache` under `path` so a traceback shows its
+    lines; without it the worker reads `path` itself, in the jail. Either way a UTF-8 byte order
+    mark is no part of it. The input's own names are gone after it, however it ends."""
     read = (
         [
             f"    _bh_source = {source!r}",
@@ -235,14 +416,62 @@ def _startup_input(path: str, source: str | None = None) -> str:
             *read,
             f"    _bh_code = compile(_bh_source, {path!r}, 'exec')",
             "    exec(_bh_code, globals())",
-            "    import dis as _bh_dis",
-            "    _bh_bound = {i.argval for i in _bh_dis.get_instructions(_bh_code)"
-            " if i.opname == 'STORE_NAME'}",
-            "    print('\\n' + (', '.join(sorted(n for n, v in globals().items() if not n.startswith('_')"
-            " and (n in _bh_bound or n not in _bh_before or _bh_before[n] is not v))) or 'nothing'))",
+            "    import inspect as _bh_inspect, json as _bh_json",
+            "    _bh_held = {id(v) for v in _bh_before.values()}",
+            "    def _bh_made(v):",  # an object may raise on any attribute: not told then
+            "        try:",
+            "            return (callable(v) and (_bh_inspect.isroutine(v) or _bh_inspect.isclass(v))"
+            " and id(v) not in _bh_held and v.__module__ == __name__)",
+            "        except Exception:",
+            "            return False",
+            "    def _bh_signature(v):",  # a default's repr can be anything, and raise
+            "        try:",
+            f"            return str(_bh_inspect.signature(v))[:{_READ}]",
+            "        except Exception:",
+            "            return None",
+            "    _bh_all = globals().get('__all__')",
+            "    if isinstance(_bh_all, (list, tuple)) and ("
+            "'__all__' not in _bh_before or _bh_before['__all__'] is not _bh_all):",
+            "        _bh_told = [n for n in dict.fromkeys(n for n in _bh_all if isinstance(n, str))"
+            " if callable(globals().get(n))]",
+            "    else:",
+            "        _bh_told = [n for n, v in globals().items() if not n.startswith('_') and _bh_made(v)]",
+            "    print('\\n' + _bh_json.dumps("
+            "{'told': [[n, _bh_signature(globals()[n])] for n in _bh_told]}))",
             "finally:",
-            "    for _bh_name in ('_bh_before', '_bh_source', '_bh_code', '_bh_bound', '_bh_path',"
-            " '_bh_lines', '_bh_dis', '_bh_name'):",
+            "    for _bh_name in ('_bh_before', '_bh_source', '_bh_code', '_bh_path', '_bh_lines',"
+            " '_bh_inspect', '_bh_json', '_bh_held', '_bh_made', '_bh_signature', '_bh_all', '_bh_told',"
+            " '_bh_name'):",
+            "        globals().pop(_bh_name, None)",
+        ]
+    )
+
+
+def _check_input(path: str, cache: str, source: str | None = None) -> str:
+    """The input that checks the startup file at `path` against the docstring convention and for types,
+    and prints, last and on a line of its own, `startup_check.py`'s one line of JSON (`_missed` reads
+    it). It runs that program by path under the Python process's interpreter (`-I`), which runs ruff,
+    mypy (its cache the directory `cache`) and the example rule over the file's text: the text `source`
+    when the host read it (the person's own, which a jail that reads by allowlist can't see, handed over
+    on stdin), else the file at `path`, which the program reads in the jail. Nothing of the file runs.
+    A program that fails prints nothing, and one that outlives `_CHECK_S` is killed and fails the
+    input. The input's own names are gone after it."""
+    flags = f"'--ruff', '--mypy', {'--cache-dir=' + cache!r}, '--json'"
+    program = f"[_bh_sys.executable, '-I', {str(_CHECK)!r}, {flags}"
+    call = (  # `--name=` and `--`: a file named `-x.py` is a file, not an option
+        f"{program}, {'--name=' + path!r}, '--', '-'], input={source!r}"
+        if source is not None
+        else f"{program}, '--', {path!r}], stdin=_bh_run.DEVNULL"
+    )
+    return "\n".join(
+        [
+            "try:",
+            "    import subprocess as _bh_run, sys as _bh_sys",
+            f"    _bh_ran = _bh_run.run({call}, capture_output=True, encoding='utf-8', timeout={_CHECK_S})",
+            "    if _bh_ran.returncode in (0, 1):",  # 1 is findings; 2, a file or ruff it could not check
+            "        print('\\n' + _bh_ran.stdout)",
+            "finally:",
+            "    for _bh_name in ('_bh_run', '_bh_sys', '_bh_ran', '_bh_name'):",
             "        globals().pop(_bh_name, None)",
         ]
     )
@@ -475,7 +704,7 @@ class PythonProcess:
         confined = self.confined
         try:
             ready = await asyncio.to_thread(self._ready, confined)
-        except Exception as error:  # the input still runs, and says why its helpers are missing
+        except Exception as error:  # the input still runs, and says why its functions are missing
             ready = []
             asides.append(f"the startup files could not be looked at ({error}), so none ran")
         if ready and not confined:
@@ -486,6 +715,7 @@ class PythonProcess:
                 f"are put to the person, so run {'it' if one else 'them'} as an input of your own if you "
                 f"want {'it' if one else 'them'}: {runs}"
             )
+        spare = _BUDGET  # of the signatures the model is told, what the files after this one may spend
         for index, startup in enumerate(ready if confined else ()):
             if startup.name in self._passed:
                 asides.append(
@@ -499,7 +729,7 @@ class PythonProcess:
                 )
                 continue
             try:
-                ran = await self._exchange(_startup_input(startup.path, startup.source))
+                ran, checked = await self._run_startup(startup)
             except ConnectionError:
                 self._passed[startup.name] = "it ended the REPL's process"
                 raise _StartupEnded(startup.name, _told(asides)) from None
@@ -522,9 +752,28 @@ class PythonProcess:
                     f"{startup.name} ran {when} and failed{left}, so what it defines is missing:\n{ran.error}"
                 )
             else:
-                lines = ran.output.strip().splitlines()
-                asides.append(f"{startup.name} ran {when} and defined: {lines[-1] if lines else 'nothing'}")
+                line = _last(ran.output)
+                told, spare = startup_ran(startup.name, when, line, spare)
+                asides.append(told)
+                if checked is not None:  # the file told something: its docstrings and types were checked
+                    names = [each for each, _ in _bound(line) or ()]
+                    said = startup_checked(
+                        startup.name, names, "" if checked.error else _last(checked.output)
+                    )
+                    if said:
+                        asides.append(said)
         return _told(asides)
+
+    async def _run_startup(self, startup: _Ready) -> tuple[_Output, _Output | None]:
+        """Run the startup file as an input and, when it ran and told something, the input that checks
+        its docstrings and types (`_check_input`): the file's own and the check's, which is None when
+        there was nothing to check. Both are the file's turn, so one that ends the worker or is stopped
+        ends this one's, and `_opening` answers either the same way."""
+        ran = await self._exchange(_startup_input(startup.path, startup.source))
+        if ran.error or not _bound(_last(ran.output)):
+            return ran, None
+        cache = str(Path(self._config.root).resolve() / self._config.mypy_cache)
+        return ran, await self._exchange(_check_input(startup.path, cache, startup.source))
 
     def _ready(self, read: bool) -> list[_Ready]:
         """The startup files that are there, in order, each once (at its first place), and how
@@ -633,7 +882,7 @@ class PythonProcess:
                 return ""
             listed = ", ".join(f"tools.{name}" for name in sorted(now))
             return (
-                f"(bh-02's other tools are functions in your namespace: {listed}; "
+                f"(bh-02's other tools, run by bh-02 when you call one: {listed}; "
                 "help(tools.NAME) says what one takes)\n"
             )
         added = sorted(now.keys() - before.keys())

@@ -7,16 +7,17 @@ filled only by `refresh`, which `/model` awaits when it lists (a coroutine of it
 request never blocks the event loop the TUI shares). Everything that only reads, `/model`'s
 choices, the composer's completion, the status bar, reads `found` and never asks the server.
 
-A listing is kept under the endpoint's `base_url` and the name of its key's line, never under the
-key: what is kept is ids, and the key goes only into the headers of the one request that asks
-(`Ask`). A reader never expires an entry; only `refresh` decides to ask again, when what it has is
-`FRESH` seconds old or is no list at all (a failure is never fresh, so `/model` typed again after
-the server was started asks at once). One that fails drops the ids it had.
+A listing is kept under the endpoint's `base_url` and the name of its key's line (or its
+key_command), never under the key: what is kept is ids, and the key goes only into the headers of
+the one request that asks (`Ask`). A reader never expires an entry; only `refresh` decides to ask
+again, when what it has is `FRESH` seconds old or is no list at all (a failure is never fresh, so
+`/model` typed again after the server was started asks at once). One that fails drops the ids it
+had.
 """
 
 import asyncio
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Final, Protocol, assert_never
 
@@ -40,7 +41,8 @@ _CONNECT: Final = 3.0
 _DEADLINE: Final = 6.0  # the whole request, however slowly a server drips its answer
 _DETAIL: Final = 120  # how much of a library's error text a line quotes
 
-type Key = tuple[str, str | None]  # an endpoint's base_url and the name of its key's local.env line
+# an endpoint's base_url and how it gets its key: the name of its local.env line, or its key_command
+type Key = tuple[str, str | None]
 
 
 class Get(Protocol):
@@ -123,8 +125,9 @@ class Discovery:
         entry = self._found.get(key)
         return None if entry is None else entry.outcome
 
-    async def refresh(self, wanted: Mapping[Key, Callable[[], Ask | Unlisted]]) -> None:
-        """Ask for each endpoint of `wanted` (its request, made only now: it reads local.env) that
+    async def refresh(self, wanted: Mapping[Key, Callable[[], Awaitable[Ask | Unlisted]]]) -> None:
+        """Ask for each endpoint of `wanted` (its request, made only now: it reads local.env or runs
+        its key_command) that
         has no listing, a failed one, or one `FRESH` seconds old; all at once. Whatever is kept for
         an endpoint not in `wanted` is dropped. An `Unlisted` in place of a request is the
         endpoint's answer, as when its key's line is missing."""
@@ -136,13 +139,14 @@ class Discovery:
             or isinstance(entry.outcome, Unlisted)
             or now - entry.at >= FRESH
         }
-        outcomes = await asyncio.gather(*(self._asked(ask()) for ask in stale.values()))
+        outcomes = await asyncio.gather(*(self._asked(ask) for ask in stale.values()))
         at = self._clock()
         self._found = {
             key: entry for key, entry in self._found.items() if key in wanted and key not in stale
         } | {key: _Found(outcome, at) for key, outcome in zip(stale, outcomes, strict=True)}
 
-    async def _asked(self, ask: Ask | Unlisted) -> Listed | Unlisted:
+    async def _asked(self, request: Callable[[], Awaitable[Ask | Unlisted]]) -> Listed | Unlisted:
+        ask = await request()
         if isinstance(ask, Unlisted):
             return ask
         outcome = read_listing(await self._get(ask.url, ask.headers))

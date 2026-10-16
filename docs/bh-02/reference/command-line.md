@@ -1,7 +1,8 @@
 # Command line
 
-`bh-02` starts a session in the current directory. Its subcommands list sessions and follow a
-sub-agent's event log. Each block below is the command's own `--help`.
+`bh-02` starts a session in the current directory. Its subcommands list sessions, follow a
+sub-agent's event log and check a startup file's docstrings. Each block below is the command's own
+`--help`.
 
 ## `bh-02`
 
@@ -9,16 +10,17 @@ sub-agent's event log. Each block below is the command's own `--help`.
 Usage: bh-02 [OPTIONS] [COMMAND] [ARGS]...
 
   A coding agent in a terminal app. The model acts in Python, through the
-  python tool, in a persistent Python process inside a jail. Claude is reached
-  through Claude Code on the Claude subscription, with the
-  CLAUDE_CODE_OAUTH_TOKEN in local.env (`claude setup-token` makes one); any
-  OpenAI-compatible model can be added to the models file. Every run is a
-  session that `--resume` continues.
+  python tool, in a persistent Python process inside a jail. Its models are
+  the endpoints in the models file: Claude through Claude Code (on the Claude
+  subscription, with the CLAUDE_CODE_OAUTH_TOKEN in local.env that `claude
+  setup-token` makes, or through a gateway), and any OpenAI-compatible model.
+  Every run is a session that `--resume` continues.
 
 Options:
-  --model TEXT   The model to start on, by name: sonnet (the default), opus,
-                 haiku, or one of yours in ~/.config/bh-02/models.toml
-                 ($XDG_CONFIG_HOME/bh-02/models.toml); /model lists them.
+  --model TEXT   The model to start on, by name, ENDPOINT/MODEL: one of your
+                 endpoints' in ~/.config/bh-02/models.toml
+                 ($XDG_CONFIG_HOME/bh-02/models.toml), whose `default` is used
+                 otherwise; /model lists them.
   --patch FILE   A layer file applied over the shipped composition.
                  Repeatable.
   --trace FILE   Append every row's lifecycle event to FILE (the app owns the
@@ -31,8 +33,9 @@ Options:
   --help         Show this message and exit.
 
 Commands:
-  sessions  List this directory's sessions, newest first: each one's id,...
-  watch     Follow one sub-agent's event log, read-only: SESSION is a...
+  check-examples  Check the docstrings of the functions and classes...
+  sessions        List this directory's sessions, newest first: each...
+  watch           Follow one sub-agent's event log, read-only: SESSION is...
 ```
 
 - `--model` with a `--patch` that sets the model row's config is refused: the patch chooses the
@@ -88,13 +91,37 @@ that is not a name bh-02 made (a session id such as `20261012-091500-ab12`, an a
 `general-1`), so neither can name a path. Anything the model wrote is shown as plain text, with
 no escape sequence. It works the same inside tmux or outside it.
 
+## `bh-02 check-examples`
+
+```text
+Usage: bh-02 check-examples [OPTIONS] FILES...
+
+  Check the docstrings of the functions and classes startup files tell for an
+  example in each (a doctest block, or a `::` literal block) and for doctest
+  blocks that parse, each with a blank line before it. It reads each FILE and
+  runs none of its code, needs no session and no model, and exits 1 on a
+  finding, 0 on none and 2 when it can't check a file. ruff checks the rest of
+  the convention (`ruff check --isolated --no-fix --select
+  D101,D103,D205,D415,D419 FILE`), and mypy the types, with `mypy --strict
+  --config-file= FILE`.
+
+Options:
+  --help  Show this message and exit.
+```
+
+It is the example rule of the docstring check a session runs at start, as a command for you, a
+pre-commit hook or CI ([Checking the docstrings and types](../how-it-works/python-tool.md#checking-the-docstrings-and-types)
+has the ruff and mypy lines beside it and how to wire them). It prints one line a finding,
+`FILE:LINE: CODE NAME: what to do`, with the codes `example` (no example) and `doctest` (a doctest
+block that does not parse, or has no blank line before it).
+
 ## Exit codes
 
 | Code | When |
 |---|---|
-| `0` | the session ended normally, or a subcommand did its job |
+| `0` | the session ended normally, or a subcommand did its job (`check-examples`: no finding) |
 | `1` | a layer file can't be read or names old rows, the composition could not start, or the session ended with an error. bh-02 says why in one line, starting `error:`. |
-| `2` | a usage error: an unknown option, a `--patch` file that doesn't exist, a `--resume` that matches no session or more than one |
+| `2` | a usage error: an unknown option, a `--patch` file that doesn't exist, a `--resume` that matches no session or more than one. For `check-examples`, also a file it can't check (not readable, not Python): it exits `1` only for a finding. |
 
 ## Environment
 

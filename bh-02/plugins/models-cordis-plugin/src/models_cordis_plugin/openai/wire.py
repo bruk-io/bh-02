@@ -49,14 +49,16 @@ _MASKED: Final = re.compile(r"\S*(?:\*{2,}|\.{3,}|…)\S*")
 
 @dataclass(frozen=True, slots=True)
 class Where:
-    """What an error names: the model, the URL asked, the key's line in local.env (if any)
-    and where the model was named, so the message says what to change."""
+    """What an error names: the model, the URL asked, the key's line in local.env (if any), where
+    the model was named, and the command that printed its key (if it has one), so the message says
+    what to change."""
 
     name: str
     url: str
     model: str
     key: str | None
     source: str
+    command: str | None = None
 
 
 def request_for(
@@ -332,7 +334,12 @@ def http_error(status: int, body: str, where: Where, sent: Mapping[str, str] | N
     said = _server_text(scrubbed(body, sent))
     heard = f"{where.url} answered HTTP {status}" + (f": {said}" if said else "")
     if status in (401, 403):
-        if where.key is None:
+        if where.command is not None:
+            todo = (
+                f"check what model {where.name!r}'s key_command prints (run `{where.command}` in a "
+                "terminal), then send the message again: the next request runs it again"
+            )
+        elif where.key is None:
             todo = (
                 f'model {where.name!r} sends no key; if the endpoint needs one, add `key = "NAME"` to its '
                 f"table ({where.source}) and `NAME=<the key>` to local.env, then send the message again"

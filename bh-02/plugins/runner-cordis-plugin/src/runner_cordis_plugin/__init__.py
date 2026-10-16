@@ -30,12 +30,13 @@ from runner_cordis_plugin.jail import (
     spec_for,
     stack_for,
     still_made,
+    still_running,
     told_reads,
     tripwired,
     uncovered,
 )
 from runner_cordis_plugin.runner import Mechanism, Runner, Started
-from runner_cordis_plugin.tripwire import Tripwire, decoded, lifted, tripped_for, wires
+from runner_cordis_plugin.tripwire import Tripwire, decoded, lifted, tripped_for, unended_for, wires
 from runner_cordis_plugin.unconfined import UNENFORCED, Unjailed
 from runner_cordis_plugin.wiring import approval, confined, release, unconfined
 
@@ -80,10 +81,12 @@ __all__ = [
     "spec_for",
     "stack_for",
     "still_made",
+    "still_running",
     "told_reads",
     "tripped_for",
     "tripwired",
     "unconfined",
     "uncovered",
+    "unended_for",
     "wires",
 ]

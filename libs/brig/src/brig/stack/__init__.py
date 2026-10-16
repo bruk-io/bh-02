@@ -62,7 +62,13 @@ from brig.core import (
     Spec,
     unenforced_report,
 )
-from brig.core.runtime import RUNTIME_AXES, Capability, RuntimeKind, runtime_grades
+from brig.core.runtime import (
+    RUNTIME_AXES,
+    Capability,
+    RuntimeKind,
+    SupervisorPlan,
+    runtime_grades,
+)
 from brig.mech import (
     ArgvTransformer,
     CompileCtx,
@@ -72,7 +78,7 @@ from brig.mech import (
     StagedFile,
     Step,
 )
-from brig.mech.bwrap import bwrap
+from brig.mech.bwrap import DEFAULT_INTERPRETER, Bwrap
 from brig.mech.connect_proxy import ConnectProxy
 from brig.mech.env_scrub import env_scrub
 from brig.mech.rlimits import rlimits
@@ -513,6 +519,20 @@ class EnvConflict(ValueError):
         )
 
 
+class SupervisorConflict(ValueError):
+    """Two mechanisms in a Stack each declare a supervisor (decision-190): a jail has
+    one PID 1, so a stack asks for one, and two are refused (law 2)."""
+
+    def __init__(self, mechanism_a: str, mechanism_b: str) -> None:
+        self.mechanism_a = mechanism_a
+        self.mechanism_b = mechanism_b
+        super().__init__(
+            f"mechanisms {mechanism_a!r} and {mechanism_b!r} each declare a supervisor, and a "
+            "jail has one PID 1 -- build the stack with one of them (SPEC.md section 6, "
+            "decision-190)"
+        )
+
+
 class RuntimeConflict(ValueError):
     """Two mechanisms in a Stack name different runtime kinds.
 
@@ -592,6 +612,7 @@ class CompiledJail:
     signatures: SignatureBook = field(default_factory=lambda: SignatureBook(claims=()))
     sensors: tuple[EventSource, ...] = ()
     runtime: RuntimeKind = RuntimeKind.HOST
+    supervisor: SupervisorPlan | None = None
 
     def __post_init__(self) -> None:
         # Defensive copy: prevent caller mutation of the source mapping from
@@ -657,6 +678,7 @@ class Stack:
             AxisClaimConflict: two mechanisms declare one axis (1).
             CompatibilityRefused: a pair the matrix does not list (3).
             RuntimeConflict: two mechanisms name different runtime kinds.
+            SupervisorConflict: two mechanisms declare a supervisor.
             EnvConflict: two mechanisms set one variable to different values.
             ValueError: a Step grades an axis outside its mechanism's
                 declared axes, or a mechanism's own compile refuses.
@@ -758,6 +780,7 @@ class Stack:
         requires: frozenset[Capability] = frozenset()
         for _, step in steps:
             requires = requires | step.requires
+        supervisor = _resolve_supervisor(steps)
 
         # Build the aggregate report: start from core.unenforced_report()'s
         # all-seven-axes-UNENFORCED fill (SPEC.md §3: "the empty stack ...
@@ -847,7 +870,24 @@ class Stack:
             signatures=signatures,
             sensors=tuple(step.events for _, step in steps if step.events is not None),
             runtime=runtime,
+            supervisor=supervisor,
         )
+
+
+def _resolve_supervisor(steps: Sequence[tuple[Mechanism, Step]]) -> SupervisorPlan | None:
+    """The one supervisor plan a mechanism's `Step` declared, or `None` (decision-190).
+
+    Raises:
+        SupervisorConflict: two mechanisms each declared one, naming both.
+    """
+    first: tuple[str, SupervisorPlan] | None = None
+    for mechanism, step in steps:
+        if step.supervisor is None:
+            continue
+        if first is not None:
+            raise SupervisorConflict(first[0], mechanism.name)
+        first = (mechanism.name, step.supervisor)
+    return None if first is None else first[1]
 
 
 def _resolve_runtime(mechanisms: Sequence[Mechanism]) -> RuntimeKind:
@@ -1128,7 +1168,7 @@ def scratch_darwin() -> Stack:
     return Stack([rlimits, seatbelt, env_scrub])
 
 
-def strict_linux() -> Stack:
+def strict_linux(python: str = DEFAULT_INTERPRETER) -> Stack:
     """The `strict_linux()` preset (SPEC.md sec 7, decision-159): a
     kernel-enforced jail on linux -- the smallest stack that reaches
     `enforced` on `fs_read`, `fs_write` and `network` there, and the linux
@@ -1174,9 +1214,15 @@ def strict_linux() -> Stack:
     every other preset here. Everything that decides the report and the
     composed argv lives in the mechanisms and in `COMPATIBILITY_MATRIX`.
 
+    **`python` is the interpreter inside the jail that brig's supervisor, its
+    PID 1, runs under** (decision-190), `/usr/bin/python3` by default, as
+    `confined_egress_darwin(python)` is given the one its proxy runs under. The
+    `Spec` must mount it: a `Spec` that does not is refused at compile
+    (`InterpreterNotMounted`).
+
     Linux only: it composes `bwrap`, which refuses any other platform.
     """
-    return Stack([bwrap, rlimits, env_scrub])
+    return Stack([Bwrap(interpreter=python), rlimits, env_scrub])
 
 
 def confined_egress_darwin(python: str) -> Stack:
@@ -1220,6 +1266,7 @@ __all__ = (  # noqa: RUF022
     "MATRIX_VERSION",
     "MatrixEntry",
     "RuntimeConflict",
+    "SupervisorConflict",
     "Stack",
     "degraded",
     "confined_egress_darwin",

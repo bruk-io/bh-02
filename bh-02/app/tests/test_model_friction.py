@@ -35,7 +35,7 @@ def _startup_findings(sessions: Path, codes: Sequence[str]) -> list[str]:
 
 
 def test_a_session_whose_model_wrote_its_startup_file_is_counted(tmp_path: Path) -> None:
-    """A model that writes `.bh-02/startup.py` is keeping its helpers."""
+    """A model that writes `.bh-02/startup.py` is keeping functions for later sessions."""
     code = "from pathlib import Path\nPath('.bh-02/startup.py').write_text('def sh(): pass')"
     assert _startup_findings(tmp_path, [code]) == [" ".join(code.split())]
 

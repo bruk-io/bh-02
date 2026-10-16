@@ -57,11 +57,12 @@ from brig.run.runtime import (
     Reservation,
     Runtime,
     Supervisor,
+    SupervisorRecord,
 )
-from brig.run.teardown import KillReport
+from brig.run.teardown import DEFAULT_GRACE_S, KillReport
 from brig.stack import CompiledJail
 
-JAIL_VERSION: Final = 8
+JAIL_VERSION: Final = 9
 """The version of a jail's dict (`HANDLE_VERSION` until decision-183 renamed it,
 the value unchanged). Bumped 1 -> 2 by
 task-046 (`wrap_prefix` and `jail_env` became REQUIRED top-level keys) and
@@ -87,7 +88,11 @@ process's fields (`pid`, `pgid`, `start_time`, `argv`, `stdout_path`,
 `processes` are new and required.
 
 Bumped 6 -> 7 by decision-184 (TASK-0079.05): each entry of `processes`
-carries `channel` and `bound_path`, required, as `record.json` does."""
+carries `channel` and `bound_path`, required, as `record.json` does.
+
+Bumped 8 -> 9 by decision-192 (TASK-0079.06): `supervisor` is new and required,
+`null` for a jail whose processes the host starts, else the pid and start
+stamp of the group that holds the jail's PID 1."""
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
@@ -106,6 +111,7 @@ _TOP_LEVEL_KEYS: Final = frozenset(
         "compile_events",
         "helper_pids",
         "helper_stamps",
+        "supervisor",
         "processes",
     }
 )
@@ -136,10 +142,13 @@ class _Wait(Protocol):
     def __call__(self, timeout: float | None = None) -> int: ...
 
 
-def _fidelity(wrap_prefix: tuple[str, ...] | None) -> ExecFidelity:
+def _fidelity(wrap_prefix: tuple[str, ...] | None, *, supervised: bool) -> ExecFidelity:
     """How a process stands to the jail's confinement, decided per jail, never
-    per start (decision-181): an identical wrapper for a non-empty prefix, a
+    per start (decision-181): in the one instance every process of a supervised
+    jail shares (decision-192), an identical wrapper for a non-empty prefix, a
     plain process for an empty one. Pure."""
+    if supervised:
+        return ExecFidelity.SAME_INSTANCE
     return ExecFidelity.EQUIVALENT_PROFILE if wrap_prefix else ExecFidelity.PLAIN
 
 
@@ -149,8 +158,12 @@ class Process:
 
     `id` names its records (`<jail_dir>/procs/<id>/` for `HostRuntime`); `pid`
     and `start_time` are an identity, not a number (decision-155); `pid` is
-    its exit wrapper, which leads its group. `argv` is what was spawned (the
-    jail's wrap prefix included). `fidelity` is the jail's (decision-181).
+    its exit wrapper, which leads its group, in a jail whose processes the host
+    starts, and in a supervised one (decision-192) the process itself, in the
+    host's pid namespace, leading a session of its own. `argv` is what was
+    spawned (the jail's wrap prefix included; a supervised jail's wrap is around
+    its supervisor, so the argv alone). `fidelity` is the jail's (decision-181;
+    `SAME_INSTANCE` when supervised).
     `channel` is the declared channel it was started on, `bound_path` the
     socket it binds inside the jail and `endpoint` the host path to dial it at,
     which its runtime resolves (decision-184); all `None` without one.
@@ -395,7 +408,9 @@ class Jail:
             argv=record.argv,
             stdout_path=record.stdout_path,
             stderr_path=record.stderr_path,
-            fidelity=_fidelity(self._base.wrap_prefix),
+            fidelity=_fidelity(
+                self._base.wrap_prefix, supervised=self._base.supervisor is not None
+            ),
             channel=record.channel,
             bound_path=record.bound_path,
             endpoint=self._runtime.endpoint(self._record(), record),
@@ -460,6 +475,10 @@ class Jail:
             TetherClosed: the jail is tethered and its tether has ended;
                 nothing is made or spawned.
             WorkloadSpawnFailed: `argv` could not be spawned inside the jail.
+            SupervisorGone: a supervised jail's control socket is closed
+                (decision-191).
+            SupervisorUnresponsive: a supervised jail's supervisor did not
+                answer in time, and the jail was destroyed (decision-191).
             OSError: the process's records directory or record could not be
                 written (a process whose record could not be written is
                 ended first).
@@ -521,11 +540,37 @@ class Jail:
         gone."""
         return self._runtime.alive(self._record())
 
-    def destroy(self) -> KillReport:
+    def destroy(self, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
         """End every process, then every helper, verified, one item each
         (SPEC.md section 9's ladder): the first process `workload_group`,
-        every later one `exec_sibling`. Always there."""
-        return self._runtime.destroy(self._record())
+        every later one `exec_sibling`. Always there.
+
+        `grace` is how long a process has after `SIGTERM` before `SIGKILL`.
+        `grace=0` gives none: `SIGKILL` at once, and in a supervised jail the
+        instance first, so a program in a session of its own goes with it
+        (decision-193). It is for a caller that must not let a workload act
+        while it is ended: a hold the host lifted, a deadline missed.
+
+        Raises:
+            ValueError: `grace` is negative.
+        """
+        if grace < 0:
+            raise ValueError(
+                f"destroy's grace is the seconds a process has after SIGTERM, 0 or more, "
+                f"got {grace!r}; pass 0 to end the jail at once with SIGKILL (decision-193)"
+            )
+        return self._runtime.destroy(self._record(), grace=grace)
+
+    @property
+    def instance_group(self) -> int | None:
+        """The process group that holds a supervised jail's PID 1, which lives as long as the
+        jail's namespaces do: the first program ending, or a `setsid()` child outliving it,
+        changes nothing about it. `None` for a jail with no supervisor, whose programs' own
+        groups are all there is (decision-193). It is what a record of "which jail holds
+        this" names for another process to test with `group_alive`; a program's own pid is
+        not it."""
+        supervisor = self._record().supervisor
+        return None if supervisor is None else supervisor.pid
 
     def to_dict(self) -> dict[str, Any]:
         """Versioned, JSON-native: everything `destroy`, `alive` and a
@@ -549,6 +594,11 @@ class Jail:
             "compile_events": [event.to_dict() for event in self.compile_events],
             "helper_pids": list(record.helper_pids),
             "helper_stamps": list(record.helper_stamps),
+            "supervisor": (
+                None
+                if record.supervisor is None
+                else {"pid": record.supervisor.pid, "start_time": record.supervisor.start_time}
+            ),
             "processes": [_records.to_json(process) for process in record.processes],
         }
 
@@ -560,7 +610,7 @@ class Jail:
         invalid can be smuggled in through a hand-edited dict.
 
         Raises:
-            ValueError: `version` is missing or not 7; a key is unknown or
+            ValueError: `version` is missing or not 9; a key is unknown or
                 missing; the dict names a runtime kind `runtimes` does not
                 hold, or one whose runtime's own `kind` is another; a process
                 is not a record brig writes, or two share an id; or any
@@ -592,6 +642,7 @@ class Jail:
             processes=_processes_from_list(d["processes"]),
             helper_pids=tuple(int(pid) for pid in d["helper_pids"]),
             helper_stamps=tuple(str(stamp) for stamp in d["helper_stamps"]),
+            supervisor=_supervisor_from(d["supervisor"]),
         )
         return cls(
             jail_id=record.jail_id,
@@ -606,6 +657,26 @@ class Jail:
             _tethered=d["tethered"],
             _created_here=False,
         )
+
+
+def _supervisor_from(raw: object) -> SupervisorRecord | None:
+    """The instance a dict names for a supervised jail, or `None`.
+
+    Raises:
+        ValueError: `raw` is neither `None` nor a pid brig could have recorded and a start
+            stamp.
+    """
+    if raw is None:
+        return None
+    if type(raw) is not dict or set(raw) != {"pid", "start_time"}:
+        raise ValueError(f"{_WHO}: 'supervisor' must be null or {{pid, start_time}}, got {raw!r}")
+    pid, stamp = raw["pid"], raw["start_time"]
+    if not _records.is_process_id(pid) or type(stamp) is not str:
+        raise ValueError(
+            f"{_WHO}: 'supervisor' names pid {pid!r} with start time {stamp!r}, which is not "
+            "an identity brig records"
+        )
+    return SupervisorRecord(pid=pid, start_time=stamp)
 
 
 def _runtime_for(raw_kind: object, runtimes: Mapping[RuntimeKind, Runtime]) -> Runtime:

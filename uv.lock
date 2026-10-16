@@ -32,7 +32,7 @@ dev = [
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.6" },
     { name = "mypy", git = "https://github.com/python/mypy?rev=539f6e67b6743d39ce1c643f4cea08fa60602093" },
     { name = "pymdown-extensions", specifier = ">=12.1" },
-    { name = "pypeeker", git = "https://github.com/brukhabtu/pypeeker?rev=7905d24" },
+    { name = "pypeeker", git = "https://github.com/brukhabtu/pypeeker?rev=67b0a1b" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
@@ -1026,7 +1026,7 @@ wheels = [
 [[package]]
 name = "pypeeker"
 version = "0.2.0"
-source = { git = "https://github.com/brukhabtu/pypeeker?rev=7905d24#7905d240b13ad69e400b841eb0076a11c84cec26" }
+source = { git = "https://github.com/brukhabtu/pypeeker?rev=67b0a1b#67b0a1b0121fa48d89c6cecaa82624592bfa8386" }
 dependencies = [
     { name = "click" },
     { name = "pyyaml" },
@@ -1082,12 +1082,16 @@ source = { editable = "bh-02/plugins/python-cordis-plugin" }
 dependencies = [
     { name = "cordis" },
     { name = "host-paths" },
+    { name = "mypy" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cordis", editable = "libs/cordis" },
     { name = "host-paths", editable = "libs/host-paths" },
+    { name = "mypy", git = "https://github.com/python/mypy?rev=539f6e67b6743d39ce1c643f4cea08fa60602093" },
+    { name = "ruff", specifier = ">=0.16.7" },
 ]
 
 [[package]]

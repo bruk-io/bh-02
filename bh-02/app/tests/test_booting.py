@@ -70,7 +70,7 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     assert rows["shell-command"].use == "commands:shell_command"
     assert resolve(rows["shell-command"].use or "").inject == {"commands"}
     # the model row names its model by `default`, which is None until a layer says one (then the
-    # models file's `default`, else sonnet); the status bar asks the models row which, so it needs
+    # models file's `default`, else none); the status bar asks the models row which, so it needs
     # no default of its own
     chosen_by = resolve(rows["model"].use or "").config_type
     assert chosen_by is not None and chosen_by().default is None and rows["status"].config is None
@@ -294,10 +294,8 @@ async def test_slash_commands_act_on_the_running_session(composition: Callable[.
     rows, cleared, model, unknown = fragile.NOTES
     assert "python" in rows and "python:tool" in rows and "active" in rows
     assert cleared == "the conversation was cleared; starting afresh: loop, transcript, python, agents"
-    assert (
-        model.startswith("● sonnet  claude-code  sonnet  (default: built in)\n  opus")
-        and "/model NAME switches" in model
-    )
+    # no models file here, and no built-in models: /model lists none and says where to add them
+    assert model.startswith("/model NAME switches; add models in ") and model.endswith("models.toml")
     assert unknown == "unknown command /nope; /help lists them"
     assert fragile.SHOWN == ["after"]  # only the message reached the model, after the restart
 

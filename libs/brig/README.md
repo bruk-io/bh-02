@@ -215,6 +215,21 @@ now bound over itself, read-write (a mount point too), so it stays where it is;
 a rename from it to elsewhere in the root fails with `EXDEV`.
 `tests/integration/test_bwrap_fs.py` shows the rename refused.
 
+**A bwrap jail has a supervisor, 2026-10-15 (decisions 189 to 192).** Under
+`bwrap` the jail's PID 1 is a small Python program of brig's (`python -I`, an
+empty environment, its source bound in read-only, every import done before it
+starts anything), and every start, signal, wait and stop is a request on a
+socketpair the host made first and passes to nothing the supervisor starts.
+Several processes started in one jail now share one mount and one network
+namespace (fidelity `SAME_INSTANCE`), the supervisor reaps what is orphaned,
+and a `SIGKILL` or `SIGSTOP` a process of the jail sends it is dropped by the
+kernel, as for any PID 1. End-of-file on the socket (`Jail.destroy`, a
+collected `Jail`, a host that died) ends everything in the jail, a `setsid()`
+child included, and a request the supervisor does not answer in time destroys
+it. `Process.pid` is now the program's own, not an exit wrapper's. Seatbelt
+keeps its profile and `EQUIVALENT_PROFILE`. `tests/e2e/test_supervised_jail.py`
+observes each of these from a real jail; `scripts/linux-jail-check` runs it.
+
 ## Development
 
 Requires Python >= 3.15 and [uv](https://docs.astral.sh/uv/). brig is a member of a uv

@@ -90,7 +90,7 @@ def model_list(
         default = f"  (default: {m['default']})" if m.get("default") else ""
         head = f"{mark} {str(m['name']).ljust(width)}  {str(m['provider']).ljust(kinds)}"
         line = f"{head}  {m['id']}{where}{default}"
-        notes = [str(m[k]) for k in ("shadows", "problem") if m.get(k)]
+        notes = [str(m["problem"])] if m.get("problem") else []
         lines.append(line.rstrip() + "".join(f"\n    {note}" for note in notes))
     lines += [f"  {e['name']}: {note}" for e in endpoints for note in e.get("notes", ())]
     if default_problem is not None:
@@ -124,7 +124,7 @@ class Switch:
 
     def spec(self) -> dict[str, Any]:
         """`/model`'s spec, with a choice for each model, which the palette offers as its own
-        entry (`/model haiku`), read each time the palette opens."""
+        entry (`/model claude/haiku`), read each time the palette opens."""
         return {
             "name": "model",
             "help": "list the models, or switch to NAME for this session",
@@ -167,7 +167,7 @@ class Switch:
                 self.models.default_problem,
             )
         if args.startswith("/") or len(args.split()) != 1:
-            return f"not a model name: {args!r}; type /model and one name, e.g. /model sonnet"
+            return f"not a model name: {args!r}; type /model and one name, e.g. /model ENDPOINT/MODEL"
         if self.config.layer is None:
             return "no session layer to record the model in; start bh-02 with --model instead"
         if args == self.models.current()["name"]:

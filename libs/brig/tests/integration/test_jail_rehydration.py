@@ -436,8 +436,9 @@ def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
     jail, process = _launch(argv, jail_id="jail-rehydration-version")
     try:
         d = jail.to_dict()
-        # 6 since decision-181 (TASK-0079.26), 7 since decision-184 (TASK-0079.05).
-        assert d["version"] == JAIL_VERSION == 8
+        # 6 since decision-181 (TASK-0079.26), 7 since decision-184 (TASK-0079.05),
+        # 8 since decision-186, 9 since decision-192 (TASK-0079.06).
+        assert d["version"] == JAIL_VERSION == 9
 
         stale = dict(d)
         stale["version"] = 1

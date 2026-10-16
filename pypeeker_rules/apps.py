@@ -127,10 +127,11 @@ register_dsl_rule(
 def _print_input(options: Mapping[str, Any]) -> Selection | None:
     return references().where(
         all_of(
-            _in_units(units()),
-            *(not_(row.module.is_within(m)) for m in _list(options, "allowed")),
+            # Listed first: it keeps almost no reference rows, so the clauses after it see few of them.
             # builtins resolve to `<builtins>.<name>` symbol ids; binding_name is only set for locals
             any_of(row.symbol_id.eq("<builtins>.print"), row.symbol_id.eq("<builtins>.input")),
+            _in_units(units()),
+            *(not_(row.module.is_within(m)) for m in _list(options, "allowed")),
         )
     )
 

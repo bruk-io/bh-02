@@ -4,7 +4,7 @@ bh-02's ui: a Textual app bound as `input`, `output` (whose `confirm` asks about
 modal) and `frame` by `tui:ui`, and small rows that push into the app's frame: the status
 bar's fields (`tui:status`: the session's id and the model; `tui:grades`: the jail's grades)
 and the palette's commands (`tui:palette`). The screen is the conversation (the transcript over the composer),
-the whole width, and the status bar along the bottom. Imports nothing from any other plugin;
+the whole width, a line naming the everyday keys under the composer, and the status bar along the bottom. Imports nothing from any other plugin;
 the shapes are in `../../CONTRACTS.md`.
 
 - **Value half** (no cordis): `app.py` (the `BhApp` and `running`, which runs it on the event loop
@@ -35,8 +35,11 @@ questions are a no. Ctrl-C is a priority binding that interrupts the running tur
 quits; one pressed after a line is sent and before its turn listens (or during a command: a
 slash command, a `!` one) is held for the turn, and the next read drops it. Held and still
 unheard a moment later, it was pressed during a command, which it doesn't stop, and the app
-says so, and that leaving does. `confirm()` comes from plain coroutines (not Textual
-workers), so the modal is `push_screen` with a callback resolving a future. Questions are
+says so, and that leaving does. Esc stops a running reply exactly as Ctrl-C does
+(`stop_reply`, a binding that is not priority, so it is the last to want the key: the list of
+commands closes on it, a question is declined by it and the palette closed by it, and only
+that); with no reply running, a command included, it does nothing and says nothing. `confirm()` comes from
+plain coroutines (not Textual workers), so the modal is `push_screen` with a callback resolving a future. Questions are
 shown one at a time, the rest queued; an interrupted turn cancels its future and its modal
 comes down wherever it is (anything shown over it is popped first); Ctrl-C with a question up
 answers every open one no and interrupts the turn. No palette opens over a question. A
@@ -51,7 +54,7 @@ The frame. `tui:palette` pushes the `commands` broker's `specs` method itself, w
 palette (Ctrl-P) calls each time it opens, so a command registered
 after the push is offered with no reload; choosing one sends `/name` through the input as if
 typed, or puts `/name ` in the composer when it takes arguments; a spec's `choices` (read each
-time it opens too) are entries of their own that run at once (`/model haiku`, one per model).
+time it opens too) are entries of their own that run at once (`/model claude/haiku`, one per model).
 `/help` and `/exit` are the ui's own entries. Typing a one-line `/` in the composer
 shows the same entries as a list between the transcript and the composer (decision-0003): read
 once when it opens (a command registered meanwhile shows at the next opening), filtered per key,
@@ -59,12 +62,23 @@ prefix matches then substring matches, at most 8 rows. Up/Down move the highligh
 without running, Enter takes the highlight only when it was moved or the text is a strict prefix
 of its call (otherwise the text is sent as typed), Esc closes it for the line, Ctrl-J and
 Shift+Enter close it. It never takes focus and closes on a question or when the composer loses
-focus. Control characters are stripped from every entry (`frame.palette_entries`) for both views. `tui:status` shows the running session's id (from
+focus. Control characters are stripped from every entry (`frame.palette_entries`) for both views.
+
+**History.** Up on the composer's first line (a long line counts as the rows it is drawn in)
+recalls the line sent before, Down on its last line goes forward, and past the newest Down gives
+back the draft that was being typed (`recall`, pure: a frozen `Recall` of the lines sent and where
+the person is in them, and steps that return the next one or None, when the key is the text area's
+as before). It is in memory for the run: every line sent joins it (a message, a `/command`, a `!`
+line, and a command run from the list or the palette, as sent), none is ever changed (an edited
+recalled line sent is one more line), and sending ends the walk. A recalled line has the cursor at
+its end. Layers: the slash list's Up and Down come first, so with it open they move its
+highlight; a recalled line keeps the list shut until it is edited (or the list would take the
+next Up from the history), and a question up holds the keys itself. `tui:status` shows the running session's id (from
 the `session` value, `(resumed)` after it on a resume), and asks
 the `models` value which model the model row names now and on which provider (`models.current()`;
-`config.model_row`, `model`, names the row whose lifecycle it follows): `sonnet (claude-code)`
-(narrow: `sonnet`). It observes lifecycle events to show it again at each of that row's events:
-`sonnet (claude-code, starting…)` (narrow: `sonnet…`) from the row's unloading (or `reload`) until it is active again, so a
+`config.model_row`, `model`, names the row whose lifecycle it follows): `claude/sonnet (claude-code)`
+(narrow: `claude/sonnet`). It observes lifecycle events to show it again at each of that row's events:
+`claude/sonnet (claude-code, starting…)` (narrow: `claude/sonnet…`) from the row's unloading (or `reload`) until it is active again, so a
 `/model` or `/clear` shows the new model at once and that it is still starting (the Claude
 CLI takes seconds); its first push reads the row's state from the loader's `status()`. It
 depends on the loader, `models`, `session`, `frame` and its config, none of which `/clear` or
@@ -106,6 +120,65 @@ and reading waits once it is large), and gives the loop a turn after every event
 that yields everything at once still leaves Ctrl-C heard mid-reply. The app joins each run of
 streamed text before drawing and recording it.
 
+**The keys line.** One line under the composer names the everyday keys (`widgets/keys.py`, `render.keys_line`,
+pure): `Enter send  Ctrl-J new line  Esc stop  PgUp/PgDn scroll  ↑/↓ history  Ctrl-T copy reply  Ctrl-P
+palette  Ctrl-Q quit`, 116 cells, then the same with the keys and words short (`↵ send  ^J newline ...`, 86) and
+with one-space gaps (79, which is what fits an 80-column terminal beside the line's left margin), then fewer of
+them as the width falls, copy first and then history, scroll, new line, send, palette and stop, never quit. The
+widest that fits is shown, again whenever the width changes. The keys are the ones the code binds, and a
+test presses every key the line names (read from the line itself) and sees it do what it says; the docs'
+Keys table (`docs/bh-02/using/commands.md`) is checked to list the same ones. Ctrl-O is still bound to nothing.
+
+**Working.** While a reply runs, a line between the transcript and the composer says so and for how
+long: `Working · 12s`, then `Working · 1m 05s`, then `Working · 1h 02m` (`render.working_line`, pure).
+The `Working` widget redraws it from a Textual timer (`set_interval`, every `WORKING_EVERY`, one second),
+never a loop or a wait: the timer starts when the first of the replies streaming begins
+(`TurnStarted`) and stops when the last ends (`TurnEnded`, which the output posts whether the reply
+finished, was stopped with Ctrl-C or Esc, or failed), and the next reply counts from its own start.
+The first tick comes a second in and the line is hidden until then, so a reply that ends sooner (a
+command's answer goes through the same stream) never flashes it or moves the transcript. It is the
+reply's line: a command still running (`!`, `/compact`) shows nothing until it answers. `BhApp(clock=,
+working_every=)` are the seams a test drives.
+
+**Paging.** PageUp and PageDown in the composer scroll the transcript a page (`Composer.Paged`, which
+the app answers with `Transcript.page`) and leave the focus and the cursor where they are, with the
+slash list open too (they are not its keys); with a question up they are the modal's. A transcript
+follows new output while it is at its end; a page up releases it and reaching the end anchors it
+again, as the mouse wheel does (both are Textual's `scroll_to`). `page` guards the two cases
+`scroll_to` gets wrong: with nothing to scroll, or a page down from the end, it would release the
+anchor with no movement to restore it, and the output that came next would not be followed.
+
+**Copying** goes to the terminal's clipboard through Textual's `copy_to_clipboard` (an OSC 52
+escape sequence, so it reaches the local clipboard over SSH where the terminal allows it, and a
+terminal that ignores it copies nothing: a test sees only what the app asked to copy, `app.clipboard`,
+and the line it showed). `BhApp` overrides `copy_to_clipboard` to say how much in one line, so every
+way of copying says it alike, Textual's own included. The line is a toast, not a line of the
+conversation: one there would split a reply that is still streaming (the transcript draws the
+person's own lines only once the reply ends, for the same reason). Four ways: **Ctrl-C** with text
+selected that has not been copied yet copies it, clears the selection and stops nothing (the
+composer's own selection when it has the focus, else the transcript's, which Textual keeps), and
+otherwise stops the reply as before, so a second Ctrl-C after a copy stops it. A selection counts as
+copied once any copy of it was made (`BhApp.copy_to_clipboard` remembers it, with where it is and
+what it reads, so a different selection or new text under the same range is new): a mouse
+selection is copied as it ends and stays shown, and the Ctrl-C that follows must stop the reply, not
+copy the same text again. What copy on select leaves uncopied is a selection of one character, one
+made without a mouse up (Textual's select all), and the composer's own; Ctrl-C copies those. Never
+while a question is up (Ctrl-C then answers it no).
+**Cmd-C** is Textual's own `super+c`, bound by the screen's copy and by the text area's: the priority
+Ctrl-C binding never shadowed it, and it reaches the app only where the terminal passes Cmd to
+programs (the kitty keyboard protocol). A **mouse selection** in the transcript is copied when the
+mouse lets go (the screen's `TextSelected`, posted at every mouse up, a click included); a click, or
+one character, copies nothing and says nothing, and the selection stays shown. **Ctrl-T** copies the
+newest reply whole (`Transcript.reply`, `render.newest_reply`): the text blocks after the last
+message, as the model wrote them (the markdown source, not what is drawn), a blank line between,
+so a reply that stops for tool calls and goes on comes whole; when the newest message has no text
+yet it is the one before; with none, it says `Nothing to copy: no reply yet`. It is a free key:
+the text area binds no `ctrl+t`, nor does a screen or the app, and no terminal keeps it, while
+Ctrl-O (Claude Code's), Ctrl-R, Ctrl-G and Ctrl-N are keys readline and Claude Code give other
+meanings. Esc never copies (it also clears a selection: Textual's own, the screen's escape key, which the
+app's non-priority Esc binding leaves to run; a test presses it with the focus in the transcript and
+in the composer, a reply running or not).
+
 **The transcript** draws a turn as it streams: a block per event, a CSS class per kind. Text
 and thinking grow one `Stream`, which settles its text into pieces of a couple of dozen lines
 and re-draws only the open one, so a chunk costs the same at line 2,000 as at line 1 (a Pilot
@@ -113,6 +186,25 @@ test times it). Text with no newlines settles by size: a piece longer than 2,000
 cut at its last line end or space, which ends a line there on screen (a paragraph that long is
 drawn as two), so a long paragraph costs the same at its end as at its start too. Thinking folds to one line once the reply moves on. A result or a call hangs
 beside its marker and an input's code has a left border, so wrapped lines keep their gutter.
+
+**Clipped blocks open.** A tool result is cut at 12 lines, a diff or the code a call carries at 40, and
+`▶ 8 more lines` stands under what shows (`render.Clip`, pure: the lines, how they are drawn, how many
+show; `Clipped`, the widget). A click on that line, or Enter or Space once it has the focus (Tab and
+Shift+Tab reach it: Shift+Tab from the composer is the newest), shows every line (`▼ 8 more lines`),
+and the same closes it, as a finished thinking block opens. Closed is how every new block starts,
+and what was opened is not kept in the history. The rest is drawn at the first opening, not before:
+code is highlighted whole and cut, so a string that began above the cut is still one below it, and
+a block nobody opens costs what its first lines do (a result is at most 20,000 characters
+from the Python tool; 2,000 lines took about 0.1 s to draw on opening and 10,000 about 1 s, on
+the event loop, once, when the person asked). Opening only changes the block's height. It does not use
+Textual's `Collapsible`, which scrolls itself into view when it toggles, and a scroll releases the
+transcript's anchor: a transcript following its end (its layout pins it to the new end) goes on
+following, and one scrolled away stays where it is. Reaching a line by keyboard is different and
+deliberate: Shift+Tab onto a line that is off screen scrolls the transcript to it (Textual scrolls to
+what takes the focus, a scroll like any other), so the transcript stops following new output until
+it is back at its end, as TASK-0089.04 has it for PageUp; a test follows that through (Shift+Tab,
+Enter, PageDown to the end, then new output is followed again). The label is not selectable, so it is
+not copied. A click leaves the focus on the label, as it does on a thinking block's title.
 
 **History.** With `history` in its config (a session's layer sets `{"history":
 "<session>/events.jsonl"}`), the app appends every entry the transcript draws to that file

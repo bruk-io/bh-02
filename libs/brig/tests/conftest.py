@@ -80,6 +80,7 @@ from __future__ import annotations
 import contextlib
 import os
 import pathlib
+import select
 import subprocess
 import threading
 import time
@@ -91,7 +92,6 @@ import pytest
 
 from brig.run import HostRuntime, IoPolicy, Jail, KillReport, Process
 from brig.run.runtime import Runtime
-from brig.run.teardown import kill_named
 from brig.stack import CompiledJail
 
 # How often the background poller samples `/bin/ps` for the run-id token,
@@ -248,24 +248,45 @@ def launch(
 
 
 def destroy_with_grace(jail: Jail, grace: float) -> KillReport:
-    """`jail.destroy()` with the ladder's grace period shortened: the same
-    `teardown.kill_named` over the record `destroy` passes its runtime, for
-    tests that time the ladder's escalation (the handle-era teardown took
-    `grace=` until decision-183)."""
-    record = jail._record()
-    return kill_named(
-        known=record.processes,
-        jail_dir=record.jail_dir,
-        helper_pids=record.helper_pids,
-        helper_stamps=record.helper_stamps,
-        grace=grace,
-    )
+    """`jail.destroy(grace=grace)`: the ladder's grace period shortened, for tests that time its
+    escalation (the handle-era teardown took `grace=` until decision-183, and `Jail.destroy`
+    took it again with decision-193)."""
+    return jail.destroy(grace=grace)
 
 
 def teardown_group(process: Process, *, timeout: float = 20.0) -> None:
     """`teardown_pgid` for a process's group, waiting on the process between
-    passes so this process's exit waiter reaps its leader."""
+    passes so this process's exit waiter reaps its leader. A supervised jail
+    (decision-192) outlives its processes, so its instance is destroyed too:
+    a test that removes the jail directory next would otherwise race the
+    supervisor's own end, which writes into it."""
     teardown_pgid(process._record.pgid, wait=process.wait, timeout=timeout)
+    if process._jail._record().supervisor is not None:
+        process._jail.destroy()
+
+
+def tether_has_ended(read_end: int, timeout: float = 10.0) -> bool:
+    """Whether every write end of the tether pipe whose read end is `read_end` (a descriptor of
+    the test's own, a `dup` of what it gave `create`) is closed, waiting up to `timeout` seconds
+    for the hangup.
+
+    A test that closes its own write end has not ended the tether: a child that another thread
+    of the process forked, and that has not yet exec'd, holds a copy of every descriptor until it
+    does (the suite's own leak poller forks `ps` every 50 ms). Measured under four CPU-bound
+    processes, the hangup came 1.5 to 2.4 ms late in 2 closes of 60, and a start made in that
+    window is not refused: the tether has not ended, and its watcher ends the start when it does
+    (SPEC.md section 8, TASK-0079.25 point 2). A test of what a start does *after* the tether has
+    ended waits for that first."""
+    poller = select.poll()
+    poller.register(read_end, select.POLLIN)
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        events = poller.poll(max(0.0, remaining) * 1000)
+        if any(mask & select.POLLHUP for _, mask in events):
+            return True
+        if remaining <= 0:
+            return False
 
 
 def teardown_pgid(

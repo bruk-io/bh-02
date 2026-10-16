@@ -66,10 +66,13 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from brig.core.runtime import Capability, RuntimeKind, channel_dir
+from brig.core.runtime import Capability, RuntimeKind, SupervisorPlan, channel_dir
 from brig.mech import HelperLifetime
 from brig.run import _exit_status, _identity, _records, _waiters
 from brig.run._spawn_pgid import spawn_pgid
+from brig.run._supervised import LinkedSupervisor
+from brig.run._supervisor_link import SupervisorGone, SupervisorLink
+from brig.run._supervisor_program import PROTOCOL, SUPERVISOR_SOURCE, supervisor_argv
 from brig.run._tether import HeldTether
 from brig.run.dial import dial
 from brig.run.exec_ import ExecWrapNotAPrefix
@@ -80,13 +83,14 @@ from brig.run.runtime import (
     JailRecord,
     ProcessRecord,
     Reservation,
-    ReservationRefused,
     Supervisor,
+    SupervisorRecord,
     channel_dir_of,
-    reservation_refusal,
+    refuse_foreign_reservation,
     reserved_socket,
 )
 from brig.run.teardown import (
+    DEFAULT_GRACE_S,
     KillOutcome,
     KillReport,
     UnreadableProcessTable,
@@ -110,6 +114,23 @@ _LAUNCH_SCOPED_TIMEOUT_S: Final = 120.0
 #: to turn "still running" into "gone, and nothing recorded it", and paying a
 #: `/bin/ps` fifty times a second to ask it sooner buys nothing.
 _LIVENESS_POLL_S: Final = 0.25
+
+
+#: How long a supervisor may take to import everything and say hello (decision-191). A jail
+#: whose bwrap or interpreter fails ends the socket at once, which is read as the failure it
+#: is; this is for a host too loaded to start a Python in time, so it is generous.
+_SUPERVISOR_READY_TIMEOUT_S: Final = 60.0
+
+#: `<jail_dir>/supervisor`: the supervisor's own stdio and exit record, host-opened, which no
+#: grant reaches (the jail directory is sealed, decision-173).
+_SUPERVISOR_DIRNAME: Final = "supervisor"
+
+
+class SupervisorFailed(RuntimeError):
+    """The jail's supervisor did not start, so there is no jail: bwrap or the interpreter
+    failed, the protocol is not the one this brig speaks, or nothing was heard within the
+    time a start is given (decision-191). The message carries what the supervisor's own stderr
+    said (bwrap's errors included) and where it is."""
 
 
 class HelperFailed(RuntimeError):
@@ -222,6 +243,8 @@ def _spawn(
     stderr_path: str,
     exit_file: str,
     tether: int | None = None,
+    stdin_fd: int | None = None,
+    keep_fds: tuple[int, ...] = (),
 ) -> subprocess.Popen[bytes]:
     """Spawn the jail's argv under the exit wrapper, detached, new group.
 
@@ -234,7 +257,10 @@ def _spawn(
     jail's argv: the wrapper spawns THAT as its own child, inheriting this
     cwd, env and stdio unchanged, and writes the status to `exit_file`, the
     process's own exit record, when it ends (decision-156, decision-181).
-    `tether` is passed to this wrapper alone (`pass_fds`). The ready pipe is what
+    `tether` is passed to this wrapper alone (`pass_fds`). `stdin_fd` is the workload's stdin,
+    `/dev/null` when none (the supervisor's is the program's source, which `bwrap` reads from
+    descriptor 0, decision-190), and `keep_fds` are inherited by the wrapper and its child
+    alone (the supervisor's control socket, decision-191). The ready pipe is what
     keeps a workload that cannot be exec'd a LAUNCH failure rather than a
     handle for something already dead -- the wrapper writes one token
     through it the instant the spawn succeeds or fails, and closing it is
@@ -245,19 +271,19 @@ def _spawn(
         with (
             open(stdout_path, "wb") as stdout_f,
             open(stderr_path, "wb") as stderr_f,
-            open(os.devnull, "rb") as stdin_f,
+            open(os.devnull, "rb") as devnull_f,
         ):
             proc = subprocess.Popen(
                 _exit_status.wrapper_argv(
-                    sys.executable, exit_file, write_fd, wrapped_argv, tether
+                    sys.executable, exit_file, write_fd, wrapped_argv, tether, keep_fds
                 ),
                 cwd=cwd,
                 env=dict(env),
-                stdin=stdin_f,
+                stdin=devnull_f if stdin_fd is None else stdin_fd,
                 stdout=stdout_f,
                 stderr=stderr_f,
                 start_new_session=True,
-                pass_fds=(write_fd,) if tether is None else (write_fd, tether),
+                pass_fds=(write_fd, *(() if tether is None else (tether,)), *keep_fds),
             )
         os.close(write_fd)
         write_fd = -1
@@ -377,6 +403,131 @@ def _start_helpers(
     return tuple(persistent), tuple(stamps)
 
 
+def _source_fd() -> int:
+    """A descriptor at offset 0 of an anonymous memory file holding the supervisor's program,
+    which `bwrap` reads to end-of-file from its stdin (`--ro-bind-data 0`, decision-190): the
+    program reaches the jail from the host's memory, never from a file anyone could write.
+
+    Raises:
+        OSError: no memory file could be made (not Linux, or out of descriptors)."""
+    fd = os.memfd_create("brig-supervisor")
+    try:
+        data = memoryview(SUPERVISOR_SOURCE.encode())
+        while data:
+            data = data[os.write(fd, data) :]
+        os.lseek(fd, 0, os.SEEK_SET)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _log_tail(path: str, size: int = 2000) -> str:
+    """The end of the log at `path`, for an error that says what the supervisor's own stderr
+    said (bwrap's mount errors land there); empty when it can't be read."""
+    try:
+        with open(path, "rb") as log:
+            return log.read()[-size:].decode(errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def _launch_supervisor(
+    plan: SupervisorPlan,
+    *,
+    jail: CompiledJail,
+    wrap_prefix: tuple[str, ...] | None,
+    env: Mapping[str, str],
+    cwd: str,
+    jail_dir: str,
+    jail_id: str,
+    tether: HeldTether | None,
+) -> tuple[SupervisorRecord, SupervisorLink]:
+    """Start the jail's supervisor, the jail's only process until it starts others, and wait
+    for it to say it is ready (decision-191, decision-192).
+
+    It runs `(*wrap_prefix, *supervisor_argv)` under its own exit wrapper, detached in a new
+    process group, tethered when the jail is, exactly as any process of an unsupervised jail
+    was: that group is the instance, and ending it ends the jail. Its stdin is its program's
+    source (read by `bwrap`, stage 7a), its stdout and stderr files in `<jail_dir>/supervisor/`,
+    and its control socket, a `SOCK_SEQPACKET` socketpair made here before it exists, a
+    descriptor the wrapper and its child keep and nothing else does.
+
+    Raises:
+        ExecWrapNotAPrefix: the compiled wrap is not a pure argv prefix, or does not map the
+            supervisor's argv to it followed by the argv.
+        TetherClosed: the jail's tether has already ended.
+        WorkloadSpawnFailed: the supervisor's own argv could not be spawned.
+        SupervisorFailed: the supervisor never said it was ready; the instance was ended first.
+        OSError: the supervisor's directory, files or program could not be made.
+    """
+    directory = os.path.join(jail_dir, _SUPERVISOR_DIRNAME)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    stdout_path = os.path.join(directory, "stdout.log")
+    stderr_path = os.path.join(directory, "stderr.log")
+    host_end, jail_end = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    source = -1
+    try:
+        argv = supervisor_argv(plan, jail_end.fileno())
+        if wrap_prefix is None or tuple(jail.wrap(argv)) != (*wrap_prefix, *argv):
+            raise ExecWrapNotAPrefix(wrap_prefix, argv)
+        tether_fd = None if tether is None else tether.fd()
+        source = _source_fd()
+        proc = _spawn(
+            (*wrap_prefix, *argv),
+            cwd=cwd,
+            env=env,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            exit_file=os.path.join(directory, _records.EXIT_FILENAME),
+            tether=tether_fd,
+            stdin_fd=source,
+            keep_fds=(jail_end.fileno(),),
+        )
+    except BaseException:
+        host_end.close()
+        raise
+    finally:
+        jail_end.close()
+        if source != -1:
+            os.close(source)
+    pid = proc.pid
+    stamp = _identity.start_stamp(pid)
+    _waiters.watch(proc, jail_id=jail_id)  # reaped when its wrapper ends, as every start's is
+
+    def unresponsive() -> None:
+        end_group("supervisor", pid, pid, stamp, grace=0.0)  # a deadline passed: at once
+
+    link = SupervisorLink(host_end, unresponsive=unresponsive)
+    try:
+        hello = link.wait_hello(_SUPERVISOR_READY_TIMEOUT_S)
+        problem = (
+            None
+            if hello.get("protocol") == PROTOCOL
+            else f"it speaks protocol {hello.get('protocol')!r} and this brig speaks {PROTOCOL}"
+        )
+    except SupervisorGone:
+        problem = "its control socket closed before it said it was ready"
+    except TimeoutError:
+        problem = f"it said nothing within {_SUPERVISOR_READY_TIMEOUT_S}s"
+    if problem is not None:
+        link.close()
+        item = end_group("supervisor", pid, pid, stamp, grace=0.0)
+        said = _log_tail(stderr_path)
+        raise SupervisorFailed(
+            f"brig's supervisor did not start in jail {jail_id!r}: {problem}. Its stderr "
+            f"({stderr_path}) said: {said or 'nothing'}. Usual causes: the interpreter "
+            f"{plan.interpreter!r} is missing from the jail or older than Python 3.9, "
+            "bubblewrap refused a mount, or the kernel has no pidfd (Linux 5.3)"
+            + (
+                ""
+                if item.outcome is not KillOutcome.FAILED
+                else f"; ending it failed: {item.detail}"
+            )
+        )
+    return SupervisorRecord(pid=pid, start_time=stamp), link
+
+
 def _refused(jail: CompiledJail, capabilities: frozenset[Capability]) -> frozenset[Capability]:
     """The capabilities `jail` requires that `capabilities` lacks."""
     return jail.requires - capabilities
@@ -461,7 +612,10 @@ class HostRuntime:
         run `LAUNCH_SCOPED` helpers to completion and start `JAIL_LIFETIME`
         ones, and derive `wrap_prefix` once, from `jail.wrap` applied to a
         fixed sentinel argv, verified as a pure prefix (`None`: every start
-        refuses). Spawns no workload: every process is a `HostSupervisor.start`.
+        refuses). Spawns no workload: every process is a `HostSupervisor.start`, or, in a
+        jail whose compiled stack declares a supervisor (decision-190), a request to the
+        supervisor `create` starts here as the jail's PID 1 and waits to be ready
+        (`_launch_supervisor`, decision-191).
 
         `tether` (decision-167, SPEC.md section 8) is the read end of a pipe
         whose write end the caller keeps: the jail holds a duplicate of it
@@ -476,6 +630,13 @@ class HostRuntime:
                 and something they name runs, or brig can't tell.
             HelperFailed: a `LAUNCH_SCOPED` helper exited non-zero or did not
                 finish.
+            ExecWrapNotAPrefix: a supervised jail's wrap is not a pure argv
+                prefix (decision-190).
+            TetherClosed: a supervised jail's tether has already ended.
+            WorkloadSpawnFailed: a supervised jail's supervisor could not be
+                spawned.
+            SupervisorFailed: a supervised jail's supervisor never said it was
+                ready; what `create` started is ended first.
             OSError: `tether` is not an open descriptor, or `jail_dir` could
                 not be made or written, or its `chan` is there and is not a
                 directory (`FileExistsError`).
@@ -484,11 +645,7 @@ class HostRuntime:
         if missing:
             raise LaunchRefused(missing, "host")
 
-        held = Held(
-            wrap=jail.wrap,
-            sensors=jail.sensors,
-            tether=None if tether is None else HeldTether(tether),
-        )
+        tether_hold = None if tether is None else HeldTether(tether)
         os.makedirs(jail_dir, exist_ok=True)
         _clear_earlier_records(jail_dir)
         _make_channel_dir(jail_dir)
@@ -510,6 +667,32 @@ class HostRuntime:
         _records.write_jail_record(jail_dir, jail_id=jail_id, tethered=tether is not None)
         helper_pids, helper_stamps = _start_helpers(jail, cwd=cwd, env=full_env, jail_dir=jail_dir)
 
+        instance: SupervisorRecord | None = None
+        link: SupervisorLink | None = None
+        if jail.supervisor is not None:
+            # A jail whose PID 1 is brig's supervisor (decision-190): the whole composed wrap
+            # runs around it, once, and every process of the jail is a request to it.
+            try:
+                instance, link = _launch_supervisor(
+                    jail.supervisor,
+                    jail=jail,
+                    wrap_prefix=wrap_prefix,
+                    env=full_env,
+                    cwd=cwd,
+                    jail_dir=jail_dir,
+                    jail_id=jail_id,
+                    tether=tether_hold,
+                )
+            except BaseException:
+                kill_named(
+                    known=(),
+                    jail_dir=jail_dir,
+                    helper_pids=helper_pids,
+                    helper_stamps=helper_stamps,
+                )
+                raise
+        held = Held(wrap=jail.wrap, sensors=jail.sensors, tether=tether_hold, link=link)
+
         return JailRecord(
             kind=self.kind,
             jail_id=jail_id,
@@ -519,6 +702,7 @@ class HostRuntime:
             wrap_prefix=wrap_prefix,
             helper_pids=helper_pids,
             helper_stamps=helper_stamps,
+            supervisor=instance,
             held=held,
         )
 
@@ -529,10 +713,19 @@ class HostRuntime:
         `JAIL_LIFETIME` helper that does. A recycled pid and a zombie read gone
         (decision-155, decision-171); an unknown stamp degrades to the pid-only
         check. A jail with nothing started and no helper reads gone. This
-        answers for leaders; `destroy` is what ends groups."""
-        return any(self.process_alive(jail, process) for process in self.processes(jail)) or any(
-            _identity.identity_holds(pid, stamp)
-            for pid, stamp in zip(jail.helper_pids, jail.helper_stamps, strict=True)
+        answers for leaders; `destroy` is what ends groups. A supervised jail
+        (decision-192) is alive while its supervisor's group leader holds its
+        identity, with or without a process in it."""
+        return (
+            any(self.process_alive(jail, process) for process in self.processes(jail))
+            or (
+                jail.supervisor is not None
+                and _identity.identity_holds(jail.supervisor.pid, jail.supervisor.start_time)
+            )
+            or any(
+                _identity.identity_holds(pid, stamp)
+                for pid, stamp in zip(jail.helper_pids, jail.helper_stamps, strict=True)
+            )
         )
 
     def processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]:
@@ -558,22 +751,42 @@ class HostRuntime:
         del jail
         return _identity.identity_holds(process.pid, process.start_time)
 
-    def destroy(self, jail: JailRecord) -> KillReport:
+    def destroy(self, jail: JailRecord, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
         """SPEC.md section 9's ladder per process in start order -- the ones
         `jail` holds, then every other record under `procs/` -- then every
         `JAIL_LIFETIME` helper, each verified (`teardown.kill_named`). Total:
-        raises nothing from an item."""
+        raises nothing from an item.
+
+        In a supervised jail (decision-191, decision-192) each process's group is laddered
+        first, as in any jail, and then the instance: the link is closed just before its
+        ladder, so the supervisor reads end-of-file and ends everything it holds, which is the
+        prompt end (a supervisor's PID 1 drops the ladder's `SIGTERM`, so the ladder alone would
+        wait out its grace), and the ladder verifies it, `SIGKILL` included. With `grace` 0
+        it is the other way about: the instance is killed first, at once (decision-193)."""
+        held = jail.held
         return kill_named(
             known=jail.processes,
             jail_dir=jail.jail_dir,
             helper_pids=jail.helper_pids,
             helper_stamps=jail.helper_stamps,
+            supervisor=(
+                None
+                if jail.supervisor is None
+                else (jail.supervisor.pid, jail.supervisor.start_time)
+            ),
+            end_of_file=None if held is None or held.link is None else held.link.close,
+            grace=grace,
         )
 
-    def supervisor(self, jail: JailRecord) -> Supervisor:
-        """A `HostSupervisor` bound to `jail`. Every host jail has one: a
-        process is started from the record alone."""
-        return HostSupervisor(jail)
+    def supervisor(self, jail: JailRecord) -> Supervisor | None:
+        """The supervisor bound to `jail`: a `HostSupervisor` for an unsupervised jail, which
+        starts a process from the record alone; for a supervised one (decision-192) a
+        `LinkedSupervisor` over the link only the process that created it holds, and `None` in
+        any other, which can be destroyed and nothing else."""
+        if jail.supervisor is None:
+            return HostSupervisor(jail)
+        link = None if jail.held is None else jail.held.link
+        return None if link is None else LinkedSupervisor(jail, link)
 
     def reserve(self, jail: JailRecord, channel: str) -> Reservation:
         """A fresh socket in `jail`'s channel directory, under the jail
@@ -700,20 +913,7 @@ class HostSupervisor:
             raise ExecWrapNotAPrefix(wrap_prefix, argv_t)
         tether_fd = None if held is None or held.tether is None else held.tether.fd()
         if channel is not None:
-            taken = frozenset(
-                process.bound_path
-                for process in (*jail.processes, *_records.scan(jail.jail_dir).records)
-                if process.bound_path is not None
-            )
-            reason = reservation_refusal(
-                channel, chan=channel_dir_of(jail), endpoint=channel.bound_path, taken=taken
-            )
-            if reason is not None:
-                raise ReservationRefused(
-                    f"start: the reservation for channel {channel.channel!r} is not this "
-                    f"jail's: {reason}. Reserve one with jail.channel({channel.channel!r}) "
-                    "for each start"
-                )
+            refuse_foreign_reservation(jail, channel)
 
         process_id = _records.new_id()
         order = time.time_ns()

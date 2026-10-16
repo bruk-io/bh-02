@@ -60,11 +60,9 @@ _MODEL_ROW = "model"  # the row whose `default` (the model's name) /model and --
 _CLAUDE_STATE = (
     "claude"  # the claude-code provider's own state: Claude Code's config, its session, its stderr
 )
-# What a new session starts on when neither `--model` nor the models file's `default` says: the
-# model row's own default (models:model), which `create` writes into the session's layer.
-_DEFAULT_MODEL = "sonnet"
-# The `stack` of a session whose layer records no model, because the models file's default can't be
-# read: it follows that default, and the model row says what is wrong with it.
+# The `stack` of a session whose layer records no model, because neither `--model` nor the models
+# file's `default` names one, or that default can't be read: it follows the file's default, and the
+# model row says what is wrong, or what to write when none is chosen.
 _UNPINNED = "default"
 
 
@@ -165,15 +163,16 @@ def _models_file() -> Path:
 def _pinned(file: str | OSError | None) -> str | None:
     """The model a new session's layer records from the models file (`file`: its text; None when there
     is none, or it is not read; the error when it can't be read): the file's `default` when that is a
-    name (a non-empty string; the model row says so if it names no model), else `sonnet`. None, no
-    model recorded, when the model row has something to say about the file that a recorded `sonnet`
-    would hide: the file can't be read, is not TOML, holds a key that is no table, or its `default`
-    is no name (TASK-0087: the row stays `Unusable` and says what to write). The same rule as
-    `models_cordis_plugin.named.parsed` and `standing`, which the app test of the two sides holds
-    them to: a `default` that is a table is a model named `default`, not the setting."""
+    name (a non-empty string; the model row says so if it names no model). None, no model recorded,
+    when there is no file or it names no default (there are no built-in models: the row says what to
+    write), and when the model row has something to say about the file: it can't be read, is not
+    TOML, holds a key that is no table, or its `default` is no name (TASK-0087: the row stays
+    `Unusable` and says what to write). The same rule as `models_cordis_plugin.named.parsed` and
+    `standing`, which the app test of the two sides holds them to: a `default` that is a table is an
+    endpoint named `default`, not the setting."""
     match file:
         case None:
-            return _DEFAULT_MODEL
+            return None
         case OSError():
             return None
         case str():
@@ -187,12 +186,12 @@ def _pinned(file: str | OSError | None) -> str | None:
     declared: object = None
     for name, value in data.items():
         if isinstance(value, dict):
-            continue  # a model's table
+            continue  # an endpoint's table
         if name != "default":
             return None  # a key that is no table
         declared = value
     if declared is None:
-        return _DEFAULT_MODEL
+        return None
     return declared if isinstance(declared, str) and declared else None
 
 
@@ -206,10 +205,10 @@ def create(root: Path, cwd: str, *, model: str | None, no_jail: bool, patches: S
     """A new session directory, its metadata and its layer, written before anything boots.
 
     The model it starts on is `--model`'s name, else the models file's `default` when that is a
-    name, else `sonnet` (`_pinned`); the layer records it (as `--model` does), so a resume keeps it
-    whatever the file says later. When the file can't be read, is not TOML or has a `default` that is
-    no name, the layer records none and the model row says what is wrong with the file; the session's
-    `stack` is then `default`. Otherwise its `stack` is that model, and
+    name (`_pinned`); the layer records it (as `--model` does), so a resume keeps it whatever the
+    file says later. When there is neither, or the file can't be read, is not TOML or has a `default`
+    that is no name, the layer records none and the model row says what is wrong or what to write;
+    the session's `stack` is then `default`. Otherwise its `stack` is that model, and
     `patches` the names of the `--patch` files it started with: the listing shows both, since
     a patch can replace the model row. A resume with other patches keeps these.
     """

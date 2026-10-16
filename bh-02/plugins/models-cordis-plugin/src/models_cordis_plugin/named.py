@@ -1,42 +1,57 @@
 """Named models: which model a name means, on which provider, with what settings.
 
-Three places name models, each over the last: the built-ins (`sonnet`, `opus`, `haiku`,
-Claude through Claude Code), the models file (`$XDG_CONFIG_HOME/bh-02/models.toml`, else
-`~/.config/bh-02/models.toml`, or the row's `models`), and the row's own `extra` (a table
-like the file's, which a migrated layer writes). A later place wins: an `extra` model over
-the file's of the same name, and a user's model over a built-in (allowed, and marked as
-shadowing it). The file is one table per model:
+Two places name models, the second over the first: the models file
+(`$XDG_CONFIG_HOME/bh-02/models.toml`, else `~/.config/bh-02/models.toml`, or the row's
+`models`), and the row's own `extra` (tables like the file's, which a layer writes): an `extra`
+endpoint wins over the file's of the same name. There are no built-in models: every model is one an
+endpoint serves, so what a session runs on, and what it spends, is always written down by the person.
 
-    [llama]
+The file is one table per endpoint: how to reach a server, and the models it serves, each under
+the endpoint's `models`, named `ENDPOINT/MODEL`. The same shape for every provider:
+
+    default = "local/llama"
+
+    [local]
     provider = "openai"                        # or "claude-code"
+    base_url = "http://localhost:11434/v1"     # openai: where /chat/completions is
+    key = "OPENROUTER_API_KEY"                 # optional: a line of local.env
+
+    [local.models.llama]
     id = "llama3.2"                            # the provider's own name for the model
-    base_url = "http://localhost:11434/v1"     # openai only: where /chat/completions is
-    key = "OPENROUTER_API_KEY"                 # openai only, optional: a line of local.env
-    max_tokens = 4096                          # optional
-    temperature = 0.2                          # optional
+    max_tokens = 4096                          # optional (openai), here or on the endpoint
+    temperature = 0.2                          # optional (openai), here or on the endpoint
 
-A top-level `default = "NAME"` above the tables names the model a new session starts on. The
-model a session starts on is chosen, lowest first, by the built-in `sonnet`, the file's `default`,
-a layer's model row `default` (the session's own layer, which `/model` and `--model` write; so a
-resumed session keeps the model it was on), `--model` (which writes that layer). A layer that
-names no model leaves `ModelConfig.default` None, so the file's counts; one that names `sonnet`
-chooses it (`intended`).
+    [work]
+    provider = "claude-code"
+    base_url = "https://gateway.example/anthropic"   # optional: Claude through this gateway
+    key_command = "print-a-token"              # with base_url: Claude Code's apiKeyHelper
+    key_ttl_ms = 300000                        # optional: how long a token is used
+    experimental_betas = false                 # optional: false when the gateway refuses them
+    models = { opus = { id = "claude-opus-5-5" } }   # the same data, written inline
 
-A provider can also be `module:attribute`, a factory the model's table is passed to (bh-02's
-fakes are one); its table is its own.
+A model's table is its endpoint's settings with its own over them (`derived`). `ENDPOINT/ID`, an id
+the endpoint's `models` doesn't name, is that id on the endpoint: no server is asked for it. An
+openai endpoint with `discover = true` also offers the models its server lists (`discovery.py`),
+narrowed by `include`, by glob; `/model` asks the server only when it lists. A claude-code endpoint
+with no `base_url` runs on the subscription token in local.env. An endpoint whose table has a
+problem names no model: `ENDPOINT/MODEL` is refused with that table's problem, as the table alone is.
 
-An openai table with `discover = true` is an endpoint, not a model: it names the models its server
-lists, `ENDPOINT/ID`, split at the first `/` (`find`). Such a name needs no network to mean what it
-says (`find` derives the model from the endpoint's table); the server is asked only when `/model`
-lists (`discovery.py`). `include` narrows what is listed, by glob. Endpoints come only from the
-models file, which is why a layer's `extra` may not hold one. An endpoint whose table has a problem
-names no model: `ENDPOINT/ID` is refused with that table's problem, as the table alone is.
+A top-level `default = "NAME"` names the model a new session starts on. The model a session starts
+on is chosen, lowest first, by the file's `default`, a layer's model row `default` (the session's own
+layer, which `/model` and `--model` write; so a resumed session keeps the model it was on), `--model`
+(which writes that layer). A layer that names no model leaves `ModelConfig.default` None, so the
+file's counts (`intended`); with neither, no model is chosen, and the model row says what to write
+(`chosen`).
 
-The models file is trusted whole: a factory it names runs in bh-02's own process, and a `key`
-it names is sent to its `base_url`. So it is not read when it is in the project, which the
-model's code can write (`in_project`: bh-02 run from the home directory, `$XDG_CONFIG_HOME` in
-the project, a link into it). And wherever a table comes from, an `openai` model's `key` may
-not name the Claude Code token (`withheld`), which is the Claude Code CLI's alone.
+A provider can also be `module:attribute`, a factory each model's table is passed to (bh-02's fakes
+are one); its tables are its own.
+
+The models file is trusted whole: a factory it names runs in bh-02's own process, a `key_command` it
+names runs as the person, and a `key` it names is sent to its `base_url`. So it is not read when it is
+in the project, which the model's code can write (`in_project`: bh-02 run from the home directory,
+`$XDG_CONFIG_HOME` in the project, a link into it), and `discover` and `key_command` are read only from
+it, never from a layer's `extra`. Wherever a table comes from, an openai endpoint's `key` may not name
+the Claude Code token (`withheld`), which is the Claude Code CLI's alone.
 
 Everything here is pure but `models_file`, which reads the environment, `read_models`, which
 reads the file, and `in_project`, which follows the file's links.
@@ -55,7 +70,6 @@ from host_paths import config_home, passes, roots
 from models_cordis_plugin.claude_code.credential import TOKEN_VARIABLE
 
 __all__ = [
-    "BUILT_IN",
     "CLAUDE_CODE",
     "OPENAI",
     "Intended",
@@ -65,7 +79,6 @@ __all__ = [
     "combined",
     "chosen",
     "derived",
-    "endpoint",
     "environ",
     "find",
     "from_file",
@@ -73,6 +86,7 @@ __all__ = [
     "intended",
     "key_name",
     "models_file",
+    "named_models",
     "not_a_model",
     "parsed",
     "problem",
@@ -85,24 +99,30 @@ __all__ = [
 CLAUDE_CODE: Final = "claude-code"
 OPENAI: Final = "openai"
 _PROVIDERS: Final = (CLAUDE_CODE, OPENAI)
-BUILT_IN: Final[Mapping[str, Mapping[str, Any]]] = {
-    "sonnet": {"provider": CLAUDE_CODE, "id": "sonnet"},
-    "opus": {"provider": CLAUDE_CODE, "id": "opus"},
-    "haiku": {"provider": CLAUDE_CODE, "id": "haiku"},
-}
-_BUILT_IN_DEFAULT: Final = "sonnet"
-_BUILT_IN_SOURCE: Final = "built in"
+_UNCHOSEN: Final = "nowhere"  # the origin of no default: the models file names none
 _FILE_SOURCE: Final = "the models file"
 _LAYER_SOURCE: Final = "the model row"
 _DEFAULT_KEY: Final = "default"
 _EXTRA_SOURCE: Final = "the model row's extra"
+_MODELS: Final = "models"
 _DISCOVER: Final = "discover"
 _INCLUDE: Final = "include"
-# The keys a model's table may have, per provider (a factory's table is its own).
-_KEYS: Final[Mapping[str, frozenset[str]]] = {
-    CLAUDE_CODE: frozenset({"provider", "id"}),
+_KEY_COMMAND: Final = "key_command"
+_KEY_TTL: Final = "key_ttl_ms"
+_BETAS: Final = "experimental_betas"
+# What only an endpoint says: which models it has. A model made of it (`derived`) drops them.
+_LISTING: Final = frozenset({_MODELS, _DISCOVER, _INCLUDE})
+# The keys a model's own table may have, per provider (a factory's tables are its own).
+_MODEL_KEYS: Final[Mapping[str, frozenset[str]]] = {
+    CLAUDE_CODE: frozenset({"id"}),
+    OPENAI: frozenset({"id", "max_tokens", "temperature"}),
+}
+# The keys an endpoint's table may have, per provider: how to reach it, its models, and the
+# settings its models share (each model's own table may set them again).
+_ENDPOINT_KEYS: Final[Mapping[str, frozenset[str]]] = {
+    CLAUDE_CODE: frozenset({"provider", "base_url", _KEY_COMMAND, _KEY_TTL, _BETAS, _MODELS}),
     OPENAI: frozenset(
-        {"provider", "id", "base_url", "key", "max_tokens", "temperature", _DISCOVER, _INCLUDE}
+        {"provider", "base_url", "key", _KEY_COMMAND, _KEY_TTL, "max_tokens", "temperature", *_LISTING}
     ),
 }
 # A key is the name of a local.env line, never the key itself: a value that isn't such a name is
@@ -110,8 +130,17 @@ _KEYS: Final[Mapping[str, frozenset[str]]] = {
 # Capitals only: a key itself nearly always has lower-case letters (`gsk_...`, `sk-...`), which
 # a name with `_` alone would let through.
 _KEY_NAME: Final = re.compile(r"[A-Z_][A-Z0-9_]*")
+# A model's name under its endpoint: 1 to 200 printable ASCII characters, no space and no `/` (a
+# name is `ENDPOINT/MODEL`, split at the first `/`; `/model NAME` takes one word; a layer file holds
+# it as TOML, which `format_layer` writes outside ASCII as an escape TOML refuses).
+_MODEL_NAME: Final = re.compile(r"[!-.0-~]{1,200}")
+_DEFAULTED: Final = (
+    'default = "local/MODEL"\n\n[local]\nprovider = "openai"\nbase_url = "https://HOST/v1"\n\n'
+    '[local.models.MODEL]\nid = "MODEL ID"'
+)
 _EXAMPLE: Final = (
-    '[NAME]\nprovider = "openai"\nid = "MODEL ID"\nbase_url = "https://HOST/v1"\nkey = "LINE_IN_LOCAL_ENV"'
+    '[NAME]\nprovider = "openai"\nbase_url = "https://HOST/v1"\nkey = "LINE_IN_LOCAL_ENV"\n\n'
+    '[NAME.models.MODEL]\nid = "MODEL ID"'
 )
 
 
@@ -128,13 +157,12 @@ class ModelsError(Exception):
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
     """The `model` row's config. `default`: the model's name (`/model` and `--model` set it);
-    None when no layer names one, which is not the same as naming `sonnet` (`intended`: the
-    models file's `default` counts then).
-    `models`: the models file, when not the default one. `extra`: models of the row's own, one
+    None when no layer names one (`intended`: the models file's `default` counts then).
+    `models`: the models file, when not the default one. `extra`: endpoints of the row's own, one
     table per name, as in the file. For the claude-code provider: `state`, the directory its
     Claude Code state lives in (the session's `claude/`, which the session layer sets);
     `env_file`, where `local.env` is (found above the install when unset; the openai provider
-    reads a model's `key` there too); `cwd`, the project Claude Code is told it works in (the
+    reads an endpoint's `key` there too); `cwd`, the project Claude Code is told it works in (the
     working directory when unset), which, like the working directory, a models file must be
     outside of (`in_project`)."""
 
@@ -148,18 +176,18 @@ class ModelConfig:
 
 @dataclass(frozen=True, slots=True)
 class _ModelsFile:
-    """What a models file says: its model tables by name, and its top-level `default` as written
+    """What a models file says: its endpoint tables by name, and its top-level `default` as written
     (None when it has none; TOML has no null, so None is never a value; not checked here: said
     by `chosen` when it is the one in effect)."""
 
-    models: Mapping[str, Mapping[str, Any]]
+    endpoints: Mapping[str, Mapping[str, Any]]
     default: object = None
 
 
 @dataclass(frozen=True, slots=True)
 class Intended:
     """The model name a session starts on, as written (`name`: not yet checked to be a name), and
-    where it was written: `origin`, the built-in default, the models file, or a layer."""
+    where it was written: `origin`, the models file, a layer, or nowhere (no default: `name` None)."""
 
     name: object
     origin: str
@@ -167,15 +195,16 @@ class Intended:
 
 @dataclass(frozen=True, slots=True)
 class Named:
-    """One model a name means: its provider, the provider's id for it, its whole table (the
-    provider's settings), where it was named, and whether it shadows a built-in."""
+    """A name and what it means: a model (its provider, the provider's id for it, its whole table:
+    the provider's settings) or, with `endpoint`, an endpoint (`id` empty, `table` its own, its
+    models under `models`), and where it was named."""
 
     name: str
     provider: str
     id: str
     table: Mapping[str, Any]
     source: str
-    shadows: bool = False
+    endpoint: bool = False
 
 
 def models_file(explicit: str | None, environ: Mapping[str, str]) -> Path:
@@ -187,7 +216,11 @@ def models_file(explicit: str | None, environ: Mapping[str, str]) -> Path:
 
 
 def read_models(path: Path) -> str | None:
-    """The models file's text, or None when there is none (no file is no user models)."""
+    """The models file's text, or None when there is none (no file is no user models).
+
+    Raises:
+        ModelsError: the file is there but can't be read.
+    """
     try:
         return path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -216,12 +249,12 @@ def in_project(path: Path, root: Path) -> str | None:
 def _refused(path: Path, root: Path, how: str) -> str:
     return (
         f"the models file {path} is not read: it is in the project ({root}){how}, which the model's "
-        "code can write, and a models file the model wrote could run code in bh-02's own process (a "
-        "`module:attribute` provider) or send a local.env key to a server of its choosing. Keep your "
+        "code can write, and a models file the model wrote could run code as you (a `key_command`, "
+        "a `module:attribute` provider) or send a local.env key to a server of its choosing. Keep your "
         "models file outside the project, and not a link into it: run bh-02 in the project's own "
         "directory rather than one that holds your config (such as your home), or set "
         "XDG_CONFIG_HOME (or the model row's `models`) to a directory outside it. Until then only "
-        "the built-in models and the model row's `extra` are offered"
+        "the model row's `extra` is offered"
     )
 
 
@@ -231,9 +264,13 @@ def environ() -> Mapping[str, str]:
 
 
 def parsed(text: str | None, source: str) -> _ModelsFile:
-    """The models file's tables, by name, and its `default`: empty for no file. A file that is not
-    TOML, or holds something other than one table per model (and a `default`), is a
-    `ModelsError` naming it. A `[default]` table is a model named `default`."""
+    """The models file's endpoint tables, by name, and its `default`: empty for no file. A
+    `[default]` table is an endpoint named `default`.
+
+    Raises:
+        ModelsError: the file is not TOML, or holds something other than one table per endpoint
+            (and a `default`).
+    """
     if text is None:
         return _ModelsFile({})
     try:
@@ -250,21 +287,21 @@ def parsed(text: str | None, source: str) -> _ModelsFile:
         else:
             raise ModelsError(
                 "models_file",
-                f"the models file {source}: {name!r} is not a table; each model is one, e.g.\n{_EXAMPLE}",
+                f"the models file {source}: {name!r} is not a table; each endpoint is one, e.g.\n{_EXAMPLE}",
             )
     return _ModelsFile(tables, default)
 
 
 def standing(from_file: object) -> Intended:
-    """The default below any layer: the models file's `default` when it has one, else `sonnet`."""
+    """The default below any layer: the models file's `default` when it has one, else none."""
     if from_file is None:
-        return Intended(_BUILT_IN_DEFAULT, _BUILT_IN_SOURCE)
+        return Intended(None, _UNCHOSEN)
     return Intended(from_file, _FILE_SOURCE)
 
 
 def intended(layer: object, below: Intended) -> Intended:
     """The model a session starts on: a layer's model row `default` when it has one (None when no
-    layer names a model, which `sonnet` named in a layer is not), else `below` (`standing`). A
+    layer names a model), else `below` (`standing`). A
     layer's default that is the models file's own default is the file's (`from_file`): a new
     session's layer records it from there at the start (`bh_02.sessions.create`), so an error
     about it says the file's default is the cause."""
@@ -281,101 +318,174 @@ def from_file(wanted: Intended) -> bool:
 def combined(
     files: Mapping[str, Mapping[str, Any]], source: str, extra: Mapping[str, Mapping[str, Any]]
 ) -> list[Named]:
-    """Every named model: the built-ins, then the models file's (`files`, read from `source`),
-    then the row's `extra`; a later one of the same name replaces an earlier one, in its
-    place, and a user's model named like a built-in is marked as shadowing it."""
+    """Every endpoint: the models file's (`files`, read from `source`), then the row's `extra`; a
+    later endpoint of the same name replaces an earlier one, in its place.
+
+    Raises:
+        ModelsError: `extra` is not a table of tables.
+    """
     if not isinstance(extra, Mapping):
         raise ModelsError(
             "model_config",
-            f"{_EXTRA_SOURCE} is {type(extra).__name__}, not a table of models; give it one table "
-            "per model, as in the models file, or remove it",
+            f"{_EXTRA_SOURCE} is {type(extra).__name__}, not a table of endpoints; give it one table "
+            "per endpoint, as in the models file, or remove it",
         )
     for name, table in extra.items():
         if not isinstance(table, Mapping):
             raise ModelsError(
                 "model_config",
-                f"{_EXTRA_SOURCE}: {name!r} is not a table; each model is one, e.g. "
-                f'`{name} = {{ provider = "openai", id = "MODEL ID", base_url = "https://HOST/v1" }}`',
+                f"{_EXTRA_SOURCE}: {name!r} is not a table; each endpoint is one, e.g. "
+                f'`{name} = {{ provider = "openai", base_url = "https://HOST/v1", '
+                'models = { MODEL = { id = "MODEL ID" } } }`',
             )
-    out: dict[str, Named] = {name: _named(name, table, _BUILT_IN_SOURCE) for name, table in BUILT_IN.items()}
+    out: dict[str, Named] = {}
     for where, tables in ((source, files), (_EXTRA_SOURCE, extra)):
         for name, table in tables.items():
-            out[name] = _named(str(name), table, where, shadows=name in BUILT_IN)
+            out[name] = _named(str(name), table, where, endpoint=True)
     return list(out.values())
 
 
-def _named(name: str, table: Mapping[str, Any], source: str, *, shadows: bool = False) -> Named:
+def _named(name: str, table: Mapping[str, Any], source: str, *, endpoint: bool = False) -> Named:
     provider, model = table.get("provider"), table.get("id")
     return Named(
         name,
         provider if isinstance(provider, str) else "",
-        model if isinstance(model, str) else "",
+        model if isinstance(model, str) and not endpoint else "",
         dict(table),
         source,
-        shadows,
+        endpoint,
     )
 
 
 def problem(named: Named) -> str | None:
-    """What is wrong with a model's table, said so the person can fix it; None when nothing is."""
-    where = f"model {named.name!r} ({named.source})"
+    """What is wrong with a model's or an endpoint's table, said so the person can fix it; None when
+    nothing is. An endpoint's problem is its own or any of its models'."""
+    kind = "endpoint" if named.endpoint else "model"
+    where = f"{kind} {named.name!r} ({named.source})"
     if not named.provider:
         return (
             f'{where} names no provider; give it `provider = "{OPENAI}"` (an OpenAI-compatible '
             f'endpoint) or `provider = "{CLAUDE_CODE}"` (Claude through Claude Code)'
         )
-    if named.provider not in _PROVIDERS:
-        if ":" in named.provider:
-            return None  # a factory (`module:attribute`), whose table is its own
+    factory = named.provider not in _PROVIDERS
+    if factory and ":" not in named.provider:
         known = " or ".join(map(repr, _PROVIDERS))
         return f"{where}: provider {named.provider!r} is not one bh-02 has; use {known}"
-    if unknown := sorted(set(named.table) - _KEYS[named.provider]):
-        allowed = ", ".join(sorted(_KEYS[named.provider]))
+    if named.endpoint:
+        return _endpoint_problem(named, where, factory=factory)
+    if factory:
+        return None  # a factory (`module:attribute`), whose tables are its own
+    allowed = _ENDPOINT_KEYS[named.provider] - _LISTING | _MODEL_KEYS[named.provider]
+    if unknown := sorted(set(named.table) - allowed):
+        return f"{where}: {', '.join(unknown)} is not a setting of a {named.provider} model"
+    if not named.id:
+        return f'{where} names no model id; give it `id = "..."`, the provider\'s own name for the model'
+    return _settings_problem(named, where)
+
+
+def _endpoint_problem(named: Named, where: str, *, factory: bool) -> str | None:
+    """What is wrong with an endpoint's table, or one of its models', or None."""
+    table = named.table
+    if "id" in table:
         return (
-            f"{where}: {', '.join(unknown)} is not a setting of a {named.provider} model; it takes {allowed}"
+            f"{where} names an id, as a single model's table did: a table is an endpoint now, and its "
+            f"models are under it. Move the id to a model of it, `[{named.name}.models.MODEL]` with "
+            f'`id = "{table["id"]}"` (named {named.name}/MODEL), and keep the rest here; e.g.\n'
+            + _EXAMPLE.replace("NAME", named.name)
+        )
+    if "/" in named.name:
+        return (
+            f"{where}: an endpoint's name may not hold '/': its models are named ENDPOINT/MODEL, split "
+            "at the first '/'. Rename the table"
+        )
+    if (why := _models_problem(named, where, factory=factory)) is not None:
+        return why
+    if factory:
+        return None
+    if unknown := sorted(set(table) - _ENDPOINT_KEYS[named.provider]):
+        allowed = ", ".join(sorted(_ENDPOINT_KEYS[named.provider]))
+        return (
+            f"{where}: {', '.join(unknown)} is not a setting of a {named.provider} endpoint; it takes "
+            f"{allowed}"
+        )
+    if named.source == _EXTRA_SOURCE and (said := sorted({_DISCOVER, _KEY_COMMAND} & set(table))):
+        return (
+            f"{where}: {' and '.join(said)} is read only from the models file, never from a layer: it "
+            "makes bh-02 trust the table (ask a server what it lists, run a command as you). Move "
+            f"this table to the models file, or remove {' and '.join(said)}"
         )
     if named.provider == OPENAI and (why := _discover_problem(named, where)) is not None:
         return why
-    if not named.id and not endpoint(named):
-        return f'{where} names no model id; give it `id = "..."`, the provider\'s own name for the model'
-    if named.provider == OPENAI:
-        return _openai_problem(named, where)
+    if not table.get(_MODELS) and table.get(_DISCOVER) is not True:
+        how = " or `discover = true` to offer what its server lists" if named.provider == OPENAI else ""
+        return f'{where} names no models; give it one, `[{named.name}.models.MODEL]` with `id = "..."`{how}'
+    if (why := _settings_problem(named, where)) is not None:
+        return why
+    for model in _model_names(table):
+        if (why := problem(derived(named, model, checked=False))) is not None:
+            return why
     return None
 
 
-def endpoint(named: Named) -> bool:
-    """Whether `named` is an endpoint, a table that names the models its server lists
-    (`discover = true` on an openai table of the models file), not a model. A table of the
-    row's `extra` is never one: endpoints come only from the trusted models file (`problem`)."""
-    return named.provider == OPENAI and named.table.get(_DISCOVER) is True and named.source != _EXTRA_SOURCE
+def _models_problem(named: Named, where: str, *, factory: bool) -> str | None:
+    """What is wrong with an endpoint's `models` as a table of models, or None."""
+    models = named.table.get(_MODELS, {})
+    if not isinstance(models, dict):
+        return (
+            f"{where}: models must be a table of models, one per name, like "
+            f'`[{named.name}.models.MODEL]` with `id = "..."`'
+        )
+    for model, table in models.items():
+        if not _MODEL_NAME.fullmatch(model):
+            return (
+                f"{where}: {model!r} can't name a model: a model's name is 1 to 200 printable ASCII "
+                "characters, with no space and no '/'. Rename it"
+            )
+        if not isinstance(table, dict):
+            return (
+                f'{where}: models.{model} is not a table; give it one, `{model} = {{ id = "..." }}`, '
+                f"or `[{named.name}.models.{model}]` with its id"
+            )
+        if factory:
+            continue
+        if unknown := sorted(set(table) - _MODEL_KEYS[named.provider]):
+            allowed = ", ".join(sorted(_MODEL_KEYS[named.provider]))
+            return (
+                f"{where}: {', '.join(unknown)} is not a setting of a {named.provider} model "
+                f"({named.name}/{model}); a model takes {allowed}, and its endpoint the rest"
+            )
+        if not isinstance(table.get("id"), str) or not table["id"]:
+            return (
+                f'{where}: model {model!r} names no id; give it `id = "..."`, the provider\'s own name '
+                "for the model"
+            )
+    return None
+
+
+def _model_names(table: Mapping[str, Any]) -> list[str]:
+    """The names an endpoint's `models` gives, as written (empty when it has none or no table)."""
+    models = table.get(_MODELS)
+    return list(models) if isinstance(models, dict) else []
+
+
+def named_models(host: Named) -> list[Named]:
+    """The models an endpoint's `models` names, in the order written, each as `derived` makes it;
+    none when it has a problem (`problem` says what)."""
+    if problem(host) is not None:
+        return []
+    return [derived(host, model, checked=False) for model in _model_names(host.table)]
 
 
 def _discover_problem(named: Named, where: str) -> str | None:
-    """What is wrong with an openai table's `discover` and `include`, or None."""
+    """What is wrong with an openai endpoint's `discover` and `include`, or None."""
     table = named.table
     discover = table.get(_DISCOVER)
     if _DISCOVER in table and not isinstance(discover, bool):
         return f"{where}: discover must be true or false"
     if _INCLUDE in table and discover is not True:
         return (
-            f"{where}: include narrows the models an endpoint lists; add `discover = true`, or remove include"
-        )
-    if discover is not True:
-        return None
-    if named.source == _EXTRA_SOURCE:
-        return (
-            f"{where}: discover is read only from the models file, never from a layer: an endpoint is "
-            "trusted whole, as its table in the models file is. Move this table there, or remove discover"
-        )
-    if "/" in named.name:
-        return (
-            f"{where}: an endpoint's name may not hold '/': its models are named ENDPOINT/ID, split at "
-            "the first '/'. Rename the table"
-        )
-    if "id" in table:
-        return (
-            f"{where}: an endpoint names no id, it lists its models (named {named.name}/ID). Remove id, "
-            "or remove discover for a single model"
+            f"{where}: include narrows the models an endpoint's server lists; add `discover = true`, or "
+            "remove include"
         )
     patterns = table.get(_INCLUDE)
     if _INCLUDE in table and not (
@@ -387,18 +497,40 @@ def _discover_problem(named: Named, where: str) -> str | None:
     return None
 
 
-def _openai_problem(named: Named, where: str) -> str | None:
-    """What is wrong with an openai model's settings, or None."""
-    url = named.table.get("base_url")
-    if not isinstance(url, str) or not url:
+def _settings_problem(named: Named, where: str) -> str | None:
+    """What is wrong with how a model or endpoint is reached, and with its settings, or None."""
+    table = named.table
+    url = table.get("base_url")
+    if named.provider == OPENAI and (not isinstance(url, str) or not url):
         return (
             f"{where} names no base_url; give it the endpoint's base, the part before "
             '/chat/completions (e.g. `base_url = "https://api.openai.com/v1"`, '
             '`"http://localhost:11434/v1"` for Ollama)'
         )
-    if (bad := _url_problem(url)) is not None:
+    if url is not None and (bad := _url_problem(url)) is not None:
         return f'{where}: base_url {url!r} {bad}; e.g. `base_url = "https://api.openai.com/v1"`'
-    key = named.table.get("key")
+    if (why := _key_problem(named, where)) is not None:
+        return why
+    tokens = table.get("max_tokens")
+    if tokens is not None and not _whole(tokens):
+        return f"{where}: max_tokens must be a whole number above 0"
+    heat = table.get("temperature")
+    if heat is not None and (not isinstance(heat, int | float) or isinstance(heat, bool)):
+        return f"{where}: temperature must be a number"
+    betas = table.get(_BETAS)
+    if betas is not None and not isinstance(betas, bool):
+        return f"{where}: experimental_betas must be true or false"
+    return None
+
+
+def _key_problem(named: Named, where: str) -> str | None:
+    """What is wrong with how a model or endpoint gets its key (`key`, `key_command`, `key_ttl_ms`),
+    or None. A claude-code one with a `base_url` needs a `key_command`, and one without has the
+    subscription token, so takes no `key_command`."""
+    table = named.table
+    key, command, ttl = table.get("key"), table.get(_KEY_COMMAND), table.get(_KEY_TTL)
+    if key is not None and command is not None:
+        return f"{where}: give key (a line of local.env) or key_command (a command that prints one), not both"
     if key is not None and key_name(key) is None:
         return (
             f"{where}: key must name a line of local.env (capitals, digits and _, like "
@@ -407,17 +539,35 @@ def _openai_problem(named: Named, where: str) -> str | None:
         )
     if (why := withheld(named)) is not None:
         return why
-    tokens = named.table.get("max_tokens")
-    if tokens is not None and (not isinstance(tokens, int) or isinstance(tokens, bool) or tokens <= 0):
-        return f"{where}: max_tokens must be a whole number above 0"
-    heat = named.table.get("temperature")
-    if heat is not None and (not isinstance(heat, int | float) or isinstance(heat, bool)):
-        return f"{where}: temperature must be a number"
+    if command is not None and (not isinstance(command, str) or not command.strip()):
+        return (
+            f"{where}: key_command must be a command that prints a key, like "
+            '`key_command = "my-token-helper"`'
+        )
+    if ttl is not None and command is None:
+        return f"{where}: key_ttl_ms says how long a key_command's key is used; add key_command, or remove it"
+    if ttl is not None and not _whole(ttl):
+        return f"{where}: key_ttl_ms must be a whole number of milliseconds above 0"
+    if named.provider == CLAUDE_CODE and ("base_url" in table) != (command is not None):
+        return (
+            f"{where}: a gateway needs both base_url (where Claude Code sends its requests) and "
+            "key_command (the command that prints its key, Claude Code's apiKeyHelper); without "
+            "either, Claude Code runs on the subscription token in local.env"
+        )
+    if named.provider == CLAUDE_CODE and _BETAS in table and "base_url" not in table:
+        return f"{where}: experimental_betas is for a gateway; add base_url and key_command, or remove it"
     return None
 
 
-def _url_problem(url: str) -> str | None:
+def _whole(value: object) -> bool:
+    """Whether `value` is a whole number above 0 (a TOML `true` is no number)."""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _url_problem(url: object) -> str | None:
     """What is wrong with a base_url as a URL (said after it), or None."""
+    if not isinstance(url, str):
+        return "is not text"
     try:
         parts = urlsplit(url)
         _ = parts.port  # reading it checks it: a port not a number, or out of range, is a ValueError
@@ -434,10 +584,10 @@ def withheld(named: Named) -> str | None:
     if named.table.get("key") != TOKEN_VARIABLE:
         return None
     return (
-        f"model {named.name!r} ({named.source}): key may not name {TOKEN_VARIABLE}, the Claude Code "
+        f"{named.name!r} ({named.source}): key may not name {TOKEN_VARIABLE}, the Claude Code "
         "token: bh-02 gives it to the Claude Code CLI alone and never sends it to an endpoint "
         "(whoever holds it can use your subscription). Name the local.env line of this endpoint's "
-        "own key (add one as `ITS_API_KEY=<the key>`), or use sonnet, opus or haiku for Claude"
+        "own key (add one as `ITS_API_KEY=<the key>`), or a claude-code endpoint for Claude"
     )
 
 
@@ -447,54 +597,67 @@ def key_name(key: object) -> str | None:
     return key if isinstance(key, str) and _KEY_NAME.fullmatch(key) else None
 
 
-def derived(host: Named, model_id: str) -> Named:
-    """The model `ENDPOINT/ID` means: the endpoint's table (its provider, `base_url`, `key` and
-    settings) with `model_id` as the model's, named as the person writes it. Nothing is asked of the
-    server: an id it lacks is the first step's 404. A table with a problem (`problem`) means no model:
-    `host` itself comes back, which `not_a_model` refuses with that problem, so the person is told
-    which table to fix and what to write, and no model is made of a table bh-02 calls broken."""
-    if problem(host) is not None:
+def derived(host: Named, model: str, *, checked: bool = True) -> Named:
+    """The model `ENDPOINT/MODEL` means: the endpoint's table (its provider, how it is reached, the
+    settings its models share) with the model's own over it: the table its `models` gives `model`,
+    else `model` as the provider's id (an id the endpoint's `models` doesn't name). Nothing is asked
+    of the server: an id it lacks is the first step's error. With `checked`, a table with a problem
+    (`problem`) means no model: `host` itself comes back, which `not_a_model` refuses with that
+    problem, so the person is told which table to fix and what to write."""
+    if checked and problem(host) is not None:
         return host
-    table = {k: v for k, v in host.table.items() if k not in (_DISCOVER, _INCLUDE)}
-    return Named(f"{host.name}/{model_id}", OPENAI, model_id, {**table, "id": model_id}, host.source)
+    shared = {k: v for k, v in host.table.items() if k not in _LISTING}
+    models = host.table.get(_MODELS)
+    own = models.get(model) if isinstance(models, dict) else None
+    table = {**shared, **own} if isinstance(own, dict) else {**shared, "id": model}
+    model_id = table.get("id")
+    return Named(
+        f"{host.name}/{model}",
+        host.provider,
+        model_id if isinstance(model_id, str) else "",
+        table,
+        host.source,
+    )
 
 
 def find(name: object, models: Sequence[Named]) -> Named | None:
-    """The model `name` means, or None: the table of that name, else `ENDPOINT/ID` for an
-    endpoint (`derived`: the endpoint's own table when that has a problem), split at the first `/`
-    so an id may hold more of them, and `:`. Pure: no server is asked."""
+    """What `name` means, or None: the endpoint of that name, else
+    `ENDPOINT/MODEL` (`derived`: the endpoint's own table when that has a problem), split at the
+    first `/` so an id may hold more of them, and `:`. Pure: no server is asked."""
     if not isinstance(name, str):
         return None
     exact = next((named for named in models if named.name == name), None)
     if exact is not None:
         return exact
-    host_name, slash, model_id = name.partition("/")
-    if not slash or not model_id:
+    host_name, slash, model = name.partition("/")
+    if not slash or not model:
         return None
-    host = next((named for named in models if named.name == host_name and endpoint(named)), None)
-    return None if host is None else derived(host, model_id)
+    host = next((named for named in models if named.name == host_name and named.endpoint), None)
+    return None if host is None else derived(host, model)
 
 
 def not_a_model(found: Named) -> str | None:
     """Why `found` can't be the model row's model, said so the person can fix it: its table has a
     problem (`problem`: an endpoint's too, which resolves no model of it), or it is an endpoint,
-    which lists models and is none; None when it can be."""
+    which serves models and is none; None when it can be."""
     if (why := problem(found)) is not None:
         return why
-    if endpoint(found):
+    if found.endpoint:
+        names = ", ".join(named.name for named in named_models(found))
         return (
-            f"{found.name!r} ({found.source}) is an endpoint, which lists models and is none itself; "
-            f"name one of them, {found.name}/ID: /model lists them"
+            f"{found.name!r} ({found.source}) is an endpoint, which serves models and is none itself; "
+            f"name one of them, {found.name}/MODEL" + (f" ({names})" if names else ": /model lists them")
         )
     return None
 
 
 def said_names(models: Sequence[Named]) -> str:
-    """The models there are, for a message: each model's name, then, when there are endpoints,
-    that a name may be `ENDPOINT/ID` for one."""
-    names = ", ".join(named.name for named in models if not endpoint(named))
-    hosts = ", ".join(named.name for named in models if endpoint(named))
-    return names + (f"; or ENDPOINT/ID, for an endpoint ({hosts})" if hosts else "")
+    """The models there are, for a message: each model an endpoint names, then, when there are
+    endpoints, that a name may be `ENDPOINT/ID` for one; `none` when there are none."""
+    names = [model.name for named in models if named.endpoint for model in named_models(named)]
+    hosts = ", ".join(named.name for named in models if named.endpoint)
+    listed = ", ".join(names) or "none"
+    return listed + (f"; or ENDPOINT/ID, an id on an endpoint ({hosts})" if hosts else "")
 
 
 def chosen(
@@ -504,23 +667,33 @@ def chosen(
     refused: str | None = None,
     origin: str = _LAYER_SOURCE,
 ) -> Named:
-    """The model `name` means, or a `ModelsError` saying what to do: no such name (the models
-    there are, and where to add one, or why the models file is not read: `refused`, which
-    `in_project` says), or a table with a problem. `origin`: where `name` was written
-    (`Intended.origin`), said when it is the models file's `default`."""
+    """The model `name` means. `origin`: where `name` was written (`Intended.origin`), said when it
+    is the models file's `default`.
+
+    Raises:
+        ModelsError: `name` is no name, no model has it (the models there are, and where to add one,
+            or why the models file is not read: `refused`, which `in_project` says), or its table has
+            a problem.
+    """
     from_file = origin == _FILE_SOURCE
+    if name is None and origin == _UNCHOSEN:
+        add = refused or f"add an endpoint and a `default` to the models file {source}, e.g.\n{_DEFAULTED}"
+        raise ModelsError(
+            "unknown_model",
+            "no model is chosen: neither --model, /model nor the models file's `default` names one; the "
+            f"models are {said_names(models)}. /model NAME switches to one; {add}",
+        )
     if not isinstance(name, str) or not name:
         who = f"the default in the models file {source}" if from_file else "the model row's default"
         raise ModelsError(
             "models_file" if from_file else "model_config",
-            f'{who} is {name!r}, not a model\'s name; give it one, like `default = "sonnet"`, or remove it',
+            f"{who} is {name!r}, not a model's name; give it one, like "
+            '`default = "local/llama"`, or remove it',
         )
     found = find(name, models)
     if found is None:
         names = said_names(models)
-        add = refused or (
-            f"to add {name!r}, give it a table in the models file {source}:\n{_EXAMPLE.replace('NAME', name)}"
-        )
+        add = refused or (f"to add a model, give it an endpoint in the models file {source}:\n{_EXAMPLE}")
         which = f", the default in the models file {source}" if from_file else ""
         raise ModelsError(
             "unknown_model",

@@ -110,7 +110,9 @@ def _denial_signature() -> re.Pattern[str]:
     real compiled `Step` rather than hand-copied as a literal, so this file
     tests what `bwrap` actually declares. Computed inside a test (never at
     import time) so nothing runs during collection ahead of the skip."""
-    spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST))
+    # The mechanism refuses a Spec that does not mount its supervisor's interpreter
+    # (decision-190), which is a fact about the Spec, not about the signature.
+    spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)))
     ctx = build_compile_ctx(spec, jail_dir=_new_jail_dir(), platform="linux")
     return bwrap.compile(spec, ctx).denial_signatures[0]
 

@@ -38,7 +38,7 @@ uv run pytest libs/cordis/tests/test_runtime.py::test_name -q
 uv run ruff format .                                      # format
 uv run ruff check .                                       # lint; applies safe fixes by default (fix = true), --no-fix to only report
 uv run mypy                                               # strict; checked paths come from [tool.mypy] files
-scripts/arch-check                                        # every pypeeker gate (root, then libs/*); applies autofixes first, --no-fix to only report
+scripts/arch-check                                        # every pypeeker gate at once, each reported whole (root, then libs/*); applies autofixes first, --no-fix to only report
 scripts/linux-jail-check                                  # the Linux jail (bubblewrap) tests, in a Docker container; not part of check
 uv run pytest -m "not real_launch"                        # skip the tests that launch the real app in a pty
 scripts/sync-tokens [--check] [--bh-01 PATH]              # bh-01's token CSS -> bh-02's Textual theme (reads ../bh-01)
@@ -48,7 +48,7 @@ uv tool install --editable ./bh-02/app                    # bh-02 as a command o
 uv run bh-02 --resume [ID]                                # continue this directory's newest session (or ID: whole, its start, or its last part)
 uv run bh-02 sessions                                     # this directory's sessions, newest first
 uv run bh-02 --no-jail                                    # the Python process runs with your permissions; every input asks
-uv run bh-02 --model opus                                 # choose the model by name (sonnet, the default, opus, haiku, or yours in ~/.config/bh-02/models.toml; a session keeps it; /model lists and switches)
+uv run bh-02 --model claude/opus                          # choose the model, ENDPOINT/MODEL, from the endpoints in ~/.config/bh-02/models.toml (no models are built in; its `default` is used otherwise; a session keeps it; /model lists and switches)
 uv run bh-02 --patch mine.toml                            # a layer of your own over the shipped composition
 uv run bh-02 --trace FILE                                 # every row's lifecycle event, appended to FILE
 uv run pytest -m e2e                                      # the tests against real services (Claude Code on the subscription): only when asked, skipped without the token
@@ -58,8 +58,10 @@ bh-02's Claude credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` mak
 `local.env` (git-ignored, at the repository root). The model row (`models:model`, its
 claude-code provider) reads that file itself and hands the token only to the Claude Code CLI it
 starts. Without it bh-02 still starts, and each message answers with an error saying where to
-put one. An OpenAI-compatible model in the models file may name another line of `local.env` as
-its `key`, which the row reads per request and sends only as that request's header.
+put one. A claude-code endpoint with a `base_url` and a `key_command` (a company's gateway) needs
+no token: the CLI runs that command itself. An OpenAI-compatible endpoint in the models file may
+name another line of `local.env` as its `key`, or a `key_command`, which the row reads or runs per
+request and sends only as that request's header.
 
 Formatting and fixing happen by default. A `PostToolUse` hook in `.claude/settings.json` runs
 `ruff format` and `ruff check --fix` on every `.py` file Claude writes or edits, so don't

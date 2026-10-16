@@ -117,7 +117,7 @@ def test_resuming_with_a_model_when_the_session_s_layer_is_broken_says_which_fil
     assert runner.invoke(main, ["--no-jail", "--patch", str(_patch(composition))]).exit_code == 0
     (layer,) = (state / "state").glob("bh-02/sessions/*/session.toml")
     layer.write_text("[[plugin]\n")
-    result = runner.invoke(main, ["--resume", "--model", "haiku"])
+    result = runner.invoke(main, ["--resume", "--model", "claude/haiku"])
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit)
     assert result.stderr.startswith(f"error: {layer}: ") and "; fix the file or drop it" in result.stderr
     assert layer.read_text() == "[[plugin]\n"  # left for the person to fix, not rewritten

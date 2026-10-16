@@ -143,9 +143,9 @@ class _Push(Protocol):
 
 
 class ModelField:
-    """The status bar's `model` field, `sonnet (claude-code)`: what the `models` value says the
+    """The status bar's `model` field, `claude/sonnet (claude-code)`: what the `models` value says the
     model row names (`current`), shown again at each lifecycle event of the model row
-    (`model`): `sonnet (claude-code, starting…)` from the moment the row unloads
+    (`model`): `claude/sonnet (claude-code, starting…)` from the moment the row unloads
     (a `/model` edits the session's layer and reloads it; `/clear` restarts it) until it is
     active again, however long that takes (`frame.model_forms`).
 

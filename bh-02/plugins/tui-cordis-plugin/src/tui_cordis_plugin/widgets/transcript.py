@@ -9,6 +9,9 @@ its text into pieces of a few lines each, so a chunk re-draws at most one piece 
 the reply grows. Wrapped lines keep their gutter: a result is a marker column beside a body
 that wraps inside its own column, and an input's code has a left border the height of the block.
 
+A result or a piece of code too long to glance at is cut to its first lines (`Clipped`), with a line
+under them that opens the rest and closes it again, by a click or by Enter or Space on it.
+
 A model step's usage is one line however many usage events it sends (Anthropic sends what was
 read as the turn starts, and the rest as it ends): the events are summed and the line drawn
 once the step's usage is complete, which is when anything but its own text, thinking
@@ -17,10 +20,12 @@ meanwhile is drawn after the reply, see `BhApp.send`).
 A reply stopped mid-stream so still shows what it read, under what it said.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
+from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
 from textual.widget import Widget
@@ -29,7 +34,7 @@ from textual.widgets import Collapsible, Static
 from tui_cordis_plugin import render
 from tui_cordis_plugin.history import Replay
 
-__all__ = ["Stream", "Transcript"]
+__all__ = ["Clipped", "Stream", "Transcript"]
 
 # How many lines a streaming piece grows to before it is settled and a new one opened, and
 # how many characters, for text that comes without newlines (a long paragraph).
@@ -94,6 +99,97 @@ class Stream(Vertical):
             self.mount(self._piece)
         else:  # inside a container not composed yet (a Collapsible): mounted with the stream
             self._unattached.append(self._piece)
+
+
+class _More(Static, can_focus=True):
+    """The line under a clipped block's first lines that opens and closes the rest: a click, or
+    Enter or Space once it has the focus (Tab and Shift+Tab reach it), as a thinking block's
+    title does. It only asks its block to flip: it scrolls nothing."""
+
+    ALLOW_SELECT = False  # the label is not part of what is copied
+    BINDINGS = [Binding("enter,space", "flip", "Show or hide the rest", show=False)]
+
+    def __init__(self, label: str, flip: Callable[[], None]) -> None:
+        super().__init__(label, markup=False, classes="more")
+        self._flip = flip
+
+    def on_click(self, event: events.Click) -> None:
+        event.stop()
+        self._flip()
+
+    def action_flip(self) -> None:
+        self._flip()
+
+
+class Clipped(Vertical):
+    """A result or a piece of code cut to its first lines, with a line under them that opens the
+    rest and closes it again (`render.Clip`). Closed is how it starts. The rest is drawn at the
+    first opening, not before, so a block nobody opens costs what its first lines do.
+
+    Opening only changes this block's height: it scrolls nothing and calls nothing that
+    releases the transcript's anchor, so a transcript that follows its end goes on following
+    (its layout puts it at the new end), and one scrolled away stays where it is."""
+
+    DEFAULT_CSS = """
+    Clipped {
+        height: auto;
+    }
+    Clipped > Static {
+        width: 100%;
+    }
+    Clipped > .more {
+        color: $bh-text 70%;
+        pointer: pointer;
+    }
+    Clipped > .more:hover {
+        color: $bh-primary;
+    }
+    Clipped > .more:focus {
+        color: $bh-ring;
+        text-style: bold;
+    }
+    Clipped > .rest {
+        display: none;
+    }
+    Clipped.-opened > .rest {
+        display: block;
+    }
+    """
+
+    def __init__(self, clip: render.Clip, *, classes: str | None = None) -> None:
+        super().__init__(classes=classes)
+        self._clip = clip
+        self._opened = False
+        self._drawn = False  # whether the rest has been drawn: at the first opening
+        self._head = Static(render.clip_head(clip))
+        self._more = _More(render.clip_label(clip, opened=False), self.toggle)
+        self._rest = Static("", classes="rest")
+
+    @property
+    def opened(self) -> bool:
+        """Whether every line shows, not only the first ones."""
+        return self._opened
+
+    @property
+    def text(self) -> str:
+        """What the block shows, as plain text: its first lines, the line that opens it and,
+        once it is open, the rest."""
+        shown = [_plain(self._head), _plain(self._more)]
+        return "\n".join([*shown, _plain(self._rest)] if self._opened else shown)
+
+    def compose(self) -> ComposeResult:
+        yield self._head
+        yield self._more
+        yield self._rest
+
+    def toggle(self) -> None:
+        """Show every line, or only the first ones."""
+        self._opened = not self._opened
+        if self._opened and not self._drawn:
+            self._rest.update(render.clip_rest(self._clip))
+            self._drawn = True
+        self.set_class(self._opened, "-opened")
+        self._more.update(render.clip_label(self._clip, opened=self._opened))
 
 
 class Transcript(VerticalScroll):
@@ -197,6 +293,22 @@ class Transcript(VerticalScroll):
     def on_mount(self) -> None:
         self.anchor()  # follow the end until the person scrolls away
 
+    def page(self, *, up: bool) -> None:
+        """Scroll a page up or down at once (PageUp, PageDown in the composer). It goes through
+        `scroll_to`, as the mouse wheel does: up from the end releases the anchor (it stops
+        following new output) and reaching the end anchors it again. Two cases `scroll_to`
+        would get wrong are handled here: with nothing to scroll, or down from the end, it
+        would release the anchor with no movement to restore it, and the transcript would not
+        follow the output that came next."""
+        if not self.allow_vertical_scroll:
+            return
+        if up:
+            self.scroll_page_up(animate=False)
+        elif self.scroll_y + self.scrollable_content_region.height >= self.max_scroll_y:
+            self.scroll_end(animate=False, immediate=True)  # the end itself: following again
+        else:
+            self.scroll_page_down(animate=False)
+
     def user(self, text: str) -> None:
         """Add a message the person sent."""
         self._settle_usage()
@@ -262,6 +374,12 @@ class Transcript(VerticalScroll):
         if replay.entries:
             self.note("↑ the session so far (a resumed session's Python process starts empty)")
 
+    def reply(self) -> str | None:
+        """The newest reply's text as the model wrote it (`render.newest_reply`), or None."""
+        return render.newest_reply(
+            (_kind(block), block.text if isinstance(block, Stream) else "") for block in self.children
+        )
+
     def blocks(self) -> list[tuple[str, str]]:
         """What the transcript shows, as (kind, plain text) per block, top to bottom."""
         return [(_kind(block), _plain(block)) for block in self.children]
@@ -312,12 +430,19 @@ def _tool_call(event: Mapping[str, Any]) -> Widget:
         classes="row",
     )
     code = render.tool_call_code(event)
-    return Vertical(head, *([Static(code, classes="code")] if code is not None else []))
+    return Vertical(head, *([_lines(code, "code")] if code is not None else []))
 
 
 def _tool_result(event: Mapping[str, Any]) -> Widget:
     """A result: a marker column beside the body, so wrapped lines hang under the body."""
-    return Horizontal(Static("⎿", classes="marker"), Static(render.tool_result_body(event), classes="body"))
+    return Horizontal(Static("⎿", classes="marker"), _lines(render.tool_result_body(event), "body"))
+
+
+def _lines(clip: render.Clip, classes: str) -> Widget:
+    """A block of lines: plain when it fits, else clipped, to open by a click or a key."""
+    if clip.hidden == 0:
+        return Static(render.clip_head(clip), classes=classes)
+    return Clipped(clip, classes=classes)
 
 
 _KINDS = ("user", "text", "thinking", "tool_call", "tool_result", "usage", "stop", "note", "failure")
@@ -331,6 +456,8 @@ def _plain(widget: Widget) -> str:
     """A block's text as the person reads it: a row's columns joined by a space, lines by a newline."""
     if isinstance(widget, Collapsible):  # its title is decoration; the text is its stream's
         return "\n".join(_plain(stream) for stream in widget.query(Stream))
+    if isinstance(widget, Clipped):
+        return widget.text
     if isinstance(widget, Static):
         content = widget.content
         return content.plain if isinstance(content, Content) else str(content)

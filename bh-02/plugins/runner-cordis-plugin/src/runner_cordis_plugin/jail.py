@@ -65,6 +65,7 @@ import fcntl
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import tempfile
@@ -94,6 +95,7 @@ from brig.run import (
     Jail,
     KillItem,
     KillOutcome,
+    KillReport,
     Process,
     build_compile_ctx,
     group_alive,
@@ -129,6 +131,7 @@ __all__ = [
     "spec_for",
     "stack_for",
     "still_made",
+    "still_running",
     "told_reads",
     "tripwired",
     "uncovered",
@@ -468,6 +471,16 @@ def mountable(denies: Sequence[str], instead: Mapping[str, str]) -> tuple[str, .
     return tuple(dict.fromkeys(instead.get(deny, deny) for deny in denies))
 
 
+def still_running(report: KillReport) -> str:
+    """What a teardown could not end, for the person: each item that failed, named, with what
+    it said; "" when everything ended or was already gone."""
+    return "; ".join(
+        f"{item.kind} {item.identity}: {item.detail}"
+        for item in report.items
+        if item.outcome not in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE)
+    )
+
+
 def records_dir(environ: Mapping[str, str], home: str) -> str:
     """Where a Linux jail records the placeholders it made, one file per jail: bh-02's state
     directory (`$XDG_STATE_HOME/bh-02`, else `~/.local/state/bh-02`; `host_paths.state_home`),
@@ -634,11 +647,17 @@ class _Jailed:
         return self._facts.writes
 
     def _write(self) -> None:
-        """The record as it stands: the placeholders, and which bubblewrap process holds them
-        (the process's group: brig's process leads its own, so its pid names it)."""
+        """The record as it stands: the placeholders, and which process group holds the jail they
+        are mounted in: a Linux jail's instance (`Jail.instance_group`: PID 1 of its namespaces,
+        which lives as long as they do, though the program ends first and a `setsid()` child of
+        it runs on), else the program's own, which leads its group. A sweep that read the
+        program's group would call a jail dead that a background server still holds."""
         if self._record is not None:
+            group = self._jail.instance_group
             with contextlib.suppress(OSError):
-                Path(self._record).write_text(record_text(self._made, self._process.pid))
+                Path(self._record).write_text(
+                    record_text(self._made, self._process.pid if group is None else group)
+                )
 
     @property
     def stopped(self) -> bool:
@@ -938,7 +957,10 @@ class BrigJail:
         finally:
             os.close(watched)
         if wire is not None:
-            wire.arm(process.pid)  # brig's process leads its own group
+            wire.arm(
+                lambda: still_running(running.destroy(grace=0.0)),
+                fallback=lambda: os.killpg(running.instance_group or process.pid, signal.SIGKILL),
+            )
         started = _Jailed(running, process, facts, jail_dir, placed, lock, record, tether, wire)
         try:
             await _until_listening(endpoint, _READY_TIMEOUT_S)
@@ -1067,9 +1089,10 @@ class BrigJail:
 
     def _sweep(self, lock: int, records: str) -> None:
         """Take `lock` exclusively if it can be, and then remove what every record left in
-        `records` names, but those whose jail still runs (`_hold`). A jail is its process group,
-        not its pid: the group outlives its leader (bubblewrap's own first process exits;
-        measured). `group_alive` counts a zombie as gone and a process table it can't read as
+        `records` names, but those whose jail still runs (`_hold`). A jail is its instance's
+        process group (`_Jailed._write`), not a program's pid: it lives as long as the jail's
+        namespaces do, whatever its programs do, and a group outlives its leader.
+        `group_alive` counts a zombie as gone and a process table it can't read as
         running, so only what is proved dead is removed; a pid reused as a group since reads as
         alive, which only keeps placeholders longer."""
         try:

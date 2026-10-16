@@ -38,10 +38,18 @@ async def _bound(config: ModelConfig) -> Any:
     return entered, manager
 
 
-async def test_the_default_is_sonnet_on_claude_code_and_the_credential_is_read_at_the_first_step(
+_SUB = {"sub": {"provider": "claude-code", "models": {"sonnet": {"id": "sonnet"}, "haiku": {"id": "haiku"}}}}
+
+
+async def test_a_claude_code_model_binds_and_the_credential_is_read_at_the_first_step(
     tmp_path: Path,
 ) -> None:
-    config = ModelConfig(state=str(tmp_path / "state"), env_file=str(tmp_path / "missing.env"))
+    config = ModelConfig(
+        default="sub/sonnet",
+        extra=_SUB,
+        state=str(tmp_path / "state"),
+        env_file=str(tmp_path / "missing.env"),
+    )
     bound, manager = await _bound(config)
     assert isinstance(bound, ClaudeCodeModel)  # an async context manager: left with the row
     with pytest.raises(ClaudeCodeError, match="missing.env"):
@@ -52,32 +60,38 @@ async def test_the_default_is_sonnet_on_claude_code_and_the_credential_is_read_a
 
 async def test_a_model_from_the_models_file_on_an_openai_endpoint(tmp_path: Path) -> None:
     models = tmp_path / "models.toml"
-    models.write_text('[local]\nprovider = "openai"\nid = "llama3.2"\nbase_url = "http://127.0.0.1:9/v1"\n')
-    bound, manager = await _bound(ModelConfig(default="local", models=str(models)))
+    models.write_text(
+        '[local]\nprovider = "openai"\nbase_url = "http://127.0.0.1:9/v1"\nmodels.llama.id = "llama3.2"\n'
+    )
+    bound, manager = await _bound(ModelConfig(default="local/llama", models=str(models)))
     assert isinstance(bound, OpenAIModel)
     await manager.__aexit__(None, None, None)
+
+
+_M = {"m": {"id": "y"}}  # one model, `x/m`
 
 
 @pytest.mark.parametrize(
     ("config", "said"),
     [
+        (ModelConfig(), "no model is chosen: neither --model, /model nor the models file's `default`"),
         (ModelConfig(default="gpt-9"), "no model named 'gpt-9'"),
         (
-            ModelConfig(default="x", extra={"x": {"id": "y"}}),
-            "model 'x' (the model row's extra) names no provider",
+            ModelConfig(default="x/m", extra={"x": {"models": _M}}),
+            "endpoint 'x' (the model row's extra) names no provider",
         ),
         (
             ModelConfig(
-                default="x", extra={"x": {"provider": "openai", "id": "y", "base_url": "localhost:1"}}
+                default="x/m", extra={"x": {"provider": "openai", "base_url": "localhost:1", "models": _M}}
             ),
             "base_url 'localhost:1' is not an http(s) URL",
         ),
         (
-            ModelConfig(default="x", extra={"x": {"provider": "nope.module:thing"}}),
+            ModelConfig(default="x/m", extra={"x": {"provider": "nope.module:thing", "models": _M}}),
             "names the provider 'nope.module:thing', which can't be loaded",
         ),
         (
-            ModelConfig(default="x", extra={"x": {"provider": f"{__name__}:_failing", "id": "y"}}),
+            ModelConfig(default="x/m", extra={"x": {"provider": f"{__name__}:_failing", "models": _M}}),
             f"its provider '{__name__}:_failing' failed to make the model (TypeError: no id y)",
         ),
     ],
@@ -96,9 +110,9 @@ async def test_a_model_that_can_t_be_used_still_binds_and_each_step_says_why(
 
 
 async def test_a_factory_provider_is_given_the_model_s_table() -> None:
-    config = ModelConfig(default="fake", extra={"fake": {"provider": f"{__name__}:_factory", "id": "f1"}})
-    bound, manager = await _bound(config)
-    assert bound == {"provider": f"{__name__}:_factory", "id": "f1"}
+    endpoint = {"provider": f"{__name__}:_factory", "shared": 1, "models": {"f": {"id": "f1", "own": 2}}}
+    bound, manager = await _bound(ModelConfig(default="fake/f", extra={"fake": endpoint}))
+    assert bound == {"provider": f"{__name__}:_factory", "shared": 1, "id": "f1", "own": 2}
     await manager.__aexit__(None, None, None)
 
 
@@ -119,11 +133,11 @@ class _Entry:
 
 class _Loader:
     def entries(self) -> list[_Entry]:
-        return [_Entry("model", "models:model", {"default": "haiku"})]
+        return [_Entry("model", "models:model", {"default": "sub/haiku", "extra": _SUB})]
 
 
 async def test_the_catalog_row_binds_the_models_over_the_loader() -> None:
     effects = await drive(catalog(loader=_Loader(), host=_Host(), config=CatalogConfig()))
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "models")]
     bound = effects[0].args[1]
-    assert isinstance(bound, Catalog) and bound.current() == {"name": "haiku", "provider": "claude-code"}
+    assert isinstance(bound, Catalog) and bound.current() == {"name": "sub/haiku", "provider": "claude-code"}

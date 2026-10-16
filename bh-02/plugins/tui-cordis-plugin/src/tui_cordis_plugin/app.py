@@ -1,15 +1,26 @@
 """The Textual app, and `running`, which runs it on the event loop already running cordis.
 
-Layout, in bh-01's words: the conversation (Transcript over Composer), the whole width, and a
-StatusBar along the bottom. The app owns the screen: its input, output and frame post it
-messages (`messages.py`) and it draws them.
+Layout, in bh-01's words: the conversation (Transcript over Composer), the whole width, a line
+naming the everyday keys (Keys) under the composer, and a StatusBar along the bottom. The app owns
+the screen: its input, output and frame post it messages (`messages.py`) and it draws them.
 
 Leaving: Ctrl-Q, or `/exit` or `/quit` in the composer. The terminal going away (its window
 closed: SIGHUP, or, with no controlling terminal, stdin at end of file) leaves the same way, so
 the composition unwinds rather than the process dying where it stands or spinning on a dead
 fd. Ctrl-C interrupts the running turn and never quits; with no turn running it says how to
-leave, and while a command runs (a `!` one may take minutes) that Ctrl-C doesn't stop it.
-Ctrl-P opens the command palette.
+leave, and while a command runs (a `!` one may take minutes) that Ctrl-C doesn't stop it. Esc
+stops a running reply as Ctrl-C does, once nothing nearer wants it: the composer's list of
+commands (Esc closes it), a question (Esc declines it) and the palette (Esc closes it); with no
+reply running it does nothing. Ctrl-P opens the command palette.
+
+Copying goes to the terminal's clipboard through Textual (`copy_to_clipboard`, an OSC 52
+sequence), and every way of copying says how much in one line: Ctrl-C with text selected that
+has not been copied yet (it stops nothing then; a selection already copied, as a mouse selection
+is when it ends, leaves Ctrl-C to stop the reply), Cmd-C (Textual's own `super+c`), a mouse
+selection finished in the transcript (copied at once), and Ctrl-T for the newest reply.
+
+While a reply runs, a line above the composer says for how long (`Working`, redrawn by a timer
+that starts and stops with the reply).
 
 Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
 withdraws its own (shown or queued), and Ctrl-C with one up answers no to every open question
@@ -30,13 +41,16 @@ import signal
 import struct
 import sys
 import termios
+import time
 from collections import deque
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import Any
 
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.selection import Selection
+from textual.widget import Widget
 from textual.widgets import OptionList, TextArea
 
 from tui_cordis_plugin import frame, render, theme
@@ -54,12 +68,15 @@ from tui_cordis_plugin.messages import (
 from tui_cordis_plugin.ports import AppCrashed, Bridge, Frame
 from tui_cordis_plugin.widgets import (
     GRACE,
+    WORKING_EVERY,
     ApprovalScreen,
     CommandsProvider,
     Completions,
     Composer,
+    Keys,
     StatusBar,
     Transcript,
+    Working,
 )
 
 __all__ = ["BhApp", "running"]
@@ -72,7 +89,15 @@ _COMMAND_RUNS = (
 )
 
 type _Question = tuple[Mapping[str, Any], asyncio.Future[bool]]
+# A selection of the screen as it was copied: where it is (each widget and its range) and what it
+# reads there (the text under the same range changes as output arrives).
+type _Taken = tuple[tuple[tuple[Widget, Selection], ...], str]
 
+# How long the line saying what was copied stays on screen.
+_TOLD_FOR = 3.0
+_NOTHING_TO_COPY = "Nothing to copy: no reply yet"
+# A selection of fewer characters than this is not copied when the mouse ends it.
+_COPY_ON_SELECT = 2
 # How long an interrupted turn has to withdraw its own questions before they are answered no.
 _WITHDRAW_GRACE = 0.5
 # How long a Ctrl-C held for the line being handled may go unheard before the app says a
@@ -88,25 +113,40 @@ class BhApp(App[None]):
     """bh-02's screen. `bridge` is what its input, output and frame share with it; `frame` is
     what rows push into; `replay` is drawn when it starts; `history`, when given, is appended
     to as the transcript draws; `grace` is how long a question just put up ignores y, n and
-    Escape (keys typed ahead)."""
+    Escape (keys typed ahead); `clock` and `working_every` are the time and the seconds between
+    redraws of the line that says how long a reply has run (`Working`)."""
 
     TITLE = "bh-02"
     COMMANDS = {CommandsProvider}  # the commands rows offer, not Textual's system commands
     BINDINGS = [
         Binding("ctrl+c", "interrupt", "Interrupt", priority=True, show=False),
         Binding("ctrl+q", "quit", "Quit", priority=True, show=False),
+        # Not priority: the list of commands, the question and the palette take Esc first.
+        Binding("escape", "stop_reply", "Stop the reply", show=False),
+        # Free in the composer (TextArea binds no ctrl+t), the screen and the app, and no
+        # terminal keeps it: Ctrl-O, Ctrl-R, Ctrl-G and Ctrl-N are what Claude Code and readline
+        # use for other things.
+        Binding("ctrl+t", "copy_reply", "Copy the newest reply", show=False),
     ]
     # No app `CSS`: each widget styles itself (its DEFAULT_CSS). App CSS outranks every
     # DEFAULT_CSS, and a `Screen { background: ... }` here would match the approval modal too,
     # which would lose its translucent background.
 
     def __init__(
-        self, *, history: History | None = None, replay: Replay | None = None, grace: float = GRACE
+        self,
+        *,
+        history: History | None = None,
+        replay: Replay | None = None,
+        grace: float = GRACE,
+        clock: Callable[[], float] = time.monotonic,
+        working_every: float = WORKING_EVERY,
     ) -> None:
         super().__init__()
         self.history = history
         self.replay = replay
         self.grace = grace  # how long a question just shown ignores its keys (`ApprovalScreen`)
+        self._clock = clock
+        self._working_every = working_every
         # Registered before anything mounts: a stylesheet parsed at startup must find its tokens.
         for each in theme.themes():
             self.register_theme(each)
@@ -119,15 +159,18 @@ class BhApp(App[None]):
         self._replying = 0  # replies streaming now (started, not yet ended)
         self._typed: list[str] = []  # lines typed while one streams, drawn once it ends
         self._hangups = 0  # checks in a row that found the terminal gone
+        self._copied: _Taken | None = None  # the screen's selection as last copied
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         return dict(theme.VARIABLES)
 
     def compose(self) -> ComposeResult:
         yield Transcript(id="transcript")
+        yield Working(id="working", clock=self._clock, every=self._working_every)
         listed = Completions(id="completions")
         yield listed
         yield Composer(id="composer", completions=listed)
+        yield Keys(id="keys")
         yield StatusBar(id="status-bar")
 
     def on_mount(self) -> None:
@@ -181,6 +224,13 @@ class BhApp(App[None]):
     def on_composer_submitted(self, message: Composer.Submitted) -> None:
         self.send(message.text)
 
+    def on_composer_paged(self, message: Composer.Paged) -> None:
+        """PageUp or PageDown in the composer: the conversation scrolls a page, at once as the
+        composer's own cursor does, and the focus stays where it is. Scrolling up releases the
+        transcript's anchor, so it stops following new output; scrolling back to its end anchors
+        it again: what the mouse wheel does, since both go through `scroll_to`."""
+        self.query_one(Transcript).page(up=message.up)
+
     def palette_entries(self) -> Sequence[PaletteEntry]:
         """What the command palette lists: the commands rows offer now, `/help`, `/exit`."""
         return frame.palette_entries(self.frame.offered_commands())
@@ -192,8 +242,11 @@ class BhApp(App[None]):
             self._follow_composer()
 
     def _follow_composer(self) -> None:
+        """The list follows the composer's text, but stays shut while a question is up and
+        while the text is a line recalled from the history (Up and Down are then the history's)."""
+        composer = self.query_one(Composer)
         self.query_one(Completions).update_for(
-            self.query_one(Composer).text, self.palette_entries, allowed=self._asking is None
+            composer.text, self.palette_entries, allowed=self._asking is None and not composer.recalled
         )
 
     def on_descendant_blur(self, event: events.DescendantBlur) -> None:
@@ -218,11 +271,13 @@ class BhApp(App[None]):
         self.choose(entry)
 
     def choose(self, entry: PaletteEntry) -> None:
-        """Run a palette entry; one that takes arguments goes in the composer to finish."""
+        """Run a palette entry (it joins the lines Up recalls); one that takes arguments goes in
+        the composer to finish."""
+        composer = self.query_one(Composer)
         if not entry.takes_arguments:
+            composer.remember(entry.call)
             self.send(entry.call)
             return
-        composer = self.query_one(Composer)
         composer.text = f"{entry.call} "
         composer.move_cursor(composer.document.end)
         composer.focus()
@@ -258,6 +313,8 @@ class BhApp(App[None]):
         self._record({"type": "user", "text": line})
 
     def on_turn_started(self, message: TurnStarted) -> None:
+        if not self._replying:
+            self.query_one(Working).begin()  # the first of the replies streaming now
         self._replying += 1
 
     def on_turn_ended(self, message: TurnEnded) -> None:
@@ -265,6 +322,7 @@ class BhApp(App[None]):
         self._record({"type": "turn_end"})
         self._replying = max(0, self._replying - 1)
         if not self._replying:
+            self.query_one(Working).end()
             typed, self._typed = self._typed, []
             for line in typed:
                 self._draw_typed(line)
@@ -347,7 +405,64 @@ class BhApp(App[None]):
         screen.dismiss(False)
 
     def action_interrupt(self) -> None:
-        """Ctrl-C: stop the running turn and take its questions down as a no; with nothing
+        """Ctrl-C: copy the text that is selected and not copied yet, and stop nothing
+        (`_copy_selection`); otherwise stop the running turn (`_stop`)."""
+        if not self._copy_selection():
+            self._stop()
+
+    def _copy_selection(self) -> bool:
+        """Copy the text selected now, clear the selection, and say whether it did. It is the
+        composer's own selection when the composer has the focus and some, else the screen's (the
+        transcript's, which Textual keeps), but not one that was copied already: a mouse selection
+        is copied when it ends and stays shown, so the Ctrl-C that follows stops the reply (which
+        comes first) and never copies it a second time. Never while a question is up: Ctrl-C then answers
+        it no, as ever."""
+        if self._asking is not None:
+            return False
+        composer = self.query_one(Composer)
+        selected = composer.selected_text if self.focused is composer else ""
+        if selected:
+            composer.move_cursor(composer.cursor_location)  # the cursor alone: nothing selected
+        elif (selected := self.screen.get_selected_text() or "") and self._copied != self._taken(selected):
+            self.screen.clear_selection()
+        else:
+            return False
+        self.copy_to_clipboard(selected)
+        return True
+
+    def _taken(self, text: str) -> _Taken:
+        """The screen's selection now, reading `text`, as `_copied` remembers it."""
+        return tuple(self.screen.selections.items()), text
+
+    def copy_to_clipboard(self, text: str) -> None:
+        """Copy `text` to the terminal's clipboard (Textual writes OSC 52, which a terminal may
+        ignore, and keeps its own record in `clipboard`) and say how much in one line. Every
+        copy comes through here, Textual's own too (Cmd-C, a cut or a copy in the composer),
+        so each says the same, and a copy of the screen's selection is remembered (`_copied`)
+        whoever made it. A toast, not a line of the conversation: one there would split a reply
+        that is still streaming."""
+        super().copy_to_clipboard(text)
+        self.notify(render.copied_line(text), timeout=_TOLD_FOR, markup=False)
+        if text and text == self.screen.get_selected_text():
+            self._copied = self._taken(text)
+
+    def on_text_selected(self, event: events.TextSelected) -> None:
+        """A mouse selection ended (the screen says so at every mouse up, a click included):
+        what is selected is copied at once. A click, or one character, copies nothing and says
+        nothing. The selection stays shown, remembered as copied (`copy_to_clipboard`), so a
+        Ctrl-C after it stops the reply."""
+        if len(text := self.screen.get_selected_text() or "") >= _COPY_ON_SELECT:
+            self.copy_to_clipboard(text)
+
+    def action_copy_reply(self) -> None:
+        """Ctrl-T: copy the newest reply's text whole (`Transcript.reply`), or say there is none."""
+        if (text := self.query_one(Transcript).reply()) is None:
+            self.notify(_NOTHING_TO_COPY, timeout=_TOLD_FOR, markup=False)
+        else:
+            self.copy_to_clipboard(text)
+
+    def _stop(self) -> None:
+        """Stop the running turn and take its questions down as a no; with nothing
         running, say how to leave; while a command runs, say that Ctrl-C doesn't stop it. A
         sub-agent's question is never answered here: the stopped reply withdraws its foreground
         child's, and a background child's stays queued (the reply it stops is not its own).
@@ -369,6 +484,14 @@ class BhApp(App[None]):
             self.query_one(Transcript).note(f"Nothing is running. {_HOW_TO_LEAVE}")
         elif self.bridge.interrupt_held:
             self.set_timer(_UNHEARD_GRACE, self._unheard)
+
+    def action_stop_reply(self) -> None:
+        """Esc: stop the running reply exactly as Ctrl-C does (`_stop`), though never to copy. With no
+        reply running it does nothing, and says nothing: Esc is pressed out of habit, and the
+        composer is not its business. It reaches here only when the list of commands, a question
+        and the palette have passed on it."""
+        if self.bridge.turn_running:
+            self._stop()
 
     def _unheard(self) -> None:
         """A Ctrl-C held for the line being handled went unheard: a command is running (no turn

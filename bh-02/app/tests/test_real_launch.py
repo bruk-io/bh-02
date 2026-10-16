@@ -172,22 +172,31 @@ def _sgr(layer: str, token: str) -> bytes:
     return f"{layer};2;{red};{green};{blue}".encode()
 
 
-# The fake models every launch can name (`--model`, `/model`), in the test's own models file.
+# The fake models every launch can name (`--model`, `/model`), in the test's own models file: one
+# endpoint per fake provider, each model under it (`e/fake`), its id its short name, which the fakes
+# say back (`[fake-2] echo: ...`). One-letter endpoints keep the names of a length: `/model` lines
+# them up.
+_ENDPOINTS = {"e": "echo_provider", "s": "slow_provider", "r": "repl_provider", "d": "delegating_provider"}
 _MODELS = {
-    "fake": "echo_provider",
-    "fake-2": "echo_provider",
-    "slow": "slow_provider",
-    "slow-2": "slow_provider",
-    "inputs": "repl_provider",
-    "agents": "delegating_provider",  # no longer than the rest: `/model` lines them up
+    "fake": "e/fake",
+    "fake-2": "e/fake-2",
+    "slow": "s/slow",
+    "slow-2": "s/slow-2",
+    "inputs": "r/inputs",
+    "agents": "d/agents",
 }
 
 
 def _models_file(config: Path, more: str = "") -> None:
-    """The test's models file: every fake model, and `more` (a stub server's model)."""
+    """The test's models file: every fake model, and `more` (a stub server's endpoint)."""
     tables = [
-        f'[{name}]\nprovider = "bh_02.testing:{provider}"\nid = "{name}"\n'
-        for name, provider in _MODELS.items()
+        f'[{endpoint}]\nprovider = "bh_02.testing:{provider}"\n'
+        + "".join(
+            f'[{endpoint}.models.{short}]\nid = "{short}"\n'
+            for short, name in _MODELS.items()
+            if name.startswith(f"{endpoint}/")
+        )
+        for endpoint, provider in _ENDPOINTS.items()
     ]
     (config / "bh-02").mkdir(parents=True, exist_ok=True)
     (config / "bh-02" / "models.toml").write_text("\n".join([*tables, more]))
@@ -204,7 +213,7 @@ def launch(tmp_path: Path) -> Iterator[Launch]:
     started: list[Launched] = []
 
     def start(model: str, *args: str, cols: int = _COLS, truecolor: bool = False) -> Launched:
-        chosen = ["--model", model if model in _MODELS else "fake"]
+        chosen = ["--model", _MODELS.get(model, _MODELS["fake"])]
         if model not in _MODELS:
             patch = tmp_path / f"{model}.toml"
             patch.write_text(f'[[plugin]]\nid = "loop"\nuse = "bh_02.testing:{model}"\n')
@@ -246,7 +255,7 @@ def test_a_bang_line_runs_in_the_shell_and_the_model_reads_its_output_with_the_n
     shown = app.wait_for("exit status 0; the model reads this with your next message", 20, after=ready)
     assert "shellsaid" in app.text()[ready:shown] and "/work" in app.text()[ready:shown]
     assert "SHELLSAID" not in app.text()  # nothing went to the model yet
-    app.type("/model fake-2")
+    app.type("/model e/fake-2")
     switched = app.wait_for("↻ chat reloaded", 20, after=shown)
     app.settle(1.0)
     app.type("over to you")
@@ -511,15 +520,15 @@ def test_the_palette_runs_a_command_and_the_status_bar_follows_the_model(launch:
     row) shows the new one."""
     app = launch("fake")
     ready = app.wait_for(_READY, 60)
-    app.wait_for("model: fake", after=0)
+    app.wait_for("model: e/fake", after=0)
     app.press(b"\x10")  # Ctrl-P
     opened = app.wait_for("/restart", after=ready)  # an operator command, offered in the palette
     app.type("rows")  # the palette's search, then Enter on the hit
     ran = app.wait_for("tui:palette", after=opened)  # /rows's table names the palette's own row
     app.press(b"\x10")  # Ctrl-P again: a model by name is an entry of its own
-    offered = app.wait_for("/model fake-2", after=ran)
+    offered = app.wait_for("/model e/fake-2", after=ran)
     app.type("fake-2")  # the palette's search: the one entry that runs it
-    app.wait_for("model: fake-2", 20, after=offered)
+    app.wait_for("model: e/fake-2", 20, after=offered)
     app.type("hello")
     app.wait_for("[fake-2] echo: HELLO", 20, after=offered)
     app.press(b"\x11")
@@ -530,7 +539,7 @@ def test_a_models_file_default_that_is_no_name_shows_in_the_status_bar_and_the_f
     tmp_path: Path,
 ) -> None:
     """TASK-0093: a new session under `default = 5` records no model, so the model row says what is wrong
-    with the file's default (TASK-0087's `Unusable`) instead of a pinned sonnet hiding it: the status bar
+    with the file's default (TASK-0087's `Unusable`) instead of a pinned model hiding it: the status bar
     names it as unusable, never blank, the first message gets the error with what to write, and
     `/model fake` (a model that is fine) gets the person out."""
     work, state, config = tmp_path / "work", tmp_path / "state", tmp_path / "config"
@@ -543,15 +552,15 @@ def test_a_models_file_default_that_is_no_name_shows_in_the_status_bar_and_the_f
         ready = app.wait_for(_READY, 60)
         app.wait_for("model: default (unusable)", after=0)  # not blank, and not a model that looks fine
         app.type("hello")
-        told = app.wait_for(
-            "remove it", 20, after=ready
-        )  # `... give it one, like `default = "sonnet"`, or remove it`
+        # `... give it one, like `default = "local/llama"`, or remove it`: one word, which a line
+        # break (where it falls moves with the models file's path) can't split
+        told = app.wait_for("remove", 20, after=ready)
         # the error names the models file, whose path is as long as the test's tmp_path (pytest-xdist
         # adds `popen-gwN/` to it), so where the screen breaks the line moves: read the words only
         said = " ".join(app.text()[ready:told].replace("▎", " ").split())
         assert "not a model's name" in said
-        app.type("/model fake")
-        app.wait_for("model: fake", 20, after=told)
+        app.type("/model e/fake")
+        app.wait_for("model: e/fake", 20, after=told)
         app.settle(1.0)
         app.type("again")
         app.wait_for("[fake] echo: AGAIN", 20, after=told)
@@ -637,7 +646,7 @@ def test_at_80_columns_the_status_bar_shows_session_model_jail_and_usage(launch:
     app.wait_for("usage: 1.2k/56 $0.01", 10, after=ready)
     screen = app.text()
     last = screen[screen.rfind("session: ") :]
-    assert "model: fake" in last and "jail: unjailed w✗n✗r✗e✗" in last  # a short model: room for the axes
+    assert "model: e/fake" in last and "jail: unjailed w✗n✗r✗e✗" in last  # a short model: room for the axes
     app.press(b"\x11")
     assert app.exit_code() == 0
 
@@ -656,7 +665,7 @@ def test_a_resumed_session_s_usage_adds_to_what_it_had(launch: Launch) -> None:
     again.wait_for("usage: 2.5k/112 $0.02", 10, after=ready)
     screen = again.text()
     last = screen[screen.rfind("session: ") :]
-    assert " ↻ │ model: fake" in last  # at 120 columns: resumed, and the grades keep their axes
+    assert " ↻ │ model: e/fake" in last  # at 120 columns: resumed, and the grades keep their axes
     assert "jail: unjailed fs_write ✗ network ✗ fs_read ✗ env ✗ │ usage" in last
     again.press(b"\x11")
     assert again.exit_code() == 0
@@ -671,7 +680,7 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
     ready = app.wait_for(_READY, 60)
     app.type("hello there")
     replied = app.wait_for("echo: HELLO THERE (message 1)", after=ready)
-    app.type("/model fake-2")
+    app.type("/model e/fake-2")
     app.wait_for("↻ chat reloaded", 20, after=replied)
     app.settle(1.0)
     narrowed = len(app.text())
@@ -756,15 +765,15 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     ready = app.wait_for(_READY, 60)
     app.type("first")
     up = app.wait_for("echo: FIRST", 20, after=ready)
-    app.type("/model slow-2")
-    starting = app.wait_for("model: slow-2…", 10, after=up)  # the narrow form: a factory's name is long
+    app.type("/model s/slow-2")
+    starting = app.wait_for("model: s/slow-2…", 10, after=up)  # the narrow form: a factory's name is long
     app.type("hello")
     waiting = app.wait_for(
         "⧗ waiting for model to start; this message is sent once it is up", 5, after=starting
     )
     replied = app.wait_for("echo: HELLO", 20, after=waiting)
-    status = app.text()[app.text().rfind("model: slow-2") :]
-    assert status.startswith("model: slow-2 "), status[:80]  # active again
+    status = app.text()[app.text().rfind("model: s/slow-2") :]
+    assert status.startswith("model: s/slow-2 "), status[:80]  # active again
     app.type("/clear")  # the loop, its transcript and the python row restart; the model stays up
     app.type("again")
     # the chat row reads `again` once the restart /clear queued is done (`jobs`): typed while it
@@ -789,16 +798,16 @@ def test_a_message_typed_the_moment_after_model_waits_for_the_new_model(launch: 
     ready = app.wait_for(_READY, 60)
     app.type("first")
     up = app.wait_for("echo: FIRST", 20, after=ready)
-    app.press(b"/model slow-2\rhello\r")
-    switching = app.wait_for("switching to slow-2", 10, after=up)
+    app.press(b"/model s/slow-2\rhello\r")
+    switching = app.wait_for("switching to s/slow-2", 10, after=up)
     waiting = app.wait_for("⧗ waiting for model to start; this message is sent once it is up", 5, after=up)
     replied = app.wait_for("echo: HELLO", 20, after=max(switching, waiting))
     shown = app.text()
     assert "stopped: interrupted" not in shown[up:], shown[up:][-2000:]
-    starting = shown.find("model: slow-2…", up)
+    starting = shown.find("model: s/slow-2…", up)
     assert 0 <= starting < replied  # it was answered once the new model had started
-    status = shown[shown.rfind("model: slow-2") :]
-    assert status.startswith("model: slow-2 "), status[:80]  # up again
+    status = shown[shown.rfind("model: s/slow-2") :]
+    assert status.startswith("model: s/slow-2 "), status[:80]  # up again
     app.press(b"/clear\ragain\r")  # the same for /clear, which restarts the python row too
     waiting = app.wait_for("⧗ waiting for agents, loop, python, transcript to start", 10, after=replied)
     again = app.wait_for("echo: AGAIN", 20, after=waiting)
@@ -839,7 +848,9 @@ def test_model_switches_by_name_between_a_fake_and_an_openai_model_on_a_stub_ser
     needs the real CLI here; Claude's own turns reaching an openai model are the models
     plugin's `test_claude_code_to_openai.py` (the real provider over its fake session)."""
     with StubServer() as stub:
-        stub_model = f'[stub]\nprovider = "openai"\nid = "stub-1"\nbase_url = "{stub.base_url}"\n'
+        stub_model = (
+            f'[o]\nprovider = "openai"\nbase_url = "{stub.base_url}"\n[o.models.stub]\nid = "stub-1"\n'
+        )
         _models_file(tmp_path / "config", stub_model)
         app = launch("fake")
         ready = app.wait_for(_READY, 60)
@@ -848,9 +859,9 @@ def test_model_switches_by_name_between_a_fake_and_an_openai_model_on_a_stub_ser
         app.type("/model")
         listed = app.wait_for("/model NAME switches", 10, after=said)
         shown = app.text()[said:listed]
-        assert "● fake" in shown and "stub    openai" in shown and f"at {stub.base_url}" in shown, shown
-        app.type("/model stub")
-        switched = app.wait_for("model: stub (openai)", 20, after=listed)
+        assert "● e/fake" in shown and "o/stub    openai" in shown and f"at {stub.base_url}" in shown, shown
+        app.type("/model o/stub")
+        switched = app.wait_for("model: o/stub (openai)", 20, after=listed)
         app.wait_for("↻ model reloaded", 20, after=listed)  # the first switch says so too
         app.type("hi stub")
         heard = app.wait_for("[stub-1] heard: hi stub", 20, after=switched)
@@ -858,8 +869,8 @@ def test_model_switches_by_name_between_a_fake_and_an_openai_model_on_a_stub_ser
         app.wait_for("Run this python code", 10, after=heard)  # the input, put to the person (unjailed)
         app.answer(b"y")
         ran = app.wait_for("the input said: 42", 20, after=heard)
-        app.type("/model fake")
-        back = app.wait_for("model: fake", 20, after=ran)  # its provider too, when the bar has room
+        app.type("/model e/fake")
+        back = app.wait_for("model: e/fake", 20, after=ran)  # its provider too, when the bar has room
         app.type("again")
         app.wait_for("[fake] echo: AGAIN (message 4)", 20, after=back)  # one conversation throughout
         app.press(b"\x11")
@@ -878,15 +889,15 @@ def test_a_patch_that_sets_the_model_row_s_config_keeps_its_model_and_says_so(tm
     work.mkdir()
     _models_file(config)
     pin = tmp_path / "pin.toml"
-    pin.write_text('[[plugin]]\nid = "model"\nconfig = { default = "fake-2" }\n')
-    refused = Launched(["--no-jail", "--model", "fake", "--patch", str(pin)], work, state, config=config)
+    pin.write_text('[[plugin]]\nid = "model"\nconfig = { default = "e/fake-2" }\n')
+    refused = Launched(["--no-jail", "--model", "e/fake", "--patch", str(pin)], work, state, config=config)
     app = Launched(["--no-jail", "--patch", str(pin)], work, state, config=config)
     try:
         assert refused.exit_code() == 1
-        assert "--model fake would not take effect" in " ".join(refused.text().split())
+        assert "--model e/fake would not take effect" in " ".join(refused.text().split())
         ready = app.wait_for(_READY, 60)
-        app.wait_for("model: fake-2", after=0)
-        app.type("/model fake")
+        app.wait_for("model: e/fake-2", after=0)
+        app.type("/model e/fake")
         said = app.wait_for("not switched:", 10, after=ready)
         # one word of the message: a long patch path wraps its line, which can split a phrase
         app.wait_for("replaces", 10, after=said)
@@ -907,15 +918,15 @@ def test_a_keyed_model_s_key_never_reaches_an_input_s_environment(tmp_path: Path
     env = tmp_path / "scratch.env"
     env.write_text("VERIFY_STUB_KEY=fake-verify-key\n")
     pin = tmp_path / "keyed.toml"  # the env file is the model row's config, so it names the model too
-    pin.write_text(f'[[plugin]]\nid = "model"\nconfig = {{ default = "keyed", env_file = "{env}" }}\n')
+    pin.write_text(f'[[plugin]]\nid = "model"\nconfig = {{ default = "k/keyed", env_file = "{env}" }}\n')
     with StubServer(key="fake-verify-key") as stub:
-        keyed = f'[keyed]\nprovider = "openai"\nid = "stub-1"\nbase_url = "{stub.base_url}"\n'
-        keyed += 'key = "VERIFY_STUB_KEY"\n'
+        keyed = f'[k]\nprovider = "openai"\nbase_url = "{stub.base_url}"\nkey = "VERIFY_STUB_KEY"\n'
+        keyed += '[k.models.keyed]\nid = "stub-1"\n'
         _models_file(config, keyed)
         app = Launched(["--no-jail", "--patch", str(pin)], work, state, config=config)
         try:
             ready = app.wait_for(_READY, 60)
-            app.wait_for("model: keyed", after=0)
+            app.wait_for("model: k/keyed", after=0)
             app.type(
                 'call import os; print("VERIFY_STUB_KEY" in os.environ, "fake-verify-key" in str(os.environ))'
             )
