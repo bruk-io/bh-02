@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 22:06'
-updated_date: '2026-10-16 22:27'
+updated_date: '2026-10-16 22:29'
 labels:
   - runner
   - security
@@ -48,4 +48,6 @@ Checks: runner tests + bh-02/app/tests/test_python_repl.py as tester under tini 
 NOT held, found while measuring, not fixed (a policy call, needs the link's directory denied, which a mount of the file cannot do): the entry of a link in a writable directory, and a link directory on the way to the file. In the incident layout the venv's python leads through uv's cpython-3.15-linux-x86_64-gnu (a link to the versioned directory) under ~/.local/share/uv/python: measured in bwrap with only the file denied, an input could mv that link away and plant a tree of its own at its name (rc 0), and the next uv run / .venv/bin/python would execute it. Closing it means denying ~/.local/share/uv/python (or each link's directory) when under a writable root. README says so under the writes bullet.
 
 Orchestrator ruling, 2026-10-16: criterion 1 is met by denying the interpreter files (each name followed to the file it leads to), not the link names. Measured by the worker in bwrap: a read-only bind on a link lands on its target, brig resolves write denies to the realpath on bwrap and seatbelt alike, and a link spelling in the denies would make TASK-0124's supervisor_interpreter accept a replaceable link as PID 1's Python. Every write to the interpreter, through any of its names, is refused in a real jail. The links on the way to it (a link's own entry, uv's cpython-3.15-<platform> link to the versioned directory) are not held by a file mount: filed separately as a policy question for the owner.
+
+No repro: the fixed tree has no failing test to record; the worker's plant (the interpreter deny removed, three new tests failing, the real-jail one showing the write and rename done) is recorded above.
 <!-- SECTION:NOTES:END -->
