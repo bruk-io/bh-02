@@ -53,4 +53,6 @@ Evidence after: 3 rounds x 60 and 20 rounds x 40 target runs beside the plugin's
 Not green, and not this task: test_unloading_the_agents_row_retires_every_child_it_holds has the same flaw (restarts the row after _up(.., 2) without waiting for both steps to hang; closed == 1 with hung == 1 at the restart) and failed 4 of the first 25 whole-plugin rounds (assert 1 == 2). Filed as TASK-0112 and not touched; the other 25 of the 50 rounds deselected it. Criterion 3 (scripts/check passes, the full one) left for the reviewer; until TASK-0112 lands the plugin run can still fail on that test.
 
 Review (closing reviewer): full scripts/check from the repo root, run once: format, lint, types ok; tests 3171 passed, 31 skipped in 202.41s; gates ok; docs ok; tokens skipped (no bh-01/dist); exit 0. No files reformatted. TASK-0112's test passed in this run.
+
+No repro: the failure shows only under load and only before the fix (the worker's scratch loop outside the repo: 3 of 180 runs failed); with the fix committed the test cannot fail, so record-check --repro (1 passed) records nothing.
 <!-- SECTION:NOTES:END -->
