@@ -1,11 +1,11 @@
 ---
 id: TASK-0111
 title: Find why scripts/arch-check takes about a minute per run
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 05:01'
-updated_date: '2026-10-16 08:21'
+updated_date: '2026-10-16 08:23'
 labels:
   - gates
   - size-2
@@ -113,4 +113,6 @@ So in every member check (the form workers run) the gates step is the slowest st
 TASK-0113 (size-2, high): no-hidden-global-mutation clause order, -39 s, pypeeker then pin. TASK-0114 (size-2): find_symbol by id, -21 s, pypeeker then pin. TASK-0115 (size-1): print-input clause order, -7 s. TASK-0116 (size-2): gates side by side, -9 s now. TASK-0117 (size-2, high): one index process per gate, -56 s cold, pypeeker then arch-check. TASK-0118 (size-1): drop index entries outside src, -7 s where they exist.
 
 No one-line change to scripts/arch-check came out with a measured saving (the only script-side change that pays is TASK-0116's, which is more than one line and needs output capture), so none was made here. Not run: scripts/check in full for a change (no change), scripts/linux-jail-check (nothing here touches the jail). import-time-side-effects (8.8 s) and under-exposed-access (7.1 s) were not read for clause order; if TASK-0113's change lands, they are the next two to profile.
+
+Review (closing reviewer): CLOSE. AC1 met: phase table warm and cold, median of 3, method stated; warm rows sum 115.4 against 115.6, cold 179.0 against 178.9 (rounding). AC2 met: root gate check named (89%), causes checked against pypeeker source (mutation_rules._global_base applies allow before kind; engine.find_symbol scans all_indexes per call; apps.py print-input puts the symbol-id clause last); each saving measured; TASK-0113..0118 filed, sized, To Do, board-check ready on all six. Nits, not filed: TASK-0115 title says under 3 s, its AC says under 4 s; TASK-0116 file name still carries an older title. No full check run: board-only change, as instructed.
 <!-- SECTION:NOTES:END -->
