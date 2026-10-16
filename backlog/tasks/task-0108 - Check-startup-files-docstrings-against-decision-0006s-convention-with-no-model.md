@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-16 02:03'
+updated_date: '2026-10-16 02:04'
 labels:
   - python
   - size-3
@@ -17,7 +18,7 @@ references:
     backlog/decisions/decision-0006 -
     Tell-the-model-of-the-functions-the-startup-files-define-by-progressive-disclosure-with-no-decorator.md
 priority: medium
-type: feature
+type: task
 ---
 
 ## Description
