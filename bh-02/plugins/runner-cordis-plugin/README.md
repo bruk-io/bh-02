@@ -106,10 +106,46 @@ policy seam, not this).
   (`test_the_interpreter_bh_02_runs_on_is_denied_where_an_input_could_write_it`, the compile of a
   planted venv layout, and in a real jail
   `test_a_linux_jail_refuses_an_input_that_writes_the_interpreter_bh_02_runs_on`: a write, a write
-  through the link, a rename and a removal are refused). Not held: the entry of a link in a
-  writable directory, nor a link directory on the way to the file (uv's
-  `cpython-3.15-linux-x86_64-gnu` beside the versioned one), which an input could replace with a
-  file or tree of its own; only denying the directory that holds the link would stop that.
+  through the link, a rename and a removal are refused). A mount on the file holds the file, not
+  the links that lead to it, and **the directory that holds each link on the way to it is denied
+  too** (the owner's rule, TASK-0127). The entry of a link in a writable directory can be renamed,
+  and a Python of the input's own planted at its name: uv's `cpython-3.15-linux-x86_64-gnu`, the
+  link to the versioned directory that a venv's `python` goes through, lies in
+  `~/.local/share/uv/python`, and the next `uv run` on the host would execute what was planted
+  there. So for every link from `sys.executable` (and from `<sys.base_prefix>/bin/python3`) to the
+  interpreter's file, the directory that holds the link is denied whenever it lies strictly under
+  a root the jail may write (generic: uv, pyenv, a venv's own `bin`). The decision is a pure
+  function beside `spec_for`, `link_directories(links, writable)`, which takes the chain as the
+  host found it; the shell, `_links_on_the_way`, only walks it, one path component at a time, so a
+  link is found in the directory that physically holds it (a link reached through a link to a
+  directory is that directory's). What it denies in the common layouts:
+  - bh-02 run from its own checkout (`uv run bh-02`), the project the checkout: its `.venv/bin`
+    holds the `python` link; it is bh-02's own code, which `sys.prefix` denied already, and uv's
+    Python directory is not under the checkout. Nothing is new.
+  - `uv tool install`, the project elsewhere: nothing, none of the chain is under it (the tool's
+    venv under `~/.local/share/uv/tools` is denied as `sys.prefix` where a project reaches it).
+  - A project that is the home directory (the checkout's or the tool's venv, and uv's Python,
+    all under it): uv's Python directory, `~/.local/share/uv/python`, read-only to inputs (the
+    versioned directory with it; a mount lands on the same files, so the interpreter still runs
+    there), and the venv's `bin` where the venv is bh-02's own; everything else in the home
+    directory stays writable (measured in a real jail: the worker ran on the uv Python, a file
+    created in that directory failed with `Read-only file system`, one beside it was written).
+  - A plain project with a `.venv` of its own on some other Python: not on the way from bh-02's
+    interpreter to its file, so not denied; an input may still install into that venv or replace
+    its links.
+
+  When the directory that holds a link is a writable root itself (the project is a venv's `bin`,
+  or uv's Python directory), it is not denied, as `host`, `trusted` and `code` above are not: a
+  root that is also a deny is a read-only project, and every write of the session would fail. The
+  person opened the project there to let the model write it; what stays is that an input can rename
+  that link, in that one directory. A directory below the root that holds a link is denied as any.
+  The tests: `test_the_directory_of_each_link_on_the_way_to_the_interpreter_is_denied_where_it_is_writable`
+  (the decision, the root and the roots it leaves out), the compile of a planted uv layout
+  (`test_a_jail_denies_the_directory_of_each_link_from_the_interpreter_bh_02_runs_on_to_its_file`,
+  with a project's own venv left alone) and, in a real jail,
+  `test_a_linux_jail_refuses_an_input_that_changes_a_link_on_the_way_to_the_interpreter_bh_02_runs_on`
+  (every link renamed, removed or replaced is refused).
+
   A started program's `writes()` names the roots its inputs may write (the
   python row reads nothing on the host whose way passes through one);
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
@@ -181,9 +217,10 @@ One policy, two stacks (`stack_for`):
   may write counts only where a write deny holds it, since an input could replace the interpreter
   that runs as PID 1. That matters when the project is the home directory, where bh-02's uv-managed
   Python lies under the project. `spec_for` denies the standard library the host imports from
-  there and the interpreter's file, not the `bin/python3` link that leads to it (a deny on a link
-  holds only the file; unless bh-02 runs on the base interpreter itself, when `prefix` is in the
-  host and the whole tree is denied), so the choice skips it: the next candidate, or brig's
+  there, the interpreter's file and the directory of each link on the way to it, so the
+  `bin/python3` link is held (its directory is read-only, which a deny on the link itself, a mount
+  on the file, would not be) and the choice may run under it; a candidate that is not on that way
+  (a link in the project that `spec_for` was not handed) is skipped: the next candidate, or brig's
   default. A host with
   neither gets brig's own default, which brig refuses (`InterpreterNotMounted`, its advice written for code
   that embeds brig). The compile does not pass that on: it raises the runner's own error, which

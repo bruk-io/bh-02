@@ -6,7 +6,9 @@ work is, compiled, launched, graded.
 composition's layer files (an input rewriting one would reshape the program running it, outside
 the jail), every path the host imports code from (`sys.path` entries and the interpreter's
 prefix), the interpreter bh-02 runs on (its files: in a venv layout the base's binary is on
-neither of those, and the next start on the host would run what an input wrote there), the
+neither of those, and the next start on the host would run what an input wrote there; and the
+directory of every link on the way to it, which a mount on the file cannot hold: an input
+could rename the link and plant a Python of its own at its name), the
 directory of every package bh-02 runs code from (`code`: bh-02's own, cordis's,
 brig's and each plugin's, as installed; under a writable root when bh-02 works on its own
 checkout, an editable install), whose modules bh-02 imports in its own process, brig's own
@@ -123,6 +125,7 @@ __all__ = [
     "holding",
     "host_interpreters",
     "identity",
+    "link_directories",
     "made_by_the_jail",
     "mountable",
     "notice_for",
@@ -145,6 +148,9 @@ __all__ = [
 ]
 
 _READY_TIMEOUT_S = 10.0
+
+#: How many links one lookup follows before the kernel gives up (ELOOP): `_links_on_the_way` stops there.
+_MAX_LINKS = 40
 
 #: The system tree a Linux jail may read: what the interpreter links against and reads at
 #: start (`/lib`, `/usr/lib`, `/etc/ld.so.cache`, locale data) and what an input runs (`/bin/sh`,
@@ -215,6 +221,7 @@ def spec_for(
     trusted: Sequence[str] = (),
     code: Sequence[str] = (),
     interpreters: Sequence[str] = (),
+    links: Sequence[str] = (),
     memory: str = "",
 ) -> Spec:
     """The jail's Spec. `host` is every path the host process loads code from; any under a
@@ -223,8 +230,9 @@ def spec_for(
     bh-02's configuration, whose files the host reads and trusts) and `code` (absolute: the
     directory of every package bh-02 runs code from) may not be written where they are under a
     writable root. `interpreters` (absolute, resolved: the files of the interpreter bh-02 itself
-    runs on, `_interpreter_files`) may not be written where they are under one either. `memory`
-    (absolute: the project's auto memory directory, '' for none) may be
+    runs on, `_interpreter_files`) may not be written where they are under one either, nor the
+    directory of each of `links` (absolute: the links on the way to them, `_links_on_the_way`;
+    `link_directories`). `memory` (absolute: the project's auto memory directory, '' for none) may be
     written, as a root of its own outside the project: no self-modification list applies there,
     since nothing reads it but the memory row, through no link."""
     roots = [str(Path(root, w).resolve()) for w in config.write]
@@ -260,6 +268,9 @@ def spec_for(
     # on what it leads to, so the file is what holds. Strictly under a root, as `host`.
     allows = (*writable, str(Path(endpoint).parent))
     interpreter = [i for i in interpreters if i not in allows and any(i.startswith(r + "/") for r in allows)]
+    # And the links on the way to it, which a mount on the file does not hold (the entry of a link
+    # can be renamed, and an input plant its own interpreter at the name): their directories.
+    holders = link_directories(links, allows)
     denies = [
         *layers,
         *under,
@@ -269,6 +280,7 @@ def spec_for(
         *configured,
         *running,
         *interpreter,
+        *holders,
     ]
     return Spec(
         fs=FsPolicy(
@@ -286,6 +298,24 @@ def spec_for(
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=tuple(config.env), set=(("TMPDIR", scratch),)),
         channels=(Channel(name="program", kind=ChannelKind.LISTEN),),
     )
+
+
+def link_directories(links: Sequence[str], writable: Sequence[str]) -> tuple[str, ...]:
+    """The directories an input may not write, so that it cannot change a link on the way to the
+    interpreter bh-02 runs on. `links` is that chain as the host found it (`_links_on_the_way`):
+    where each link's own entry sits, absolute, in the directory that physically holds it.
+
+    A mount on the interpreter's file holds the file, not the links that lead to it: the entry of
+    a link in a writable directory can be renamed, and a Python of the input's own planted at its
+    name (a project opened at the home directory holds uv's `cpython-3.15-<platform>` link to the
+    versioned directory the venv's `python` goes through, and the next `uv run` on the host would
+    execute what it planted). Only the directory that holds the link refuses that. So, for each
+    link, its directory, when it lies strictly under a root in `writable` (the roots the jail may
+    write; elsewhere an input changes nothing). Not a root itself, as for `host`: the project is
+    the directory that holds the link, and denying it would leave the project read-only. Each once,
+    in the order the links are met."""
+    holders = (str(PurePosixPath(link).parent) for link in links)
+    return tuple(dict.fromkeys(h for h in holders if any(h.startswith(r + "/") for r in writable)))
 
 
 def allowlisted(spec: Spec, readable: Sequence[str], hold: Collection[str] = ()) -> Spec:
@@ -490,10 +520,12 @@ def supervisor_interpreter(
     runs as the jail's PID 1, so a path under a writable root counts only where a write deny holds
     it. bh-02's base interpreter lies under the project when the project is the home directory (a
     uv-managed Python under `~/.local`), and `spec_for` denies the standard library the host imports
-    from there and the interpreter's file, but not the `bin/python3` link that leads to it: a deny
-    on a link is a mount on the file, so an input could still replace the link's own entry, and the
-    link is not a Python the jail holds (unless bh-02 runs on that interpreter itself, when
-    `prefix` is in the host and the whole tree is denied).
+    from there, the interpreter's file and the directory of each link on the way to it
+    (`link_directories`): the `bin/python3` link that leads to it is held by its directory, as a deny
+    on the link itself, a mount on the file, would not hold its entry. A candidate that is not on
+    that way, a link in the project `spec_for` was not handed, is not held, and not a Python the
+    jail holds (unless bh-02 runs on that interpreter itself, when `prefix` is in the host and the
+    whole tree is denied).
 
     When none qualifies, brig's own default: a Spec that does not mount it is refused by brig
     (`InterpreterNotMounted`), which `BrigJail.compile` turns into the runner's own error
@@ -542,6 +574,55 @@ def _interpreter_files(spelled: Sequence[str]) -> tuple[str, ...]:
     writable directory is held by none. A name that is empty (an embedded interpreter has no
     `sys.executable`) leads nowhere and is left out."""
     return tuple(dict.fromkeys(str(Path(name).resolve()) for name in spelled if name))
+
+
+def _stepped(
+    here: PurePosixPath, pending: Sequence[str], led_to: str | None
+) -> tuple[PurePosixPath, tuple[str, ...]]:
+    """One step of the kernel's lookup of a path, as `_links_on_the_way` takes it: `here` is the
+    directory reached, as it physically is (no link in it), and `pending` what is left to look up,
+    its first component the one just looked at, which `led_to` says is a link (to this text) or
+    not (`None`). Returns the directory the lookup is in and what is left. A component that is not
+    a link is entered (`..` leaves); a link is replaced by what it leads to, which starts at `/` if
+    absolute and at the directory that holds the link if not."""
+    part, rest = pending[0], tuple(pending[1:])
+    if led_to is None:
+        return (here.parent if part == ".." else here / part), rest
+    target = PurePosixPath(led_to)
+    if target.is_absolute():
+        return PurePosixPath(target.anchor), (*target.parts[1:], *rest)
+    return here, (*target.parts, *rest)
+
+
+def _links_on_the_way(spelled: Sequence[str]) -> tuple[str, ...]:
+    """Every link on the way from each name in `spelled` (`_interpreter_files`) to the file it leads
+    to, the entry of each as it sits on disk: the link `python3` in a venv, the `python` it leads to,
+    a link to a directory in the middle of a path (uv's `cpython-3.15-<platform>`, which the venv's
+    `python` goes through), one the target of another leads through, in the order met. Walked one
+    component at a time (`_stepped`), so each link is found in the directory that physically holds
+    it (a name reached through a link to a directory is that directory's, which is where a mount
+    lands), and what `link_directories` decides on is where the entries are. The kernel's own limit
+    on links in one lookup ends a loop, which is no interpreter.
+
+    Raises:
+        OSError: a link was replaced as it was read (the host changed its Python while a jail
+            started).
+    """
+    found: list[str] = []
+    for name in spelled:
+        if not name:
+            continue
+        path = PurePosixPath(name)
+        here = PurePosixPath(path.anchor) if path.is_absolute() else PurePosixPath(Path.cwd())
+        pending, followed = (path.parts[1:] if path.is_absolute() else path.parts), 0
+        while pending and followed <= _MAX_LINKS:
+            entry = Path(here, pending[0])
+            led_to = os.readlink(entry) if entry.is_symlink() else None
+            if led_to is not None:
+                found.append(str(entry))
+                followed += 1
+            here, pending = _stepped(here, pending, led_to)
+    return tuple(dict.fromkeys(found))
 
 
 def stack_for(platform: str, python: str = DEFAULT_INTERPRETER) -> Stack:
@@ -1118,6 +1199,7 @@ class BrigJail:
         scratch = str(Path(jail_dir, "tmp"))
         Path(scratch).mkdir(parents=True, exist_ok=True)
         host = [str(Path(p).resolve()) for p in (*import_path, prefix) if p]
+        names = (host_executable, str(Path(base_prefix, "bin", "python3")))  # how the host reaches its Python
         spec = spec_for(
             root=cwd,
             endpoint=endpoint,
@@ -1129,7 +1211,8 @@ class BrigJail:
             secrets=self._host.secrets,
             trusted=self._host.trusted,
             code=self._host.code,
-            interpreters=_interpreter_files((host_executable, str(Path(base_prefix, "bin", "python3")))),
+            interpreters=_interpreter_files(names),
+            links=_links_on_the_way(names),
             memory=self._host.auto_memory,
         )
         python = DEFAULT_INTERPRETER

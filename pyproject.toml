@@ -338,6 +338,7 @@ exclude = [
     "runner_cordis_plugin.jail:_place",               # mkdir a placeholder and mark it, before bubblewrap starts
     "runner_cordis_plugin.jail:_clear_up",            # take the jail lock alone, then remove_placeholders
     "runner_cordis_plugin.jail:_launch",              # brig's Jail.create, its first start, destroy when refused
+    "runner_cordis_plugin.jail:_links_on_the_way",    # readlink, one component at a time, from the interpreter bh-02 runs on to its file
     "runner_cordis_plugin.tripwire:Tripwire.*",       # inotify on the held paths' directories; kills the jail at a lift
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
     "chat_cordis_plugin.wiring:converse", "models_cordis_plugin.wiring:model",

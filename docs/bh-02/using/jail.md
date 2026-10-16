@@ -11,7 +11,7 @@ In short; the policy itself, path by path and why, is the
 
 | | Inside the jail |
 |---|---|
-| **Writes** | the project, a scratch directory of the jail's own, and the project's auto memory directory. Not, even in the project: bh-02's layer files, its own code, the Python it runs on and the paths it imports from, its config directory, `.git/hooks`, `.git/config`, `.claude`, shell rc files, editor settings, and other files that could run code later. `CLAUDE.md` and `AGENTS.md` may be edited. |
+| **Writes** | the project, a scratch directory of the jail's own, and the project's auto memory directory. Not, even in the project: bh-02's layer files, its own code, the Python it runs on (and the directories of the links that lead to it, uv's Python directory when your project is the home directory) and the paths it imports from, its config directory, `.git/hooks`, `.git/config`, `.claude`, shell rc files, editor settings, and other files that could run code later. `CLAUDE.md` and `AGENTS.md` may be edited. |
 | **Reads** | everything but credentials: `~/.ssh`, `~/.aws` and the like, bh-02's `local.env`, and the sessions' state. On Linux, only the system, the Python interpreter, the project and its auto memory directory are there at all; your home directory is not. |
 | **Network** | none |
 | **Environment** | scrubbed to a short list of variables |
