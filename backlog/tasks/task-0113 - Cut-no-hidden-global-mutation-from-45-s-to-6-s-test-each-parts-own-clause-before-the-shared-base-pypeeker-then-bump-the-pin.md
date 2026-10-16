@@ -3,11 +3,11 @@ id: TASK-0113
 title: >-
   Cut no-hidden-global-mutation from 45 s to 6 s: test each part's own clause
   before the shared base (pypeeker, then bump the pin)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 08:19'
-updated_date: '2026-10-16 13:16'
+updated_date: '2026-10-16 13:17'
 labels:
   - gates
   - size-2
@@ -79,4 +79,6 @@ The docs call written order normative (fork #3: dsl/selection.py, dsl/expr.py, d
 Pin part of criterion 1 (orchestrator, 2026-10-16): the pypeeker change landed as part of brukhabtu/pypeeker PR #148 (CI green), squash-merged as 67b0a1b0121fa48d89c6cecaa82624592bfa8386. The commits reviewed were 04e2249 (TASK-0113), f6ea736 (TASK-0114) and 8fd3239 (TASK-0117) on pypeeker branch ccr-8cdd69a0-gt1lov (the workers' wt-* commits 7370f98, ae3f719 and 184d2ac re-applied without change). bh-02 commit 2bcfefe pins pypeeker@67b0a1b; uv.lock regenerated with `uv lock` (pypeeker 7905d240 -> 67b0a1b0, nothing else).
 - After the pin, on a quiet machine: scripts/arch-check --no-fix exit 0 in 56.4, 49.9, 49.8 s (TASK-0111 measured 115.6 s warm before any of TASK-0113..0118).
 - Full scripts/check: exit 0 in 208 s; format, lint, types, tests (3186 passed, 31 skipped), gates (all five ok), docs, tokens.
+
+Review: APPROVE. pypeeker 04e2249 reorders clauses, which are pure and joined by AND, so the findings and confidence are unchanged; only the derivation order seen by query --why moves, and no selection of this rule reaches it. Criterion 2 evidence is 43.6 s to 6.3 s with the same four planted findings. Pin checked: 2bcfefe pins pypeeker@67b0a1b; uv.lock names 67b0a1b0121f; .venv direct_url.json has commit 67b0a1b0121f. The full check passed (orchestrator). Nits, not filed: the worker notes name 7370f98 rather than the merged 67b0a1b; no-argument-mutation has the same order cost but no bh-02 gate enables it, so it is a possible pypeeker follow-up.
 <!-- SECTION:NOTES:END -->
