@@ -38,6 +38,7 @@ from runner_cordis_plugin import (
     group_alive,
     held,
     holding,
+    host_interpreters,
     identity,
     lifted,
     made_by_the_jail,
@@ -55,6 +56,7 @@ from runner_cordis_plugin import (
     stack_for,
     still_made,
     still_running,
+    supervisor_interpreter,
     told_reads,
     tripwired,
     uncovered,
@@ -1898,6 +1900,123 @@ def test_a_platform_brig_has_no_preset_for_is_refused_by_name() -> None:
     with pytest.raises(RuntimeError, match=r"this is freebsd.*`runner:unconfined`"):
         stack_for("freebsd")
     assert BrigJail(BrigConfig(), Host(), platform="freebsd").report() == {}
+
+
+def test_the_supervisor_runs_under_the_first_interpreter_the_jail_holds_whole() -> None:
+    """brig checks only that the interpreter's spelling is under a root the Spec mounts, so the
+    rest is this choice's: a link that leads out of the roots would dangle in the jail, and a
+    jail whose PID 1 can't start is no jail. The roots are the Spec's read roots: read-only."""
+    mounted = ("/usr", "/etc", "/opt/py")
+    system = {"/usr/bin/python3": "/usr/bin/python3.13"}  # Debian's goes through /etc/alternatives
+    own = {"/opt/py/bin/python3": "/opt/py/bin/python3.15"}
+    assert supervisor_interpreter({**system, **own}, mounted) == "/usr/bin/python3"  # best first
+    assert supervisor_interpreter(own, mounted) == "/opt/py/bin/python3"  # the system's is elsewhere
+    nix = {"/nix/store/aa-python3/bin/python3": "/nix/store/aa-python3/bin/python3.15"}
+    assert supervisor_interpreter({**nix, **own}, mounted) == "/opt/py/bin/python3"  # not mounted: skipped
+    leads_out = {"/usr/bin/python3": "/nix/store/bb-python3/bin/python3.15"}  # mounted, its target is not
+    assert supervisor_interpreter({**leads_out, **own}, mounted) == "/opt/py/bin/python3"
+    beside = {"/opt/pyx/bin/python3": "/opt/pyx/bin/python3"}  # a sibling name is not under /opt/py
+    assert supervisor_interpreter({**beside, **own}, mounted) == "/opt/py/bin/python3"
+    assert supervisor_interpreter(own, ("/",)) == "/opt/py/bin/python3"  # everything is under /
+    # none holds whole: brig's own default, which brig then refuses by name or fails to start
+    assert supervisor_interpreter({}, mounted) == "/usr/bin/python3"
+    assert supervisor_interpreter({**nix, **leads_out}, mounted) == "/usr/bin/python3"
+    assert supervisor_interpreter({**nix}, ("/opt/py",)) == "/usr/bin/python3"
+
+
+def test_a_linux_host_looks_for_its_system_python_then_the_one_bh_02_runs_on() -> None:
+    assert host_interpreters() == ("/usr/bin/python3", str(Path(sys.base_prefix, "bin", "python3")))
+
+
+def _a_python_elsewhere(directory: Path) -> Path:
+    """An interpreter at a path no host has one at: a link to the one running this, whose target
+    the jail mounts (`sys.base_prefix`) and whose own directory only a command naming it does."""
+    directory.mkdir()
+    link = directory / "python3"
+    link.symlink_to(Path(sys.executable).resolve())
+    return link
+
+
+def test_a_jail_compiles_its_supervisor_under_the_interpreter_the_host_has_and_it_mounts(
+    tmp_path: Path,
+) -> None:
+    """The choice reaches brig (`strict_linux(python=...)`): the supervisor plan of the compiled
+    jail names it. Where the host's own interpreter is not at a path the Spec mounts, the next is
+    chosen, and with none at all brig's default, for brig to refuse or run."""
+    link = _a_python_elsewhere(tmp_path / "pybin")
+    project = tmp_path / "project"
+    project.mkdir()
+    sock = str(tmp_path / "k" / "k.sock")
+    here = BrigJail(BrigConfig(), Host(), platform="linux", interpreters=(str(link),))
+    naming = ["/usr/bin/env", str(link), "-I"]  # the command names the interpreter's directory
+    assert here.compile(str(tmp_path / "j"), sock, str(project), naming)[0].supervisor.interpreter == str(
+        link
+    )
+    assert here.compile(str(tmp_path / "j"), sock, str(project), ())[0].supervisor.interpreter == (
+        "/usr/bin/python3"  # its directory is not mounted: the jail has no such interpreter
+    )
+    chosen = BrigJail(BrigConfig(), Host(), platform="linux", interpreters=("/nowhere/python3", str(link)))
+    assert chosen.compile(str(tmp_path / "j"), sock, str(project), naming)[0].supervisor.interpreter == str(
+        link
+    )  # one that is not there is skipped
+
+
+# Listens; once the jail has seen it listen, writes what its PID 1 runs (the supervisor's command
+# line) to argv[2], and waits.
+_LISTEN_THEN_SAY_PID_1 = """
+import os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+said = open("/proc/1/cmdline", "rb").read().replace(b"\\0", b" ").decode()
+open(sys.argv[2] + ".tmp", "w").write(said)
+os.rename(sys.argv[2] + ".tmp", sys.argv[2])
+time.sleep(60)
+"""
+
+
+async def test_a_host_whose_python_is_not_at_the_usual_path_starts_a_confined_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real jail on a host whose only interpreter is elsewhere (a link, in a directory the
+    command names): its PID 1, brig's supervisor, runs under that path, not under the default
+    `/usr/bin/python3` brig would otherwise start it with."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    link = _a_python_elsewhere(tmp_path / "pybin")
+    project = tmp_path / "project"
+    project.mkdir()
+    said = project / "pid-1"
+    endpoint = _endpoint()
+    argv = [str(link), "-I", "-c", _LISTEN_THEN_SAY_PID_1, endpoint, str(said)]
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"), interpreters=(str(link),))
+    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+    try:
+        for _ in range(200):
+            if said.exists():
+                break
+            await asyncio.sleep(0.05)
+        assert said.read_text().split()[:3] == [str(link), "-I", "/.brig-supervisor.py"]
+    finally:
+        await started.stop()
+
+
+def test_a_host_whose_jail_mounts_no_interpreter_is_refused_by_brig_with_what_to_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No `/usr` on the host (nothing of the system mounted but `/etc`), and the interpreter bh-02
+    runs on elsewhere: nothing holds an interpreter, and brig's own refusal is the answer, naming
+    the interpreter and the roots, before any program starts."""
+    monkeypatch.setattr("runner_cordis_plugin.jail.SYSTEM_READABLE", ("/etc",))
+    monkeypatch.setattr("runner_cordis_plugin.jail.base_prefix", "/opt/py")
+    monkeypatch.setattr("runner_cordis_plugin.jail.prefix", "/opt/py")
+    with pytest.raises(ValueError, match=r"InterpreterNotMounted|PID 1 is brig's supervisor") as raised:
+        BrigJail(BrigConfig(), Host(), platform="linux", interpreters=())
+    assert type(raised.value).__name__ == "InterpreterNotMounted"
+    said = str(raised.value)
+    assert "'/usr/bin/python3'" in said and "read_allows" in said and "/etc" in said
+    assert "strict_linux(python=...)" in said  # what to change
 
 
 def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_project_s_secret(

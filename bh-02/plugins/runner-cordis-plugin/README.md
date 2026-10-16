@@ -149,6 +149,26 @@ One policy, two stacks (`stack_for`):
   host imports code from) is left to the outer one (`uncovered`). Without `/usr/bin/bwrap`,
   `start` says to install `bubblewrap` or use `runner:unconfined`.
 
+  **The supervisor's interpreter.** The command bubblewrap runs is brig's supervisor, the
+  jail's PID 1 (brig's decision-190), under a Python the jail must mount; brig's default,
+  `/usr/bin/python3`, is not on every host (nor mounted in every allowlist), so each compile
+  chooses one (`supervisor_interpreter`, a pure decision over what `host_interpreters` lists and
+  the Spec's read roots) and gives it to brig as `strict_linux(python=...)`. The first that the
+  jail holds whole: the system's `/usr/bin/python3`, then the Python bh-02 itself runs on
+  (`sys.base_prefix`'s `bin/python3`, a plain interpreter, not the venv's, whose site-packages
+  the supervisor, which is stdlib-only, has no use for), which the jail mounts for the worker
+  anyway. "Whole" means its spelling and its target are both under a read root: brig checks the
+  spelling alone, and a link out of the roots (Debian's `/usr/bin/python3` goes through
+  `/etc/alternatives`, mounted with `/etc`) would dangle in the jail. A host with neither gets
+  brig's own default, so brig's own error is what the person reads in the diagnosis of the
+  `runner` row that did not start: `InterpreterNotMounted` naming the interpreter, the roots and
+  what to change (or, when the interpreter is mounted but absent, `SupervisorFailed` with the
+  supervisor's stderr). `test_a_host_whose_python_is_not_at_the_usual_path_starts_a_confined_session`
+  stands for a host whose Python is elsewhere (a link, in a real jail, whose PID 1 is that path),
+  `test_a_host_whose_jail_mounts_no_interpreter_is_refused_by_brig_with_what_to_change` for one with
+  none, and `test_on_linux_a_host_with_no_interpreter_the_jail_mounts_does_not_start_and_says_brig_s_reason`
+  (the app's) for what the person reads then.
+
 **Placeholders (Linux).** bubblewrap holds a write-denied path that doesn't exist with an empty,
 read-only directory mounted there, and the mount point is a real directory on the host, which
 the jail makes for it: a placeholder. So while a jail runs, `.envrc/`, `.vscode/`, `.idea/`, `.claude/`, an absent

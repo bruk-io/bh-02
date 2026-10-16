@@ -33,7 +33,9 @@ One policy, two platforms; only the stack and the read model differ:
   (`sys.base_prefix`, `sys.prefix`), the directories the command names, bh-02's own code
   (`code`, read-only: the extensions process imports cordis, with an editable install from the
   workspace), and what the policy lets an input write. Everything else does not exist in the
-  jail, the home directory included.
+  jail, the home directory included. brig's supervisor, the jail's PID 1, runs under a Python
+  the jail holds, chosen at each compile (`supervisor_interpreter`): the system's
+  `/usr/bin/python3` where there is one, else the one bh-02 runs on.
   The secrets stay `read_denies`, now brig's carve-outs: one inside that tree (a `local.env` at
   the project root) is masked if it exists, and one that does not exist yet is not, which
   brig's `fs_read` grade says (`best_effort`, naming it); an absent one where bh-02 looks for
@@ -71,7 +73,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from sys import base_prefix, prefix
 from sys import path as import_path
 from sys import platform as host_platform
@@ -88,7 +90,7 @@ from brig.core import (
     ReadModel,
     Spec,
 )
-from brig.mech.bwrap import DEFAULT_BWRAP_PATH
+from brig.mech.bwrap import DEFAULT_BWRAP_PATH, DEFAULT_INTERPRETER
 from brig.run import (
     HostRuntime,
     IoPolicy,
@@ -116,6 +118,7 @@ __all__ = [
     "group_alive",
     "held",
     "holding",
+    "host_interpreters",
     "identity",
     "made_by_the_jail",
     "mountable",
@@ -132,6 +135,7 @@ __all__ = [
     "stack_for",
     "still_made",
     "still_running",
+    "supervisor_interpreter",
     "told_reads",
     "tripwired",
     "uncovered",
@@ -144,7 +148,15 @@ _READY_TIMEOUT_S = 10.0
 #: `git`, ...). Entries that do not exist on a host (`/lib64` on arm64) are dropped at start.
 SYSTEM_READABLE: tuple[str, ...] = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc")
 
-_STACKS: Mapping[str, Callable[[], Stack]] = {"darwin": scratch_darwin, "linux": strict_linux}
+
+def _seatbelt(python: str) -> Stack:
+    """darwin's preset: a seatbelt profile has no supervisor to name an interpreter for."""
+    del python
+    return scratch_darwin()
+
+
+#: Each platform's preset, given the interpreter brig's supervisor runs under (`stack_for`).
+_STACKS: Mapping[str, Callable[[str], Stack]] = {"darwin": _seatbelt, "linux": strict_linux}
 
 
 @runtime_checkable
@@ -433,15 +445,61 @@ def made_by_the_jail(absent: Sequence[str]) -> tuple[str, ...]:
     return tuple(sorted(set(absent), key=lambda p: (-p.count("/"), p)))
 
 
-def stack_for(platform: str) -> Stack:
-    """brig's preset for `platform`, or a refusal that says what to use instead."""
+def host_interpreters() -> tuple[str, ...]:
+    """Where a Linux host's Python for brig's supervisor may be, best first: brig's own default,
+    the system's (`/usr/bin/python3`, which every host that works today has, so it keeps being
+    the one), then the Python bh-02 itself runs on: `sys.base_prefix`'s, which the jail mounts
+    for the program it starts anyway, so a host with its system Python elsewhere (or none)
+    still has one. Never `sys.prefix`'s: a venv's `python` is that one's link, with the venv's
+    site-packages on its path, and the supervisor is stdlib-only."""
+    return (DEFAULT_INTERPRETER, str(Path(base_prefix, "bin", "python3")))
+
+
+def supervisor_interpreter(found: Mapping[str, str], mounted: Sequence[str]) -> str:
+    """The interpreter brig's supervisor, the jail's PID 1, runs under (`strict_linux(python=...)`):
+    the first of `found` that the jail holds whole. `found` is each candidate as spelled, best
+    first, with the path it resolves to; `mounted` is the Spec's read roots (the system, the
+    interpreter's trees, bh-02's code: bound read-only), never its write roots, where an input
+    could replace what runs as the jail's PID 1. brig checks the spelling only, and leaves a link
+    that leads out of the roots to the Spec's author (Debian's `/usr/bin/python3` goes to
+    `/etc/alternatives`), so a candidate counts when its spelling and its target are both at or
+    under a root: a link out of them would dangle in the jail, and a jail whose PID 1 can't start
+    is no jail.
+
+    When none qualifies, brig's own default: a Spec that does not mount it is refused by brig,
+    by name (`InterpreterNotMounted`: the interpreter, the roots and what to change), and one that
+    does mount it but has no Python there fails to start with the supervisor's own stderr
+    (`SupervisorFailed`). Nothing here hides either."""
+    for spelled, target in found.items():
+        if all(
+            any(PurePosixPath(path).is_relative_to(root) for root in mounted) for path in (spelled, target)
+        ):
+            return spelled
+    return DEFAULT_INTERPRETER
+
+
+def _present(candidates: Sequence[str]) -> dict[str, str]:
+    """Each of `candidates` that is an executable file on this host (through its links), with the
+    path it resolves to: what `supervisor_interpreter` chooses among."""
+    return {c: str(Path(c).resolve()) for c in candidates if Path(c).is_file() and os.access(c, os.X_OK)}
+
+
+def stack_for(platform: str, python: str = DEFAULT_INTERPRETER) -> Stack:
+    """brig's preset for `platform`, or a refusal that says what to use instead. `python` is the
+    interpreter inside a Linux jail that brig's supervisor runs under (`supervisor_interpreter`);
+    darwin's jail has no supervisor.
+
+    Raises:
+        RuntimeError: brig has no preset for `platform`.
+    """
     try:
-        return _STACKS[platform]()
+        preset = _STACKS[platform]
     except KeyError:
         raise RuntimeError(
             f"runner:confined runs on darwin (seatbelt) and Linux (bubblewrap); this is {platform}. "
             "Use `runner:unconfined` for the runner row (or `bh-02 --no-jail`), knowing it confines nothing"
         ) from None
+    return preset(python)
 
 
 def self_modify_denied(allow: Sequence[str]) -> tuple[str, ...]:
@@ -818,15 +876,26 @@ class BrigJail:
     what another session's jails left and none removes a placeholder while another runs. Only tests
     pass one of their own (a `tmp_path`), so that another session's jail running on the person's
     machine can't hold the lock out from under them.
+
+    `interpreters` (Linux) are the Pythons brig's supervisor may run under, best first: left out,
+    the host's own (`host_interpreters`); each compile takes the first the jail mounts
+    (`supervisor_interpreter`). Only tests pass any, to stand for a host whose Python is elsewhere.
     """
 
     def __init__(
-        self, config: BrigConfig, host: Host, *, platform: str = host_platform, lock: str | None = None
+        self,
+        config: BrigConfig,
+        host: Host,
+        *,
+        platform: str = host_platform,
+        lock: str | None = None,
+        interpreters: Sequence[str] | None = None,
     ) -> None:
         self._config = config
         self._host = host
         self._platform = platform
         self._lock = lock if lock is not None else _LOCK.format(uid=os.getuid())
+        self._interpreters = host_interpreters() if interpreters is None else tuple(interpreters)
         # The grades are known before anything starts: compile once against a throwaway directory.
         # A platform brig has no preset for grades nothing; `start` says what to use instead.
         # The probe's endpoint is in a subdirectory: bwrap refuses one directly in the jail directory.
@@ -997,6 +1066,7 @@ class BrigJail:
             code=self._host.code,
             memory=self._host.auto_memory,
         )
+        python = DEFAULT_INTERPRETER
         if self._platform == "linux":
             readable = readable_roots(
                 argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE, code=self._host.code
@@ -1007,8 +1077,9 @@ class BrigJail:
             denies = uncovered(mountable(spec.fs.write_denies, self._instead(spec)))
             spec = replace(spec, fs=replace(spec.fs, write_denies=denies))
             spec = replace(spec, env=replace(spec.env, set=(*spec.env.set, *author)))
+            python = supervisor_interpreter(_present(self._interpreters), spec.fs.read_allows)
         ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
-        jail = stack_for(self._platform).compile(spec, ctx=ctx)
+        jail = stack_for(self._platform, python).compile(spec, ctx=ctx)
         report = {axis.value: grade.grade.value for axis, grade in jail.report.axes.items()}
         holds = held(spec, self._absent_secrets(spec)) if self._platform == "linux" else ()
         return jail, graded(report, holds)

@@ -24,6 +24,7 @@ import cordis
 import memory_cordis_plugin
 from agent_cordis_plugin import ToolBroker
 from bh_02.bootstrap import (
+    CompositionError,
     code_directories,
     code_packages,
     config_directories,
@@ -370,6 +371,30 @@ async def test_a_jailed_python_process_starts_in_a_worktree_and_cannot_write_its
     out = _shown()
     assert "[0] WROTE" in out and "[1] DENIED" in out and "[2] DENIED" in out, out
     assert mine.read_text().endswith('"runner:confined"\n') and (project / ".git").is_file()
+
+
+async def test_on_linux_a_host_with_no_interpreter_the_jail_mounts_does_not_start_and_says_brig_s_reason(
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The jail is compiled when the runner row starts, and brig's supervisor runs under a Python
+    the jail must mount: on a host with no `/usr` and no Python among what is mounted, brig refuses
+    (`InterpreterNotMounted`), and the person reads its text in the composition's own diagnosis of
+    the row that did not start: which interpreter, which roots, what to change."""
+    if sys.platform != "linux":
+        pytest.skip("brig's supervisor is bubblewrap's: Linux only")
+    monkeypatch.setattr("runner_cordis_plugin.jail.SYSTEM_READABLE", ("/etc",))
+    monkeypatch.setattr("runner_cordis_plugin.jail.base_prefix", "/opt/py")
+    monkeypatch.setattr("runner_cordis_plugin.jail.prefix", "/opt/py")
+    monkeypatch.setattr("runner_cordis_plugin.jail.host_interpreters", lambda: ())
+    project = tmp_path / "project"
+    project.mkdir()
+    patch = _inputs(composition, "1", extra=_jailed_in(project))
+    with pytest.raises(CompositionError) as raised:
+        await asyncio.wait_for(run([*layers(), patch], [Row("chat", config={"prompt": "go"})]), 10)
+    said = raised.value.message
+    assert "could not start" in said and "runner" in said
+    assert "InterpreterNotMounted" in said and "/usr/bin/python3" in said
+    assert "Add the interpreter's directory to read_allows" in said, said
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
