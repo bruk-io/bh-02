@@ -17,9 +17,10 @@ one dropped) but never adds one: a new module in an indexed path, or a new path,
 it checks, so it passes silently. So for each gate this first writes `[tool.pypeeker].src` from
 the globs in `[tool.arch-check].src` (the layout, not a hand-kept list, decides what is
 checked), drops the index entry of each file no src path holds (pypeeker's refresh keeps one
-whose file still exists, and find_symbol and the call graph read every entry), indexes each path
-that holds a file with no index entry (all of them on a fresh checkout, none when nothing was
-added) in one `pypeeker index` call per gate, not one per path (a call reconciles pypeeker's
+whose file still exists, and find_symbol and the call graph read every entry; if one is still
+listed afterwards, pypeeker's layout has changed under the unlink and the gate fails saying so),
+indexes each path that holds a file with no index entry (all of them on a fresh checkout, none when
+nothing was added) in one `pypeeker index` call per gate, not one per path (a call reconciles pypeeker's
 cross-file symbol tree, which reads every entry written so far, so a call per path cost paths
 times files: the root gate's 29 paths took 55 s cold, in one call 4 s), fails on any indexing error,
 then runs `check --strict` (plain `check` hides heuristic findings). It writes that list only when
@@ -157,10 +158,32 @@ def outside_src(paths: Sequence[str], entries: frozenset[str]) -> tuple[str, ...
     return tuple(sorted(e for e in entries if not any(Path(e).is_relative_to(path) for path in paths)))
 
 
+def left_behind(dropped: Sequence[str], entries: frozenset[str]) -> str | None:
+    """None when none of the `dropped` entries is in `entries` (what the index lists now); else the
+    problem, naming each one that is."""
+    left = [entry for entry in dropped if entry in entries]
+    if not left:
+        return None
+    names = "".join(f"\n  {entry}" for entry in left)
+    return (
+        f"arch-check: dropped {len(left)} index entries that are still listed; pypeeker may keep its entries "
+        f"somewhere `drop_entries` does not look now (compare INDEX and `drop_entries` with "
+        f"pypeeker/storage/index_store.py):{names}"
+    )
+
+
 def drop_entries(gate: Path, entries: Sequence[str]) -> None:
     """Remove the index entry of each source file in `entries`, at the path IndexStore keeps it (under
     `.pypeeker/index`, with `.json` added: the file `IndexStore.remove` unlinks). pypeeker has no command
-    for this: its check drops an entry only when the source file is gone."""
+    for this: its check drops an entry only when the source file is gone.
+
+    This is a coupling to pypeeker's storage layout, which is pre-1.0 and may change. If it does, the
+    unlink finds no file (`missing_ok`, since an entry may already be gone) and drops nothing, and says
+    nothing: the orphans stay, and every symbol lookup and the call graph read them again, so the gate
+    slows again with no error. `run_gate` therefore reads the index once more after this and fails the
+    gate, naming each entry it meant to drop that is still listed (`left_behind`): a layout change
+    becomes a failing run, not a slower one. The read is of the layout `indexed` assumes, so a change that
+    moves the listing too is for the clean-gate test in test_arch_check.py to notice."""
     for entry in entries:
         (gate / INDEX / f"{entry}.json").unlink(missing_ok=True)
 
@@ -190,11 +213,15 @@ def index(gate: Path, paths: Sequence[str]) -> str | None:
 
 
 def run_gate(gate: Path, fix: bool) -> Outcome:
-    """Drop the index entries outside one gate's sources, index what has no index in them, apply pypeeker
-    autofixes, then run check --strict."""
+    """Drop the index entries outside one gate's sources (failing if one is still listed), index what has
+    no index in them, apply pypeeker autofixes, then run check --strict."""
     paths = sync_src(gate)
-    drop_entries(gate, outside_src(paths, indexed(gate)))
-    if unindexed := without_index({path: sources(gate, path) for path in paths}, indexed(gate)):
+    dropped = outside_src(paths, indexed(gate))
+    drop_entries(gate, dropped)
+    entries = indexed(gate)
+    if (problem := left_behind(dropped, entries)) is not None:
+        return Outcome(False, problem)
+    if unindexed := without_index({path: sources(gate, path) for path in paths}, entries):
         if (problem := index(gate, unindexed)) is not None:
             return Outcome(False, problem)
     applied = ""

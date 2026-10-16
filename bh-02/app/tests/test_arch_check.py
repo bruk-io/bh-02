@@ -329,6 +329,64 @@ def test_an_index_entry_outside_src_is_dropped_and_one_inside_src_is_kept(
     assert index_calls == []
 
 
+def test_an_entry_dropped_and_still_listed_is_named_and_one_never_dropped_is_not(
+    arch_check: ModuleType,
+) -> None:
+    """What was dropped, against what the index lists after: only an entry in both is a problem."""
+    dropped = ["m/b/x.py", "m/b/y.py", "m/b/z.py"]
+    listed = frozenset({"m/a/x.py", "m/b/y.py", "m/b/z.py"})  # m/a/x.py is inside src: kept, never dropped
+
+    problem = arch_check.left_behind(dropped, listed)
+
+    assert problem is not None
+    assert problem.endswith(":\n  m/b/y.py\n  m/b/z.py")
+    assert "dropped 2 index entries" in problem and "m/a/x.py" not in problem and "m/b/x.py" not in problem
+    assert "INDEX" in problem and "index_store.py" in problem  # where to look
+
+
+def test_nothing_is_left_behind_when_every_dropped_entry_is_gone_or_none_was_dropped(
+    arch_check: ModuleType,
+) -> None:
+    assert arch_check.left_behind(["m/b/x.py"], frozenset({"m/a/x.py"})) is None
+    assert arch_check.left_behind([], frozenset({"m/a/x.py"})) is None
+    assert arch_check.left_behind([], frozenset()) is None
+
+
+@pytest.fixture
+def layout_moved(arch_check: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """pypeeker keeps its entries somewhere `drop_entries` no longer looks: the real `drop_entries`, run
+    as if the entries lived in `.pypeeker/index-v2`, unlinks nothing (the file is not there), as it
+    would after a change to pypeeker's storage; everything else still reads and writes `.pypeeker/index`."""
+    drop = arch_check.drop_entries
+
+    def drop_where_the_entries_are_not(gate: Path, entries: Sequence[str]) -> None:
+        with monkeypatch.context() as moved:
+            moved.setattr(arch_check, "INDEX", Path(".pypeeker") / "index-v2")
+            drop(gate, entries)
+
+    monkeypatch.setattr(arch_check, "drop_entries", drop_where_the_entries_are_not)
+
+
+@pytest.mark.usefixtures("layout_moved")
+def test_a_gate_whose_orphan_entries_are_not_where_drop_entries_looks_fails_naming_them(
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
+) -> None:
+    """Without the check the run is green and every symbol lookup still reads the orphans: the drop
+    would be a silent no-op, the slowdown it was written to remove back with nothing said."""
+    _member(gate, "b")
+    assert _run(arch_check, gate, capfd) == (0, "")
+    (gate / "pyproject.toml").write_text(_GATE.replace("members/*/src", "members/a/src"))  # b leaves src
+    index_calls.clear()
+
+    code, out = _run(arch_check, gate, capfd)
+
+    assert code == 1
+    assert out.startswith("arch-check: dropped 2 index entries that are still listed")
+    assert out.endswith(":\n  members/b/src/b/__init__.py\n  members/b/src/b/mod.py")
+    assert arch_check.indexed(gate) >= {"members/b/src/b/__init__.py", "members/b/src/b/mod.py"}
+    assert index_calls == []  # the run stopped there, before indexing or checking
+
+
 def test_the_src_list_is_written_through_a_temporary_file_renamed_over_the_old_one(
     arch_check: ModuleType, gate: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
