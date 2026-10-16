@@ -322,9 +322,10 @@ exclude = [
     "runner_cordis_plugin.unconfined:_Process.*", "runner_cordis_plugin.unconfined:Unjailed.start",
     "runner_cordis_plugin.unconfined:_until_listening",
     "python_cordis_plugin.worker:*",
-    # the startup check, a program of its own: the file it reads, ruff as a subprocess, the lines it prints
+    # the startup check, a program of its own: the file it reads, ruff and mypy as subprocesses (mypy over
+    # a copy of the text in a scratch directory of its own), the lines it prints
     "python_cordis_plugin.startup_check:main", "python_cordis_plugin.startup_check:_read",
-    "python_cordis_plugin.startup_check:_ruffed",
+    "python_cordis_plugin.startup_check:_ruffed", "python_cordis_plugin.startup_check:_mypied",
     "runner_cordis_plugin.jail:BrigJail.*", "runner_cordis_plugin.jail:_Jailed.*",
     # the model's extensions: the directory they are written to, read every `watch` seconds, and
     # the status file the model reads; a socket to a worker a jail started, the worker program

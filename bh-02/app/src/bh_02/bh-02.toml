@@ -78,7 +78,8 @@ use = "tui:ui"
 id = "chat"
 use = "chat:converse"
 
-# The python tool and its Python process; config `startup`: the files a new process runs first.
+# The python tool and its Python process; config `startup`: the files a new process runs first;
+# `mypy_cache`: where mypy keeps its cache for the type check of those files (default `.bh-02/mypy_cache`).
 [[plugin]]
 id = "python"
 use = "python:tool"

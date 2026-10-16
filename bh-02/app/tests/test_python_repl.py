@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -825,7 +826,7 @@ async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_hom
     async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
         out = await process.run(f"import os\nprint(os.path.exists({str(person)!r}))\nshow(TOOLS)")
     assert out.startswith(
-        f"({person} ran first: functions show(x). {person} docstring findings: show D103, example. "
+        f"({person} ran first: functions show(x). {person} findings: show D103, example, no-untyped-def. "
         ".bh-02/startup.py ran next: no public functions)\n"
     ), out
     assert out.endswith("\nFalse\n'<2>'"), out  # the jail can't see the person's file; its function runs
@@ -853,14 +854,15 @@ async def test_on_linux_a_startup_file_s_functions_are_listed_by_signature_from_
     async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
         out = await process.run("show(run('ls'))")
     assert out == (
-        f"({person} ran first: functions show(x). {person} docstring findings: show D103, example. "
+        f"({person} ran first: functions show(x). {person} findings: show D103, example, no-untyped-def. "
         ".bh-02/startup.py ran next: functions run(cmd, *, quiet=True). "
-        ".bh-02/startup.py docstring findings: run D103, example)\n'<ls>'"
+        ".bh-02/startup.py findings: run D103, example, no-untyped-def; "
+        "elsewhere in the file: no-untyped-def)\n'<ls>'"
     ), out
 
 
 _DOCUMENTED = (
-    "def show(x):\n"
+    "def show(x: int) -> str:\n"
     '    """Show X in angle brackets.\n\n'
     "    >>> show(1)\n"
     "    '<1>'\n"
@@ -868,16 +870,17 @@ _DOCUMENTED = (
     "    return f'<{x}>'\n"
 )
 _FINDINGS = (
+    "try:\n    import nosuchmodule_bh\nexcept ModuleNotFoundError:\n    pass\n\n\n"
     "def run(cmd):\n"
     '    """Run CMD"""\n'
     "    return cmd\n\n\n"
-    "def go(x):\n"
+    "def go(x: int) -> str:\n"
     '    """Go.\n\n'
     "    Gives X back.\n"
     "    >>> go(1)\n"
     '    1\n    """\n'
     "    return x\n\n\n"
-    "def fine():\n"
+    "def fine() -> None:\n"
     '    """Do nothing.\n\n'
     "    Use::\n\n"
     "        fine()\n"
@@ -886,14 +889,15 @@ _FINDINGS = (
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_on_linux_both_checks_run_in_the_jail_on_a_file_with_findings_and_one_without(
+async def test_on_linux_the_checks_run_in_the_jail_on_a_file_with_findings_and_one_without(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Ruff, with bh-02's flags, and the example rule run as programs under the Python process's own
-    interpreter, inside bubblewrap, over the person's file (which the jail can't read: its text was
-    handed in) and the project's (which it reads). The person's keeps the convention and adds
-    nothing to the aside; the project's has three findings, ruff's and the rule's, said as codes.
-    The model's own run of either tool, as it is told to, works in the same jail."""
+    """Ruff and mypy, with bh-02's flags, and the example rule run as programs under the Python process's
+    own interpreter, inside bubblewrap, over the person's file (which the jail can't read: its text was
+    handed in) and the project's (which it reads). The person's keeps the convention and the types and
+    adds nothing to the aside; the project's has findings of all three, said as codes, and an import
+    mypy can't find. mypy's cache is made in the project, where git ignores it. The model's own run of
+    each tool, as it is told to, works in the same jail."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -913,15 +917,53 @@ async def test_on_linux_both_checks_run_in_the_jail_on_a_file_with_findings_and_
             "capture_output=True, text=True)\n"
             "rule = subprocess.run([sys.executable, '-m', 'python_cordis_plugin.startup_check', "
             "'.bh-02/startup.py'], capture_output=True, text=True)\n"
+            "types = subprocess.run([sys.executable, '-m', 'mypy', '--strict', '--config-file=', "
+            "'.bh-02/startup.py'], capture_output=True, text=True)\n"
             "print(ruff.returncode, ruff.stdout.count('D415'), rule.returncode, "
             "'doctest go:' in rule.stdout)\n"
+            "print(types.returncode, types.stdout.count('[return-value]'), "
+            "types.stdout.count('[no-untyped-def]'))\n"
             "show(1)"
         )
     assert out == (
-        f"({person} ran first: functions show(x). "
-        ".bh-02/startup.py ran next: functions run(cmd), go(x), fine(). "
-        ".bh-02/startup.py docstring findings: run D415, example; go doctest)\nFalse\n1 1 1 True\n'<1>'"
+        f"({person} ran first: functions show(x: int) -> str. "
+        ".bh-02/startup.py ran next: functions run(cmd), go(x: int) -> str, fine() -> None. "
+        ".bh-02/startup.py findings: run D415, example, no-untyped-def; go doctest, return-value; "
+        "elsewhere in the file: import-not-found)\nFalse\n1 1 1 True\n1 1 1\n'<1>'"
     ), out
+    cache = project / ".bh-02" / "mypy_cache"
+    assert (cache / ".gitignore").read_text().rstrip().endswith("*")  # mypy's own: git ignores the cache
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_on_linux_a_second_start_in_the_project_reuses_mypy_s_cache_from_inside_the_jail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each REPL start is a jail of its own with a scratch directory of its own, so mypy's cache is in
+    the project (`.bh-02/mypy_cache`), the one writable place that outlives the jail. The first start
+    pays mypy's cold start (seconds); the second, in a new jail, reads what the first wrote and says the
+    same, in a fraction of the time. (The numbers are measured and recorded on TASK-0109; this is the
+    guard that the cache is used at all.)"""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    (project / ".bh-02").mkdir(parents=True)
+    (project / ".bh-02" / "startup.py").write_text(_FINDINGS)
+    host = _Host(code=code_directories(code_packages(["python_cordis_plugin"])))
+
+    async def start() -> tuple[float, str]:
+        """A new REPL in a new jail: how long its first input took, and what it said."""
+        async with _python(BrigJail(BrigConfig(), host), PythonProcessConfig(root=str(project))) as process:
+            began = time.perf_counter()
+            out = await process.run("1")
+            return time.perf_counter() - began, out
+
+    cold, first = await start()
+    warm, second = await start()
+    assert "go doctest, return-value" in first and first == second
+    assert any(each.is_dir() for each in (project / ".bh-02" / "mypy_cache").iterdir())
+    assert warm < cold * 0.7, (cold, warm)
 
 
 @pytest.mark.usefixtures("_needs_a_jail")

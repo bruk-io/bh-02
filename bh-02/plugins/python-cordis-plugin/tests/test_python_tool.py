@@ -2,6 +2,7 @@
 that come back as the input's text."""
 
 import asyncio
+import dataclasses
 import os
 import re
 import shutil
@@ -38,6 +39,10 @@ def _process(
     """The python tool's process as the python row builds it: started by a runner over
     `mechanism`, its inputs confined as the approval rule says of that runner."""
     runner = mechanism if isinstance(mechanism, Runner) else Runner(mechanism)
+    if cache := os.environ.get(
+        "BH_TEST_MYPY_CACHE"
+    ):  # conftest: one mypy cache for the run, warm after the first
+        config = dataclasses.replace(config, mypy_cache=cache)
     return PythonProcess(runner, config, access, rule=Approval(runner), tools=tools)
 
 
@@ -105,13 +110,23 @@ def _project_s(root: Path, text: str) -> Path:
     return path
 
 
-def _bare(path: object, *names: str) -> str:
-    """The aside about a startup file whose told `names` have no docstring: a function misses D103 and a
-    class (named with a capital) D101, and each misses `example` too. Ruff calls a name with a leading
-    underscore private even when `__all__` names it, so such a name misses `example` alone."""
-    return f"{path} docstring findings: " + "; ".join(
-        f"{name} {'' if name.startswith('_') else ('D101, ' if name[0].isupper() else 'D103, ')}example"
+def _bare(path: object, *names: str, elsewhere: str = "") -> str:
+    """The aside about a startup file whose told `names` are undocumented and untyped functions, or
+    classes (named with a capital) with no methods: a function misses D103, `example` and, mypy
+    strict, `no-untyped-def`; a class D101 and `example`. Ruff calls a name with a leading underscore
+    private even when `__all__` names it, so such a name misses no D103. `elsewhere` is what mypy says
+    of the rest of the file (an untyped private function, say)."""
+    misses = [
+        f"{name} "
+        + (
+            "D101, example"
+            if name[0].isupper()
+            else f"{'' if name.startswith('_') else 'D103, '}example, no-untyped-def"
+        )
         for name in names
+    ]
+    return f"{path} findings: " + "; ".join(
+        [*misses, *([f"elsewhere in the file: {elsewhere}"] if elsewhere else [])]
     )
 
 
@@ -119,7 +134,11 @@ async def test_the_person_s_startup_file_runs_before_the_project_s(tmp_path: Pat
     """Both files: the person's first, so its functions are there for the project's, which may
     bind a name afresh; each is said with the functions it defined, and leaves nothing else behind."""
     person = _person_s("def show(x):\n    return f'<{x}>'\n\nWIDTH = 80\n")
-    _project_s(tmp_path, "def sh(cmd):\n    return show(cmd)\n\nWIDTH = 100\n")
+    # `show` is the person's, there when this file runs: declared with a bare annotation, as `tools` is
+    _project_s(
+        tmp_path,
+        "from typing import Any\n\nshow: Any\n\n\ndef sh(cmd):\n    return show(cmd)\n\nWIDTH = 100\n",
+    )
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("sh('ls'), WIDTH")
         assert first == (
@@ -344,8 +363,10 @@ async def test_a_startup_file_tells_the_functions_and_classes_it_defines_and_not
         first = await k.run("run_tests()")
         assert first == (
             "(.bh-02/startup.py ran first: functions run_tests(path='.', *, quiet=True), changed(), "
-            "Suite(root), square(x), Handler(). .bh-02/startup.py docstring findings: run_tests example; "
-            "changed example; Suite D101, example; Handler D101, example)\n'.'"
+            "Suite(root), square(x), Handler(). .bh-02/startup.py findings: "
+            "run_tests example, no-untyped-def; changed example, no-untyped-def; "
+            "Suite D101, example, no-untyped-def; "
+            "Handler D101, example, no-untyped-def; elsewhere in the file: no-untyped-def)\n'.'"
         )
         assert "hidden" not in first and "TOOLS" not in first  # what is not told is not counted
         used = "again(), handler('x'), _quiet(3), TOOLS, join('a', 'b'), os.sep, square(4)"
@@ -356,7 +377,8 @@ async def test_a_private_name_is_not_told_but_works(tmp_path: Path) -> None:
     _project_s(tmp_path, "def loud(x):\n    return x\n\n\ndef _quiet(x):\n    return -x\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("_quiet(1), loud(1)") == (
-            f"(.bh-02/startup.py ran first: functions loud(x). {_bare('.bh-02/startup.py', 'loud')})\n(-1, 1)"
+            "(.bh-02/startup.py ran first: functions loud(x). "
+            f"{_bare('.bh-02/startup.py', 'loud', elsewhere='no-untyped-def')})\n(-1, 1)"
         )
 
 
@@ -386,6 +408,8 @@ def _exported(y):
 
 __all__ = ["dedent", "mine", "never_bound", "_exported", "mine", 7]
 """
+# what mypy says of the rest of that file: the 7 in `__all__`, and `other`, which it leaves out, untyped
+_EXPORTED_ELSEWHERE = "list-item, no-untyped-def"
 
 
 async def test_a_file_with_all_tells_exactly_the_callables_it_names_imported_ones_included(
@@ -400,7 +424,7 @@ async def test_a_file_with_all_tells_exactly_the_callables_it_names_imported_one
         told = await k.run("other(), mine(1), _exported(2)")
     assert told == (
         "(.bh-02/startup.py ran first: functions dedent(text), mine(x), _exported(y). "
-        f"{_bare('.bh-02/startup.py', 'mine', '_exported')})\n(None, 1, 2)"
+        f"{_bare('.bh-02/startup.py', 'mine', '_exported', elsewhere=_EXPORTED_ELSEWHERE)})\n(None, 1, 2)"
     )
 
 
@@ -412,15 +436,16 @@ async def test_all_names_only_what_the_file_that_bound_it_made(tmp_path: Path) -
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("1") == (
             f"({person} ran first: functions dedent(text), mine(x), _exported(y). "
-            f"{_bare(person, 'mine', '_exported')}. "
+            f"{_bare(person, 'mine', '_exported', elsewhere=_EXPORTED_ELSEWHERE)}. "
             f".bh-02/startup.py ran next: functions extra(z). {_bare('.bh-02/startup.py', 'extra')})\n1"
         )
     _project_s(tmp_path, "def extra(z):\n    return z\n\n\ndef more():\n    pass\n\n\n__all__ = ['more']\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("1") == (
             f"({person} ran first: functions dedent(text), mine(x), _exported(y). "
-            f"{_bare(person, 'mine', '_exported')}. "
-            f".bh-02/startup.py ran next: functions more(). {_bare('.bh-02/startup.py', 'more')})\n1"
+            f"{_bare(person, 'mine', '_exported', elsewhere=_EXPORTED_ELSEWHERE)}. "
+            ".bh-02/startup.py ran next: functions more(). "
+            f"{_bare('.bh-02/startup.py', 'more', elsewhere='no-untyped-def')})\n1"
         )
 
 
@@ -429,15 +454,17 @@ async def test_all_that_is_not_a_list_or_a_tuple_names_nothing(tmp_path: Path) -
     does not read it as one either: the file has none, and the public rule tells what it defines."""
     _project_s(tmp_path, "def a(x):\n    return x\n\n\ndef b():\n    pass\n\n\n__all__ = {'b'}\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
-        # ruff reads no set as `__all__` and calls no name public then: `example` alone
+        # ruff reads no set as `__all__` and calls no name public then: `example` alone; mypy says a set
+        # is not what `__all__` is, of the file and not of a function
         assert await k.run("1") == (
-            "(.bh-02/startup.py ran first: functions a(x), b(). "
-            ".bh-02/startup.py docstring findings: a example; b example)\n1"
+            "(.bh-02/startup.py ran first: functions a(x), b(). .bh-02/startup.py findings: "
+            "a example, no-untyped-def; b example, no-untyped-def; elsewhere in the file: misc)\n1"
         )
     _project_s(tmp_path, "def a(x):\n    return x\n\n\ndef b():\n    pass\n\n\n__all__ = ('b',)\n")
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("1") == (
-            f"(.bh-02/startup.py ran first: functions b(). {_bare('.bh-02/startup.py', 'b')})\n1"
+            "(.bh-02/startup.py ran first: functions b(). "
+            f"{_bare('.bh-02/startup.py', 'b', elsewhere='no-untyped-def')})\n1"
         )
 
 
@@ -446,7 +473,9 @@ async def test_a_name_bound_to_what_an_earlier_file_made_is_not_told_again(tmp_p
     person's file, which told it. A function it defines afresh, even under a name the person's
     file used, is its own and is told."""
     person = _person_s("def show(x):\n    return f'<{x}>'\n\n\ndef fmt(x):\n    return x\n")
-    _project_s(tmp_path, "display = show\n\n\ndef fmt(x, y):\n    return x\n")
+    _project_s(
+        tmp_path, "from typing import Any\n\nshow: Any\ndisplay = show\n\n\ndef fmt(x, y):\n    return x\n"
+    )
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("display(1)") == (
             f"({person} ran first: functions show(x), fmt(x). {_bare(person, 'show', 'fmt')}. "
@@ -455,7 +484,7 @@ async def test_a_name_bound_to_what_an_earlier_file_made_is_not_told_again(tmp_p
 
 
 _DOCUMENTED = '''\
-def run(cmd):
+def run(cmd: str) -> str:
     """Run CMD and give back what it printed.
 
     >>> run("ls")
@@ -472,7 +501,7 @@ class Tests:
         Tests().go()
     """
 
-    def go(self):
+    def go(self) -> None:
         pass
 '''
 
@@ -509,11 +538,12 @@ def _private(x):
         first = await k.run("[bare(1), late(2), _private(3), run(4)]")
         listing, findings = first.splitlines()[0], first.splitlines()[1]
         assert listing.startswith(
-            "(.bh-02/startup.py ran first: functions run(cmd), Tests(), bare(x), late(x)"
+            "(.bh-02/startup.py ran first: functions run(cmd: str) -> str, Tests(), bare(x), late(x)"
         )
         assert findings == "[1, 2, 3, 4]"
         assert listing.endswith(
-            "late(x). .bh-02/startup.py docstring findings: bare D103, example; late doctest)"
+            "late(x). .bh-02/startup.py findings: bare D103, example, no-untyped-def; "
+            "late doctest, no-untyped-def; elsewhere in the file: no-untyped-def)"
         )
         assert await k.run("[n for n in globals() if n.startswith('_bh')]") == "[]"  # the check left nothing
 
@@ -527,7 +557,7 @@ async def test_a_finding_stops_nothing_and_hides_nothing(tmp_path: Path) -> None
         first = await k.run("show(run(1)), WIDTH, TOOLS")
     assert first == (
         f"({person} ran first: functions show(x). {_bare(person, 'show')}. "
-        ".bh-02/startup.py ran next: functions run(cmd), Tests())\n('<1>', 80, 2)"
+        ".bh-02/startup.py ran next: functions run(cmd: str) -> str, Tests())\n('<1>', 80, 2)"
     )
 
 
@@ -540,7 +570,7 @@ async def test_a_file_with_no_findings_and_one_that_tells_nothing_add_nothing_to
         first = await k.run("WIDTH")
     assert first == (
         f"({person} ran first: no public functions. "
-        ".bh-02/startup.py ran next: functions run(cmd), Tests())\n80"
+        ".bh-02/startup.py ran next: functions run(cmd: str) -> str, Tests())\n80"
     )
 
 
@@ -582,8 +612,8 @@ async def test_a_check_that_could_not_run_is_said_so_and_the_file_still_ran(tmp_
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("bare(5)")
     assert first == (
-        "(.bh-02/startup.py ran first: functions bare(x). .bh-02/startup.py docstrings could not be "
-        "checked)\n5"
+        "(.bh-02/startup.py ran first: functions bare(x). .bh-02/startup.py docstrings and types could not "
+        "be checked)\n5"
     )
     assert "ZeroDivisionError" not in first
 
@@ -678,12 +708,13 @@ async def test_a_told_function_s_signature_is_cleaned_cut_or_dots_whatever_its_d
         "def unreadable(): pass\n\n"
         "unreadable.__signature__ = 5\n",
     )
+    elsewhere = "attr-defined, no-untyped-def"  # `__signature__ = 5`, and the private classes' methods
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         first = await k.run("1")
     assert first == (
         "(.bh-02/startup.py ran first: functions colored(a=<[31mred>), "
         f"long(a={'L' * 157}…, boom(...), unreadable(...). "
-        f"{_bare('.bh-02/startup.py', 'colored', 'long', 'boom', 'unreadable')})\n1"
+        f"{_bare('.bh-02/startup.py', 'colored', 'long', 'boom', 'unreadable', elsewhere=elsewhere)})\n1"
     ), first
 
 
@@ -715,7 +746,8 @@ async def test_an_object_that_misbehaves_when_asked_is_not_told_and_does_not_fai
     async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
         told = await k.run("1")
     assert told == (
-        f"(.bh-02/startup.py ran first: functions plain(). {_bare('.bh-02/startup.py', 'plain')})\n1"
+        "(.bh-02/startup.py ran first: functions plain(). "
+        f"{_bare('.bh-02/startup.py', 'plain', elsewhere='no-untyped-def')})\n1"
     )
 
 
@@ -959,9 +991,27 @@ def test_the_model_is_told_the_docstring_convention_of_the_file_it_writes_with_o
         assert _DOCSTRINGS not in instructions_for(confined, ())
 
 
+_TYPED = (
+    "A startup file that uses a name the REPL provides, such as `tools`, declares it with a bare "
+    "annotation (`tools: Any`): that binds nothing, so the REPL's stays, and mypy is satisfied."
+)
+
+
+def test_the_model_is_told_how_to_declare_a_name_the_repl_provides_with_or_without_a_jail() -> None:
+    """The file is type-checked wherever it is (at start, or by the model's own command), and the REPL's
+    `tools` is a name it may use: said of a file the model writes, not when the only one is the person's."""
+    mine, theirs = (".bh-02/startup.py",), ("/home/me/.config/bh-02/startup.py",)
+    for confined in (True, False):
+        assert instructions_for(confined, mine).count(_TYPED) == 1
+        assert instructions_for(confined, mine, theirs=theirs).count(_TYPED) == 1
+        assert _TYPED not in instructions_for(confined, (), theirs=theirs)
+        assert _TYPED not in instructions_for(confined, ())
+
+
 _COMMANDS = (
-    "`python -m ruff check --isolated --no-fix --select D101,D103,D205,D415,D419 FILE` (ruff's codes) and "
-    "`python -m python_cordis_plugin.startup_check FILE` (`example` and `doctest`)"
+    "`python -m ruff check --isolated --no-fix --select D101,D103,D205,D415,D419 FILE` (ruff's codes), "
+    "`python -m python_cordis_plugin.startup_check FILE` (`example` and `doctest`) and "
+    "`python -m mypy --strict --config-file= FILE` (the types)"
 )
 
 
@@ -972,19 +1022,24 @@ def test_confined_the_model_is_told_the_files_are_checked_at_start_and_how_to_se
         instructions_for(True, mine, theirs=theirs),
         instructions_for(True, (), theirs=theirs),  # the person's file is checked all the same
     ):
-        assert "told functions are checked for a docstring with a summary line and an example" in told
-        assert "the startup line names each that misses with the codes it breaks" in told
+        assert "each told function for a docstring with a summary line and an example" in told
+        assert "and the file for types, strictly (`mypy --strict`: annotate every function)" in told
+        assert "The startup line names each function that misses with the codes it breaks" in told
+        assert "`elsewhere in the file` is what no told function holds, an import say." in told
         assert "A finding stops and hides nothing." in told
         assert f"For the detail run the tool in an input (`python` is `sys.executable`): {_COMMANDS}." in told
         assert "Nothing checks a startup file here" not in told
-    assert "told functions are checked" not in instructions_for(True, ())  # no startup file to check
+    assert "the startup files are checked" not in instructions_for(True, ())  # no startup file to check
 
 
-def test_unconfined_nothing_runs_unasked_and_the_model_is_given_the_two_commands() -> None:
+def test_unconfined_nothing_runs_unasked_and_the_model_is_given_the_three_commands() -> None:
     mine, theirs = (".bh-02/startup.py",), ("/home/me/.config/bh-02/startup.py",)
     told = instructions_for(False, mine, theirs=theirs)
     assert "Nothing checks a startup file here unasked: after you write a function in one, check its" in told
-    assert f"docstring with these, as inputs of your own (`python` is `sys.executable`): {_COMMANDS}." in told
+    assert (
+        "docstring and its types with these, as inputs of your own (`python` is `sys.executable`): " in told
+    )
+    assert f"{_COMMANDS}. Each exits 1 on a finding." in told
     assert "Each exits 1 on a finding." in told
     assert "the startup line names" not in told  # nothing is listed or checked unconfined
     assert "Nothing checks" not in instructions_for(False, (), theirs=theirs)  # not the person's file
@@ -992,12 +1047,14 @@ def test_unconfined_nothing_runs_unasked_and_the_model_is_given_the_two_commands
 
 
 def test_what_the_model_is_told_of_the_check_is_short_because_it_is_in_every_request() -> None:
-    end = "(`example` and `doctest`)."
+    end = "(the types)."
     confined = instructions_for(True, (".bh-02/startup.py",))
     unconfined = instructions_for(False, (".bh-02/startup.py",))
-    said = confined[confined.index("When a REPL starts, the startup files'") : confined.index(end) + len(end)]
+    said = confined[
+        confined.index("When a REPL starts, the startup files are") : confined.index(end) + len(end)
+    ]
     by_hand = unconfined[unconfined.index("Nothing checks a startup file") : unconfined.index(end) + len(end)]
-    assert len(said) < 700 and len(by_hand) < 500, (len(said), len(by_hand))
+    assert len(said) < 900 and len(by_hand) < 500, (len(said), len(by_hand))
 
 
 def test_the_old_name_for_a_startup_function_is_nowhere_in_what_the_model_is_told() -> None:
@@ -1911,3 +1968,132 @@ async def test_bh_02_s_other_tools_are_functions_an_input_calls_as_the_model_wou
 async def test_with_no_tools_to_offer_the_namespace_has_no_tools() -> None:
     async with _process(Unjailed(), PythonProcessConfig(), tools=_Offering()) as k:
         assert await k.run("'tools' in globals()") == "False"
+
+
+_CLEAN_FUNCTION = '''\
+def clean(a: int) -> int:
+    """Give it back.
+
+    Use::
+
+        clean(1)
+    """
+    return a
+'''
+_STRICT = (
+    '''\
+try:
+    import nosuchmodule_bh
+except ModuleNotFoundError:  # the REPL can't import it either, and mypy says so
+    pass
+
+
+def untyped(a, b):
+    """Add.
+
+    Use::
+
+        untyped(1, 2)
+    """
+    return a + b
+
+
+def wrong(a: int) -> int:
+    """Add a string.
+
+    Use::
+
+        wrong(1)
+    """
+    return a + "x"
+
+
+'''
+    + _CLEAN_FUNCTION
+)
+
+
+async def test_a_startup_file_is_type_checked_strictly_and_the_aside_names_the_codes_not_the_messages(
+    tmp_path: Path,
+) -> None:
+    """An untyped function, a type error, an import mypy can't find (in the file, not in a function) and a
+    clean function: each told function that misses with its mypy codes, the file's own after them, and
+    nothing mypy wrote; the file still ran and its functions work."""
+    _project_s(tmp_path, _STRICT)
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        first = await k.run("clean(1)")
+    assert first == (
+        "(.bh-02/startup.py ran first: functions untyped(a, b), wrong(a: int) -> int, clean(a: int) -> int. "
+        ".bh-02/startup.py findings: untyped no-untyped-def; wrong operator; "
+        "elsewhere in the file: import-not-found)\n1"
+    )
+    assert "Incompatible" not in first and "Cannot find" not in first and "nosuchmodule" not in first
+
+
+async def test_an_import_the_repl_can_not_make_is_import_not_found_to_mypy_too(tmp_path: Path) -> None:
+    """The same imports are found by mypy and by the REPL: a module beside the startup file and one in
+    the project are neither (the REPL is `python -I`), and a startup file that guards the import runs,
+    and is told so by mypy all the same."""
+    (tmp_path / "helper_bh.py").write_text("VALUE = 1\n")
+    (tmp_path / ".bh-02").mkdir()
+    (tmp_path / ".bh-02" / "helper_bh.py").write_text("VALUE = 1\n")
+    guarded = "try:\n    import helper_bh\nexcept ModuleNotFoundError:\n    helper_bh = None\n\n\n"
+    _project_s(tmp_path, guarded + _CLEAN_FUNCTION)
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        first = await k.run("repr(helper_bh)")
+    assert first == (
+        "(.bh-02/startup.py ran first: functions clean(a: int) -> int. "
+        ".bh-02/startup.py findings: elsewhere in the file: import-not-found)\n'None'"
+    )
+
+
+async def test_a_name_the_repl_provides_is_declared_with_a_bare_annotation_and_the_repl_s_own_stays(
+    tmp_path: Path,
+) -> None:
+    """`tools: Any` binds nothing when the file runs, so `tools` is still the REPL's, bh-02's tools as
+    functions, and a function of the file calls through it; mypy, which can't see the REPL, is
+    satisfied by the declaration. Without it the function that uses `tools` is a `name-defined`."""
+    declaration = "from typing import Any\n\ntools: Any\n\n\n"
+    function = (
+        "def echo(text: str) -> str:\n"
+        '    """Call the echo tool.\n\n    Use::\n\n        echo("hi")\n    """\n'
+        "    return str(tools.echo(text=text))\n"
+    )
+    offering = _Offering("echo")
+    _project_s(tmp_path, declaration + function)
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path)), tools=offering) as k:
+        first = await k.run("echo('hi')")
+        assert first == (
+            "(.bh-02/startup.py ran first: functions echo(text: str) -> str)\n"
+            "(bh-02's other tools, run by bh-02 when you call one: tools.echo; help(tools.NAME) "
+            "says what one takes)\n'echo: hi'"
+        )
+        assert await k.run("type(tools).__name__") == "'_Offered'"  # the REPL's own, not the annotation
+        assert offering.calls == [("echo", {"text": "hi"})]
+    _project_s(tmp_path, function)
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path)), tools=_Offering("echo")) as k:
+        undeclared = await k.run("1")
+    assert ".bh-02/startup.py findings: echo name-defined" in undeclared
+
+
+async def test_mypy_keeps_its_cache_in_the_project_where_git_ignores_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default: `.bh-02/mypy_cache` under the root, which mypy fills and marks ignored itself (a
+    `.gitignore` of `*`), so the project's own `.gitignore` is not touched and nothing shows as new."""
+    monkeypatch.delenv("BH_TEST_MYPY_CACHE")  # conftest's shared cache is for the other tests
+    _project_s(tmp_path, _CLEAN_FUNCTION)
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        await k.run("1")
+    cache = tmp_path / ".bh-02" / "mypy_cache"
+    assert (cache / ".gitignore").read_text().rstrip().endswith("*")
+    assert not (tmp_path / ".mypy_cache").exists()  # the project's own mypy keeps its cache there, apart
+    assert sorted(each.name for each in (tmp_path / ".bh-02").iterdir()) == ["mypy_cache", "startup.py"]
+
+
+def test_mypy_cache_is_a_config_key_and_a_directory_name() -> None:
+    assert PythonProcessConfig().mypy_cache == ".bh-02/mypy_cache"
+    assert PythonProcessConfig(mypy_cache="/var/cache/bh-02/mypy").mypy_cache == "/var/cache/bh-02/mypy"
+    for bad in ("", None, 3, [".bh-02"]):
+        with pytest.raises(TypeError, match="`mypy_cache` must be a directory name"):
+            PythonProcessConfig(mypy_cache=bad)  # type: ignore[arg-type]

@@ -145,7 +145,8 @@ def check_examples_command(files: Sequence[Path]) -> None:
     (a doctest block, or a `::` literal block) and for doctest blocks that parse, each with a blank
     line before it. It reads each FILE and runs none of its code, needs no session and no model, and
     exits 1 on a finding, 0 on none and 2 when it can't check a file. ruff checks the rest of the
-    convention: `ruff check --isolated --no-fix --select D101,D103,D205,D415,D419 FILE`."""
+    convention (`ruff check --isolated --no-fix --select D101,D103,D205,D415,D419 FILE`), and mypy the
+    types, with `mypy --strict --config-file= FILE`."""
     program = _check_program()
     sys.exit(subprocess.run([sys.executable, "-I", str(program), *map(str, files)], check=False).returncode)
 

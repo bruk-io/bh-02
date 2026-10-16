@@ -1082,6 +1082,7 @@ source = { editable = "bh-02/plugins/python-cordis-plugin" }
 dependencies = [
     { name = "cordis" },
     { name = "host-paths" },
+    { name = "mypy" },
     { name = "ruff" },
 ]
 
@@ -1089,6 +1090,7 @@ dependencies = [
 requires-dist = [
     { name = "cordis", editable = "libs/cordis" },
     { name = "host-paths", editable = "libs/host-paths" },
+    { name = "mypy", git = "https://github.com/python/mypy?rev=539f6e67b6743d39ce1c643f4cea08fa60602093" },
     { name = "ruff", specifier = ">=0.16.7" },
 ]
 

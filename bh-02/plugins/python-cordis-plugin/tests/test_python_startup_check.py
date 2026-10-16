@@ -374,10 +374,7 @@ def _said(*misses: tuple[str, list[str]]) -> str:
 
 def test_the_aside_names_each_told_function_that_misses_and_its_codes() -> None:
     line = _said(("b", ["doctest"]), ("a", ["example", "D103"]))
-    assert (
-        startup_checked("PATH", ["a", "b", "c"], line)
-        == "PATH docstring findings: a D103, example; b doctest"
-    )
+    assert startup_checked("PATH", ["a", "b", "c"], line) == "PATH findings: a D103, example; b doctest"
 
 
 def test_a_file_with_no_findings_adds_nothing() -> None:
@@ -389,13 +386,13 @@ def test_the_aside_names_only_what_the_file_told() -> None:
     """The check reads the syntax and the file's own input the live objects: a name only the first
     knows (a function the file deleted, a private one in `__all__` it never bound) is not said."""
     line = _said(("gone", ["D103"]), ("a", ["example"]))
-    assert startup_checked("PATH", ["a"], line) == "PATH docstring findings: a example"
+    assert startup_checked("PATH", ["a"], line) == "PATH findings: a example"
     assert startup_checked("PATH", ["b"], line) == ""
 
 
 def test_the_aside_is_in_the_order_the_file_told_its_functions_not_the_check_s() -> None:
     line = _said(("z", ["example"]), ("a", ["D101"]))
-    assert startup_checked("PATH", ["a", "z"], line) == "PATH docstring findings: a D101; z example"
+    assert startup_checked("PATH", ["a", "z"], line) == "PATH findings: a D101; z example"
 
 
 def test_the_aside_never_says_what_a_tool_wrote() -> None:
@@ -414,6 +411,6 @@ def test_the_aside_never_says_what_a_tool_wrote() -> None:
         "",
     ):
         said = startup_checked("PATH", ["a"], bad)
-        assert said == "PATH docstrings could not be checked", bad[:40]
+        assert said == "PATH docstrings and types could not be checked", bad[:40]
         assert saying not in said
-    assert startup_checked("PATH", ["a"], _said(("a", ["D103"]))) == "PATH docstring findings: a D103"
+    assert startup_checked("PATH", ["a"], _said(("a", ["D103"]))) == "PATH findings: a D103"

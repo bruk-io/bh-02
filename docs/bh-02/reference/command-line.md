@@ -101,16 +101,17 @@ Usage: bh-02 check-examples [OPTIONS] FILES...
   blocks that parse, each with a blank line before it. It reads each FILE and
   runs none of its code, needs no session and no model, and exits 1 on a
   finding, 0 on none and 2 when it can't check a file. ruff checks the rest of
-  the convention: `ruff check --isolated --no-fix --select
-  D101,D103,D205,D415,D419 FILE`.
+  the convention (`ruff check --isolated --no-fix --select
+  D101,D103,D205,D415,D419 FILE`), and mypy the types, with `mypy --strict
+  --config-file= FILE`.
 
 Options:
   --help  Show this message and exit.
 ```
 
 It is the example rule of the docstring check a session runs at start, as a command for you, a
-pre-commit hook or CI ([Checking the docstrings](../how-it-works/python-tool.md#checking-the-docstrings)
-has both lines and how to wire them). It prints one line a finding,
+pre-commit hook or CI ([Checking the docstrings and types](../how-it-works/python-tool.md#checking-the-docstrings-and-types)
+has the ruff and mypy lines beside it and how to wire them). It prints one line a finding,
 `FILE:LINE: CODE NAME: what to do`, with the codes `example` (no example) and `doctest` (a doctest
 block that does not parse, or has no blank line before it).
 

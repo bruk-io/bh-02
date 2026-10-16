@@ -15,7 +15,7 @@ each input to the person and runs it only on a yes.
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from python_cordis_plugin.startup_check import RUFF_FLAGS
+from python_cordis_plugin.startup_check import MYPY_FLAGS, RUFF_FLAGS
 
 __all__ = ["PYTHON", "instructions_for", "shown_call"]
 
@@ -75,22 +75,29 @@ _DOCSTRINGS = (
     "examples in reST: a doctest block (`>>>` calls with their output, a blank line before and "
     "after) when the output is fixed, a `::` block when it isn't."
 )
-# the two tools that check a startup file, as an input runs them: `python` is `sys.executable`
+_TYPED = (
+    "A startup file that uses a name the REPL provides, such as `tools`, declares it with a bare "
+    "annotation (`tools: Any`): that binds nothing, so the REPL's stays, and mypy is satisfied."
+)
+# the tools that check a startup file, as an input runs them: `python` is `sys.executable`
 _TOOLS = (
-    f"`python -m ruff check {' '.join(RUFF_FLAGS)} FILE` (ruff's codes) and "
-    "`python -m python_cordis_plugin.startup_check FILE` (`example` and `doctest`)"
+    f"`python -m ruff check {' '.join(RUFF_FLAGS)} FILE` (ruff's codes), "
+    "`python -m python_cordis_plugin.startup_check FILE` (`example` and `doctest`) and "
+    f"`python -m mypy {' '.join(MYPY_FLAGS)} FILE` (the types)"
 )
 _CHECKED = (
-    "When a REPL starts, the startup files' told functions are checked for a docstring with a summary "
-    "line and an example: the startup line names each that misses with the codes it breaks, ruff's "
-    "(D101, D103, D205, D415, D419) or bh-02's `example` (no example) and `doctest` (a doctest block "
-    "that does not parse, or has no blank line before it). A finding stops and hides nothing. For the "
-    f"detail run the tool in an input (`python` is `sys.executable`): {_TOOLS}."
+    "When a REPL starts, the startup files are checked in the jail: each told function for a docstring "
+    "with a summary line and an example, and the file for types, strictly (`mypy --strict`: annotate "
+    "every function). The startup line names each function that misses with the codes it breaks, ruff's "
+    "(D101, D103, D205, D415, D419), bh-02's `example` and `doctest`, or mypy's (`no-untyped-def`, "
+    "`operator`, `import-not-found`); `elsewhere in the file` is what no told function holds, an import "
+    "say. A finding stops and hides nothing. For the detail run the tool in an input (`python` is "
+    f"`sys.executable`): {_TOOLS}."
 )
 _CHECK_BY_HAND = (
     "Nothing checks a startup file here unasked: after you write a function in one, check its "
-    f"docstring with these, as inputs of your own (`python` is `sys.executable`): {_TOOLS}. Each exits "
-    "1 on a finding."
+    "docstring and its types with these, as inputs of your own (`python` is `sys.executable`): "
+    f"{_TOOLS}. Each exits 1 on a finding."
 )
 _USE = (
     "How to use it:",
@@ -195,10 +202,11 @@ def _keep(confined: bool, startup: Sequence[str], theirs: Sequence[str]) -> str:
     write and grow; the person's (`theirs`), which come first, are theirs and not its to edit.
     Confined, the files run when the REPL starts, and it is told which of their functions are told
     to it and what they cost (once: the prompt is fixed for a conversation, the signatures arrive
-    with the first input's output), and that their docstrings are checked then, with how to see a
-    finding's detail; unconfined nothing is listed or checked, so none of that is said, and it is
-    given the commands to check the file it writes. The docstring convention is said of the
-    project's file, the model's to write, either way."""
+    with the first input's output), and that their docstrings and types are checked then, with how to
+    see a finding's detail; unconfined nothing is listed or checked, so none of that is said, and it is
+    given the commands to check the file it writes. The docstring convention, and how the file
+    declares a name the REPL provides, are said of the project's file, the model's to write, either
+    way."""
     runs = (
         "a new REPL runs it before your first input."
         if confined
@@ -224,7 +232,7 @@ def _keep(confined: bool, startup: Sequence[str], theirs: Sequence[str]) -> str:
     if confined and said:
         said.append(_TOLD)
     if startup:
-        said.append(_DOCSTRINGS)
+        said.extend((_DOCSTRINGS, _TYPED))
     if confined and said:
         said.append(_CHECKED)
     elif startup:

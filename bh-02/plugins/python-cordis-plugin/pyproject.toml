@@ -8,6 +8,9 @@ dependencies = [
     "host-paths",
     # run in the jail, under bh-02's interpreter, over a startup file's text (decision-0006 point 7)
     "ruff>=0.16.7",
+    # mypy 2.4.0-dev, the root's pin (uv.lock holds one mypy): the first mypy that types PEP 661 sentinels.
+    # Move both back to "mypy>=2.4" from PyPI once it is released, and drop the source below.
+    "mypy>=2.4.0.dev0",
 ]
 
 [project.entry-points."cordis.plugins"]
@@ -16,6 +19,7 @@ python = "python_cordis_plugin"
 [tool.uv.sources]
 cordis = { workspace = true }
 host-paths = { workspace = true }
+mypy = { git = "https://github.com/python/mypy", rev = "539f6e67b6743d39ce1c643f4cea08fa60602093" }
 
 [build-system]
 requires = ["hatchling"]

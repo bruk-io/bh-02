@@ -51,13 +51,15 @@ cut at `_CUT`, `name(...)` for one that could not be read, a name Python could n
 an identifier) left out, and signatures told up to `_BUDGET` characters across the REPL's startup
 files, in the order they run, then names only.
 
-Each file that told something is then checked against the docstring convention, in the jail (decision-0006's
-point 7): a second input runs `startup_check.py` by path as a program under the Python process's own
-interpreter, over the file's text, which runs ruff with bh-02's flags only and bh-02's example rule and prints
-one line of JSON naming each told function that misses and the rule codes it breaks (`_check_input`). The
-host reads that line as data too (`startup_checked`): only a name the file told, only a code from the closed
-set (`CODES`), never a tool's message, which quotes the file. A finding is advice: it never stops a file
-running or hides a function, and a check that did not run is said, once, as such.
+Each file that told something is then checked against the docstring convention and for types, in the jail
+(decision-0006's point 7): a second input runs `startup_check.py` by path as a program under the Python
+process's own interpreter, over the file's text, which runs ruff and mypy with bh-02's flags only and bh-02's
+example rule and prints one line of JSON naming each told function that misses and the codes it breaks, and
+the codes of what is outside them (`_check_input`). The host reads that line as data too
+(`startup_checked`): only a name the file told, only a code from the closed set (`CODES`), never a tool's
+message, which quotes the file. A finding is advice: it never stops a file running or hides a function, and
+a check that did not run is said, once, as such. mypy's cache is the project's (`mypy_cache`): a REPL start
+is the first check there, which takes seconds, and every other takes a fraction of one.
 """
 
 import asyncio
@@ -76,14 +78,16 @@ from typing import Any, Protocol, runtime_checkable
 
 from host_paths import config_home, walked
 from python_cordis_plugin.python import PYTHON, instructions_for
-from python_cordis_plugin.startup_check import CODES
+from python_cordis_plugin.startup_check import CODES, ELSEWHERE
 
 __all__ = ["Access", "Jailed", "PythonProcess", "PythonProcessConfig", "Rule", "Runner", "worker_argv"]
 
 _WORKER = Path(__file__).with_name("worker.py")
-# the docstring check: a program of its own, run by path in the jail like the worker
+# the docstring and type check: a program of its own, run by path in the jail like the worker
 _CHECK = Path(__file__).with_name("startup_check.py")
-_CHECK_S = 40.0  # how long the check gets in the Python process: ruff and the rule take milliseconds
+# How long the check gets in the Python process: ruff and the rule take milliseconds, mypy a fraction of a
+# second warm and, cold, seconds (13 for a file that imports textual); it gets 90 s of this, ruff 20.
+_CHECK_S = 120.0
 # The longest line the worker sends: its output and its error are capped at 20,000 characters
 # each, and JSON escapes a character to at most 12 bytes (a surrogate pair, `\ud83d\ude00`),
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
@@ -160,11 +164,15 @@ class PythonProcessConfig:
     across sessions. The person's own first (`$XDG_CONFIG_HOME/` is their config directory: that
     variable's value, else `~/.config`, as for the models file; `~/` is their home), then the
     project's (a relative name is from `root`), the one the model may write. A single string is
-    one file."""
+    one file. `mypy_cache` is the directory (from `root`, or absolute) where mypy keeps its cache for
+    the type check of those files at each start: in the project because that is where a jail can
+    write that outlives it (mypy puts a `.gitignore` of `*` in it, so git ignores it), and a cache is
+    what makes the check take a fraction of a second, not seconds."""
 
     root: str = "."
     grace: float = 5.0
     startup: Sequence[str] = ("$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py")
+    mypy_cache: str = ".bh-02/mypy_cache"
 
     def __post_init__(self) -> None:
         names = (self.startup,) if isinstance(self.startup, str) else self.startup
@@ -173,6 +181,11 @@ class PythonProcessConfig:
                 "`startup` must be a file name or a list of them, as in "
                 '`startup = ["$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py"]`, '
                 f"not {self.startup!r}"
+            )
+        if not isinstance(self.mypy_cache, str) or not self.mypy_cache:
+            raise TypeError(
+                "`mypy_cache` must be a directory name, from the root or absolute, as in "
+                f'`mypy_cache = ".bh-02/mypy_cache"`, not {self.mypy_cache!r}'
             )
 
 
@@ -322,10 +335,10 @@ def startup_ran(name: str, when: str, line: str, left: int) -> tuple[str, int]:
 
 
 def _missed(line: str) -> dict[str, tuple[str, ...]] | None:
-    """What the check input's last line says: each name that misses and the codes it breaks, in `CODES`
-    order, or None when the line is not the shape `startup_check.py --json` prints,
-    `{"misses": [[name, [code, ...]], ...]}`, with every code one of `CODES`. The line is the Python
-    process's, so nothing about it is taken on trust."""
+    """What the check input's last line says: each name that misses (`ELSEWHERE`: what is outside the
+    told functions) and the codes it breaks, in `CODES` order, or None when the line is not the shape
+    `startup_check.py --json` prints, `{"misses": [[name, [code, ...]], ...]}`, with every code one of
+    `CODES`. The line is the Python process's, so nothing about it is taken on trust."""
     try:
         said = json.loads(line)
     except ValueError, RecursionError:  # not JSON, a number past Python's limit, nested past its stack
@@ -345,18 +358,19 @@ def _missed(line: str) -> dict[str, tuple[str, ...]] | None:
 
 
 def startup_checked(name: str, told: Sequence[str], line: str) -> str:
-    """What the model is told of the docstring check of the startup file `name`, from the last line of
-    its input (`_check_input`; "" when it printed none: the check did not run) and the `told` names the
-    file's own input listed, in their order: each that misses and the codes it breaks, never a
+    """What the model is told of the docstring and type check of the startup file `name`, from the last
+    line of its input (`_check_input`; "" when it printed none: the check did not run) and the `told`
+    names the file's own input listed, in their order: each that misses and the codes it breaks, then
+    the codes of what is elsewhere in the file (an import, a statement, a private function), never a
     tool's message, which quotes the file. A name the check says but the file did not tell is not
     said. "" when nothing misses; a check that did not run is said not to have."""
     found = _missed(line)
     if found is None:
-        return f"{name} docstrings could not be checked"
-    misses = [(_plain(each), found[each]) for each in told if found.get(each)]
-    if not misses:
-        return ""
-    return f"{name} docstring findings: " + "; ".join(f"{each} {', '.join(codes)}" for each, codes in misses)
+        return f"{name} docstrings and types could not be checked"
+    misses = [f"{_plain(each)} {', '.join(found[each])}" for each in told if found.get(each)]
+    if elsewhere := found.get(ELSEWHERE):
+        misses.append(f"elsewhere in the file: {', '.join(elsewhere)}")
+    return f"{name} findings: " + "; ".join(misses) if misses else ""
 
 
 def _last(output: str) -> str:
@@ -433,15 +447,17 @@ def _startup_input(path: str, source: str | None = None) -> str:
     )
 
 
-def _check_input(path: str, source: str | None = None) -> str:
-    """The input that checks the startup file at `path` against the docstring convention and prints,
-    last and on a line of its own, `startup_check.py`'s one line of JSON (`_missed` reads it). It runs
-    that program by path under the Python process's interpreter (`-I`), which runs ruff and the example
-    rule over the file's text: the text `source` when the host read it (the person's own, which a jail
-    that reads by allowlist can't see, handed over on stdin), else the file at `path`, which the
-    program reads in the jail. Nothing of the file runs. A program that fails prints nothing, and one
-    that outlives `_CHECK_S` is killed and fails the input. The input's own names are gone after it."""
-    program = f"[_bh_sys.executable, '-I', {str(_CHECK)!r}, '--ruff', '--json'"
+def _check_input(path: str, cache: str, source: str | None = None) -> str:
+    """The input that checks the startup file at `path` against the docstring convention and for types,
+    and prints, last and on a line of its own, `startup_check.py`'s one line of JSON (`_missed` reads
+    it). It runs that program by path under the Python process's interpreter (`-I`), which runs ruff,
+    mypy (its cache the directory `cache`) and the example rule over the file's text: the text `source`
+    when the host read it (the person's own, which a jail that reads by allowlist can't see, handed over
+    on stdin), else the file at `path`, which the program reads in the jail. Nothing of the file runs.
+    A program that fails prints nothing, and one that outlives `_CHECK_S` is killed and fails the
+    input. The input's own names are gone after it."""
+    flags = f"'--ruff', '--mypy', {'--cache-dir=' + cache!r}, '--json'"
+    program = f"[_bh_sys.executable, '-I', {str(_CHECK)!r}, {flags}"
     call = (  # `--name=` and `--`: a file named `-x.py` is a file, not an option
         f"{program}, {'--name=' + path!r}, '--', '-'], input={source!r}"
         if source is not None
@@ -739,7 +755,7 @@ class PythonProcess:
                 line = _last(ran.output)
                 told, spare = startup_ran(startup.name, when, line, spare)
                 asides.append(told)
-                if checked is not None:  # the file told something: its docstrings were checked
+                if checked is not None:  # the file told something: its docstrings and types were checked
                     names = [each for each, _ in _bound(line) or ()]
                     said = startup_checked(
                         startup.name, names, "" if checked.error else _last(checked.output)
@@ -750,13 +766,14 @@ class PythonProcess:
 
     async def _run_startup(self, startup: _Ready) -> tuple[_Output, _Output | None]:
         """Run the startup file as an input and, when it ran and told something, the input that checks
-        its docstrings (`_check_input`): the file's own and the check's, which is None when there
-        was nothing to check. Both are the file's turn, so one that ends the worker or is stopped
+        its docstrings and types (`_check_input`): the file's own and the check's, which is None when
+        there was nothing to check. Both are the file's turn, so one that ends the worker or is stopped
         ends this one's, and `_opening` answers either the same way."""
         ran = await self._exchange(_startup_input(startup.path, startup.source))
         if ran.error or not _bound(_last(ran.output)):
             return ran, None
-        return ran, await self._exchange(_check_input(startup.path, startup.source))
+        cache = str(Path(self._config.root).resolve() / self._config.mypy_cache)
+        return ran, await self._exchange(_check_input(startup.path, cache, startup.source))
 
     def _ready(self, read: bool) -> list[_Ready]:
         """The startup files that are there, in order, each once (at its first place), and how
