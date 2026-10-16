@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 08:19'
-updated_date: '2026-10-16 12:40'
+updated_date: '2026-10-16 13:16'
 labels:
   - gates
   - size-2
@@ -41,7 +41,7 @@ This is a pypeeker change (pinned in the root dev dependencies): make it upstrea
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 pypeeker (upstream) resolves the function an impurity walk asks about from its symbol id without a scan of every symbol, keeps find_symbol's contract that all_indexes() re-reads the store, and the root pin names the merged commit, uv.lock regenerated with uv
+- [x] #1 pypeeker (upstream) resolves the function an impurity walk asks about from its symbol id without a scan of every symbol, keeps find_symbol's contract that all_indexes() re-reads the store, and the root pin names the merged commit, uv.lock regenerated with uv
 - [x] #2 The root gate's no-impure-functions takes under 8 s on a warm run (23.4 s before, in-process timing, median of 3), recorded in the notes, and its findings on a planted impure function are the same as before
 <!-- AC:END -->
 
@@ -96,4 +96,8 @@ Planted impure function, scratch copy of this checkout (/tmp/claude-0/bh02-plant
 Not run: scripts/check and scripts/arch-check (nothing outside the board changed in this repository). Not done, for the orchestrator: merge and push the pypeeker branch, bump the root pin, regenerate uv.lock, then tick criterion 1.
 
 modified_files above are pypeeker's paths (repository /home/user/pypeeker, commit ae3f719), not this repository's; this repository changed only its board.
+
+Pin part of criterion 1 (orchestrator, 2026-10-16): the pypeeker change landed as part of brukhabtu/pypeeker PR #148 (CI green), squash-merged as 67b0a1b0121fa48d89c6cecaa82624592bfa8386. The commits reviewed were 04e2249 (TASK-0113), f6ea736 (TASK-0114) and 8fd3239 (TASK-0117) on pypeeker branch ccr-8cdd69a0-gt1lov (the workers' wt-* commits 7370f98, ae3f719 and 184d2ac re-applied without change). bh-02 commit 2bcfefe pins pypeeker@67b0a1b; uv.lock regenerated with `uv lock` (pypeeker 7905d240 -> 67b0a1b0, nothing else).
+- After the pin, on a quiet machine: scripts/arch-check --no-fix exit 0 in 56.4, 49.9, 49.8 s (TASK-0111 measured 115.6 s warm before any of TASK-0113..0118).
+- Full scripts/check: exit 0 in 208 s; format, lint, types, tests (3186 passed, 31 skipped), gates (all five ok), docs, tokens.
 <!-- SECTION:NOTES:END -->
