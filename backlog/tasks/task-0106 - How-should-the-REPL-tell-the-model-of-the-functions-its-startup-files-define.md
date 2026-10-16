@@ -4,9 +4,11 @@ title: How should the REPL tell the model of the functions its startup files def
 status: To Do
 assignee: []
 created_date: '2026-10-16 02:03'
+updated_date: '2026-10-16 02:57'
 labels:
   - python
   - size-2
+  - finish-moved
 dependencies: []
 references:
   - >-
@@ -25,5 +27,12 @@ The owner (2026-10-15/16) dropped @helper and the word helper: a startup file's 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Decision recorded
-- [ ] #2 The owner has accepted decision-0006 (its status is accepted), including the 1,500-character budget and point 7's check
+- [ ] #2 The owner has accepted decision-0006 (its status is accepted), including the signature budget and point 7's checks
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16: finish moved: the criterion named the proposed 1,500-character budget; the owner accepted decision-0006 with 600 instead.
+- Decision recorded: backlog/decisions/decision-0006 (status accepted 2026-10-16 by the owner in conversation; Acceptance section says so). decision-0004 marked superseded.
+<!-- SECTION:NOTES:END -->
