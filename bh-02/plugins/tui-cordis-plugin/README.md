@@ -148,6 +148,18 @@ again, as the mouse wheel does (both are Textual's `scroll_to`). `page` guards t
 `scroll_to` gets wrong: with nothing to scroll, or a page down from the end, it would release the
 anchor with no movement to restore it, and the output that came next would not be followed.
 
+**Focus after the mouse.** A click or a drag in the transcript focuses the Transcript (Textual focuses what is
+clicked), and the keys typed next would go nowhere. The screen posts `TextSelected` at every mouse up, wherever the
+pointer is let go, and the app answers it by giving the focus back to the composer when the Transcript has it
+(`BhApp._return_focus`). It is given back on mouse up, and the transcript is not stopped from taking it from the mouse,
+because Tab can put it there too and a click in it then would still leave the keys going nowhere (the composer also
+loses the focus for the length of the click, as it did, so the list of commands is closed by it). The selection stays
+shown (the screen holds it, not the focus) until the person types: Textual clears a screen selection when the
+composer's cursor moves. Tab still takes the focus to the transcript and back, and PageUp and PageDown scroll it from
+the composer. Only the Transcript itself is given back: a clipped line or a thinking title the person clicked keeps the
+focus (a control they chose, TASK-0089.07), and a question's modal keeps its own. A scrollbar dragged while the
+transcript has the focus from Tab gives it back too, since the mouse up does not say where it was.
+
 **Copying** goes to the terminal's clipboard through Textual's `copy_to_clipboard` (an OSC 52
 escape sequence, so it reaches the local clipboard over SSH where the terminal allows it, and a
 terminal that ignores it copies nothing: a test sees only what the app asked to copy, `app.clipboard`,

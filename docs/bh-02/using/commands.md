@@ -143,7 +143,8 @@ highlight, and a recalled command doesn't open it until you edit it, so `Up` goe
 
 A tool result is shown cut at 12 lines, and a diff or the code a call carries at 40, with
 `▶ 8 more lines` under what shows. Click that line to show every line (it reads `▼ 8 more lines`
-then), and click it again to close it. From the keyboard, `Shift+Tab` in the composer puts the
+then), and click it again to close it (a click on the line leaves the focus on it, so `Enter` or `Space` closes it
+too). From the keyboard, `Shift+Tab` in the composer puts the
 focus on the newest such line (`Shift+Tab` again goes to the one before it), `Enter` or `Space` opens
 or closes it, and `Tab` goes on to the next one and, past the newest, back to the composer.
 
@@ -159,7 +160,9 @@ part of what a selection copies.
 
 Select text in the conversation with the mouse and it is copied as you let go: bh-02 says
 `Copied 120 characters` for a few seconds. A click, or a selection of one character, copies
-nothing, and the selection stays shown. `Ctrl+C` stops the running reply, also with a selection
+nothing, and the selection stays shown until you type. The focus goes back to the composer as the mouse lets
+go (the `▶ N more lines` line keeps it, see Long results), so after a click or a selection in the conversation your
+next keys reach the composer; `Tab` still moves the focus to the conversation and back. `Ctrl+C` stops the running reply, also with a selection
 showing, if that selection was copied already (as a mouse selection is, when you let go, or by
 `Cmd+C`): stopping comes first. It copies a selection that has not been copied yet (one of a single
 character, one made without the mouse, or text selected in the composer, which the mouse does not

@@ -17,7 +17,9 @@ Copying goes to the terminal's clipboard through Textual (`copy_to_clipboard`, a
 sequence), and every way of copying says how much in one line: Ctrl-C with text selected that
 has not been copied yet (it stops nothing then; a selection already copied, as a mouse selection
 is when it ends, leaves Ctrl-C to stop the reply), Cmd-C (Textual's own `super+c`), a mouse
-selection finished in the transcript (copied at once), and Ctrl-T for the newest reply.
+selection finished in the transcript (copied at once), and Ctrl-T for the newest reply. A click
+or a selection in the transcript gives the focus back to the composer as the mouse lets go, so
+typing carries on (`_return_focus`).
 
 While a reply runs, a line above the composer says for how long (`Working`, redrawn by a timer
 that starts and stops with the reply).
@@ -447,12 +449,25 @@ class BhApp(App[None]):
             self._copied = self._taken(text)
 
     def on_text_selected(self, event: events.TextSelected) -> None:
-        """A mouse selection ended (the screen says so at every mouse up, a click included):
-        what is selected is copied at once. A click, or one character, copies nothing and says
-        nothing. The selection stays shown, remembered as copied (`copy_to_clipboard`), so a
-        Ctrl-C after it stops the reply."""
+        """The mouse let go (the screen says so at every mouse up, a click or a drag ending
+        anywhere): what is selected is copied at once. A click, or one character, copies nothing
+        and says nothing. The selection stays shown, remembered as copied (`copy_to_clipboard`),
+        so a Ctrl-C after it stops the reply. Then the focus the mouse took for the transcript
+        goes back to the composer (`_return_focus`), so typing carries on."""
         if len(text := self.screen.get_selected_text() or "") >= _COPY_ON_SELECT:
             self.copy_to_clipboard(text)
+        self._return_focus()
+
+    def _return_focus(self) -> None:
+        """The focus goes back to the composer when the Transcript has it. A click or a drag in
+        the transcript focuses it (Textual focuses what is clicked), and
+        the person who clicked or selected goes on typing. Only the Transcript itself: a clipped
+        line or a thinking title the person clicked keeps the focus (it is a control they
+        chose), and so does a question's modal. The selection stays, since the screen holds it
+        and not the focus. Tab still takes the focus to the transcript and back, and PageUp and
+        PageDown scroll it from the composer."""
+        if self.focused is self.query_one(Transcript):
+            self.query_one(Composer).focus()
 
     def action_copy_reply(self) -> None:
         """Ctrl-T: copy the newest reply's text whole (`Transcript.reply`), or say there is none."""
