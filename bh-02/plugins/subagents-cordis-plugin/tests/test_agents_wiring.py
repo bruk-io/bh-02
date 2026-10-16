@@ -448,6 +448,9 @@ async def test_unloading_the_agents_row_retires_every_child_it_holds(tmp_path: P
     tool = rt.root.get("tools").get("agent")
     runs = [asyncio.ensure_future(tool.run({"prompt": "p", "type": "general"})) for _ in range(2)]
     programs = await _up(tmp_path, 2)
+    # the programs having run says nothing of the model: a restart before both steps hang leaves no
+    # stream to close for a child that has not asked yet (`closed` is short), so wait for both
+    await _until(lambda: model.hung == 2)
     assert sorted(f for f in _children(rt) if f.count("/") == 1) == ["agents/general-1", "agents/general-2"]
     await _bounded(booted.loader.restart("agents"))
     answers = [str((await _bounded(run))["content"]) for run in runs]

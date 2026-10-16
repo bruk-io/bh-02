@@ -4,9 +4,11 @@ title: >-
   test_unloading_the_agents_row_retires_every_child_it_holds fails under the
   parallel plugin run: it restarts the row before both children's model steps
   hang
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-16 05:42'
+updated_date: '2026-10-16 06:16'
 labels:
   - subagents
   - size-1
@@ -25,6 +27,24 @@ Seen: the whole plugin on every core (su tester -c 'tini -s -- .venv/bin/python 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 After _up, the test waits until both children's model steps hang (await _until(lambda: model.hung == 2), the bounded wait its siblings use) before restarting the row; its assertions stay as they are
-- [ ] #2 The test passes 50 times running with the whole plugin on every core (-n auto --dist loadgroup), and the file's other tests pass
+- [x] #1 After _up, the test waits until both children's model steps hang (await _until(lambda: model.hung == 2), the bounded wait its siblings use) before restarting the row; its assertions stay as they are
+- [x] #2 The test passes 50 times running with the whole plugin on every core (-n auto --dist loadgroup), and the file's other tests pass
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Edit one test: in test_unloading_the_agents_row_retires_every_child_it_holds (bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py), add a comment and 'await _until(lambda: model.hung == 2)' directly after 'programs = await _up(tmp_path, 2)', before the row restarts. Same shape as TASK-0110's change in the stop test (model.hung == 1). Assertions unchanged; nothing else touched.
+2. Run the file's tests as tester under tini (the target and the file's other tests, -n auto --dist loadgroup) to see it green.
+3. Criterion 2: the 50-round whole-plugin loop as the delegation gives it, in two halves of 25 if one call would run past the timeout; count passing rounds; failing rounds are printed.
+4. Once, at the end: scripts/check bh-02/plugins/subagents-cordis-plugin (exit code read directly, not through a pipe). Criterion 1 and 2 ticked only with the evidence. Risk: none to product code; the test only gains a bounded wait (30 s via _until, which fails loudly if the steps never hang).
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fix: test_agents_wiring.py, test_unloading_the_agents_row_retires_every_child_it_holds: await _until(lambda: model.hung == 2) right after _up(tmp_path, 2), before the row restarts, the same change TASK-0110 made to the stop test. Assertions unchanged; the diff is that wait and its 2-line comment.
+- Before the fix (from the description, not re-run here): the whole plugin failed this test 4 of 25 rounds, assert (1 == 2) on model.closed.
+- The file alone, as tester under tini (tini -s -- .venv/bin/python -m pytest -q -p no:cacheprovider -n auto --dist loadgroup .../test_agents_wiring.py): 48 passed, exit 0.
+- Criterion 2: the whole plugin (-n auto --dist loadgroup) 50 rounds running as tester under tini, the brief loop in two halves of 25 (about 14 s a round): 50 of 50 passed, no round printed a failure. The file's other tests ran in every round.\n- scripts/check bh-02/plugins/subagents-cordis-plugin, run as root under tini, exit 0: format, lint, types (6 files), tests (119 passed), gates, docs ok; tokens skipped (no /home/user/bh-01/dist).\n- Not verified: the other _up callers (lines 430, 521, 548, 1402) were only read, not changed; none asserts a model.closed count across a restart in the lines I read.
+<!-- SECTION:NOTES:END -->
