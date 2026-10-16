@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 02:03'
-updated_date: '2026-10-16 03:27'
+updated_date: '2026-10-16 03:35'
 labels:
   - python
   - size-3
@@ -45,7 +45,7 @@ Build decision-0006 points 1-6 (accepted 2026-10-16). In short: a startup file's
 <!-- AC:BEGIN -->
 - [x] #1 The python section of the system prompt states which functions are told, what they cost (listed every REPL; a leading underscore keeps one untold; a docstring and source cost nothing until asked for) and the docstring convention, and each sentence holds with and without the jail
 - [x] #2 @helper, the helper name, __bh_helper__ and the word helper are gone from the code, the model-facing text, GLOSSARY.md and the docs, and a startup file that still says @helper fails at start with a NameError on the startup line
-- [ ] #3 scripts/check passes
+- [x] #3 scripts/check passes
 - [x] #4 At each REPL start the aside lists every told function of the REPL's startup files by signature up to 600 characters across them, in the order they run, and the rest by name, and tests cover __all__ (an imported name included), a private name, a name only imported, and files past the budget
 <!-- AC:END -->
 
@@ -89,4 +89,6 @@ Evidence (root unless said; Python 3.15.0b4):
 - AC #1: _TOLD/_DOCSTRINGS/the three-kinds bullet are quoted in tests (test_the_model_is_told_once_which_startup_functions_are_told_and_what_they_cost, ..._docstring_convention_..._with_or_without_a_jail, test_the_old_name_for_a_startup_function_is_nowhere_in_what_the_model_is_told). _TOLD is confined only (nothing is listed unconfined); the docstring sentence holds either way and is said when the project's file is named.
 - AC #2: grep -rniI helper bh-02 docs: what is left, kept for another sense: brig jail helpers (runner plugin jail.py, README, test_runner_confined.py), credential helpers / apiKeyHelper / key_command helper (models plugin, docs/bh-02/using/models.md), "private helpers" (bh_02/sessions.py), a row key named "helpers" in test_agents_child.py; and in the python plugin's tests the old decorator on purpose: test_python_tool.py (the @helper NameError test; the assertion that the model is told no "helper") and test_python_listing.py (the same assertion on the aside, and the pre-decision-0006 {"helpers": ...} line, which must not be taken for a listing). Nothing in client.py, worker.py, python.py, the plugin README, GLOSSARY.md or docs says it; scripts/model-friction said "the model keeping its helpers" and now says "functions for later sessions".
 - Not verified: darwin (seatbelt) path; scripts/linux-jail-check (Docker) was not run; the listing line is still bounded by the worker's 20,000-character output cap (a file with hundreds of functions is said not to be listable, as before; public-by-default makes it likelier, no task filed: it needs ~250 functions).
+
+Review (closing reviewer): scripts/check from the repo root, run 1: exit 1, "1 failed, 3075 passed, 31 skipped" — test_agents_wiring.py::test_agent_stop_ends_the_child_and_its_python_program (subagents plugin, untouched by this commit; passes 3/3 alone). Run 2: exit 0, "3076 passed, 31 skipped in 161.42s"; format, lint, types, gates, docs ok; tokens skipped (no bh-01 dist). python plugin + test_python_repl.py: 126 passed, 1 skipped.
 <!-- SECTION:NOTES:END -->
