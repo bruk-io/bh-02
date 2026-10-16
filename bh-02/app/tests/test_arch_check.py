@@ -17,6 +17,7 @@ import shutil
 import sys
 import threading
 import tomllib
+from collections.abc import Sequence
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
@@ -57,18 +58,18 @@ def arch_check(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 @pytest.fixture
-def indexed_paths(arch_check: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """The paths the script asks pypeeker to index, in order."""
-    asked: list[str] = []
+def index_calls(arch_check: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """The paths of each call the script makes to index, in order: one entry per call."""
+    calls: list[tuple[str, ...]] = []
     index = arch_check.index
 
-    def spy(gate: Path, path: str) -> str | None:
-        asked.append(path)
-        problem: str | None = index(gate, path)
+    def spy(gate: Path, paths: Sequence[str]) -> str | None:
+        calls.append(tuple(paths))
+        problem: str | None = index(gate, paths)
         return problem
 
     monkeypatch.setattr(arch_check, "index", spy)
-    return asked
+    return calls
 
 
 def _member(gate: Path, name: str, init: str = "") -> Path:
@@ -122,12 +123,12 @@ def _run(arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str]) 
 
 
 def test_a_clean_gate_passes_and_leaves_nothing_without_an_index(
-    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], indexed_paths: list[str]
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
 ) -> None:
     """Also the check that the script reads the index where pypeeker writes it: were that to move,
     this finds files without an entry after a run, and the script would index every path every run."""
     assert _run(arch_check, gate, capfd) == (0, "")
-    assert indexed_paths == ["members/a/src"]
+    assert index_calls == [("members/a/src",)]
     entries = arch_check.indexed(gate)
     assert entries == {"members/a/src/a/__init__.py", "members/a/src/a/mod.py"}
     files = {path: arch_check.sources(gate, path) for path in arch_check.sync_src(gate)}
@@ -135,11 +136,11 @@ def test_a_clean_gate_passes_and_leaves_nothing_without_an_index(
 
 
 def test_a_gate_whose_files_are_all_indexed_indexes_nothing_and_still_sees_a_change(
-    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], indexed_paths: list[str]
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
 ) -> None:
     """pypeeker's check indexes again a file that changed, so the script need not."""
     _run(arch_check, gate, capfd)
-    indexed_paths.clear()
+    index_calls.clear()
     assert _run(arch_check, gate, capfd) == (0, "")
     (gate / "members/a/src/a/__init__.py").write_text(_DEFINES)
 
@@ -147,14 +148,14 @@ def test_a_gate_whose_files_are_all_indexed_indexes_nothing_and_still_sees_a_cha
 
     assert code == 1
     assert "members/a/src/a/__init__.py:1: [init-reexport-only]" in out
-    assert indexed_paths == []
+    assert index_calls == []
 
 
 def test_a_new_module_in_a_path_that_is_indexed_reaches_the_gate(
-    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], indexed_paths: list[str]
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
 ) -> None:
     _run(arch_check, gate, capfd)
-    indexed_paths.clear()
+    index_calls.clear()
     (gate / "members/a/src/a/sub").mkdir()
     (gate / "members/a/src/a/sub/__init__.py").write_text(_DEFINES)
 
@@ -162,26 +163,26 @@ def test_a_new_module_in_a_path_that_is_indexed_reaches_the_gate(
 
     assert code == 1
     assert "members/a/src/a/sub/__init__.py:1: [init-reexport-only]" in out
-    assert indexed_paths == ["members/a/src"]
+    assert index_calls == [("members/a/src",)]
 
 
 def test_a_new_member_reaches_the_gate_and_only_its_path_is_indexed(
-    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], indexed_paths: list[str]
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
 ) -> None:
     _run(arch_check, gate, capfd)
-    indexed_paths.clear()
+    index_calls.clear()
     _member(gate, "b", init=_DEFINES)
 
     code, out = _run(arch_check, gate, capfd)
 
     assert code == 1
     assert "members/b/src/b/__init__.py:1: [init-reexport-only]" in out
-    assert indexed_paths == ["members/b/src"]
+    assert index_calls == [("members/b/src",)]
     assert '"members/b/src"' in (gate / "pyproject.toml").read_text()
 
 
 def test_a_member_added_before_the_first_run_is_indexed_with_the_rest(
-    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], indexed_paths: list[str]
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
 ) -> None:
     """A checkout with no index at all (a fresh clone, a new worktree) is indexed whole, not skipped."""
     _member(gate, "b", init=_DEFINES)
@@ -190,7 +191,69 @@ def test_a_member_added_before_the_first_run_is_indexed_with_the_rest(
 
     assert code == 1
     assert "members/b/src/b/__init__.py:1: [init-reexport-only]" in out
-    assert indexed_paths == ["members/a/src", "members/b/src"]
+    assert index_calls == [("members/a/src", "members/b/src")]
+
+
+def test_every_path_without_an_index_is_indexed_in_one_call_and_a_second_run_makes_none(
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
+) -> None:
+    """A call per path reconciled pypeeker's symbol tree each time, reading every entry written so far:
+    on the root gate's 29 paths that was 62 s of a cold run."""
+    _member(gate, "b")
+    _member(gate, "c")
+
+    assert _run(arch_check, gate, capfd) == (0, "")
+
+    assert index_calls == [("members/a/src", "members/b/src", "members/c/src")]
+    assert {entry.split("/")[1] for entry in arch_check.indexed(gate)} == {"a", "b", "c"}
+    index_calls.clear()
+    assert _run(arch_check, gate, capfd) == (0, "")
+    assert index_calls == []
+
+
+def test_the_call_holds_only_the_paths_that_have_no_index(
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
+) -> None:
+    _run(arch_check, gate, capfd)
+    index_calls.clear()
+    _member(gate, "b")
+    _member(gate, "c")
+
+    assert _run(arch_check, gate, capfd) == (0, "")
+
+    assert index_calls == [("members/b/src", "members/c/src")]
+
+
+def test_an_indexing_error_in_one_path_fails_the_call_and_names_its_file(
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
+) -> None:
+    """The error is in the second path of one call; the run stops there, before the gate's check."""
+    _member(gate, "b")
+    (gate / "members/b/src/b/broken.py").mkdir()
+
+    code, out = _run(arch_check, gate, capfd)
+
+    assert code == 1
+    assert (
+        out.startswith("pypeeker index members/a/src members/b/src: ") and "members/b/src/b/broken.py" in out
+    )
+    assert index_calls == [("members/a/src", "members/b/src")]
+
+
+def test_a_src_path_that_is_not_there_fails_the_call_and_names_it(
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
+) -> None:
+    """With no `[tool.arch-check]` globs the gate's `src` is taken as written."""
+    listing = '[tool.pypeeker]\nsrc = ["members/a/src", "nowhere"]'
+    (gate / "pyproject.toml").write_text(
+        _GATE.split("\n\n", 1)[1].replace("[tool.pypeeker]\nsrc = []", listing)
+    )
+
+    code, out = _run(arch_check, gate, capfd)
+
+    assert code == 1
+    assert "Path not found: nowhere" in out
+    assert index_calls == [("members/a/src", "nowhere")]
 
 
 def test_a_file_that_cannot_be_indexed_fails_every_run_not_only_the_first(
@@ -247,7 +310,7 @@ def test_a_file_that_is_itself_a_src_path_holds_only_itself(arch_check: ModuleTy
 
 
 def test_an_index_entry_outside_src_is_dropped_and_one_inside_src_is_kept(
-    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], indexed_paths: list[str]
+    arch_check: ModuleType, gate: Path, capfd: pytest.CaptureFixture[str], index_calls: list[tuple[str, ...]]
 ) -> None:
     """A member that leaves src keeps its files on disk, and its index entries are dropped: the gate
     would neither check nor refresh them. The member still in src keeps its own entries."""
@@ -256,14 +319,14 @@ def test_an_index_entry_outside_src_is_dropped_and_one_inside_src_is_kept(
     assert "members/b/src/b/mod.py" in arch_check.indexed(gate)
     (gate / "pyproject.toml").write_text(_GATE.replace("members/*/src", "members/a/src"))
     (gate / "members/b/src/b/__init__.py").write_text(_DEFINES)  # a violation, once b is out of src
-    indexed_paths.clear()
+    index_calls.clear()
 
     code, out = _run(arch_check, gate, capfd)
 
     assert (code, out) == (0, "")
     assert arch_check.indexed(gate) == {"members/a/src/a/__init__.py", "members/a/src/a/mod.py"}
     assert (gate / "members/b/src/b/__init__.py").read_text() == _DEFINES
-    assert indexed_paths == []
+    assert index_calls == []
 
 
 def test_the_src_list_is_written_through_a_temporary_file_renamed_over_the_old_one(

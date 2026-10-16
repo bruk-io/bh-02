@@ -19,10 +19,12 @@ the globs in `[tool.arch-check].src` (the layout, not a hand-kept list, decides 
 checked), drops the index entry of each file no src path holds (pypeeker's refresh keeps one
 whose file still exists, and find_symbol and the call graph read every entry), indexes each path
 that holds a file with no index entry (all of them on a fresh checkout, none when nothing was
-added; every run indexing all of them was 37 processes, about 2.4 s each), fails on any indexing
-error, then runs `check --strict` (plain `check` hides heuristic findings). It writes that list only
-when it changes (a member was added), through a temporary file and a rename, because scripts/check
-runs pytest, ruff and mypy beside it and each reads pyproject.toml as it starts.
+added) in one `pypeeker index` call per gate, not one per path (a call reconciles pypeeker's
+cross-file symbol tree, which reads every entry written so far, so a call per path cost paths
+times files: the root gate's 29 paths took 55 s cold, in one call 4 s), fails on any indexing error,
+then runs `check --strict` (plain `check` hides heuristic findings). It writes that list only when
+it changes (a member was added), through a temporary file and a rename, because scripts/check runs
+pytest, ruff and mypy beside it and each reads pyproject.toml as it starts.
 
 The gates share nothing (each has its own pyproject.toml, its own .pypeeker and its own sources),
 so they run at the same time and the run takes as long as the slowest gate, the root one, not as
@@ -171,17 +173,19 @@ class Outcome:
     output: str
 
 
-def index(gate: Path, path: str) -> str | None:
-    """Index one path; None when pypeeker did, else what it reported (a failure or indexing errors)."""
-    result = pypeeker(gate, "index", path, capture=True)
+def index(gate: Path, paths: Sequence[str]) -> str | None:
+    """Index `paths` in one pypeeker call; None when pypeeker did, else what it reported (a failure,
+    which names a path that is not there, or indexing errors, each naming its file)."""
+    command = f"pypeeker index {' '.join(paths)}"
+    result = pypeeker(gate, "index", *paths, capture=True)
     if result.returncode != 0:
         return result.stdout + result.stderr
     try:
         errors = json.loads(result.stdout).get("errors", [])
     except json.JSONDecodeError:
-        return f"pypeeker index {path}: unexpected output\n{result.stdout}"
+        return f"{command}: unexpected output\n{result.stdout}"
     if errors:
-        return f"pypeeker index {path}: {json.dumps(errors, indent=2)}"
+        return f"{command}: {json.dumps(errors, indent=2)}"
     return None
 
 
@@ -190,8 +194,8 @@ def run_gate(gate: Path, fix: bool) -> Outcome:
     autofixes, then run check --strict."""
     paths = sync_src(gate)
     drop_entries(gate, outside_src(paths, indexed(gate)))
-    for path in without_index({path: sources(gate, path) for path in paths}, indexed(gate)):
-        if (problem := index(gate, path)) is not None:
+    if unindexed := without_index({path: sources(gate, path) for path in paths}, indexed(gate)):
+        if (problem := index(gate, unindexed)) is not None:
             return Outcome(False, problem)
     applied = ""
     if fix:
