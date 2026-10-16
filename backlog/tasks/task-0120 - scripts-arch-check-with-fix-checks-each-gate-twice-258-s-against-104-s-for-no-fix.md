@@ -3,7 +3,7 @@ id: TASK-0120
 title: >-
   scripts/arch-check with --fix checks each gate twice: 258 s against 104 s for
   --no-fix
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 12:19'
@@ -78,4 +78,6 @@ Paired differences before - after: 73.8, 67.2, 73.8; median 73.8 s (60%). A clea
 - Correction to the AC2 note: 'a heavier moment of the same machine' explaining 258 s against 118 s here is a guess I did not test; what I measured is 118.4 s before and 47.7 s for --no-fix, a ratio of 2.5 like the 258/104 of TASK-0116.
 
 2026-10-16, orchestrator: finish moved after the work. Criterion 1 asked for one run "when no fix applies"; the worker showed pypeeker gives no way to meet it for a gate whose findings have no fix (the --fix report carries only a count, and check marks no finding as fixable). Narrowed to the clean gate, the case the task was filed for (every green CI and pre-commit run, 118 s to 48 s), with the red-gate case moved to TASK-0125 (an upstream pypeeker change, then a pin bump).
+
+Review (closing reviewer): CLOSE. Full scripts/check passed at eedde1e (exit 0, 3226 passed, five gates ok), not re-run per orchestrator. test_arch_check.py re-run: 38 passed. AC1 met: before/after timing in notes (118.4 s -> 48.1 s median). AC2 met: clean gate one plain check (test_a_clean_gate_with_fix_runs_one_check_and_no_fix); every new path traced against the old two-run version: same findings text, applied line and exit code; non-JSON --fix still fails with its text. Narrowing judged honest: the description asked that 'a run that applied nothing checks once', and the clean gate is the run it was filed for; the no-fix red gate genuinely needs an upstream change and TASK-0125 carries it with criteria. Nit (not filed): when a fix applies and --fix exits 0, the plain recheck's stdout is no longer appended; harmless since a passing check --strict prints nothing of note.
 <!-- SECTION:NOTES:END -->
