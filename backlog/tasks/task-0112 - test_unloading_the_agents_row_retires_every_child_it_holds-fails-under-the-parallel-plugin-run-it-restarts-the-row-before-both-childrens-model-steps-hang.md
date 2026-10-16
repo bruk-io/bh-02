@@ -4,7 +4,7 @@ title: >-
   test_unloading_the_agents_row_retires_every_child_it_holds fails under the
   parallel plugin run: it restarts the row before both children's model steps
   hang
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 05:42'
@@ -49,4 +49,6 @@ Fix: test_agents_wiring.py, test_unloading_the_agents_row_retires_every_child_it
 - Criterion 2: the whole plugin (-n auto --dist loadgroup) 50 rounds running as tester under tini, the brief loop in two halves of 25 (about 14 s a round): 50 of 50 passed, no round printed a failure. The file's other tests ran in every round.\n- scripts/check bh-02/plugins/subagents-cordis-plugin, run as root under tini, exit 0: format, lint, types (6 files), tests (119 passed), gates, docs ok; tokens skipped (no /home/user/bh-01/dist).\n- Not verified: the other _up callers (lines 430, 521, 548, 1402) were only read, not changed; none asserts a model.closed count across a restart in the lines I read.
 
 No repro: the failure (4 of 25 whole-plugin rounds, assert 1 == 2 on model.closed) was recorded in the description before the fix; a passing test can't be recorded as a repro, as TASK-0110's close did.
+
+Review (closing reviewer): CLOSE. AC1 met: commit 51dff1d adds only a bounded 'await _until(lambda: model.hung == 2)' plus comment after _up(tmp_path, 2), before loader.restart('agents'); assertions unchanged. AC2 met: worker's 50/50 rounds; reviewer re-ran the whole plugin -n auto --dist loadgroup as tester under tini 5 times, 119 passed and exit 0 each. Findings: none blocking or should-fix; nit: the other _up callers were read, not audited, no failure seen there; no draft filed.
 <!-- SECTION:NOTES:END -->
