@@ -8,7 +8,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 08:20'
-updated_date: '2026-10-16 12:33'
+updated_date: '2026-10-16 13:16'
 labels:
   - gates
   - scripts
@@ -32,7 +32,7 @@ TASK-0102 rejected calling pypeeker's Python API from the script (it couples a s
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 pypeeker (upstream) indexes several paths in one call and reconciles the tree once, and the root pin names the merged commit, uv.lock regenerated with uv
+- [x] #1 pypeeker (upstream) indexes several paths in one call and reconciles the tree once, and the root pin names the merged commit, uv.lock regenerated with uv
 - [x] #2 scripts/arch-check indexes the paths of a gate that have no index entry in one call per gate, still failing on any indexing error; the index it writes cold is identical to the one the per-path calls wrote, and a cold run's indexing time is recorded in the notes (67.0 s before; 61.7 s of it the root gate)
 <!-- AC:END -->
 
@@ -76,4 +76,8 @@ Identity: the first before run and the first after run each copied every gate's 
 ## Caveats
 - Until the root pin names a pypeeker with this change, scripts/arch-check on a checkout with the pinned pypeeker fails on any gate with more than one path to index (`Got unexpected extra argument`), and the arch-check tests need the new pypeeker too: they pass here only because this worktree's venv has pp-0117 installed editable.
 - Script-only alternative with no upstream change: none known (as the task said).
+
+Pin part of criterion 1 (orchestrator, 2026-10-16): the pypeeker change landed as part of brukhabtu/pypeeker PR #148 (CI green), squash-merged as 67b0a1b0121fa48d89c6cecaa82624592bfa8386. The commits reviewed were 04e2249 (TASK-0113), f6ea736 (TASK-0114) and 8fd3239 (TASK-0117) on pypeeker branch ccr-8cdd69a0-gt1lov (the workers' wt-* commits 7370f98, ae3f719 and 184d2ac re-applied without change). bh-02 commit 2bcfefe pins pypeeker@67b0a1b; uv.lock regenerated with `uv lock` (pypeeker 7905d240 -> 67b0a1b0, nothing else).
+- After the pin, on a quiet machine: scripts/arch-check --no-fix exit 0 in 56.4, 49.9, 49.8 s (TASK-0111 measured 115.6 s warm before any of TASK-0113..0118).
+- Full scripts/check: exit 0 in 208 s; format, lint, types, tests (3186 passed, 31 skipped), gates (all five ok), docs, tokens.
 <!-- SECTION:NOTES:END -->
