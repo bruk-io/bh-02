@@ -378,8 +378,9 @@ async def test_on_linux_a_host_with_no_interpreter_the_jail_mounts_does_not_star
 ) -> None:
     """The jail is compiled when the runner row starts, and brig's supervisor runs under a Python
     the jail must mount: on a host with no `/usr` and no Python among what is mounted, brig refuses
-    (`InterpreterNotMounted`), and the person reads its text in the composition's own diagnosis of
-    the row that did not start: which interpreter, which roots, what to change."""
+    (`InterpreterNotMounted`), and the runner says so in its own words in the composition's
+    diagnosis of the row that did not start: the Python it looked for, brig's reason, and what a
+    bh-02 user does (install python3, or `--no-jail`)."""
     if sys.platform != "linux":
         pytest.skip("brig's supervisor is bubblewrap's: Linux only")
     monkeypatch.setattr("runner_cordis_plugin.jail.SYSTEM_READABLE", ("/etc",))
@@ -393,8 +394,9 @@ async def test_on_linux_a_host_with_no_interpreter_the_jail_mounts_does_not_star
         await asyncio.wait_for(run([*layers(), patch], [Row("chat", config={"prompt": "go"})]), 10)
     said = raised.value.message
     assert "could not start" in said and "runner" in said
-    assert "InterpreterNotMounted" in said and "/usr/bin/python3" in said
-    assert "Add the interpreter's directory to read_allows" in said, said
+    assert "Install python3" in said and "`bh-02 --no-jail`" in said, said
+    assert "(InterpreterNotMounted): /usr/bin/python3 is under no path the jail mounts" in said, said
+    assert "strict_linux" not in said, said  # brig's advice to an embedder stays in its cause
 
 
 @pytest.mark.usefixtures("_needs_a_jail")

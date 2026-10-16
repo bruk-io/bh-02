@@ -90,7 +90,7 @@ from brig.core import (
     ReadModel,
     Spec,
 )
-from brig.mech.bwrap import DEFAULT_BWRAP_PATH, DEFAULT_INTERPRETER
+from brig.mech.bwrap import DEFAULT_BWRAP_PATH, DEFAULT_INTERPRETER, InterpreterNotMounted
 from brig.run import (
     HostRuntime,
     IoPolicy,
@@ -466,16 +466,32 @@ def supervisor_interpreter(found: Mapping[str, str], mounted: Sequence[str]) -> 
     under a root: a link out of them would dangle in the jail, and a jail whose PID 1 can't start
     is no jail.
 
-    When none qualifies, brig's own default: a Spec that does not mount it is refused by brig,
-    by name (`InterpreterNotMounted`: the interpreter, the roots and what to change), and one that
-    does mount it but has no Python there fails to start with the supervisor's own stderr
-    (`SupervisorFailed`). Nothing here hides either."""
+    When none qualifies, brig's own default: a Spec that does not mount it is refused by brig
+    (`InterpreterNotMounted`), which `BrigJail.compile` turns into the runner's own error
+    (`_no_python_message`). One that does mount it but has no Python there fails to start with
+    the supervisor's own stderr (`SupervisorFailed`). Nothing here hides either."""
     for spelled, target in found.items():
         if all(
             any(PurePosixPath(path).is_relative_to(root) for root in mounted) for path in (spelled, target)
         ):
             return spelled
     return DEFAULT_INTERPRETER
+
+
+def _no_python_message(looked_for: Sequence[str], python: str) -> str:
+    """What the person reads when brig refuses the jail for want of a Python it mounts: the
+    candidates looked for (`host_interpreters`), brig's reason in bh-02's terms (`python`, the
+    one brig refused, is under no path the jail mounts), and the steps a bh-02 user takes, as the
+    missing-bwrap error names them. brig's own text (its advice is for code that embeds brig)
+    stays on the exception's `__cause__`."""
+    looked = ", ".join(looked_for) or "none"
+    return (
+        "runner:confined cannot start its jail on this host: the jail runs brig's supervisor as its "
+        "PID 1, under a Python the jail mounts, and none of the Pythons looked for "
+        f"({looked}) is one. brig refused the jail (InterpreterNotMounted): {python} is under no path "
+        "the jail mounts. Install python3, or use `runner:unconfined` for the runner row (or "
+        "`bh-02 --no-jail`), knowing it confines nothing"
+    )
 
 
 def _present(candidates: Sequence[str]) -> dict[str, str]:
@@ -1049,7 +1065,12 @@ class BrigJail:
         author: Sequence[tuple[str, str]] = (),
     ) -> tuple[CompiledJail, Mapping[str, str]]:
         """The jail for `argv` in `cwd`, compiled, and its grades. `author` (Linux: `git_author`)
-        is set in the worker's environment besides the policy's own."""
+        is set in the worker's environment besides the policy's own.
+
+        Raises:
+            RuntimeError: on Linux, no Python the jail mounts is among the interpreters
+                (`_no_python_message`); brig's `InterpreterNotMounted` is its cause.
+        """
         scratch = str(Path(jail_dir, "tmp"))
         Path(scratch).mkdir(parents=True, exist_ok=True)
         host = [str(Path(p).resolve()) for p in (*import_path, prefix) if p]
@@ -1079,7 +1100,10 @@ class BrigJail:
             spec = replace(spec, env=replace(spec.env, set=(*spec.env.set, *author)))
             python = supervisor_interpreter(_present(self._interpreters), spec.fs.read_allows)
         ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
-        jail = stack_for(self._platform, python).compile(spec, ctx=ctx)
+        try:
+            jail = stack_for(self._platform, python).compile(spec, ctx=ctx)
+        except InterpreterNotMounted as error:
+            raise RuntimeError(_no_python_message(self._interpreters, python)) from error
         report = {axis.value: grade.grade.value for axis, grade in jail.report.axes.items()}
         holds = held(spec, self._absent_secrets(spec)) if self._platform == "linux" else ()
         return jail, graded(report, holds)

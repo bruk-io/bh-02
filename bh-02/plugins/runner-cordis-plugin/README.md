@@ -160,12 +160,15 @@ One policy, two stacks (`stack_for`):
   anyway. "Whole" means its spelling and its target are both under a read root: brig checks the
   spelling alone, and a link out of the roots (Debian's `/usr/bin/python3` goes through
   `/etc/alternatives`, mounted with `/etc`) would dangle in the jail. A host with neither gets
-  brig's own default, so brig's own error is what the person reads in the diagnosis of the
-  `runner` row that did not start: `InterpreterNotMounted` naming the interpreter, the roots and
-  what to change (or, when the interpreter is mounted but absent, `SupervisorFailed` with the
+  brig's own default, which brig refuses (`InterpreterNotMounted`, its advice written for code
+  that embeds brig). The compile does not pass that on: it raises the runner's own error, which
+  names the candidates looked for and brig's reason, and says what a bh-02 user does (install
+  python3, or `runner:unconfined` / `bh-02 --no-jail`, as the missing-bwrap error does), with
+  brig's refusal as its `__cause__`. The diagnosis of the `runner` row that did not start shows
+  that text (or, when the interpreter is mounted but absent, `SupervisorFailed` with the
   supervisor's stderr). `test_a_host_whose_python_is_not_at_the_usual_path_starts_a_confined_session`
   stands for a host whose Python is elsewhere (a link, in a real jail, whose PID 1 is that path),
-  `test_a_host_whose_jail_mounts_no_interpreter_is_refused_by_brig_with_what_to_change` for one with
+  `test_a_host_whose_jail_mounts_no_interpreter_is_refused_with_what_a_person_does` for one with
   none, and `test_on_linux_a_host_with_no_interpreter_the_jail_mounts_does_not_start_and_says_brig_s_reason`
   (the app's) for what the person reads then.
 

@@ -2002,21 +2002,25 @@ async def test_a_host_whose_python_is_not_at_the_usual_path_starts_a_confined_se
         await started.stop()
 
 
-def test_a_host_whose_jail_mounts_no_interpreter_is_refused_by_brig_with_what_to_change(
+def test_a_host_whose_jail_mounts_no_interpreter_is_refused_with_what_a_person_does(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No `/usr` on the host (nothing of the system mounted but `/etc`), and the interpreter bh-02
-    runs on elsewhere: nothing holds an interpreter, and brig's own refusal is the answer, naming
-    the interpreter and the roots, before any program starts."""
+    runs on elsewhere: nothing holds an interpreter, so the runner refuses before any program
+    starts. The refusal is the runner's own, in a bh-02 user's terms (install python3, or
+    `--no-jail`), and brig's `InterpreterNotMounted` is its cause, with brig's advice to an
+    embedder left in the cause."""
     monkeypatch.setattr("runner_cordis_plugin.jail.SYSTEM_READABLE", ("/etc",))
     monkeypatch.setattr("runner_cordis_plugin.jail.base_prefix", "/opt/py")
     monkeypatch.setattr("runner_cordis_plugin.jail.prefix", "/opt/py")
-    with pytest.raises(ValueError, match=r"InterpreterNotMounted|PID 1 is brig's supervisor") as raised:
-        BrigJail(BrigConfig(), Host(), platform="linux", interpreters=())
-    assert type(raised.value).__name__ == "InterpreterNotMounted"
+    with pytest.raises(RuntimeError, match=r"runner:confined cannot start") as raised:
+        BrigJail(BrigConfig(), Host(), platform="linux", interpreters=("/nowhere/python3",))
     said = str(raised.value)
-    assert "'/usr/bin/python3'" in said and "read_allows" in said and "/etc" in said
-    assert "strict_linux(python=...)" in said  # what to change
+    assert type(raised.value.__cause__).__name__ == "InterpreterNotMounted"
+    assert "(/nowhere/python3) is one" in said  # the candidates looked for
+    assert "(InterpreterNotMounted): /usr/bin/python3 is under no path the jail mounts" in said
+    assert "Install python3" in said and "`runner:unconfined`" in said and "`bh-02 --no-jail`" in said
+    assert "strict_linux" not in said and "read_allows" not in said, said  # brig's advice stays a cause
 
 
 def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_project_s_secret(
