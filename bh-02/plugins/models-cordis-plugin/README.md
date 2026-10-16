@@ -537,14 +537,15 @@ the command (`failure_of`); the CLI retries it for about three minutes first (me
   the settings layer, not the environment, so the detached launcher's scrub of `ANTHROPIC_*` (below)
   stays as it is.
 
-### Detached, and on the subscription only
+### Detached: its own process group, with the Anthropic and Claude variables dropped
 
 The SDK starts the CLI through this plugin's `claude-code-detached` console script
 (`detach.py`). The script calls `setsid`, because a terminal's Ctrl-C signals the whole process
 group and the CLI exits on SIGINT: in a session of its own, the terminal's SIGINT never reaches
 it, and a stop is the loop closing its step. It then `execve`s the SDK's bundled CLI with every
 `ANTHROPIC_*` and `CLAUDE_*` variable removed but the ones the SDK and the options set (the
-token, `CLAUDE_CONFIG_DIR`, the SDK's entry point and version). A gateway's base URL is not among
+credential variable, which is the subscription token or empty through a gateway,
+`CLAUDE_CONFIG_DIR`, the SDK's entry point and version). A gateway's base URL is not among
 them: it reaches the CLI in its settings layer (above). The SDK merges bh-02's
 environment into the child's, and its options can override a key but not remove one; without
 the scrub, a shell's `CLAUDE_CODE_USE_BEDROCK=1` sent the steps to Bedrock (measured: the
