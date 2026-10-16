@@ -50,6 +50,14 @@ pure functions (`startup_ran`, `signed`): control and format characters stripped
 cut at `_CUT`, `name(...)` for one that could not be read, a name Python could not have written (not
 an identifier) left out, and signatures told up to `_BUDGET` characters across the REPL's startup
 files, in the order they run, then names only.
+
+Each file that told something is then checked against the docstring convention, in the jail (decision-0006's
+point 7): a second input runs `startup_check.py` by path as a program under the Python process's own
+interpreter, over the file's text, which runs ruff with bh-02's flags only and bh-02's example rule and prints
+one line of JSON naming each told function that misses and the rule codes it breaks (`_check_input`). The
+host reads that line as data too (`startup_checked`): only a name the file told, only a code from the closed
+set (`CODES`), never a tool's message, which quotes the file. A finding is advice: it never stops a file
+running or hides a function, and a check that did not run is said, once, as such.
 """
 
 import asyncio
@@ -68,10 +76,14 @@ from typing import Any, Protocol, runtime_checkable
 
 from host_paths import config_home, walked
 from python_cordis_plugin.python import PYTHON, instructions_for
+from python_cordis_plugin.startup_check import CODES
 
 __all__ = ["Access", "Jailed", "PythonProcess", "PythonProcessConfig", "Rule", "Runner", "worker_argv"]
 
 _WORKER = Path(__file__).with_name("worker.py")
+# the docstring check: a program of its own, run by path in the jail like the worker
+_CHECK = Path(__file__).with_name("startup_check.py")
+_CHECK_S = 40.0  # how long the check gets in the Python process: ruff and the rule take milliseconds
 # The longest line the worker sends: its output and its error are capped at 20,000 characters
 # each, and JSON escapes a character to at most 12 bytes (a surrogate pair, `\ud83d\ude00`),
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
@@ -309,6 +321,50 @@ def startup_ran(name: str, when: str, line: str, left: int) -> tuple[str, int]:
     return f"{name} ran {when}: functions {'; '.join(parts)}", left
 
 
+def _missed(line: str) -> dict[str, tuple[str, ...]] | None:
+    """What the check input's last line says: each name that misses and the codes it breaks, in `CODES`
+    order, or None when the line is not the shape `startup_check.py --json` prints,
+    `{"misses": [[name, [code, ...]], ...]}`, with every code one of `CODES`. The line is the Python
+    process's, so nothing about it is taken on trust."""
+    try:
+        said = json.loads(line)
+    except ValueError, RecursionError:  # not JSON, a number past Python's limit, nested past its stack
+        return None
+    match said:
+        case {"misses": list() as misses}:
+            found: dict[str, tuple[str, ...]] = {}
+            for each in misses:
+                match each:
+                    case [str() as name, list() as codes] if all(code in CODES for code in codes):
+                        found[name] = tuple(code for code in CODES if code in codes)
+                    case _:
+                        return None
+            return found
+        case _:
+            return None
+
+
+def startup_checked(name: str, told: Sequence[str], line: str) -> str:
+    """What the model is told of the docstring check of the startup file `name`, from the last line of
+    its input (`_check_input`; "" when it printed none: the check did not run) and the `told` names the
+    file's own input listed, in their order: each that misses and the codes it breaks, never a
+    tool's message, which quotes the file. A name the check says but the file did not tell is not
+    said. "" when nothing misses; a check that did not run is said not to have."""
+    found = _missed(line)
+    if found is None:
+        return f"{name} docstrings could not be checked"
+    misses = [(_plain(each), found[each]) for each in told if found.get(each)]
+    if not misses:
+        return ""
+    return f"{name} docstring findings: " + "; ".join(f"{each} {', '.join(codes)}" for each, codes in misses)
+
+
+def _last(output: str) -> str:
+    """The last line of an input's `output`, "" for none: where a startup input prints its line."""
+    lines = output.strip().splitlines()
+    return lines[-1] if lines else ""
+
+
 def _startup_input(path: str, source: str | None = None) -> str:
     """The input that runs a startup file in the namespace and prints, last and on a line of its
     own, one line of JSON (`_bound` reads it): the functions the file tells, each the name of a
@@ -372,6 +428,34 @@ def _startup_input(path: str, source: str | None = None) -> str:
             "    for _bh_name in ('_bh_before', '_bh_source', '_bh_code', '_bh_path', '_bh_lines',"
             " '_bh_inspect', '_bh_json', '_bh_held', '_bh_made', '_bh_signature', '_bh_all', '_bh_told',"
             " '_bh_name'):",
+            "        globals().pop(_bh_name, None)",
+        ]
+    )
+
+
+def _check_input(path: str, source: str | None = None) -> str:
+    """The input that checks the startup file at `path` against the docstring convention and prints,
+    last and on a line of its own, `startup_check.py`'s one line of JSON (`_missed` reads it). It runs
+    that program by path under the Python process's interpreter (`-I`), which runs ruff and the example
+    rule over the file's text: the text `source` when the host read it (the person's own, which a jail
+    that reads by allowlist can't see, handed over on stdin), else the file at `path`, which the
+    program reads in the jail. Nothing of the file runs. A program that fails prints nothing, and one
+    that outlives `_CHECK_S` is killed and fails the input. The input's own names are gone after it."""
+    program = f"[_bh_sys.executable, '-I', {str(_CHECK)!r}, '--ruff', '--json'"
+    call = (  # `--name=` and `--`: a file named `-x.py` is a file, not an option
+        f"{program}, {'--name=' + path!r}, '--', '-'], input={source!r}"
+        if source is not None
+        else f"{program}, '--', {path!r}], stdin=_bh_run.DEVNULL"
+    )
+    return "\n".join(
+        [
+            "try:",
+            "    import subprocess as _bh_run, sys as _bh_sys",
+            f"    _bh_ran = _bh_run.run({call}, capture_output=True, encoding='utf-8', timeout={_CHECK_S})",
+            "    if _bh_ran.returncode in (0, 1):",  # 1 is findings; 2, a file or ruff it could not check
+            "        print('\\n' + _bh_ran.stdout)",
+            "finally:",
+            "    for _bh_name in ('_bh_run', '_bh_sys', '_bh_ran', '_bh_name'):",
             "        globals().pop(_bh_name, None)",
         ]
     )
@@ -629,7 +713,7 @@ class PythonProcess:
                 )
                 continue
             try:
-                ran = await self._exchange(_startup_input(startup.path, startup.source))
+                ran, checked = await self._run_startup(startup)
             except ConnectionError:
                 self._passed[startup.name] = "it ended the REPL's process"
                 raise _StartupEnded(startup.name, _told(asides)) from None
@@ -652,10 +736,27 @@ class PythonProcess:
                     f"{startup.name} ran {when} and failed{left}, so what it defines is missing:\n{ran.error}"
                 )
             else:
-                lines = ran.output.strip().splitlines()
-                told, spare = startup_ran(startup.name, when, lines[-1] if lines else "", spare)
+                line = _last(ran.output)
+                told, spare = startup_ran(startup.name, when, line, spare)
                 asides.append(told)
+                if checked is not None:  # the file told something: its docstrings were checked
+                    names = [each for each, _ in _bound(line) or ()]
+                    said = startup_checked(
+                        startup.name, names, "" if checked.error else _last(checked.output)
+                    )
+                    if said:
+                        asides.append(said)
         return _told(asides)
+
+    async def _run_startup(self, startup: _Ready) -> tuple[_Output, _Output | None]:
+        """Run the startup file as an input and, when it ran and told something, the input that checks
+        its docstrings (`_check_input`): the file's own and the check's, which is None when there
+        was nothing to check. Both are the file's turn, so one that ends the worker or is stopped
+        ends this one's, and `_opening` answers either the same way."""
+        ran = await self._exchange(_startup_input(startup.path, startup.source))
+        if ran.error or not _bound(_last(ran.output)):
+            return ran, None
+        return ran, await self._exchange(_check_input(startup.path, startup.source))
 
     def _ready(self, read: bool) -> list[_Ready]:
         """The startup files that are there, in order, each once (at its first place), and how

@@ -6,6 +6,8 @@ requires-python = ">=3.15"
 dependencies = [
     "cordis",
     "host-paths",
+    # run in the jail, under bh-02's interpreter, over a startup file's text (decision-0006 point 7)
+    "ruff>=0.16.7",
 ]
 
 [project.entry-points."cordis.plugins"]

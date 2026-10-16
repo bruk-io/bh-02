@@ -10,6 +10,7 @@ a fatal error, and those reports after the run.
 import asyncio
 import contextlib
 import os
+import subprocess
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from importlib.metadata import entry_points
@@ -133,6 +134,31 @@ def sessions_command() -> None:
         click.echo(f"{session.id}  {session.created[:19]}  {session.stack}{patched}")  # to the second
     for record in broken:
         click.echo(f"warning: skipped {record.message}", err=True)
+
+
+@main.command("check-examples")
+@click.argument(
+    "files", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+def check_examples_command(files: Sequence[Path]) -> None:
+    """Check the docstrings of the functions and classes startup files tell for an example in each
+    (a doctest block, or a `::` literal block) and for doctest blocks that parse, each with a blank
+    line before it. It reads each FILE and runs none of its code, needs no session and no model, and
+    exits 1 on a finding, 0 on none and 2 when it can't check a file. ruff checks the rest of the
+    convention: `ruff check --isolated --no-fix --select D101,D103,D205,D415,D419 FILE`."""
+    program = _check_program()
+    sys.exit(subprocess.run([sys.executable, "-I", str(program), *map(str, files)], check=False).returncode)
+
+
+def _check_program() -> Path:
+    """The python plugin's `startup_check.py`, found by the plugin's name (`code_directories`, which
+    imports nothing): the app does not import a plugin, and the program is run by path, as the
+    Python process runs it in the jail."""
+    for directory in code_directories(("python_cordis_plugin",)):
+        program = Path(directory) / "startup_check.py"
+        if program.is_file():
+            return program
+    raise click.ClickException("the python plugin is not installed, so there is no example rule to run")
 
 
 @main.command("watch")

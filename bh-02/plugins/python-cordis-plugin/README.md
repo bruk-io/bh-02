@@ -198,6 +198,79 @@ bound), reported on the startup line like any failing file. The line is bounded 
 process's output cap (20,000 characters): a file with so many functions that it passes that is said
 not to be listable.
 
+Each file that told something is then checked against the docstring convention (decision-0006's point
+7), in the jail and after the file, by a second input (`client._check_input`) that runs
+`startup_check.py` as a program: `python -I startup_check.py --ruff --json NAME` (the project's
+file, which the jail reads) or `... --name NAME -` with the text on stdin (the person's, which the
+host handed in), under the Python process's own interpreter (`sys.executable`, whose environment
+every jail reads), with a timeout. Ruff runs as `sys.executable -m ruff` with bh-02's flags only
+(`startup_check.RUFF_FLAGS`: `--isolated --no-fix --select D101,D103,D205,D415,D419`, `--output-format
+json`, `--stdin-filename NAME`), so no configuration the model could write loosens it. The program's
+pure core reads the text and executes none of it: `examples` is bh-02's own rule (`ast` and
+`doctest.DocTestParser`: for each function and class the file tells, an example, a doctest block or a
+`::` literal block that has a blank line before it, code `example`; doctest blocks that parse, each
+with a blank line before it, code `doctest`), and `ruff_findings` keeps ruff's findings that are on a
+told definition (its line for `D101`/`D103`, its docstring's lines for the rest) and drops a private
+function's, a method's and the module's. Which functions are told is decided again there, from the
+syntax (the public ones the file defines, or the ones its literal `__all__`, `=` or `+=`, names; the
+last definition of a name), and the host takes the names the live listing also told. The program
+prints one line, `{"misses": [[name, [code, ...]], ...]}`, codes only; the host reads it as data like
+the listing (`client.startup_checked`): a name the file did not tell, or a code outside
+`startup_check.CODES`, is dropped or makes the line not the report, a message is never said, and
+the aside is `PATH docstring findings: a D103, example; b doctest`, in the order the file told its
+functions, codes in `CODES` order, or nothing when nothing misses. A check that did not run
+(the program failed, timed out, or printed something else) is `PATH docstrings could not be
+checked`; a finding stops no file and hides no function. A file that failed, or told nothing, is
+not checked. A function with no docstring has no example, so it breaks `example` beside ruff's
+`D103`; ruff calls a name with a leading underscore private even when `__all__` names it (no `D103`),
+and reads a set or a string `__all__` as naming nothing public, so those miss `example` alone.
+
+`startup_check.py` is a program of its own, standard library only (the gate's `worker-stdlib-only`),
+run by path and never imported by the Python process or the app's command line, because importing
+this package imports cordis. `bh-02 check-examples FILE...` (the app's `cli.py`) finds it by the
+plugin's name, with no import (`importlib.util.find_spec`), and runs `startup_check.py FILE...` under
+its own interpreter: the example rule alone, one line a finding, exit status 1 on a finding, 0 on
+none, 2 for a usage error or a file it can't check (unreadable, not UTF-8, not Python). It needs no
+session or model, and is for the person, a pre-commit hook and CI, beside ruff's line:
+
+```sh
+ruff check --isolated --no-fix --select D101,D103,D205,D415,D419 .bh-02/startup.py
+bh-02 check-examples .bh-02/startup.py
+```
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: startup-ruff
+        name: startup file docstrings (ruff)
+        entry: ruff check --isolated --no-fix --select D101,D103,D205,D415,D419
+        language: system
+        files: (^|/)startup\.py$
+      - id: startup-examples
+        name: startup file docstring examples (bh-02)
+        entry: bh-02 check-examples
+        language: system
+        files: (^|/)startup\.py$
+```
+
+```yaml
+# a CI step
+- name: Startup file docstrings
+  run: |
+    ruff check --isolated --no-fix --select D101,D103,D205,D415,D419 .bh-02/startup.py
+    bh-02 check-examples .bh-02/startup.py
+```
+
+`_keep` says what the check is in the `python` section: confined, that the told functions are
+checked at REPL start, what the startup line's codes mean, that a finding stops and hides nothing,
+and the two commands to run in an input for the detail (`python -m ruff check ...`, `python -m
+python_cordis_plugin.startup_check FILE`, `python` being `sys.executable`; the second imports this
+package, which works in the model's REPL and costs a moment). Unconfined nothing is listed or
+checked, so it is given the two commands to check the file it writes. ruff is a runtime dependency
+of this plugin (so the app's), at the version the codes were measured on or later.
+
 The namespace's `__name__` is `__kernel__`: a startup file may test it, and renaming it would
 break that silently.
 

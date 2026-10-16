@@ -148,13 +148,15 @@ rules = [
 mode = "library"  # what a package __init__ re-exports is protected public API (every top-level package)
 
 # The ui plugin is the interface that talks to a terminal (a Textual app, all of it); an app's
-# command line has no Output to go through for option parsing or a fatal error.
+# command line has no Output to go through for option parsing or a fatal error. The startup check is
+# a program of its own: stdin, stdout and stderr are its whole interface.
 [tool.pypeeker.terminal-io]
-allowed = ["tui_cordis_plugin", "bh_02.cli", "warden.cli"]
+allowed = ["tui_cordis_plugin", "bh_02.cli", "warden.cli", "python_cordis_plugin.startup_check"]
 
-# The Python process's worker is a separate program whose stdout is the input's output.
+# The Python process's worker is a separate program whose stdout is the input's output; the
+# startup check prints its findings.
 [tool.pypeeker.print-input]
-allowed = ["python_cordis_plugin.worker"]
+allowed = ["python_cordis_plugin.worker", "python_cordis_plugin.startup_check"]
 
 # An app's shell modules know cordis besides every plugin's wiring.
 [tool.pypeeker.cordis-in-wiring-only]
@@ -167,8 +169,9 @@ shell = [
     "extensions_cordis_plugin.worker",
 ]
 
+# The startup check runs in the same jail, by path, under the same interpreter (decision-0006 point 7).
 [tool.pypeeker.worker-stdlib-only]
-modules = ["python_cordis_plugin.worker"]
+modules = ["python_cordis_plugin.worker", "python_cordis_plugin.startup_check"]
 
 [tool.pypeeker.brig-one-adapter]
 adapter = "runner_cordis_plugin"
@@ -182,8 +185,9 @@ extra-impure = ["itertools.count", "importlib.resources.files", "threading.Condi
 allow = [
     "bh_02.__main__", "warden.__main__",
     # the Python process's worker and the extensions process's, each run by path (`python -I worker.py
-    # SOCKET`) inside a jail
-    "python_cordis_plugin.worker", "extensions_cordis_plugin.worker",
+    # SOCKET`) inside a jail; and the startup check, a program run by path in the same jail and by
+    # `bh-02 check-examples`
+    "python_cordis_plugin.worker", "extensions_cordis_plugin.worker", "python_cordis_plugin.startup_check",
 ]
 
 # A function may not mutate module-level state. The extensions process puts each model-written
@@ -218,6 +222,7 @@ exclude = [
     "bh_02.sessions:find",                                    # resolves --resume: reads the state dir (scanned)
     "bh_02.sessions:Listing.listed",                          # the `session` value, read fresh per call
     "bh_02.cli:_session", "bh_02.cli:main", "bh_02.cli:sessions_command",
+    "bh_02.cli:check_examples_command",                       # runs the python plugin's startup check as a subprocess
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
     "bh_02.cli:_launch",                                      # makes the project's auto memory directory
     "bh_02.bootstrap:project_of",                             # reads .git: a worktree's main repository
@@ -317,6 +322,9 @@ exclude = [
     "runner_cordis_plugin.unconfined:_Process.*", "runner_cordis_plugin.unconfined:Unjailed.start",
     "runner_cordis_plugin.unconfined:_until_listening",
     "python_cordis_plugin.worker:*",
+    # the startup check, a program of its own: the file it reads, ruff as a subprocess, the lines it prints
+    "python_cordis_plugin.startup_check:main", "python_cordis_plugin.startup_check:_read",
+    "python_cordis_plugin.startup_check:_ruffed",
     "runner_cordis_plugin.jail:BrigJail.*", "runner_cordis_plugin.jail:_Jailed.*",
     # the model's extensions: the directory they are written to, read every `watch` seconds, and
     # the status file the model reads; a socket to a worker a jail started, the worker program
@@ -346,7 +354,7 @@ allow = [
     "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:repl_provider",
     "bh_02.testing:delegating_provider",
     # registered by decorator or by [project.scripts], never called by name
-    "bh_02.cli:sessions_command", "bh_02.cli:watch_command",
+    "bh_02.cli:sessions_command", "bh_02.cli:watch_command", "bh_02.cli:check_examples_command",
     "models_cordis_plugin.claude_code.detach:main",
     # the documentation site's MkDocs hook: MkDocs calls these by name (mkdocs.yml `hooks`)
     "bh_docs:on_config", "bh_docs:on_page_markdown",

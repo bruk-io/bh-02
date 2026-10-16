@@ -825,7 +825,8 @@ async def test_on_linux_the_person_s_startup_file_runs_in_a_jail_that_has_no_hom
     async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
         out = await process.run(f"import os\nprint(os.path.exists({str(person)!r}))\nshow(TOOLS)")
     assert out.startswith(
-        f"({person} ran first: functions show(x). .bh-02/startup.py ran next: no public functions)\n"
+        f"({person} ran first: functions show(x). {person} docstring findings: show D103, example. "
+        ".bh-02/startup.py ran next: no public functions)\n"
     ), out
     assert out.endswith("\nFalse\n'<2>'"), out  # the jail can't see the person's file; its function runs
 
@@ -852,8 +853,74 @@ async def test_on_linux_a_startup_file_s_functions_are_listed_by_signature_from_
     async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
         out = await process.run("show(run('ls'))")
     assert out == (
+        f"({person} ran first: functions show(x). {person} docstring findings: show D103, example. "
+        ".bh-02/startup.py ran next: functions run(cmd, *, quiet=True). "
+        ".bh-02/startup.py docstring findings: run D103, example)\n'<ls>'"
+    ), out
+
+
+_DOCUMENTED = (
+    "def show(x):\n"
+    '    """Show X in angle brackets.\n\n'
+    "    >>> show(1)\n"
+    "    '<1>'\n"
+    '    """\n'
+    "    return f'<{x}>'\n"
+)
+_FINDINGS = (
+    "def run(cmd):\n"
+    '    """Run CMD"""\n'
+    "    return cmd\n\n\n"
+    "def go(x):\n"
+    '    """Go.\n\n'
+    "    Gives X back.\n"
+    "    >>> go(1)\n"
+    '    1\n    """\n'
+    "    return x\n\n\n"
+    "def fine():\n"
+    '    """Do nothing.\n\n'
+    "    Use::\n\n"
+    "        fine()\n"
+    '    """\n'
+)
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_on_linux_both_checks_run_in_the_jail_on_a_file_with_findings_and_one_without(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ruff, with bh-02's flags, and the example rule run as programs under the Python process's own
+    interpreter, inside bubblewrap, over the person's file (which the jail can't read: its text was
+    handed in) and the project's (which it reads). The person's keeps the convention and adds
+    nothing to the aside; the project's has three findings, ruff's and the rule's, said as codes.
+    The model's own run of either tool, as it is told to, works in the same jail."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    person = Path(os.environ["XDG_CONFIG_HOME"]) / "bh-02" / "startup.py"
+    person.parent.mkdir(parents=True)
+    person.write_text(_DOCUMENTED)
+    project = tmp_path / "project"
+    (project / ".bh-02").mkdir(parents=True)
+    (project / ".bh-02" / "startup.py").write_text(_FINDINGS)
+    host = _Host(code=code_directories(code_packages(["python_cordis_plugin"])))
+    async with _python(BrigJail(BrigConfig(), host), PythonProcessConfig(root=str(project))) as process:
+        out = await process.run(
+            "import os, subprocess, sys\n"
+            f"print(os.path.exists({str(person)!r}))\n"
+            "ruff = subprocess.run([sys.executable, '-m', 'ruff', 'check', '--isolated', '--no-fix', "
+            "'--select', 'D101,D103,D205,D415,D419', '--output-format', 'concise', '.bh-02/startup.py'], "
+            "capture_output=True, text=True)\n"
+            "rule = subprocess.run([sys.executable, '-m', 'python_cordis_plugin.startup_check', "
+            "'.bh-02/startup.py'], capture_output=True, text=True)\n"
+            "print(ruff.returncode, ruff.stdout.count('D415'), rule.returncode, "
+            "'doctest go:' in rule.stdout)\n"
+            "show(1)"
+        )
+    assert out == (
         f"({person} ran first: functions show(x). "
-        ".bh-02/startup.py ran next: functions run(cmd, *, quiet=True))\n'<ls>'"
+        ".bh-02/startup.py ran next: functions run(cmd), go(x), fine(). "
+        ".bh-02/startup.py docstring findings: run D415, example; go doctest)\nFalse\n1 1 1 True\n'<1>'"
     ), out
 
 
