@@ -3,11 +3,11 @@ id: TASK-0116
 title: >-
   Run arch-check's gates at the same time: 115.6 s to 107.0 s now, more once the
   root gate is fast
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 08:19'
-updated_date: '2026-10-16 12:16'
+updated_date: '2026-10-16 12:19'
 labels:
   - gates
   - scripts
@@ -66,4 +66,6 @@ Wall time of scripts/arch-check --no-fix, warm, paired and interleaved (before =
 ## Not part of this task (for the report)
 - --fix doubles the root gate's time (fix pass, then check pass): about 258 s against 104 s here.
 - I ran chmod +x on my own scratch timing script in the scratchpad (a file I created); no repository file or directory mode was touched.
+
+Reviewer: CLOSE. 23/23 tests in test_arch_check.py pass; scripts/arch-check --no-fix exit 0, five gates ok in gate order. Merge with TASK-0118 is correct: drop_entries(outside_src) is run_gate's first step after sync_src, docstring keeps both paragraphs. index returning its problem becomes Outcome(False), so every indexing failure still fails the run. --fix concurrency argument (per-gate .pypeeker, disjoint src) accepted with the 25-round stress. Nits, not filed: an exception (not an Outcome) raised inside run_gate propagates through pool.map and drops later gates' output, though the exit stays non-zero; --fix doubles the root gate's time (noted by worker, outside scope).
 <!-- SECTION:NOTES:END -->
