@@ -12,7 +12,7 @@ labels:
   - security
   - size-1
 dependencies: []
-type: bug
+type: task
 ---
 
 ## Description
@@ -25,5 +25,6 @@ Measured 2026-10-16 by the orchestrator, in a real bwrap jail with `_a_uv_python
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 In a real bwrap jail with the project at the home layout, an input cannot rename any directory on the way from a writable root to bh-02's interpreter, and a test plants it, seen failing first
+- [ ] #1 In a real bwrap jail with uv's layout under the project, an input's rename of each directory between the project and the interpreter file or a link on the way to it is refused, and nothing is moved on the host
+- [ ] #2 The test is seen failing with brig.mech.bwrap's pins replaced by one that returns nothing (renaming uv and venv then succeeds), and passing without the plant
 <!-- AC:END -->
