@@ -3,11 +3,11 @@ id: TASK-0118
 title: >-
   Drop a gate's index entries that are outside its src: this checkout's root
   gate carries 54 of brig's and pays 7 s a run
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 08:20'
-updated_date: '2026-10-16 12:10'
+updated_date: '2026-10-16 12:13'
 labels:
   - gates
   - scripts
@@ -72,4 +72,6 @@ Machine shared with two other workers (1-minute load average 1.8 to 2.9 on 4 cor
 - O: 94.04, 97.27, 97.00 s; median 97.00 s
 - paired differences W minus O: +3.79, +0.31, +3.58 s; median +3.58 s (3.7%)
 This is a smaller and noisier saving than TASK-0111's in-process figure (106.1 s to 98.9 s, 7.2 s): the run-to-run spread (94.0 to 100.6 s) is larger than the median difference, and this is the subprocess command, not the in-process rule timing. Not reproduced at 7 s on this run; a reviewer who wants a firmer number needs more paired rounds, which were not run because the brief said median of 3.
+
+Reviewer verdict: CLOSE. AC1 met: outside_src pure, Path.is_relative_to, 4 tests (dropped/kept + edges), re-run 16 passed; arch-check --no-fix exit 0. AC2 met: before/after recorded (97.83 s vs 97.00 s median, paired +3.6 s, noise noted). Should-fix (not filed): drop_entries unlinks by pypeeker's on-disk layout, the same pre-1.0 coupling TASK-0102 rejected for the Python API, just smaller; the docstring names IndexStore.remove but not that a pypeeker storage change silently makes the drop a no-op (missing_ok). Corruption risk low: per-file unlinks are independent, tree.json is rebuilt on read. Nit: empty index dirs left behind.
 <!-- SECTION:NOTES:END -->
