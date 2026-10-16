@@ -7,11 +7,12 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 12:19'
-updated_date: '2026-10-16 14:11'
+updated_date: '2026-10-16 14:12'
 labels:
   - gates
   - scripts
   - size-2
+  - finish-moved
 dependencies: []
 priority: medium
 type: task
@@ -25,8 +26,8 @@ From TASK-0116 (its worker measured it; its close review noted it). scripts/arch
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 scripts/arch-check (with --fix) runs each gate's rules once when no fix applies, and still reports the findings left and exits non-zero on any, shown by a test
-- [x] #2 Its wall time with --fix before and after is recorded in the notes
+- [x] #1 Its wall time with --fix before and after is recorded in the notes
+- [ ] #2 scripts/arch-check (with --fix) runs a clean gate's rules once; a gate with findings still reports the findings left and exits non-zero (it still runs them twice when no fix applies, until TASK-0125), shown by tests
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -75,4 +76,6 @@ Paired differences before - after: 73.8, 67.2, 73.8; median 73.8 s (60%). A clea
 - scripts/check bh-02/app --no-gates --no-docs: exit 0 (format, lint, types, 236 passed 1 skipped; tokens skipped, no bh-01 dist). The first run failed lint on a 114-character docstring line in the new test; shortened, then green.
 - AC #1 left unticked on purpose: it holds for a clean gate (one pypeeker check, no --fix: test_a_clean_gate_with_fix_runs_one_check_and_no_fix) and findings are reported with a non-zero exit in every case (the tests above), but a gate with findings that no fix applies to still runs the rules twice (plain check, then --fix). Without a pypeeker change the --fix report holds only a count of those findings, so there is no way to read them from a --fix run; the reviewer rules on whether that reading of 'once when no fix applies' is the intent. Upstream, a --fix report (or flag) that carries the findings left would remove the second run; not filed (parallel workers).
 - Correction to the AC2 note: 'a heavier moment of the same machine' explaining 258 s against 118 s here is a guess I did not test; what I measured is 118.4 s before and 47.7 s for --no-fix, a ratio of 2.5 like the 258/104 of TASK-0116.
+
+2026-10-16, orchestrator: finish moved after the work. Criterion 1 asked for one run "when no fix applies"; the worker showed pypeeker gives no way to meet it for a gate whose findings have no fix (the --fix report carries only a count, and check marks no finding as fixable). Narrowed to the clean gate, the case the task was filed for (every green CI and pre-commit run, 118 s to 48 s), with the red-gate case moved to TASK-0125 (an upstream pypeeker change, then a pin bump).
 <!-- SECTION:NOTES:END -->
