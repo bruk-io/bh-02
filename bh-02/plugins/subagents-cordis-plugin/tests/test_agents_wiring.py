@@ -1191,6 +1191,9 @@ async def test_agent_stop_ends_the_child_and_its_python_program(tmp_path: Path) 
     tools = rt.root.get("tools")
     await _background(rt, background=True)
     [program] = await _up(tmp_path, 1)
+    # the program having run says nothing of the model: stopped before the loop asks for the next
+    # step, there is no step to close (`closed` stays 0), so the stop waits until the step hangs
+    await _until(lambda: model.hung == 1)
     stopped = await _bounded(tools.get("agent_stop").run({"name": "general-1"}))
     assert stopped["content"].startswith("Stopped general-1")
     assert (await _bounded(tools.get("agent_wait").run({"names": ["general-1"]})))["content"].startswith(
