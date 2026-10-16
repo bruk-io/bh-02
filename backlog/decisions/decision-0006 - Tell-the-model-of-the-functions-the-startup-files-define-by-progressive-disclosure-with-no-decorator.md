@@ -4,7 +4,7 @@ title: >-
   Tell the model of the functions the startup files define by progressive
   disclosure, with no decorator
 date: '2026-10-16 01:51'
-status: proposed
+status: accepted
 ---
 ## Context
 
@@ -63,7 +63,7 @@ Weighed and not taken:
    | | What | When | From |
    |---|---|---|---|
    | Frame | The convention, the cost (point 3) and the docstring convention (point 4), once | Every request: the python row's section of the system prompt, fixed and cached | bh-02's own text (`python.instructions_for`) |
-   | 1 | `name(signature)` for each told function | Pushed once per REPL (a start, `/clear`, a restart, a resume), in the aside before the first input's output: signatures up to 1,500 characters, then the rest by name only, so nothing is hidden | The live object (`inspect.signature`), cleaned on the host as now: control and format characters stripped, each cut at 160 characters, a name that is not an identifier counted, never shown |
+   | 1 | `name(signature)` for each told function | Pushed once per REPL (a start, `/clear`, a restart, a resume), in the aside before the first input's output: signatures up to 600 characters across the REPL's startup files, in the order they run, then the rest by name only, so nothing is hidden | The live object (`inspect.signature`), cleaned on the host as now: control and format characters stripped, each cut at 160 characters, a name that is not an identifier counted, never shown |
    | 2 | The docstring | Pulled only: `help(name)` | The live object, when asked (current after an edit and a reload) |
    | 3 | The source | Pulled only: `inspect.getsource(name)` | The project's file from disk in the jail; the person's from the text the host handed the REPL |
 
@@ -162,5 +162,9 @@ Proposed 2026-10-16 from the owner's choices in conversation: no decorator, no "
 functions told, the model told what they cost and how, a docstring convention for examples (reST
 examples, both forms, with the project's own field style), a check of the convention that needs
 no model (ruff where it has rules, bh-02's own where it has none), and typing enforced with mypy.
-Two parts are the orchestrator's, for the owner to confirm: the 1,500-character budget for
-signatures at REPL start, and point 7's rule selection, flags and placement in the jail.
+
+Accepted 2026-10-16 by the owner, in conversation, with one change applied above: the budget for
+signatures at REPL start is 600 characters (about 150 tokens; the orchestrator had proposed 1,500,
+which the owner found too long). Point 7's rules, flags and placement in the jail accepted as
+written. Supersedes decision-0004. Recorded by TASK-0106; built by TASK-0107, TASK-0108 (docstrings)
+and TASK-0109 (types).
