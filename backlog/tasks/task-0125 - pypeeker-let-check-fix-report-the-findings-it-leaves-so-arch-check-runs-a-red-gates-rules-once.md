@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 14:12'
-updated_date: '2026-10-16 22:59'
+updated_date: '2026-10-16 23:26'
 labels:
   - gates
   - size-2
@@ -79,4 +79,31 @@ Setup: scratch copy of bh-02 at 41b5bbb (git archive, warm .pypeeker copied) und
 - Worth doing, unsized, not filed: pypeeker skips the repairs collection in check --fix when the run has no findings (clean --fix 54.8 -> about 37 s by the prototype), after which fix-first costs a clean gate nothing.
 
 Correction to the evidence above: the pre-change run (5 of 6 new tests failed with KeyError: 'residual_findings') was of the first, optional-key version of the tests; the sixth then asserted the key was absent and passed. I then made the key always present and rewrote that test to expect an empty list, and did not re-run the final tests against the unchanged code; the planted rendering (path:line only) failed 6 tests of the final version.
+
+## Second round (worker 2): a clean gate pays nothing for --fix first. Evidence for criterion 3
+
+Criterion 3 reads: a clean gate's scripts/arch-check run with --fix is no slower than before this task. The first round left a clean gate 17.7 s slower (fix first, not plain first). Fixed upstream, pypeeker f558226 on wt-0125 (second commit on top of 8f0e223, not squashed into it; pushed by nobody, the pin bump is the orchestrator's): plan_check_fixes returns the empty outcome (no fixes, no conflicts, no declines, no transaction, the run's findings as the residual) when the run has no findings, before it asks any rule for repairs. A repair is the remedy of a finding (DslRule.remediations derives both from one pass over the same rows), so a run that found nothing has none to collect. The report, the exit code and the findings are unchanged (the clean-run CLI test pins the whole report and passes untouched). --fix-until-clean does not take the shortcut. bh-02 itself changed nothing in this round but the board.
+
+Two test fixtures in pypeeker built a CheckRun with findings=[] around a rule that proposes a repair (test_app_fix_run.py TestApplyFailure, test_index_cache_freshness.py TestCheckFixSeesItsOwnEdit single-pass); the skip made both fail (seen: 2 failed, 3896 passed), so they now name the finding their rule reports. New tests (tests/test_app_fix_run.py, TestCleanRunPlansNothing, 3): a clean run asks no rule for repairs and returns the empty FixOutcome (seen failing before the change: the rule was asked once); the same on a real clean project, nothing written; a run with a finding it cannot repair still asks (seen failing with the skip made unconditional, `if True:`, then restored and cmp'd). pypeeker scripts/verify-repo.sh on the final tree: pytest 3898 passed, ruff passed, self-lint passed, OVERALL: PASS. bh-02: UV_NO_SYNC=1 uv run pytest bh-02/app/tests/test_arch_check.py: 40 passed on the new pypeeker.
+
+## Table: whole scripts/arch-check (default --fix), five gates, clean tree, wall seconds, paired and interleaved
+
+Method: scratch copy of bh-02 at this branch's HEAD (git archive, the five gates' warm .pypeeker copied) under the session scratchpad, never in the repo. Each run is a fresh process that loads the script as a module with ROOT set to the copy and PYPEEKER set to the pypeeker binary, calls its main() with no arguments (the default --fix), captures stdout and reads the exit code; under tini -s --; one warm-up per variant first; the order rotated each round. before = 41b5bbb's script (git show 41b5bbb:scripts/arch-check, TASK-0120's plain-first) with the pinned pypeeker 67b0a1b (/home/user/bh-02/.venv/bin/pypeeker, read only; its dist-info names commit 67b0a1b). after = d2a589e's script (cmp equal to this worktree's scripts/arch-check) with pypeeker f558226 (this worktree's editable). noskip = d2a589e's script with the pinned pypeeker, i.e. fix first without the upstream skip (the 54.8 s case of the first round), kept as the control. Machine shared with another worker: load average 1.2-2.7 during the runs, so single runs vary by 3-7 s.
+
+| round (order) | before (plain first, pinned) | after (fix first, f558226) | noskip (fix first, pinned) |
+|---|---|---|---|
+| 1 (before, after, noskip) | 37.7 | 38.1 | 56.6 |
+| 2 (after, noskip, before) | 36.2 | 37.2 | 56.4 |
+| 3 (noskip, before, after) | 38.9 | 42.2 | 56.8 |
+| median | 37.7 | 38.1 | 56.6 |
+
+Paired after minus before: +0.4, +1.0, +3.3 s, median +1.0 s. An earlier sample the same session, before and after only (order before/after, after/before, before/after): before 42.1, 46.4, 39.1 (median 42.1), after 41.1, 43.9, 39.6 (median 41.1), differences -1.0, -2.5, +0.5. Over all six pairs the differences are -2.5, -1.0, +0.4, +0.5, +1.0, +3.3: median +0.45 s (about +1%), inside the run-to-run spread. Every run exits 0 with five gates ok, and the printed bytes are identical across before, after and noskip in every round (cmp), so the verdict and output are unchanged. The control shows where the 17.7 s went: fix first costs +18.9 s over plain first with the pinned pypeeker (56.6 against 37.7), and the skip takes all of it back (38.1).
+
+In-process on bh-02's root corpus (the root gate's run_check, then plan_check_fixes on its clean run; the way TASK-0111 timed the rule in-process; python -I, PYTHONDONTWRITEBYTECODE, interleaved before/after/after/before/before/after): plan_check_fixes 21.1, 19.8, 19.3 s pinned (median 19.8) against 0.0, 0.0, 0.0 s now; run_check itself 40.2, 35.8, 35.9 (median 35.9) pinned against 36.3, 36.6, 35.2 (median 36.3) now. Both return 0 findings, 0 fixes, tx_id None.
+
+What this does and does not show: a clean gate's --fix run now does the plain check's work plus a JSON report, and the five-gate medians (38.1 against 37.7 s, +0.4 s; +0.45 s over six pairs) cannot be told apart from equal on this machine; I do not claim a strictly smaller number. A gate with findings is as before this round (the first round's 93.1 to 56.2 s).
+
+## Left / worth doing, not filed (unsized)
+- pypeeker: --fix-until-clean on a clean run still collects repairs in its first round (and hashes the whole tree); the same early return would fit _run_fixpoint's first iteration, with the report's iteration record kept as it is. bh-02 does not use the flag.
+- AC1's root pin naming the merged commit, uv.lock regenerated: the orchestrator's (this branch's tests read residual_findings, so they pass only on a pypeeker with 8f0e223; the skip needs f558226). Criterion 3 and 'scripts/check passes': the reviewer's.
 <!-- SECTION:NOTES:END -->
