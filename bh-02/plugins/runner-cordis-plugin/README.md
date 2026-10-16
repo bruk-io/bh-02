@@ -159,8 +159,13 @@ One policy, two stacks (`stack_for`):
   the supervisor, which is stdlib-only, has no use for), which the jail mounts for the worker
   anyway. "Whole" means its spelling and its target are both under a read root: brig checks the
   spelling alone, and a link out of the roots (Debian's `/usr/bin/python3` goes through
-  `/etc/alternatives`, mounted with `/etc`) would dangle in the jail. A host with neither gets
-  brig's own default, which brig refuses (`InterpreterNotMounted`, its advice written for code
+  `/etc/alternatives`, mounted with `/etc`) would dangle in the jail. A path under a root the jail
+  may write counts only where a write deny holds it, since an input could replace the interpreter
+  that runs as PID 1. That matters when the project is the home directory, where bh-02's uv-managed
+  Python lies under the project. `spec_for` denies the standard library the host imports from
+  there, not that `bin/python3` (unless bh-02 runs on the base interpreter itself, when `prefix`
+  is in the host), so the choice skips it: the next candidate, or brig's default. A host with
+  neither gets brig's own default, which brig refuses (`InterpreterNotMounted`, its advice written for code
   that embeds brig). The compile does not pass that on: it raises the runner's own error, which
   names the candidates looked for and brig's reason, and says what a bh-02 user does (install
   python3, or `runner:unconfined` / `bh-02 --no-jail`, as the missing-bwrap error does), with

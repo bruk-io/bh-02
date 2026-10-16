@@ -455,25 +455,41 @@ def host_interpreters() -> tuple[str, ...]:
     return (DEFAULT_INTERPRETER, str(Path(base_prefix, "bin", "python3")))
 
 
-def supervisor_interpreter(found: Mapping[str, str], mounted: Sequence[str]) -> str:
+def supervisor_interpreter(
+    found: Mapping[str, str],
+    mounted: Sequence[str],
+    *,
+    writable: Sequence[str] = (),
+    denied: Sequence[str] = (),
+) -> str:
     """The interpreter brig's supervisor, the jail's PID 1, runs under (`strict_linux(python=...)`):
     the first of `found` that the jail holds whole. `found` is each candidate as spelled, best
     first, with the path it resolves to; `mounted` is the Spec's read roots (the system, the
-    interpreter's trees, bh-02's code: bound read-only), never its write roots, where an input
-    could replace what runs as the jail's PID 1. brig checks the spelling only, and leaves a link
-    that leads out of the roots to the Spec's author (Debian's `/usr/bin/python3` goes to
+    interpreter's trees, bh-02's code: bound read-only). brig checks the spelling only, and leaves a
+    link that leads out of the roots to the Spec's author (Debian's `/usr/bin/python3` goes to
     `/etc/alternatives`), so a candidate counts when its spelling and its target are both at or
     under a root: a link out of them would dangle in the jail, and a jail whose PID 1 can't start
     is no jail.
+
+    `writable` is the Spec's write roots and `denied` its write denies. An input could replace what
+    runs as the jail's PID 1, so a path under a writable root counts only where a write deny holds
+    it. bh-02's base interpreter lies under the project when the project is the home directory (a
+    uv-managed Python under `~/.local`), and `spec_for` denies the standard library the host imports
+    from there but not the `bin/python3` that starts it, unless bh-02 runs on that interpreter itself.
 
     When none qualifies, brig's own default: a Spec that does not mount it is refused by brig
     (`InterpreterNotMounted`), which `BrigJail.compile` turns into the runner's own error
     (`_no_python_message`). One that does mount it but has no Python there fails to start with
     the supervisor's own stderr (`SupervisorFailed`). Nothing here hides either."""
+
+    def under(roots: Sequence[str], path: str) -> bool:
+        return any(PurePosixPath(path).is_relative_to(root) for root in roots)
+
+    def whole(path: str) -> bool:
+        return under(mounted, path) and (not under(writable, path) or under(denied, path))
+
     for spelled, target in found.items():
-        if all(
-            any(PurePosixPath(path).is_relative_to(root) for root in mounted) for path in (spelled, target)
-        ):
+        if whole(spelled) and whole(target):
             return spelled
     return DEFAULT_INTERPRETER
 
@@ -1098,7 +1114,12 @@ class BrigJail:
             denies = uncovered(mountable(spec.fs.write_denies, self._instead(spec)))
             spec = replace(spec, fs=replace(spec.fs, write_denies=denies))
             spec = replace(spec, env=replace(spec.env, set=(*spec.env.set, *author)))
-            python = supervisor_interpreter(_present(self._interpreters), spec.fs.read_allows)
+            python = supervisor_interpreter(
+                _present(self._interpreters),
+                spec.fs.read_allows,
+                writable=spec.fs.write_allows,
+                denied=spec.fs.write_denies,
+            )
         ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=self._platform)
         try:
             jail = stack_for(self._platform, python).compile(spec, ctx=ctx)

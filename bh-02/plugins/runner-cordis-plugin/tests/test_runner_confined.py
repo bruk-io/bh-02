@@ -1924,6 +1924,30 @@ def test_the_supervisor_runs_under_the_first_interpreter_the_jail_holds_whole() 
     assert supervisor_interpreter({**nix}, ("/opt/py",)) == "/usr/bin/python3"
 
 
+def test_the_supervisor_never_runs_under_a_python_an_input_can_write_unless_a_deny_holds_it() -> None:
+    """bh-02's base interpreter lies under the project when the project is the home directory (a
+    uv-managed Python under `~/.local`). An input could replace what runs as the jail's PID 1 there,
+    so a candidate counts under a writable root only where a write deny holds it, its spelling and
+    its target both: a sibling name does not hold it."""
+    mounted = ("/usr", "/home/me")
+    writable = ("/home/me",)
+    base = {"/home/me/.local/py/bin/python3": "/home/me/.local/py/bin/python3.15"}
+    assert supervisor_interpreter(base, mounted, writable=writable) == "/usr/bin/python3"
+    assert (
+        supervisor_interpreter(base, mounted, writable=writable, denied=("/home/me/.local/py",))
+        == "/home/me/.local/py/bin/python3"
+    )
+    assert (
+        supervisor_interpreter(base, mounted, writable=writable, denied=("/home/me/.local/p",))
+        == "/usr/bin/python3"  # a sibling name is not under the deny
+    )
+    system = {"/usr/bin/python3": "/home/me/.local/py/bin/python3.15"}  # a link into the writable tree
+    own = {"/opt/py/bin/python3": "/opt/py/bin/python3.15"}
+    assert supervisor_interpreter({**system, **own}, (*mounted, "/opt/py"), writable=writable) == (
+        "/opt/py/bin/python3"  # the target counts too
+    )
+
+
 def test_a_linux_host_looks_for_its_system_python_then_the_one_bh_02_runs_on() -> None:
     assert host_interpreters() == ("/usr/bin/python3", str(Path(sys.base_prefix, "bin", "python3")))
 
@@ -1959,6 +1983,27 @@ def test_a_jail_compiles_its_supervisor_under_the_interpreter_the_host_has_and_i
     assert chosen.compile(str(tmp_path / "j"), sock, str(project), naming)[0].supervisor.interpreter == str(
         link
     )  # one that is not there is skipped
+
+
+def test_a_jail_does_not_run_its_supervisor_under_a_python_in_its_project_unless_a_deny_holds_it(
+    tmp_path: Path,
+) -> None:
+    """A Python in the project (where an input may write) is the PID 1 only where the policy denies
+    writing it: the same interpreter, named by the command so its directory is mounted, is refused
+    without the deny and chosen with one (`BrigConfig(deny=)`)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    link = _a_python_elsewhere(project / "py")
+    sock = str(tmp_path / "k" / "k.sock")
+    naming = ["/usr/bin/env", str(link), "-I"]  # mounted, so only the writable root decides
+    bare = BrigJail(BrigConfig(), Host(), platform="linux", interpreters=(str(link),))
+    assert bare.compile(str(tmp_path / "j"), sock, str(project), naming)[0].supervisor.interpreter == (
+        "/usr/bin/python3"
+    )
+    denied = BrigJail(BrigConfig(deny=("py",)), Host(), platform="linux", interpreters=(str(link),))
+    assert denied.compile(str(tmp_path / "j"), sock, str(project), naming)[0].supervisor.interpreter == (
+        str(link)
+    )
 
 
 # Listens; once the jail has seen it listen, writes what its PID 1 runs (the supervisor's command
