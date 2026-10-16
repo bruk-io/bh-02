@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import ctypes
 import os
+import shutil
 import signal
 import socket
 import struct
@@ -233,6 +234,96 @@ def test_bh_02_s_own_code_under_a_writable_root_is_denied_as_its_layer_files_are
     assert not set(_CODE) & set(elsewhere.fs.write_denies)
     inside = rooted(_CODE[0])  # bh-02 run in a package's own directory
     assert not _denied(inside, f"{_CODE[0]}/notes.md")
+
+
+def test_the_interpreter_bh_02_runs_on_is_denied_where_an_input_could_write_it() -> None:
+    """A project that holds the uv-managed Python (the home directory) is a root an input may
+    write, and the interpreter bh-02 runs on lies under it. In a venv layout `host` names the base's
+    standard library (on `sys.path`) and the venv's prefix, not the base's own binary: an input
+    that wrote that file would be run by the next bh-02 start on the host, outside any jail. So the
+    interpreter's files are denied, with or without a venv, where they are under a writable root."""
+    base = f"{_HOME}/.local/share/uv/python/cpython-3.15.0-linux"
+    interpreter, venv = f"{base}/bin/python3.15", f"{_HOME}/src/app/.venv"
+    stdlib = (f"{base}/lib/python3.15", f"{base}/lib/python3.15/lib-dynload")
+    in_a_venv = (*stdlib, f"{venv}/lib/python3.15/site-packages", venv)  # `sys.path`, `sys.prefix`
+    without_one = (base, *stdlib)  # `sys.prefix` is the base: the whole tree is the host's
+
+    def rooted(root: str, host: Sequence[str], interpreters: Sequence[str] = (interpreter,)) -> Any:
+        return spec_for(
+            root=root,
+            endpoint="/tmp/k/k.sock",
+            scratch="/tmp/j/tmp",
+            home=_HOME,
+            config=BrigConfig(),
+            layers=(),
+            host=host,
+            interpreters=interpreters,
+        )
+
+    for host in (in_a_venv, without_one):
+        spec = rooted(_HOME, host)
+        assert _denied(spec, interpreter), host
+        assert _denied(spec, f"{base}/lib/python3.15/os.py")  # the standard library was, either way
+        assert not _denied(spec, f"{_HOME}/notes.md")
+    sibling = f"{base}/bin/python3.15x"
+    assert not _denied(rooted(_HOME, in_a_venv), sibling)  # a name beside it is not the file
+    assert _denied(rooted(_HOME, without_one), sibling)  # (no venv: the whole base is the host's)
+    elsewhere = rooted(f"{_HOME}/work/app", in_a_venv)  # the usual case: the Python is not under the project
+    assert interpreter not in elsewhere.fs.write_denies
+    system = rooted(_HOME, in_a_venv, ("/usr/bin/python3.13",))  # a system Python, outside every root
+    assert "/usr/bin/python3.13" not in system.fs.write_denies
+    in_its_directory = rooted(f"{base}/bin", in_a_venv)  # the project is its directory: only the file
+    assert _denied(in_its_directory, interpreter) and not _denied(in_its_directory, f"{base}/bin/notes.md")
+    itself = rooted(interpreter, in_a_venv)  # a root is never denied, or the project would be read-only
+    assert interpreter not in itself.fs.write_denies
+
+
+def _a_python_in(project: Path) -> tuple[Path, Path, Path]:
+    """A uv-managed Python under `project` and a venv beside it, as a project opened at the home
+    directory holds them: the base's interpreter file (an executable, `true`'s) with its `python3`
+    link and standard library, and the venv's `python` links, which lead to the file. Returns the
+    file, the link, the venv."""
+    base, venv = project / ".local" / "py", project / "venv"
+    (base / "lib" / "python3.15").mkdir(parents=True)
+    (base / "bin").mkdir()
+    file = base / "bin" / "python3.15"
+    shutil.copy2(shutil.which("true") or "/bin/true", file)
+    link = base / "bin" / "python3"
+    link.symlink_to("python3.15")
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to(file)
+    (venv / "bin" / "python3").symlink_to("python")
+    return file, link, venv
+
+
+def test_a_jail_denies_the_interpreter_bh_02_runs_on_when_it_lies_in_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The compile reads the interpreter off the process (`sys.executable`, `sys.base_prefix`) and
+    gives the policy the files they lead to: in a venv layout planted under the project, the base's
+    file is denied beside its standard library. The base's `python3` is a link, and a deny on a link
+    is bubblewrap's mount on the file it leads to, which holds nothing of the link's own entry (an
+    input could replace it): so it is not what the policy lists, and not a Python the supervisor
+    may run under."""
+    project = tmp_path / "project"
+    file, link, venv = _a_python_in(project)
+    module = "runner_cordis_plugin.jail"
+    monkeypatch.setattr(f"{module}.host_executable", str(venv / "bin" / "python3"))
+    monkeypatch.setattr(f"{module}.base_prefix", str(file.parent.parent))
+    monkeypatch.setattr(f"{module}.prefix", str(venv))
+    monkeypatch.setattr(f"{module}.import_path", [str(file.parent.parent / "lib" / "python3.15")])
+    sock = str(tmp_path / "k" / "k.sock")
+    one = BrigJail(BrigConfig(), Host(), platform="linux", interpreters=(str(link),))
+    compiled, _ = one.compile(str(tmp_path / "j"), sock, str(project), ())
+    denies = compiled.spec.fs.write_denies
+    assert str(file.resolve()) in denies  # the interpreter, which the venv's links and `python3` lead to
+    assert _denied(compiled.spec, str(venv / "bin" / "python")) and _denied(
+        compiled.spec, str(file.parent.parent / "lib" / "python3.15" / "os.py")
+    )  # the venv's links and the standard library: held already
+    assert str(link) not in denies  # a link's entry is not what a mount holds
+    assert compiled.supervisor.interpreter == "/usr/bin/python3"  # so the link is not PID 1's Python
+    held = BrigJail(BrigConfig(), Host(), platform="linux", interpreters=(str(file),))
+    assert held.compile(str(tmp_path / "j"), sock, str(project), ())[0].supervisor.interpreter == str(file)
 
 
 def test_a_linux_jail_reads_bh_02_s_own_code_and_writes_none_of_it(tmp_path: Path) -> None:
@@ -1511,6 +1602,66 @@ async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_no
         assert (memory / "MEMORY.md").read_text() == "a memory"
         assert not (beside / "MEMORY.md").exists()
         assert str(memory.resolve()) in started.writes() and str(memory.resolve()) in started.reads()
+    finally:
+        await started.stop()
+
+
+# Listens; once the jail has seen it listen, tries what an input could do to the interpreter file
+# argv[2] (write it, write through its link argv[3], rename it, remove it) and writes a file beside
+# them, argv[4]; says what each came to in argv[5], waits.
+_LISTEN_THEN_REACH_FOR_THE_PYTHON = """
+import os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+file, link, beside, said = sys.argv[2:6]
+tries = {
+    "write": lambda: open(file, "w").write("planted"),
+    "write through the link": lambda: open(link, "w").write("planted"),
+    "rename": lambda: os.rename(file, file + ".moved"),
+    "remove": lambda: os.unlink(file),
+    "write beside": lambda: open(beside, "w").write("fine"),
+}
+came_to = []
+for name, attempt in tries.items():
+    try:
+        attempt()
+        came_to.append(name + ": done")
+    except OSError as error:
+        came_to.append(name + ": " + os.strerror(error.errno))
+open(said, "w").write("\\n".join(came_to))
+time.sleep(60)
+"""
+
+
+async def test_a_linux_jail_refuses_an_input_that_writes_the_interpreter_bh_02_runs_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In a real jail, with the interpreter bh-02 runs on planted under the project (an input may
+    write the project): a write to the file, or through its link, a rename and a removal are all
+    refused, and a file beside it is written as any in the project is."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "records"))
+    project = tmp_path / "project"
+    file, link, _ = _a_python_in(project)
+    before = file.read_bytes()
+    monkeypatch.setattr("runner_cordis_plugin.jail.host_executable", str(link))
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
+    endpoint, said, beside = _endpoint(), project / "said", project / "beside"
+    argv = [sys.executable, "-I", "-c", _LISTEN_THEN_REACH_FOR_THE_PYTHON, endpoint]
+    argv += [str(file), str(link), str(beside), str(said)]
+    started = await one.start(argv, cwd=str(project), endpoint=endpoint)
+    try:
+        for _ in range(200):
+            if said.exists():
+                break
+            await asyncio.sleep(0.05)
+        came_to = dict(line.split(": ") for line in said.read_text().splitlines())
+        assert came_to["write beside"] == "done" and beside.read_text() == "fine"
+        refused = {name: how for name, how in came_to.items() if name != "write beside"}
+        assert refused and "done" not in refused.values(), refused
+        assert file.read_bytes() == before and not Path(f"{file}.moved").exists()
     finally:
         await started.stop()
 

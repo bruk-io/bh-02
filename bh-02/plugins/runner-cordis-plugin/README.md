@@ -92,7 +92,25 @@ policy seam, not this).
   package, whatever `sys.path` holds: a package an import hook finds is on no `sys.path`, and a
   `src` directory that is the project itself is not denied as a host import path (the test runs
   there too). Held on Linux as any write deny there is. Not one the project is (bh-02 run in a
-  package's own directory), which would leave the project read-only. A started program's `writes()` names the roots its inputs may write (the
+  package's own directory), which would leave the project read-only.
+  Nor the interpreter bh-02 itself runs on, where its file lies under a writable root (a project
+  opened at the home directory holds the uv-managed Python): the next bh-02 start on the host
+  would run what an input wrote there, outside any jail. `host` holds the standard library and
+  the venv's prefix, and with no venv the whole prefix; in a venv layout the base's binary is on
+  neither, so `BrigJail` hands `spec_for` the files that `sys.executable` and
+  `<sys.base_prefix>/bin/python3` lead to, every link followed, and one strictly under a writable
+  root is denied (as for `host`: a root itself would leave the project read-only). The files, not
+  the names that lead to them: bubblewrap's mount on a link lands on the file, so the file is what
+  holds (measured: a write to the file and one through the link both fail, while the link's own
+  entry can be renamed), and a deny on a link that dangles in the jail fails the launch
+  (`test_the_interpreter_bh_02_runs_on_is_denied_where_an_input_could_write_it`, the compile of a
+  planted venv layout, and in a real jail
+  `test_a_linux_jail_refuses_an_input_that_writes_the_interpreter_bh_02_runs_on`: a write, a write
+  through the link, a rename and a removal are refused). Not held: the entry of a link in a
+  writable directory, nor a link directory on the way to the file (uv's
+  `cpython-3.15-linux-x86_64-gnu` beside the versioned one), which an input could replace with a
+  file or tree of its own; only denying the directory that holds the link would stop that.
+  A started program's `writes()` names the roots its inputs may write (the
   python row reads nothing on the host whose way passes through one);
 - **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
   what `host` names as `secrets`: every place the model rows look for `local.env`
@@ -163,8 +181,10 @@ One policy, two stacks (`stack_for`):
   may write counts only where a write deny holds it, since an input could replace the interpreter
   that runs as PID 1. That matters when the project is the home directory, where bh-02's uv-managed
   Python lies under the project. `spec_for` denies the standard library the host imports from
-  there, not that `bin/python3` (unless bh-02 runs on the base interpreter itself, when `prefix`
-  is in the host), so the choice skips it: the next candidate, or brig's default. A host with
+  there and the interpreter's file, not the `bin/python3` link that leads to it (a deny on a link
+  holds only the file; unless bh-02 runs on the base interpreter itself, when `prefix` is in the
+  host and the whole tree is denied), so the choice skips it: the next candidate, or brig's
+  default. A host with
   neither gets brig's own default, which brig refuses (`InterpreterNotMounted`, its advice written for code
   that embeds brig). The compile does not pass that on: it raises the runner's own error, which
   names the candidates looked for and brig's reason, and says what a bh-02 user does (install

@@ -5,7 +5,9 @@ work is, compiled, launched, graded.
 (`write`) and a scratch directory of the jail's own. What it may not, even inside those: the
 composition's layer files (an input rewriting one would reshape the program running it, outside
 the jail), every path the host imports code from (`sys.path` entries and the interpreter's
-prefix), the directory of every package bh-02 runs code from (`code`: bh-02's own, cordis's,
+prefix), the interpreter bh-02 runs on (its files: in a venv layout the base's binary is on
+neither of those, and the next start on the host would run what an input wrote there), the
+directory of every package bh-02 runs code from (`code`: bh-02's own, cordis's,
 brig's and each plugin's, as installed; under a writable root when bh-02 works on its own
 checkout, an editable install), whose modules bh-02 imports in its own process, brig's own
 self-modification list (`.git/hooks`, `.git/config`, shell rc
@@ -75,6 +77,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from sys import base_prefix, prefix
+from sys import executable as host_executable
 from sys import path as import_path
 from sys import platform as host_platform
 from typing import Protocol, runtime_checkable
@@ -211,6 +214,7 @@ def spec_for(
     secrets: Sequence[str] = (),
     trusted: Sequence[str] = (),
     code: Sequence[str] = (),
+    interpreters: Sequence[str] = (),
     memory: str = "",
 ) -> Spec:
     """The jail's Spec. `host` is every path the host process loads code from; any under a
@@ -218,7 +222,9 @@ def spec_for(
     `secrets` (absolute) may not be read, wherever they are. `trusted` (absolute directories:
     bh-02's configuration, whose files the host reads and trusts) and `code` (absolute: the
     directory of every package bh-02 runs code from) may not be written where they are under a
-    writable root. `memory` (absolute: the project's auto memory directory, '' for none) may be
+    writable root. `interpreters` (absolute, resolved: the files of the interpreter bh-02 itself
+    runs on, `_interpreter_files`) may not be written where they are under one either. `memory`
+    (absolute: the project's auto memory directory, '' for none) may be
     written, as a root of its own outside the project: no self-modification list applies there,
     since nothing reads it but the memory row, through no link."""
     roots = [str(Path(root, w).resolve()) for w in config.write]
@@ -246,6 +252,14 @@ def spec_for(
     # hook finds is on no `sys.path`, and a `src` that is the project itself is not denied there.
     # Only strictly under a root, as `trusted`: one the project is would leave it read-only.
     running = [c for c in code if any(c.startswith(r + "/") for r in roots)]
+    # The interpreter bh-02 itself runs on, under a root an input may write (bh-02 run from a
+    # directory that holds the uv-managed Python, the home directory say): the next bh-02 start on
+    # the host would run what an input wrote there, outside any jail. `host` denies the standard
+    # library and the venv's prefix, but in a venv layout the base's own binary is on neither (with
+    # no venv the whole prefix is, and this adds nothing). Files only: a deny on a link is the mount
+    # on what it leads to, so the file is what holds. Strictly under a root, as `host`.
+    allows = (*writable, str(Path(endpoint).parent))
+    interpreter = [i for i in interpreters if i not in allows and any(i.startswith(r + "/") for r in allows)]
     denies = [
         *layers,
         *under,
@@ -254,6 +268,7 @@ def spec_for(
         *kept,
         *configured,
         *running,
+        *interpreter,
     ]
     return Spec(
         fs=FsPolicy(
@@ -261,7 +276,7 @@ def spec_for(
             # (brig's decision-186), so the directory the owner chose for its socket is granted
             # here, as brig granted it per channel until then. TASK-0079.31 moves the owners to a
             # socket brig reserves, and this goes.
-            write_allows=(*writable, str(Path(endpoint).parent)),
+            write_allows=allows,
             write_denies=tuple(dict.fromkeys(denies)),
             read_denies=(
                 *(str(Path(home, name)) for name in CREDENTIAL_READ_DENIES_HOME_RELATIVE),
@@ -475,7 +490,10 @@ def supervisor_interpreter(
     runs as the jail's PID 1, so a path under a writable root counts only where a write deny holds
     it. bh-02's base interpreter lies under the project when the project is the home directory (a
     uv-managed Python under `~/.local`), and `spec_for` denies the standard library the host imports
-    from there but not the `bin/python3` that starts it, unless bh-02 runs on that interpreter itself.
+    from there and the interpreter's file, but not the `bin/python3` link that leads to it: a deny
+    on a link is a mount on the file, so an input could still replace the link's own entry, and the
+    link is not a Python the jail holds (unless bh-02 runs on that interpreter itself, when
+    `prefix` is in the host and the whole tree is denied).
 
     When none qualifies, brig's own default: a Spec that does not mount it is refused by brig
     (`InterpreterNotMounted`), which `BrigJail.compile` turns into the runner's own error
@@ -514,6 +532,16 @@ def _present(candidates: Sequence[str]) -> dict[str, str]:
     """Each of `candidates` that is an executable file on this host (through its links), with the
     path it resolves to: what `supervisor_interpreter` chooses among."""
     return {c: str(Path(c).resolve()) for c in candidates if Path(c).is_file() and os.access(c, os.X_OK)}
+
+
+def _interpreter_files(spelled: Sequence[str]) -> tuple[str, ...]:
+    """The files the interpreter bh-02 itself runs on is: where each name in `spelled` (how the host
+    reaches it: `sys.executable`, the base installation's `bin/python3`) leads once every link on
+    the way is followed, as `spec_for` is handed `host`'s paths, resolved. The file, not the names:
+    a write through any of them reaches it, and a mount holds it, where the entry of a link in a
+    writable directory is held by none. A name that is empty (an embedded interpreter has no
+    `sys.executable`) leads nowhere and is left out."""
+    return tuple(dict.fromkeys(str(Path(name).resolve()) for name in spelled if name))
 
 
 def stack_for(platform: str, python: str = DEFAULT_INTERPRETER) -> Stack:
@@ -1101,6 +1129,7 @@ class BrigJail:
             secrets=self._host.secrets,
             trusted=self._host.trusted,
             code=self._host.code,
+            interpreters=_interpreter_files((host_executable, str(Path(base_prefix, "bin", "python3")))),
             memory=self._host.auto_memory,
         )
         python = DEFAULT_INTERPRETER
