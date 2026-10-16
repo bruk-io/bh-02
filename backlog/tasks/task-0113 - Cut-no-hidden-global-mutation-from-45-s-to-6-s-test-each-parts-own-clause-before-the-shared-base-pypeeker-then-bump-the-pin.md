@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 08:19'
-updated_date: '2026-10-16 12:29'
+updated_date: '2026-10-16 13:16'
 labels:
   - gates
   - size-2
@@ -33,7 +33,7 @@ This is a pypeeker change (the repository is pinned in the root dev dependencies
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 pypeeker (upstream) evaluates no-hidden-global-mutation's selecting clauses before the shared in-a-function and allow clauses, or shares that base across the rule's parts, and the root pin names the merged commit, uv.lock regenerated with uv
+- [x] #1 pypeeker (upstream) evaluates no-hidden-global-mutation's selecting clauses before the shared in-a-function and allow clauses, or shares that base across the rule's parts, and the root pin names the merged commit, uv.lock regenerated with uv
 - [x] #2 The root gate's no-hidden-global-mutation takes under 10 s on a warm run (44.7 s before, in-process timing, median of 3), recorded in the notes, and its findings on a planted violation of each of the rule's four shapes are the same as before
 <!-- AC:END -->
 
@@ -75,4 +75,8 @@ The docs call written order normative (fork #3: dsl/selection.py, dsl/expr.py, d
 ## Not done / left
 - Criterion 1's last part, "the root pin names the merged commit, uv.lock regenerated", is the orchestrator's: unticked.
 - no-argument-mutation (same mutation_rules.py) has the same shape in _argument_base (in-a-function and allow before its kind clauses); none of this repository's gates enable it, so it was not measured and not changed (outside this task's criteria): worth a pypeeker follow-up for consumers that do.
+
+Pin part of criterion 1 (orchestrator, 2026-10-16): the pypeeker change landed as part of brukhabtu/pypeeker PR #148 (CI green), squash-merged as 67b0a1b0121fa48d89c6cecaa82624592bfa8386. The commits reviewed were 04e2249 (TASK-0113), f6ea736 (TASK-0114) and 8fd3239 (TASK-0117) on pypeeker branch ccr-8cdd69a0-gt1lov (the workers' wt-* commits 7370f98, ae3f719 and 184d2ac re-applied without change). bh-02 commit 2bcfefe pins pypeeker@67b0a1b; uv.lock regenerated with `uv lock` (pypeeker 7905d240 -> 67b0a1b0, nothing else).
+- After the pin, on a quiet machine: scripts/arch-check --no-fix exit 0 in 56.4, 49.9, 49.8 s (TASK-0111 measured 115.6 s warm before any of TASK-0113..0118).
+- Full scripts/check: exit 0 in 208 s; format, lint, types, tests (3186 passed, 31 skipped), gates (all five ok), docs, tokens.
 <!-- SECTION:NOTES:END -->
