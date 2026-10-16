@@ -1,11 +1,11 @@
 ---
 id: TASK-0115
 title: 'Put print-input''s selective clause first: 9.8 s to under 3 s of the root gate'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 08:19'
-updated_date: '2026-10-16 11:58'
+updated_date: '2026-10-16 12:00'
 labels:
   - gates
   - size-1
@@ -46,4 +46,6 @@ AC1 timing. Method: scratch driver outside the repo (scratchpad 0115/time_rule.p
 AC2 planted run. No test home exists for gate rules (pypeeker_rules has no tests), so a recorded run: a scratch copy of the worktree (no .git, no .claude; outside the repository), with bh-02/plugins/memory-cordis-plugin/src/memory_cordis_plugin/planted_print.py added (_ask: print(text), input(...)), indexed with pypeeker index, then pypeeker check --strict run in the copy (PYTHONPATH the copy root, as arch-check does) with HEAD's apps.py and then with the edited one. Both runs exit 1 and report, word for word, the same lines: planted_print.py:5 [print-input] '<builtins>.print' and :6 [print-input] '<builtins>.input' (plus the same no-impure-functions finding at :4, which is another rule). diff of the two whole outputs: identical. The plant exists only in the scratch copy, never in the worktree or a commit. The copy was made before the final wording of the comment; the code is the same.
 
 Proof: scripts/arch-check --no-fix (tini -s --, in the worktree): exit 0, 1m39s. ruff format --check and ruff check --no-fix on pypeeker_rules/apps.py: pass. scripts/check not run: no member changed (the rule file is outside every member), and the full check is the reviewer's to prove. git status: only pypeeker_rules/apps.py modified.
+
+Review (closing reviewer): CLOSE. AC1 met: diff is a pure reorder of all_of's clauses (symbol-id first, unit and allowed clauses unchanged); the clauses are side-effect-free predicates in a conjunction, so the matched rows cannot change; rule 10.6 s -> 2.6 s in-process, median of 3. AC2 met: recorded scratch-copy run, same two print-input findings, whole outputs identical before and after. scripts/arch-check --no-fix run by the reviewer: exit 0. Full scripts/check deferred to the batch run per caller. Findings: nit, commit attribution reads Claude Haiku 5.5 rather than the session's model; no draft filed.
 <!-- SECTION:NOTES:END -->
