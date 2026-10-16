@@ -1,7 +1,7 @@
 ---
 id: TASK-0126
 title: The jail must not let an input write the Python bh-02 itself runs on
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 22:06'
@@ -50,4 +50,6 @@ NOT held, found while measuring, not fixed (a policy call, needs the link's dire
 Orchestrator ruling, 2026-10-16: criterion 1 is met by denying the interpreter files (each name followed to the file it leads to), not the link names. Measured by the worker in bwrap: a read-only bind on a link lands on its target, brig resolves write denies to the realpath on bwrap and seatbelt alike, and a link spelling in the denies would make TASK-0124's supervisor_interpreter accept a replaceable link as PID 1's Python. Every write to the interpreter, through any of its names, is refused in a real jail. The links on the way to it (a link's own entry, uv's cpython-3.15-<platform> link to the versioned directory) are not held by a file mount: filed separately as a policy question for the owner.
 
 No repro: the fixed tree has no failing test to record; the worker's plant (the interpreter deny removed, three new tests failing, the real-jail one showing the write and rename done) is recorded above.
+
+Reviewed (closing reviewer). CLOSE. AC1: spec_for denies each resolved interpreter file strictly under a writable root (r+'/' prefix, component-wise); _interpreter_files resolves sys.executable and <base_prefix>/bin/python3, so every name (python, python3, python3.15) lands on the one file. Files-not-links ruling upheld. AC2/AC3: re-run as tester under tini: 122 passed, 2 skipped; the three new tests pass, real bwrap one not skipped. Findings: link entries and uv's directory link stay writable, already TASK-0127 (should-fix, out of scope); nit: a missing bin/python3 still resolves to a harmless deny candidate.
 <!-- SECTION:NOTES:END -->
