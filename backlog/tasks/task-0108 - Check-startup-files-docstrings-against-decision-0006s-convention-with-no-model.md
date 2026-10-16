@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-16 02:03'
-updated_date: '2026-10-16 04:11'
+updated_date: '2026-10-16 04:15'
 labels:
   - python
   - size-3
@@ -34,7 +34,7 @@ Build decision-0006 point 7's docstring half: ruff (--isolated, D101, D103, D205
 - [x] #1 Confined, at each REPL start, ruff with bh-02's flags and bh-02's example rule check each startup file in the jail (the person's from the text the host hands the REPL), and tests cover each finding and a file with none
 - [x] #2 The aside names each told function that misses and the rule codes it breaks, never a tool's message text, and a finding never stops a file running or hides a function; unconfined, nothing runs unasked and the python section gives the model the commands
 - [x] #3 The ruff line for CI and a pre-commit hook is documented, and the example rule runs as a command with no session and no model, exiting 1 on a finding and 0 on none
-- [ ] #4 scripts/check passes
+- [x] #4 scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -77,4 +77,6 @@ Planted violations, each seen failing and restored: example check never fires (m
 Timing added to a REPL start, a real bwrap jail, one startup file telling one documented function vs one telling none (no check), median of 7 starts: warm 425 ms vs 227 ms, so about +200 ms (the program alone: 63 ms with a `::` example, 133 ms with a doctest block because import doctest is ~70 ms; ruff alone ~35 ms); cold (page cache dropped): 567 ms vs 308 ms, about +260 ms. Per file that tells something.
 
 Not verified: scripts/linux-jail-check (the Docker daemon is not answering in this container: `Cannot connect to the Docker daemon`), darwin (seatbelt). AC #4 (scripts/check passes) is NOT ticked: the full scripts/check is the reviewer's. Typing (mypy) left to TASK-0109. A computed `__all__` (not a list/tuple literal) is read by the rule as none: its underscored names get no `example` finding (the live listing still tells them).
+
+Reviewer: scripts/check (repo root, full) exit 0: format ok, lint ok, types ok (194 files), tests 3134 passed 31 skipped in 165s, gates ok, docs ok, tokens skipped (no bh-01 dist). Working tree clean after it.
 <!-- SECTION:NOTES:END -->
