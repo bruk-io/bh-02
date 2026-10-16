@@ -3,7 +3,7 @@ id: TASK-0110
 title: >-
   test_agent_stop_ends_the_child_and_its_python_program fails once under the
   full parallel check
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 03:35'
@@ -55,4 +55,6 @@ Not green, and not this task: test_unloading_the_agents_row_retires_every_child_
 Review (closing reviewer): full scripts/check from the repo root, run once: format, lint, types ok; tests 3171 passed, 31 skipped in 202.41s; gates ok; docs ok; tokens skipped (no bh-01/dist); exit 0. No files reformatted. TASK-0112's test passed in this run.
 
 No repro: the failure shows only under load and only before the fix (the worker's scratch loop outside the repo: 3 of 180 runs failed); with the fix committed the test cannot fail, so record-check --repro (1 passed) records nothing.
+
+CLOSE. Root cause verified against agents.py:806-815 (_driven cancels and gathers the reply before the run ends, so agent_wait cannot answer with a step open): test race, not product. One bounded wait (_until, 30 s) added before agent_stop; assertions unchanged. Full scripts/check exit 0 (3171 passed, 31 skipped). TASK-0112 filed correctly. Nit, not filed: the load reproduction harness is not kept in the repo.
 <!-- SECTION:NOTES:END -->
