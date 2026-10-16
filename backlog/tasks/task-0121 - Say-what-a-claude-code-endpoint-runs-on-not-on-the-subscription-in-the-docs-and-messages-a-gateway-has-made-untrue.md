@@ -3,11 +3,11 @@ id: TASK-0121
 title: >-
   Say what a claude-code endpoint runs on, not 'on the subscription', in the
   docs and messages a gateway has made untrue
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 13:35'
-updated_date: '2026-10-16 22:07'
+updated_date: '2026-10-16 22:08'
 labels:
   - models
   - docs
@@ -57,4 +57,6 @@ Planted violation: none, no safety property changed (wording and a test name). T
 Widened the list to three more places, on the coordinator's direction: docs/bh-02/get-started.md (line 40 and the credential section after it, which said bh-02 reaches Claude 'on your subscription' and that a missing token is a subscription error), the module docstring of models_cordis_plugin/claude_code/__init__.py ('on a Claude subscription'), and the README.md setup block (its 'Claude Code makes a token for your subscription' comment now says the token is the subscription's and that a gateway endpoint, base_url and key_command, needs none). Why: each says Claude runs only on the subscription, the stale claim this task is about; my earlier grep missed them because they say 'on your subscription' and 'on a Claude subscription', not 'on the subscription'. Also reworded, beyond those three and noted here so it can be reverted: the 'What you need' bullet at get-started.md:10, which named a Claude subscription as the only Claude option (same claim, same file). No heading renamed; the only new link is using/models.md#claude-through-a-gateway, an existing heading, which resolves in the built site (href ../using/models/#claude-through-a-gateway, id present).
 
 Re-run after these doc edits: tini -s -- scripts/check bh-02/plugins/models-cordis-plugin exit 0 (format, lint, types, 349 passed 2 skipped, gates, docs, tokens skipped); tini -s -- scripts/arch-check --no-fix exit 0. git grep -i for 'on the subscription|on your subscription|on a Claude subscription' outside backlog/ now finds only text about the subscription route itself (CLAUDE.md:54 e2e, models README:29, credential.py:3, named.py:36, test_claude_code_live.py:1, get-started.md:62 'For Claude on your subscription:' and models.md:7/132) plus cli.py:85, which names both routes.
+
+Review: CLOSE. AC1 met: every changed sentence names both routes and matches named.py (one of base_url/key_command alone is refused; neither = subscription token); remaining 'subscription' hits are about the subscription route itself or name both (cli.py:85/command-line.md:15). AC2 met: wording-only message change, test_named_models quotes the kept 'a gateway needs both'; models plugin 349 passed 2 skipped; mkdocs build --strict exit 0. No findings filed.
 <!-- SECTION:NOTES:END -->
