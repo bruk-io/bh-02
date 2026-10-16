@@ -26,8 +26,8 @@ The owner (2026-10-15/16) dropped @helper and the word helper: a startup file's 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Decision recorded
-- [ ] #2 The owner has accepted decision-0006 (its status is accepted), including the signature budget and point 7's checks
+- [x] #1 Decision recorded
+- [x] #2 The owner has accepted decision-0006 (its status is accepted), including the signature budget and point 7's checks
 <!-- AC:END -->
 
 ## Implementation Notes
