@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-17 14:58'
-updated_date: '2026-10-17 17:44'
+updated_date: '2026-10-17 17:45'
 labels:
   - brig
   - size-8
@@ -61,7 +61,7 @@ set up. I would prefer all logs to be JSON-shaped and consistent.
 - [ ] Reservations (`.reserve(`): carry them over for bh-02's per-jail socket directory (bh-02 TASK-0079.31), or drop them? Carried forward: only bh-02's runner would use them, so it is decided when the runner moves (criterion 17).
 - [ ] Egress: cooperative as today (the workload is pointed at the proxy and may ignore it), or enforced, by relaying the jail's only route out through the supervisor to the proxy? Carried forward: a design task before the egress work; the skeleton has no egress.
 - [ ] Seatbelt: build its slice before a Mac run proves it, or leave macOS unjailed (like every host until the new brig jails it) until a Mac run can prove it? Carried forward: bwrap comes first; this is decided before the Seatbelt work starts.
-- [ ] The SPEC's numbering: continue from the old SPEC's decision-203, or start a fresh series with the old SPEC kept as history? Carried forward: settled when the owner accepts the updated decision-0008, which proposes continuing from decision-204 so no number means two things.
+- [x] The SPEC's numbering: continue from the old SPEC's decision-203, or start a fresh series? Settled by decision-0008 (rule 18): new rulings are numbered from decision-204, so no number means two things.
 - [x] The docs theme: bh-01's components, as bh-02's site uses, or Material for MkDocs? Settled by staying in bh-02: brig's docs live in bh-02's site (criterion 12), which uses bh-01's components.
 - [x] The ruff hook that formats every file an agent edits: settled by staying in bh-02, whose `.claude/settings.json` already runs it on every edited file; ruff's checks still run only in `just done`.
 - [ ] The log envelope: its fields (time, level, source, event, then the event's own fields?), and whether "all logs JSON-shaped and consistent" becomes a rule in the philosophy plugin, for every repository and not only brig. Carried forward: a design task before the supervisor program writes its first log line, likely within the walking skeleton.
@@ -69,12 +69,9 @@ set up. I would prefer all logs to be JSON-shaped and consistent.
 
 ## References
 
-- bh-02 decision-0008 (proposed): the layout and rules from before the brainstorm. Update it: the
-  old brig is deleted rather than archived at `archive/brig-v1/`; the layers renamed domain, infra and presentation (infra independent of the
-  domain); the cuts and keeps above. Its rule 14's four test layers become the three of the
-  owner's test rule (unit, integration, e2e). Its order runs inside-out (the domain first, the API
-  at step 5), against the test rule's "work outside-in": the new board's order starts from a test
-  at the public API and works inward.
+- bh-02 decision-0008 (accepted 2026-10-17): the design. Where it is built, the layout, the rules
+  and the pypeeker rule that enforces each boundary, what is kept, cut and paused, and the order,
+  outside-in.
 - bh-02 decision-0007 (accepted): Python 3.15 everywhere, the supervisor included.
 - bh-02 TASK-0133 (supervisor, never agent) and TASK-0134 (decision-0007's implementation) are
   absorbed by criteria 1 and 5. TASK-0131 (earlier helpers left running) has nowhere to happen once
