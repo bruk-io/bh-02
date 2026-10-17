@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-14 14:06'
-updated_date: '2026-10-17 02:32'
+updated_date: '2026-10-17 02:33'
 labels:
   - app
   - size-1
@@ -34,4 +34,6 @@ Found while fixing TASK-0094. A --model value from argv bytes that are not UTF-8
 Deferred by the owner (2026-10-15): this run fixes only critical bugs; this one is not critical (no data loss, no security exposure, a workaround exists). Not to be started without the owner's word.
 
 Fix: refused in the CLI (where the name enters), not in sessions.create: bh-02/app/src/bh_02/cli.py gets a click callback on --model (_model_name) that raises click.BadParameter when the value does not encode as UTF-8, so the usage error (exit 2) comes before read_layers, sessions.create and sessions.set_model. sessions.py is untouched (TASK-0096 edits its models-file read). Tests: bh-02/app/tests/test_command_line.py, _NOT_UTF8 = os.fsdecode(b"claude/\xff") (the argv string for those bytes, 'claude/\udcff'); test_a_model_name_that_is_not_utf8_is_a_usage_error_and_makes_no_session (AC 1) and test_a_resume_with_a_model_name_that_is_not_utf8_changes_nothing (AC 2: snapshot of every file under the state directory is equal before and after). Seen failing first, before the fix: both exit 1 with ValueError "a layer can't hold 'claude/\udcff'", and a plain run left sessions/<id>/meta.json with no session.toml. After: stderr is click's usage block, then the one line: Error: Invalid value for '--model': 'claude/\udcff' is not valid UTF-8; write the model's name in UTF-8. Commands and results: uv run pytest bh-02/app/tests/test_command_line.py -q: 20 passed. uv run pytest bh-02/app/tests -q -m "not real_launch" -n auto --dist loadgroup (under tini, machine shared): 208 passed, 1 skipped (seatbelt test, darwin only), exit 0. scripts/check bh-02/app: exit 0 (format, lint, types, tests 242 passed 1 skipped, gates, docs). The docstring of _model_name was reworded after that run; ruff format --check, ruff check, mypy and the command-line tests were re-run and pass. Dispatched 2026-10-17 by the orchestrator as a size-1 run in worktree wt-0098; the 2026-10-15 deferral above is the owner's, so the merge decision is the orchestrator's.
+
+Orchestrator, 2026-10-17: the owner's word to start it, which the 2026-10-15 deferral asked for: "ok wrap up all tasks that you are able to" (in conversation, this date).
 <!-- SECTION:NOTES:END -->
