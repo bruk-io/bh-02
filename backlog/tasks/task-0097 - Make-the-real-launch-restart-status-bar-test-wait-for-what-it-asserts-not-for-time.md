@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-14 13:40'
-updated_date: '2026-10-17 03:41'
+updated_date: '2026-10-17 04:18'
 labels:
   - app
   - tests
@@ -29,7 +29,7 @@ bh-02/app/tests/test_real_launch.py::test_while_the_model_restarts_the_status_ba
 <!-- AC:BEGIN -->
 - [x] #1 The test waits for the screen text it asserts, with a bound, never for a fixed delay; the race it had is named in the notes
 - [x] #2 test_real_launch.py passes 20 runs in a row under load (for example beside another pytest process), recorded in the notes
-- [ ] #3 scripts/check passes
+- [x] #3 scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -70,4 +70,6 @@ AC2. Machine shared at the start with three other workers, then mostly mine (loa
 AC3. Left for the reviewer. `scripts/check bh-02/app --no-gates --no-docs`: exit 0 (format ok, lint ok, types ok, 242 passed 1 skipped in 73 s; tokens skipped, no bh-01 dist).
 
 Reviewer: AC1 and AC2 verified (no settle/sleep in the changed test, every wait_for bounded; changed test 3/3 passes, file 34 passed in 131 s). AC3 left for the orchestrator's full check: the worker's member check ran with --no-gates --no-docs, so the gates never saw the edited test file. READY. Should-fix: test_real_launch.py:826 (burst test) still reads the bar with rfind after the reply, the same pattern this task replaced at :794. Nit: :823-825 same read; the bang-line test's settle(0.5).
+
+Full scripts/check on 5cf6e37 (this task's commits with the rest of the batch): exit 0, format, lint, types, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17; log at the session scratchpad, check-batch4b.txt).
 <!-- SECTION:NOTES:END -->
