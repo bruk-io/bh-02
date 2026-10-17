@@ -3,8 +3,12 @@ id: decision-0008
 title: >-
   Rebuild brig from empty in three layers: domain, infra and presentation
 date: '2026-10-17 14:57'
-status: accepted
+status: superseded
 ---
+> **Superseded, 2026-10-17.** brig moved to a repository of its own, where this design continues
+> as that board's decision-0001, with bh-02 left out of it. bh-02 keeps its old `libs/brig`; nothing
+> here is built in this repository.
+
 ## Context
 
 brig (libs/brig at d297a50: about 18,000 lines, 63 modules, a 3,950-line SPEC) is layered by stage,
