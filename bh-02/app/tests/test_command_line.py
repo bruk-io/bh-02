@@ -61,14 +61,18 @@ def test_a_composition_that_cannot_start_is_one_line_and_exit_code_1(
     assert "no sessions" in CliRunner().invoke(main, ["sessions"]).stderr  # and none is listed
 
 
-def test_a_resumed_session_that_cannot_start_is_kept(composition: Callable[..., Path], state: Path) -> None:
+def test_a_resumed_session_that_cannot_start_is_kept_and_not_offered_a_resume(
+    composition: Callable[..., Path], state: Path
+) -> None:
     ran = CliRunner().invoke(main, ["--no-jail", "--patch", str(_patch(composition))])
     assert ran.exit_code == 0, ran.output
     patch = composition('[[plugin]]\nid = "loop"\ndisabled = true\n[[plugin]]\nid = "ui"\ndisabled = true\n')
     result = CliRunner().invoke(main, ["--resume", "--patch", str(patch)])
     assert result.exit_code == 1 and "error: could not start" in result.stderr
-    assert "bh-02 --resume" in result.stderr  # it is still there to continue
-    assert CliRunner().invoke(main, ["sessions"]).stdout.count("\n") == 1
+    assert "bh-02 --resume" not in result.stderr  # it would fail the same way until a layer changes
+    assert "did not start and is kept as it was" in result.stderr  # said instead, with what to change
+    assert "session.toml" in result.stderr and "--patch file" in result.stderr
+    assert CliRunner().invoke(main, ["sessions"]).stdout.count("\n") == 1  # kept
 
 
 @pytest.mark.parametrize(

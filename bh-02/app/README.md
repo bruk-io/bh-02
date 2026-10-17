@@ -86,6 +86,16 @@ and the loader's error, which names the row, the `use` it wrote and the plugins 
 the layer is the one to change. After a pull that renames a plugin, install again with
 `--reinstall`, since plugins are read from what is installed.
 
+`run()` says that before it mounts a row, because the ui row depends on nothing and would draw the
+app first: it reads the layers, refuses a row with no `use` that no layer below it added (a
+`LayerError` naming the file, the row and what to add; cordis's `compose` would raise a
+ValueError), and resolves every enabled row's `use` (a `NotStarted`, in the words the loader gives
+an unresolved row). A row that is waiting on a key no row binds, or whose component fails, is
+known only by starting rows, so the ui may draw before that error: holding the ui until the chat
+row's dependencies are active would make it depend on them, and a `/model` switch would reload it
+with them. A resumed session that does not come up is kept and not offered a resume (it would fail
+the same way): the command line says it did not start and where its own layer is.
+
 What the rows depend on, which is what decides what reloads when:
 
 ```

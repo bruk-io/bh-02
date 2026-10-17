@@ -113,12 +113,26 @@ def main(
     if not started and resume is None:
         sessions.discard(session)  # a run that never came up made no session worth listing
     else:
-        newest = sessions.listed(sessions.state_root(), str(Path.cwd()))[:1]
-        newest_id = newest[0].id if newest else None
-        how = sessions.resume_command(session.stack, None if session.id == newest_id else session.id)
+        if started:
+            newest = sessions.listed(sessions.state_root(), str(Path.cwd()))[:1]
+            newest_id = newest[0].id if newest else None
+            how = sessions.resume_command(session.stack, None if session.id == newest_id else session.id)
+            farewell = f"session {session.id}  ({how} to continue it)"
+        else:  # a resume that did not come up: it would fail the same way until something changes
+            farewell = _not_resumable(session)
         with contextlib.suppress(OSError):  # the terminal has gone (its window closed): nobody to tell
-            click.echo(click.style(f"session {session.id}  ({how} to continue it)", dim=True), err=True)
+            click.echo(click.style(farewell, dim=True), err=True)
     sys.exit(code)
+
+
+def _not_resumable(session: sessions.Session) -> str:
+    """What to say of a resumed session that did not come up, in place of the offer to resume it
+    (which would fail the same way): it was kept, and the layer to change is the one the error
+    above names, this session's own or a `--patch` file."""
+    return (
+        f"session {session.id}  did not start and is kept as it was; change what the error above "
+        f"names, in this session's own layer ({session.layer}) or in a --patch file"
+    )
 
 
 def _no_pinned_model(model: str | None, patches: Sequence[Path]) -> None:

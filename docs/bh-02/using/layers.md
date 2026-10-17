@@ -70,26 +70,35 @@ The model's code can't write a layer file: the jail protects them.
 
 bh-02 renames its own rows and plugins now and then, and it doesn't translate the old names. A
 layer that names a plugin, a component or a row bh-02 no longer has fails at boot, whichever layer
-it is: the shipped one, a session's own `session.toml`, or a `--patch` file. bh-02 exits with code
-1, once the terminal is yours again, and says which row could not start, the `use` it names and
-which plugins are installed:
+it is: the shipped one, a session's own `session.toml`, or a `--patch` file. bh-02 checks every
+row's `use` before it starts anything, so the app is never drawn: it exits with code 1 and says
+which row could not start, the `use` it names and which plugins are installed:
 
 ```text
 error: could not start:
 loop: unresolved: ModuleNotFoundError: No module named 'nonesuch' (use 'nonesuch:loop'; no 'nonesuch' plugin either; installed plugins: agent, chat, commands, extensions, memory, models, python, runner, subagents, tui)
-chat#16: inactive
-  waiting on: loop
-shell#32: inactive
-  waiting on: done
-error: chat needs loop; no row provides it
 ```
 
 To fix it, edit the layer so the row names what exists: the plugin from the list in the message,
 and a component that plugin has (for a plugin that is there but has no such component, the message
-lists the components it has). A row of your own with no `use`, whose `id` bh-02 doesn't have, is
-refused the same way, naming the row. After a `git pull` that renames a plugin, install again with
+lists the components it has). After a `git pull` that renames a plugin, install again with
 `--reinstall` first ([Get started](../get-started.md)): the names come from what is installed.
 
+A row with no `use` is a layer error of its own, found the same way. A row can leave out its `use`
+only to change a row some layer below it added (the shipped composition, or an earlier layer or
+row of the same file). One that adds nothing, a row of your own that forgot its `use` or an `id`
+with a typo, is refused with the file, the row and what to write:
+
+```text
+error: /home/me/mine.toml: row 'mine' has no `use`, and no layer below it adds a row 'mine'; add use = "plugin:component" to make it a row of your own, or, to change a row bh-02 has, write that row's id (/rows lists them)
+```
+
+A row that is found but cannot run (a row it needs is disabled, or its component fails when it
+starts) is only known once the rows start, so the app may be drawn for a moment before the error is
+said.
+
 A run that fails this way makes no session. A resumed session whose layer names something bh-02
-dropped is kept: edit its `session.toml`, in its directory under `bh-02/sessions/` in the state
-directory (`$XDG_STATE_HOME`, else `~/.local/state`), or start a new session.
+dropped, or has a row like that, is kept, and isn't offered to resume again, since it would fail the
+same way: bh-02 says it did not start and where its own layer is. Edit its `session.toml`, in its
+directory under `bh-02/sessions/` in the state directory (`$XDG_STATE_HOME`, else
+`~/.local/state`), or the `--patch` file, or start a new session.

@@ -962,6 +962,17 @@ def _said(app: Launched) -> str:
     return " ".join(app.text().split())
 
 
+# What Textual writes to take the terminal's alternate screen, before it draws anything.
+_ALTERNATE_SCREEN = b"\x1b[?1049h"
+
+
+def _never_drawn(app: Launched) -> None:
+    """The app never took the terminal: it did not switch to the alternate screen, and the line
+    the composer's screen opens with (`_READY`) was never written."""
+    assert _ALTERNATE_SCREEN not in app.written(), f"the app was drawn first:\n{app.text()[-3000:]}"
+    assert _READY not in app.text(), f"the composer was drawn first:\n{app.text()[-3000:]}"
+
+
 def test_a_patch_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s_error(
     launch: Launch, tmp_path: Path
 ) -> None:
@@ -977,6 +988,7 @@ def test_a_patch_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s
     assert "loop: unresolved:" in said and "use 'nonesuch:loop'" in said, said
     assert "installed plugins: " in said and "subagents" in said, said  # what to name instead
     assert "Traceback" not in said
+    _never_drawn(app)  # the ui row depends on nothing and starts at once: the run knows first
 
 
 def test_a_resumed_session_whose_layer_names_a_use_no_plugin_provides_fails_at_boot_too(
@@ -998,4 +1010,52 @@ def test_a_resumed_session_whose_layer_names_a_use_no_plugin_provides_fails_at_b
     assert "error: could not start:" in said, said
     assert "python: unresolved:" in said and "use 'claude-agent-sdk:agent'" in said, said
     assert "Traceback" not in said
+    _never_drawn(again)
     assert layer.is_file(), "the session's directory is kept"
+    # a resume that would fail the same way is not offered; the person is told what to change
+    assert "to continue it" not in said and "--resume" not in said, said
+    assert f"session {layer.parent.name} did not start" in said, said  # (_said folds the two spaces)
+    assert f"in this session's own layer ({layer})" in said, said
+
+
+def test_a_patch_row_with_no_use_that_no_layer_added_is_a_layer_error_naming_the_row_and_what_to_add(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """A patch row only changes a row some layer below it added, so one with no `use` that nothing
+    added (a mistyped id, or a row of your own that forgot its `use`) used to end in cordis's
+    ValueError and a Traceback. It is a layer error now: the file, the row and what to write, the
+    app never drawn, and no session left behind (the run never came up)."""
+    mine = tmp_path / "mine.toml"
+    mine.write_text('[[plugin]]\nid = "mine"\nconfig = { size = 3 }\n')
+    app = launch("echo", "--patch", str(mine))
+    assert app.exit_code(60) == 1
+    said = _said(app)
+    assert f"error: {mine}: row 'mine' has no `use`" in said, said
+    assert 'add use = "plugin:component"' in said, said  # what to add
+    assert "Traceback" not in said and "ValueError" not in said, said
+    _never_drawn(app)
+    assert not list((tmp_path / "state").glob("bh-02/sessions/*")), (
+        "a run that never came up leaves no session"
+    )
+
+
+def test_a_session_layer_row_with_no_use_is_the_same_layer_error_and_the_session_is_kept(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """The session's layer is a layer like any other, hand-edited here to add a row with no `use`:
+    the resume says which file and row, the app is never drawn, and the session is kept."""
+    first = launch("echo")
+    first.wait_for(_READY, 60)
+    first.press(b"\x11")
+    assert first.exit_code() == 0
+    (layer,) = (tmp_path / "state").glob("bh-02/sessions/*/session.toml")
+    layer.write_text(layer.read_text() + '\n[[plugin]]\nid = "mine"\nconfig = { size = 3 }\n')
+    again = launch("echo", "--resume")
+    assert again.exit_code(60) == 1
+    said = _said(again)
+    assert f"error: {layer}: row 'mine' has no `use`" in said, said
+    assert 'add use = "plugin:component"' in said, said
+    assert "Traceback" not in said and "ValueError" not in said, said
+    _never_drawn(again)
+    assert layer.is_file(), "the session's directory is kept"
+    assert "to continue it" not in said, said

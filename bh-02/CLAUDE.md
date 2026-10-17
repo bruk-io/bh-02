@@ -123,6 +123,10 @@ What to keep when changing it; the detail is where each line points.
 - **The app owns the terminal**: no child inherits fd 2, `--trace` takes a file, and the shell
   speaks once the app has exited. `confirm()` runs in cordis's coroutines, not Textual workers,
   so the approval modal is `push_screen` with a callback (tui plugin).
+- **What is known before a row starts is said before one does**: the ui depends on nothing, so
+  it draws the moment it mounts. `run()` refuses a layer that cannot compose and a `use` that
+  resolves to nothing before it mounts any row; the ui never waits on other rows instead, which
+  would reload it with them (`app/README.md`).
 - **Test a real launch**: `app/tests/test_real_launch.py` starts the installed script in a pty
   with a fake model from `bh_02.testing`, since `run_test()` misses what only a real launch does.
   The Linux jail's tests skip on darwin; `scripts/linux-jail-check` runs them with bubblewrap.
