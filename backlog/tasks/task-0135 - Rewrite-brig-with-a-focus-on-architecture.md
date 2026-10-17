@@ -1,7 +1,7 @@
 ---
-id: DRAFT-0008
+id: TASK-0135
 title: Rewrite brig with a focus on architecture
-status: Draft
+status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-17 14:58'
