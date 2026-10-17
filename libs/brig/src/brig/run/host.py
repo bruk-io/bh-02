@@ -689,6 +689,8 @@ class HostRuntime:
         processes do (`_helper_tether`).
 
         Raises:
+            ValueError: `jail` was compiled for another runtime than this one's `kind`
+                (decision-202: a container's jail is not made of host process groups).
             LaunchRefused: `jail.requires` names a feature `capabilities`
                 lacks.
             _records.JailDirInUse: `jail_dir` holds an earlier jail's records
@@ -707,6 +709,12 @@ class HostRuntime:
                 not be made or written, or its `chan` is there and is not a
                 directory (`FileExistsError`).
         """
+        if jail.runtime is not self.kind:
+            raise ValueError(
+                f"HostRuntime.create: the jail was compiled for the {jail.runtime.value} runtime, "
+                f"and this is the {self.kind.value} runtime; pass the jail to a runtime of its "
+                "kind (SPEC.md section 8, decision-202)"
+            )
         missing = _refused(jail, self.capabilities)
         if missing:
             raise LaunchRefused(missing, "host")

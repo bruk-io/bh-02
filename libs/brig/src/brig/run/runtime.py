@@ -255,6 +255,17 @@ class SupervisorRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ContainerRecord:
+    """The instance of a container jail, as `destroy` and `alive` identify it (decision-202):
+    the container's full id and the id of the daemon that made it. An identity, not an address:
+    the runtime object names the daemon it talks to (`OciRuntime(docker_host=...)`), never a record,
+    and a runtime refuses a record whose `daemon_id` is not the daemon's it asked."""
+
+    container_id: str
+    daemon_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessNamespaces:
     """Whether each process a supervised jail starts has namespaces of its own (decision-195),
     as its supervisor found out before it said it was ready: `held`, and when not, `reason`, the
@@ -280,7 +291,8 @@ class JailRecord:
     (decision-192), `None` for a jail whose processes are started by the
     host. `namespaces` is what its supervisor found about the namespaces of
     its processes (decision-195), known to the process that created the jail
-    and no other, `None` without a supervisor. `held` is what the creating
+    and no other, `None` without a supervisor. `container` is the instance of an
+    `OCI` jail (decision-202), `None` for any other. `held` is what the creating
     process holds in memory (`Held`), never compared or shown."""
 
     kind: RuntimeKind
@@ -294,6 +306,7 @@ class JailRecord:
     helper_stamps: tuple[str, ...] = ()
     supervisor: SupervisorRecord | None = None
     namespaces: ProcessNamespaces | None = None
+    container: ContainerRecord | None = None
     held: Held | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:

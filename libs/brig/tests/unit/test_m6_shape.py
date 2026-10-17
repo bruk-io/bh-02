@@ -42,7 +42,7 @@ _LAYERS = {"core", "mech", "probe", "proxy", "run", "runtime", "stack", "trampol
 #: (see their own rationales in `brig/stack/__init__.py`). A pair the
 #: matrix cannot reach still needs a row, because `Stack.compile` refuses
 #: an UNKNOWN pair and "unknown" is not the same claim as "impossible".
-_MECHANISMS = {"env_scrub", "rlimits", "seatbelt", "connect_proxy", "bwrap"}
+_MECHANISMS = {"env_scrub", "rlimits", "seatbelt", "connect_proxy", "bwrap", "oci"}
 
 
 def _brig_root() -> Path:
@@ -141,8 +141,15 @@ def test_every_mechanism_pair_has_a_matrix_row_a_complete_square() -> None:
     from itertools import combinations
 
     expected = {frozenset(pair) for pair in combinations(sorted(_MECHANISMS), 2)}
-    assert set(brig.stack.COMPATIBILITY_MATRIX) == expected
+    composes, refused = set(brig.stack.COMPATIBILITY_MATRIX), set(brig.stack.REFUSED_PAIRS)
+    # decision-202: a pair is a row (it composes) or a refusal with its reason (it never does),
+    # and `oci`'s five are the refusals. The square is the two together, and they do not overlap.
+    assert composes | refused == expected
+    assert not composes & refused
+    assert refused == {frozenset({"oci", other}) for other in _MECHANISMS - {"oci"}}
 
     for pair, entry in brig.stack.COMPATIBILITY_MATRIX.items():
         assert entry.rationale.strip() != "", pair
         assert entry.outer in pair, (pair, entry.outer)
+    for pair, reason in brig.stack.REFUSED_PAIRS.items():
+        assert reason.strip() != "", pair

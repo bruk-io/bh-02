@@ -35,6 +35,7 @@ there (TASK-0079.26's settled point 1).
 """
 
 import dataclasses
+import re
 import signal
 import socket
 from collections.abc import Callable, Mapping, Sequence
@@ -60,6 +61,7 @@ from brig.run.events import stamp_all
 from brig.run.exec_ import ExecFidelity
 from brig.run.readiness import UnknownChannel, poll_ready
 from brig.run.runtime import (
+    ContainerRecord,
     IoPolicy,
     JailRecord,
     NoSupervisor,
@@ -73,7 +75,7 @@ from brig.run.runtime import (
 from brig.run.teardown import DEFAULT_GRACE_S, KillReport
 from brig.stack import CompiledJail
 
-JAIL_VERSION: Final = 10
+JAIL_VERSION: Final = 11
 """The version of a jail's dict (`HANDLE_VERSION` until decision-183 renamed it,
 the value unchanged). Bumped 1 -> 2 by
 task-046 (`wrap_prefix` and `jail_env` became REQUIRED top-level keys) and
@@ -106,7 +108,10 @@ Bumped 8 -> 9 by decision-192 (TASK-0079.06): `supervisor` is new and required,
 stamp of the group that holds the jail's PID 1.
 
 Bumped 9 -> 10 by decision-196 (TASK-0079.07): each entry of `processes`
-carries `namespaces`, required, as `record.json` does."""
+carries `namespaces`, required, as `record.json` does.
+
+Bumped 10 -> 11 by decision-202 (TASK-0079.09): `container` is new and required, `null` for
+a jail whose instance is host processes, else the container's id and its daemon's id."""
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
@@ -126,6 +131,7 @@ _TOP_LEVEL_KEYS: Final = frozenset(
         "helper_pids",
         "helper_stamps",
         "supervisor",
+        "container",
         "processes",
     }
 )
@@ -681,6 +687,11 @@ class Jail:
                 if record.supervisor is None
                 else {"pid": record.supervisor.pid, "start_time": record.supervisor.start_time}
             ),
+            "container": (
+                None
+                if record.container is None
+                else {"id": record.container.container_id, "daemon": record.container.daemon_id}
+            ),
             "processes": [_records.to_json(process) for process in record.processes],
         }
 
@@ -692,7 +703,7 @@ class Jail:
         invalid can be smuggled in through a hand-edited dict.
 
         Raises:
-            ValueError: `version` is missing or not 9; a key is unknown or
+            ValueError: `version` is missing or not 11; a key is unknown or
                 missing; the dict names a runtime kind `runtimes` does not
                 hold, or one whose runtime's own `kind` is another; a process
                 is not a record brig writes, or two share an id; or any
@@ -725,6 +736,7 @@ class Jail:
             helper_pids=tuple(int(pid) for pid in d["helper_pids"]),
             helper_stamps=tuple(str(stamp) for stamp in d["helper_stamps"]),
             supervisor=_supervisor_from(d["supervisor"]),
+            container=_container_from(d["container"]),
         )
         return cls(
             jail_id=record.jail_id,
@@ -759,6 +771,40 @@ def _supervisor_from(raw: object) -> SupervisorRecord | None:
             "an identity brig records"
         )
     return SupervisorRecord(pid=pid, start_time=stamp)
+
+
+#: A container's id: the full 64 hex characters Docker prints, never a name or a prefix, which
+#: could stand for another container.
+_CONTAINER_ID: Final = re.compile(r"[0-9a-f]{64}")
+
+#: A daemon's id as `docker info --format '{{.ID}}'` prints it: a UUID, or groups of letters and
+#: digits joined by colons (older daemons).
+_DAEMON_ID: Final = re.compile(r"[A-Za-z0-9:_-]{1,128}")
+
+
+def _container_from(raw: object) -> ContainerRecord | None:
+    """The container a dict names, or `None`.
+
+    Raises:
+        ValueError: `raw` is neither `None` nor `{id, daemon}` with an id Docker could have printed
+            and a daemon id of the form `docker info` prints.
+    """
+    if raw is None:
+        return None
+    if type(raw) is not dict or set(raw) != {"id", "daemon"}:
+        raise ValueError(f"{_WHO}: 'container' must be null or {{id, daemon}}, got {raw!r}")
+    container_id, daemon_id = raw["id"], raw["daemon"]
+    if (
+        type(container_id) is not str
+        or _CONTAINER_ID.fullmatch(container_id) is None
+        or type(daemon_id) is not str
+        or _DAEMON_ID.fullmatch(daemon_id) is None
+    ):
+        raise ValueError(
+            f"{_WHO}: 'container' names id {container_id!r} on daemon {daemon_id!r}, which is not "
+            "an identity brig records (a full 64-hex container id and the daemon's own id)"
+        )
+    return ContainerRecord(container_id=container_id, daemon_id=daemon_id)
 
 
 def _runtime_for(raw_kind: object, runtimes: Mapping[RuntimeKind, Runtime]) -> Runtime:

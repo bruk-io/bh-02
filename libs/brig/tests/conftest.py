@@ -82,6 +82,7 @@ import os
 import pathlib
 import select
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -961,11 +962,66 @@ def run_id() -> Iterator[str]:
         except pytest.fail.Exception as exc:
             failure_sections.append(f"SECONDARY (/bin/ps) sweep also failed:\n{exc}")
 
+        # Containers (M10, decision-202): a jail the container tier made that outlived its test.
+        # Only if that tier's helpers were imported at all, so a unit-only run asks no daemon.
+        if "tests.oci_jail" in sys.modules:
+            from tests.oci_jail import leaked_containers
+
+            containers = leaked_containers(token)
+            if containers:
+                failure_sections.append(
+                    "CONTAINER sweep -- container jails labelled with this run's token that "
+                    "outlived their tests (removed now):\n" + "\n".join(containers)
+                )
+
         if failure_sections:
             pytest.fail(
                 f"run_id={token} harness_pid={harness_pid}\n\n" + "\n\n".join(failure_sections),
                 pytrace=False,
             )
+
+
+@pytest.fixture
+def make_oci_jail(run_id: str) -> Iterator[Callable[..., Jail]]:
+    """`make(spec, jail_id=None, ...)` makes a container jail (`tests/oci_jail.py`): its id carries
+    this run's token, which the session's container sweep looks for, and every jail made is
+    destroyed, and must end, when the test is done. Skips, naming `docker info`, where there is no
+    Docker daemon to run it on."""
+    from tests import oci_jail
+
+    oci_jail.needs_docker()
+    made: list[tuple[Jail, str]] = []
+
+    def make(
+        spec: Any = None, *, jail_id: str | None = None, jail_dir: str | None = None, **more: Any
+    ) -> Jail:
+        import shutil
+
+        from brig.core import Spec
+
+        directory = oci_jail.new_jail_dir() if jail_dir is None else jail_dir
+        try:
+            jail = oci_jail.make(
+                Spec(fs=oci_jail.allow_list()) if spec is None else spec,
+                directory,
+                jail_id=f"oci-{run_id}-{uuid.uuid4().hex[:8]}" if jail_id is None else jail_id,
+                **more,
+            )
+        except BaseException:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+        made.append((jail, directory))
+        return jail
+
+    yield make
+    import shutil
+
+    failed: list[str] = []
+    for jail, directory in made:
+        report = jail.destroy()
+        failed += [str(item) for item in report.items if item.outcome.value == "FAILED"]
+        shutil.rmtree(directory, ignore_errors=True)
+    assert not failed, f"a container jail could not be destroyed at teardown: {failed}"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

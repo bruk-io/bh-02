@@ -132,15 +132,17 @@ def test_a_wait_that_reaches_its_deadline_is_a_timeout() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_dict_is_version_10_and_round_trips_with_the_runtime_passed() -> None:
+def test_the_dict_is_version_11_and_round_trips_with_the_runtime_passed() -> None:
     runtime = FakeRuntime()
     jail = _create(runtime)
     first = jail.start(["sleep", "100"])
     d = jail.to_dict()
     # 8 since decision-186 (channels name no path), 9 since decision-192 (`supervisor`),
-    # 10 since decision-196 (each process says whether it has namespaces)
-    assert d["version"] == JAIL_VERSION == 10
+    # 10 since decision-196 (each process says whether it has namespaces),
+    # 11 since decision-202 (`container`)
+    assert d["version"] == JAIL_VERSION == 11
     assert d["supervisor"] is None  # a fake jail has no supervisor
+    assert d["container"] is None  # nor a container
     assert d["runtime"] == "FAKE" and d["tethered"] is False
     assert [p["id"] for p in d["processes"]] == [first.id]
     assert not {"pid", "pgid", "argv", "launcher_name"} & set(d)
@@ -177,7 +179,7 @@ def test_a_runtime_passed_under_another_kind_is_refused() -> None:
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"version": 9}, "unsupported version 9, expected 10"),
+        ({"version": 10}, "unsupported version 10, expected 11"),
         ({"pid": 1}, r"unknown key\(s\) \['pid'\]"),
         ({"runtime": "DOCKER"}, "'DOCKER' is no runtime kind"),
         ({"tethered": "yes"}, "'tethered' must be a bool"),

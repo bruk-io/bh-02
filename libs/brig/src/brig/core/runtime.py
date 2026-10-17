@@ -10,8 +10,13 @@ need them.
 `SupervisorPlan` is what a mechanism hands the runtime when its jail runs brig's
 own supervisor as PID 1 (SPEC.md section 6, decision-190): the interpreter the
 supervisor runs under inside the jail, and where its source is bound.
+
+`ContainerPlan` is what the `oci` mechanism hands its runtime (SPEC.md section 6,
+decision-202): the flags of `docker create`, the image and command, and the environment
+the runtime writes to the env file those flags name. It renders that file's text, purely.
 """
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -27,10 +32,12 @@ class RuntimeKind(Enum):
     `HOST` is brig's own: host process groups, the exit wrapper, the tether
     (`brig/run/host.py`). `FAKE` is `brig.runtime.fake`'s, a test double
     (decision-181): no mechanism names it, so no compiled jail has it, and a
-    fake's records say `FAKE` so they never reach a real runtime. A container
-    runtime's kind arrives with it (decision-0001 step 5)."""
+    fake's records say `FAKE` so they never reach a real runtime. `OCI` is a
+    container, created and ended through the Docker daemon (`brig/runtime/oci.py`,
+    decision-202)."""
 
     HOST = "HOST"
+    OCI = "OCI"
     FAKE = "FAKE"
 
 
@@ -83,6 +90,71 @@ class SupervisorPlan:
             )
 
 
+#: A name an env file can carry: `NAME=value` is one line of Docker's `--env-file`, and a line
+#: with no `=` would forward a variable of the Docker CLI's own environment (decision-202).
+_ENV_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+class EnvNotRepresentable(ValueError):
+    """A variable cannot be written to a container's env file as one `NAME=value` line
+    (SPEC.md section 6, decision-202): its name is not `[A-Za-z_][A-Za-z0-9_]*`, or its value holds
+    a newline, a carriage return or a NUL. Names the variable, never its value."""
+
+
+def env_refusal(name: str, value: str | None = None) -> str | None:
+    """Why `name` (and `value`, when given) cannot be one line of an env file, or `None`.
+    The reason names the variable and never the value. Pure."""
+    if _ENV_NAME.fullmatch(name) is None:
+        return f"the name {name!r} is not [A-Za-z_][A-Za-z0-9_]*"
+    if value is not None and any(char in value for char in "\n\r\0"):
+        return f"the value of {name} holds a newline, a carriage return or a NUL"
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class ContainerPlan:
+    """A jail whose instance is a container (SPEC.md section 6, decision-202): what the `oci`
+    mechanism hands its runtime. `flags` are everything `docker create` takes between its own
+    verb and the image, rendered purely from the `Spec`; `image` and `command` follow them (the
+    command is the container's idle process until a supervisor replaces it, TASK-0079.10).
+
+    `env_file` is the path `flags` name with `--env-file`, which the runtime writes (mode 0600,
+    removed once `docker create` returns) from `env_file_text`: the names of `env_forward`, from
+    the environment of the process that creates the jail, and the pairs of `env_set`. The
+    environment is a file and never `-e K=V` because argv is visible in `ps` (law 9)."""
+
+    image: str
+    flags: tuple[str, ...]
+    command: tuple[str, ...]
+    env_file: str
+    env_forward: tuple[str, ...]
+    env_set: tuple[tuple[str, str], ...]
+
+    def env_file_text(self, environ: Mapping[str, str]) -> str:
+        """The env file's text for a creating process whose environment is `environ`: a forwarded
+        name when `environ` has it set and non-empty (as `env_scrub` forwards, decision-066), then
+        each `env_set` pair, which overrides a forwarded name. One `NAME=value` per line, the value
+        verbatim (Docker's file takes it so). Pure.
+
+        Raises:
+            EnvNotRepresentable: a name or a value cannot be a line (the message names the
+                variable, never its value).
+        """
+        lines: dict[str, str] = {}
+        for name in self.env_forward:
+            value = environ.get(name)
+            if value:
+                lines[name] = value
+        lines.update(self.env_set)
+        for name, value in lines.items():
+            reason = env_refusal(name, value)
+            if reason is not None:
+                raise EnvNotRepresentable(
+                    f"cannot write {name} to the container's env file: {reason}"
+                )
+        return "".join(f"{name}={value}\n" for name, value in lines.items())
+
+
 #: The two axes a runtime grades rather than a mechanism (SPEC.md section 7,
 #: decision-179): `control` at the jail scope, and `channel_exclusivity`.
 RUNTIME_AXES: Final[frozenset[Axis]] = frozenset({Axis.CONTROL, Axis.CHANNEL_EXCLUSIVITY})
@@ -106,6 +178,23 @@ _HOST_CONTROL_SUPERVISED: Final[str] = (
     "own or not. This is the jail scope; a process's own is Process.control"
 )
 
+_OCI_CONTROL: Final[str] = (
+    "graded by the OCI runtime for a container jail: destroy() is `docker rm -f` through the "
+    "daemon the runtime object names, which SIGKILLs the container's init and with it its pid "
+    "namespace, and then asks `docker inspect` whether the container is gone. Proved from the "
+    "host by the control battery (decision-202, tests/integration/test_oci_control.py): a "
+    "setsid() child, a process that ignores SIGTERM and a SIGSTOPped init are each planted (by "
+    "`docker exec`, the test's own door) beside a plain child the same destroy() ends, and "
+    "destroy() ends all of them. This is the jail scope; nothing is started in a container "
+    "through brig yet, so there is no process scope to grade (TASK-0079.10)"
+)
+
+_OCI_CHANNEL_EXCLUSIVITY: Final[str] = (
+    "graded by the OCI runtime: nothing establishes that the declared channels and the "
+    "enumerated shared media are the only ways in or out of the container, and a Spec that "
+    "declares a channel is refused until the channel directory exists (TASK-0079.10)"
+)
+
 _FAKE_DETAIL: Final[str] = (
     "graded by the FAKE runtime, a test double (brig.runtime.fake): it starts, "
     "signals and ends nothing, so it enforces nothing"
@@ -126,8 +215,11 @@ def runtime_grades(kind: RuntimeKind, *, supervised: bool) -> Mapping[Axis, Grad
     (decision-0001, "Grades stay in the stack, at two scopes"). Never above what the control
     battery proves (decision-201, law 10): `HOST` grades `control` `enforced` for a supervised
     jail, whose `destroy` the battery ended every planted survivor with, and `unenforced` for
-    one with no supervisor, which it has not been run against. `channel_exclusivity` is
-    `unenforced` for every kind, as every report said before decision-179."""
+    one with no supervisor, which it has not been run against. `OCI` grades it `enforced`
+    whether or not a supervisor runs in the container: the battery for a container
+    (decision-202) plants its survivors through `docker exec` and ends them with `destroy`.
+    `channel_exclusivity` is `unenforced` for every kind, as every report said before
+    decision-179."""
     match kind:
         case RuntimeKind.HOST:
             control = (
@@ -138,6 +230,11 @@ def runtime_grades(kind: RuntimeKind, *, supervised: bool) -> Mapping[Axis, Grad
             return {
                 Axis.CONTROL: control,
                 Axis.CHANNEL_EXCLUSIVITY: Graded(Grade.UNENFORCED, _HOST_CHANNEL_EXCLUSIVITY),
+            }
+        case RuntimeKind.OCI:
+            return {
+                Axis.CONTROL: Graded(Grade.ENFORCED, _OCI_CONTROL),
+                Axis.CHANNEL_EXCLUSIVITY: Graded(Grade.UNENFORCED, _OCI_CHANNEL_EXCLUSIVITY),
             }
         case RuntimeKind.FAKE:
             return {

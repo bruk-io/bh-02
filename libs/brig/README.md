@@ -47,6 +47,17 @@ Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md
 is the one describing the library.
 
+A container is a jail too (decision-202, TASK-0079.09): `Oci(image)` is the mechanism, compiling a `Spec`
+to the flags of `docker create` (mounts, `--network none`, `--ulimit`, `--init`, `--user` as the
+embedder's uid, and an env file of mode 0600 that is removed after the create, never `-e`), and
+`brig.runtime.oci.OciRuntime` creates it through the Docker daemon, identifies it by a `brig.jail` label
+and the daemon's id, ends it with `docker rm -f` verified by `docker inspect`, and removes it when its
+embedder goes (a tether watcher, `SIGKILL` included). The daemon is the runtime object's
+(`OciRuntime(docker_host=...)`), never a record's. `env_scrub` and `rlimits` are refused beside it: it
+compiles their effect itself. Nothing is started in a container through brig yet, so `Jail.start` is
+absent on one; that, and the channel directory, are TASK-0079.10's. Its integration tier runs against
+the machine's Docker daemon and skips, naming `docker info`, without one.
+
 ## Standing alone
 
 brig imports the standard library and itself, and nothing else. It knows nothing about what

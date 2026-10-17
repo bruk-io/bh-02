@@ -65,6 +65,7 @@ from brig.core import (
 from brig.core.runtime import (
     RUNTIME_AXES,
     Capability,
+    ContainerPlan,
     RuntimeKind,
     SupervisorPlan,
     runtime_grades,
@@ -412,7 +413,42 @@ _BWRAP_CONNECT_PROXY_RATIONALE: Final[str] = (
 _CONNECT_PROXY_NAME: Final[str] = "connect_proxy"
 _SEATBELT_NAME: Final[str] = "seatbelt"
 
-MATRIX_VERSION: Final[int] = 5
+#: **`oci` is refused beside every other mechanism, each with its reason** (decision-202). A
+#: row of `COMPATIBILITY_MATRIX` says how two mechanisms compose; a pair that never does has no
+#: composition to describe, and an "unreachable" row would say one (were a claim narrowed, `env_scrub`'s
+#: shell would compose around a container's argv). Rule 1 refuses all five first, on the axes they
+#: claim twice; this is the matrix's own refusal, for the day a claim is narrowed.
+_OCI_ENV_RLIMITS_REASON: Final[str] = (
+    "oci compiles this mechanism's effect itself, as container flags (an env file for env_scrub's "
+    "scrub, --ulimit for rlimits'), so the two would claim one axis twice; and neither can wrap a "
+    "container's argv: env_scrub's wrap is a shell around a host argv, and the rlimits trampoline "
+    "needs brig in the image"
+)
+_OCI_JAIL_TYPE_REASON: Final[str] = (
+    "bwrap and seatbelt are jail types of the HOST runtime and oci's is a container, so a stack of "
+    "both would need two runtimes (RuntimeConflict), and they claim fs_read, fs_write and network "
+    "twice; build one stack per jail type"
+)
+_OCI_CONNECT_PROXY_REASON: Final[str] = (
+    "connect_proxy is the HOST runtime's egress filter and claims network, which oci grants none "
+    "of (--network none); filtering a container's egress is a sidecar proxy on an --internal network "
+    "(decision-0001), not built"
+)
+
+#: Pairs that never compose, each with the reason (decision-202). Beside `COMPATIBILITY_MATRIX`:
+#: together they close the square, every pair of mechanisms being a row or a refusal. Read at call
+#: time, like the matrix.
+REFUSED_PAIRS: Mapping[frozenset[str], str] = MappingProxyType(
+    {
+        frozenset({"oci", "env_scrub"}): _OCI_ENV_RLIMITS_REASON,
+        frozenset({"oci", "rlimits"}): _OCI_ENV_RLIMITS_REASON,
+        frozenset({"oci", "bwrap"}): _OCI_JAIL_TYPE_REASON,
+        frozenset({"oci", "seatbelt"}): _OCI_JAIL_TYPE_REASON,
+        frozenset({"oci", "connect_proxy"}): _OCI_CONNECT_PROXY_REASON,
+    }
+)
+
+MATRIX_VERSION: Final[int] = 6
 COMPATIBILITY_MATRIX: Mapping[frozenset[str], MatrixEntry] = MappingProxyType(
     {
         frozenset({"bwrap", "rlimits"}): MatrixEntry(
@@ -470,22 +506,36 @@ class AxisClaimConflict(ValueError):
 
 
 class CompatibilityRefused(ValueError):
-    """A Stack contains a mechanism pair absent from the compatibility matrix.
+    """A Stack contains a mechanism pair that is not a row of the compatibility matrix.
 
-    SPEC.md §7 step 3: "Unknown pairs are refused."
+    SPEC.md §7 step 3: "Unknown pairs are refused." A pair the matrix lists as REFUSED
+    (`REFUSED_PAIRS`, decision-202) carries its `reason`: the two never compose. An unknown
+    pair has none.
     """
 
-    def __init__(self, mechanism_a: str, mechanism_b: str, matrix_version: int) -> None:
+    def __init__(
+        self,
+        mechanism_a: str,
+        mechanism_b: str,
+        matrix_version: int,
+        reason: str | None = None,
+    ) -> None:
         self.mechanism_a = mechanism_a
         self.mechanism_b = mechanism_b
         self.matrix_version = matrix_version
+        self.reason = reason
         super().__init__(str(self))
 
     def __str__(self) -> str:
+        pair = f"({self.mechanism_a!r}, {self.mechanism_b!r})"
+        if self.reason is not None:
+            return (
+                f"the pair {pair} is refused by the compatibility matrix "
+                f"(v{self.matrix_version}): {self.reason}"
+            )
         return (
             f"no compatibility matrix entry (v{self.matrix_version}) for the "
-            f"pair ({self.mechanism_a!r}, {self.mechanism_b!r}); unknown "
-            "pairs are refused"
+            f"pair {pair}; unknown pairs are refused"
         )
 
 
@@ -530,6 +580,20 @@ class SupervisorConflict(ValueError):
             f"mechanisms {mechanism_a!r} and {mechanism_b!r} each declare a supervisor, and a "
             "jail has one PID 1 -- build the stack with one of them (SPEC.md section 6, "
             "decision-190)"
+        )
+
+
+class ContainerConflict(ValueError):
+    """Two mechanisms in a Stack each declare a container plan (decision-202): a jail's instance
+    is one container, so a stack asks for one, and two are refused (law 2)."""
+
+    def __init__(self, mechanism_a: str, mechanism_b: str) -> None:
+        self.mechanism_a = mechanism_a
+        self.mechanism_b = mechanism_b
+        super().__init__(
+            f"mechanisms {mechanism_a!r} and {mechanism_b!r} each declare a container, and a "
+            "jail's instance is one -- build the stack with one of them (SPEC.md section 6, "
+            "decision-202)"
         )
 
 
@@ -613,6 +677,7 @@ class CompiledJail:
     sensors: tuple[EventSource, ...] = ()
     runtime: RuntimeKind = RuntimeKind.HOST
     supervisor: SupervisorPlan | None = None
+    container: ContainerPlan | None = None
 
     def __post_init__(self) -> None:
         # Defensive copy: prevent caller mutation of the source mapping from
@@ -676,9 +741,11 @@ class Stack:
 
         Raises:
             AxisClaimConflict: two mechanisms declare one axis (1).
-            CompatibilityRefused: a pair the matrix does not list (3).
+            CompatibilityRefused: a pair the matrix does not list as a row (3):
+                one it lists as refused carries the reason.
             RuntimeConflict: two mechanisms name different runtime kinds.
             SupervisorConflict: two mechanisms declare a supervisor.
+            ContainerConflict: two mechanisms declare a container.
             EnvConflict: two mechanisms set one variable to different values.
             ValueError: a Step grades an axis outside its mechanism's
                 declared axes, or a mechanism's own compile refuses.
@@ -732,7 +799,9 @@ class Stack:
                 pair = frozenset((a.name, b.name))
                 entry = COMPATIBILITY_MATRIX.get(pair)
                 if entry is None:
-                    raise CompatibilityRefused(a.name, b.name, MATRIX_VERSION)
+                    raise CompatibilityRefused(
+                        a.name, b.name, MATRIX_VERSION, REFUSED_PAIRS.get(pair)
+                    )
                 pair_entries[pair] = entry
 
         # --- 3b. The runtime (decision-179) -------------------------------
@@ -781,6 +850,7 @@ class Stack:
         for _, step in steps:
             requires = requires | step.requires
         supervisor = _resolve_supervisor(steps)
+        container = _resolve_container(steps)
 
         # Build the aggregate report: start from core.unenforced_report()'s
         # all-seven-axes-UNENFORCED fill (SPEC.md §3: "the empty stack ...
@@ -876,6 +946,7 @@ class Stack:
             sensors=tuple(step.events for _, step in steps if step.events is not None),
             runtime=runtime,
             supervisor=supervisor,
+            container=container,
         )
 
 
@@ -892,6 +963,22 @@ def _resolve_supervisor(steps: Sequence[tuple[Mechanism, Step]]) -> SupervisorPl
         if first is not None:
             raise SupervisorConflict(first[0], mechanism.name)
         first = (mechanism.name, step.supervisor)
+    return None if first is None else first[1]
+
+
+def _resolve_container(steps: Sequence[tuple[Mechanism, Step]]) -> ContainerPlan | None:
+    """The one container plan a mechanism's `Step` declared, or `None` (decision-202).
+
+    Raises:
+        ContainerConflict: two mechanisms each declared one, naming both.
+    """
+    first: tuple[str, ContainerPlan] | None = None
+    for mechanism, step in steps:
+        if step.container is None:
+            continue
+        if first is not None:
+            raise ContainerConflict(first[0], mechanism.name)
+        first = (mechanism.name, step.container)
     return None if first is None else first[1]
 
 

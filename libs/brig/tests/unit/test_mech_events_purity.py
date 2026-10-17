@@ -150,6 +150,7 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
             "brig.mech.contract",
             "brig.mech.bwrap",
             "brig.mech.env_scrub",
+            "brig.mech.oci",
             "brig.mech.rlimits",
             "brig.mech.seatbelt",
         }
@@ -226,6 +227,23 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
             "brig.core",
             # decision-179: `Mechanism.runtime` is `RuntimeKind.HOST`.
             "brig.core.runtime",
+            "brig.mech.contract",
+        }
+    ),
+    # `oci.py` (2026-10-17, decision-202): the container mechanism. NOT a carve-out either --
+    # `Oci.compile` is a pure `spec -> flags` render, and `os` is absent for the reason it is
+    # absent from `bwrap.py`: the env file is written by the runtime, and the filesystem facts
+    # arrive on `CompileCtx`. `brig.mech.bwrap` is imported for `pins`, the pure lexical list of
+    # directories between a write root and a carve-out that `build_compile_ctx` observes too.
+    "oci.py": frozenset(
+        {
+            "__future__",
+            "collections.abc",
+            "re",
+            "typing",
+            "brig.core",
+            "brig.core.runtime",
+            "brig.mech.bwrap",
             "brig.mech.contract",
         }
     ),

@@ -860,7 +860,7 @@ def test_a_rehydrated_supervised_jail_can_be_destroyed_and_nothing_else() -> Non
         jail.start(sleep)
         assert until(lambda: bool(running_with(marker)))
         d = json.loads(json.dumps(jail.to_dict()))
-        assert d["version"] == 10 and d["supervisor"]["pid"] == instance_group(jail)
+        assert d["version"] == 11 and d["supervisor"]["pid"] == instance_group(jail)
 
         again = Jail.from_dict(d, runtimes={RuntimeKind.HOST: HostRuntime()})
         assert again.alive()

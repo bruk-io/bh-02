@@ -50,7 +50,7 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from brig.core import Axis, DataValue, EventKind, Graded, Spec
-from brig.core.runtime import Capability, RuntimeKind, SupervisorPlan, channel_dir
+from brig.core.runtime import Capability, ContainerPlan, RuntimeKind, SupervisorPlan, channel_dir
 
 # Type aliases
 ArgvTransformer = Callable[[tuple[str, ...]], tuple[str, ...]]
@@ -362,6 +362,11 @@ class Step:
                 supervisor's argv, never a workload's, and every process of the
                 jail is a request to it. At most one mechanism of a stack
                 declares one. Defaults to `None`.
+        container: `None`, or the plan of a jail whose instance is a container
+                (SPEC.md §6, decision-202): the flags of `docker create`, its image
+                and command, and the environment for the env file. `wrap` is then the
+                identity, since nothing wraps a host argv. At most one mechanism of a
+                stack declares one. Defaults to `None`.
     """
 
     wrap: ArgvTransformer
@@ -373,6 +378,7 @@ class Step:
     denial_signatures: tuple[re.Pattern[str], ...]
     events: EventSource | None = None
     supervisor: SupervisorPlan | None = None
+    container: ContainerPlan | None = None
 
     def __post_init__(self) -> None:
         # Defensive copy for env: prevent caller mutations from affecting this Step
