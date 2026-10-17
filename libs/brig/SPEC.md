@@ -1215,13 +1215,40 @@ guard. Ruled:
   processes get the graded fallback (§8, decision-195). Making root work needs
   the supervisor to hold `CAP_SYS_ADMIN` at its start, long enough to unmount the
   covers and then drop it: capabilities in the jail's PID 1, which is a design
-  question this ruling does not take.
+  question this ruling does not take. *Taken 2026-10-17, decision-197: not made.*
 - **Grades don't move.** For an unprivileged user the cover guarded nothing, so
   `fs_write` is as `enforced` as it was, and its detail still names the cover
   where it is emitted. decision-177's "emitted whoever runs bwrap" is amended by
   this ruling; the rest of it stands.
 
 Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-194.)
+
+**A jail run as uid 0 gets no per-process namespaces, and its supervisor holds no
+capability to make them (2026-10-17, decision-197).** The question decision-194
+left: whether the supervisor of a jail run as root should keep `CAP_SYS_ADMIN`
+to unmount bwrap's `/proc` covers and mount each process a fresh `/proc`. Not
+made. A jail run as root has no user namespace around it, so that capability is
+the host's own, not a namespace's; and since every start mounts a `/proc`, the
+supervisor would keep it for the jail's life, not only at its start. Each fresh
+`/proc` would also have to be covered again before the process runs, or uid 0
+writes `kernel.core_pattern` (decision-177). A fault in a privileged PID 1 inside
+every root jail would be a host escape, against a gain only a jail run as root
+sees (a container or CI, where the container is usually the outer boundary).
+Ruled:
+
+- A jail run as uid 0 keeps decision-195's fallback: its processes share the
+  jail's namespaces, the process scope is graded `cooperative` and the reason
+  says so (decision-196). Its co-tenant rows (decision-0001's table) are shared
+  media, named in each process's `channel_exclusivity` detail.
+- What the fallback costs in practice is a stop that a child outside the
+  process group survives (`setsid`, a daemon). That is closed without privilege,
+  by a subreaper per process: TASK-0130, which rules on it.
+- Running a root jail as an unprivileged host uid instead (a user namespace
+  mapping onto a non-root uid) was weighed and not taken: files the workload
+  writes would be owned by that uid, and a root-owned project would not be
+  writable at all, decision-177's objection to `--uid`.
+
+Decided by the owner in conversation, 2026-10-17. (Ruled 2026-10-17, decision-197.)
 
 Deliberately absent: a cooperative filesystem guard (see §4), and `ulimit -u`
 / `RLIMIT_NPROC` anywhere (per-user on darwin and commonly on linux; capping
