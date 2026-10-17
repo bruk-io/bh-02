@@ -2394,6 +2394,13 @@ interpreter. Ruled:
   verified by `docker inspect`, and a supervisor's link closed after), the tether watcher, the env file,
   the jail dict (`JAIL_VERSION` 11: the agent is the creating process's knowledge, as a supervised jail's
   namespaces are), and every grade of the report but `channel_exclusivity`'s detail and `control`'s.
+- **The container is the jail; its processes get no namespaces of their own, by design.** The owner,
+  2026-10-17, on the measurement above: per-process namespaces are not sought inside a container (no
+  seccomp profile loosened to allow `CLONE_NEWUSER`). decision-0001's table had a container's process
+  scope as "its nested namespace"; that row is superseded. Both agents' processes are graded
+  `cooperative` at the process scope, and the exec agent is not graded lower: it is weaker in kind (no
+  agent for a subreaper per process, TASK-0130; a pid announced rather than held; an exit status only
+  its starter reads), which its `control` detail names (§9).
 
 Implementing task: TASK-0079.10. (Ruled 2026-10-17, decision-203.)
 
