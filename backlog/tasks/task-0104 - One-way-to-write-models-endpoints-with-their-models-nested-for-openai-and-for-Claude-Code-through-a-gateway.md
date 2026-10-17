@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-15 20:32'
-updated_date: '2026-10-15 20:32'
+updated_date: '2026-10-17 01:48'
 labels:
   - models
   - size-8
@@ -93,4 +93,6 @@ Done uncommitted on the owner's machine (2026-10-15; the owner asked for no comm
 - Built-ins removed (#12): no `BUILT_IN`; no default and no `--model` means no model (`chosen` raises "no model is chosen" with an endpoint to write; status bar `none`); `bh_02.sessions._pinned` records none; a broken or untrusted models file leaves only `extra`. Docs: get-started gains "Your models" (a `claude` endpoint with sonnet/opus/haiku), models guide, README, CONTRACTS, GLOSSARY, plugin READMEs, CLI help. `scripts/check` after: format, lint, gates, docs ok; 2776 passed, the 9 failures environment-bound or flaky alone (as above).
 
 Accepted 2026-10-15 by the owner, who asked for these changes on this branch, made carefully rather than copied, since the codebase may have moved. Their diff is kept at the orchestrator's scratchpad (models-endpoints.diff, 48 files). Measured before porting: 42 of its 44 changed files have exactly the diff's base here; bh-02/CLAUDE.md and GLOSSARY.md differ only by TASK-0099.05's and TASK-0100's edits, and the whole diff applies. Criteria #9 and #10 are about the owner's machine: their notes above are that evidence, and nothing here can repeat it (no gateway, no owner models file).
+
+Owner, 2026-10-17, in conversation: criteria #10 (a gateway reply through bh-02, [1m] ids included) and #11 (their models file in the new shape, its models working) hold on their machine with the merged code: "i can confirm its fine". And no backwards compatibility is needed: an old flat table, an old session's model name or an old layer's `extra` is refused or errors, as the criteria already say, with nothing translated.
 <!-- SECTION:NOTES:END -->
