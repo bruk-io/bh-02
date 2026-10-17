@@ -620,10 +620,9 @@ def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tm
         m["content"] for m in map(json.loads, transcript.read_text().splitlines()) if m["role"] == "tool"
     ]
     assert results[0].startswith("not run: the person stopped the turn before this call started")
-    assert results[1].endswith(
-        "tools.agent, tools.agent_send, tools.agent_stop, tools.agent_wait; "
-        "help(tools.NAME) says what one takes)\n42"
-    )
+    # the first input's result: the note on bh-02's other tools (which tools they are is the
+    # python plugin's tests' to pin, not this one's), then what the input printed
+    assert results[1].endswith("; help(tools.NAME) says what one takes)\n42"), results[1][-300:]
 
 
 def test_a_narrow_screen_keeps_every_jail_grade_named(launch: Launch) -> None:
