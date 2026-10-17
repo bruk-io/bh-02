@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-17 14:50'
+updated_date: '2026-10-17 19:04'
 labels:
   - brig
   - runner
@@ -33,3 +34,9 @@ Builds decision-0007, the owner's ruling of 2026-10-17: brig's supervisor, each 
 - [ ] #4 The supervisor program refuses to start under an older interpreter, naming the version it needs; the 3.9 parse test is gone and the program is checked by strict mypy with the rest of brig
 - [ ] #5 scripts/check and scripts/linux-jail-check pass, the supervisor running under uv's 3.15 in both
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 2026-10-17: brig moved to a repository of its own (TASK-0135, archived), and the old libs/brig is frozen until the new one replaces it. The new brig's decision-0001 (rule 17) carries decision-0007: the supervisor runs only on Python 3.15.
+<!-- SECTION:NOTES:END -->
