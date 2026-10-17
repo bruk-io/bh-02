@@ -67,7 +67,9 @@ class ExecFidelity(Enum):
     (ambiguity A13 in the M2 plan). `oci_container`/`bwrap` place the exec
     inside the *same boundary instance* (`SAME_INSTANCE`: no M4 mechanism
     could deliver this, task-046; a bwrap jail does since decision-192, SPEC.md
-    §9, every process a request to the supervisor that is its PID 1); `seatbelt` and any other
+    §9, every process a request to the supervisor that is its PID 1, in the jail's
+    confinement and, since decision-195, in namespaces of its own where the host gives
+    them); `seatbelt` and any other
     argv-wrap mechanism (`env_scrub`, `rlimits`, and their composition) can
     only start a sibling under an *identical, re-derived* wrapper --
     `EQUIVALENT_PROFILE`, first reachable at task-046, whenever

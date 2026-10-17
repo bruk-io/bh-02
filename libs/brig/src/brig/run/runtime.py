@@ -165,6 +165,18 @@ def reserved_socket(chan: str, token: str) -> str:
     return f"{chan}/{token}.sock"
 
 
+def socket_endpoint(bound_path: str, *, namespaces: bool) -> str:
+    """The host path to dial the socket a process binds at `bound_path` in the channel
+    directory (decision-196). The same path where the process shares the directory with the
+    jail's others; where it has a mount namespace of its own (decision-195) it sees a
+    directory of its own, named for the socket, over the channel directory, so the socket it
+    makes at `<chan>/<token>.sock` is at `<chan>/<token>/<token>.sock` for the host. Pure."""
+    if not namespaces:
+        return bound_path
+    directory, name = os.path.split(bound_path)
+    return f"{directory}/{name.removesuffix('.sock')}/{name}"
+
+
 def refuse_foreign_reservation(jail: JailRecord, channel: Reservation) -> None:
     """Refuse a `channel` that is not a socket the runtime would reserve in `jail`'s channel
     directory, or that a process the jail knows (in memory or under `procs/`) already binds
@@ -179,7 +191,12 @@ def refuse_foreign_reservation(jail: JailRecord, channel: Reservation) -> None:
         if process.bound_path is not None
     )
     reason = reservation_refusal(
-        channel, chan=channel_dir_of(jail), endpoint=channel.bound_path, taken=taken
+        channel,
+        chan=channel_dir_of(jail),
+        endpoint=socket_endpoint(
+            channel.bound_path, namespaces=jail.namespaces is not None and jail.namespaces.held
+        ),
+        taken=taken,
     )
     if reason is not None:
         raise ReservationRefused(
@@ -235,6 +252,17 @@ class SupervisorRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ProcessNamespaces:
+    """Whether each process a supervised jail starts has namespaces of its own (decision-195),
+    as its supervisor found out before it said it was ready: `held`, and when not, `reason`, the
+    line the supervisor gave. What a `Process` reads its `namespaces` and `control` from, and
+    the runtime the host paths of the sockets it reserves."""
+
+    held: bool
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class JailRecord:
     """A jail's instance, as its runtime identifies it.
 
@@ -247,8 +275,10 @@ class JailRecord:
     `helper_stamps` are the `JAIL_LIFETIME` helpers `destroy` must end too, one
     stamp per pid. `supervisor` is the instance of a supervised jail
     (decision-192), `None` for a jail whose processes are started by the
-    host. `held` is what the creating process holds in memory (`Held`),
-    never compared or shown."""
+    host. `namespaces` is what its supervisor found about the namespaces of
+    its processes (decision-195), known to the process that created the jail
+    and no other, `None` without a supervisor. `held` is what the creating
+    process holds in memory (`Held`), never compared or shown."""
 
     kind: RuntimeKind
     jail_id: str
@@ -260,6 +290,7 @@ class JailRecord:
     helper_pids: tuple[int, ...] = ()
     helper_stamps: tuple[str, ...] = ()
     supervisor: SupervisorRecord | None = None
+    namespaces: ProcessNamespaces | None = None
     held: Held | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:

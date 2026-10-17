@@ -141,6 +141,19 @@ PROCS_DIRNAME: Final = "procs"
 CHANNELS_DIRNAME: Final = "chan"
 
 
+#: `<jail_dir>/tmp`: the jail's scratch, the one part of the jail directory a write
+#: root reaching it still grants (decision-173); an embedder points `TMPDIR` there.
+#: In a supervised jail whose processes have namespaces of their own, each gets a
+#: directory of its own over it (decision-195).
+SCRATCH_DIRNAME: Final = "tmp"
+
+
+def scratch_dir(jail_dir: str) -> str:
+    """The scratch directory of the jail in `jail_dir` (decision-173). Pure:
+    lexical, so a caller that needs it resolved passes a resolved `jail_dir`."""
+    return f"{jail_dir.rstrip('/')}/{SCRATCH_DIRNAME}"
+
+
 def channel_dir(jail_dir: str) -> str:
     """The channel directory of the jail in `jail_dir` (decision-184). Pure:
     lexical, so a caller that needs it resolved passes a resolved `jail_dir`."""

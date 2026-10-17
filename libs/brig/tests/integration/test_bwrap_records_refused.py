@@ -80,9 +80,13 @@ def _spec() -> Spec:
     )
 
 
-def _write_through(jail_dir: str, directory: str) -> tuple[str, list[str]]:
+def _write_through(
+    jail_dir: str, directory: str, *, namespaces: bool = True
+) -> tuple[str, list[str]]:
     """Run the forgery in a jail with a declared channel; what it printed and
-    which forged names landed in `directory` on the host."""
+    which forged names landed in `directory` on the host. A process in
+    namespaces of its own writes the channel directory through the one made for
+    it (decision-195), so `directory` is that one when it is the channel's."""
     spec = _spec()
     compiled = Stack([bwrap]).compile(
         spec, ctx=build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
@@ -93,9 +97,12 @@ def _write_through(jail_dir: str, directory: str) -> tuple[str, list[str]]:
         cwd="/",
         jail_id="bwrap-records-refused",
         jail_dir=jail_dir,
+        namespaces=namespaces,
     )
     try:
         process.wait(timeout=_WAIT_TIMEOUT_S)
+        if process.namespaces and directory == os.path.join(os.path.realpath(jail_dir), "chan"):
+            directory = os.path.join(directory, process.id)
         with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
             stdout = f.read()
         landed = sorted(name for name in _FORGED if os.path.lexists(os.path.join(directory, name)))
@@ -108,22 +115,31 @@ def _write_through(jail_dir: str, directory: str) -> tuple[str, list[str]]:
     return stdout, landed
 
 
+_NAMESPACES = pytest.mark.parametrize(
+    "namespaces", [True, False], ids=["as-the-host-gives", "no-namespaces"]
+)
+
+
 @pytest.mark.integration
-def test_a_channel_grants_nothing_at_the_records(jail_dir: str) -> None:
+@_NAMESPACES
+def test_a_channel_grants_nothing_at_the_records(jail_dir: str, namespaces: bool) -> None:
     records = os.path.join(os.path.realpath(jail_dir), "procs")
-    stdout, landed = _write_through(jail_dir, records)
+    stdout, landed = _write_through(jail_dir, records, namespaces=namespaces)
     assert os.path.isdir(records), "CONTROL failed: the launch wrote no records to forge beside"
     assert landed == [], f"the jail wrote its records: {stdout.split()} -> {landed}"
     assert "WROTE" not in stdout.split() and "WROTE_FLAT" not in stdout.split(), stdout
 
 
 @pytest.mark.integration
-def test_the_channel_directory_beside_the_records_is_written_through(jail_dir: str) -> None:
+@_NAMESPACES
+def test_the_channel_directory_beside_the_records_is_written_through(
+    jail_dir: str, namespaces: bool
+) -> None:
     """The control: the channel directory is the jail's one grant in the jail
     directory, and the same forgery lands there. Without it, the refusal above
     could pass against a bwrap whose channel grant never let anything
     through."""
     chan = os.path.join(os.path.realpath(jail_dir), "chan")
-    stdout, landed = _write_through(jail_dir, chan)
+    stdout, landed = _write_through(jail_dir, chan, namespaces=namespaces)
     assert stdout.split() == ["MADE_DIR", "WROTE", "WROTE_FLAT"], stdout
     assert landed == ["0123456789abcdef", "2.json"], landed

@@ -47,8 +47,10 @@ restrictive".
                                            working directory the jail can't
                                            write.
     2. `--proc /proc`,                     the jail's OWN furniture: a proc
-       `--ro-bind /proc/sys /proc/sys`,    for its own pid namespace, its
-       `--dev /dev`                        sysctls read-only (decision-177),
+       `--ro-bind /proc/sys /proc/sys`     for its own pid namespace, its
+       (uid 0 or unknown only),            sysctls read-only for a workload
+       `--dev /dev`                        that can be the host's root
+                                           (decision-177, decision-194),
                                            and a minimal device set. First
                                            among the mounts, so every
                                            spec-derived mount below stacks ON
@@ -154,9 +156,12 @@ host's uid 0, though, and a sysctl's write check is the mode bits alone, so
 `/proc/sys` -- which bwrap 0.9 leaves uncovered -- is bound read-only over
 the jail's own proc: the source is the host's `/proc/sys`, since a bwrap
 bind source is a host path and `--remount-ro` refuses a path that is not a
-mount point. Both are emitted whoever runs bwrap, which keeps this render
-pure; an unprivileged bwrap has no capability to drop and no host root to
-be, so for it they change nothing.
+mount point. `--cap-drop ALL` is emitted whoever runs bwrap, which keeps this
+render pure; an unprivileged bwrap has no capability to drop. The `/proc/sys`
+cover is emitted unless the user creating the jail is known not to be uid 0
+(`CompileCtx.euid`, decision-194): for anyone else it guards nothing, and a
+cover over `/proc/sys` is what would keep a process of a supervised jail from
+mounting a `/proc` of its own for its pid namespace (decision-195).
 
 **Read carve-outs inside the allowlist (decision-164).** An allowlist
 denies by absence, but a secret can sit INSIDE an allowed root: a
@@ -302,7 +307,13 @@ from dataclasses import dataclass
 from typing import Final
 
 from brig.core import Axis, Grade, Graded, ReadModel, Spec
-from brig.core.runtime import SUPERVISOR_SOURCE_PATH, RuntimeKind, SupervisorPlan, channel_dir
+from brig.core.runtime import (
+    SCRATCH_DIRNAME,
+    SUPERVISOR_SOURCE_PATH,
+    RuntimeKind,
+    SupervisorPlan,
+    channel_dir,
+)
 from brig.mech.contract import ArgvTransformer, CompileCtx, Step
 
 #: Absolute, never the bare name `bwrap` (decision-026 rule 1's family, the
@@ -392,13 +403,29 @@ _NULL: Final[str] = "/dev/null"
 #: write check is the mode bits alone, and bwrap 0.9 leaves this uncovered.
 _PROC_SYS: Final[str] = "/proc/sys"
 
+
+def _proc_sys_cover(euid: int | None) -> tuple[str, ...]:
+    """The argv that binds the sysctls read-only over the jail's proc (decision-177), or nothing
+    when `euid` is known not to be 0 (decision-194). Pure.
+
+    The cover guards a workload that is the host's uid 0, whose sysctl writes the mode bits alone
+    allow. For any other user the files are root's and mode 0644: there is nothing to guard, and a
+    cover is a mount over a non-empty directory, which the kernel counts as hiding something, so
+    no process of the jail could mount a fresh `/proc` of its own in a namespace it makes
+    (`mount_too_revealing`): the per-process `/proc` of a supervised jail needs the jail's own
+    uncovered. `None` is an unknown user and is covered, never guessed weaker."""
+    if euid is not None and euid != 0:
+        return ()
+    return ("--ro-bind", _PROC_SYS, _PROC_SYS)
+
+
 _AXES: Final[frozenset[Axis]] = frozenset({Axis.FS_READ, Axis.FS_WRITE, Axis.NETWORK})
 
 #: The jail's scratch, under its jail directory: the one part of it a write
 #: root reaching it still grants (decision-173). An embedder points `TMPDIR`
 #: here; a `Spec` can't name it beside a root above it (allow tuples are an
 #: antichain), so it is brig's own name.
-_SCRATCH: Final[str] = "tmp"
+_SCRATCH: Final[str] = SCRATCH_DIRNAME
 
 
 class PlatformUnsupported(ValueError):
@@ -595,6 +622,7 @@ def render_bwrap_prefix(
     interpreter: str,
     path_is_dir: Mapping[str, bool] | None = None,
     bwrap_path: str = DEFAULT_BWRAP_PATH,
+    euid: int | None = None,
 ) -> tuple[str, ...]:
     """Render `spec` into the bwrap argv PREFIX. Pure: no I/O, no clock.
 
@@ -630,6 +658,9 @@ def render_bwrap_prefix(
         path_is_dir: Every `read_denies` entry stage 7 masks, mapped to
               whether it is a directory (decision-164).
         bwrap_path: Absolute path to the `bwrap` binary.
+        euid: The effective user id of the process creating the jail
+              (`CompileCtx.euid`), or `None` when unknown: `/proc/sys` is
+              covered unless it is known not to be 0 (`_proc_sys_cover`).
 
     Raises:
         ReadModelUnsupported, NetworkUnsupported, UnresolvedPath,
@@ -664,9 +695,7 @@ def render_bwrap_prefix(
         "/",
         "--proc",
         "/proc",
-        "--ro-bind",
-        _PROC_SYS,
-        _PROC_SYS,
+        *_proc_sys_cover(euid),
         "--dev",
         "/dev",
     ]
@@ -953,6 +982,7 @@ class Bwrap:
             interpreter=self._supervisor.interpreter,
             path_is_dir=ctx.path_is_dir,
             bwrap_path=self._bwrap_path,
+            euid=ctx.euid,
         )
         unmasked = unmasked_read_denies(
             spec, resolved=ctx.resolved_paths, path_exists=ctx.path_exists, jail_dir=ctx.jail_dir

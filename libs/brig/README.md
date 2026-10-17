@@ -220,8 +220,8 @@ a rename from it to elsewhere in the root fails with `EXDEV`.
 empty environment, its source bound in read-only, every import done before it
 starts anything), and every start, signal, wait and stop is a request on a
 socketpair the host made first and passes to nothing the supervisor starts.
-Several processes started in one jail now share one mount and one network
-namespace (fidelity `SAME_INSTANCE`), the supervisor reaps what is orphaned,
+Several processes started in one jail share its confinement (fidelity
+`SAME_INSTANCE`), the supervisor reaps what is orphaned,
 and a `SIGKILL` or `SIGSTOP` a process of the jail sends it is dropped by the
 kernel, as for any PID 1. End-of-file on the socket (`Jail.destroy`, a
 collected `Jail`, a host that died) ends everything in the jail, a `setsid()`
@@ -229,6 +229,22 @@ child included, and a request the supervisor does not answer in time destroys
 it. `Process.pid` is now the program's own, not an exit wrapper's. Seatbelt
 keeps its profile and `EQUIVALENT_PROFILE`. `tests/e2e/test_supervised_jail.py`
 observes each of these from a real jail; `scripts/linux-jail-check` runs it.
+
+**Each process has namespaces of its own, 2026-10-16 (decisions 194 to 196).**
+Where the host lets an unprivileged process make them (the supervisor finds out
+before it says it is ready, by doing it once), every process of a bwrap jail
+starts as PID 1 of user, pid, mount, network and IPC namespaces of its own, with
+a `/proc` for its pid namespace, a directory of its own over the jail's channel
+and scratch directories and no capability: a sibling is not in its pid table,
+can't be signalled, and its socket, abstract socket and System V IPC are out of
+reach, and a stop ends the namespace, a `setsid()` child included. Where it
+doesn't (a jail run as uid 0, a host that blocks nested user namespaces) a
+process starts as it always did, and `Process.namespaces` is `False` and
+`Process.control` says why, graded `cooperative` either way until the control
+battery of TASK-0079.08. A socket in the channel directory is then at a path of
+its own on the host (`Process.endpoint` is not `bound_path`).
+`tests/e2e/test_process_namespaces.py` shows each from inside a real jail, with
+the same probe in a jail without the namespaces beside it.
 
 ## Development
 

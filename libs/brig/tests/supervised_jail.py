@@ -11,6 +11,8 @@ from the host with `/bin/ps` and `/proc`, or from inside, by a process the test 
 
 from __future__ import annotations
 
+import dataclasses
+import functools
 import os
 import re
 import shutil
@@ -33,7 +35,7 @@ from brig.core import (
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH
 from brig.run import HostRuntime, Jail, Process
 from brig.run.compile_ctx import build_compile_ctx
-from brig.stack import strict_linux
+from brig.stack import CompiledJail, strict_linux
 
 INTERPRETER = "/usr/bin/python3"
 SYSTEM_ROOTS = ("/bin", "/usr", "/lib", "/lib64", "/etc")
@@ -54,16 +56,34 @@ def new_jail_dir() -> str:
     return tempfile.mkdtemp(prefix="bg-sv-", dir="/tmp")
 
 
-def spec_for(workspace: str | None = None, *, channel: bool = False) -> Spec:
-    """An allowlist `Spec`: the system, read-only, and `workspace` writable when given."""
+def spec_for(
+    workspace: str | None = None, *, channel: bool = False, scratch: str | None = None
+) -> Spec:
+    """An allowlist `Spec`: the system, read-only, `workspace` writable when given, and `scratch`
+    (the jail's `<jail_dir>/tmp`, decision-173) writable when given."""
+    writable = tuple(path for path in (workspace, scratch) if path is not None)
     return Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
             read_allows=tuple(path for path in SYSTEM_ROOTS if os.path.exists(path)),
-            write_allows=() if workspace is None else (workspace,),
+            write_allows=writable,
         ),
         channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),) if channel else (),
     )
+
+
+def blocked(compiled: CompiledJail) -> CompiledJail:
+    """`compiled` with bwrap told to refuse a nested user namespace (`--unshare-user
+    --disable-userns`), as a hardened host does: the planted block of decision-195. A process of
+    the jail finds `unshare(CLONE_NEWUSER)` refused (`ENOSPC`), so the supervisor's probe fails and
+    its processes get no namespaces of their own; nothing else about the jail changes."""
+    sentinel = ("__brig_test_argv__",)
+    whole = compiled.wrap(sentinel)
+    assert whole[-1:] == sentinel, "the compiled wrap is not a pure prefix"
+    prefix = whole[:-1]
+    at = prefix.index("--unshare-all") + 1
+    planted = (*prefix[:at], "--unshare-user", "--disable-userns", *prefix[at:])
+    return dataclasses.replace(compiled, wrap=lambda argv: (*planted, *argv))
 
 
 def create_jail(
@@ -71,22 +91,97 @@ def create_jail(
     *,
     workspace: str | None = None,
     channel: bool = False,
+    scratch: bool = False,
+    namespaces: bool = True,
     tether: int | None = None,
     python: str = INTERPRETER,
     jail_id: str = "supervised",
 ) -> Jail:
-    """A supervised jail through `HostRuntime`, its supervisor ready. The caller destroys it."""
-    spec = spec_for(workspace, channel=channel)
+    """A supervised jail through `HostRuntime`, its supervisor ready. The caller destroys it.
+
+    `namespaces=False` plants the block of decision-195 (`blocked`): the jail whose processes
+    share the jail's pid, mount, network and IPC namespaces, which is also what a jail run as
+    uid 0 is. `True` is whatever the host gives: namespaces of their own for an unprivileged
+    user where nested user namespaces work, the shared ones where they don't. `scratch` grants
+    the jail's own `<jail_dir>/tmp`, which a process in namespaces gets a directory of its own
+    over."""
+    scratch_dir = os.path.join(os.path.realpath(jail_dir), "tmp") if scratch else None
+    if scratch_dir is not None:
+        os.makedirs(scratch_dir, exist_ok=True)
+        os.chmod(scratch_dir, 0o777)
+    spec = spec_for(workspace, channel=channel, scratch=scratch_dir)
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
     compiled = strict_linux(python).compile(spec, ctx=ctx)
     return Jail.create(
-        compiled,
+        compiled if namespaces else blocked(compiled),
         runtime=HostRuntime(),
         cwd="/",
         jail_id=jail_id,
         jail_dir=jail_dir,
         tether=tether,
     )
+
+
+@functools.cache
+def namespaces_here() -> tuple[bool, str]:
+    """Whether a jail made here gives its processes namespaces of their own, and when not the
+    supervisor's reason, asked of a real jail once: what a test that needs them skips on."""
+    jail_dir = new_jail_dir()
+    jail = create_jail(jail_dir, jail_id="asked")
+    try:
+        process = jail.start(["/bin/true"])
+        return process.namespaces, process.control.detail
+    finally:
+        jail.destroy()
+        cleanup(jail_dir)
+
+
+@functools.cache
+def the_kernel_gives_namespaces_in_a_jail(*, blocked_jail: bool = False) -> bool:
+    """Whether an unprivileged process can make a user, pid, mount, network and IPC namespace
+    with a `/proc` for its pid namespace inside a jail made like these, asked of `unshare(1)` and
+    not of brig's supervisor: an observation made without the code under test, so that a
+    supervisor that wrongly finds none is told from a host that gives none. `blocked_jail` asks
+    it of the jail with the block of decision-195 planted (`blocked`)."""
+    jail_dir = new_jail_dir()
+    try:
+        spec = spec_for()
+        ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
+        compiled = strict_linux(INTERPRETER).compile(spec, ctx=ctx)
+        argv = (
+            "/usr/bin/unshare",
+            "--user",
+            "--map-current-user",
+            "--pid",
+            "--mount",
+            "--net",
+            "--ipc",
+            "--fork",
+            "--mount-proc",
+            "/bin/true",
+        )
+        wrap = (blocked(compiled) if blocked_jail else compiled).wrap
+        # bwrap reads its stdin to the end for the `--ro-bind-data` the supervisor's program is
+        done = subprocess.run(wrap(argv), input=b"x", capture_output=True, check=False)
+        return done.returncode == 0
+    finally:
+        cleanup(jail_dir)
+
+
+def needs_namespaces() -> None:
+    """Skip, visibly and by name, where a jail made here gives its processes none because the host
+    gives none (uid 0, or a host that blocks nested user namespaces). Fail where the kernel gives
+    an unprivileged process namespaces in such a jail, `unshare(1)` made them, and brig's
+    supervisor found none: that is a defect, and a skip would read as a pass."""
+    held, why = namespaces_here()
+    if held:
+        return
+    if os.geteuid() != 0 and the_kernel_gives_namespaces_in_a_jail():
+        pytest.fail(
+            "the kernel gives an unprivileged process namespaces in a jail like this one "
+            f"(unshare(1) made them) and brig's supervisor found none: {why}"
+        )
+    pytest.skip(f"this jail gives its processes no namespaces of their own here: {why}")
 
 
 def cleanup(jail_dir: str, *workspaces: str) -> None:

@@ -301,6 +301,22 @@ record whose process group still runs is left alone, placeholders and all, until
 below, is such a time: `test_the_sweep_leaves_a_record_whose_process_group_still_runs`, and a program
 that started a server and ended: `test_the_sweep_leaves_a_jail_a_server_holds_after_the_program_that_started_it_ended`).
 
+**Each program has namespaces of its own (Linux, where the host gives them).** Since brig's
+decisions 194 to 196 a program the runner starts is PID 1 of user, pid, mount, network and IPC
+namespaces of its own, with a `/proc` for them: it sees no other program and the supervisor not at
+all, can't signal one, and `$TMPDIR` is a directory of its own, not the one every program of the jail
+shares. Ending a program ends its pid namespace, a `setsid()` child included. What this does not
+reach yet is bh-02's own sockets: each owner's socket directory is a write grant of the Spec like any
+other and stays shared by the jail's programs, so one can reach another owner's socket there until
+TASK-0079.31 moves the owners to brig's channel directory (where each program sees only its own).
+Run as uid 0, or on a host that blocks nested user namespaces, the programs share the jail's
+namespaces as they did, `Process.namespaces` is `False` and `Process.control` says why; nothing in
+the runner changes with it. A program that is PID 1 of its namespace is not ended by a signal it
+sends itself, and one that handles no `SIGTERM` or `SIGINT` is sent the `SIGKILL` that ends it
+(brig's decision-195), so `interrupt` ends such a program with status -9, not -2.
+(`test_a_host_whose_python_is_not_at_the_usual_path_starts_a_confined_session` reads the supervisor
+from the host's process table for that reason: the program can no longer read it from inside.)
+
 **The jail ends with bh-02.** Each jail is launched tethered (brig SPEC.md section 8,
 decision-167): bh-02 holds the write end of a pipe nothing else holds, and brig's watcher, in the
 jail's process group, kills that group once the pipe closes. bh-02 closes it after stopping the

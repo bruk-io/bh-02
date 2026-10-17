@@ -90,9 +90,12 @@ def _ended(jail: Jail) -> None:
 
 
 def test_several_processes_share_the_jails_one_instance_and_another_jail_does_not() -> None:
+    """In a jail whose processes have no namespaces of their own (the block planted; uid 0 is
+    this too), they are in the one instance's: decision-192. With namespaces they are not, and
+    `tests/e2e/test_process_namespaces.py` is where that is shown."""
     first_dir, second_dir = new_jail_dir(), new_jail_dir()
-    one = create_jail(first_dir, jail_id="one")
-    other = create_jail(second_dir, jail_id="other")
+    one = create_jail(first_dir, jail_id="one", namespaces=False)
+    other = create_jail(second_dir, jail_id="other", namespaces=False)
     try:
         a = one.start(python(_NAMESPACES))
         b = one.start(python(_NAMESPACES))
@@ -166,8 +169,10 @@ with open("/.brig-supervisor.py") as f:
 def test_the_supervisor_is_pid_1_isolated_with_an_empty_environment_and_a_read_only_source() -> (
     None
 ):
+    """Read from a process that can see PID 1: one with no namespaces of its own (the block
+    planted). With them it can't, which is the namespaces' test."""
     jail_dir = new_jail_dir()
-    jail = create_jail(jail_dir)
+    jail = create_jail(jail_dir, namespaces=False)
     try:
         status, out = run_to_end(jail.start(python(_ABOUT_PID_1)))
         assert status == 0, out
@@ -274,9 +279,11 @@ _SIGNAL_THE_INIT = (
 
 
 def test_signals_from_inside_the_jail_do_not_reach_the_supervisor_but_the_hosts_do() -> None:
+    """From a process that can see PID 1 (no namespaces of its own: the block planted). With
+    them `kill 1` reaches the process itself, which is its own PID 1."""
     jail_dir, other_dir = new_jail_dir(), new_jail_dir()
-    jail = create_jail(jail_dir, jail_id="signalled")
-    control = create_jail(other_dir, jail_id="control")
+    jail = create_jail(jail_dir, jail_id="signalled", namespaces=False)
+    control = create_jail(other_dir, jail_id="control", namespaces=False)
     try:
         group = instance_group(jail)
         supervisor = supervisor_host_pid(group)
@@ -344,8 +351,10 @@ print(held)
 
 
 def test_a_process_of_the_jail_can_not_read_attach_to_or_take_from_the_supervisor() -> None:
+    """From a process that can see PID 1 (no namespaces of its own: the block planted); with
+    them the supervisor is not in its pid namespace at all."""
     jail_dir = new_jail_dir()
-    jail = create_jail(jail_dir)
+    jail = create_jail(jail_dir, namespaces=False)
     try:
         status, out = run_to_end(jail.start(python(_PROBE_THE_SUPERVISOR)))
         assert status == 0, stderr_of(jail.processes()[0])
@@ -514,13 +523,18 @@ def test_a_jail_nobody_holds_any_more_ends() -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_start_wait_interrupt_and_stop_are_requests_the_supervisor_answers() -> None:
+@pytest.mark.parametrize("namespaces", [True, False], ids=["as-the-host-gives", "no-namespaces"])
+def test_start_wait_interrupt_and_stop_are_requests_the_supervisor_answers(
+    namespaces: bool,
+) -> None:
     jail_dir = new_jail_dir()
-    jail = create_jail(jail_dir)
+    jail = create_jail(jail_dir, namespaces=namespaces)
     try:
         assert run_to_end(jail.start(sh("exit 3"))) == (3, "")
         killed = jail.start(sh("kill -KILL $$"))
-        assert killed.wait(10) == -signal.SIGKILL
+        # A process that is PID 1 of its own pid namespace can't SIGKILL itself: the kernel drops
+        # it, as it drops any signal an init gets from inside (decision-195).
+        assert killed.wait(10) == (0 if killed.namespaces else -signal.SIGKILL)
 
         # interrupt delivers SIGINT to the process's group; a process that handles it says so.
         catches = jail.start(
@@ -544,7 +558,9 @@ def test_start_wait_interrupt_and_stop_are_requests_the_supervisor_answers() -> 
         report = running.stop()
         assert [(i.kind, i.outcome) for i in report.items] == [("exec_sibling", KillOutcome.ENDED)]
         assert not running_with(marker)
-        assert running.wait(5) == -signal.SIGTERM
+        # killed by the SIGTERM a process would die of; a PID 1 that handles none is sent the
+        # SIGKILL that ends it, and its status says that (decision-195).
+        assert running.wait(5) == (-signal.SIGKILL if running.namespaces else -signal.SIGTERM)
     finally:
         _ended(jail)
         cleanup(jail_dir)
@@ -698,9 +714,12 @@ def test_the_instance_group_names_the_jail_whose_program_ended_and_the_jail_did_
     """decision-193. A program starts another in a session of its own and ends: its own group is
     gone and the jail, which the other holds, is not. `Jail.instance_group` is the group that holds
     PID 1, found in the process table the way the other tests find it, and it lives as long as the
-    jail does, which is the number a record of which jail holds a placeholder has to name."""
+    jail does, which is the number a record of which jail holds a placeholder has to name. The
+    other program outlives the first in a jail whose processes have no namespaces of their own (the
+    block planted); in one that has them it ends with the first's pid namespace, which
+    `tests/e2e/test_process_namespaces.py` shows."""
     jail_dir = new_jail_dir()
-    jail = create_jail(jail_dir)
+    jail = create_jail(jail_dir, namespaces=False)
     marker, _ = unique_sleep()
     try:
         program = jail.start(sh(f"setsid /bin/sleep {marker} & exit 0"))
@@ -727,7 +746,7 @@ def test_a_rehydrated_supervised_jail_can_be_destroyed_and_nothing_else() -> Non
         jail.start(sleep)
         assert until(lambda: bool(running_with(marker)))
         d = json.loads(json.dumps(jail.to_dict()))
-        assert d["version"] == 9 and d["supervisor"]["pid"] == instance_group(jail)
+        assert d["version"] == 10 and d["supervisor"]["pid"] == instance_group(jail)
 
         again = Jail.from_dict(d, runtimes={RuntimeKind.HOST: HostRuntime()})
         assert again.alive()

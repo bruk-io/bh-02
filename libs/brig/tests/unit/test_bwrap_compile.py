@@ -143,6 +143,64 @@ def test_axes_is_exactly_fs_read_fs_write_network() -> None:
 
 
 # --------------------------------------------------------------------------
+# The /proc/sys cover is for a workload that can be the host's uid 0 (decision-194).
+# --------------------------------------------------------------------------
+
+_COVER = ("--ro-bind", "/proc/sys", "/proc/sys")
+
+
+def _with_euid(euid: int | None) -> tuple[str, ...]:
+    ctx = _spec_ctx()
+    ctx = CompileCtx(
+        jail_dir=ctx.jail_dir,
+        platform=ctx.platform,
+        resolved_paths=ctx.resolved_paths,
+        path_exists=ctx.path_exists,
+        path_is_dir=ctx.path_is_dir,
+        euid=euid,
+    )
+    return bwrap.compile(_SPEC, ctx).wrap(("w",))
+
+
+def _contains(argv: tuple[str, ...], run: tuple[str, ...]) -> bool:
+    return any(argv[i : i + len(run)] == run for i in range(len(argv)))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("euid", [None, 0], ids=["unknown", "root"])
+def test_the_proc_sys_cover_is_emitted_for_root_and_for_a_user_nobody_named(
+    euid: int | None,
+) -> None:
+    """decision-177's guard, kept where it guards: a workload that is the host's uid 0, and an
+    unknown user, which is never guessed weaker."""
+    assert _contains(_with_euid(euid), _COVER)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("euid", [1, 1000, 30033])
+def test_the_proc_sys_cover_is_left_off_for_a_user_known_not_to_be_root(euid: int) -> None:
+    """decision-194: a cover over `/proc/sys` hides a non-empty directory, which the kernel
+    will not let a nested mount namespace's fresh `/proc` stand beside, and guards nothing for
+    a user whose sysctl writes the mode bits already refuse. The rest of stage 1 and 2 is
+    unchanged: the capabilities are dropped and the proc is the jail's own."""
+    argv = _with_euid(euid)
+    assert not _contains(argv, ("/proc/sys", "/proc/sys"))
+    assert _contains(
+        argv, ("--cap-drop", "ALL", "--chdir", "/", "--proc", "/proc", "--dev", "/dev")
+    )
+    # And the same spec as root is the same argv with the cover added, nothing else moved.
+    covered = _with_euid(0)
+    cut = covered.index("/proc/sys") - 1
+    assert covered[:cut] + covered[cut + 3 :] == argv
+
+
+@pytest.mark.unit
+def test_a_compile_context_carries_the_user_and_says_unknown_by_default() -> None:
+    assert _ctx().euid is None
+    assert CompileCtx(jail_dir=_JAIL_DIR, platform="linux", euid=1234).euid == 1234
+
+
+# --------------------------------------------------------------------------
 # The golden argv, and the mount order it encodes.
 # --------------------------------------------------------------------------
 

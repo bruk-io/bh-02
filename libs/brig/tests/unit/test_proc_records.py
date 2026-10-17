@@ -33,6 +33,7 @@ def _raw(**fields: object) -> str:
         "stderr_path": f"{_JAIL}/procs/{_ID}/stderr.log",
         "channel": None,
         "bound_path": None,
+        "namespaces": False,
     }
     base.update(fields)
     return json.dumps(base)
@@ -80,6 +81,10 @@ def test_a_record_reads_back_as_written() -> None:
         (_raw(bound_path=f"{_JAIL}/chan/x.sock"), "'channel' and 'bound_path'"),
         (_raw(channel="", bound_path=""), "'channel' and 'bound_path'"),
         (_raw(channel="ctl", bound_path=5), "'channel' and 'bound_path'"),
+        # decision-196: whether it has namespaces of its own is a bool, and present.
+        (_raw(namespaces=1), "'namespaces' must be a bool"),
+        (_raw(namespaces="yes"), "'namespaces' must be a bool"),
+        (_raw(namespaces=None), "'namespaces' must be a bool"),
     ],
 )
 def test_what_is_not_a_record_brig_wrote_is_named(text: str, reason: str) -> None:
@@ -94,6 +99,20 @@ def test_a_record_carries_its_channel_and_the_socket_it_binds() -> None:
     record = _record(channel="ctl", bound_path=socket_path)
     assert (record.channel, record.bound_path) == ("ctl", socket_path)
     assert _records.from_json(_records.to_json(record), _ID) == record
+
+
+@pytest.mark.unit
+def test_a_record_says_whether_its_process_has_namespaces_of_its_own() -> None:
+    """decision-196: `namespaces` reads back as written, false for a record that says so, and a
+    record without the key is not one this brig wrote (the control: it names the key)."""
+    assert _record().namespaces is False
+    record = _record(namespaces=True)
+    assert record.namespaces is True
+    assert _records.from_json(_records.to_json(record), _ID) == record
+    without = json.loads(_raw())
+    del without["namespaces"]
+    reason = _records.from_json(without, _ID)
+    assert isinstance(reason, str) and "missing key(s) namespaces" in reason
 
 
 @pytest.mark.unit

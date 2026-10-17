@@ -114,7 +114,7 @@ def dockerfile(proxy: Proxy | None) -> str:
 
 
 # The default run: brig's bwrap tests (the mechanism, then the preset end to end, then its
-# supervisor, PID 1 of the jail) and its tether
+# supervisor, PID 1 of the jail, and the namespaces of each process it starts) and its tether
 # (a jail ends with the process that launched it), then bh-02's
 # Linux jail tests (the policy compiled for Linux, and real inputs in the real jail).
 DEFAULT = (
@@ -130,6 +130,7 @@ DEFAULT = (
     " libs/brig/tests/integration/test_bwrap_network.py"
     " libs/brig/tests/e2e/test_strict_linux_journey.py"
     " libs/brig/tests/e2e/test_supervised_jail.py"
+    " libs/brig/tests/e2e/test_process_namespaces.py"
     " libs/brig/tests/integration/test_supervisor_requests.py"
     " libs/brig/tests/unit/test_bwrap_supervisor_compile.py"
     " libs/brig/tests/integration/test_tether.py"

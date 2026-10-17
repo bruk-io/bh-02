@@ -339,6 +339,39 @@ def _signal_group(pgid: int, sig: signal.Signals) -> bool:
     return True
 
 
+def term_rung(status: str) -> signal.Signals:
+    """The signal the first rung of the ladder sends a group whose leader's `/proc/<pid>/status`
+    is `status` (decision-195): `SIGTERM`, but `SIGKILL` where `SIGTERM` could not be delivered.
+    A leader that is PID 1 of a pid namespace of its own (`NSpid` ends in `1` after at least
+    one more) is sent no signal by the host, which is outside the namespace, unless it has a
+    handler for it, `SIGKILL` and `SIGSTOP` excepted: the kernel drops the rest. So a process
+    that handles `SIGTERM` or ignores it gets `SIGTERM` and its grace, as any process does; one
+    whose default action would have ended it gets what ends it. Anything this cannot read is an
+    ordinary process: `SIGTERM`. Pure."""
+    fields = {
+        name: value.split()
+        for name, _, value in (line.partition(":") for line in status.splitlines())
+    }
+    nspid = fields.get("NSpid", [])
+    if len(nspid) < 2 or nspid[-1] != "1":
+        return signal.SIGTERM
+    try:
+        held = int(fields["SigCgt"][0], 16) | int(fields["SigIgn"][0], 16)
+    except KeyError, IndexError, ValueError:
+        return signal.SIGTERM
+    return signal.SIGTERM if held & (1 << (signal.SIGTERM - 1)) else signal.SIGKILL
+
+
+def _first_rung(leader_pid: int) -> signal.Signals:
+    """`term_rung` for the process `leader_pid` names, read from `/proc`; `SIGTERM` when it
+    cannot be read (the process has gone, or this is not Linux)."""
+    try:
+        with open(f"/proc/{leader_pid}/status", encoding="utf-8", errors="replace") as status:
+            return term_rung(status.read())
+    except OSError:
+        return signal.SIGTERM
+
+
 def _end_at_once(pgid: int, leader_pid: int, leader_stamp: str) -> tuple[KillOutcome, str]:
     """The ladder for `grace=0` (decision-193): `SIGKILL` to the group, and with its leader
     running, which `/proc` says in microseconds, nothing is read before it: no scan of the
@@ -378,7 +411,9 @@ def _run_ladder(
        had already exited on its own), report `ALREADY_GONE` -- no signal
        sent. (With `grace` 0 this and the next rung are skipped:
        `_end_at_once`, decision-193.)
-    2. `SIGTERM` to the group, then verify for up to `grace` seconds.
+    2. `SIGTERM` to the group (`SIGKILL` where `SIGTERM` could not be delivered to a
+       leader that is a pid namespace's init, `term_rung`), then verify for up to
+       `grace` seconds.
     3. If anything survives, `SIGKILL` to the group, then verify again for
        up to `grace` seconds.
     4. Report `ENDED` only if the post-signal scan actually found the
@@ -430,7 +465,7 @@ def _run_ladder(
     if not _group_member_pids(pgid):
         return KillOutcome.ALREADY_GONE, "process group had already ended before kill() ran"
 
-    _signal_group(pgid, signal.SIGTERM)
+    _signal_group(pgid, _first_rung(leader_pid))
     ended = _wait_until_group_gone(pgid, leader_pid, time.monotonic() + grace)
 
     if not ended:

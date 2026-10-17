@@ -218,9 +218,13 @@ def launch(
     io: IoPolicy | None = None,
     tether: int | None = None,
     runtime: Runtime | None = None,
+    namespaces: bool = True,
 ) -> tuple[Jail, Process]:
     """A jail with one process: `Jail.create` (through `HostRuntime` unless
     `runtime` says otherwise) and its first `jail.start`, returned together.
+    `namespaces=False` plants the block of decision-195 on a bwrap jail's wrap
+    (`tests.supervised_jail.blocked`): its processes then share the jail's
+    namespaces, as a jail run as uid 0 does.
 
     What the launcher did until decision-183 (TASK-0079.28) deleted it, kept
     here so brig's tests keep asserting what they asserted
@@ -232,8 +236,10 @@ def launch(
     Raises:
         Whatever `Jail.create` or `jail.start` raise.
     """
+    from tests.supervised_jail import blocked
+
     jail = Jail.create(
-        compiled,
+        compiled if namespaces else blocked(compiled),
         runtime=HostRuntime() if runtime is None else runtime,
         cwd=cwd,
         jail_id=jail_id,

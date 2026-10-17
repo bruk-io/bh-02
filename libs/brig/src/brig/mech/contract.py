@@ -189,6 +189,17 @@ class CompileCtx:
                   file with a file and a directory with a directory. Absent
                   paths map to `False`. Same default, same refusal on a
                   missing key, same defensive copy as `path_exists`.
+        euid: the effective user id of the process that will create the
+                  jail, a fact `run`'s helper observes (`os.geteuid()`) and
+                  `mech` may not: whether the workload will be the host's
+                  uid 0, which `bwrap` guards a sysctl write against
+                  (decision-177) and, for any other user, need not, so that
+                  the jail's own `/proc` is uncovered and each process of a
+                  supervised jail can mount one of its own (decision-194).
+                  `None` (the default, so every pre-existing
+                  `CompileCtx(...)` call site constructs unchanged) is
+                  "unknown", which a mechanism treats as the user it must
+                  guard against: it never guesses a default that is weaker.
         channel_dir: (a property, not a field) `<jail_dir>/chan`, the
                   runtime's channel directory (decision-184).
     """
@@ -198,6 +209,7 @@ class CompileCtx:
     resolved_paths: Mapping[str, str] = field(default_factory=dict)
     path_exists: Mapping[str, bool] = field(default_factory=dict)
     path_is_dir: Mapping[str, bool] = field(default_factory=dict)
+    euid: int | None = None
 
     def __post_init__(self) -> None:
         # Defensive copy: prevent caller mutations from affecting this ctx,

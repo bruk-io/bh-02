@@ -127,7 +127,10 @@ def test_the_same_stop_resumed_within_the_deadline_is_answered_and_the_jail_live
         assert answered == [True]
         # The request was carried out once it could be: the sleeper got its SIGINT. And the jail
         # lived through a stop that was resumed in time.
-        assert victim.wait(10) == -signal.SIGINT and jail.alive()
+        # (A PID 1 of its own pid namespace that handles no SIGINT is sent the SIGKILL that
+        # ends it instead, decision-195.)
+        expected = -signal.SIGKILL if victim.namespaces else -signal.SIGINT
+        assert victim.wait(10) == expected and jail.alive()
     finally:
         _ended(jail)
         cleanup(jail_dir)
@@ -174,7 +177,7 @@ def test_a_process_is_not_allowed_to_run_until_its_record_is_written(
 
 #: Where a live process is signalled for a stop: no rehearsal reaches it (the rehearsal stops a
 #: process that is already gone), so an import planted here is a late one.
-_LIVE_STOP = "        self.signal_group(entry[0], signal.SIGTERM)\n"
+_LIVE_STOP = "        self.deliver(entry, signal.SIGTERM)\n"
 
 
 def test_a_supervisor_that_imports_after_it_is_ready_fails_the_request_that_needed_the_import(
@@ -270,12 +273,12 @@ def test_a_supervisor_that_cannot_start_ends_the_instance_and_says_what_it_said(
 def test_a_supervisor_that_speaks_another_protocol_is_refused_and_ended(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    other = SUPERVISOR_SOURCE.replace("PROTOCOL = 1\n", "PROTOCOL = 99\n", 1)
+    other = SUPERVISOR_SOURCE.replace("PROTOCOL = 2\n", "PROTOCOL = 99\n", 1)
     assert other != SUPERVISOR_SOURCE
     jail_dir = new_jail_dir()
     try:
         monkeypatch.setattr(host, "SUPERVISOR_SOURCE", other)
-        with pytest.raises(SupervisorFailed, match="speaks protocol 99 and this brig speaks 1"):
+        with pytest.raises(SupervisorFailed, match="speaks protocol 99 and this brig speaks 2"):
             create_jail(jail_dir, channel=True)
         assert until(lambda: running_with(os.path.basename(jail_dir)) == [])
     finally:
@@ -314,7 +317,7 @@ def test_a_wait_in_flight_does_not_hold_up_a_start_from_another_thread() -> None
 
         slow.stop()
         thread.join(20)
-        assert waited == [-signal.SIGTERM]
+        assert waited == [-signal.SIGKILL if slow.namespaces else -signal.SIGTERM]
     finally:
         _ended(jail)
         cleanup(jail_dir)

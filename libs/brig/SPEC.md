@@ -66,7 +66,8 @@ change that violates one is a spec change first, code second.
    "namespace" case is a supervised bwrap jail, whose instance is a pid
    namespace that ends with its PID 1, §8; the grade at the process scope is
    TASK-0079.08's, and until a battery proves one no grade above `unenforced`
-   is claimed.)
+   is claimed. *Amended 2026-10-16, decision-196, TASK-0079.07:* each `Process` carries
+   its `control` grade, `cooperative` at most, until the battery.)
 8. **Events are evidence, never the boundary.** Telemetry is best-effort by
    nature. No security claim may rest on an event having been emitted.
 9. **Nothing crosses the boundary anonymously.** The exclusivity claim —
@@ -892,7 +893,7 @@ be the copy decision-152 deleted the event stream for).
   (1) `--unshare-all --as-pid-1 --cap-drop ALL --chdir /` (decision-190 and
   decision-177, below); (2) the jail's
   own furniture, `--proc /proc`, `/proc/sys` bound read-only over it
-  (decision-177) and `--dev /dev`, first among the mounts so every
+  (decision-177; for uid 0 or an unknown user only, decision-194) and `--dev /dev`, first among the mounts so every
   spec-derived mount stacks on top of it; (3) `read_allows` as `--ro-bind`; (4) the channel directory
   `<jail_dir>/chan` as `--bind` when the Spec declares a channel (decision-184,
   §10; each declared endpoint's directory too until decision-186);
@@ -962,7 +963,9 @@ be the copy decision-152 deleted the event stream for).
   unchanged, and the workload would see its own files owned by a stranger.
   Both flags are emitted whoever runs bwrap, so the render stays pure (no
   uid on `CompileCtx`); for an unprivileged user they change nothing (no
-  capabilities to drop, and a mapped uid that is not the host's root). No
+  capabilities to drop, and a mapped uid that is not the host's root).
+  *Amended 2026-10-16 (decision-194, TASK-0079.07): `CompileCtx` has a `euid` now,
+  and the `/proc/sys` cover is emitted only for uid 0 or an unknown user.* No
   grade moves: the change makes `enforced` true as root, where it had been
   claimed and void. A host with no `/proc/sys` fails the launch, closed.
   Seatbelt has nothing to drop: its profile is mandatory access control the
@@ -1180,6 +1183,45 @@ last among its own refusals (an unmountable `Spec` still reports a
 `ChannelInsideWriteDeny` first). The preset's `python` parameter is the one
 `confined_egress_darwin(python)` has. Implementing task: TASK-0079.06. (Ruled
 2026-10-15, decision-190.)
+
+**The `/proc/sys` cover is for a workload that can be the host's uid 0
+(2026-10-16, decision-194).** decision-0001's migration step 4b, the mechanism's
+half; §8 (decision-195) is the runtime's. decision-177 bound the host's
+`/proc/sys` read-only over the jail's own proc for every user, because the
+render stayed pure with no uid on `CompileCtx`. A process of a supervised jail
+that has a pid namespace of its own needs a `/proc` for it, and the kernel will
+not mount a fresh one in a mount namespace made by an unprivileged user
+namespace while the jail's own proc has a mount over any of its directories
+(`mount_too_revealing`: it wants one existing proc mount that hides nothing, and
+a mount over `/proc/sys` hides the sysctls). Measured here, TASK-0079.07: with
+decision-177's cover a nested `mount -t proc` is `EPERM` as an unprivileged user,
+and without it works; a non-recursive bind of the covered proc is `EINVAL` too
+(`has_locked_children`), so there is no way round it from inside. The cover guards
+a workload that is the host's uid 0, whose sysctl writes the mode bits alone allow.
+For any other user the files are root's and mode 0644 and there is nothing to
+guard. Ruled:
+
+- **`CompileCtx.euid`** is the effective user id of the process creating the jail,
+  `None` when unknown (the default, so every hand-built context compiles as it
+  did). `run.build_compile_ctx` sets it to `os.geteuid()`, the fact `mech` may not
+  go and get (§6, decision-115). `render_bwrap_prefix(euid=...)` emits
+  `--ro-bind /proc/sys /proc/sys` unless `euid` is known and not 0: an unknown user
+  is covered, never guessed weaker.
+- **As root nothing changes, and the per-process `/proc` is out of reach there.**
+  bwrap run as root covers `/proc/irq` and `/proc/bus` itself (it covers each of
+  `sys`, `sysrq-trigger`, `irq` and `bus` it can write to, with no flag to refuse
+  it), and the jail's `--cap-drop ALL` leaves no process able to unmount them. So
+  a jail run as uid 0 has no fresh `/proc` for a nested pid namespace, and its
+  processes get the graded fallback (§8, decision-195). Making root work needs
+  the supervisor to hold `CAP_SYS_ADMIN` at its start, long enough to unmount the
+  covers and then drop it: capabilities in the jail's PID 1, which is a design
+  question this ruling does not take.
+- **Grades don't move.** For an unprivileged user the cover guarded nothing, so
+  `fs_write` is as `enforced` as it was, and its detail still names the cover
+  where it is emitted. decision-177's "emitted whoever runs bwrap" is amended by
+  this ruling; the rest of it stands.
+
+Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-194.)
 
 Deliberately absent: a cooperative filesystem guard (see §4), and `ulimit -u`
 / `RLIMIT_NPROC` anywhere (per-user on darwin and commonly on linux; capping
@@ -1634,6 +1676,92 @@ composed wrap, and returns once it has said it is ready. Ruled:
   own record of how the supervisor ended (`<jail_dir>/supervisor/exit`, read by nothing).
 
 Implementing task: TASK-0079.06. (Ruled 2026-10-15, decision-191.)
+
+**A supervised jail starts each process in namespaces of its own where the host
+lets it (2026-10-16, decision-195).** decision-0001's migration step 4b, the
+runtime's half; §6 (decision-194) is the mechanism's and §9 (decision-196) the
+embedder's. Until now every process of a supervised jail stood in the jail's one
+pid, mount, network and IPC namespace (decision-192): a child that left its group
+with `setsid()` outlived `stop`, a process could see, signal and read a sibling,
+and every socket in the channel directory, abstract socket and System V object was
+every process's to reach (decision-184's residual). Ruled:
+
+- **Found out before the supervisor says it is ready, by doing it.** After its
+  rehearsal the supervisor does once what a start does: forks, leaves for new user,
+  mount, pid, network and IPC namespaces, forks the PID 1 of the new pid namespace,
+  makes its mounts private, mounts a fresh `/proc`, brings the loopback up and drops its
+  capabilities, then ends it. The answer is in the hello,
+  `{"namespaces": {"held": true|false, "reason": "..."}}` (`PROTOCOL` 2), and
+  `JailRecord.namespaces` carries it in the process that created the jail. A host that
+  restricts nested user namespaces fails some step, and `reason` is the failing call's own
+  error: `bwrap --disable-userns` (the block the tests plant), a low
+  `user.max_user_namespaces` and a seccomp filter each refuse `unshare` here (TASK-0079.01),
+  and an AppArmor profile for unprivileged user namespaces, which could not be tried, would
+  refuse the mounts after it. A
+  jail run as uid 0 is not tried: bwrap covers its `/proc/irq` and `/proc/bus`, the kernel
+  then refuses a fresh `/proc` to any namespace made inside it (§6, decision-194), and the
+  reason says so. No start falls back later:
+  a jail that held its namespaces at create starts every process in them or fails that
+  start (law 2), and one that did not starts every process as decision-191 ruled,
+  graded `cooperative` and saying why (decision-196).
+- **What a start does when they are held.** The `start` request is as decision-191
+  ruled, with `chan` (the jail's channel directory and the name of the socket this
+  process will bind there, if it has one) and `scratch` (the jail's scratch directory,
+  `<jail_dir>/tmp`, decision-173). The supervisor makes a directory of its own for
+  the process in each that the jail can write (`<chan>/<name>`, `<chan>/<process id>`
+  for a process with no socket, `<tmp>/<process id>`; mode 0700), then forks: the child
+  leaves for the namespaces, forks the process, which is **PID 1 of its pid namespace**
+  and leads a process group of its own in it (so the host reads, through the pidfd, the
+  host pid, start time and group every record has), tells the supervisor which it is
+  and ends. The user namespace maps the process's own uid and gid to themselves and
+  denies `setgroups`, the one mapping an unprivileged process may write, so its files
+  stay its own and `getuid()` is what it was. The gate and `go` are as before; after
+  `go` and before the program's descriptors the process makes its mounts private,
+  mounts a fresh `/proc` for its pid namespace, binds its directories over the channel
+  directory and the scratch directory (each sees one directory it alone can write and
+  no sibling's socket or file), brings the loopback up (bwrap does the jail's; a new
+  network namespace's is down) and, after its descriptors and signal dispositions, drops
+  every capability, bounding set included: it made a user namespace, so it holds all of
+  them in it until it does. An unwritable channel or scratch directory holds no socket
+  or file of anyone's and is left as it is, unless a socket was promised there, which
+  fails the start. The directories are removed, if empty, when the process is gone.
+- **What each namespace closes** (decision-0001's table, each probed from inside a real
+  jail with a control in a jail without the bundle, `tests/e2e/test_process_namespaces.py`):
+  pid, `/proc` and signals (a sibling's pid is not there and `kill` finds no such process);
+  mount (the channel and scratch directories are the process's own); network (the loopback
+  is the process's own, so an abstract Unix socket is too); IPC (a System V message queue a
+  sibling made is not found; POSIX message queues are the same namespace's, not probed, as a
+  jail mounts no `mqueue`); user (no capability, and `mount(2)` is `EPERM`).
+- **A signal to the process is what it would be to any process.** The kernel drops a signal
+  a process outside a pid namespace sends its PID 1 unless the PID 1 handles it (`SIGKILL`
+  and `SIGSTOP` excepted), so a `SIGTERM` or `SIGINT` to a program that installed no
+  handler would do nothing, and `stop` would wait out its grace. The supervisor reads the
+  process's `SigCgt` and `SigIgn` from `/proc/<pid>/status` before it signals and sends
+  `SIGKILL` for a signal that would have ended an ordinary process by default and that
+  the process neither handles nor ignores; a handled or ignored one is sent as it is
+  (a handler runs, an ignored `SIGTERM` waits out the grace), and `SIGCHLD`, `SIGCONT`,
+  `SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`, `SIGURG` and `SIGWINCH` always. The host's
+  own ladder, which signals a leader outside its namespace too, does the same for
+  `SIGTERM` (`teardown.term_rung`: `SIGTERM`, but `SIGKILL` for a leader whose `NSpid`
+  ends in `1` after another number and that neither handles nor ignores it). What a caller
+  sees of it is a status of `-9` where an ordinary process would have had `-15` (or `-2` for
+  an interrupt), and that the process's children, handlers or none, end with it at once: a
+  stop ends the namespace. A PID 1 can't be ended by a signal it sends itself, either (a
+  shell's `kill -KILL $$` returns and goes on), the kernel's rule for a namespace's init.
+- **The supervisor is out of its reach, and the orphans are its own.** A process of a
+  jail with namespaces can't see the supervisor (`/proc` shows only its own pid
+  namespace), signal it or reach its socket. A process it orphans is adopted by
+  the PID 1 of its own pid namespace, which is the program itself: it reaps nothing it
+  does not `wait` for, as in any container without an init, and a zombie it leaves is
+  gone to every check brig makes (decision-171) and to the kernel when the namespace ends.
+- **Measured here (TASK-0079.07).** A nested user, mount, pid, network and IPC bundle as
+  an unprivileged user inside a jail with the cover of decision-194 removed: `/proc` is a
+  fresh one, the loopback comes up, the capability sets are empty. As uid 0 with
+  `--cap-drop ALL`, a nested user namespace can write no `uid_map` at all (mapping the
+  parent's uid 0 needs `CAP_SETFCAP` in the parent: `verify_root_map`), and a fresh `/proc`
+  is refused whatever the map.
+
+Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-195.)
 
 ## 9. The Jail (the Handle until decision-183)
 
@@ -2379,7 +2507,11 @@ starts. For a supervised one, ruled:
   scan of the process table, and `ENDED` is reported only when both agree. Its reach is
   the process's group, as before: a child that left it with `setsid()` is outside it, until
   each process has a pid namespace of its own (TASK-0079.07); `destroy` ends those.
-- **`fidelity` is `SAME_INSTANCE`.** Every process of the jail is in the one mount, network
+  *Amended 2026-10-16 (decision-195, TASK-0079.07): where the host lets a process have
+  namespaces of its own a `stop` ends its pid namespace, a `setsid()` child included.*
+- **`fidelity` is `SAME_INSTANCE`.** *(Amended 2026-10-16, decision-196: when a process has
+  namespaces of its own it is in the jail's confinement, not its pid, mount, network or IPC
+  namespace.)* Every process of the jail is in the one mount, network
   and pid namespace the supervisor holds, observed from inside (`readlink /proc/self/ns/*`
   is one answer for all of them and another for any other jail), and what separates
   them is what each process's own group and the kernel's user-id rules do, nothing more.
@@ -2467,6 +2599,57 @@ ended the jail in 0.01 s. A grace period is a window a hostile workload uses. Ru
 
 Implementing task: TASK-0079.06, reopened by its closing review. (Ruled 2026-10-15,
 decision-193.)
+
+**A process says whether it has namespaces, grades its control, and its socket
+may be in a directory of its own (2026-10-16, decision-196).** decision-0001's
+migration step 4b, the embedder's half; §6 (decision-194) and §8 (decision-195) are
+the mechanism's and the runtime's. Ruled:
+
+- **`Process.namespaces` and `Process.control`.** `namespaces` is whether the
+  process was started as PID 1 of user, pid, mount, network and IPC namespaces of its
+  own (decision-195). `control` is a `Graded` (§4) for what its `stop` delivers, the
+  process scope decision-0001 puts on each `Process` and not in the report. In
+  namespaces it is `cooperative`, its detail saying `stop` ends the process's pid
+  namespace, a `setsid()` child included; without them, in a supervised jail,
+  `cooperative`, its detail saying `stop` signals the process's group, which a child can
+  leave with `setsid()` (only `destroy()` ends that), and **why the jail's processes have
+  no namespaces** as the supervisor said it (a blocked nested user namespace, uid 0).
+  A jail with no supervisor says its runtime gives a process none. `cooperative` is the
+  ceiling for both until TASK-0079.08's battery plants survivors from the host and proves
+  more (decision-0001, law 10); the two differ in `namespaces` and in the detail. The
+  jail's `report` is the compile-time claim and is not changed: its `control` axis is the
+  jail scope, `unenforced` as before.
+- **The record carries it.** `ProcessRecord` and `record.json` gain `namespaces`
+  (a bool, required: an older record reads unreadable, a doubt like any other), and the
+  jail's dict carries the records, so `JAIL_VERSION` is 10. A rehydrated jail reads it from
+  the records; the reason it was not held lives only in the process that created the jail.
+- **A socket is in a directory of its own.** A process with a mount namespace sees the
+  channel directory as one directory made for it, so the socket it binds at the reserved
+  path `<chan>/<token>.sock` is at `<chan>/<token>/<token>.sock` on the host. For such a
+  jail `Reservation.endpoint` differs from `bound_path` (`socket_endpoint`: the one
+  directory in between, named for the token), `Runtime.endpoint` derives it from the
+  record's `bound_path` and `namespaces`, and `reservation_refusal` expects it. The
+  verified dial (decision-185) is unchanged: the kernel numbers a listener in a descendant
+  pid namespace for the host that dials it, so its group and its leader's identity are the
+  ones the record holds. Without namespaces nothing moves: the two paths are one.
+- **The residual decision-184 named is closed where the namespaces are there.** A socket
+  in the channel directory was reachable by every process of its jail; now a process sees
+  only its own, and `connect` to a sibling's path finds no such file. It is a statement
+  about brig's own channel directory; an embedder's own writable directory (bh-02's
+  runner grants each owner's socket directory until TASK-0079.31) is a normal grant, and
+  stays shared. `channel_exclusivity` stays `unenforced` (§7).
+- **`fidelity` is still `SAME_INSTANCE`.** decision-192's "every process of the jail is in
+  the one mount, network and pid namespace the supervisor holds" is amended: the processes
+  share the jail's confinement (its mounts, its allowlist, its limits, its one network of
+  nothing) and no longer its pid, mount, network or IPC namespace when they have their own.
+- **A destroy does not wait out a grace a process can't use.** The ladder's first rung
+  is `SIGKILL` for a leader that is a pid namespace's init and handles no `SIGTERM`
+  (`term_rung`, decision-195), so a jail of such processes is not ended in two seconds per
+  process. A process that handles `SIGTERM` still gets it and its grace.
+- **Law 7's process scope** (§2) is this: the grade at the process scope is `Process.control`,
+  `cooperative` at most until the battery.
+
+Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-196.)
 
 ## 10. Communication with jails
 
@@ -2558,7 +2741,7 @@ jail could not each have their own. Ruled:
   for a channel's declared endpoint until TASK-0079.32.
 - **Residual, named.** A socket in the channel directory is reachable by every
   process of its jail until each has a mount namespace of its own
-  (TASK-0079.07): a co-tenant's socket is shared media, not a channel to the
+  (TASK-0079.07; closed where the host lets it, decision-196): a co-tenant's socket is shared media, not a channel to the
   host (decision-0001), and `channel_exclusivity` stays `unenforced` (§7). A
   link a process plants in the channel directory is dialled by the host as
   found, as a link in a per-endpoint directory always was. Grades are
@@ -2615,7 +2798,8 @@ and `Process.wait_ready` reported ready. Ruled, superseding that residual:
   workload and everything it forks stay in it; with a pid namespace a
   co-tenant is another start's group and is refused, which closes
   decision-184's co-tenant residual for the host's dial (not for the
-  co-tenants themselves, TASK-0079.07's). Without one (the empty stack, all
+  co-tenants themselves, TASK-0079.07's; closed where the processes have mount
+  namespaces, decision-196). Without one (the empty stack, all
   host starts in one session) a co-tenant could setpgid into a sibling's
   group and pass as it: never a host socket, but the residual stands there.
   Descent was
@@ -2719,7 +2903,8 @@ container or a remote sandbox shares no host path with it). Ruled:
   bound, nothing listening) read "not yet".
 - **Unchanged.** Grades; decision-184's reservations and the records' fields;
   decision-185's verified dial; the residuals both name (a co-tenant's socket
-  is shared media until each process has a mount namespace, TASK-0079.07).
+  is shared media until each process has a mount namespace, TASK-0079.07; closed
+  where the host lets them, decision-196).
 
 Implementing task: TASK-0079.32. (Ruled 2026-10-13, decision-186.)
 

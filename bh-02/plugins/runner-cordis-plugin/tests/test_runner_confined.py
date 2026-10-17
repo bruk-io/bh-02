@@ -2424,19 +2424,33 @@ def test_a_jail_does_not_run_its_supervisor_under_a_python_in_its_project_unless
     )
 
 
-# Listens; once the jail has seen it listen, writes what its PID 1 runs (the supervisor's command
-# line) to argv[2], and waits.
-_LISTEN_THEN_SAY_PID_1 = """
+# Listens; once the jail has seen it listen, says so in argv[2], and waits.
+_LISTEN_THEN_SAY_SO = """
 import os, socket, sys, time
 server = socket.socket(socket.AF_UNIX)
 server.bind(sys.argv[1])
 server.listen(4)
 server.accept()
-said = open("/proc/1/cmdline", "rb").read().replace(b"\\0", b" ").decode()
-open(sys.argv[2] + ".tmp", "w").write(said)
+open(sys.argv[2] + ".tmp", "w").write("listening")
 os.rename(sys.argv[2] + ".tmp", sys.argv[2])
 time.sleep(60)
 """
+
+
+def _commands_running(word: str) -> list[list[str]]:
+    """The command line of each process on the host that has `word` in it, read from `/proc` as
+    the host sees it: a process in a jail's pid namespace, or in one inside that, is in this table."""
+    found: list[list[str]] = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            words = [w.decode(errors="replace") for w in (entry / "cmdline").read_bytes().split(b"\0") if w]
+        except OSError:
+            continue
+        if word in words:
+            found.append(words)
+    return found
 
 
 async def test_a_host_whose_python_is_not_at_the_usual_path_starts_a_confined_session(
@@ -2444,15 +2458,17 @@ async def test_a_host_whose_python_is_not_at_the_usual_path_starts_a_confined_se
 ) -> None:
     """A real jail on a host whose only interpreter is elsewhere (a link, in a directory the
     command names): its PID 1, brig's supervisor, runs under that path, not under the default
-    `/usr/bin/python3` brig would otherwise start it with."""
+    `/usr/bin/python3` brig would otherwise start it with. Read from the host's process table:
+    the program, in namespaces of its own since TASK-0079.07, is no longer in the supervisor's
+    pid namespace to read it from inside."""
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     link = _a_python_elsewhere(tmp_path / "pybin")
     project = tmp_path / "project"
     project.mkdir()
-    said = project / "pid-1"
+    said = project / "listening"
     endpoint = _endpoint()
-    argv = [str(link), "-I", "-c", _LISTEN_THEN_SAY_PID_1, endpoint, str(said)]
+    argv = [str(link), "-I", "-c", _LISTEN_THEN_SAY_SO, endpoint, str(said)]
     one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"), interpreters=(str(link),))
     started = await one.start(argv, cwd=str(project), endpoint=endpoint)
     try:
@@ -2460,7 +2476,9 @@ async def test_a_host_whose_python_is_not_at_the_usual_path_starts_a_confined_se
             if said.exists():
                 break
             await asyncio.sleep(0.05)
-        assert said.read_text().split()[:3] == [str(link), "-I", "/.brig-supervisor.py"]
+        assert said.read_text() == "listening"
+        supervisors = _commands_running("/.brig-supervisor.py")
+        assert [str(link), "-I", "/.brig-supervisor.py"] in [words[:3] for words in supervisors]
     finally:
         await started.stop()
 

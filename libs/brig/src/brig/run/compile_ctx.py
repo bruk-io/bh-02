@@ -104,6 +104,7 @@ def build_compile_ctx(spec: Spec, *, jail_dir: str, platform: str) -> CompileCtx
         resolved_paths=resolved_paths,
         path_exists=path_exists,
         path_is_dir=path_is_dir,
+        euid=os.geteuid(),
     )
 
 

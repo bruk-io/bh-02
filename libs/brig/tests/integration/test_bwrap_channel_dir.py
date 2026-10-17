@@ -100,9 +100,11 @@ _FORGED = ("MADE_RECORD", "WROTE_EXIT", "WROTE_X")
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("namespaces", [True, False], ids=["as-the-host-gives", "no-namespaces"])
 def test_the_channel_directory_works_and_the_rest_of_the_jail_directory_is_sealed(
     run_id: str,
     jail_dir: str,
+    namespaces: bool,
 ) -> None:
     chan = os.path.join(jail_dir, "chan")
     spec = _spec()
@@ -119,6 +121,7 @@ def test_the_channel_directory_works_and_the_rest_of_the_jail_directory_is_seale
         io=IoPolicy(),
         jail_id="bwrap-channel-dir",
         jail_dir=jail_dir,
+        namespaces=namespaces,
     )
     holder_exit = _records.exit_path(jail_dir, holder.id)
     try:
@@ -144,5 +147,11 @@ def test_the_channel_directory_works_and_the_rest_of_the_jail_directory_is_seale
     # The control, same jail, same run: the channel's own directory is written,
     # and the exit record is the workload's status, not a forged one.
     assert "CHANNEL_DIR" in stdout, (stdout, stderr)
-    assert os.path.isfile(os.path.join(chan, "inside"))
+    # (A process in namespaces of its own writes into the directory made for it, decision-195.)
+    inside = (
+        os.path.join(chan, process.id, "inside")
+        if process.namespaces
+        else os.path.join(chan, "inside")
+    )
+    assert os.path.isfile(inside)
     assert status == 3
