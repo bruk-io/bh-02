@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-15 02:27'
-updated_date: '2026-10-17 03:53'
+updated_date: '2026-10-17 03:54'
 labels:
   - app
   - size-2
@@ -61,4 +61,6 @@ RUNS: uv run pytest bh-02/app/tests -q -n auto --dist loadgroup (under tini): 24
 FILES: bh-02/app/src/bh_02/bootstrap.py, cli.py; tests above; docs/bh-02/using/layers.md, sessions.md, reference/command-line.md; bh-02/app/README.md; bh-02/CLAUDE.md (one line under The running harness).
 
 NOT DONE / for the owner, unsized: the unmet-dependency and component-raises cases still draw the app first (needs either cordis exposing a pre-mount check of declared provides that refuses only when sure, or the ui row starting last, which the ui-depends-on-nothing rule forbids).
+
+No repro: as a failing test on this commit, since the fix is in it; the repros are the real-launch tests named above (test_a_patch_row_with_no_use..., test_a_session_layer_row_with_no_use..., test_a_resumed_session_whose_layer_names_a_use...), which the worker saw fail on 7d4c934 and the reviewer saw pass here.
 <!-- SECTION:NOTES:END -->
