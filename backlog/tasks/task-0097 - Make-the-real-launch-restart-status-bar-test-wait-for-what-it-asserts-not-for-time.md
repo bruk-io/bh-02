@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-14 13:40'
-updated_date: '2026-10-17 03:37'
+updated_date: '2026-10-17 03:41'
 labels:
   - app
   - tests
@@ -68,4 +68,6 @@ SAME PATTERN ELSEWHERE IN THE FILE (not changed; the fix is not a shared helper)
 
 AC2. Machine shared at the start with three other workers, then mostly mine (load average at the end of each run in brackets). `tini -s -- .venv/bin/python -m pytest bh-02/app/tests/test_real_launch.py -q`, 20 runs in a row, beside `uv run pytest bh-02/plugins/models-cordis-plugin -q` looped (124 passes, 0 failures) and, from run 6 on, also `pytest bh-02/plugins/tui-cordis-plugin bh-02/plugins/agent-cordis-plugin -n 2` looped (28 passes, 0 failures): runs 1-20 all exit 0, "34 passed" each, 126 to 145 s each (load 4.23, 3.48, 2.49, 1.06, 2.01, 1.81, 3.17, 4.62, 2.99, 4.93, 3.56, 7.64, 2.68, 3.00, 1.41, 1.47, 1.88, 1.45, 5.25, 6.37). The unfixed file also passed 20 of 20 of the two restart tests in parallel runs, so these runs show no regression; the planted stall above is what shows the fix.
 AC3. Left for the reviewer. `scripts/check bh-02/app --no-gates --no-docs`: exit 0 (format ok, lint ok, types ok, 242 passed 1 skipped in 73 s; tokens skipped, no bh-01 dist).
+
+Reviewer: AC1 and AC2 verified (no settle/sleep in the changed test, every wait_for bounded; changed test 3/3 passes, file 34 passed in 131 s). AC3 left for the orchestrator's full check: the worker's member check ran with --no-gates --no-docs, so the gates never saw the edited test file. READY. Should-fix: test_real_launch.py:826 (burst test) still reads the bar with rfind after the reply, the same pattern this task replaced at :794. Nit: :823-825 same read; the bang-line test's settle(0.5).
 <!-- SECTION:NOTES:END -->
