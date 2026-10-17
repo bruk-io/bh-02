@@ -3,7 +3,7 @@ id: TASK-0104
 title: >-
   One way to write models: endpoints with their models nested, for openai and
   for Claude Code through a gateway
-status: To Do
+status: Done
 assignee:
   - '@bruk'
 created_date: '2026-10-15 20:32'
@@ -95,4 +95,6 @@ Done uncommitted on the owner's machine (2026-10-15; the owner asked for no comm
 Accepted 2026-10-15 by the owner, who asked for these changes on this branch, made carefully rather than copied, since the codebase may have moved. Their diff is kept at the orchestrator's scratchpad (models-endpoints.diff, 48 files). Measured before porting: 42 of its 44 changed files have exactly the diff's base here; bh-02/CLAUDE.md and GLOSSARY.md differ only by TASK-0099.05's and TASK-0100's edits, and the whole diff applies. Criteria #9 and #10 are about the owner's machine: their notes above are that evidence, and nothing here can repeat it (no gateway, no owner models file).
 
 Owner, 2026-10-17, in conversation: criteria #10 (a gateway reply through bh-02, [1m] ids included) and #11 (their models file in the new shape, its models working) hold on their machine with the merged code: "i can confirm its fine". And no backwards compatibility is needed: an old flat table, an old session's model name or an old layer's `extra` is refused or errors, as the criteria already say, with nothing translated.
+
+Closing review (reviewer, did not do the work): CLOSED. Children TASK-0104.01 and .02 Done. #1,#5,#8,#9 from .01's review and named.py/_endpoint_problem reading. #2 spot-checked: a flat [qwen] table with id through named.parsed+problem is refused with a [qwen.models.MODEL] rewrite. #6: with an empty XDG_CONFIG_HOME, read_models gives None and chosen says 'no model is chosen ... add an endpoint and a default' with an example. #3/#4/#7: credential.gateway_settings hands key_command to the CLI as apiKeyHelper; provider.py:433 setting_sources=[]; pinned by test_models_gateway.py (test_the_environment_through_a_gateway_holds_no_token..., test_the_provider_starts_claude_code_with_the_layer_and_needs_no_local_env) and test_models_key_command.py (test_a_command_that_gives_no_key_names_itself_never_what_it_printed, test_a_refused_printed_key_is_dropped..., test_a_printed_key_a_header_can_not_carry_is_said_without_it); plugin tests 349 passed, 2 skipped. #10/#11: not judged here; ticked on the owner's confirmation of 2026-10-17 in the notes. #12: orchestrator's full scripts/check on a head with all the code exit 0 (3311 passed, 50 skipped, check-wave3.txt); docs, READMEs, CONTRACTS, GLOSSARY show only nested endpoint tables and say there are no built-in models. Open questions all ticked. Findings: nits only, unfiled: an error quotes key_command text in full (a key written into the command would show); mkdocs strict does not fail on broken anchors (raised in .02's review).
 <!-- SECTION:NOTES:END -->
