@@ -3,7 +3,7 @@ id: TASK-0101
 title: >-
   Say a boot failure plainly: no app drawn first, no traceback, no false resume
   hint
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-15 02:27'
@@ -63,4 +63,6 @@ FILES: bh-02/app/src/bh_02/bootstrap.py, cli.py; tests above; docs/bh-02/using/l
 NOT DONE / for the owner, unsized: the unmet-dependency and component-raises cases still draw the app first (needs either cordis exposing a pre-mount check of declared provides that refuses only when sure, or the ui row starting last, which the ui-depends-on-nothing rule forbids).
 
 No repro: as a failing test on this commit, since the fix is in it; the repros are the real-launch tests named above (test_a_patch_row_with_no_use..., test_a_session_layer_row_with_no_use..., test_a_resumed_session_whose_layer_names_a_use...), which the worker saw fail on 7d4c934 and the reviewer saw pass here.
+
+Review (closing reviewer, 2026-10-17): CLOSED. AC1 met by the notes' route: static pre-flight covers unresolved uses; holding the ui would make tui:ui depend on loop and reload with /model, said in layers.md, app README and bh-02/CLAUDE.md. AC2 and AC3 met: real-launch tests pass (7 passed), test_booting + test_command_line 38 passed; resume message names session.layer (session.toml), true. AC4 ticked on the worker's scripts/check bh-02/app (gates and docs run whole; change confined to bh-02/app, docs, bh-02/CLAUDE.md); orchestrator's full check still follows. Pre-flight: disabled rows skipped, rows added earlier and configured later pass (known set), resolve is the loader's own call so imports are those boot does anyway. Findings: nit only, none filed: the unmet-dependency and component-raises cases still draw first, recorded in notes for the owner.
 <!-- SECTION:NOTES:END -->
