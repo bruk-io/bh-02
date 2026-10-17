@@ -1,7 +1,7 @@
 ---
 id: TASK-0096
 title: A models file that is not UTF-8 text crashes the shell and the model row
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 13:05'
@@ -66,4 +66,6 @@ Orchestrator, 2026-10-17: finish moved again, on the docs criterion. It asked th
 Full scripts/check on 5cf6e37 (this task's commits with the rest of the batch): exit 0, format, lint, types, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17; log at the session scratchpad, check-batch4b.txt).
 
 No repro: the fixed tree cannot fail it. The worker recorded the repro before the fix (4 tests failed with UnicodeDecodeError from named.py:225 and sessions.py:223, and a real start exited 1 with a traceback at 2fd63fa); those tests are now in the suite and pass.
+
+Reviewed by philosophy:reviewer (2026-10-17): READY, every criterion met but scripts/check, no blocking findings (TASK-0097's one should-fix, the burst test's bar read, fixed by the orchestrator in 14c8ca5). Closed once the full check passed: Full scripts/check on 5cf6e37: exit 0, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17).
 <!-- SECTION:NOTES:END -->
