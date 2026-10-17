@@ -819,12 +819,12 @@ def test_a_message_typed_the_moment_after_model_waits_for_the_new_model(launch: 
     switching = app.wait_for("switching to s/slow-2", 10, after=up)
     waiting = app.wait_for("⧗ waiting for model to start; this message is sent once it is up", 5, after=up)
     replied = app.wait_for("echo: HELLO", 20, after=max(switching, waiting))
+    starting = app.wait_for("model: s/slow-2…", 10, after=up)
+    assert starting < replied  # it was answered once the new model had started
+    # up again: the bar's own text, waited for, not read out of whatever has arrived by the reply
+    app.wait_for("model: s/slow-2 ", 20, after=starting)
     shown = app.text()
     assert "stopped: interrupted" not in shown[up:], shown[up:][-2000:]
-    starting = shown.find("model: s/slow-2…", up)
-    assert 0 <= starting < replied  # it was answered once the new model had started
-    status = shown[shown.rfind("model: s/slow-2") :]
-    assert status.startswith("model: s/slow-2 "), status[:80]  # up again
     app.press(b"/clear\ragain\r")  # the same for /clear, which restarts the python row too
     waiting = app.wait_for("⧗ waiting for agents, loop, python, transcript to start", 10, after=replied)
     again = app.wait_for("echo: AGAIN", 20, after=waiting)
