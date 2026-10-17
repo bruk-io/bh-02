@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-10 03:31'
-updated_date: '2026-10-17 04:03'
+updated_date: '2026-10-17 04:04'
 labels:
   - memory
   - runner
@@ -72,4 +72,6 @@ Criterion evidence: #1 test_memory_tool_composition.py (real agent loop/tools/sy
 Commands (read by exit code): scripts/check bh-02/plugins/memory-cordis-plugin exit 0 (format, lint, types, 150 tests, gates, docs); scripts/check --no-gates --no-docs for runner (88 passed, 1 skipped), agent (116, 1 skipped), subagents (130), extensions (44), libs/host-paths (41), each exit 0; scripts/arch-check --no-fix exit 0; bh-02/app/tests -m "not real_launch" 209 passed 1 skipped; two real-launch tests passed (shipped layer with a real memory dir).
 Not ticked: #7 (scripts/check passes) is the reviewer's to prove.
 Seen but not done (unsized): two sessions on one project share the memory directory (worktrees do) and a save is read-modify-write on MEMORY.md with no lock, so two simultaneous saves can lose a line; the cap on one read/save is the 4 MiB reading limit (DRAFT-0005 owns oversized memories).
+
+Review (2026-10-17): READY, only #7 left for the orchestrator's full check. #1-#6 verified: only memory:auto (wiring.py:124) claims runs="memory"; extensions hardcode runs="jail" (host.py:565, tested for both spec and kwarg claims); subagents use harness. write_beneath/remove_beneath: O_EXCL|O_NOFOLLOW temp by dir_fd, rename never follows; slug checked before any path. 338 passed, 1 skipped (memory, host-paths, approval, agent, extensions host). Findings: nit - MEMORY.md read-modify-write without lock can lose a line on concurrent saves (worker noted).
 <!-- SECTION:NOTES:END -->
