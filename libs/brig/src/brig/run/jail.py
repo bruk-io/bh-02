@@ -175,30 +175,38 @@ def _fidelity(wrap_prefix: tuple[str, ...] | None, *, supervised: bool) -> ExecF
 
 _GROUP_SHAPED: Final = (
     "stop() signals the process's group, and a child that leaves it with setsid() is outside "
-    "it: only the jail's destroy() ends that"
+    "it: the control battery plants one and it outlives stop (observed, decision-201, "
+    "tests/e2e/test_control_battery.py), and only the jail's destroy() ends that"
+)
+
+_UNSUPERVISED: Final = (
+    "a signal reaches the process's group, and a child that leaves it with setsid() is outside "
+    "it. This runtime gives a process no namespace and no stop(), and the control battery "
+    "(decision-201) has not been run against this jail type: its control is unproven, not failed"
 )
 
 _NAMESPACED: Final = (
     "stop() ends the process's pid namespace, which the kernel ends with its PID 1, so a child "
-    "that left its group with setsid() ends with it (probed from inside a real jail by "
-    "tests/e2e/test_process_namespaces.py). cooperative is the ceiling until a battery driven "
-    "from the host plants survivors and proves more (TASK-0079.08, decision-0001)"
+    "that left its group with setsid() ends with it, and a process that ignores SIGTERM ends at "
+    "the SIGKILL after its grace. Proved from the host by the control battery (decision-201, "
+    "tests/e2e/test_control_battery.py). The gap: stop is a request to the supervisor, so one "
+    "it does not answer in time (stopped, wedged) takes the request's deadline and ends the "
+    "whole jail, the process's co-tenants with it"
 )
 
 
 def _process_control(*, namespaces: bool, supervised: bool, reason: str | None) -> Graded:
-    """The grade of the control one process's `stop` delivers (decision-196). A process in
-    namespaces of its own is ended with its pid namespace; one without is ended by its group,
-    which it can leave, and `reason` (what the jail's supervisor found, when this process knows
-    it) says why it has none. `cooperative` either way: no control grade is above it without the
-    battery of TASK-0079.08 (decision-0001), and the two differ in the detail and in
-    `Process.namespaces`. Pure."""
+    """The grade of the control one process's `stop` delivers (decision-196, decision-201): what
+    the control battery proves for its jail type, and no more. A process in namespaces of its own
+    is ended with its pid namespace, a `setsid()` child included: `best_effort`, the gap named. One
+    without is ended by its group, which it can leave: `cooperative`, and `reason` (what the jail's
+    supervisor found, when this process knows it) says why it has none. A process of a jail with no
+    supervisor has no `stop`: `cooperative`, the ceiling without a battery, which has not been run
+    against that jail type. Pure."""
     if namespaces:
-        return Graded(Grade.COOPERATIVE, _NAMESPACED)
+        return Graded(Grade.BEST_EFFORT, _NAMESPACED)
     if not supervised:
-        return Graded(
-            Grade.COOPERATIVE, f"{_GROUP_SHAPED}. This runtime gives a process no namespace"
-        )
+        return Graded(Grade.COOPERATIVE, _UNSUPERVISED)
     because = (
         ""
         if reason is None
@@ -225,7 +233,8 @@ class Process:
     `namespaces` is whether it runs as PID 1 of user, pid, mount, network and IPC
     namespaces of its own, which a supervised jail gives where the host lets an
     unprivileged process make them (decision-195); `control` is the grade of
-    what its `stop` delivers (decision-196), and says which when the
+    what its `stop` delivers (decision-196), no higher than the control battery
+    proves for its jail type (decision-201), and says which when the
     namespaces are not there. `interrupt`, `stop` and `wait` are absent when
     its jail has no supervisor.
     """

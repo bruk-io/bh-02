@@ -118,7 +118,7 @@ def test_the_fake_has_a_kind_of_its_own_and_its_records_say_so() -> None:
     jail, _first = _jail(runtime)
     assert Stack([]).compile(Spec()).runtime is RuntimeKind.HOST
     assert jail._record().kind is RuntimeKind.FAKE
-    grades = runtime_grades(RuntimeKind.FAKE)
+    grades = runtime_grades(RuntimeKind.FAKE, supervised=False)
     assert set(grades) == RUNTIME_AXES
     assert {graded.grade for graded in grades.values()} == {Grade.UNENFORCED}
     assert all("test double" in graded.detail for graded in grades.values())

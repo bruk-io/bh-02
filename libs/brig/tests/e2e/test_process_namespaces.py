@@ -663,13 +663,16 @@ def test_a_failed_start_leaves_no_directory_made_for_it_and_the_jail_goes_on(
 # ---------------------------------------------------------------------------------------------
 
 
-def test_the_process_scope_is_graded_cooperative_and_says_whether_namespaces_hold_and_why(
+def test_the_process_scope_is_graded_and_says_whether_namespaces_hold_and_why(
     mode: str, make: Rig
 ) -> None:
+    """The grades are what the control battery proves (decision-201,
+    tests/e2e/test_control_battery.py holds them to it): `best_effort` with namespaces,
+    `cooperative` without."""
     jail, _ = make()
     process = jail.start(sh("echo started"))
     assert process.wait(10) == 0  # the fallback starts it all the same
-    assert process.control.grade is Grade.COOPERATIVE
+    assert process.control.grade is (Grade.BEST_EFFORT if _isolated(mode) else Grade.COOPERATIVE)
     if _isolated(mode):
         assert process.namespaces is True
         assert "ends the process's pid namespace" in process.control.detail
@@ -680,9 +683,10 @@ def test_the_process_scope_is_graded_cooperative_and_says_whether_namespaces_hol
         assert "signals the process's group" in detail and "setsid()" in detail
         # it names what blocked them: uid 0 (root), or the user namespace the block refused
         assert ("uid 0" in detail) if os.geteuid() == 0 else ("unshare" in detail), detail
-    # The jail's report is the compile-time claim and does not move: its control is the jail scope's.
+    # The jail's report is the compile-time claim, whatever the process has: its control is the
+    # jail scope's, which the battery proves for a supervised jail with namespaces or without.
     axes = {axis.value: graded.grade for axis, graded in jail.report.axes.items()}
-    assert axes["control"] is Grade.UNENFORCED
+    assert axes["control"] is Grade.ENFORCED
     # The record carries it: a jail rehydrated in another process reads the same.
     again = Jail.from_dict(
         json.loads(json.dumps(jail.to_dict())), runtimes={RuntimeKind.HOST: HostRuntime()}

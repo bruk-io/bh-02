@@ -815,8 +815,13 @@ class Stack:
         # pattern.
         # decision-179: the runtime's own axes are filled from its kind's
         # static grades, not from `unenforced_report()`. A mechanism that
-        # declares one still overlays it below, as on any axis.
-        grades: dict[Axis, Graded] = {**unenforced_report().axes, **runtime_grades(runtime)}
+        # declares one still overlays it below, as on any axis. decision-201:
+        # the jail type matters to them, so whether a mechanism gave the jail a
+        # supervisor is part of what grades them.
+        grades: dict[Axis, Graded] = {
+            **unenforced_report().axes,
+            **runtime_grades(runtime, supervised=supervisor is not None),
+        }
         claims: list[AxisClaim] = []
         for mechanism, step in steps:
             for axis, graded in step.grades.items():
@@ -924,7 +929,7 @@ def _runtime_floor_note(
         f"graded by the jail's runtime, not by a mechanism: {runtime.value} "
         f"grades {graded}, and no mechanism in this stack claims it, so no "
         f"stack like it meets this floor until a battery proves a higher "
-        f"grade on {runtime.value} (decision-0001, TASK-0079.08); lower it"
+        f"grade for this jail type (decision-0001, decision-201); lower it"
     )
 
 

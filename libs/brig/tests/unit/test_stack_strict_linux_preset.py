@@ -91,8 +91,10 @@ def test_it_composes_rlimits_outermost_then_bwrap_then_env_scrub() -> None:
 def test_the_golden_report_grades_all_seven_axes() -> None:
     """Three `enforced` from real kernel mechanisms, `env` `enforced` from
     `env_scrub`'s SCRUB, `limits` `best_effort` because `rlimits` reaches
-    cpu and nothing else, and the two axes nobody claims `unenforced` via
-    the coverage fill. Any change here is a change to what an embedder is
+    cpu and nothing else, `channel_exclusivity` nobody claims (`unenforced`
+    via the runtime's grades), and `control` `enforced` at the jail scope:
+    the control battery (decision-201) ended every survivor it planted in a
+    jail of this type. Any change here is a change to what an embedder is
     told, so it is a reviewed diff by construction."""
     report = strict_linux().compile(_SPEC, ctx=_ctx()).report
 
@@ -103,7 +105,7 @@ def test_the_golden_report_grades_all_seven_axes() -> None:
         Axis.LIMITS: Grade.BEST_EFFORT,
         Axis.ENV: Grade.ENFORCED,
         Axis.CHANNEL_EXCLUSIVITY: Grade.UNENFORCED,
-        Axis.CONTROL: Grade.UNENFORCED,
+        Axis.CONTROL: Grade.ENFORCED,
     }
 
 

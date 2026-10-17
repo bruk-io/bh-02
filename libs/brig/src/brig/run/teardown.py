@@ -11,12 +11,11 @@ SPEC.md §9, the fixed ladder, verbatim:
 > relocated into teardown, and law 7 makes deliverability itself a graded
 > claim rather than an assumption.
 
-And SPEC.md law 7 (as decision-189 amended it): "Control must not require
+And SPEC.md law 7 (as decision-201 amended it): "Control must not require
 cooperation. Interrupt and kill are delivered by mechanism-level means that
 work when the jail is spinning, wedged, or hostile. Teardown reaches
-everything the jail contains (process group, tree, namespace, container),
-never a single process, and is verified; its deliverability is itself graded
-in the report, per scope: the jail's, and one process's."
+everything the jail contains (group, tree, namespace, container), never a
+single process, and is verified; its deliverability is graded per scope."
 
 **The pgid signalled here was read at spawn, and the pid-reuse seam that
 created was ACCEPTED by decision-144 and is CLOSED by decision-155

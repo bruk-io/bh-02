@@ -97,11 +97,12 @@ _LIMITS_DETAIL = (
 # GRADES are unchanged (unenforced); only the detail is new, copied by hand
 # from brig/core/runtime.py at review time like every detail here.
 _HOST_CONTROL_DETAIL = (
-    "graded by the HOST runtime: a jail is ended by signalling the process "
-    "groups brig started and verifying them gone, and nothing yet proves that "
-    "reaches every process in the jail (a setsid() child leaves its group). "
-    "No grade above unenforced until a control battery driven from the host "
-    "plants survivors (decision-0001, TASK-0079.08)"
+    "graded by the HOST runtime for a jail with no supervisor: it is ended by signalling the "
+    "process groups brig started and verifying them gone, and a child that leaves its group "
+    "(setsid()) is outside them. The control battery (decision-201, "
+    "tests/e2e/test_control_battery.py) plants its survivors in a supervised bwrap jail only, "
+    "and has not been run against this jail type (Seatbelt needs macOS), so its control is "
+    "unproven, not failed. No grade above unenforced"
 )
 
 _HOST_CHANNEL_EXCLUSIVITY_DETAIL = (

@@ -59,15 +59,16 @@ change that violates one is a spec change first, code second.
    sender's claim.
 7. **Control must not require cooperation.** Interrupt and kill are delivered
    by mechanism-level means that work when the jail is spinning, wedged, or
-   hostile. Teardown reaches everything the jail contains (process group, tree,
+   hostile. Teardown reaches everything the jail contains (group, tree,
    namespace, container), never a single process, and is verified; its
-   deliverability is itself graded in the report, per scope: the jail's, and
-   one process's. (Ruled 2026-10-15, decision-189, TASK-0079.06: the
-   "namespace" case is a supervised bwrap jail, whose instance is a pid
-   namespace that ends with its PID 1, §8; the grade at the process scope is
-   TASK-0079.08's, and until a battery proves one no grade above `unenforced`
-   is claimed. *Amended 2026-10-16, decision-196, TASK-0079.07:* each `Process` carries
-   its `control` grade, `cooperative` at most, until the battery.)
+   deliverability is graded per scope. (Ruled 2026-10-15, decision-189,
+   TASK-0079.06: the "namespace" case is a supervised bwrap jail, whose instance
+   is a pid namespace that ends with its PID 1, §8. *Amended 2026-10-16,
+   decision-196, TASK-0079.07:* each `Process` carries its `control` grade.
+   *Amended 2026-10-17, decision-201, TASK-0079.08:* the two scopes are the
+   jail's (`Jail.destroy`, the report's `control` axis) and one process's
+   (`Process.stop`, `Process.control`); each is graded no higher than a battery
+   that plants survivors from the host proves, per jail type, §4.)
 8. **Events are evidence, never the boundary.** Telemetry is best-effort by
    nature. No security claim may rest on an event having been emitted.
 9. **Nothing crosses the boundary anonymously.** The exclusivity claim —
@@ -241,7 +242,7 @@ The report's fixed vocabulary. Axes:
 | `limits` | resource caps (cpu, memory, tasks, wall, output) |
 | `env` | what environment the process receives |
 | `channel_exclusivity` | declared channels + enumerated shared media are the only ways in/out |
-| `control` | interrupt/kill deliverability without the jail's cooperation |
+| `control` | interrupt/kill deliverability without the jail's cooperation, at two scopes (below) |
 
 Grades, ordered:
 
@@ -274,6 +275,68 @@ grades accept an empty `detail`. A mechanism that cannot name its gap grades
 stack whose aggregate report misses a floor is refused at compile time. Refuse
 is the default posture; warn-and-continue is an embedder choice made by
 lowering floors, never a brig fallback.
+
+**Control is graded per scope, and rises only as far as a battery proves
+(2026-10-17, decision-201).** decision-0001's migration step 4c. Law 7 reads
+"Teardown reaches everything the jail contains (group, tree, namespace,
+container), never a single process, and is verified; its deliverability is
+graded per scope." The `control` axis has two scopes:
+
+- **The jail's**: whether the jail and everything in it can be ended without
+  cooperation, which `Jail.destroy` delivers. It is the report's `control` axis,
+  static for the jail type a stack compiles (`runtime_grades`, §7).
+- **One process's**: whether one process and everything it started can be ended
+  without cooperation, which `Process.stop` delivers. It travels on each
+  `Process` as `Process.control` (§9, decision-196) and is not in the report.
+
+A grade at either scope is claimed only for a jail type a **battery driven from
+the host** was run against (law 10). The battery (`tests/control_battery.py`, run
+by `tests/e2e/test_control_battery.py`) plants three survivors in a real
+supervised bwrap jail: a `setsid()` child, a process that ignores `SIGTERM`, and a
+supervisor the host `SIGSTOP`s. Each is planted beside a positive control, a plain
+child that the same ending ends, so that a survivor found gone is not one nobody
+could see; at the process scope it also plants a bystander, a process the stop was
+not asked about. It ends them with `Process.stop` and with `Jail.destroy`, and it
+looks for them with the host's own `/bin/ps` and `/proc` and never through brig:
+an observation made with the code under test is not an observation. What it saw
+becomes a grade by one rule (`control_battery.proven`), and `Jail.report` and
+`Process.control` are held to that grade in the same test, neither above it (a claim
+nothing planted) nor below it:
+
+- a scope with a survivor not planted as meant (a `setsid()` child in no session of
+  its own, a process that does not ignore `SIGTERM` as `/proc` says, a supervisor
+  not stopped), or whose control the ending did not end, or with a survivor missing,
+  proves nothing: `unenforced`;
+- a survivor that outlives its ending is a process that opted out of a control that
+  reached only a compliant one: `cooperative`;
+- an ending that also ended a process it was not asked about reached the survivor
+  and more, a gap to name: `best_effort`;
+- otherwise `enforced`.
+
+Ruled, per jail type and scope. Run 2026-10-17 on Linux 6.18 with bubblewrap 0.9,
+as uid 0 (every process shares the jail's namespaces, decision-197) and as an
+unprivileged user, with namespaces and with the block of decision-195 planted:
+
+| jail type | scope | grade | what the host saw |
+|---|---|---|---|
+| bwrap, supervised, with or without per-process namespaces | jail | `enforced` | `destroy` ended all three, a stopped supervisor included (the host's `SIGKILL` lands on a stopped PID 1 and ends its namespace), and each control. |
+| bwrap, supervised, per-process namespaces held | process | `best_effort` | `stop` ended all three and each control, a `setsid()` child with the process's pid namespace, an ignorer after its grace period. The gap: a stop is a request to the supervisor, so one it does not answer takes the request's deadline (twice the grace period and 10 s) and ends the jail, the bystander with it. |
+| bwrap, supervised, no namespaces (uid 0, nested user namespaces blocked) | process | `cooperative` | `stop` signals the group, and the `setsid()` child outlived it, observed; `destroy` ended it. Closing that without a namespace is TASK-0130's (a subreaper per process, decision-197). |
+| no supervisor (the empty stack, Seatbelt, ...) | jail, process | `unenforced`, `cooperative` | Not run. Seatbelt cannot be run here, and its grades do not rise: its control is **unproven, not failed**, and the report's `detail` says so. decision-0001 names the `setsid()` escape as its gap; a run on macOS is what would show whether the battery finds it. |
+
+The stop's deadline is the one number a test changes (`SLACK_S`, 10 s to 1 s, so
+that the stopped-supervisor cell takes 5 s and not 14); what is proved is that the
+stop ends the jail when it is missed, not its length. A floor `require(control=...)` is
+checked at compile like any other: `strict_linux()` meets `enforced`, and every stack
+without a supervisor still refuses anything above `unenforced`. `channel_exclusivity` is
+not graded by this ruling: nothing plants a violation of it yet, and it stays
+`unenforced` (§7).
+
+Not changed: the ladder and its verification rung (§9), the supervisor's protocol and
+deadlines (§8), every other axis, the matrix and `MATRIX_VERSION`. Changed in code:
+`runtime_grades(kind, *, supervised)` grades `control` by whether the compiled jail has
+a supervisor, and `Process.control` is `best_effort` where a process has namespaces
+(amended in §6, §7 and §9). Implementing task: TASK-0079.08. (Ruled 2026-10-17, decision-201.)
 
 ## 5. The Spec
 
@@ -1203,9 +1266,12 @@ it. Ruled:
   before (the `fs_read` detail now names the supervisor's program among what the
   jail holds), and `control` and `channel_exclusivity` stay `unenforced`, the
   `HOST` runtime's static grades, until a battery that plants survivors proves a
-  higher one (TASK-0079.08, law 10). Seatbelt has no PID 1 to be and no
+  higher one (TASK-0079.08, law 10). *Amended 2026-10-17, decision-201,
+  TASK-0079.08:* the battery has been run, and `control` is `enforced` at the jail
+  scope for a supervised jail (§4); `channel_exclusivity` stays `unenforced`.
+  Seatbelt has no PID 1 to be and no
   namespace to end a process by; it keeps `EQUIVALENT_PROFILE` and a group-shaped
-  stop, unchanged and untested here.
+  stop, unchanged and untested here (its control unproven, not failed, §4).
 
 `render_bwrap_prefix` takes the interpreter as a required keyword and refuses
 last among its own refusals (an unmountable `Spec` still reports a
@@ -1341,7 +1407,15 @@ exclusivity. No grade above that ships without decision-0001's control battery
 law 10). What changes in a report is the two axes' `detail`, which now names
 the runtime and the gap. The matrix keeps every row and its order, and
 `MATRIX_VERSION` stays 5. Implementing task: TASK-0079.03. (Ruled 2026-10-12,
-decision-179.)
+decision-179.) *Amended 2026-10-17, decision-201, TASK-0079.08:* the battery
+exists (§4), and `runtime_grades` takes whether the compiled jail has a
+supervisor, so the grade is per jail type and not per kind alone: `HOST` grades
+`control` `enforced` for a jail with a supervisor, `unenforced` for one with none
+(the empty stack, Seatbelt, a stack without bwrap), whose `detail` says the battery
+has not been run against it. `channel_exclusivity` is `unenforced` for every kind.
+A floor `require(control=...)` above what the jail type earns is refused at compile
+as before, and its note says no stack like it meets the floor until a battery proves
+a higher grade for this jail type.
 
 **Coverage is a construction-time invariant, not a step anyone can forget.** An
 `EnforcementReport` carries a `Graded` for all seven axes of §4; constructing one
@@ -2000,7 +2074,7 @@ implementation and not a description of it:
 - **The grade is already promised, and is not re-promised here.** How well
   control can be delivered for a given jail is the `control` axis of the
   `EnforcementReport` the handle already carries (§4; law 7's "its
-  deliverability is itself graded in the report"). `interrupt` reads no grade
+  deliverability is graded per scope", since decision-201). `interrupt` reads no grade
   and publishes none: a per-call grade would be a second, unsynchronized
   answer to a question the report answers.
 - **Same pid-reuse seam as teardown**, accepted by decision-144 on the same
@@ -2776,7 +2850,13 @@ the mechanism's and the runtime's. Ruled:
   ceiling for both until TASK-0079.08's battery plants survivors from the host and proves
   more (decision-0001, law 10); the two differ in `namespaces` and in the detail. The
   jail's `report` is the compile-time claim and is not changed: its `control` axis is the
-  jail scope, `unenforced` as before.
+  jail scope, `unenforced` as before. *Amended 2026-10-17, decision-201, TASK-0079.08: the
+  battery has been run (§4). A process in namespaces of its own is `best_effort`, its detail
+  naming the gap (a stop the supervisor does not answer ends the jail at the request's
+  deadline); one without stays `cooperative`, its detail saying the battery saw a `setsid()`
+  child outlive its stop; a jail with no supervisor, which the battery was not run against,
+  stays `cooperative` and says so. The jail's `control` axis is `enforced` for a supervised
+  jail, with or without namespaces.*
 - **The record carries it.** `ProcessRecord` and `record.json` gain `namespaces`
   (a bool, required: an older record reads unreadable, a doubt like any other), and the
   jail's dict carries the records, so `JAIL_VERSION` is 10. A rehydrated jail reads it from
@@ -2805,7 +2885,8 @@ the mechanism's and the runtime's. Ruled:
   (`term_rung`, decision-195), so a jail of such processes is not ended in two seconds per
   process. A process that handles `SIGTERM` still gets it and its grace.
 - **Law 7's process scope** (§2) is this: the grade at the process scope is `Process.control`,
-  `cooperative` at most until the battery.
+  `cooperative` at most until the battery. *(Amended 2026-10-17, decision-201: the battery
+  has been run, §4; `Process.control` is what it proves.)*
 
 Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-196.)
 

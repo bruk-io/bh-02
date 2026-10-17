@@ -1,11 +1,10 @@
 """`Process.interrupt`: SIGINT to the workload group, and what `True` means.
 
-SPEC.md law 7, verbatim (as decision-189 amended it): "Control must not
+SPEC.md law 7, verbatim (as decision-201 amended it): "Control must not
 require cooperation. Interrupt and kill are delivered by mechanism-level means
 that work when the jail is spinning, wedged, or hostile. Teardown reaches
-everything the jail contains (process group, tree, namespace, container),
-never a single process, and is verified; its deliverability is itself graded
-in the report, per scope: the jail's, and one process's."
+everything the jail contains (group, tree, namespace, container), never a
+single process, and is verified; its deliverability is graded per scope."
 
 `interrupt` is the first rung of that: `os.killpg(pgid, SIGINT)`, never a
 single pid. Three claims, each with its own discriminating control:

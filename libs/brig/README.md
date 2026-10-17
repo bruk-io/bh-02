@@ -240,11 +240,24 @@ can't be signalled, and its socket, abstract socket and System V IPC are out of
 reach, and a stop ends the namespace, a `setsid()` child included. Where it
 doesn't (a jail run as uid 0, a host that blocks nested user namespaces) a
 process starts as it always did, and `Process.namespaces` is `False` and
-`Process.control` says why, graded `cooperative` either way until the control
-battery of TASK-0079.08. A socket in the channel directory is then at a path of
+`Process.control` says why. A socket in the channel directory is then at a path of
 its own on the host (`Process.endpoint` is not `bound_path`).
 `tests/e2e/test_process_namespaces.py` shows each from inside a real jail, with
 the same probe in a jail without the namespaces beside it.
+
+**Control is graded by what a battery proves, 2026-10-17 (decision-201).** A
+`setsid()` child, a process that ignores `SIGTERM` and a stopped supervisor are
+planted from the host in a real bwrap jail, each beside a plain child the same
+ending ends, and `Process.stop` and `Jail.destroy` end them, watched by the
+host's own `/bin/ps` and `/proc` (`tests/control_battery.py`,
+`tests/e2e/test_control_battery.py`; run as root and as an unprivileged user,
+with namespaces and without). The report's `control` axis, the jail's scope, is
+`enforced` for a supervised jail, where `destroy` ended everything. A process's
+`control` is `best_effort` in namespaces of its own (a stop the supervisor
+does not answer ends the jail at the request's deadline, the gap) and
+`cooperative` without them, where the battery saw a `setsid()` child outlive a
+stop. Seatbelt, which the battery has not been run against, stays as it was and
+says it is unproven, not failed.
 
 ## Development
 
