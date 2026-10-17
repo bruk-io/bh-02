@@ -1,4 +1,5 @@
-"""The jail's own hold on its tether (decision-167, made per start by decision-181).
+"""The jail's own hold on its tether (decision-167, made per start by decision-181), and the
+lifeline a supervised jail with no tether gives its helpers (decision-199).
 
 `create` takes the read end of a pipe whose write end the embedder keeps. Every
 process the jail starts is tethered to it: its exit wrapper starts a watcher on
@@ -13,6 +14,12 @@ its own wrapper alone (`pass_fds`), and the wrapper hands it to its watcher and
 closes its own copy, as decision-167's wrapper did. The duplicate is closed when
 the last in-memory holder is collected (`weakref.finalize`), never by `destroy`,
 so ending a jail changes nothing about what a later start does.
+
+`HeldLifeline` is the tether a supervised jail has no use for and its helpers still need: a
+supervised jail's processes end with the socket its supervisor reads (decision-191), a socket
+no helper can watch without holding the end that would keep it open. It is a pipe the jail
+makes, whose write end it alone holds: the kernel closes that end when the creating process
+dies, and the jail's collection closes it, which is exactly when the socket closes.
 """
 
 import os
@@ -82,3 +89,33 @@ class HeldTether:
     def release(self) -> None:
         """Close the duplicate now. Idempotent."""
         self._finalizer()
+
+
+def _close_both(read_end: int, write_end: int) -> None:
+    os.close(read_end)
+    os.close(write_end)
+
+
+class HeldLifeline:
+    """A pipe whose write end only this object holds, for the helpers of a supervised jail with
+    no tether (decision-199): each helper's watcher reads the other end and ends the helper's
+    group once this one is closed.
+
+    A class because it owns a resource with a lifecycle: both ends, closed once, when the
+    holder is collected (the kernel closes them if the process dies first). Neither end is
+    inheritable, so a start passes the read end to its own wrapper alone (`pass_fds`) and
+    nothing else ever holds the write end.
+    """
+
+    def __init__(self) -> None:
+        """Make the pipe.
+
+        Raises:
+            OSError: no descriptor could be made.
+        """
+        self._read, write_end = os.pipe()
+        weakref.finalize(self, _close_both, self._read, write_end)
+
+    def fd(self) -> int:
+        """The read end, to hand to a helper's wrapper."""
+        return self._read

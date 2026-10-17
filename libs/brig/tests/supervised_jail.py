@@ -32,6 +32,7 @@ from brig.core import (
     ReadModel,
     Spec,
 )
+from brig.mech import Helper
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH
 from brig.run import HostRuntime, Jail, Process
 from brig.run.compile_ctx import build_compile_ctx
@@ -94,6 +95,7 @@ def create_jail(
     scratch: bool = False,
     namespaces: bool = True,
     tether: int | None = None,
+    helpers: Sequence[Helper] = (),
     python: str = INTERPRETER,
     jail_id: str = "supervised",
 ) -> Jail:
@@ -104,7 +106,8 @@ def create_jail(
     uid 0 is. `True` is whatever the host gives: namespaces of their own for an unprivileged
     user where nested user namespaces work, the shared ones where they don't. `scratch` grants
     the jail's own `<jail_dir>/tmp`, which a process in namespaces gets a directory of its own
-    over."""
+    over. `helpers` are added to what the stack compiled (a `JAIL_LIFETIME` one runs on the host,
+    started by `create`)."""
     scratch_dir = os.path.join(os.path.realpath(jail_dir), "tmp") if scratch else None
     if scratch_dir is not None:
         os.makedirs(scratch_dir, exist_ok=True)
@@ -112,6 +115,7 @@ def create_jail(
     spec = spec_for(workspace, channel=channel, scratch=scratch_dir)
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
     compiled = strict_linux(python).compile(spec, ctx=ctx)
+    compiled = dataclasses.replace(compiled, helpers=(*compiled.helpers, *helpers))
     return Jail.create(
         compiled if namespaces else blocked(compiled),
         runtime=HostRuntime(),

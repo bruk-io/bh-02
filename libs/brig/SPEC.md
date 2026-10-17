@@ -821,7 +821,7 @@ data in this shape; M4's probe engine builds the subject.)
 
 **Helper lifetimes** are declared, not improvised: `JAIL_LIFETIME` (dies when
 the jailed tree dies — implemented by pipe-EOF or pid-watch, the mechanism
-chooses), `LAUNCH_SCOPED` (gone before the workload runs).
+chooses; since decision-199 both, §8), `LAUNCH_SCOPED` (gone before the workload runs).
 
 Planned roster (platforms in parentheses; grades are the *ceiling* each can
 honestly earn):
@@ -1539,6 +1539,8 @@ writing the project). Five things about it are constraints, not description:
   are not tethered. *Amended 2026-10-12 (decision-181, TASK-0079.25):* exec
   siblings are tethered: every start's exit wrapper starts a watcher of its
   own on the jail's tether, so no process of a tethered jail runs untethered.
+  *Amended 2026-10-17 (decision-199, TASK-0079.29):* `JAIL_LIFETIME` helpers are
+  tethered too, as the jail's processes are (below).
 - **It does not serialize.** An fd can't cross `to_dict`; a rehydrated `Handle`
   has no tether and needs none, since the process that held the write end is
   the one whose death it watched. `tether=None`, the default, launches exactly
@@ -1622,7 +1624,8 @@ makes before the first spawn. So:
   siblings included (decision-167's "exec siblings are groups of their own
   and are not tethered" is superseded). `JAIL_LIFETIME` helpers stay
   untethered, as decision-167 states; tethering them is decision-0001's
-  ("Helpers with `JAIL_LIFETIME`"), not this step's.
+  ("Helpers with `JAIL_LIFETIME`"), not this step's. *(Done 2026-10-17 by
+  decision-199, TASK-0079.29: they are tethered, below.)*
 - **Which process is the jail's "workload".** None is special to the
   runtime. A `KillReport` keeps its vocabulary: the first process started is
   reported as `workload_group` and every later one as `exec_sibling`, in
@@ -1818,6 +1821,61 @@ every process's to reach (decision-184's residual). Ruled:
   is refused whatever the map.
 
 Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-195.)
+
+**A `JAIL_LIFETIME` helper ends with the process that created the jail, as the jail's
+processes do (2026-10-17, decision-199).** A helper (the egress proxy is one) runs on
+the host, in a group of its own, outside the jail's namespaces. decision-167 left it
+out of the tether and decision-181 kept it out, so a creator that died without calling
+`destroy` (`SIGKILL`, a crash) took the jail's processes with it, by the tether or, in a
+supervised jail, by end-of-file on the control socket (decision-191), and left the
+helpers running, orphaned to PID 1: found 2026-10-12 as an egress proxy fourteen hours
+old. Asked first, 2026-10-17, of the code at 94cd441, and the answer was yes: with the
+supervisor ending everything at end-of-file nothing had changed for a helper, since
+the kernel's end of a pid namespace does not reach a process outside it. Planted
+before the fix (a stand-in creator process killed with `SIGKILL`, a second one alive
+as the control) and seen failing in four shapes: a tethered jail, a tether closed
+without `destroy`, a supervised jail with no tether, and a supervised jail collected
+(`tests/integration/test_helpers_end_with_their_creator.py`,
+`tests/e2e/test_supervised_jail.py`). Ruled:
+
+- **A helper is started as a process is.** `create` starts each `JAIL_LIFETIME` helper
+  under the exit wrapper (decision-156), detached in a group of its own as before, and
+  that wrapper starts a watcher in the helper's group before the helper, on a
+  descriptor the wrapper is given: decision-167's watcher, unchanged, which ends its
+  group once every write end is closed. The helper's pid and start stamp
+  (`helper_pids`, decision-155) are now the wrapper's, which lives exactly as long as the
+  helper does and leads the group the helper is in, so `alive`, `destroy`, `to_dict` and
+  a rehydrated jail find and end it as they did; the watcher is in that group too, so
+  `destroy`'s ladder ends it with the helper and the group's number can't be handed to
+  a stranger while it waits. Its log stays `helper-<name>.log` (stdout and stderr
+  together); its exit record is `<jail_dir>/helper-<name>.exit`, read by nothing, as the
+  supervisor's is. A helper that can't be spawned is `WorkloadSpawnFailed`, an
+  `OSError` as the `Popen` failure it replaces was.
+- **What the watcher reads is what ties the jail's processes to the creator.** A
+  tethered jail's helpers read its tether, so `SIGKILL` of the creator, or its closing the
+  tether, ends them with the processes. A supervised jail with no tether has the jail
+  make a pipe (`HeldLifeline`, `brig/run/_tether.py`) whose write end only the jail
+  holds, in `Held`: the kernel closes it when the creator dies and the jail's collection
+  closes it, which is when the control socket closes, so a supervised jail's helpers
+  end with its processes, tether or none. A tethered, supervised jail's helpers read the
+  tether: collecting such a `Jail` while its creator lives and holds the tether
+  ends the processes at once (decision-191) and the helpers with the tether or `destroy`,
+  not before. An unsupervised jail with no tether ties nothing: its processes outlive
+  its creator, and a `Jail` rehydrated from its dict ends them and its helpers by the pids
+  it carries, so its helpers outlive it too (`create`'s docstring and the test that pins
+  it say so). A jail with no `JAIL_LIFETIME` helper makes no lifeline and asks nothing of
+  its tether.
+- **A tether that has ended refuses the create.** `create` of a tethered jail with a
+  `JAIL_LIFETIME` helper whose tether is already at end-of-file raises `TetherClosed` before
+  any helper starts, as a supervised jail's does and as every `start` of it would, where a
+  watcher on a dead tether would end the helper at once.
+- **Unchanged.** Helpers are still ended by `destroy`'s ladder as the last items of its
+  report (`"helper"`), by identity; `LAUNCH_SCOPED` helpers still run to completion first;
+  a helper's own death leaves its watcher in the group until the tether closes or `destroy`
+  runs, as a process's does (decision-167); what a mechanism's helper may do is its own.
+
+No change to what a helper is declared as. decision-0001's "helpers tethered" is this
+ruling. Implementing task: TASK-0079.29. (Ruled 2026-10-17, decision-199.)
 
 ## 9. The Jail (the Handle until decision-183)
 
@@ -2237,7 +2295,10 @@ inherited pipe fd cannot cross a process boundary to provide, and one §9's
 socket nobody owns. `LAUNCH_SCOPED` helpers run to completion *before* the
 workload is spawned, and a non-zero exit refuses the launch rather than
 starting a workload behind a preparation step that failed. (Ruled 2026-08-29,
-decision-132.)
+decision-132.) *Amended 2026-10-17 (decision-199, TASK-0079.29):* the pid is still
+what `destroy` ends a helper by, from any process; a creator that dies without
+calling it no longer leaves the helper running, for a tether now ends it as it ends
+the jail's processes (§8).
 
 ### The Jail and its processes (2026-10-12, decision-181)
 

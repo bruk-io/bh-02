@@ -17,12 +17,15 @@ supervisor what it thinks of itself. Each has its control in the same test:
 - no process holds the control socket;
 - end-of-file ends everything, a `setsid()` child included, with a second jail that keeps its
   host as the control that it was the end of the host, not a general cleanup;
+- a `JAIL_LIFETIME` helper, which runs on the host outside the jail's namespaces, ends with the
+  creator as the jail's processes do, tether or none (decision-199, TASK-0079.29);
 - a rehydrated jail can be destroyed and nothing else.
 """
 
 from __future__ import annotations
 
 import ast
+import contextlib
 import gc
 import json
 import os
@@ -36,6 +39,7 @@ from pathlib import Path
 import pytest
 
 from brig.core import Grade
+from brig.mech import Helper, HelperLifetime
 from brig.run import (
     ExecFidelity,
     HostRuntime,
@@ -473,6 +477,116 @@ def test_end_of_file_on_the_control_socket_ends_everything_a_setsid_child_includ
             host.kill()
             host.wait(10)
         cleanup(dead_dir, kept_dir)
+
+
+# ---------------------------------------------------------------------------------------------
+# decision-199: a helper is tethered to the creator as the jail's processes are.
+# ---------------------------------------------------------------------------------------------
+
+_HOST_WITH_A_HELPER = r"""
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1])
+from brig.mech import Helper, HelperLifetime
+from tests.supervised_jail import create_jail
+jail_dir, helper_marker, process_marker, tethered = sys.argv[2:6]
+helper = Helper(
+    name="beacon", argv=("/bin/sleep", helper_marker), lifetime=HelperLifetime.JAIL_LIFETIME
+)
+watched, tether = os.pipe()
+jail = create_jail(
+    jail_dir, helpers=(helper,), **({"tether": watched} if tethered == "1" else {})
+)
+os.close(watched)
+jail.start(["/bin/sleep", process_marker])
+print(json.dumps(jail.to_dict()["helper_pids"]), flush=True)
+time.sleep(600)
+"""
+
+
+def _kill_markers(*markers: str) -> None:
+    for marker in markers:
+        for pid in running_with(marker):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
+def _helper(marker: str) -> Helper:
+    return Helper(name="beacon", argv=("/bin/sleep", marker), lifetime=HelperLifetime.JAIL_LIFETIME)
+
+
+def _stand_in_host_with_a_helper(
+    jail_dir: str, helper_marker: str, process_marker: str, *, tethered: bool
+) -> subprocess.Popen[str]:
+    tests_parent = str(Path(__file__).resolve().parents[2])
+    return subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            _HOST_WITH_A_HELPER,
+            tests_parent,
+            jail_dir,
+            helper_marker,
+            process_marker,
+            "1" if tethered else "0",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+
+
+@pytest.mark.parametrize("tethered", [False, True], ids=["untethered", "tethered"])
+def test_a_helper_ends_with_a_creator_killed_as_the_jails_processes_do(tethered: bool) -> None:
+    """The helper runs on the host, outside the jail's namespaces, so the supervisor's end-of-file
+    does not reach it: it is tethered to the creator by a descriptor of its own. The control is
+    the second creator, alive, whose helper and process both run until it is killed too."""
+    dead_dir, kept_dir = new_jail_dir(), new_jail_dir()
+    dead, kept = (_marker(), _marker()), (_marker(), _marker())
+    dying = _stand_in_host_with_a_helper(dead_dir, *dead, tethered=tethered)
+    surviving = _stand_in_host_with_a_helper(kept_dir, *kept, tethered=tethered)
+    try:
+        for host in (dying, surviving):
+            assert host.stdout is not None and len(json.loads(host.stdout.readline())) == 1
+        assert until(lambda: all(running_with(m) for m in (*dead, *kept))), (
+            "the jails did not start"
+        )
+
+        dying.kill()  # SIGKILL: the kernel closes the creator's descriptors, nothing runs
+        dying.wait(10)
+
+        assert until(lambda: not running_with(dead[1]), 15.0), "the jail's process outlived it"
+        assert until(lambda: not running_with(dead[0]), 15.0), {
+            "the helper outlived its creator": running_with(dead[0])
+        }
+        assert all(running_with(m) for m in kept)  # it was the end of the creator, not a sweep
+        surviving.kill()
+        surviving.wait(10)
+        assert until(lambda: not any(running_with(m) for m in kept), 15.0)
+    finally:
+        for host in (dying, surviving):
+            host.kill()
+            host.wait(10)
+        _kill_markers(*dead, *kept)  # a helper that outlived its creator is not left behind
+        cleanup(dead_dir, kept_dir)
+
+
+def test_a_helper_ends_with_a_supervised_jail_nobody_holds_any_more() -> None:
+    jail_dir = new_jail_dir()
+    helper_marker, process_marker = _marker(), _marker()
+
+    def make() -> None:
+        jail = create_jail(jail_dir, helpers=(_helper(helper_marker),))
+        jail.start(["/bin/sleep", process_marker])
+        assert until(lambda: bool(running_with(helper_marker) and running_with(process_marker)))
+
+    try:
+        make()
+        gc.collect()
+        assert until(lambda: not running_with(process_marker), 15.0), "the jail outlived its object"
+        assert until(lambda: not running_with(helper_marker), 15.0), "its helper outlived it"
+    finally:
+        _kill_markers(helper_marker, process_marker)
+        cleanup(jail_dir)
 
 
 def test_a_tether_still_ends_a_supervised_jail_whose_host_lives() -> None:
