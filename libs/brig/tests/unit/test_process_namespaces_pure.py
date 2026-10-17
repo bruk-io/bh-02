@@ -16,8 +16,8 @@ from typing import Any
 import pytest
 
 from brig.core import Grade
+from brig.run._supervised import namespaces_of
 from brig.run._supervisor_program import SUPERVISOR_SOURCE
-from brig.run.host import _namespaces_of
 from brig.run.jail import _process_control
 from brig.run.runtime import (
     ProcessNamespaces,
@@ -177,11 +177,17 @@ def test_a_signal_to_an_init_is_what_it_would_be_to_any_process(
 # ---------------------------------------------------------------------------------------------
 
 
-def test_a_process_in_namespaces_is_cooperative_and_says_its_stop_ends_the_namespace() -> None:
+def test_a_process_in_namespaces_is_best_effort_and_names_what_the_battery_proved_and_the_gap() -> (
+    None
+):
+    """decision-201: the control battery proves a stop ends a process in namespaces of its own, a
+    `setsid()` child included, and that a stop the supervisor does not answer ends the jail: the
+    gap, named, which is what holds the grade at `best_effort`."""
     graded = _process_control(namespaces=True, supervised=True, reason="")
-    assert graded.grade is Grade.COOPERATIVE
+    assert graded.grade is Grade.BEST_EFFORT
     assert "ends the process's pid namespace" in graded.detail and "setsid()" in graded.detail
-    assert "TASK-0079.08" in graded.detail  # why no higher
+    assert "tests/e2e/test_control_battery.py" in graded.detail
+    assert "ends the whole jail" in graded.detail  # the gap `best_effort` requires named
 
 
 def test_a_process_without_them_is_cooperative_and_says_what_a_stop_leaves_and_why() -> None:
@@ -202,12 +208,22 @@ def test_a_process_without_them_is_cooperative_and_says_what_a_stop_leaves_and_w
     assert "gives a process no namespace" in plain.detail
 
 
-def test_the_two_graded_alike_differ_in_the_detail_and_nothing_claims_more_than_cooperative() -> (
+def test_only_namespaces_raise_a_process_above_cooperative_and_every_other_case_stays_there() -> (
     None
 ):
+    """The battery proves the process scope only where the namespaces are: the fallback's own
+    cell has a `setsid()` child outliving the stop (observed), and a jail with no supervisor was
+    not run against. Neither is graded above `cooperative`, for any reason the supervisor gave."""
     held = _process_control(namespaces=True, supervised=True, reason="")
-    not_held = _process_control(namespaces=False, supervised=True, reason="uid 0")
-    assert held != not_held and held.grade is not_held.grade is Grade.COOPERATIVE
+    assert held.grade is Grade.BEST_EFFORT
+    for reason in (None, "", "uid 0", "unshare(...): No space left on device"):
+        not_held = _process_control(namespaces=False, supervised=True, reason=reason)
+        assert not_held.grade is Grade.COOPERATIVE, reason
+        assert not_held != held
+        assert "outlives stop (observed" in not_held.detail
+    plain = _process_control(namespaces=False, supervised=False, reason=None)
+    assert plain.grade is Grade.COOPERATIVE
+    assert "unproven, not failed" in plain.detail
 
 
 # ---------------------------------------------------------------------------------------------
@@ -239,4 +255,4 @@ def test_the_two_graded_alike_differ_in_the_detail_and_nothing_claims_more_than_
 def test_a_hello_claims_namespaces_only_when_it_says_so_in_so_many_words(
     hello: dict[str, object], expected: ProcessNamespaces
 ) -> None:
-    assert _namespaces_of(hello) == expected
+    assert namespaces_of(hello) == expected

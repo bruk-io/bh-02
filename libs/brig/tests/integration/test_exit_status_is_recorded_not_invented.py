@@ -297,3 +297,41 @@ def test_wait_returns_only_once_the_process_has_left_so_the_jail_dir_is_free() -
             jail_dir=jail_dir,
         )
         assert process.wait(timeout=20.0) == round_ % 5
+
+
+@pytest.mark.integration
+def test_a_pid_is_watched_until_its_status_is_recorded_so_no_one_sees_neither(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """decision-203: a caller that finds a pid no longer watched and no status recorded concludes
+    nothing will ever say how it ended (`HostSupervisor.wait` raises `ExitStatusUnobservable`).
+    The waiter used to stop being watched a moment before it recorded; under load that moment was
+    long enough for the exec agent's `wait` to fall in it. Made long here (the record slowed by
+    0.3 s), the pid is watched throughout: read in this order, watched first and the record
+    second, a pid that is not watched is one whose record is already there."""
+    from brig.run import _waiters
+
+    real = _waiters.record_status
+
+    def slowly(*args: object, **kwargs: object) -> None:
+        time.sleep(0.3)
+        real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_waiters, "record_status", slowly)
+    proc = subprocess.Popen(["/bin/true"])
+    key = proc.pid + 1_000_000  # a key no real process has; the status is kept under it
+    _waiters.watch(proc, jail_id="window", pid=key)
+    gap = False
+    deadline = time.monotonic() + 10
+    try:
+        while time.monotonic() < deadline:
+            watched = _waiters.is_watched(key)
+            recorded = _waiters.recorded_exit(key)
+            if not watched and recorded is None:
+                gap = True
+            if recorded is not None:
+                break
+        assert not gap
+        assert recorded is not None and recorded.returncode == 0
+    finally:
+        _waiters.forget(key)

@@ -22,6 +22,7 @@ from brig.mech.contract import (
     Step,
 )
 from brig.mech.env_scrub import EnvScrub, env_scrub
+from brig.mech.oci import Oci
 from brig.mech.rlimits import Rlimits, rlimits
 from brig.mech.seatbelt import Seatbelt, seatbelt
 
@@ -38,6 +39,7 @@ __all__ = (  # noqa: RUF022
     "JAIL_LIFETIME",
     "LAUNCH_SCOPED",
     "Mechanism",
+    "Oci",
     "Rlimits",
     "Seatbelt",
     "StagedFile",

@@ -32,10 +32,10 @@ import os
 import re
 import shutil
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from signal import Signals
-from typing import Final
+from typing import Any, Final
 
 from brig.core.runtime import scratch_dir
 from brig.run import _identity, _records, _waiters
@@ -49,6 +49,7 @@ from brig.run.runtime import (
     ExitStatusUnobservable,
     IoPolicy,
     JailRecord,
+    ProcessNamespaces,
     ProcessRecord,
     Reservation,
     channel_dir_of,
@@ -118,6 +119,17 @@ def stop_item(kind: str, process: ProcessRecord, outcome: str, detail: str, gone
             "process group had already ended before stop() ran",
         )
     return KillItem(kind, identity, KillOutcome.ENDED, "")
+
+
+def namespaces_of(hello: Mapping[str, Any]) -> ProcessNamespaces:
+    """What a supervisor's hello says of its processes' namespaces (decision-195): held, or
+    not and why. A hello that says nothing of them, or something that is not that, is not held:
+    no claim is made on a supervisor's silence."""
+    said = hello.get("namespaces")
+    if isinstance(said, dict) and isinstance(said.get("held"), bool):
+        reason = said.get("reason")
+        return ProcessNamespaces(said["held"], reason if isinstance(reason, str) else "")
+    return ProcessNamespaces(False, "the supervisor did not say whether it could")
 
 
 @dataclass(frozen=True, slots=True)

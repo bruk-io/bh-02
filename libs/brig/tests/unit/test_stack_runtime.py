@@ -7,10 +7,12 @@ names one), refuses two different ones (law 2), carries it on
 `CompiledJail.runtime`, and grades `control` and `channel_exclusivity` from
 that kind's static grades, so a floor on either is checked at compile.
 
-The no-rise pin (TASK-0079.03 AC3) is here too: every stack that can be
-built from the mechanisms that exist reports both axes `unenforced`, which
-is what every report said before this ruling, until decision-0001's control
-battery (TASK-0079.08) proves more.
+The grades follow the control battery (decision-201, TASK-0079.08), which
+retired TASK-0079.03 AC3's pin that no stack reports either axis above
+`unenforced` (WORKFLOW.md decision-041, rule 4) and replaced it with the
+positive: `control` is `enforced` for the stacks whose jail has a supervisor,
+the one jail type the battery was run against (`tests/e2e/test_control_battery.py`),
+and `unenforced` for every other; `channel_exclusivity` is `unenforced` for all.
 """
 
 import itertools
@@ -179,45 +181,67 @@ def test_two_mechanisms_naming_different_runtimes_are_refused() -> None:
 def test_the_runtime_axes_are_control_and_channel_exclusivity() -> None:
     assert frozenset({Axis.CONTROL, Axis.CHANNEL_EXCLUSIVITY}) == RUNTIME_AXES
     for kind in RuntimeKind:
-        assert frozenset(runtime_grades(kind)) == RUNTIME_AXES
+        for supervised in (False, True):
+            assert frozenset(runtime_grades(kind, supervised=supervised)) == RUNTIME_AXES
 
 
 @pytest.mark.unit
 def test_control_and_channel_exclusivity_come_from_the_kinds_static_grades() -> None:
-    """The report's two runtime axes are the resolved kind's grades, detail
-    and all: the empty coverage fill (detail `""`) would fail this, which is
-    what tells the two sources apart while both grade `unenforced`."""
+    """The report's two runtime axes are the resolved kind's grades for the
+    jail type (supervised or not, decision-201), detail and all: the empty
+    coverage fill (detail `""`) would fail this, which is what tells the two
+    sources apart where both grade `unenforced`."""
     for compiled in (
         Stack([]).compile(Spec()),
         degraded().compile(Spec()),
         strict_linux().compile(_LINUX_SPEC, ctx=_LINUX_CTX),
     ):
-        expected = runtime_grades(compiled.runtime)
+        expected = runtime_grades(compiled.runtime, supervised=compiled.supervisor is not None)
         for axis in RUNTIME_AXES:
             assert compiled.report.axes[axis] == expected[axis]
             assert "HOST runtime" in compiled.report.axes[axis].detail
 
 
 @pytest.mark.unit
-def test_a_floor_on_control_the_runtime_cannot_meet_is_refused_at_compile() -> None:
-    """`require(control=...)` above the kind's grade refuses at compile,
-    with a note naming the runtime and what to do. Control: a floor the
-    kind meets compiles."""
-    for axis in RUNTIME_AXES:
-        floors = require(**{axis.value: Grade.COOPERATIVE})
+def test_a_floor_on_control_the_jail_type_cannot_meet_is_refused_at_compile() -> None:
+    """`require(control=...)` above what the control battery proves for the
+    jail type refuses at compile, with a note naming the runtime and what to
+    do: a jail with no supervisor (the empty stack, a preset without bwrap)
+    grades `control` `unenforced`. Control: the same floor on a supervised
+    bwrap jail, which the battery was run against, compiles."""
+    floors = require(control=Grade.COOPERATIVE)
+    for unsupervised in (Stack([]), degraded()):
         with pytest.raises(FloorViolation) as exc_info:
-            strict_linux().compile(_LINUX_SPEC, floors, ctx=_LINUX_CTX)
-        assert [s.axis for s in exc_info.value.shortfalls] == [axis]
+            unsupervised.compile(Spec(), floors)
+        assert [s.axis for s in exc_info.value.shortfalls] == [Axis.CONTROL]
         notes = getattr(exc_info.value, "__notes__", [])
         assert len(notes) == 1
         assert "graded by the jail's runtime" in notes[0]
-        assert f"HOST grades {axis.value} unenforced" in notes[0]
+        assert "HOST grades control unenforced" in notes[0]
         assert "lower it" in notes[0]
 
+    compiled = strict_linux().compile(_LINUX_SPEC, require(control=Grade.ENFORCED), ctx=_LINUX_CTX)
+    assert compiled.report.axes[Axis.CONTROL].grade is Grade.ENFORCED
+
+
+@pytest.mark.unit
+def test_a_floor_on_channel_exclusivity_no_jail_type_meets_is_refused_at_compile() -> None:
+    """Nothing establishes channel exclusivity yet, so the floor is refused
+    for every stack, bwrap's included. Control: `unenforced` compiles."""
+    floors = require(channel_exclusivity=Grade.COOPERATIVE)
+    for stack, spec, ctx in (
+        (strict_linux(), _LINUX_SPEC, _LINUX_CTX),
+        (degraded(), Spec(), None),
+    ):
+        with pytest.raises(FloorViolation) as exc_info:
+            stack.compile(spec, floors, ctx=ctx)
+        assert [s.axis for s in exc_info.value.shortfalls] == [Axis.CHANNEL_EXCLUSIVITY]
+        notes = getattr(exc_info.value, "__notes__", [])
+        assert len(notes) == 1
+        assert "HOST grades channel_exclusivity unenforced" in notes[0]
+
     strict_linux().compile(
-        _LINUX_SPEC,
-        require(control=Grade.UNENFORCED, channel_exclusivity=Grade.UNENFORCED),
-        ctx=_LINUX_CTX,
+        _LINUX_SPEC, require(channel_exclusivity=Grade.UNENFORCED), ctx=_LINUX_CTX
     )
 
 
@@ -260,18 +284,30 @@ def test_a_mechanism_declaring_a_runtime_axis_still_overlays_it() -> None:
 
 
 # --------------------------------------------------------------------------
-# AC3: no control grade rises above what reports said before decision-179.
+# AC3, as decision-201 retired it: control rises only as far as the battery proves.
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_every_runtime_kind_grades_its_axes_unenforced() -> None:
-    """Before decision-179 every report graded both axes `unenforced` (no
-    mechanism declares either, so the coverage fill did). No kind may grade
-    above that until a battery proves it (decision-0001, TASK-0079.08)."""
-    for kind in RuntimeKind:
-        for axis, graded in runtime_grades(kind).items():
-            assert graded.grade is Grade.UNENFORCED, (kind, axis)
+def test_control_is_graded_by_the_jail_type_and_only_a_supervised_host_jail_rises() -> None:
+    """The control battery (`tests/e2e/test_control_battery.py`) was run
+    against a supervised bwrap jail: its `destroy` ended every planted
+    survivor, so `HOST` grades `control` `enforced` for it. It was not run
+    against any other jail type (Seatbelt needs macOS), so those stay
+    `unenforced` and say they are unproven, not failed. `channel_exclusivity`
+    nothing has proved for any."""
+    supervised = runtime_grades(RuntimeKind.HOST, supervised=True)
+    unsupervised = runtime_grades(RuntimeKind.HOST, supervised=False)
+    assert supervised[Axis.CONTROL].grade is Grade.ENFORCED
+    assert "decision-201" in supervised[Axis.CONTROL].detail
+    assert "jail scope" in supervised[Axis.CONTROL].detail
+    assert unsupervised[Axis.CONTROL].grade is Grade.UNENFORCED
+    assert "unproven, not failed" in unsupervised[Axis.CONTROL].detail
+    assert supervised[Axis.CHANNEL_EXCLUSIVITY].grade is Grade.UNENFORCED
+    assert unsupervised[Axis.CHANNEL_EXCLUSIVITY].grade is Grade.UNENFORCED
+    for flag in (False, True):
+        for axis, graded in runtime_grades(RuntimeKind.FAKE, supervised=flag).items():
+            assert graded.grade is Grade.UNENFORCED, (flag, axis)
 
 
 @pytest.mark.unit
@@ -308,16 +344,24 @@ def _every_compiling_stack() -> list[tuple[str, CompiledJail]]:
 
 
 @pytest.mark.unit
-def test_no_stack_reports_control_or_channel_exclusivity_above_unenforced() -> None:
-    """TASK-0079.03 AC3's pin: the same stacks report the same grade on
-    both axes as before decision-179, never higher."""
+def test_every_stack_reports_control_by_its_jail_type_and_channel_exclusivity_unenforced() -> None:
+    """The positive that replaces TASK-0079.03 AC3's pin over the same
+    stacks: `control` is `enforced` exactly where the compiled jail has a
+    supervisor (bwrap's, the jail type the battery was run against), and
+    `unenforced` for the other thirty-odd, Seatbelt's included;
+    `channel_exclusivity` is `unenforced` for every one."""
     compiled = _every_compiling_stack()
     names = {name for name, _ in compiled}
     assert {"strict_linux", "scratch_darwin", "bwrap+env_scrub+rlimits"} <= names
     # The count, so a stack that starts raising ValueError can't leave the pin
     # unseen; a new mechanism or preset changes it on purpose.
     assert len(compiled) == 35, sorted(names)
+    supervised = {name for name, jail in compiled if jail.supervisor is not None}
+    assert {"strict_linux", "bwrap+env_scrub+rlimits"} <= supervised
+    assert all("bwrap" in name or name == "strict_linux" for name in supervised), supervised
+    assert supervised != names
     for name, jail in compiled:
         assert set(jail.report.axes) == set(AXES)
-        for axis in RUNTIME_AXES:
-            assert jail.report.axes[axis].grade is Grade.UNENFORCED, (name, axis)
+        want = Grade.ENFORCED if name in supervised else Grade.UNENFORCED
+        assert jail.report.axes[Axis.CONTROL].grade is want, name
+        assert jail.report.axes[Axis.CHANNEL_EXCLUSIVITY].grade is Grade.UNENFORCED, name

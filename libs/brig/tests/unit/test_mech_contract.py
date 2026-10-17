@@ -20,7 +20,7 @@ def _identity(argv: tuple[str, ...]) -> tuple[str, ...]:
 
 
 @pytest.mark.unit
-def test_step_has_exactly_nine_fields() -> None:
+def test_step_has_exactly_ten_fields() -> None:
     """task-031 AC#1, replacing task-015 AC#1 under decision-041's rule 4.
 
     task-015 AC#1 (retired here, verbatim): "Field-set pin: a unit test
@@ -36,7 +36,8 @@ def test_step_has_exactly_nine_fields() -> None:
 
     decision-190 (2026-10-15, TASK-0079.06) adds `supervisor`: the plan of a
     jail whose PID 1 is brig's supervisor, `None` for every mechanism but
-    `bwrap`; the nine are pinned the same way.
+    `bwrap`; the nine are pinned the same way. decision-202 (2026-10-17,
+    TASK-0079.09) adds `container`, the `oci` mechanism's plan: ten.
     """
     expected_fields = {
         "wrap",
@@ -48,6 +49,7 @@ def test_step_has_exactly_nine_fields() -> None:
         "denial_signatures",
         "events",
         "supervisor",
+        "container",
     }
     actual_fields = {f.name for f in dataclasses.fields(brig.mech.Step)}
     assert actual_fields == expected_fields, (

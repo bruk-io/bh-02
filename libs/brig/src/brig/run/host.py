@@ -54,29 +54,27 @@ rehydrated jail compares them too.
 """
 
 import contextlib
-import errno
 import math
 import os
 import shutil
 import signal
 import socket
-import stat
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Final
 
-from brig.core.runtime import Capability, RuntimeKind, SupervisorPlan, channel_dir
+from brig.core.runtime import Capability, RuntimeKind, SupervisorPlan
 from brig.mech import HelperLifetime
-from brig.run import _exit_status, _identity, _records, _waiters
+from brig.run import _channels, _exit_status, _identity, _records, _waiters
+from brig.run._jail_dir import clear_earlier_records, make_channel_dir
 from brig.run._spawn_pgid import spawn_pgid
-from brig.run._supervised import LinkedSupervisor
+from brig.run._supervised import LinkedSupervisor, namespaces_of
 from brig.run._supervisor_link import SupervisorGone, SupervisorLink
 from brig.run._supervisor_program import PROTOCOL, SUPERVISOR_SOURCE, supervisor_argv
 from brig.run._tether import HeldLifeline, HeldTether
-from brig.run.dial import dial
 from brig.run.exec_ import ExecWrapNotAPrefix
 from brig.run.runtime import (
     ExitStatusUnobservable,
@@ -88,20 +86,14 @@ from brig.run.runtime import (
     Reservation,
     Supervisor,
     SupervisorRecord,
-    channel_dir_of,
     refuse_foreign_reservation,
-    reserved_socket,
-    socket_endpoint,
 )
 from brig.run.teardown import (
     DEFAULT_GRACE_S,
     KillOutcome,
     KillReport,
-    UnreadableProcessTable,
     end_group,
     kill_named,
-    live_groups,
-    read_process_table,
 )
 from brig.stack import CompiledJail
 
@@ -211,31 +203,6 @@ def _write_staged_files(jail_dir: str, jail: CompiledJail) -> None:
         with open(path, "w") as f:
             f.write(staged.content)
         os.chmod(path, staged.mode)
-
-
-def _make_channel_dir(jail_dir: str) -> None:
-    """Make the jail's channel directory, `<jail_dir>/chan` (decision-184),
-    mode 0700, or keep the directory an earlier jail made there. Every
-    mechanism that grants it binds or allows it by path, and a bind follows a
-    link, so anything there that is not a directory (a link, a file) is
-    refused rather than used.
-
-    Raises:
-        FileExistsError: `chan` is there and is not a directory.
-        OSError: it could not be made or examined.
-    """
-    path = channel_dir(jail_dir)
-    try:
-        os.mkdir(path, 0o700)
-    except FileExistsError:
-        if not stat.S_ISDIR(os.lstat(path).st_mode):
-            raise FileExistsError(
-                errno.EEXIST,
-                "the jail's channel directory is there and is not a directory brig made "
-                "(a link or a file), so granting it would grant whatever it names; remove "
-                "it, or choose another jail directory",
-                path,
-            ) from None
 
 
 def _spawn(
@@ -576,18 +543,7 @@ def _launch_supervisor(
                 else f"; ending it failed: {item.detail}"
             )
         )
-    return SupervisorRecord(pid=pid, start_time=stamp), link, _namespaces_of(hello)
-
-
-def _namespaces_of(hello: Mapping[str, Any]) -> ProcessNamespaces:
-    """What a supervisor's hello says of its processes' namespaces (decision-195): held, or
-    not and why. A hello that says nothing of them, or something that is not that, is not held:
-    no claim is made on a supervisor's silence."""
-    said = hello.get("namespaces")
-    if isinstance(said, dict) and isinstance(said.get("held"), bool):
-        reason = said.get("reason")
-        return ProcessNamespaces(said["held"], reason if isinstance(reason, str) else "")
-    return ProcessNamespaces(False, "the supervisor did not say whether it could")
+    return SupervisorRecord(pid=pid, start_time=stamp), link, namespaces_of(hello)
 
 
 def _refused(jail: CompiledJail, capabilities: frozenset[Capability]) -> frozenset[Capability]:
@@ -603,42 +559,6 @@ def _refused(jail: CompiledJail, capabilities: frozenset[Capability]) -> frozens
 #: later argument fails the prefix check here, and in the creating process
 #: every start also checks `wrap` of its own argv against the prefix.
 _WRAP_SENTINEL: Final = ("\x00brig-wrap-sentinel-argv0", "\x00brig-wrap-sentinel-argv1")
-
-
-def _clear_earlier_records(
-    jail_dir: str, *, read_table: Callable[[], str] = read_process_table
-) -> None:
-    """Remove the records an earlier jail left under `<jail_dir>/procs`, once
-    nothing they name runs; on any doubt remove nothing and refuse
-    (decision-181). Per record, the stamp before the group
-    (`_records.standing`): a leader that holds its identity runs; one whose pid
-    now names another process holds no group; one that is gone runs while its
-    group has a live member. An unreadable record, an unknown stamp, a link or
-    a file under `procs/`, or a process table that can't be read is a doubt.
-    `read_table` is the process table's seam, as `group_alive`'s.
-
-    Raises:
-        _records.JailDirInUse: something a record names runs, or is in doubt.
-        OSError: the records could not be removed.
-    """
-    scanned = _records.scan(jail_dir)
-    if not scanned.records and not scanned.unreadable:
-        return
-    try:
-        live: frozenset[int] | None = live_groups(read_table())
-    except OSError, subprocess.CalledProcessError, UnreadableProcessTable:
-        live = None
-    pids = {record.pid for record in scanned.records}
-    held = _records.held_by(
-        jail_dir,
-        scanned,
-        stamps={pid: _identity.start_stamp(pid) for pid in pids},
-        zombies=frozenset(pid for pid in pids if _identity.is_zombie(pid)),
-        live_groups=live,
-    )
-    if held:
-        raise _records.JailDirInUse(jail_dir, held)
-    _records.remove_procs(jail_dir)
 
 
 @dataclass(frozen=True, slots=True)
@@ -689,6 +609,8 @@ class HostRuntime:
         processes do (`_helper_tether`).
 
         Raises:
+            ValueError: `jail` was compiled for another runtime than this one's `kind`
+                (decision-202: a container's jail is not made of host process groups).
             LaunchRefused: `jail.requires` names a feature `capabilities`
                 lacks.
             _records.JailDirInUse: `jail_dir` holds an earlier jail's records
@@ -707,14 +629,20 @@ class HostRuntime:
                 not be made or written, or its `chan` is there and is not a
                 directory (`FileExistsError`).
         """
+        if jail.runtime is not self.kind:
+            raise ValueError(
+                f"HostRuntime.create: the jail was compiled for the {jail.runtime.value} runtime, "
+                f"and this is the {self.kind.value} runtime; pass the jail to a runtime of its "
+                "kind (SPEC.md section 8, decision-202)"
+            )
         missing = _refused(jail, self.capabilities)
         if missing:
             raise LaunchRefused(missing, "host")
 
         tether_hold = None if tether is None else HeldTether(tether)
         os.makedirs(jail_dir, exist_ok=True)
-        _clear_earlier_records(jail_dir)
-        _make_channel_dir(jail_dir)
+        clear_earlier_records(jail_dir)
+        make_channel_dir(jail_dir)
         _write_staged_files(jail_dir, jail)
 
         # SPEC.md §9's exec fidelity depends on this: every start trusts
@@ -868,20 +796,14 @@ class HostRuntime:
         host shares the jail's paths, so the host dials the path the process
         binds, unless the jail's processes have mount namespaces of their own, where it is the
         directory the process sees over the channel directory (decision-196)."""
-        path = reserved_socket(channel_dir_of(jail), _records.new_id())
-        private = jail.namespaces is not None and jail.namespaces.held
-        return Reservation(
-            channel=channel, bound_path=path, endpoint=socket_endpoint(path, namespaces=private)
-        )
+        return _channels.reserve(jail, channel)
 
     def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None:
         """The path to dial `process`'s socket at: the one it binds, which the host shares
         (decision-184), or the one in the directory of its own when it has a mount namespace
         (decision-196)."""
         del jail
-        if process.bound_path is None:
-            return None
-        return socket_endpoint(process.bound_path, namespaces=process.namespaces)
+        return _channels.endpoint_of(process)
 
     def ready(self, jail: JailRecord, process: ProcessRecord) -> bool:
         """Whether `connect` to `process`'s socket succeeds now, closed at
@@ -893,13 +815,8 @@ class HostRuntime:
                 (decision-185), or the kernel could not say who listens there
                 (decision-186): only "nothing listens yet" reads `False`.
         """
-        if process.bound_path is None:
-            return False
-        try:
-            self.connect(jail, process).close()
-        except OSError:
-            return False
-        return True
+        del jail
+        return _channels.is_ready(process)
 
     def connect(self, jail: JailRecord, process: ProcessRecord) -> socket.socket:
         """A connected socket to `process`'s reserved socket (decision-185):
@@ -913,12 +830,8 @@ class HostRuntime:
                 not `process`'s own.
             OSError: nothing listens there yet.
         """
-        endpoint = self.endpoint(jail, process)
-        if endpoint is None:
-            raise ValueError(f"process {process.id} was started with no channel to connect to")
-        return dial(
-            endpoint, group=process.pgid, leader_pid=process.pid, leader_stamp=process.start_time
-        )
+        del jail
+        return _channels.connect_to(process)
 
 
 def _end_unrecorded(process: ProcessRecord, jail_dir: str, error: OSError) -> None:

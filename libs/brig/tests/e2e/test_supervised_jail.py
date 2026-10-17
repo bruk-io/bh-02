@@ -860,7 +860,7 @@ def test_a_rehydrated_supervised_jail_can_be_destroyed_and_nothing_else() -> Non
         jail.start(sleep)
         assert until(lambda: bool(running_with(marker)))
         d = json.loads(json.dumps(jail.to_dict()))
-        assert d["version"] == 10 and d["supervisor"]["pid"] == instance_group(jail)
+        assert d["version"] == 11 and d["supervisor"]["pid"] == instance_group(jail)
 
         again = Jail.from_dict(d, runtimes={RuntimeKind.HOST: HostRuntime()})
         assert again.alive()
@@ -880,14 +880,17 @@ def test_a_rehydrated_supervised_jail_can_be_destroyed_and_nothing_else() -> Non
 
 
 def test_the_report_names_what_the_supervisor_does_not_grade() -> None:
-    """Grades don't move (decision-190): the three mechanism axes stay enforced and the two axes
-    the runtime grades stay `unenforced`, because no battery has planted a survivor yet."""
+    """The three mechanism axes are enforced; of the two axes the runtime grades, `control` is
+    `enforced` at the jail scope, which the control battery proves (decision-201,
+    tests/e2e/test_control_battery.py), and `channel_exclusivity` stays `unenforced`, which
+    nothing yet proves."""
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir)
     try:
         axes = {axis.value: graded.grade for axis, graded in jail.report.axes.items()}
         assert axes["fs_read"] is axes["fs_write"] is axes["network"] is Grade.ENFORCED
-        assert axes["control"] is axes["channel_exclusivity"] is Grade.UNENFORCED
+        assert axes["control"] is Grade.ENFORCED
+        assert axes["channel_exclusivity"] is Grade.UNENFORCED
     finally:
         _ended(jail)
         cleanup(jail_dir)

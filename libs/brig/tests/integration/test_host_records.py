@@ -36,8 +36,9 @@ import pytest
 
 from brig.core import Spec, unenforced_report
 from brig.run import IoPolicy, Jail, Process, _identity, _records, _waiters
+from brig.run._jail_dir import clear_earlier_records
 from brig.run._tether import TetherClosed
-from brig.run.host import HostRuntime, _clear_earlier_records
+from brig.run.host import HostRuntime
 from brig.run.runtime import JailRecord
 from brig.run.teardown import KillOutcome
 from brig.stack import CompiledJail
@@ -534,10 +535,10 @@ def test_create_refuses_when_the_process_table_cannot_be_read(jail_dir: str) -> 
         raise OSError("no /bin/ps here")
 
     with pytest.raises(_records.JailDirInUse, match="process table can't be read"):
-        _clear_earlier_records(jail_dir, read_table=unreadable)
+        clear_earlier_records(jail_dir, read_table=unreadable)
     assert _listing(jail_dir) == before
     # The control: with the table readable, the same gone record is removed.
-    _clear_earlier_records(jail_dir)
+    clear_earlier_records(jail_dir)
     assert not os.path.exists(_records.procs_dir(jail_dir))
 
 

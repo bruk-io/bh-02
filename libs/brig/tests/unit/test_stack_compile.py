@@ -464,7 +464,7 @@ def test_compiled_jail_env_is_defensively_copied() -> None:
 
 
 @pytest.mark.unit
-def test_compiled_jail_has_exactly_thirteen_fields() -> None:
+def test_compiled_jail_has_exactly_fourteen_fields() -> None:
     """Deliverable: CompiledJail's field set is pinned to the named fields
     -- "exactly what the launcher and the report need, and no more." A
     missing or invented field is red (same idiom as
@@ -480,7 +480,8 @@ def test_compiled_jail_has_exactly_thirteen_fields() -> None:
     mechanism that had one and then dropped on the floor here.
     decision-179 (2026-10-12) adds `runtime` -- the one `RuntimeKind` the
     stack resolved, whose static grades the report's `control` and
-    `channel_exclusivity` came from."""
+    `channel_exclusivity` came from. decision-190 added `supervisor` and
+    decision-202 (2026-10-17) adds `container`, the `oci` mechanism's plan."""
     expected_fields = {
         "spec",
         "report",
@@ -495,6 +496,7 @@ def test_compiled_jail_has_exactly_thirteen_fields() -> None:
         "sensors",
         "runtime",
         "supervisor",
+        "container",
     }
     actual_fields = {f.name for f in dataclasses.fields(brig.stack.CompiledJail)}
     assert actual_fields == expected_fields, (
@@ -573,8 +575,9 @@ def test_matrix_version_is_the_current_one() -> None:
     see this section's banner comment) bumps it again, 2 -> 3, for its own
     two new rows. task-080/decision-135 bumps it again, 3 -> 4, for
     connect_proxy's three new rows. decision-159 bumps it again, 4 -> 5,
-    for bwrap's four."""
-    assert brig.stack.MATRIX_VERSION == 5
+    for bwrap's four. decision-202 bumps it again, 5 -> 6, for the five pairs `oci`
+    adds, each refused (`REFUSED_PAIRS`)."""
+    assert brig.stack.MATRIX_VERSION == 6
 
 
 @pytest.mark.unit
@@ -592,7 +595,7 @@ def test_compiled_jail_carries_the_new_matrix_version() -> None:
     updates it to `5` for bwrap's four rows.
     """
     compiled = brig.stack.Stack([env_scrub, rlimits]).compile(Spec(), ctx=_CTX)
-    assert compiled.matrix_version == 5
+    assert compiled.matrix_version == 6
     assert compiled.matrix_version == brig.stack.MATRIX_VERSION
 
 

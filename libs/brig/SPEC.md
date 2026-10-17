@@ -59,15 +59,16 @@ change that violates one is a spec change first, code second.
    sender's claim.
 7. **Control must not require cooperation.** Interrupt and kill are delivered
    by mechanism-level means that work when the jail is spinning, wedged, or
-   hostile. Teardown reaches everything the jail contains (process group, tree,
+   hostile. Teardown reaches everything the jail contains (group, tree,
    namespace, container), never a single process, and is verified; its
-   deliverability is itself graded in the report, per scope: the jail's, and
-   one process's. (Ruled 2026-10-15, decision-189, TASK-0079.06: the
-   "namespace" case is a supervised bwrap jail, whose instance is a pid
-   namespace that ends with its PID 1, §8; the grade at the process scope is
-   TASK-0079.08's, and until a battery proves one no grade above `unenforced`
-   is claimed. *Amended 2026-10-16, decision-196, TASK-0079.07:* each `Process` carries
-   its `control` grade, `cooperative` at most, until the battery.)
+   deliverability is graded per scope. (Ruled 2026-10-15, decision-189,
+   TASK-0079.06: the "namespace" case is a supervised bwrap jail, whose instance
+   is a pid namespace that ends with its PID 1, §8. *Amended 2026-10-16,
+   decision-196, TASK-0079.07:* each `Process` carries its `control` grade.
+   *Amended 2026-10-17, decision-201, TASK-0079.08:* the two scopes are the
+   jail's (`Jail.destroy`, the report's `control` axis) and one process's
+   (`Process.stop`, `Process.control`); each is graded no higher than a battery
+   that plants survivors from the host proves, per jail type, §4.)
 8. **Events are evidence, never the boundary.** Telemetry is best-effort by
    nature. No security claim may rest on an event having been emitted.
 9. **Nothing crosses the boundary anonymously.** The exclusivity claim —
@@ -79,6 +80,9 @@ change that violates one is a spec change first, code second.
    is counted in the enumeration and covered by the `channel_exclusivity` grade,
    never excused from it because the exposure is the host's rather than the
    jail's. (Ruled 2026-08-23, decision-093, P-13.)
+   *Amended 2026-10-17, decision-202, TASK-0079.09:* a jail type that can keep a value out of argv
+   does: `oci` puts the environment in a file of mode 0600 that `docker create` reads and the runtime
+   removes (§6), never in `-e`.
 10. **Prove gates by planting violations.** A probe or test that observes a
     clean run proves nothing. Every enforcement claim has a probe that
     attempts the violation and a positive control that proves the probe
@@ -113,7 +117,11 @@ Spec ──compile──▶ Stack(Mechanisms) ──▶ Step ──create──�
   exit wrapper, the tether, a sibling per exec. The `subprocess` launcher
   (§8) is the embedder's door to it. For a bwrap jail `create` starts brig's
   supervisor as the jail's PID 1 and every process is a request to it
-  (decision-190, decision-191, decision-192).
+  (decision-190, decision-191, decision-192). `OciRuntime`
+  (`brig/runtime/oci.py`, decision-202) is a container: created and ended through the Docker
+  daemon, never by signalling a process group. Its processes have an agent found out at `create`
+  (decision-203, §8): brig's supervisor as the container's PID 1 where the image has python3, `docker
+  exec` and the host's ladder where it has none.
 - **Handle** — the running jail as the embedder holds it: serializable,
   rehydratable in a later process, owner of teardown, the anchor for
   observation and communication.
@@ -241,7 +249,7 @@ The report's fixed vocabulary. Axes:
 | `limits` | resource caps (cpu, memory, tasks, wall, output) |
 | `env` | what environment the process receives |
 | `channel_exclusivity` | declared channels + enumerated shared media are the only ways in/out |
-| `control` | interrupt/kill deliverability without the jail's cooperation |
+| `control` | interrupt/kill deliverability without the jail's cooperation, at two scopes (below) |
 
 Grades, ordered:
 
@@ -274,6 +282,71 @@ grades accept an empty `detail`. A mechanism that cannot name its gap grades
 stack whose aggregate report misses a floor is refused at compile time. Refuse
 is the default posture; warn-and-continue is an embedder choice made by
 lowering floors, never a brig fallback.
+
+**Control is graded per scope, and rises only as far as a battery proves
+(2026-10-17, decision-201).** decision-0001's migration step 4c. Law 7 reads
+"Teardown reaches everything the jail contains (group, tree, namespace,
+container), never a single process, and is verified; its deliverability is
+graded per scope." The `control` axis has two scopes:
+
+- **The jail's**: whether the jail and everything in it can be ended without
+  cooperation, which `Jail.destroy` delivers. It is the report's `control` axis,
+  static for the jail type a stack compiles (`runtime_grades`, §7).
+- **One process's**: whether one process and everything it started can be ended
+  without cooperation, which `Process.stop` delivers. It travels on each
+  `Process` as `Process.control` (§9, decision-196) and is not in the report.
+
+A grade at either scope is claimed only for a jail type a **battery driven from
+the host** was run against (law 10). The battery (`tests/control_battery.py`, run
+by `tests/e2e/test_control_battery.py`) plants three survivors in a real
+supervised bwrap jail: a `setsid()` child, a process that ignores `SIGTERM`, and a
+supervisor the host `SIGSTOP`s. Each is planted beside a positive control, a plain
+child that the same ending ends, so that a survivor found gone is not one nobody
+could see; at the process scope it also plants a bystander, a process the stop was
+not asked about. It ends them with `Process.stop` and with `Jail.destroy`, and it
+looks for them with the host's own `/bin/ps` and `/proc` and never through brig:
+an observation made with the code under test is not an observation. What it saw
+becomes a grade by one rule (`control_battery.proven`), and `Jail.report` and
+`Process.control` are held to that grade in the same test, neither above it (a claim
+nothing planted) nor below it:
+
+- a scope with a survivor not planted as meant (a `setsid()` child in no session of
+  its own, a process that does not ignore `SIGTERM` as `/proc` says, a supervisor
+  not stopped), or whose control the ending did not end, or with a survivor missing,
+  proves nothing: `unenforced`;
+- a survivor that outlives its ending is a process that opted out of a control that
+  reached only a compliant one: `cooperative`;
+- an ending that also ended a process it was not asked about reached the survivor
+  and more, a gap to name: `best_effort`;
+- otherwise `enforced`.
+
+Ruled, per jail type and scope. Run 2026-10-17 on Linux 6.18 with bubblewrap 0.9,
+as uid 0 (every process shares the jail's namespaces, decision-197) and as an
+unprivileged user, with namespaces and with the block of decision-195 planted:
+
+| jail type | scope | grade | what the host saw |
+|---|---|---|---|
+| bwrap, supervised, with or without per-process namespaces | jail | `enforced` | `destroy` ended all three, a stopped supervisor included (the host's `SIGKILL` lands on a stopped PID 1 and ends its namespace), and each control. |
+| bwrap, supervised, per-process namespaces held | process | `best_effort` | `stop` ended all three and each control, a `setsid()` child with the process's pid namespace, an ignorer after its grace period. The gap: a stop is a request to the supervisor, so one it does not answer takes the request's deadline (twice the grace period and 10 s) and ends the jail, the bystander with it. |
+| bwrap, supervised, no namespaces (uid 0, nested user namespaces blocked) | process | `cooperative` | `stop` signals the group, and the `setsid()` child outlived it, observed; `destroy` ended it. Closing that without a namespace is TASK-0130's (a subreaper per process, decision-197). |
+| no supervisor (the empty stack, Seatbelt, ...) | jail, process | `unenforced`, `cooperative` | Not run. Seatbelt cannot be run here, and its grades do not rise: its control is **unproven, not failed**, and the report's `detail` says so. decision-0001 names the `setsid()` escape as its gap; a run on macOS is what would show whether the battery finds it. |
+| OCI container (`oci`, `OciRuntime`) | jail | `enforced` | *Added 2026-10-17, decision-202:* `destroy` (`docker rm -f`, then `docker inspect` finds nothing) ended all three planted in a container with `docker exec`, a `SIGSTOP`ped init included (the host's `SIGKILL` ends a stopped PID 1 and its pid namespace), and each control; run as uid 0 on Docker 29.8 (`tests/integration/test_oci_control.py`). *Amended 2026-10-17, decision-203:* the process scope has its cells below, and the jail scope is held again with the processes started through brig (`tests/integration/test_oci_processes.py`): `destroy` ended all three survivors, planted by `Jail.start` in each agent's container, and each control. |
+| OCI container, supervisor as PID 1 (an image with python3) | process | `cooperative` | *Added 2026-10-17, decision-203:* `stop` (a request to the supervisor, which signals the group, then `SIGKILL`) ended the ignorer and each control, and the `setsid()` child outlived it, observed; `destroy` ended it. The supervisor finds it can give a process no namespaces of its own in a container (§8: Docker's seccomp profile refuses `CLONE_NEWUSER`, measured), so this is bwrap's no-namespaces row (`cooperative`), not its namespaces row. A `stop` the stopped supervisor does not answer ends the jail at its deadline, the bystander with it. Run as uid 0 on Docker 29.8 against `bh-02-linux-jail:latest`. |
+| OCI container, `docker exec` (an image with no python3) | process | `cooperative` | *Added 2026-10-17, decision-203:* `stop` (the host's ladder on the group `docker exec` made the process lead) ended the ignorer and each control, and the `setsid()` child outlived it, observed; `destroy` ended it. A stop is answered whatever state the container's init is in: with it `SIGSTOP`ped the process ends and the bystander stays. The grade is the supervisor's, and cannot rise as its can: there is no agent in the container to be given a subreaper per process (TASK-0130), and the gaps are named in the process's `control` detail (§9). Run as uid 0 on Docker 29.8 against `ubuntu:24.04`. |
+
+The stop's deadline is the one number a test changes (`SLACK_S`, 10 s to 1 s, so
+that the stopped-supervisor cell takes 5 s and not 14); what is proved is that the
+stop ends the jail when it is missed, not its length. A floor `require(control=...)` is
+checked at compile like any other: `strict_linux()` meets `enforced`, and every stack
+without a supervisor still refuses anything above `unenforced`. `channel_exclusivity` is
+not graded by this ruling: nothing plants a violation of it yet, and it stays
+`unenforced` (§7).
+
+Not changed: the ladder and its verification rung (§9), the supervisor's protocol and
+deadlines (§8), every other axis, the matrix and `MATRIX_VERSION`. Changed in code:
+`runtime_grades(kind, *, supervised)` grades `control` by whether the compiled jail has
+a supervisor, and `Process.control` is `best_effort` where a process has namespaces
+(amended in §6, §7 and §9). Implementing task: TASK-0079.08. (Ruled 2026-10-17, decision-201.)
 
 ## 5. The Spec
 
@@ -834,7 +907,7 @@ honestly earn):
 | `seatbelt` | fs_read (denylist), fs_write, network (deny-all), channel binds | darwin | SBPL; empirical dialect knowledge carried as tested facts |
 | `bwrap` | fs (allowlist-capable), network (netns) | linux | mount-order semantics; pairs with `connect_proxy` in-netns or `pasta` |
 | `systemd_scope` | limits (memory, tasks, cpu quota) | linux | cgroups per-tree; closes what rlimits cannot; `--collect` |
-| `oci_container` | fs (allowlist), limits, network | docker/podman | relay for channels; largest mechanism, lands late |
+| `oci` | fs (allowlist, the image's root named), network (none), env, limits (cpu) | docker | a container as the jail (decision-202); its channel directory and the agent that starts its processes, the supervisor or `docker exec` (decision-203) |
 | `nix_closure` | provisioning | nix hosts | curated toolset as a store closure; isolation comes from whatever it is stacked with |
 | `pasta` / `slirp4netns` | network | linux | filtered user-mode networking inside an unshared netns (closes bwrap's granted-domains gap) |
 
@@ -1203,9 +1276,12 @@ it. Ruled:
   before (the `fs_read` detail now names the supervisor's program among what the
   jail holds), and `control` and `channel_exclusivity` stay `unenforced`, the
   `HOST` runtime's static grades, until a battery that plants survivors proves a
-  higher one (TASK-0079.08, law 10). Seatbelt has no PID 1 to be and no
+  higher one (TASK-0079.08, law 10). *Amended 2026-10-17, decision-201,
+  TASK-0079.08:* the battery has been run, and `control` is `enforced` at the jail
+  scope for a supervised jail (§4); `channel_exclusivity` stays `unenforced`.
+  Seatbelt has no PID 1 to be and no
   namespace to end a process by; it keeps `EQUIVALENT_PROFILE` and a group-shaped
-  stop, unchanged and untested here.
+  stop, unchanged and untested here (its control unproven, not failed, §4).
 
 `render_bwrap_prefix` takes the interpreter as a required keyword and refuses
 last among its own refusals (an unmountable `Spec` still reports a
@@ -1279,6 +1355,151 @@ Ruled:
 
 Decided by the owner in conversation, 2026-10-17. (Ruled 2026-10-17, decision-197.)
 
+**`oci`: a container is a jail (2026-10-17, decision-202).** decision-0001's migration
+step 5, first half: a second jail type, to prove the `Runtime` seam (§8) with an instance that
+has a life of its own. This is the mechanism; the runtime is §8's, the record §9's, the matrix
+and the grades §7's and §4's. The second half, brig's supervisor as the container's agent and the
+channel directory, is TASK-0079.10's (decision-203, the amendment after this ruling).
+
+`Oci(image)` names `RuntimeKind.OCI` and claims `{fs_read, fs_write, network, env, limits}`: the
+five axes `bwrap`, `env_scrub` and `rlimits` claim between them, because it compiles their effect
+itself. `env_scrub` and `rlimits` are shell and trampoline wraps around a host argv, which a
+container's argv is not, and the trampoline cannot run in an image that does not have brig; so the
+matrix refuses them beside it (§7). `compile` is pure, as `bwrap`'s is: a `spec -> flags` render of what
+`CompileCtx` carries (`resolved_paths`, `path_exists`, `path_is_dir`, `euid`). Its `Step` has no
+wrap (`wrap` is the identity: nothing wraps a host argv), no helper, no staged file and no sensor,
+and carries `Step.container`, a `ContainerPlan` (`brig.core.runtime`): the flags of `docker create`,
+the image, the command, and the env file. `brig.mech.oci` imports no `os`: the env file is written
+by the runtime (§8), from the plan.
+
+The flags, in this order (`brig.mech.oci.render_flags`):
+
+1. `--user <euid> --network none --cap-drop ALL --security-opt no-new-privileges
+   --read-only` (and, in the exec variant only, `--init` first: a reaping PID 1, the container's
+   zombies reaped, decision-0001; the supervisor's variant reaps itself, decision-203): the
+   embedder's uid, so that files the workload writes into a project are not owned by root
+   (`CompileCtx.euid`, which `build_compile_ctx` observes; unknown is refused, never root); the
+   container has loopback and nothing else; no capability for the workload and no privilege gained
+   by an exec, as decision-177 does for bwrap, so root in the container holds none either (measured:
+   `CapEff` and `CapBnd` empty, `mount -o remount,rw` refused); and the container's root
+   filesystem read-only, as decision-166 does for bwrap's, so that a write outside every write root
+   is denied and not answered in the image's writable layer.
+2. `--env-file <jail_dir>/oci.env`, and nothing in `-e`: see "The environment" below.
+3. `--ulimit cpu=N:N+1` when `limits.cpu_seconds` is `N` (decision-161's second of headroom:
+   Linux checks the hard limit first, and a soft limit equal to it would deliver `SIGKILL`, never
+   `SIGXCPU`).
+4. `--mount type=bind,src=<resolved>,dst=<path>,readonly` per `fs.read_allows`; the same without
+   `readonly` per `fs.write_allows`; the channel directory `<jail_dir>/chan` bound read-write at its
+   own resolved path (decision-203); the pins of decision-168 (each existing directory between a write
+   root and a carve-out, bound over itself so it is a mount point and cannot be renamed away); per
+   `fs.write_denies` a writable tree reaches, the path bound read-only over itself where it exists and
+   an empty read-only `type=tmpfs` where it does not; per `fs.read_denies` inside a mounted root and
+   existing, a mask (a file by `/dev/null` bound over it, which reads as empty and takes a write
+   to the null device, the host's file untouched: Docker's binds are not `nodev`, so it is not bwrap's
+   `EACCES`; a directory by a read-only tmpfs of `tmpfs-mode=0001`, which lists and reads as
+   `EACCES` even to root, who holds no capability: the mode cannot be 0000, which Docker reads as
+   unset and an unset mode is 1777, listable, measured). The sources are resolved, the destinations the
+   `Spec`'s own, as bwrap's are. Docker orders mounts by the depth of their destination, so a carve-out is mounted over its write
+   root whatever order the flags are in. A path that holds a comma, a double quote, a newline or a NUL
+   is refused (`PathNotMountable`): `--mount` takes CSV, and a path would add a key.
+
+The refusals, each naming its subject (law 2): a platform other than linux
+(`PlatformUnsupported`: Docker Desktop's bind mounts and uid mapping are not measured), a
+denylist `Spec` (`ReadModelUnsupported`), `allowed_domains` (`NetworkUnsupported`),
+`EnvPolicy.PASS` (`EnvPassUnsupported`), an unknown `euid`
+(`UnknownUser`), a path fact the context lacks (`ContextMissing`), a path `--mount` cannot carry
+(`PathNotMountable`), an env name or value an env file cannot carry (`EnvNotRepresentable`), a write
+root that reaches the jail's records (`JailDirReachable`, decision-203), and a
+carve-out strictly above a root it would carve out of (`CarveOutAboveRoot`): Docker mounts the
+shallower destination first, so the root would be laid over the deny and it would silently not hold,
+where bwrap's flag order lets the later mount win.
+
+The grades (§4), each as the mounts and flags above can deliver:
+
+- `network` is `enforced`: `--network none`. A `Spec` that grants `allowed_domains` is refused
+  (`NetworkUnsupported`), as bwrap refuses: per-domain egress is a sidecar proxy on an `--internal`
+  network (decision-0001), not built, and a stack that ran with the network open under a granted
+  domain would be a downgrade (law 2).
+- `fs_write` is `enforced` against the host: no host path is writable that no `write_allows` entry
+  names, a `write_denies` carve-out holds as a read-only submount, and root in the container holds no
+  capability. The detail names what stays writable and never reaches the host: `/dev` (a tmpfs of the
+  container's), `/dev/shm`, `/dev/mqueue` and the tmpfs Docker lays over a few `/proc` files. It names
+  what an absent carve-out does: its mount point is made inside the write root's bind of the host
+  directory, so an empty directory is left on the HOST and outlives the container (measured, as
+  decision-164 measured it for bwrap), and the carve-out is a mount on a host directory entry, so
+  `enforced` is against the workload and not the host.
+- `fs_read` is `best_effort`, and **the gap is the image**: bwrap's jail is made of what the `Spec`
+  mounts and nothing else, so what it does not name is absent; a container is made of its image, whose
+  files are readable whatever `read_allows` says. They are the embedder's chosen furniture and not the
+  host's data, which is why the grade is not lower, and they are why it is not `enforced`: the
+  allowlist is not the whole of what is readable. `read_allows` are binds of the host's paths over the
+  image's. A `read_denies` entry inside a mounted root is masked when it exists, as bwrap's is
+  (decision-164); one that does not exist is left unmounted, for the reason bwrap gives (a mask's mount
+  point would be made on the host), and the detail names it. One outside every mounted root is inert:
+  the host's path is not in the container, and an image file at it is not masked (the grade's detail
+  says so).
+- `env` is `enforced` under `SCRUB`, scoped to the host's environment: the creating process's
+  environment reaches the container only as the names `allow_names` allows and the `set` pairs. It is
+  not the environment of the process: the image's own `ENV` (`PATH`, and whatever it sets) and the
+  `HOSTNAME` and `HOME` the daemon adds are in it, and the detail says so. Under `PASS` the mechanism
+  refuses (`EnvPassUnsupported`): `PASS` is the host's whole environment, which an image's userland is
+  not built for, and which would be written, secrets and all, into a container's configuration.
+- `limits` is `best_effort` when `cpu_seconds` is set, with `rlimits`' detail (cpu only, `uncovered:`
+  memory, tasks, wall, output): a cgroup limit (`--memory`, `--pids-limit`) is a flag away and not built
+  here. With `cpu_seconds` zero it claims nothing: nothing is enforced for the `Spec`, so nothing is
+  graded, the axis falling to the coverage fill as `unenforced` (decision-092).
+- `channel_exclusivity` and `control` are the runtime's (§7), not the mechanism's.
+
+**The environment is an env file, never the command line (law 9).** The values of
+`EnvPolicy.set` and of the names `allow_names` forwards would, as `-e K=V`, be in the argv of
+`docker create`, visible in `ps` to every user for as long as it runs (law 9 counts argv as shared
+media; §5's `EnvPolicy.set` is the first case). So the runtime writes them to a file, mode 0600,
+created exclusively and not through a link, in the jail directory (`<jail_dir>/oci.env`), names it
+with `--env-file`, and removes it as soon as `docker create` has returned, whether or not it
+succeeded: the container does not exist yet, so the file is never in a mount a process can read,
+and nothing of it is left on disk. The plan renders it (`ContainerPlan.env_file_text`, pure): a
+forwarded name is written when the creating process has it set and non-empty, as `env_scrub`'s
+`${NAME:+...}` forwards it, and a `set` pair overrides a forwarded name. A line is `NAME=value`
+whole (Docker's file takes the value verbatim, spaces, quotes, `$` and `#` included; measured), so a
+name that is not `[A-Za-z_][A-Za-z0-9_]*`, or a value with a newline, a carriage return or a NUL, is
+refused (`EnvNotRepresentable`; at compile for `set` and the names, at `create` for a forwarded
+value, which names the variable and never its value). What this leaves on the host: the values are in
+the container's configuration, so anyone who can talk to the daemon reads them with `docker inspect`
+(`Config.Env`); the grade's detail says so, as `env_scrub`'s says what the argv transit exposes.
+
+Implementing task: TASK-0079.09. (Ruled 2026-10-17, decision-202.)
+
+*Amended 2026-10-17, decision-203, TASK-0079.10:* the mechanism now compiles the container's channel
+directory and the agent that starts its processes (§8 is the runtime's half, §9 the embedder's).
+
+- **`Oci(image, interpreter="/usr/bin/python3")`.** `interpreter` is the absolute path, inside the image,
+  of the Python that brig's supervisor runs under as the container's PID 1; `None` names none (a bare name
+  is refused: the container's `PATH` is the image's, and brig names no program by a bare name). The runtime
+  tries it and, where the image has none, starts processes with `docker exec` (§8).
+- **Two variants of one plan.** The flags above are those both variants share, with one change: **`--init`
+  is no longer among them**. `ContainerPlan.create_flags` renders the exec variant as `--init` and the shared
+  flags with the idle `sleep infinity`, and the supervisor's as the shared flags and one more mount, the
+  supervisor's program (`<jail_dir>/oci-supervisor.py`, which the runtime writes) bound read-only at
+  `/.brig-supervisor.py`, with the command `<interpreter> -I /.brig-supervisor.py <jail_dir>/chan/agent.sock`
+  and no `--init`: the supervisor is PID 1 and reaps. Both are pure renders of the `Spec`, tested as goldens.
+- **The channel directory is always mounted.** Flag 4 gains `--mount type=bind,src=<jail_dir>/chan,
+  dst=<jail_dir>/chan` (read-write, at its own resolved path, `CompileCtx.channel_dir`, decision-184),
+  whether or not the `Spec` declares a channel: the supervisor's control socket, the exec agent's files and
+  every declared channel's socket are made in it. **A `Spec` that declares a channel compiles**
+  (`ChannelsUnsupported` is gone).
+- **A write root may not reach the jail's records.** `JailDirReachable` refuses a `write_allows` root at or
+  above `ctx.jail_dir`, or at or under its `procs/`: the records are kill authority (decision-173), bwrap
+  keeps that by sealing the jail directory under such a root, and a container does not seal it (a read-only
+  bind of the directory laid over the root, the channel directory bound again after, is not built). Nothing
+  else of the jail directory is mounted: the records, the stdio files and the supervisor's program stay the
+  host's.
+- **Grades.** `fs_write`'s detail names the channel directory as the one host path bound read-write
+  beside the write roots. `channel_exclusivity` stays `unenforced` (§7): the directory is shared by every
+  process of the container, so a co-tenant's socket is shared media (decision-0001), not a channel to the
+  host. Nothing else changes.
+
+Implementing task: TASK-0079.10. (Ruled 2026-10-17, decision-203.)
+
 Deliberately absent: a cooperative filesystem guard (see §4), and `ulimit -u`
 / `RLIMIT_NPROC` anywhere (per-user on darwin and commonly on linux; capping
 it strangles the operator's desktop and masquerades as a policy denial — a
@@ -1341,7 +1562,15 @@ exclusivity. No grade above that ships without decision-0001's control battery
 law 10). What changes in a report is the two axes' `detail`, which now names
 the runtime and the gap. The matrix keeps every row and its order, and
 `MATRIX_VERSION` stays 5. Implementing task: TASK-0079.03. (Ruled 2026-10-12,
-decision-179.)
+decision-179.) *Amended 2026-10-17, decision-201, TASK-0079.08:* the battery
+exists (§4), and `runtime_grades` takes whether the compiled jail has a
+supervisor, so the grade is per jail type and not per kind alone: `HOST` grades
+`control` `enforced` for a jail with a supervisor, `unenforced` for one with none
+(the empty stack, Seatbelt, a stack without bwrap), whose `detail` says the battery
+has not been run against it. `channel_exclusivity` is `unenforced` for every kind.
+A floor `require(control=...)` above what the jail type earns is refused at compile
+as before, and its note says no stack like it meets the floor until a battery proves
+a higher grade for this jail type.
 
 **Coverage is a construction-time invariant, not a step anyone can forget.** An
 `EnforcementReport` carries a `Graded` for all seven axes of §4; constructing one
@@ -1411,6 +1640,36 @@ are written anyway, because rule 3 refuses an **unknown** pair and "unknown"
 is not the same claim as "impossible": a total matrix is what makes the
 difference legible. (Implementing task: this phase.)
 
+**The matrix can refuse a pair and say why; `oci` is in it (2026-10-17, decision-202).** Rule 3
+read "unknown pairs are refused", and the matrix recorded the pairs no stack can compose as rows
+with an `outer` and an "unreachable" rationale (`{bwrap, seatbelt}`, `{bwrap, connect_proxy}`). A
+row says how two mechanisms compose, and for a pair that never does, it says something false: were
+`oci`'s axes ever narrowed, `{oci, env_scrub}` would compose, `env_scrub`'s shell around a container's
+argv. So the matrix gains `REFUSED_PAIRS`, pair to reason, beside `COMPATIBILITY_MATRIX`: a pair is a
+row (it composes), a refusal (it never does, and the reason is the data) or neither (unknown, refused,
+saying so), and the square is closed when every pair of mechanisms is one of the first two.
+`CompatibilityRefused` carries the `reason` of a refused pair. `oci` adds five, each refused:
+`{oci, bwrap}` and `{oci, seatbelt}` (two jail types; the stack's runtime would be two,
+`RuntimeConflict`, and both claim `fs_read`, `fs_write` and `network`), `{oci, connect_proxy}`
+(`connect_proxy` stays `HOST`'s: egress filtering in a container is a sidecar proxy, decision-0001),
+`{oci, env_scrub}` and `{oci, rlimits}` (§6: an `env_scrub` wrap is a shell around a host argv, the
+`rlimits` trampoline needs brig in the image, and `oci` compiles both effects itself). `oci` claims
+`env` and `limits`, so rule 1 refuses these two first, `AxisClaimConflict` naming the axis, as it
+refuses the other three; the refusal is the matrix's too, for the day a claim is narrowed, and
+`MATRIX_VERSION` is 6, as a row was added. The composition order of every pair that composes is
+unchanged.
+
+`Step.container` and `CompiledJail.container` carry the `ContainerPlan` (§6), as `supervisor` carries
+the supervisor's plan; at most one mechanism declares one (`ContainerConflict`, as
+`SupervisorConflict`). `runtime_grades(OCI)` grades `control` at the jail scope `enforced`, and
+`channel_exclusivity` `unenforced`, as every kind's; the control grade is what the control battery
+proves for a container (§4's table, decision-202), and is the same whether or not a supervisor ever
+runs in it, so it does not depend on `supervised`. A floor `require(control=ENFORCED)` is met by a stack
+of `oci`. `HostRuntime.create` refuses a compiled jail whose `runtime` is not `HOST` (`ValueError`, naming
+both kinds), as `Jail.create` already refused a runtime of another kind: the check TASK-0079.03's review
+left for this task, since a compiled jail of another kind now exists. Implementing task: TASK-0079.09.
+(Ruled 2026-10-17, decision-202.)
+
 Presets keep CLI ergonomics and give
 embedders a strength vocabulary; strength comparison between arbitrary stacks
 is report dominance per axis, not a total order.
@@ -1419,7 +1678,7 @@ is report dominance per axis, not a total order.
 
 ```python
 class Runtime(Protocol):
-    kind: RuntimeKind                        # HOST, FAKE, ... (§3)
+    kind: RuntimeKind                        # HOST, OCI, FAKE (§3)
     capabilities: frozenset[Capability]      # NEW_PROCESS_GROUP, PTY, DETACH, ... (decision-179)
     def create(self, jail: CompiledJail, *, cwd, jail_id, jail_dir,
                tether: int | None) -> JailRecord: ...   # holds no process
@@ -1918,6 +2177,233 @@ others took 21. Ruled:
 
 Implementing task: TASK-0079.21. (Ruled 2026-10-17, decision-200.)
 
+**`OciRuntime`: a container is the instance, and the daemon ends it (2026-10-17,
+decision-202).** decision-0001's migration step 5, first half; §6 is the mechanism's, §9 the record's.
+`brig.runtime.oci.OciRuntime(docker, docker_host)` is a frozen dataclass of `kind` `OCI`, no
+`Capability` and two settings: the absolute path of the `docker` CLI (`/usr/bin/docker`; a bare name
+is resolved through whatever `PATH` the process has, which is authority no `Spec` granted, as
+decision-026's rule 1 says) and the daemon, `docker_host`, `unix:///var/run/docker.sock` by default.
+An embedder picks it by importing it (§13); `run` never does. A container is created and ended
+through the daemon, never by signalling a process group.
+
+- **The daemon is the runtime object's, never a record's.** Every `docker` is run with `DOCKER_HOST`
+  set to `docker_host` and an environment of its own: the paths and settings the CLI needs to reach a
+  daemon (`PATH`, `HOME`, `DOCKER_CONFIG`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY`) and nothing else,
+  so an inherited `DOCKER_CONTEXT`, which the CLI prefers to `DOCKER_HOST`, cannot move it, and the
+  creating process's environment, secrets included, is not the CLI's. A jail's dict names no daemon
+  (§9), and one with a `docker_host` key is refused like any unknown key.
+- **`create`** refuses a compiled jail that is not an `OCI` one with a container plan, or that has
+  helpers or staged files (`OciCreateRefused`: the mechanism produces none, and a runtime that ignored
+  them would be a downgrade), then: takes a hold on the tether if given (`TetherClosed` when it
+  has ended); asks the daemon for its id (`docker info --format '{{.ID}}'`; `OciUnavailable` when it does
+  not answer); writes the env file (§6) and runs `docker create --pull never --label brig.jail=<jail_id>`
+  with the plan's flags, its image and its command, removing the env file whatever came of it; starts a
+  tether watcher (below) on the container's id; runs `docker start`; and asks once that the container
+  is running (under `--init` a command that is not in the image ends the container at once and
+  `docker start` still returns 0, and a jail that does not run is no jail; a command that ends later
+  reads gone by `alive`). If any step after the container exists fails, it removes the container and
+  the watcher before it raises (`OciCreateFailed`). The container's
+  command is `sleep infinity` under `--init`: an idle instance, which since decision-203 is the exec
+  variant only (the supervisor is the other). brig never pulls an image (`--pull never`): the embedder names an image it has.
+- **Identity is the label and the daemon's id.** The record holds the container's full id and the
+  daemon's id (§9); the container carries `brig.jail=<jail_id>`. `alive` and `destroy` act on nothing
+  they cannot verify: they ask the daemon for its id and refuse one that is not the record's
+  (a record of another daemon is not this runtime's to act on), then `docker inspect --type container`
+  the id and require that the container's id is the record's and its label is the jail's. A container
+  that is another's is not touched, and `destroy` says so in the item.
+- **`destroy` is `docker rm -f`, verified by `docker inspect`.** One `container` item (SPEC §9's kill
+  vocabulary has had the kind since M2): `ENDED` when `docker rm -f` returned and a second `inspect`
+  then found no such container (the report's evidence is that observation, never the exit code),
+  `ALREADY_GONE` when the first found none, `FAILED` with the reason when the daemon did not answer,
+  was not the record's, held another's container, or still held this one after the `rm`. Then the
+  tether watcher's group, a `helper` item, through the host ladder, which has the identity checks of
+  decision-155. Total: it raises nothing from an item. `docker rm -f` kills at once, which is what
+  `grace=0` asks for everywhere (decision-193), so `grace` is accepted and has no effect; a
+  graceful stop belongs to the process scope, which decision-203 gives its agents. `alive` is the container's `State.Running`
+  and raises `OciUnavailable` when the daemon cannot be asked or is not the record's: a bool cannot
+  say "unknown", and `True` or `False` for a jail whose state is unknown would be a guess.
+- **The tether is a host watcher that runs `docker rm -f`.** When `create` is given a tether (the read
+  end of a pipe whose write end the embedder keeps), it starts `/bin/sh` detached in a session of its
+  own, with the tether as its stdin and the daemon in its environment: it reads the pipe to
+  end-of-file, which is every write end closed (the embedder closed it, or the kernel did because the
+  embedder died, `SIGKILL` included), and then runs `docker rm -f` on the container's id, up to five
+  times a second apart, so that a daemon restarting at that moment is waited for. It is the
+  record's one `JAIL_LIFETIME` helper (`helper_pids`, `helper_stamps`), so `destroy` ends it and a
+  rehydrated jail can. A watcher cannot report: the proof that it worked is the container gone, which
+  `tests/integration/test_oci_tether.py` shows against a stand-in embedder killed with `SIGKILL`, with
+  a second live embedder's container kept as the control. A jail created with no tether has no
+  watcher and lives until it is destroyed, as a host jail does.
+- **What was absent, and what each answer is now.** *Amended 2026-10-17, decision-203, TASK-0079.10:*
+  decision-202 returned `None` from `supervisor`, an empty `processes`, a `reserve` that raised, and no
+  grade for the process scope, because nothing was started in a container through brig. Now `supervisor`
+  is the agent of the jail (below, decision-203) for a jail made in this process, and `None` for a
+  rehydrated one, so `Jail.start` and `Jail.probe` are there on a created jail and absent, not raising, on
+  a rehydrated one (§9). `processes` is the records the jail holds and finds under `procs/`, as
+  `HostRuntime`'s; `process_alive` is the identity check of decision-155; `reserve`, `endpoint`, `ready` and
+  `connect` are the host runtime's, over the channel directory bound into the container. `tethered` is still
+  `None`: a container's record keeps nothing apart from the dict, so a rehydrated jail cannot say it was
+  created untethered and does not start. The process scope is graded in §4 and §9.
+- **Proved against the daemon, and skipped visibly without one.** The integration tier
+  (`tests/integration/test_oci_*.py`) runs against the Docker daemon of the machine it runs on and skips
+  with a reason that names `docker info` when the daemon does not answer. It reads `docker inspect`
+  itself, not through the runtime: `Config.User`, `Config.Env` against what the `Spec` allowed,
+  `HostConfig.Init`, `NetworkMode`, `ReadonlyRootfs`, `Ulimits`, `Mounts` and the label; the process
+  table for a value in argv during a create; and the daemon for a container that is gone.
+
+Implementing task: TASK-0079.09. (Ruled 2026-10-17, decision-202.)
+
+**A container's processes: the supervisor as its agent where the image has python3, `docker exec`
+where it has none (2026-10-17, decision-203).** decision-0001's migration step 5, second half; §6 is
+what the mechanism compiles, §9 what a `Process` says. decision-202 left the container idle
+(`sleep infinity`) and `Jail.start` absent. Docker cannot signal an exec, so per-process control
+inside a container needs an agent there, and an image can host brig's supervisor only if it has an
+interpreter. Ruled:
+
+- **Which agent is found out at `create`, by doing it, and the processes say which.** `Oci(image,
+  interpreter="/usr/bin/python3")` names the interpreter to try. `create` makes the container as the
+  supervisor's (below) and starts it. A container whose command is not in its image does not start:
+  `docker start` fails and `docker inspect` then says `State.Status` `created` and `State.ExitCode`
+  127 (126 where the file is there and is not executable), Docker's own codes for "the contained
+  command cannot be found" and "cannot be invoked", measured on Docker 29.8 with `ubuntu:24.04`
+  (127 for `/usr/bin/python3` and for the bare `python3`, 126 for `/etc/hostname`). `127` is "this
+  image has no interpreter": the container is removed and made again as the exec variant (`--init`,
+  `sleep infinity`, as decision-202 made it), and the jail's `ContainerRecord.agent` is `EXEC` with the
+  reason (the interpreter named, the code Docker answered). Anything else that stops the start
+  (126, a mount Docker refuses) is `OciCreateFailed` carrying Docker's words, and no container is made
+  as something else for it; a supervisor that starts and never connects and speaks is too (below).
+  `interpreter=None` names no interpreter and skips the attempt. Measured, interleaved, median of 3, on a
+  shared four-core machine: a create is 346 ms with the supervisor (to its hello), 317 ms for the exec
+  variant made directly, and 572 ms for the exec variant after the attempt (a start Docker refuses,
+  a removal and a second create: about 250 ms), so an embedder that knows its image has no
+  interpreter says `None`; a first start is 4 ms through the supervisor and 104 ms through
+  `docker exec`. This is not a downgrade (law 2): the `Spec` asks for no agent, the exec variant is
+  made of the same confinement flags, `CapEff`, `CapBnd`, `NoNewPrivs`, `Seccomp` and the user of a
+  `docker exec` process equal its init's (read from `/proc` by the host, `test_oci_processes.py`), and each
+  `Process` says which agent holds it, how its control is graded and why (§9).
+- **The supervisor is the container's PID 1, started as bwrap's is.** Its variant has no `--init` (the
+  supervisor reaps every orphan, as under bwrap, and the kernel drops `SIGKILL` and `SIGSTOP` sent to a
+  pid namespace's init from inside it), the command `(interpreter, "-I", "/.brig-supervisor.py",
+  <chan>/agent.sock)`, and the program bound read-only from `<jail_dir>/oci-supervisor.py` (mode 0444,
+  written by the runtime from `SUPERVISOR_SOURCE`, a stale file or link there removed first, before
+  `docker create`). Docker has no memory-backed bind as bwrap's `--ro-bind-data`; the file is in the
+  jail directory, which no mount reaches (below), and the jail sees it read-only. The program is the same
+  text: standard library only, parsing as Python 3.9, `PROTOCOL` 2, the same five ops, the same rehearsal
+  and refusal of late imports. It learns where its control socket is from its one argument, a descriptor
+  number as under bwrap or, new, a path (`open_control`). Its uid-0 reason for holding no namespaces now
+  names a container as well as bwrap, whose covers over `/proc/irq` and `/proc/bus` it shares.
+- **How the control socket crosses into a container: a socket the host binds in the channel
+  directory, once.** Measured, the inherited-descriptor route cannot carry the protocol: through
+  `docker start --attach --interactive` the container's descriptors 0, 1 and 2 are pipes the
+  containerd shim made, and `socket.recv_fds` on one is `ENOTSOCK`: no `SCM_RIGHTS` (a start's three
+  stdio files go in, a pidfd comes out) and no message boundaries. A `SOCK_SEQPACKET` listener the
+  host binds at `<chan>/agent.sock` (mode 0600, the embedder's uid, which the container's `--user`
+  is) before the container starts, and which the supervisor connects to as its first act, carries it
+  unchanged. Measured: a container started with `--user <euid>` connects to such a socket whether
+  the directory is bound writable or `readonly` (a socket is exempt from the read-only-file-system
+  check), and `SO_PEERCRED` on the accepted connection names the host pid of the container's PID 1,
+  which is `docker inspect`'s `State.Pid`. So the host accepts one connection, requires its peer to
+  be `State.Pid` (`peer_refusal`; another process is `AgentStartFailed`, refused before a byte is read),
+  and the caller closes the listener and unlinks the path whatever came of it: after the hello nothing
+  listens, and a process of the jail finds no control socket to dial or squat. The accept is bounded
+  by 60 s, as the bwrap supervisor's hello is, and asks the container whether it still runs once a
+  second, so a supervisor that died (an interpreter older than 3.9, a kernel without `pidfd_open`) is
+  `OciCreateFailed` carrying `docker logs` and not a minute's wait. The link is `SupervisorLink`
+  (`brig/run/_supervisor_link.py`) unchanged; its `unresponsive` function is `docker rm -f` of the
+  container (a missed deadline ends the jail, decision-191), and end-of-file on it ends the supervisor,
+  which is the container's PID 1, so the container stops (it is not removed: `destroy`, or the
+  tether's watcher, removes it). `Jail.start` is `LinkedSupervisor`'s two requests, unchanged: a stdio
+  file the host opened crosses by `SCM_RIGHTS` whatever is mounted in the container, the pidfd the
+  supervisor returns names the process in the host's pid namespace, and the record is written before
+  the process runs a byte. `JailRecord.namespaces` carries the hello's, and the jail's `Held` the link
+  and the tether (a start after the tether has ended is `TetherClosed`).
+- **No process has namespaces of its own in a container, and the process scope says so.** Measured on
+  Docker 29.8 (`bh-02-linux-jail`, as uid 0 and as an unprivileged user, `--cap-drop ALL --security-opt
+  no-new-privileges`): `unshare --user ...` is `EPERM`, Docker's default seccomp profile refusing
+  `CLONE_NEWUSER` to a container without `CAP_SYS_ADMIN`; with the profile `unconfined`, mounting a fresh
+  `/proc` is `EPERM`, the container's masked `/proc` paths being what `mount_too_revealing` refuses. So the
+  hello says `held: false` and every process shares the container's namespaces, graded `cooperative` (§4,
+  §9). The supervisor was run here as uid 0 only, where it does not try (decision-197); the refusal for another
+  uid is measured with `unshare(1)`, not through the supervisor, which for that uid would report the
+  failing call's own error.
+  Loosening the container to give them (a profile that admits `unshare`, `systempaths=unconfined`) would
+  trade the container's confinement for a process scope, which this task does not weigh; the owner may.
+- **The exec variant starts a process with `docker exec`, behind a gate.** `argv` runs as `docker exec
+  --workdir <cwd> -- <container> /bin/sh -c SHIM brig-exec <chan>/<id>.pid <chan>/<id>.go argv...` by
+  the host, the client's stdout and stderr the process's files in `<jail_dir>/procs/<id>/` and its stdin
+  `/dev/null` (as `docker exec` without `-i` gives; measured), in a session of its own so the embedder's
+  terminal signals do not reach it. The host made `<id>.go` a FIFO first. The shim checks that `argv[0]` is
+  a program (`command -v`; not one is exit 127 with a message on the process's stderr, before anything is
+  announced), writes its pid to `<id>.pid` with one `echo`, and then blocks reading `<id>.go`: the process
+  is held before it has run a byte, as the supervisor's gate holds one. The host reads the pid (a complete
+  line of digits, from a file opened without following a link and read no further than a pid is long),
+  finds the host process it is (`find_host_pid`: a process whose `NSpid` ends in that number and whose
+  `ns/pid` is the container init's, whose host pid the jail record keeps, so a number in the container
+  never names a host process outside it), requires its command line to carry the start's id (it is the shim
+  of this start), reads its start stamp, requires it to lead a group of its own (measured: `docker exec`
+  makes the process a session leader, `pgid` = `sid` = pid), writes `record.json`, and writes `go` to the
+  FIFO, which `exec`s the program; it returns once the shim has exec'd (its command line no longer carries
+  the id), so a signal sent as `start` returns meets the program and not the shim. A client that exits
+  before it announces (a missing program, a working directory that is not there, a container that is gone)
+  is `WorkloadSpawnFailed` carrying what it said; a pid the host cannot map, or that is not the shim, is
+  too, and in each failure the held shim is told `x` and exits, so nothing is left running. Neither file
+  is left in the channel directory, and a failed start leaves no records directory. The pid in
+  `<id>.pid` is the jail's to write, so the record is the host's best reading of the process and not the
+  supervisor's pidfd: a co-tenant that races the host can name a decoy that carries the id on its command
+  line, which the check does not stop (§9 grades it).
+- **Control of an exec'd process is the host's ladder on the ids it recorded.** `signal` and `stop` are
+  `HostSupervisor`'s (`brig/run/host.py`) on the process's recorded host pid, group and start stamp:
+  identity before every signal (decision-155), `SIGTERM`, a grace period, `SIGKILL`, verified by the host's
+  own scan of the process table. This is a host signal to a process the host can name, which `OciRuntime`
+  otherwise never makes (a container is ended through the daemon), and it holds for what the host can name:
+  a local rootful daemon on Linux, containers run as the embedder's uid. A host that cannot (the
+  processes are not in its pid namespace, a user-namespace remap) cannot start through `docker exec`
+  (`WorkloadSpawnFailed`, saying why) rather than start a process it cannot end. `wait` is the exit status
+  `docker exec` reports for the process, kept by the thread that waits on the client under the process's
+  recorded pid, as a supervised process's status is kept: `128 + n` for a signal `n` (143 for `SIGTERM`),
+  which a status cannot be told from an exit of that code, and `ExitStatusUnobservable` in any process but
+  the one that started it. The client reports when the process has ended and everything holding its output
+  has closed it (measured: a child left holding stdout held the client for 3 s), so `wait` keeps waiting to
+  its deadline for a client it still waits on, even though the process is gone. The waiter's pid is
+  watched until its status is recorded, not a moment less (`brig/run/_waiters.py`): the reverse order left
+  a window in which a pid read as neither watched nor recorded, which `HostSupervisor.wait` reads as a
+  status that will never come, found under load by this agent's `wait`
+  (`test_exit_status_is_recorded_not_invented.py`, seen failing with the old order).
+- **The channel directory is bind-mounted, on Linux, and each start's socket is dialled from the host.**
+  `<jail_dir>/chan` (made by `create`, mode 0700, a link or a file there refused, as `HostRuntime`'s is,
+  and an earlier jail's records cleared as `HostRuntime` clears them: the two functions are `brig/run/
+  _jail_dir.py`'s now) is bound read-write at its own resolved path in every container jail (§6). `reserve`,
+  `endpoint`, `ready` and `connect` are the host runtime's (`brig/run/_channels.py`, which both runtimes
+  call): the same `<chan>/<16 hex>.sock` a process binds and the host dials, through the verified dial of
+  decision-185 (a socket not a link, its listener a process of the started process's group, whose leader
+  still holds its identity), which works across a container's pid namespace because the kernel numbers the
+  peer in the dialler's (tested for both agents, with a co-tenant that binds another process's path and a
+  link planted at it). **Docker Desktop's relay is not built**: where the daemon is in a VM or on a
+  remote host a bind mount shares no socket with the host (`Oci` refuses any platform but Linux,
+  decision-202, and the host-pid reading above needs the daemon's processes in the host's pid
+  namespace); a host listener forwarded into the container is the work of a later task.
+- **The jail directory stays the host's.** Records are kill authority and the supervisor's program is read
+  by the supervisor: `Oci.compile` refuses a write root at or above `ctx.jail_dir`, or at or under its
+  `procs/` (`JailDirReachable`, §6), where bwrap seals the directory against a write root (decision-173).
+  Nothing else of the jail directory is mounted.
+- **A rehydrated container jail** can be destroyed and asked if it is alive, as decision-202 said. Its
+  agent is not known in the process that rehydrated it (the supervisor's link was a socket; the exec
+  agent's files and waiter are the creating process's), so `supervisor` is `None`: `start`, `probe` and
+  its processes' `interrupt`, `stop` and `wait` are absent, not raising (§9), and its `tethered` is `None`.
+  The processes it finds under `procs/` are its own to list and ask the identity of.
+- **Unchanged.** `OciRuntime`'s identification by label and daemon id, `destroy` (`docker rm -f`,
+  verified by `docker inspect`, and a supervisor's link closed after), the tether watcher, the env file,
+  the jail dict (`JAIL_VERSION` 11: the agent is the creating process's knowledge, as a supervised jail's
+  namespaces are), and every grade of the report but `channel_exclusivity`'s detail and `control`'s.
+- **The container is the jail; its processes get no namespaces of their own, by design.** The owner,
+  2026-10-17, on the measurement above: per-process namespaces are not sought inside a container (no
+  seccomp profile loosened to allow `CLONE_NEWUSER`). decision-0001's table had a container's process
+  scope as "its nested namespace"; that row is superseded. Both agents' processes are graded
+  `cooperative` at the process scope, and the exec agent is not graded lower: it is weaker in kind (no
+  agent for a subreaper per process, TASK-0130; a pid announced rather than held; an exit status only
+  its starter reads), which its `control` detail names (§9).
+
+Implementing task: TASK-0079.10. (Ruled 2026-10-17, decision-203.)
+
 ## 9. The Jail (the Handle until decision-183)
 
 The shape since decision-183 (§3); "the handle" in the rulings below, which
@@ -2000,7 +2486,7 @@ implementation and not a description of it:
 - **The grade is already promised, and is not re-promised here.** How well
   control can be delivered for a given jail is the `control` axis of the
   `EnforcementReport` the handle already carries (§4; law 7's "its
-  deliverability is itself graded in the report"). `interrupt` reads no grade
+  deliverability is graded per scope", since decision-201). `interrupt` reads no grade
   and publishes none: a per-call grade would be a second, unsynchronized
   answer to a question the report answers.
 - **Same pid-reuse seam as teardown**, accepted by decision-144 on the same
@@ -2776,7 +3262,13 @@ the mechanism's and the runtime's. Ruled:
   ceiling for both until TASK-0079.08's battery plants survivors from the host and proves
   more (decision-0001, law 10); the two differ in `namespaces` and in the detail. The
   jail's `report` is the compile-time claim and is not changed: its `control` axis is the
-  jail scope, `unenforced` as before.
+  jail scope, `unenforced` as before. *Amended 2026-10-17, decision-201, TASK-0079.08: the
+  battery has been run (§4). A process in namespaces of its own is `best_effort`, its detail
+  naming the gap (a stop the supervisor does not answer ends the jail at the request's
+  deadline); one without stays `cooperative`, its detail saying the battery saw a `setsid()`
+  child outlive its stop; a jail with no supervisor, which the battery was not run against,
+  stays `cooperative` and says so. The jail's `control` axis is `enforced` for a supervised
+  jail, with or without namespaces.*
 - **The record carries it.** `ProcessRecord` and `record.json` gain `namespaces`
   (a bool, required: an older record reads unreadable, a doubt like any other), and the
   jail's dict carries the records, so `JAIL_VERSION` is 10. A rehydrated jail reads it from
@@ -2805,9 +3297,72 @@ the mechanism's and the runtime's. Ruled:
   (`term_rung`, decision-195), so a jail of such processes is not ended in two seconds per
   process. A process that handles `SIGTERM` still gets it and its grace.
 - **Law 7's process scope** (§2) is this: the grade at the process scope is `Process.control`,
-  `cooperative` at most until the battery.
+  `cooperative` at most until the battery. *(Amended 2026-10-17, decision-201: the battery
+  has been run, §4; `Process.control` is what it proves.)*
 
 Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-196.)
+
+**A container is identified in the dict (2026-10-17, decision-202).** `JailRecord` gains `container`:
+`None` for a jail whose instance is host processes, else the `ContainerRecord` of an `OCI` one,
+the container's full id (64 lowercase hex characters) and the id of the daemon that made it
+(`docker info --format '{{.ID}}'`). `Jail.to_dict` carries it as `"container"`, `null` or
+`{"id", "daemon"}`, a required key, so `JAIL_VERSION` is 11 and a version-10 dict is refused like any
+other version; `from_dict` refuses an `id` that is not a container id and a daemon id that is not a
+word of letters, digits, `:`, `-` and `_`. The record names **no daemon address and no CLI path**: those
+are the runtime object's (§8), which the embedder passes to `Jail.from_dict(d,
+runtimes={RuntimeKind.OCI: OciRuntime(...)})`, so a forged dict cannot send `destroy` to a daemon of
+its choosing, and a record read under the wrong runtime is refused by the daemon's id before anything
+is asked of a container. A rehydrated `OCI` jail has no `start` (its agent is not known to the process that rehydrated it, §8,
+decision-203; a jail made in this process has one), and can be destroyed and asked if it is alive. The rest of the record is as for any jail: `helper_pids`
+and `helper_stamps` hold the tether watcher, `supervisor` is `null`, `processes` is empty, and
+`wrap_prefix` is `null` (no prefix applies, and every start would be refused). Implementing task:
+TASK-0079.09. (Ruled 2026-10-17, decision-202.)
+
+**A container's processes (2026-10-17, decision-203).** The embedder's half of §8's ruling: a `Process`
+of a container jail and what it says. Ruled:
+
+- **`ContainerRecord` carries the agent, and the dict does not.** `ContainerRecord` gains `agent` (a
+  `ContainerAgent`, `SUPERVISOR` or `EXEC`, `None` where this process did not make the jail), `agent_reason`
+  (why it is `EXEC`: the interpreter is not in the image, or none was named) and `init_pid` (the host pid of
+  the container's PID 1). They are what the process that created the jail knows, as a supervised jail's
+  namespaces are, so `Jail.to_dict` is unchanged (`JAIL_VERSION` 11, the container `{id, daemon}`). A jail
+  made by the supervisor's variant also holds, in `Held`, its link and `JailRecord.namespaces`, the hello's
+  finding.
+- **`fidelity` is `SAME_INSTANCE` for every container process, whichever agent holds it.** A `docker exec`
+  process is placed in the container's own confinement, which is what `ExecFidelity.SAME_INSTANCE` says
+  of `oci_container` (its docstring has said so since M2): user, `CapEff`, `CapBnd`, `NoNewPrivs` and the
+  seccomp filter of an exec'd process equal the init's, read by the host from `/proc` for each agent
+  (`test_oci_processes.py`). `namespaces` is `False`, and `ProcessRecord` is the record every host start
+  writes (`pid`, `pgid`, `start_time`, `argv`, the stdio paths, `channel`, `bound_path`).
+- **`control` is `cooperative`, for both, and says why.** The control battery (`tests/control_battery.py`,
+  now a `Harness` with the plants a jail type can run and how its agent is stopped) is planted in each
+  agent's container, ends the survivors with `Process.stop` and with `Jail.destroy`, looks with the host's
+  own `/bin/ps` and `/proc`, and `proven` reads it (§4's table). It found a stop group-shaped for both: a
+  `setsid()` child outlives it, and `destroy` ends it. What differs is in the detail. The supervisor's:
+  `stop` is a request to the PID 1 supervisor, which signals the group; a stop it does not answer takes the
+  request's deadline and ends the jail, the bystander with it (the third cell); and why the container gave
+  its processes no namespaces. The exec agent's: `stop` is the host's ladder on a group `docker exec`
+  made the process lead; a stop with the container's init stopped is answered and ends the process alone;
+  there is no agent in the container, so nothing can raise the grade the way a supervisor's subreaper per
+  process can (TASK-0130); the process's identity is the host's reading of a pid the jail announced, where
+  the supervisor returns a pidfd; its exit status is `docker exec`'s (`128 + n`) and observable only in the
+  process that started it; it needs a host that can name and signal the container's processes; and it
+  names why `docker exec` is the agent. The claim and the proof are one number: the e2e-style assertion
+  holds `Process.control` and the report's `control` axis to what `proven` says for the scope, per agent,
+  and a claim above it was seen failing (the notes of TASK-0079.10).
+- **A process of the supervisor's variant is `LinkedSupervisor`'s, unchanged (§9, decision-192):** recorded
+  before it runs, from the pidfd, named by id in every request; of the exec variant `ExecSupervisor`'s (§8).
+  `Process.stop` reports one `exec_sibling` item (`workload_group` for the jail's first process), `ENDED`
+  only when the host's scan agrees. `Jail.destroy` reports the `container` item and the tether's `helper`
+  item, as decision-202 did; the processes are not laddered one by one, because removing the container ends
+  them.
+- **A co-tenant is shared media in both.** No process of a container has a mount namespace of its own,
+  so every socket in the channel directory is reachable by every process, and the supervisor's variant
+  has no more to offer a co-tenant than the exec variant's; `channel_exclusivity` stays `unenforced` (§7). The
+  host's dial refuses a listener that is not the started process's (decision-185), tested against a
+  co-tenant that binds another process's reserved path.
+
+Implementing task: TASK-0079.10. (Ruled 2026-10-17, decision-203.)
 
 ## 10. Communication with jails
 
@@ -2819,7 +3374,8 @@ Three inbound kinds, each with different liveness, trust, and delivery:
    directory, and the trusted side dials it via `process.connect()`
    (decision-184, decision-185, decision-186). Each mechanism compiles the
    crossing (Seatbelt's grant on the channel directory, bwrap's bind of it,
-   a container relay). Readiness
+   a container's bind of it, decision-203; a relay where a socket cannot cross, Docker Desktop's, is
+   not built). Readiness
    is generic: a LISTEN channel is ready when its bind is observable.
    **Observable means a connect succeeds** — not that the endpoint path
    exists. A socket file outlives the process that bound it, so path existence
@@ -3326,7 +3882,7 @@ core  ←  mech  ←  stack  ←  run  ←  observe
 | `mech` | Mechanism protocol, Step, all mechanisms, denial signatures | `core` |
 | `stack` | Stack, compatibility matrix, presets, floors, aggregation | `core`, `mech` |
 | `run` | the `Runtime` and `Supervisor` protocols and their records, `HostRuntime`, `Jail` and `Process`, teardown, readiness, dial, event stamping | `core`, `mech`, `stack` |
-| `runtime` | runtimes that are not `run`'s own: `fake` today (decision-178); nothing in brig imports one, `run` included: an embedder picks a runtime by importing it | `core`, `mech`, `stack`, `run` |
+| `runtime` | runtimes that are not `run`'s own: `fake` (decision-178) and `oci` (decision-202); nothing in brig imports one, `run` included: an embedder picks a runtime by importing it | `core`, `mech`, `stack`, `run` |
 | `observe` | Console, stat, workspace diff | `core`, `run` |
 | `probe` | batteries, verdicts, report-vs-probe checks | `core`, `run`, `observe` |
 
@@ -3359,9 +3915,12 @@ the spec module and trip the builtin `no-import-cycles`.
 
 ## 15. Deferred and open
 
-- **`oci_container` and `nix_closure`** land late by design (the relay and
-  the closure builder are the two largest mechanisms); the model is validated
-  on the cheap mechanisms first.
+- **`nix_closure`** lands late by design (the closure builder is the largest
+  mechanism); the model is validated on the cheap mechanisms first. **`oci`
+  landed 2026-10-17 (decision-202, §6)**; its channel directory and its processes'
+  agents (the supervisor, `docker exec`) landed the same day (decision-203, §8). Not built: the channel relay
+  for Docker Desktop and remote daemons, a seal of the jail directory under a write root, per-process
+  namespaces in a container (Docker's seccomp profile refuses them), and egress.
 - **Windows** — out of scope entirely for now; stated, not implied.
 - **A `suspend` control verb** — deferred until a consumer exists.
 - **Staged-file delivery for sensitive `EnvPolicy.set` values** — writing them

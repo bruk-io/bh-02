@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from signal import Signals
 from typing import Final, Protocol
 
-from brig.core.runtime import Capability, RuntimeKind, channel_dir
+from brig.core.runtime import Capability, ContainerAgent, RuntimeKind, channel_dir
 from brig.mech import ArgvTransformer, EventSource
 from brig.run import _records
 from brig.run._records import RESERVED_NAMES
@@ -255,6 +255,25 @@ class SupervisorRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ContainerRecord:
+    """The instance of a container jail, as `destroy` and `alive` identify it (decision-202):
+    the container's full id and the id of the daemon that made it. An identity, not an address:
+    the runtime object names the daemon it talks to (`OciRuntime(docker_host=...)`), never a record,
+    and a runtime refuses a record whose `daemon_id` is not the daemon's it asked.
+
+    The rest is what the process that created the jail knows and its dict does not carry
+    (decision-203, like a supervised jail's namespaces): `agent`, who starts the jail's processes
+    (`None`: not known here, a rehydrated jail), `agent_reason`, why it is not the supervisor when it
+    is not, and `init_pid`, the host pid of the container's PID 1 (0: not known)."""
+
+    container_id: str
+    daemon_id: str
+    agent: ContainerAgent | None = None
+    agent_reason: str = ""
+    init_pid: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessNamespaces:
     """Whether each process a supervised jail starts has namespaces of its own (decision-195),
     as its supervisor found out before it said it was ready: `held`, and when not, `reason`, the
@@ -280,7 +299,8 @@ class JailRecord:
     (decision-192), `None` for a jail whose processes are started by the
     host. `namespaces` is what its supervisor found about the namespaces of
     its processes (decision-195), known to the process that created the jail
-    and no other, `None` without a supervisor. `held` is what the creating
+    and no other, `None` without a supervisor. `container` is the instance of an
+    `OCI` jail (decision-202), `None` for any other. `held` is what the creating
     process holds in memory (`Held`), never compared or shown."""
 
     kind: RuntimeKind
@@ -294,6 +314,7 @@ class JailRecord:
     helper_stamps: tuple[str, ...] = ()
     supervisor: SupervisorRecord | None = None
     namespaces: ProcessNamespaces | None = None
+    container: ContainerRecord | None = None
     held: Held | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:

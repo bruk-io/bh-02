@@ -27,12 +27,16 @@ from brig.core.runtime import SUPERVISOR_SOURCE_PATH, SupervisorPlan
 #: The wire's version: the program says it in its hello, and the host refuses another.
 PROTOCOL: Final = 2
 
-SUPERVISOR_SOURCE: Final = r'''"""brig supervisor: PID 1 of a bubblewrap jail (SPEC.md section 8, decision-191).
+SUPERVISOR_SOURCE: Final = r'''"""brig supervisor: PID 1 of a bubblewrap jail or a container (SPEC.md section 8, decision-191,
+decision-203).
 
-One program for every bwrap jail. It holds the jail's processes: it starts, signals, waits for and
-stops them on request, reaps every orphan the jail makes, and ends the whole jail when the host
-that started it is gone. It runs as `python -I <this file> <control fd>` under the jail's own
-confinement, from a file bwrap bound read-only out of the host's memory (`--ro-bind-data`).
+One program for every supervised jail. It holds the jail's processes: it starts, signals, waits for
+and stops them on request, reaps every orphan the jail makes, and ends the whole jail when the host
+that started it is gone. It runs as `python -I <this file> <control socket>` under the jail's own
+confinement, from a file bwrap bound read-only out of the host's memory (`--ro-bind-data`) or Docker
+bound read-only from the jail directory. Its one argument is its control socket: the number of an
+inherited descriptor (bwrap: the host's socketpair), or the path of a socket the host listens on,
+which it connects to once (a container: a descriptor cannot cross `docker start`, decision-203).
 
 Everything it reads from its control socket is the host's. Everything a process of the jail can
 reach is the model's: its signals, its /proc, its files. So the program imports everything before
@@ -138,6 +142,19 @@ def log(text):
 def die(text, code=70):
     log(text)
     os._exit(code)
+
+
+def open_control(argument):
+    """The control socket the one argument names: an inherited descriptor's number (the end of a
+    socketpair the host made, under bwrap), else the path of a SOCK_SEQPACKET socket the host
+    listens on, connected to once (a container). Neither is inherited by anything it starts."""
+    if argument.isdigit():
+        control = socket.socket(fileno=int(argument))
+    else:
+        control = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        control.connect(argument)
+    os.set_inheritable(control.fileno(), False)
+    return control
 
 
 def check_platform():
@@ -781,9 +798,9 @@ class Supervisor:
         rehearsal."""
         if os.geteuid() == 0:
             return (
-                "the jail runs as uid 0: bwrap covers its /proc/irq and /proc/bus there, and "
-                "the kernel refuses a fresh /proc under mounts that hide those "
-                "(mount_too_revealing), so a process could have no /proc of its own"
+                "the jail runs as uid 0: bwrap (or a container) covers its /proc/irq and "
+                "/proc/bus there, and the kernel refuses a fresh /proc under mounts that hide "
+                "those (mount_too_revealing), so a process could have no /proc of its own"
             )
         reader, writer = os.pipe()
         pid = os.fork()
@@ -878,10 +895,9 @@ def main():
     check_platform()
     environment = inherited_environment()
     try:
-        control = socket.socket(fileno=int(sys.argv[1]))
+        control = open_control(sys.argv[1])
     except (IndexError, ValueError, OSError):
-        die("needs its control socket's descriptor as its one argument")
-    os.set_inheritable(control.fileno(), False)
+        die("needs its control socket as its one argument: a descriptor's number, or the path of a socket to connect to")
     make_undumpable()
     # Nothing but the wake-up a child's end needs: every other signal keeps its default, which
     # for a pid namespace's init means a signal from inside is dropped (SIGKILL and SIGSTOP

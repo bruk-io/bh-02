@@ -47,6 +47,21 @@ Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md
 is the one describing the library.
 
+A container is a jail too (decision-202, TASK-0079.09): `Oci(image)` is the mechanism, compiling a `Spec`
+to the flags of `docker create` (mounts, `--network none`, `--ulimit`, `--init`, `--user` as the
+embedder's uid, and an env file of mode 0600 that is removed after the create, never `-e`), and
+`brig.runtime.oci.OciRuntime` creates it through the Docker daemon, identifies it by a `brig.jail` label
+and the daemon's id, ends it with `docker rm -f` verified by `docker inspect`, and removes it when its
+embedder goes (a tether watcher, `SIGKILL` included). The daemon is the runtime object's
+(`OciRuntime(docker_host=...)`), never a record's. `env_scrub` and `rlimits` are refused beside it: it
+compiles their effect itself. A container's processes are started by an agent found out at `create`
+(decision-203, TASK-0079.10): brig's supervisor as its PID 1 where the image has python3 (its control
+socket a `SOCK_SEQPACKET` socket the host binds in the container's bind-mounted channel directory), `docker exec`
+and the host's ladder where it has none; each `Process` says which, and both are graded `cooperative`
+(a child that leaves its group outlives a stop; the battery plants one). Each start's socket is dialled
+from the host through the same verified dial; Docker Desktop's relay is not built. Its integration tier runs
+against the machine's Docker daemon and skips, naming `docker info`, without one.
+
 ## Standing alone
 
 brig imports the standard library and itself, and nothing else. It knows nothing about what
@@ -240,11 +255,24 @@ can't be signalled, and its socket, abstract socket and System V IPC are out of
 reach, and a stop ends the namespace, a `setsid()` child included. Where it
 doesn't (a jail run as uid 0, a host that blocks nested user namespaces) a
 process starts as it always did, and `Process.namespaces` is `False` and
-`Process.control` says why, graded `cooperative` either way until the control
-battery of TASK-0079.08. A socket in the channel directory is then at a path of
+`Process.control` says why. A socket in the channel directory is then at a path of
 its own on the host (`Process.endpoint` is not `bound_path`).
 `tests/e2e/test_process_namespaces.py` shows each from inside a real jail, with
 the same probe in a jail without the namespaces beside it.
+
+**Control is graded by what a battery proves, 2026-10-17 (decision-201).** A
+`setsid()` child, a process that ignores `SIGTERM` and a stopped supervisor are
+planted from the host in a real bwrap jail, each beside a plain child the same
+ending ends, and `Process.stop` and `Jail.destroy` end them, watched by the
+host's own `/bin/ps` and `/proc` (`tests/control_battery.py`,
+`tests/e2e/test_control_battery.py`; run as root and as an unprivileged user,
+with namespaces and without). The report's `control` axis, the jail's scope, is
+`enforced` for a supervised jail, where `destroy` ended everything. A process's
+`control` is `best_effort` in namespaces of its own (a stop the supervisor
+does not answer ends the jail at the request's deadline, the gap) and
+`cooperative` without them, where the battery saw a `setsid()` child outlive a
+stop. Seatbelt, which the battery has not been run against, stays as it was and
+says it is unproven, not failed.
 
 ## Development
 
