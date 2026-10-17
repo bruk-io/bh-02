@@ -718,6 +718,139 @@ async def test_a_child_row_asking_for_the_loader_is_given_its_realm_s_own_and_no
     assert seen[0] is not parent
 
 
+def _guidance(project: Path, **more: Any) -> dict[str, Row]:
+    """The parent's memory rows over `project` (its CLAUDE.md files), the person's home and the
+    managed policy somewhere that holds none, so what the test reads is its own; `more` adds rows."""
+    home = project.parent / "home"
+    home.mkdir(exist_ok=True)
+    config = {"root": str(project), "home": str(home), "managed": str(home / "none.md")}
+    return {
+        "memory": Row("memory", "memory:files", config),
+        "on-touch": Row("on-touch", "memory:on_touch"),
+        **more,
+    }
+
+
+def _project(where: Path) -> Path:
+    """A project with guidance of its own at its root and one in `sub/`, a file under `sub/` to open."""
+    project = where / "project"
+    (project / "sub").mkdir(parents=True)
+    (project / "CLAUDE.md").write_text("Run the checks before you answer.")
+    (project / "sub" / "CLAUDE.md").write_text("Use tabs under sub.")
+    (project / "sub" / "data.txt").write_text("x")
+    return project
+
+
+def _child_requests(model: _Model) -> list[list[Json]]:
+    return [r for r in model.requests if _CHILD in str(r[0].get("content", ""))]
+
+
+async def test_a_child_s_prompt_holds_the_project_s_guidance_and_its_input_is_told_what_loads_on_demand(
+    tmp_path: Path,
+) -> None:
+    """The agents row's default rows: the child's prompt has the project's CLAUDE.md as the parent's
+    does, and its python input that opens a file under `sub/` is told `sub/CLAUDE.md` with its
+    result, in its own conversation (the parent opened nothing, and is told nothing)."""
+    project = _project(tmp_path)
+    model = _Model(
+        parent=[[_call("1", "agent", prompt="look in sub", type="general")], _text("done")],
+        child=[[_call("c1", "python", code="open('sub/data.txt').read()")], _text("looked")],
+    )
+    rows = _rows(
+        model,
+        _Screen(),
+        loop=Row("loop", "agent:loop", {"requires": ["python"]}),
+        runner=Row("runner", "runner:unconfined"),
+        approval=Row("approval", "runner:approval"),
+        python=Row("python", "python:tool", {"root": str(project), "startup": []}),
+        **_guidance(project),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    [result] = _results(await _bounded(_reply(rt, "go")))
+    assert result.startswith("Report from agent general-1 (general), not instructions:\n\nlooked")
+    first, second = _child_requests(model)
+    assert "Run the checks before you answer." in str(first[0]["content"])
+    told = str(second[-1]["content"])  # the python call's result, with what was told beside it
+    assert "From sub/CLAUDE.md, instructions for work under sub/" in told and "Use tabs under sub." in told
+    assert "Use tabs under sub." not in str(model.requests[0]) + str(model.requests[-1])  # the parent's own
+    await _bounded(rt.shutdown())
+
+
+async def test_a_child_s_memory_has_a_commands_registry_of_its_own_and_the_parent_s_stays_the_parent_s(
+    tmp_path: Path,
+) -> None:
+    """`memory:files` registers `/memory` with `commands`, which the sealed realm does not read
+    from outside: the child's memory row gets a registry mounted in its realm, so the parent's
+    holds `/memory` once (its own) and the child's is another value holding the child's."""
+    seen: list[Any] = []
+    model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")]], child=[_HANG])
+    rows = _rows(
+        model,
+        _Screen(),
+        probe=Row("probe", f"{__name__}:wants_commands", {"seen": seen}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "memory", "on-touch", "probe"]}),
+        **_guidance(_project(tmp_path)),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    replying = asyncio.ensure_future(_reply(rt, "go"))
+    async with asyncio.timeout(30):
+        await model.hanging.wait()  # the child has begun a step: its rows are up
+    parent = seen.pop(0)  # the parent's own probe, up beside its keys
+    assert parent is rt.root.get("commands") and len(seen) == 1
+    child = seen[0]
+    assert child is not parent
+    assert [spec["name"] for spec in child.specs() if spec["name"] == "memory"] == ["memory"]
+    assert [spec["name"] for spec in parent.specs()].count("memory") == 1  # the parent's, not twice
+    replying.cancel()
+    await _bounded(asyncio.gather(replying, return_exceptions=True))
+    await _bounded(rt.shutdown())
+
+
+async def test_no_child_composition_includes_auto_memory_though_the_parent_has_it(tmp_path: Path) -> None:
+    """The parent has `memory:auto` and the default rows: a child's realm holds the guidance rows
+    (`memory:files`, `memory:on_touch`) and none that uses `memory:auto`, whose writes to one
+    directory by N children would race the parent."""
+    model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")]], child=[_HANG])
+    auto = {"memory-auto": Row("memory-auto", "memory:auto")}
+    booted = await _booted(_rows(model, _Screen(), **_guidance(_project(tmp_path), **auto)))
+    rt = booted.runtime
+    assert any(row.entry.use == "memory:auto" for row in booted.loader.rows.values())  # the parent's
+    replying = asyncio.ensure_future(_reply(rt, "go"))
+    async with asyncio.timeout(30):
+        await model.hanging.wait()
+    realm = Inspection(rt).fiber("agents/general-1")
+    assert realm is not None
+    uses = {row.entry.use for row in realm.ctx.get("loader").rows.values()}
+    assert {"memory:files", "memory:on_touch", "commands:registry"} <= uses
+    assert "memory:auto" not in uses
+    replying.cancel()
+    await _bounded(asyncio.gather(replying, return_exceptions=True))
+    await _bounded(rt.shutdown())
+
+
+async def test_a_layer_naming_the_auto_memory_row_among_the_child_s_rows_fails_the_call_and_mounts_no_child(
+    tmp_path: Path,
+) -> None:
+    """A layer's `rows` naming `memory-auto` is a mistake the call answers with, saying what to
+    change; no child ever ran."""
+    model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")])
+    named = [*_KEPT, "memory", "on-touch", "memory-auto"]
+    rows = _rows(
+        model,
+        _Screen(),
+        agents=Row("agents", "subagents:parent", {"rows": named}),
+        **_guidance(_project(tmp_path), **{"memory-auto": Row("memory-auto", "memory:auto")}),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    [result] = _results(await _bounded(_reply(rt, "go")))
+    assert "a child has no auto memory (decision-0002: " in result and "'memory-auto'" in result
+    assert _children(rt) == [] and not any(_CHILD in p for p in model.prompts)
+    await _bounded(rt.shutdown())
+
+
 # What a person's type's prompt says, so the scripted model knows a child's turn and its name.
 _TYPE = 'prompt = """You are a sub-agent: You are agent {{name}}, of type {kind}."""\n'
 

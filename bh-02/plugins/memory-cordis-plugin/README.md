@@ -98,6 +98,12 @@ text an input printed that way counts too.
 - **`/memory` lists, it doesn't open.** bh-02's app owns the terminal, so `/memory` names each
   file, marked by how it loads (✓ at launch, … on demand, · not there, ✗ excluded or not read),
   and you open one in your own editor.
+- **A sub-agent has the guidance, never auto memory.** The subagents plugin copies the `memory` and
+  `on-touch` rows into each child's sealed realm, with a `commands:registry` of its own for
+  `memory:files` to register `/memory` with, so a child's prompt has the project's files and its
+  inputs are told what loads on demand, in its own conversation. `memory:auto` is refused there: N
+  children writing one directory would race the parent
+  ([subagents-cordis-plugin](../subagents-cordis-plugin/README.md#the-projects-guidance-in-a-child)).
 - **Auto memory adds no tool.** The model writes its memories with whatever tools the
   composition gives it, as it writes any file, and this plugin names none: bh-02 is not CodeAct
   only. A tool that can write the directory says so itself (the python tool names the

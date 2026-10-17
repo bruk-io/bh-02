@@ -9,6 +9,7 @@ import pytest
 
 from subagents_cordis_plugin import (
     GENERAL,
+    AgentsConfig,
     AgentType,
     Asker,
     Labelled,
@@ -38,7 +39,7 @@ _PARENT = [
     _Entry("transcript", "agent:transcript", {"path": "/s/abc/transcript.jsonl"}),
     _Entry("model", "models:model", {"state": "/s/abc/claude", "default": "opus"}),
     _Entry("python", "python:tool", disabled=True),
-    _Entry("memory", "memory:files"),
+    _Entry("memory", "memory:files", {"root": "/p"}),
     _Entry("chat", "chat:converse"),
 ]
 _KEPT = ("loop", "tools", "transcript", "model", "python")
@@ -175,6 +176,84 @@ def test_a_child_never_gets_an_agents_row_whatever_the_layer_names() -> None:
                 hand="the hand",
             )
         assert repr(named) in str(why.value) and "take it out of `rows`" in str(why.value)
+
+
+# the shipped layer's rows that give a conversation the project's guidance (bh-02.toml)
+_GUIDED = (*_KEPT, "memory", "on-touch")
+_SHIPPED = [
+    *_PARENT,
+    _Entry("on-touch", "memory:on_touch"),
+    _Entry("memory-auto", "memory:auto"),
+    _Entry("commands", "commands:registry"),
+]
+
+
+def _guided(kept: Any = _GUIDED, parent: Any = _SHIPPED) -> Any:
+    return child_rows(
+        parent,
+        name="general-1",
+        kind=GENERAL,
+        kept=kept,
+        tools=("python",),
+        transcript_row="transcript",
+        model_row="model",
+        place=_PLACE,
+        hand="the hand",
+    )
+
+
+def test_a_child_with_the_memory_row_gets_a_commands_registry_of_its_own_beside_it() -> None:
+    """`memory:files` needs `commands`, which a sealed realm does not read from outside: the
+    child's rows gain a `commands:registry`, its own, and the memory rows are the parent's copied."""
+    rows = _guided()
+    assert [(r.id, r.use) for r in rows if "memory" in r.use or "commands" in r.use] == [
+        ("agents/general-1/memory", "memory:files"),
+        ("agents/general-1/on-touch", "memory:on_touch"),
+        ("agents/general-1/commands", "commands:registry"),
+    ]
+    by_id = {r.id: r.config for r in rows}
+    assert by_id["agents/general-1/memory"] == {"root": "/p"}  # the parent's config, for what it reads
+    assert by_id["agents/general-1/commands"] == {}
+
+
+def test_a_child_with_no_memory_row_has_no_commands_registry() -> None:
+    rows = _guided(kept=_KEPT)
+    assert not any(r.use == "commands:registry" for r in rows)
+    rows = _guided(parent=[e for e in _SHIPPED if e.id != "memory"])  # a layer with no memory plugin
+    assert not any(r.use in ("memory:files", "commands:registry") for r in rows)
+
+
+def test_a_commands_row_the_layer_gave_the_child_is_the_only_one() -> None:
+    """A layer's `rows` that names the commands row already gives the child a registry of its own
+    (a copy, mounted in its realm): a second would bind the key twice."""
+    rows = _guided(kept=(*_GUIDED, "commands"))
+    assert [r.id for r in rows if r.use == "commands:registry"] == ["agents/general-1/commands"]
+
+
+def test_the_default_rows_give_a_child_the_guidance_and_never_auto_memory() -> None:
+    """The shipped layer's child has `memory:files` and `memory:on_touch`; the rows a child is made
+    of by default name no auto memory row, so none is copied."""
+    kept = AgentsConfig().rows
+    assert "memory" in kept and "on-touch" in kept and "memory-auto" not in kept
+    uses = [r.use for r in _guided(kept=kept)]
+    assert "memory:files" in uses and "memory:on_touch" in uses and "commands:registry" in uses
+    assert "memory:auto" not in uses
+
+
+def test_a_child_never_gets_auto_memory_whatever_the_layer_names() -> None:
+    """N children writing one auto memory directory would race the parent (decision-0002): naming
+    the auto memory row in `rows`, by its id or as any row that uses `memory:auto`, is refused
+    saying what to do; it never reaches a child. A disabled one is not mounted, so naming it is
+    no error."""
+    parent = [*_SHIPPED, _Entry("remembering", "memory:auto")]
+    for named in ("memory-auto", "remembering"):
+        with pytest.raises(ValueError, match=r"a child has no auto memory \(decision-0002: ") as why:
+            _guided(kept=(*_GUIDED, named), parent=parent)
+        assert repr(named) in str(why.value) and "take it out of `rows`" in str(why.value)
+    off = [
+        e if e.id != "memory-auto" else _Entry("memory-auto", "memory:auto", disabled=True) for e in _SHIPPED
+    ]
+    assert not any(r.use == "memory:auto" for r in _guided(kept=(*_GUIDED, "memory-auto"), parent=off))
 
 
 @pytest.mark.parametrize("value", ["true", "false", "", 1, 0, None, [True], {}])

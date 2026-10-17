@@ -15,6 +15,10 @@ and [on demand](../reference/plugins/memory.md#what-loads-on-demand).
 `/memory` lists every file, marked by how it loads: `✓` at launch, `…` on demand, `·` not there,
 `✗` excluded or not read. Open them in your own editor: bh-02's app owns the terminal.
 
+A sub-agent is told them too: its prompt has the same instruction files, and its inputs are told
+what loads on demand, in its own conversation. It has no auto memory: several sub-agents writing
+one directory would race the main conversation.
+
 ## What bh-02 does differently
 
 The model can write files in the project, so bh-02 reads memory with that in mind:

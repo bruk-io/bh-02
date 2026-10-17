@@ -124,11 +124,11 @@ subagents:parent        binds Asker, Roster, registers agent tools depends on To
 
 A sub-agent (`agent`, the agents row) is not a row of these layers: each call mounts one child
 under the agents row, a sealed cordis realm whose own loader runs copies of `loop`, `tools`,
-`transcript`, `model`, `system`, `asides`, `access`, `executor` and `python` as the parent's
-loader mounted them, each under `agents/NAME/` (its transcript in the session's
-`agents/NAME/`), plus `subagents:output` (its `output`: a `confirm` over `asker`, labelled) and
-`subagents:child` (its type's section of the prompt); of the tool rows a type may grant, only its
-type's. Its type is data: shipped (`explore`, `general`) or the person's, `agents/NAME.toml` in
+`transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor` and `python` as the
+parent's loader mounted them, each under `agents/NAME/` (its transcript in the session's
+`agents/NAME/`), plus a `commands:registry` of its own (for `memory`), `subagents:output` (its `output`: a
+`confirm` over `asker`, labelled) and `subagents:child` (its type's section of the prompt); never
+`memory-auto`; of the tool rows a type may grant, only its type's. Its type is data: shipped (`explore`, `general`) or the person's, `agents/NAME.toml` in
 bh-02's config directory (`host.trusted`). From outside it reads only `runner`, `approval`,
 `host` and `asker`. It runs in the foreground, or in the background for `agent_wait`, at most
 `max_running` at once, until its type's step limit; past `session_agents`, or naming a model

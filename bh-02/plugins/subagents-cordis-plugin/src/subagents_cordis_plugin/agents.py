@@ -353,7 +353,8 @@ class AgentsConfig:
     `transcript_row` and `model_row`: which of them is the transcript and the model; `start`:
     how long, in seconds, a child's loop has to come up; `max_running`: how many children run at
     once (a further one waits for a slot); `session_agents`: how many children start before
-    each further start is put to the person.
+    each further start is put to the person. `rows` default to the loop's and the project's
+    guidance (`memory`, `on-touch`), never auto memory.
 
     Raises:
         ValueError: `max_running` is not at least 1, or `session_agents` is negative.
@@ -367,6 +368,8 @@ class AgentsConfig:
         "system",
         "asides",
         "access",
+        "memory",
+        "on-touch",
         "executor",
         "python",
     )
@@ -475,7 +478,8 @@ class Agents:
         (`child.framed`), or why it gave none; with `input["background"]`, its name at once.
 
         Raises:
-            ValueError: the layer's `rows` gives a child the agents row (`child.child_rows`).
+            ValueError: the layer's `rows` gives a child the agents row or auto memory
+                (`child.child_rows`).
             OSError: the child's state directory can't be made.
         """
         background = background_flag(input.get("background", False))
