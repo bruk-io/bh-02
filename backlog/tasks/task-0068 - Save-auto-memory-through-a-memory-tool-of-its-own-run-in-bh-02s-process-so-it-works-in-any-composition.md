@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-10 03:31'
-updated_date: '2026-10-14 15:03'
+updated_date: '2026-10-17 02:27'
 labels:
   - memory
   - runner
@@ -28,9 +28,9 @@ The memory plugin registers a `memory` tool of its own, so auto memory works in 
 Decided with the owner (2026-10-10): the tool runs in bh-02's process, not in the jail. The code that writes is bh-02's own, not the model's, and it writes only beneath the auto memory directory, which the jailed model can already write without being asked, so jailing it or asking adds no protection there; a jailed program per save would be a whole process for a small file write. So runner:approval gets one narrow case that lets this tool run unasked (every other host tool is still asked), and the tool writes through no link: a link the model planted in the directory is refused, never followed, with the writer in host_paths beside `directory_beneath`. A write that reaches past the jail is easy to misread as a hole, so the docs say so plainly, and why, wherever the tool, the jail or the approval rule is described.
 
 ## Open questions
-- [ ] The approval case's shape: a `runs` value of its own, or the request naming the one directory the call writes beneath, which `approval.unasked` checks against `host.auto_memory`.
-- [ ] What happens to a hand-written MEMORY.md already there: regenerate over it, or keep its lines that point at no topic file.
-- [ ] With the python tool present: point saves at `memory` in the prompt only, or also check the memory files an input wrote (an `asides` function; python's `touched` covers only the project root, so it would look at the directory).
+- [x] The approval case's shape: a `runs` value of its own, or the request naming the one directory the call writes beneath, which `approval.unasked` checks against `host.auto_memory`. Answered by the owner (2026-10-17): a `runs` value of its own that is never asked, jailed or under `--no-jail` (not `"harness"`, which is asked under `--no-jail`, nor a directory check).
+- [x] What happens to a hand-written MEMORY.md already there: regenerate over it, or keep its lines that point at no topic file. Answered by the owner (2026-10-17): keep them; the tool adds and removes only its own lines, one per topic file.
+- [x] With the python tool present: point saves at `memory` in the prompt only, or also check the memory files an input wrote (an `asides` function; python's `touched` covers only the project root, so it would look at the directory). Answered by the owner (2026-10-17): the prompt only; a file written through Python is not checked.
 - [x] Fold in the prompt gaps found against Claude Code's (check for an existing memory first, a **Why:** and **How to apply:** body, absolute dates, verify a memory against the code before acting on it), or leave them to a task of their own. Answered by the owner (2026-10-10): a task of their own, TASK-0069.
 <!-- SECTION:DESCRIPTION:END -->
 
