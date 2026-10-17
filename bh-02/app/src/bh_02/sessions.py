@@ -160,20 +160,20 @@ def _models_file() -> Path:
     return config_home(os.environ, Path.home()) / "bh-02" / "models.toml"
 
 
-def _pinned(file: str | OSError | None) -> str | None:
+def _pinned(file: str | OSError | UnicodeDecodeError | None) -> str | None:
     """The model a new session's layer records from the models file (`file`: its text; None when there
-    is none, or it is not read; the error when it can't be read): the file's `default` when that is a
-    name (a non-empty string; the model row says so if it names no model). None, no model recorded,
-    when there is no file or it names no default (there are no built-in models: the row says what to
-    write), and when the model row has something to say about the file: it can't be read, is not
-    TOML, holds a key that is no table, or its `default` is no name (TASK-0087: the row stays
-    `Unusable` and says what to write). The same rule as `models_cordis_plugin.named.parsed` and
-    `standing`, which the app test of the two sides holds them to: a `default` that is a table is an
-    endpoint named `default`, not the setting."""
+    is none, or it is not read; the error when it can't be read or is not UTF-8 text): the file's
+    `default` when that is a name (a non-empty string; the model row says so if it names no model).
+    None, no model recorded, when there is no file or it names no default (there are no built-in
+    models: the row says what to write), and when the model row has something to say about the file:
+    it can't be read, is not UTF-8 text or TOML, holds a key that is no table, or its `default` is no
+    name (TASK-0087: the row stays `Unusable` and says what to write). The same rule as
+    `models_cordis_plugin.named.parsed` and `standing`, which the app test of the two sides holds them
+    to: a `default` that is a table is an endpoint named `default`, not the setting."""
     match file:
         case None:
             return None
-        case OSError():
+        case OSError() | UnicodeDecodeError():
             return None
         case str():
             pass
@@ -212,7 +212,7 @@ def create(root: Path, cwd: str, *, model: str | None, no_jail: bool, patches: S
     `patches` the names of the `--patch` files it started with: the listing shows both, since
     a patch can replace the model row. A resume with other patches keeps these.
     """
-    file: str | OSError | None = None
+    file: str | OSError | UnicodeDecodeError | None = None
     # As the model row reads the file, it is trusted only outside the project, where the model's
     # code can write: a file in it, by its path or the links on the way, gives no default. The roots
     # are the row's: the working directory, and the session's directory, which is the same one in a
@@ -223,8 +223,8 @@ def create(root: Path, cwd: str, *, model: str | None, no_jail: bool, patches: S
             file = _models_file().read_text(encoding="utf-8")
         except FileNotFoundError:
             pass  # no file: no user models, no default
-        except OSError as error:
-            file = error  # the model row says it can't read the file
+        except (OSError, UnicodeDecodeError) as error:
+            file = error  # the model row says it can't read the file, or that it is not UTF-8 text
     pinned = model or _pinned(file)
     stack = pinned or _UNPINNED
     now = datetime.datetime.now()

@@ -219,7 +219,7 @@ def read_models(path: Path) -> str | None:
     """The models file's text, or None when there is none (no file is no user models).
 
     Raises:
-        ModelsError: the file is there but can't be read.
+        ModelsError: the file is there but can't be read, or is not UTF-8 text.
     """
     try:
         return path.read_text(encoding="utf-8")
@@ -228,6 +228,10 @@ def read_models(path: Path) -> str | None:
     except OSError as error:
         raise ModelsError(
             "models_file", f"can't read the models file {path} ({error.strerror}); fix it or remove it"
+        ) from None
+    except UnicodeDecodeError:
+        raise ModelsError(
+            "models_file", f"the models file {path} is not UTF-8 text; fix it or remove it"
         ) from None
 
 

@@ -190,7 +190,7 @@ class _Case:
     whether the row can then use the model (`works`). `where`: outside the project, in it as named, in it
     through a link, or in it while `create` is told another directory than the working one."""
 
-    text: str | None
+    text: str | bytes | None
     pin: str | None
     works: bool = True
     where: str = "outside"
@@ -212,6 +212,7 @@ _CONTRACT = {
     "a number": _Case("default = 5\n", None, works=False),
     "an empty string": _Case('default = ""\n', None, works=False),
     "a list": _Case('default = ["opus"]\n', None, works=False),
+    "not UTF-8 text": _Case('default = "opus"\n'.encode("utf-16"), None, works=False),  # a BOM, FF FE
     "a directory": _Case(_DIRECTORY, None, works=False),
     # the default chooses the spend: a file the model's code can write chooses nothing, however it is reached
     "in the project": _Case(_OPUS, None, works=False, where="project"),
@@ -236,6 +237,8 @@ def _placed(case: _Case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str
     models.mkdir(parents=True)
     if case.text == _DIRECTORY:
         (models / "models.toml").mkdir()
+    elif isinstance(case.text, bytes):
+        (models / "models.toml").write_bytes(case.text)
     elif case.text is not None:
         (models / "models.toml").write_text(case.text)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config))

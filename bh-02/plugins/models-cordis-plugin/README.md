@@ -89,22 +89,27 @@ before that, naming none, follows the file's `default` as it is now (and `/model
 there says "already"). The default chooses the spend, so it is read only where the tables are:
 from a models file outside the project (below), never from one in it. The shell reads the file
 itself, with the row's trust rule (`host_paths.passes` over the working directory and the
-session's directory) and the row's reading of the `default` (`named.parsed`): the two cannot share
-a function (no package imports another), so one app test (`test_session_dirs.py`) drives both
-over the same files and fails if they disagree on what a new session starts on. A `default` that
-is not a name, or names no model, is a `ModelsError` naming the models file and what to write
+session's directory: the `cwd` `create` is given, which the CLI passes as the working directory)
+and the row's reading of the `default` (`named.parsed`): the two cannot share a function (no
+package imports another), so one app test (`test_session_dirs.py`) drives both over the same
+files and fails if they disagree on what a new session starts on. The row also roots its check at
+the model row's `cwd` when a layer sets one; the shell cannot see that, since a layer composes
+after the session is created, and a `--patch` that sets the model row's config replaces the
+session's whole (`pins_model`), so the pinned default goes with it. A `default` that is not a
+name, or names no model, is a `ModelsError` naming the models file and what to write
 (kind `models_file`, or `unknown_model`, which says it is the models file's `default` also when
 the session's layer recorded it: `named.intended`), said at each step like any model that can't
 be used (`Unusable`), while bh-02 starts and `/model NAME` fixes it; it is not looked at while a
 layer names a model. The shell never hides it: for a default that is not a name (a number, an
-empty string, a list), and for a file that is not TOML, has a key that is no table, or can't be
-read, it records no model in the new session's layer (its `stack` in `bh-02 sessions` is
-`default`), so the row's error shows; a default that names no model is a name, and is recorded.
+empty string, a list), and for a file that is not TOML, is not UTF-8 text, has a key that is no
+table, or can't be read, it records no model in the new session's layer (its `stack` in
+`bh-02 sessions` is `default`), so the row's error shows; a default that names no model is a name,
+and is recorded.
 A `[default]` table is an endpoint named `default`.
 
-**A models file that can't be read** (not TOML, a key that is no table, a path that is no file)
-is not a failure of the row: `known` names the row's `extra` behind it, as behind a file refused in
-the project, with `why` saying what is wrong and what to do. A layer's choice of an `extra` model
+**A models file that can't be read** (not TOML, not UTF-8 text, a key that is no table, a path that
+is no file) is not a failure of the row: `known` names the row's `extra` behind it, as behind a
+file refused in the project, with `why` saying what is wrong and what to do. A layer's choice of an `extra` model
 runs; a row no layer names a model for has no default to follow, so it says the file's problem
 (`resolution`). `Catalog.listed` lists the `extra` models and `problem` is the line `/model` ends
 with; none of them raises.
