@@ -55,7 +55,6 @@ The owner, 2026-10-17: stick with 3.15.
 - A container image needs a 3.15 python3 for the supervisor; any other image uses `docker exec`.
 - CI's `linux-jail` job and `scripts/linux-jail-check` run the supervisor under uv's 3.15, which both
   already install for the app.
-- While 3.15 is pre-release (3.15.0b4 here), the jail's PID 1 runs on a beta, as bh-02 already does.
 
 ## Acceptance
 
