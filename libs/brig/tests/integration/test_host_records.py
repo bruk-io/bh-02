@@ -375,6 +375,7 @@ def _plant(jail_dir: str, record: dict[str, object], process_id: str | None = No
         "stderr_path": "",
         "channel": None,
         "bound_path": None,
+        "namespaces": False,
         **record,
     }
     with open(os.path.join(directory, "record.json"), "w", encoding="utf-8") as f:

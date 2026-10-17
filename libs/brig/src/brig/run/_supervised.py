@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from signal import Signals
 from typing import Final
 
+from brig.core.runtime import scratch_dir
 from brig.run import _identity, _records, _waiters
 from brig.run._exit_status import WorkloadSpawnFailed
 from brig.run._supervisor_link import (
@@ -50,6 +51,7 @@ from brig.run.runtime import (
     JailRecord,
     ProcessRecord,
     Reservation,
+    channel_dir_of,
     refuse_foreign_reservation,
 )
 from brig.run.teardown import KillItem, KillOutcome, KillReport, group_alive
@@ -198,7 +200,12 @@ class LinkedSupervisor:
             try:
                 spawned = self.link.request(
                     "start",
-                    {"process": process_id, "argv": list(argv), "cwd": cwd},
+                    {
+                        "process": process_id,
+                        "argv": list(argv),
+                        "cwd": cwd,
+                        **self._shared(channel),
+                    },
                     fds=(stdin_f.fileno(), stdout_f.fileno(), stderr_f.fileno()),
                     timeout=REQUEST_TIMEOUT_S,
                 )
@@ -230,6 +237,23 @@ class LinkedSupervisor:
                 f"{refused.reason}"
             ) from refused
         return record
+
+    def _shared(self, channel: Reservation | None) -> dict[str, object]:
+        """What a start tells the supervisor about the directories every process of the jail
+        shares, when its processes have mount namespaces of their own (decision-195): the channel
+        directory and the name of the socket this process will bind in it (`None` for one with
+        no channel), and the scratch directory. Each process gets a directory of its own over
+        each. Nothing without namespaces: the directories are shared, as they always were."""
+        namespaces = self.jail.namespaces
+        if namespaces is None or not namespaces.held:
+            return {}
+        name = (
+            None if channel is None else os.path.basename(channel.bound_path).removesuffix(".sock")
+        )
+        return {
+            "chan": {"dir": channel_dir_of(self.jail), "name": name},
+            "scratch": scratch_dir(os.path.realpath(self.jail.jail_dir)),
+        }
 
     def _recorded(
         self,
@@ -284,6 +308,7 @@ class LinkedSupervisor:
             stderr_path=stderr_path,
             channel=None if channel is None else channel.channel,
             bound_path=None if channel is None else channel.bound_path,
+            namespaces=self.jail.namespaces is not None and self.jail.namespaces.held,
         )
         _records.write(self.jail.jail_dir, record)
         return record
@@ -364,9 +389,11 @@ class LinkedSupervisor:
         """End `process`'s group, inside the jail, by request (`SIGTERM`, a grace period,
         `SIGKILL`, a grace period; the supervisor verifies the group empty), and then check the
         group empty from the host: one item, `workload_group` for the jail's first process and
-        `exec_sibling` for any other. Its record stays. A process in a session of its own is
-        outside the group it signals (until each process has a pid namespace of its own, SPEC.md
-        section 8): the jail's `destroy` is what ends those.
+        `exec_sibling` for any other. Its record stays. A process that is PID 1 of a pid
+        namespace of its own (decision-195) is sent what ends it where the kernel would drop
+        a `SIGTERM`, and its namespace ends with it, a `setsid()` child included. Without
+        namespaces a child in a session of its own is outside the group the request signals,
+        and the jail's `destroy` is what ends it.
 
         Raises:
             SupervisorUnresponsive: the supervisor did not answer in time; the jail was destroyed.

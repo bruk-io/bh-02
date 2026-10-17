@@ -42,7 +42,17 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Final, Protocol
 
-from brig.core import Battery, Channel, EnforcementReport, Event, ProbeReport, SignatureBook, Spec
+from brig.core import (
+    Battery,
+    Channel,
+    EnforcementReport,
+    Event,
+    Grade,
+    Graded,
+    ProbeReport,
+    SignatureBook,
+    Spec,
+)
 from brig.core.runtime import RuntimeKind
 from brig.run import _records, _waiters
 from brig.run._dicts import channels_from_list, channels_to_list, report_from_dict, report_to_dict
@@ -53,6 +63,7 @@ from brig.run.runtime import (
     IoPolicy,
     JailRecord,
     NoSupervisor,
+    ProcessNamespaces,
     ProcessRecord,
     Reservation,
     Runtime,
@@ -62,7 +73,7 @@ from brig.run.runtime import (
 from brig.run.teardown import DEFAULT_GRACE_S, KillReport
 from brig.stack import CompiledJail
 
-JAIL_VERSION: Final = 9
+JAIL_VERSION: Final = 10
 """The version of a jail's dict (`HANDLE_VERSION` until decision-183 renamed it,
 the value unchanged). Bumped 1 -> 2 by
 task-046 (`wrap_prefix` and `jail_env` became REQUIRED top-level keys) and
@@ -92,7 +103,10 @@ carries `channel` and `bound_path`, required, as `record.json` does.
 
 Bumped 8 -> 9 by decision-192 (TASK-0079.06): `supervisor` is new and required,
 `null` for a jail whose processes the host starts, else the pid and start
-stamp of the group that holds the jail's PID 1."""
+stamp of the group that holds the jail's PID 1.
+
+Bumped 9 -> 10 by decision-196 (TASK-0079.07): each entry of `processes`
+carries `namespaces`, required, as `record.json` does."""
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
@@ -142,6 +156,13 @@ class _Wait(Protocol):
     def __call__(self, timeout: float | None = None) -> int: ...
 
 
+def _reason(namespaces: ProcessNamespaces | None) -> str | None:
+    """Why a jail's processes have no namespaces of their own, as its supervisor said: `None`
+    when that is not known here (a jail rehydrated, or one with no supervisor), `""` when the
+    jail's processes have them. Pure."""
+    return None if namespaces is None else namespaces.reason
+
+
 def _fidelity(wrap_prefix: tuple[str, ...] | None, *, supervised: bool) -> ExecFidelity:
     """How a process stands to the jail's confinement, decided per jail, never
     per start (decision-181): in the one instance every process of a supervised
@@ -150,6 +171,40 @@ def _fidelity(wrap_prefix: tuple[str, ...] | None, *, supervised: bool) -> ExecF
     if supervised:
         return ExecFidelity.SAME_INSTANCE
     return ExecFidelity.EQUIVALENT_PROFILE if wrap_prefix else ExecFidelity.PLAIN
+
+
+_GROUP_SHAPED: Final = (
+    "stop() signals the process's group, and a child that leaves it with setsid() is outside "
+    "it: only the jail's destroy() ends that"
+)
+
+_NAMESPACED: Final = (
+    "stop() ends the process's pid namespace, which the kernel ends with its PID 1, so a child "
+    "that left its group with setsid() ends with it (probed from inside a real jail by "
+    "tests/e2e/test_process_namespaces.py). cooperative is the ceiling until a battery driven "
+    "from the host plants survivors and proves more (TASK-0079.08, decision-0001)"
+)
+
+
+def _process_control(*, namespaces: bool, supervised: bool, reason: str | None) -> Graded:
+    """The grade of the control one process's `stop` delivers (decision-196). A process in
+    namespaces of its own is ended with its pid namespace; one without is ended by its group,
+    which it can leave, and `reason` (what the jail's supervisor found, when this process knows
+    it) says why it has none. `cooperative` either way: no control grade is above it without the
+    battery of TASK-0079.08 (decision-0001), and the two differ in the detail and in
+    `Process.namespaces`. Pure."""
+    if namespaces:
+        return Graded(Grade.COOPERATIVE, _NAMESPACED)
+    if not supervised:
+        return Graded(
+            Grade.COOPERATIVE, f"{_GROUP_SHAPED}. This runtime gives a process no namespace"
+        )
+    because = (
+        ""
+        if reason is None
+        else f". Its processes share the jail's namespaces because {reason or 'it did not say'}"
+    )
+    return Graded(Grade.COOPERATIVE, f"{_GROUP_SHAPED}{because}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +222,12 @@ class Process:
     `channel` is the declared channel it was started on, `bound_path` the
     socket it binds inside the jail and `endpoint` the host path to dial it at,
     which its runtime resolves (decision-184); all `None` without one.
-    `interrupt`, `stop` and `wait` are absent when its jail has no supervisor.
+    `namespaces` is whether it runs as PID 1 of user, pid, mount, network and IPC
+    namespaces of its own, which a supervised jail gives where the host lets an
+    unprivileged process make them (decision-195); `control` is the grade of
+    what its `stop` delivers (decision-196), and says which when the
+    namespaces are not there. `interrupt`, `stop` and `wait` are absent when
+    its jail has no supervisor.
     """
 
     id: str
@@ -180,6 +240,8 @@ class Process:
     channel: str | None
     bound_path: str | None
     endpoint: str | None
+    namespaces: bool
+    control: Graded
     _record: ProcessRecord = field(repr=False, compare=False)
     _jail: Jail = field(repr=False, compare=False)
 
@@ -414,6 +476,12 @@ class Jail:
             channel=record.channel,
             bound_path=record.bound_path,
             endpoint=self._runtime.endpoint(self._record(), record),
+            namespaces=record.namespaces,
+            control=_process_control(
+                namespaces=record.namespaces,
+                supervised=self._base.supervisor is not None,
+                reason=_reason(self._base.namespaces),
+            ),
             _record=record,
             _jail=self,
         )

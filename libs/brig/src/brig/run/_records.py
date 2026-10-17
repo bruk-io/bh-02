@@ -77,6 +77,7 @@ _KEYS: Final = (
     "stderr_path",
     "channel",
     "bound_path",
+    "namespaces",
 )
 
 
@@ -95,7 +96,11 @@ class ProcessRecord:
     `stderr_path` are where `IoPolicy` sent its output, in its records
     directory. `channel` is the declared channel it was started on and
     `bound_path` the socket reserved for it, the path it binds inside the
-    jail (decision-184); both `None` for a process started with none."""
+    jail (decision-184); both `None` for a process started with none.
+    `namespaces` is whether it was started as PID 1 of user, pid, mount,
+    network and IPC namespaces of its own (decision-195), which is what makes
+    its socket's host path a directory of its own in the channel directory
+    (decision-196)."""
 
     id: str
     order: int
@@ -107,6 +112,7 @@ class ProcessRecord:
     stderr_path: str
     channel: str | None = None
     bound_path: str | None = None
+    namespaces: bool = False
 
 
 def is_id(name: str) -> bool:
@@ -173,6 +179,7 @@ def to_json(record: ProcessRecord) -> dict[str, Any]:
         "stderr_path": record.stderr_path,
         "channel": record.channel,
         "bound_path": record.bound_path,
+        "namespaces": record.namespaces,
     }
 
 
@@ -249,6 +256,8 @@ def from_json(raw: object, expected_id: str) -> ProcessRecord | str:
             "'channel' and 'bound_path' must both be null or both non-empty strs, got "
             f"{channel!r}/{bound_path!r}"
         )
+    if type(raw["namespaces"]) is not bool:
+        return f"'namespaces' must be a bool, got {raw['namespaces']!r}"
     return ProcessRecord(
         id=expected_id,
         order=order,
@@ -260,6 +269,7 @@ def from_json(raw: object, expected_id: str) -> ProcessRecord | str:
         stderr_path=raw["stderr_path"],
         channel=channel,
         bound_path=bound_path,
+        namespaces=raw["namespaces"],
     )
 
 

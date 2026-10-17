@@ -110,7 +110,7 @@ def test_a_process_carries_its_channel_bound_path_and_endpoint_across_to_dict() 
     assert (plain.channel, plain.bound_path, plain.endpoint) == (None, None, None)
 
     d = json.loads(json.dumps(jail.to_dict()))
-    assert d["version"] == 9
+    assert d["version"] == 10
     assert [(p["channel"], p["bound_path"]) for p in d["processes"]] == [
         ("ctl", reservation.bound_path),
         (None, None),

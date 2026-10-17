@@ -87,6 +87,7 @@ def _forge_registration(jail_dir: str, pid: int, pgid: int) -> None:
                 "stderr_path": "",
                 "channel": None,
                 "bound_path": None,
+                "namespaces": False,
             },
             record,
         )

@@ -107,7 +107,14 @@ def _two_starts_two_sockets(run_id: str, jail_dir: str, *, confined: bool) -> No
         a.wait_ready(_READY_S)
         b.wait_ready(_READY_S)
         assert (a.endpoint, b.endpoint) == (first.endpoint, second.endpoint)
-        assert os.path.dirname(a.endpoint or "") == os.path.dirname(b.endpoint or "") == chan
+        if a.namespaces:
+            # each process sees a directory of its own over the channel directory (decision-196):
+            # the host's path to its socket is in that, named for the socket
+            assert a.endpoint != a.bound_path and b.endpoint != b.bound_path
+            assert os.path.dirname(os.path.dirname(a.endpoint or "")) == chan
+            assert os.path.dirname(os.path.dirname(b.endpoint or "")) == chan
+        else:
+            assert os.path.dirname(a.endpoint or "") == os.path.dirname(b.endpoint or "") == chan
         assert a.endpoint != b.endpoint
         # Each dialled from the host reaches its own process, and nothing else.
         assert (_greeting(first.endpoint), _greeting(second.endpoint)) == ("first", "second")

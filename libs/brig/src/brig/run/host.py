@@ -64,7 +64,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 from brig.core.runtime import Capability, RuntimeKind, SupervisorPlan, channel_dir
 from brig.mech import HelperLifetime
@@ -81,6 +81,7 @@ from brig.run.runtime import (
     Held,
     IoPolicy,
     JailRecord,
+    ProcessNamespaces,
     ProcessRecord,
     Reservation,
     Supervisor,
@@ -88,6 +89,7 @@ from brig.run.runtime import (
     channel_dir_of,
     refuse_foreign_reservation,
     reserved_socket,
+    socket_endpoint,
 )
 from brig.run.teardown import (
     DEFAULT_GRACE_S,
@@ -442,9 +444,10 @@ def _launch_supervisor(
     jail_dir: str,
     jail_id: str,
     tether: HeldTether | None,
-) -> tuple[SupervisorRecord, SupervisorLink]:
+) -> tuple[SupervisorRecord, SupervisorLink, ProcessNamespaces]:
     """Start the jail's supervisor, the jail's only process until it starts others, and wait
-    for it to say it is ready (decision-191, decision-192).
+    for it to say it is ready (decision-191, decision-192), and what it says about the namespaces
+    its processes will have (decision-195).
 
     It runs `(*wrap_prefix, *supervisor_argv)` under its own exit wrapper, detached in a new
     process group, tethered when the jail is, exactly as any process of an unsupervised jail
@@ -525,7 +528,18 @@ def _launch_supervisor(
                 else f"; ending it failed: {item.detail}"
             )
         )
-    return SupervisorRecord(pid=pid, start_time=stamp), link
+    return SupervisorRecord(pid=pid, start_time=stamp), link, _namespaces_of(hello)
+
+
+def _namespaces_of(hello: Mapping[str, Any]) -> ProcessNamespaces:
+    """What a supervisor's hello says of its processes' namespaces (decision-195): held, or
+    not and why. A hello that says nothing of them, or something that is not that, is not held:
+    no claim is made on a supervisor's silence."""
+    said = hello.get("namespaces")
+    if isinstance(said, dict) and isinstance(said.get("held"), bool):
+        reason = said.get("reason")
+        return ProcessNamespaces(said["held"], reason if isinstance(reason, str) else "")
+    return ProcessNamespaces(False, "the supervisor did not say whether it could")
 
 
 def _refused(jail: CompiledJail, capabilities: frozenset[Capability]) -> frozenset[Capability]:
@@ -669,11 +683,12 @@ class HostRuntime:
 
         instance: SupervisorRecord | None = None
         link: SupervisorLink | None = None
+        namespaces: ProcessNamespaces | None = None
         if jail.supervisor is not None:
             # A jail whose PID 1 is brig's supervisor (decision-190): the whole composed wrap
             # runs around it, once, and every process of the jail is a request to it.
             try:
-                instance, link = _launch_supervisor(
+                instance, link, namespaces = _launch_supervisor(
                     jail.supervisor,
                     jail=jail,
                     wrap_prefix=wrap_prefix,
@@ -703,6 +718,7 @@ class HostRuntime:
             helper_pids=helper_pids,
             helper_stamps=helper_stamps,
             supervisor=instance,
+            namespaces=namespaces,
             held=held,
         )
 
@@ -793,14 +809,22 @@ class HostRuntime:
         directory resolved, as the mechanisms grant it (decision-184): its
         name 16 hex characters from `secrets` and `.sock`, never reused. The
         host shares the jail's paths, so the host dials the path the process
-        binds."""
+        binds, unless the jail's processes have mount namespaces of their own, where it is the
+        directory the process sees over the channel directory (decision-196)."""
         path = reserved_socket(channel_dir_of(jail), _records.new_id())
-        return Reservation(channel=channel, bound_path=path, endpoint=path)
+        private = jail.namespaces is not None and jail.namespaces.held
+        return Reservation(
+            channel=channel, bound_path=path, endpoint=socket_endpoint(path, namespaces=private)
+        )
 
     def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None:
-        """The path `process` binds: the host shares it (decision-184)."""
+        """The path to dial `process`'s socket at: the one it binds, which the host shares
+        (decision-184), or the one in the directory of its own when it has a mount namespace
+        (decision-196)."""
         del jail
-        return process.bound_path
+        if process.bound_path is None:
+            return None
+        return socket_endpoint(process.bound_path, namespaces=process.namespaces)
 
     def ready(self, jail: JailRecord, process: ProcessRecord) -> bool:
         """Whether `connect` to `process`'s socket succeeds now, closed at

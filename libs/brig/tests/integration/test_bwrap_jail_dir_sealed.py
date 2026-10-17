@@ -75,7 +75,10 @@ _FORGED = ("MADE_RECORD", "WROTE_RECORD", "WROTE_EXIT", "WROTE_X", "MOVED_JAIL_D
 
 
 @pytest.mark.integration
-def test_a_write_root_above_the_jail_directory_cannot_write_it(run_id: str, outer: str) -> None:
+@pytest.mark.parametrize("namespaces", [True, False], ids=["as-the-host-gives", "no-namespaces"])
+def test_a_write_root_above_the_jail_directory_cannot_write_it(
+    run_id: str, outer: str, namespaces: bool
+) -> None:
     jail_dir = os.path.join(outer, "jail")
     os.makedirs(os.path.join(jail_dir, "tmp"))
     spec = Spec(
@@ -98,6 +101,7 @@ def test_a_write_root_above_the_jail_directory_cannot_write_it(run_id: str, oute
         io=IoPolicy(),
         jail_id="bwrap-jail-dir-sealed",
         jail_dir=jail_dir,
+        namespaces=namespaces,
     )
     holder_exit = _records.exit_path(jail_dir, holder.id)
     try:
@@ -123,7 +127,13 @@ def test_a_write_root_above_the_jail_directory_cannot_write_it(run_id: str, oute
     # The controls, same jail, same run: the scratch and the write root beside
     # the jail directory are written, and the exit record is the workload's.
     assert "SCRATCH" in stdout and "BESIDE" in stdout, (stdout, stderr)
-    with open(os.path.join(jail_dir, "tmp", "scratch"), encoding="utf-8") as f:
+    # (A process in namespaces of its own writes the scratch through a directory made for it.)
+    scratch = (
+        os.path.join(jail_dir, "tmp", process.id, "scratch")
+        if process.namespaces
+        else os.path.join(jail_dir, "tmp", "scratch")
+    )
+    with open(scratch, encoding="utf-8") as f:
         assert f.read() == "ok\n"
     assert os.path.isfile(os.path.join(outer, "beside"))
     assert status == 3
