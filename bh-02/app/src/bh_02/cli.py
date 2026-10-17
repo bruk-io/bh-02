@@ -53,8 +53,21 @@ _PATCH_TYPE = click.Path(exists=True, dir_okay=False, path_type=Path)
 _TRACE_TYPE = click.Path(dir_okay=False, writable=True, path_type=Path)
 
 
+def _model_name(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
+    """`--model`'s name, refused unless it is UTF-8: argv bytes that are not UTF-8 arrive as a lone
+    surrogate, which no layer can hold, so it is refused here, before a session is made for it."""
+    if value is not None:
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise click.BadParameter(
+                f"{value!r} is not valid UTF-8; write the model's name in UTF-8", ctx=ctx, param=param
+            ) from None
+    return value
+
+
 @click.group(invoke_without_command=True)
-@click.option("--model", default=None, help=_MODEL_HELP)
+@click.option("--model", default=None, callback=_model_name, help=_MODEL_HELP)
 @click.option("--patch", "patches", multiple=True, type=_PATCH_TYPE, help=_PATCH_HELP)
 @click.option("--trace", default=None, type=_TRACE_TYPE, metavar="FILE", help=_TRACE_HELP)
 @click.option(
