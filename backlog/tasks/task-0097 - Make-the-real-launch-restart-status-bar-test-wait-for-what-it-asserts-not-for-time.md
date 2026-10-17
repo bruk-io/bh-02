@@ -72,4 +72,6 @@ AC3. Left for the reviewer. `scripts/check bh-02/app --no-gates --no-docs`: exit
 Reviewer: AC1 and AC2 verified (no settle/sleep in the changed test, every wait_for bounded; changed test 3/3 passes, file 34 passed in 131 s). AC3 left for the orchestrator's full check: the worker's member check ran with --no-gates --no-docs, so the gates never saw the edited test file. READY. Should-fix: test_real_launch.py:826 (burst test) still reads the bar with rfind after the reply, the same pattern this task replaced at :794. Nit: :823-825 same read; the bang-line test's settle(0.5).
 
 Full scripts/check on 5cf6e37 (this task's commits with the rest of the batch): exit 0, format, lint, types, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17; log at the session scratchpad, check-batch4b.txt).
+
+No repro: the race only shows when the test process stalls between /clear and again; the worker reproduced it with a planted 3 s settle (the old test failed at its last assertion, the shape of TASK-0093's recorded failure) and the fixed test passes with the same plant.
 <!-- SECTION:NOTES:END -->
