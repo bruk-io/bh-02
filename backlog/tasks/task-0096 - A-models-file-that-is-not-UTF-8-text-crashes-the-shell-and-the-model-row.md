@@ -4,10 +4,11 @@ title: A models file that is not UTF-8 text crashes the shell and the model row
 status: To Do
 assignee: []
 created_date: '2026-10-14 13:05'
-updated_date: '2026-10-15 02:27'
+updated_date: '2026-10-17 02:23'
 labels:
   - models
   - size-1
+  - finish-moved
 dependencies: []
 priority: low
 type: bug
@@ -21,14 +22,16 @@ Found while building TASK-0093 (probed on e049e4b): a models.toml holding bytes 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A models file that is not UTF-8 text is the model row's ModelsError with what to write, never a traceback, and the built-in models stay usable (/model sonnet switches)
-- [ ] #2 sessions.create records no model for it and bh-02 starts; the shell-and-row contract test in test_session_dirs.py has a case of it and fails if either side crashes or they disagree
-- [ ] #3 scripts/check passes
-- [ ] #4 docs/bh-02/using/models.md says which new sessions list as 'default' in bh-02 sessions (a default that is not a name, an unreadable file) and that one whose default names no model lists by that name; the models plugin README says the shell and the row both use the working directory and the layer's cwd as roots (from TASK-0093's close review)
+- [ ] #1 sessions.create records no model for it and bh-02 starts; the shell-and-row contract test in test_session_dirs.py has a case of it and fails if either side crashes or they disagree
+- [ ] #2 scripts/check passes
+- [ ] #3 docs/bh-02/using/models.md says which new sessions list as 'default' in bh-02 sessions (a default that is not a name, an unreadable file) and that one whose default names no model lists by that name; the models plugin README says the shell and the row both use the working directory and the layer's cwd as roots (from TASK-0093's close review)
+- [ ] #4 A models file that is not UTF-8 text is the model row's ModelsError saying what to do (fix it or remove it), never a traceback, and bh-02 starts
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Deferred by the owner (2026-10-15): this run fixes only critical bugs; this one is not critical (no data loss, no security exposure, a workaround exists). Not to be started without the owner's word.
+
+Orchestrator, 2026-10-17: finish moved before work started. Criterion 1 said the built-in models stay usable (/model sonnet switches); TASK-0104 removed built-in models (owner's call: no built-ins, no backwards compatibility), so with an unreadable file there is no model until it is fixed. Criterion 1 is now the error alone, and is listed last after the edit (the CLI appends).
 <!-- SECTION:NOTES:END -->
