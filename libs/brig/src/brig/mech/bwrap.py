@@ -51,11 +51,13 @@ restrictive".
        (uid 0 or unknown only),            sysctls read-only for a workload
        `--dev /dev`                        that can be the host's root
                                            (decision-177, decision-194),
-                                           and a minimal device set. First
-                                           among the mounts, so every
-                                           spec-derived mount below stacks ON
-                                           TOP of it rather than being
-                                           shadowed by it.
+                                           and a minimal device set, then
+                                           `/dev/shm` a tmpfs of its own
+                                           (`--perms 1777 --tmpfs`,
+                                           decision-198). First among the
+                                           mounts, so every spec-derived
+                                           mount below stacks ON TOP of it
+                                           rather than being shadowed by it.
     3. `--ro-bind SRC DEST` per            the readable tree: an ALLOWLIST,
        `fs.read_allows`                    so what is not named here does not
                                            exist inside the jail at all.
@@ -117,15 +119,19 @@ restrictive".
                                            at the root of the jail's tmpfs
                                            (decision-190), after every mount
                                            so none covers it.
-    8. `--remount-ro /`                    the jail's own root tmpfs, read-only
+    8. `--remount-ro /dev`,                 the jail's own tmpfses, read-only:
+       `--remount-ro /`                    `/dev` (decision-198) and the root
                                            (decision-166). Every directory
                                            bwrap made to hang a mount on is a
-                                           directory of it, and until this
-                                           stage a write outside every write
-                                           root landed there and SUCCEEDED
-                                           (in the jail only). Last, since a
-                                           mount point cannot be made on a
-                                           read-only root.
+                                           directory of the root, and until
+                                           this stage a write outside every
+                                           write root landed there and
+                                           SUCCEEDED (in the jail only), and
+                                           the same went for `/dev`. Last,
+                                           since a mount point cannot be made
+                                           on a read-only tmpfs. The remount
+                                           is not recursive: `/dev/shm` and
+                                           `/dev/pts` keep their own flags.
     9. `--` then the argv of the jail's PID 1: the supervisor, never a
        workload's (decision-190).
 
@@ -370,7 +376,10 @@ _FS_WRITE_DETAIL: Final[str] = (
     "named: when any channel is declared, the runtime's channel directory "
     "<jail_dir>/chan where each start's socket is reserved, bound read-write "
     "because a jail cannot bind a socket into a directory it cannot write, "
-    "and a bind mount cannot name a socket that does not exist yet. The jail "
+    "and a bind mount cannot name a socket that does not exist yet. A second "
+    "such path is /dev/shm, a tmpfs of the jail's own for POSIX shared memory "
+    "and semaphores, which never reaches the host (decision-198): the rest of "
+    "/dev is read-only, so a new path directly in it is refused. The jail "
     "directory is never writable through a write root above it: it is bound "
     "read-only after them, but for its scratch tmp/ and the channel "
     "directory. Every carve-out is a mount on "
@@ -698,6 +707,14 @@ def render_bwrap_prefix(
         *_proc_sys_cover(euid),
         "--dev",
         "/dev",
+        # `/dev/shm` is a tmpfs of the jail's own, mode 1777 as on the host: POSIX
+        # shared memory and semaphores (python's multiprocessing) need it writable.
+        # Here, before any spec-derived mount, so one of those stacks on it. `/dev`
+        # itself is made read-only at stage 8 (decision-198).
+        "--perms",
+        "1777",
+        "--tmpfs",
+        "/dev/shm",
     ]
 
     # Stage 3: the readable tree (allowlist).
@@ -812,14 +829,17 @@ def render_bwrap_prefix(
     _refuse_unmountable_supervisor(spec, interpreter)
     args += ["--perms", "0444", "--ro-bind-data", "0", SUPERVISOR_SOURCE_PATH]
 
-    # Stage 8: the jail's own root, read-only (decision-166). bwrap builds the
-    # jail on a fresh tmpfs, and every directory it makes to hang a mount on
-    # -- `/tmp` above a write root, the parents of a workspace -- is a
-    # directory of that tmpfs, WRITABLE until this line: a write outside every
-    # write root landed there and succeeded (it never reached the host, but
-    # "denied" was false). Last, because a mount point cannot be made on a
-    # read-only root; the mounts above keep their own flags.
-    args += ["--remount-ro", "/", "--"]
+    # Stage 8: the jail's own tmpfses, read-only: `/dev` (decision-198) and the
+    # root (decision-166). bwrap builds the jail on a fresh tmpfs, and every
+    # directory it makes to hang a mount on -- `/tmp` above a write root, the
+    # parents of a workspace -- is a directory of that tmpfs, WRITABLE until this
+    # line: a write outside every write root landed there and succeeded (it never
+    # reached the host, but "denied" was false). `--dev` made `/dev` a writable
+    # tmpfs of the same kind, so a new path under it succeeded too. Last, because
+    # a mount point cannot be made on a read-only tmpfs; the mounts above keep
+    # their own flags, and the remount does not reach them (`/dev/shm` stays
+    # writable, `/dev/pts` stays a devpts).
+    args += ["--remount-ro", "/dev", "--remount-ro", "/", "--"]
     return tuple(args)
 
 

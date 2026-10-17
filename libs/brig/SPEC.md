@@ -893,7 +893,8 @@ be the copy decision-152 deleted the event stream for).
   (1) `--unshare-all --as-pid-1 --cap-drop ALL --chdir /` (decision-190 and
   decision-177, below); (2) the jail's
   own furniture, `--proc /proc`, `/proc/sys` bound read-only over it
-  (decision-177; for uid 0 or an unknown user only, decision-194) and `--dev /dev`, first among the mounts so every
+  (decision-177; for uid 0 or an unknown user only, decision-194) and `--dev /dev`, with `/dev/shm` a tmpfs of its
+  own (`--perms 1777 --tmpfs`, decision-198), first among the mounts so every
   spec-derived mount stacks on top of it; (3) `read_allows` as `--ro-bind`; (4) the channel directory
   `<jail_dir>/chan` as `--bind` when the Spec declares a channel (decision-184,
   §10; each declared endpoint's directory too until decision-186);
@@ -913,8 +914,8 @@ be the copy decision-152 deleted the event stream for).
   read grant made by a deny (2026-09-28, decision-165); (7) the `read_denies` carve-outs that exist
   inside a mounted tree (decision-164, below); (7a) `--perms 0444
   --ro-bind-data 0 /.brig-supervisor.py`, the supervisor's own program, after
-  every mount (decision-190, below); (8) `--remount-ro /`, the
-  jail's own root tmpfs made read-only, last of all (decision-166, below); (9)
+  every mount (decision-190, below); (8) `--remount-ro /dev` and `--remount-ro /`, the
+  jail's own tmpfses made read-only, last of all (decision-198 and decision-166, below); (9)
   `--`, then the argv of the jail's PID 1, brig's supervisor, never a
   workload's (decision-190).
 - **The jail's root is read-only (2026-09-28, decision-166), and until it was,
@@ -979,9 +980,32 @@ be the copy decision-152 deleted the event stream for).
   `/proc/mtrr` (its write needs CAP_SYS_ADMIN), `/proc/pressure/*` (a write
   sets a monitor on that open file and changes nothing on the host), the
   jail's own `/proc/<pid>` files (its own pid namespace) and bwrap's own
-  `/dev` tmpfs (TASK-0079.22); `/proc/sysrq-trigger` is absent and
+  `/dev` tmpfs (TASK-0079.22, closed by decision-198: `/dev` is read-only now,
+  but for `/dev/shm`); `/proc/sysrq-trigger` is absent and
   `/proc/irq` and `/proc/bus` are read-only. (Ruled 2026-10-12,
   decision-177.)
+- **`/dev` is read-only, but for `/dev/shm` (2026-10-17, decision-198).** bwrap's
+  `--dev /dev` builds `/dev` as a tmpfs of the jail's own, and until stage 8 it was
+  writable: `touch /dev/x` inside a jail succeeded, the same false denial
+  decision-166 fixed for the root tmpfs, since `fs_write` grades a write outside every
+  write root denied. The stage that makes the root read-only now makes `/dev` read-only
+  too (`--remount-ro /dev`, before `--remount-ro /`), and a new path directly in it is refused
+  with the mechanism's read-only signature. Measured before the choice, with a jailed
+  `sh`, `python3` and `git`: `sh` writes `/dev/null` and reads `/dev/zero` and
+  `/dev/urandom`, and needs nothing else under `/dev`; `python3` needs `/dev/shm` writable,
+  since `multiprocessing` creates its semaphores there (a read-only `/dev` made
+  `multiprocessing.Lock()` and `Queue()` fail with EROFS), and `/dev/ptmx` for a pty;
+  `git` writes nothing under `/dev`. `/dev/pts` is devpts, its own mount, and
+  `pty.openpty` still works under the read-only `/dev` (the remount is not recursive).
+  `/dev/tty` has no controlling terminal in a test, so it is checked as a
+  character device, not opened. Ruled: `/dev/shm` stays writable, as a tmpfs of its own
+  (`--perms 1777 --tmpfs /dev/shm`) mounted at stage 2 over bwrap's directory, so a
+  spec-derived mount under it still stacks on top. It is mode 1777 as on the host, and
+  like the root tmpfs and `/tmp` it never reaches the host; `fs_write`'s detail names it
+  as the one writable path under `/dev` (a read-only `/dev/shm` was weighed and not taken:
+  it breaks `multiprocessing` and any other user of POSIX semaphores). The stage 2 and stage 8
+  lines of the order above are the built shape. Implementing task: TASK-0079.22.
+  (Ruled 2026-10-17, decision-198.)
 - **Read carve-outs: masked where they exist, graded where they do not
   (2026-09-28, decision-164).** Each `read_denies` entry is compared, resolved,
   against every tree the render mounts (read allows, channel directories,
