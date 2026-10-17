@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-17 02:23'
+updated_date: '2026-10-17 19:04'
 labels:
   - brig
   - size-3
@@ -29,3 +30,9 @@ Proposed, not measured: the supervisor starts each process under a parent of its
 - [ ] #3 The process scope's grade and reason say what the fallback holds and what it does not (a tree forking faster than the stop), with a dated SPEC.md ruling
 - [ ] #4 brig's tiers pass as root and as tester
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 2026-10-17: brig moved to a repository of its own (TASK-0135, archived), and the old libs/brig is frozen until the new one replaces it. The idea, a subreaper per process so a stop reaches children that left the group, is an input for the new brig's teardown slice.
+<!-- SECTION:NOTES:END -->
