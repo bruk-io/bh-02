@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-17 14:58'
-updated_date: '2026-10-17 17:37'
+updated_date: '2026-10-17 17:44'
 labels:
   - brig
   - size-8
@@ -13,7 +13,7 @@ dependencies: []
 references:
   - >-
     backlog/decisions/decision-0008 -
-    Rebuild-brig-as-a-pure-domain-behind-ports-and-adapters-with-no-backwards-compatibility.md
+    Rebuild-brig-from-empty-in-three-layers-domain-infra-and-presentation.md
 type: intent
 ---
 
