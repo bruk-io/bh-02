@@ -124,10 +124,13 @@ def watch(
     *,
     jail_id: str,
     sensors: tuple[EventSource, ...] = (),
+    pid: int | None = None,
 ) -> None:
     """Reap `proc` when it exits, and record its status and the sensors'
-    reading of that ending."""
-    pid = proc.pid
+    reading of that ending, under `pid`: `proc`'s own by default. A container's process started
+    with `docker exec` is the client's child and not the host's pid the process is recorded by
+    (decision-203), so its status is kept under the recorded pid, as a supervised process's is."""
+    pid = proc.pid if pid is None else pid
     with _LOCK:
         _WATCHED.add(pid)
 
@@ -136,11 +139,14 @@ def watch(
             code = proc.wait()
         except Exception:  # a lost reap must not kill the thread
             code = None
+        try:
+            if code is not None:  # else nothing observed; wait() will say so rather than guess
+                record_status(pid, code, jail_id=jail_id, sensors=sensors)
         finally:
+            # After the record, never before: a caller that finds the pid no longer watched and no
+            # record yet would conclude nothing will ever say how it ended (decision-203, found
+            # under load by the exec agent's `wait`).
             with _LOCK:
                 _WATCHED.discard(pid)
-        if code is None:
-            return  # nothing observed; wait() will say so rather than guess
-        record_status(pid, code, jail_id=jail_id, sensors=sensors)
 
     threading.Thread(target=_run, name=f"brig-exit-{pid}", daemon=True).start()

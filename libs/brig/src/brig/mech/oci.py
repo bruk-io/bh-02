@@ -19,33 +19,46 @@ refused pairs in the matrix too.
 
 The flags, in order (`render_flags`):
 
-    1. `--init --user <euid> --network none --cap-drop ALL --security-opt no-new-privileges
-       --read-only`: a reaping PID 1; the embedder's uid, so files the workload writes into a project
-       are not owned by root (an unknown user is a refusal, never root); the loopback and nothing
-       else; no capability and no privilege gained by an exec (decision-177's analogue: root in the
-       container holds none either); and a read-only root filesystem (decision-166's analogue: a
-       write outside every write root is denied, not answered in the image's writable layer).
+    1. `--user <euid> --network none --cap-drop ALL --security-opt no-new-privileges
+       --read-only`: the embedder's uid, so files the workload writes into a project are not owned
+       by root (an unknown user is a refusal, never root); the loopback and nothing else; no
+       capability and no privilege gained by an exec (decision-177's analogue: root in the container
+       holds none either); and a read-only root filesystem (decision-166's analogue: a write outside
+       every write root is denied, not answered in the image's writable layer). `--init` is not
+       here: it belongs to the exec variant (decision-203, below).
     2. `--env-file <jail_dir>/oci.env`: the environment is a file (law 9), written by the runtime
        with mode 0600 and removed once `docker create` returns. Never `-e K=V`, which is argv.
     3. `--ulimit cpu=N:N+1` for `limits.cpu_seconds` N (decision-161: a soft limit equal to the hard
        one is delivered as `SIGKILL`, never `SIGXCPU`).
     4. The mounts, which Docker orders by the depth of their destination, so a carve-out is mounted
        over its write root whatever the order of the flags: `read_allows` as read-only binds,
-       `write_allows` as binds, the pins (decision-168: each existing directory between a write root
+       `write_allows` as binds, the runtime's channel directory `<jail_dir>/chan` bound read-write
+       at its own resolved path (decision-203: the rendezvous, the exec files and every channel's
+       socket are in it), the pins (decision-168: each existing directory between a write root
        and a carve-out, bound over itself, so it is a mount point and cannot be renamed away),
        `write_denies` a writable tree reaches as read-only binds over themselves (existing) or empty
        read-only tmpfses (absent), and `read_denies` inside a mounted root as masks (decision-164:
        a file by `/dev/null`, a directory by a mode-0001 read-only tmpfs: Docker reads mode 0 as
        unset, and an unset mode is 1777, which lists).
 
+**Two variants, one per agent (decision-203, SPEC.md §8).** `Oci(image, interpreter="/usr/bin/python3")`
+names the interpreter to try brig's supervisor under inside the image; `None` names none. The plan
+renders both variants (`ContainerPlan.create_flags`, `create_command`): the supervisor's is these flags
+plus the supervisor's program bound read-only from `<jail_dir>/oci-supervisor.py`, no `--init` (the
+supervisor is PID 1 and reaps) and the command that runs it with the path of the control socket
+(`<chan>/agent.sock`); the exec variant's is `--init` and the idle command. Which one a container is
+made as is the runtime's to find out (`brig.runtime.oci`): this is a pure render of both.
+
 **Refusals** (law 2), each naming its subject: a platform other than linux (Docker Desktop's mounts
 and uid mapping are not measured), a denylist `Spec` (`bwrap` refuses it for the reason SPEC.md §6
 gives, and a container has no host paths to deny but the ones mounted), `allowed_domains` (per-domain
-egress is a sidecar proxy, decision-0001, not built), a channel (the channel directory is
-TASK-0079.10's), `EnvPolicy.PASS` (the host's whole environment, in a container's configuration,
-for an image not built for it), an unknown `euid`, a path `--mount` cannot carry, an env name or
-value an env file cannot carry, and a carve-out above a mounted root (Docker mounts the shallower
-path first, so it could never be laid over the root: a deny that silently did not hold).
+egress is a sidecar proxy, decision-0001, not built), `EnvPolicy.PASS` (the host's whole environment,
+in a container's configuration, for an image not built for it), an unknown `euid`, a path `--mount`
+cannot carry, an env name or value an env file cannot carry, a carve-out above a mounted root (Docker
+mounts the shallower path first, so it could never be laid over the root: a deny that silently did not
+hold), and a write root at or above the jail directory or at or under its `procs/` (the records are
+kill authority, decision-173's promise, which bwrap keeps by sealing the directory; sealing is not
+built here).
 
 **Grades** (SPEC.md §6), as far as the flags can deliver them: `network` `enforced`; `fs_write`
 `enforced` against the host, naming what stays writable and never reaches it; `fs_read` `best_effort`,
@@ -62,8 +75,15 @@ from collections.abc import Mapping
 from typing import Final
 
 from brig.core import Axis, EnvMode, Grade, Graded, ReadModel, Spec
-from brig.core.runtime import ContainerPlan, EnvNotRepresentable, RuntimeKind, env_refusal
-from brig.mech.bwrap import pins
+from brig.core.runtime import (
+    AGENT_SOCKET_NAME,
+    PROCS_DIRNAME,
+    ContainerPlan,
+    EnvNotRepresentable,
+    RuntimeKind,
+    env_refusal,
+)
+from brig.mech.bwrap import DEFAULT_INTERPRETER, pins
 from brig.mech.contract import ArgvTransformer, CompileCtx, Step
 
 _LINUX: Final[str] = "linux"
@@ -71,8 +91,13 @@ _LINUX: Final[str] = "linux"
 #: The env file's name in the jail directory (decision-202): `--env-file <jail_dir>/oci.env`.
 ENV_FILE_NAME: Final[str] = "oci.env"
 
-#: The container's process until a supervisor replaces it (TASK-0079.10): idle, under `--init`.
+#: The exec variant's process (decision-203): idle, under `--init`, for `docker exec` to start
+#: the jail's processes beside.
 IDLE_COMMAND: Final[tuple[str, ...]] = ("sleep", "infinity")
+
+#: The supervisor's program on the host, in the jail directory (decision-203): the runtime writes
+#: it from `SUPERVISOR_SOURCE` and Docker binds it read-only at `SUPERVISOR_SOURCE_PATH`.
+SUPERVISOR_SOURCE_FILE: Final[str] = "oci-supervisor.py"
 
 _AXES: Final[frozenset[Axis]] = frozenset(
     {Axis.FS_READ, Axis.FS_WRITE, Axis.NETWORK, Axis.ENV, Axis.LIMITS}
@@ -101,7 +126,9 @@ _FS_READ_DETAIL: Final[str] = (
 #: Must contain the literal token "write_denies".
 _FS_WRITE_DETAIL: Final[str] = (
     "oci enforces fs_write against the host: the container's root is read-only (--read-only), "
-    "spec.fs.write_allows are the only host paths bound read-write, and write_denies carve-outs "
+    "spec.fs.write_allows and the runtime's own channel directory <jail_dir>/chan (where the "
+    "supervisor's control socket and each start's socket are made) are the only host paths bound "
+    "read-write, no write root may reach the rest of the jail directory, and write_denies carve-outs "
     "are read-only submounts inside those roots (a denied path that exists is bound over itself "
     "read-only, one that does not exist becomes an empty read-only tmpfs, and the directories "
     "between a write root and a carve-out are pinned so they cannot be renamed away). Root in "
@@ -158,10 +185,12 @@ class NetworkUnsupported(ValueError):
     and per-domain egress is a sidecar proxy that is not built. Names the domain(s)."""
 
 
-class ChannelsUnsupported(ValueError):
-    """Raised when the `Spec` declares a channel: the channel directory a container binds is
-    TASK-0079.10's, and a channel the jail could not listen on would be a downgrade. Names the
-    channel(s)."""
+class JailDirReachable(ValueError):
+    """Raised when a `write_allows` root is at or above the jail directory, or at or under its
+    `procs/`: the jail's records are kill authority, so no write root may reach them
+    (decision-173), and bwrap keeps that by sealing the directory under the root. A container does
+    not seal it (decision-203); it refuses. Names the root and the directory, and says to put the
+    jail directory outside the write root."""
 
 
 class EnvPassUnsupported(ValueError):
@@ -299,15 +328,17 @@ def render_flags(
     path_is_dir: Mapping[str, bool],
     env_file: str,
     euid: int,
+    channel_dir: str,
 ) -> tuple[str, ...]:
-    """Render `spec` into the flags of `docker create`, between its verb and the image. Pure.
+    """Render `spec` into the flags of `docker create` both variants share, between its verb and
+    the image (`--init` and the supervisor's mount are the variants' own). `channel_dir` is the
+    runtime's channel directory, already resolved, bound read-write at itself. Pure.
 
     Raises:
         ContextMissing, PathNotMountable, CarveOutAboveRoot: each naming its own subject; see the
             classes' docstrings.
     """
     flags: list[str] = [
-        "--init",
         "--user",
         str(euid),
         "--network",
@@ -329,6 +360,9 @@ def render_flags(
     write_roots = tuple(_resolve(path, resolved) for path in spec.fs.write_allows)
     for path in spec.fs.write_allows:
         flags += _bind(_resolve(path, resolved), path, readonly=False)
+    # The channel directory (decision-203), at its own resolved path. No write root contains it
+    # (`_refuse_reachable_jail_dir`), so no carve-out is laid over it and it is laid over nothing.
+    flags += _bind(channel_dir, channel_dir, readonly=False)
 
     # The pins (decision-168): each existing directory between a write root and a carve-out, bound
     # over itself, so it is a mount point and `mv .git .git-moved` finds it busy.
@@ -377,6 +411,24 @@ def _refuse_unrepresentable_env(spec: Spec) -> None:
             raise EnvNotRepresentable(f"spec.env.set: {reason}")
 
 
+def _refuse_reachable_jail_dir(spec: Spec, resolved: Mapping[str, str], jail_dir: str) -> None:
+    """Refuse a write root at or above the jail directory, or at or under its `procs/`.
+
+    Raises:
+        JailDirReachable: it is.
+    """
+    records = f"{jail_dir.rstrip('/')}/{PROCS_DIRNAME}"
+    for path in spec.fs.write_allows:
+        root = _resolve(path, resolved)
+        if _is_subpath(jail_dir, root) or _is_subpath(root, records):
+            raise JailDirReachable(
+                f"the write root {path!r} (resolved {root!r}) reaches the jail directory "
+                f"{jail_dir!r}, where the records of the jail's processes are (kill authority, "
+                "decision-173), and a container does not seal it. Put the jail directory outside "
+                "every write root"
+            )
+
+
 def _identity(argv: tuple[str, ...]) -> tuple[str, ...]:
     return argv
 
@@ -388,9 +440,14 @@ class Oci:
         image: The image to create the container from. The runtime never pulls (`--pull never`),
             so the embedder names an image it has. A name, not an option: not empty, no
             whitespace, not starting with `-`.
+        interpreter: The absolute path inside the image of the Python that brig's supervisor runs
+            under as the container's PID 1 (Python 3.9 or later), `DEFAULT_INTERPRETER` by default.
+            The runtime tries it first and, when the image has none (`docker start` answers
+            127), makes the container again as the exec variant (decision-203). `None` names no
+            interpreter: processes are started with `docker exec`, and the attempt is skipped.
 
     Raises:
-        ValueError: `image` is not an image name.
+        ValueError: `image` is not an image name, or `interpreter` is not an absolute path.
     """
 
     name = "oci"
@@ -398,22 +455,29 @@ class Oci:
     #: A container lives and dies through the Docker daemon, not a host process (decision-202).
     runtime: RuntimeKind | None = RuntimeKind.OCI
 
-    def __init__(self, image: str) -> None:
+    def __init__(self, image: str, *, interpreter: str | None = DEFAULT_INTERPRETER) -> None:
         if not image or image.startswith("-") or any(char.isspace() for char in image):
             raise ValueError(
                 f"Oci(image): {image!r} is not an image name (not empty, no whitespace, not "
                 "starting with '-')"
             )
+        if interpreter is not None and not interpreter.startswith("/"):
+            raise ValueError(
+                f"Oci(interpreter={interpreter!r}): the interpreter is an absolute path inside the "
+                "image (the container's PATH is the image's, and brig names no program by a bare "
+                "name), or None to start processes with `docker exec`"
+            )
         self._image = image
+        self._interpreter = interpreter
 
     def compile(self, spec: Spec, ctx: CompileCtx) -> Step:
         """Refuse what a container cannot deliver (see the module docstring) and render the
         flags. `fs_read` is `best_effort`, naming the image and any read carve-out left unmasked.
 
         Raises:
-            PlatformUnsupported, ReadModelUnsupported, NetworkUnsupported, ChannelsUnsupported,
-            EnvPassUnsupported, UnknownUser, EnvNotRepresentable, ContextMissing,
-            PathNotMountable, CarveOutAboveRoot: each naming its own subject.
+            PlatformUnsupported, ReadModelUnsupported, NetworkUnsupported, EnvPassUnsupported,
+            UnknownUser, EnvNotRepresentable, ContextMissing, PathNotMountable, CarveOutAboveRoot,
+            JailDirReachable: each naming its own subject.
         """
         if ctx.platform != _LINUX:
             raise PlatformUnsupported(
@@ -429,12 +493,6 @@ class Oci:
                 "oci runs the container with --network none, which is deny-all: it cannot let a "
                 f"domain through. Got spec.network.allowed_domains={spec.network.allowed_domains!r}"
             )
-        if spec.channels:
-            names = ", ".join(channel.name for channel in spec.channels)
-            raise ChannelsUnsupported(
-                f"the Spec declares channel(s) {names}, and a container has no channel directory "
-                "yet (TASK-0079.10): declare none"
-            )
         if spec.env.mode is EnvMode.PASS:
             raise EnvPassUnsupported(
                 "oci cannot pass the host's whole environment into a container: an image's "
@@ -449,8 +507,12 @@ class Oci:
                 "with build_compile_ctx"
             )
         _refuse_unrepresentable_env(spec)
+        _refuse_reachable_jail_dir(spec, ctx.resolved_paths, ctx.jail_dir)
 
-        env_file = f"{ctx.jail_dir.rstrip('/')}/{ENV_FILE_NAME}"
+        jail_dir = ctx.jail_dir.rstrip("/")
+        env_file = f"{jail_dir}/{ENV_FILE_NAME}"
+        chan = ctx.channel_dir
+        source = _mountable(f"{jail_dir}/{SUPERVISOR_SOURCE_FILE}")
         flags = render_flags(
             spec,
             resolved=ctx.resolved_paths,
@@ -458,6 +520,7 @@ class Oci:
             path_is_dir=ctx.path_is_dir,
             env_file=env_file,
             euid=ctx.euid,
+            channel_dir=chan,
         )
         unmasked = unmasked_read_denies(
             spec, resolved=ctx.resolved_paths, path_exists=ctx.path_exists
@@ -486,6 +549,10 @@ class Oci:
                 env_file=env_file,
                 env_forward=spec.env.allow_names,
                 env_set=spec.env.set,
+                channel_dir=chan,
+                interpreter=self._interpreter,
+                supervisor_source=source,
+                rendezvous=f"{chan}/{AGENT_SOCKET_NAME}",
             ),
         )
 
@@ -505,10 +572,11 @@ def _fs_read_graded(unmasked: tuple[str, ...]) -> Graded:
 __all__ = (
     "ENV_FILE_NAME",
     "IDLE_COMMAND",
+    "SUPERVISOR_SOURCE_FILE",
     "CarveOutAboveRoot",
-    "ChannelsUnsupported",
     "ContextMissing",
     "EnvPassUnsupported",
+    "JailDirReachable",
     "NetworkUnsupported",
     "Oci",
     "PathNotMountable",

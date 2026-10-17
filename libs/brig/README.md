@@ -54,9 +54,13 @@ embedder's uid, and an env file of mode 0600 that is removed after the create, n
 and the daemon's id, ends it with `docker rm -f` verified by `docker inspect`, and removes it when its
 embedder goes (a tether watcher, `SIGKILL` included). The daemon is the runtime object's
 (`OciRuntime(docker_host=...)`), never a record's. `env_scrub` and `rlimits` are refused beside it: it
-compiles their effect itself. Nothing is started in a container through brig yet, so `Jail.start` is
-absent on one; that, and the channel directory, are TASK-0079.10's. Its integration tier runs against
-the machine's Docker daemon and skips, naming `docker info`, without one.
+compiles their effect itself. A container's processes are started by an agent found out at `create`
+(decision-203, TASK-0079.10): brig's supervisor as its PID 1 where the image has python3 (its control
+socket a `SOCK_SEQPACKET` socket the host binds in the container's bind-mounted channel directory), `docker exec`
+and the host's ladder where it has none; each `Process` says which, and both are graded `cooperative`
+(a child that leaves its group outlives a stop; the battery plants one). Each start's socket is dialled
+from the host through the same verified dial; Docker Desktop's relay is not built. Its integration tier runs
+against the machine's Docker daemon and skips, naming `docker info`, without one.
 
 ## Standing alone
 

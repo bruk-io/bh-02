@@ -27,12 +27,20 @@ read by the host (`tests.supervised_jail.running_with`, `process_state`).
 `proven` is the other half: the highest grade a battery's cells prove for a scope, a pure function
 of what the host saw. A claim above it is a claim nothing planted; the e2e test holds the grades
 `Jail.report` and `Process.control` give to it, per scope and per jail type.
+
+**One battery, three jail types** (decision-203, TASK-0079.10). A `Harness` says what differs: the
+jail the cells make (`rig`), the programs they plant (`plants`: Python for a bwrap jail, whose
+system has an interpreter, a shell for a container image that may not), how the host stops the
+jail's agent (`stop_agent`), and whether a stop is still answered with it stopped
+(`agent_answers_when_stopped`: a supervisor is asked, so a stopped one ends the jail at the stop's
+deadline; `docker exec`'s agent is the host's own ladder, which asks nobody). A cell given a bare
+`Rig` is a bwrap jail's, as it was.
 """
 
 import os
 import signal
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from brig.core import Grade
@@ -50,6 +58,52 @@ from tests.supervised_jail import (
 
 #: Makes a fresh supervised jail of the jail type under test. The caller owns its end.
 Rig = Callable[[], Jail]
+
+
+@dataclass(frozen=True, slots=True)
+class Plants:
+    """The programs a cell starts in the jail: `setsid_parent(plain, escaping)` runs two `sleep`s
+    with those markers as their durations, one in its own group and one that left it for a session
+    of its own, and waits; `ignorer()` ignores `SIGTERM` and loops."""
+
+    setsid_parent: Callable[[str, str], list[str]]
+    ignorer: Callable[[], list[str]]
+
+
+#: A jail whose system has Python (a bwrap jail's, an image like bh-02-linux-jail).
+PYTHON_PLANTS = Plants(
+    setsid_parent=lambda plain, escaping: python(_PLANT_SETSID, plain, escaping),
+    ignorer=lambda: python(_PLANT_IGNORER),
+)
+
+#: A jail that has `sh`, `sleep` and `setsid` and may have nothing else (a bare ubuntu image). The
+#: markers are positional parameters, so the shell's own command line never holds `sleep <marker>`.
+SHELL_PLANTS = Plants(
+    setsid_parent=lambda plain, escaping: [
+        "/bin/sh",
+        "-c",
+        'sleep "$1" & setsid sleep "$2" & wait',
+        "sh",
+        plain,
+        escaping,
+    ],
+    ignorer=lambda: ["/bin/sh", "-c", 'trap "" TERM; while :; do sleep 1; done'],
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Harness:
+    """What a jail type changes about the battery: see the module docstring."""
+
+    rig: Rig
+    plants: Plants = field(default=PYTHON_PLANTS)
+    stop_agent: Callable[[Jail], int] | None = None
+    agent_answers_when_stopped: bool = False
+
+
+def _harness(subject: Rig | Harness) -> Harness:
+    return subject if isinstance(subject, Harness) else Harness(rig=subject)
+
 
 #: How long the host waits, after an ending has returned, for what it ended to leave the process
 #: table (the kernel removes a killed process a moment later). It is also how long a survivor is
@@ -167,9 +221,11 @@ def _in_a_session_of_its_own(marker: str, parent_pid: int) -> bool:
     return os.getsid(child) != os.getsid(parent_pid)
 
 
-def _stop_the_supervisor(jail: Jail) -> int:
-    """`SIGSTOP` the jail's PID 1 from the host and return its host pid once `/proc` says `T`;
-    `0` when it never does."""
+def _stop_the_supervisor(jail: Jail, harness: Harness) -> int:
+    """`SIGSTOP` the jail's agent from the host (a bwrap jail's PID 1 by default, else the
+    harness's own) and return its host pid once `/proc` says `T`; `0` when it never does."""
+    if harness.stop_agent is not None:
+        return harness.stop_agent(jail)
     pid = supervisor_host_pid(instance_group(jail))
     os.kill(pid, signal.SIGSTOP)
     return pid if until(lambda: process_state(pid) == "T") else 0
@@ -180,10 +236,11 @@ def _stop_the_supervisor(jail: Jail) -> int:
 # ---------------------------------------------------------------------------------------------
 
 
-def stop_a_setsid_child(rig: Rig) -> Cell:
-    jail = rig()
+def stop_a_setsid_child(subject: Rig | Harness) -> Cell:
+    harness = _harness(subject)
+    jail = harness.rig()
     plain, escaping, aside = (unique_sleep() for _ in range(3))
-    parent = jail.start(python(_PLANT_SETSID, plain[0], escaping[0]))
+    parent = jail.start(harness.plants.setsid_parent(plain[0], escaping[0]))
     jail.start(aside[1])
     planted = _planted(plain[0], escaping[0], aside[0]) and _in_a_session_of_its_own(
         escaping[0], parent.pid
@@ -199,10 +256,11 @@ def stop_a_setsid_child(rig: Rig) -> Cell:
     )
 
 
-def stop_a_process_that_ignores_sigterm(rig: Rig) -> Cell:
-    jail = rig()
+def stop_a_process_that_ignores_sigterm(subject: Rig | Harness) -> Cell:
+    harness = _harness(subject)
+    jail = harness.rig()
     plain, aside = unique_sleep(), unique_sleep()
-    ignorer = jail.start(python(_PLANT_IGNORER))
+    ignorer = jail.start(harness.plants.ignorer())
     control = jail.start(plain[1])
     jail.start(aside[1])
     planted = (
@@ -222,12 +280,17 @@ def stop_a_process_that_ignores_sigterm(rig: Rig) -> Cell:
     )
 
 
-def stop_through_a_stopped_supervisor(rig: Rig) -> Cell:
+def stop_through_a_stopped_supervisor(subject: Rig | Harness) -> Cell:
     """The control is a stop the supervisor answers, of a plain process, before it is stopped. The
     stop that follows is not answered: it ends the jail at its deadline (`SupervisorUnresponsive`,
     which the caller shortens with `brig.run._supervised.SLACK_S`), the stopped supervisor, the
-    process and the bystander with it."""
-    jail = rig()
+    process and the bystander with it.
+
+    Where the agent is the host's own ladder (`Harness.agent_answers_when_stopped`: `docker exec`),
+    the stop is answered whatever state the container's init is in: the process ends, the
+    bystander and the stopped init stay, and the victim is the survivor that must be gone."""
+    harness = _harness(subject)
+    jail = harness.rig()
     control, victim, aside = (unique_sleep() for _ in range(3))
     answered = jail.start(control[1])
     process = jail.start(victim[1])
@@ -235,27 +298,34 @@ def stop_through_a_stopped_supervisor(rig: Rig) -> Cell:
     planted = _planted(control[0], victim[0], aside[0])
     answered.stop()
     control_gone = _gone(control[0])
-    supervisor = _stop_the_supervisor(jail)
+    supervisor = _stop_the_supervisor(jail, harness)
     planted = planted and supervisor != 0
     try:
         process.stop()
-        planted = False  # a stop that was answered: the supervisor was not wedged
+        if not harness.agent_answers_when_stopped:
+            planted = False  # a stop that was answered: the supervisor was not wedged
     except SupervisorUnresponsive:
-        pass
+        if harness.agent_answers_when_stopped:
+            planted = False  # a stop that asked a stopped agent: the harness is not the host's own
+    if harness.agent_answers_when_stopped:
+        survivor_gone = supervisor != 0 and _gone(victim[0])
+    else:
+        survivor_gone = supervisor != 0 and _dead(supervisor) and _gone(victim[0])
     return Cell(
         Scope.PROCESS,
         Survivor.STOPPED_SUPERVISOR,
         planted=planted,
-        survivor_gone=supervisor != 0 and _dead(supervisor) and _gone(victim[0]),
+        survivor_gone=survivor_gone,
         control_gone=control_gone,
         bystander_gone=not _running(aside[0]),
     )
 
 
-def destroy_a_setsid_child(rig: Rig) -> Cell:
-    jail = rig()
+def destroy_a_setsid_child(subject: Rig | Harness) -> Cell:
+    harness = _harness(subject)
+    jail = harness.rig()
     plain, escaping = unique_sleep(), unique_sleep()
-    parent = jail.start(python(_PLANT_SETSID, plain[0], escaping[0]))
+    parent = jail.start(harness.plants.setsid_parent(plain[0], escaping[0]))
     planted = _planted(plain[0], escaping[0]) and _in_a_session_of_its_own(escaping[0], parent.pid)
     jail.destroy()
     return Cell(
@@ -268,10 +338,11 @@ def destroy_a_setsid_child(rig: Rig) -> Cell:
     )
 
 
-def destroy_a_process_that_ignores_sigterm(rig: Rig) -> Cell:
-    jail = rig()
+def destroy_a_process_that_ignores_sigterm(subject: Rig | Harness) -> Cell:
+    harness = _harness(subject)
+    jail = harness.rig()
     plain = unique_sleep()
-    ignorer = jail.start(python(_PLANT_IGNORER))
+    ignorer = jail.start(harness.plants.ignorer())
     control = jail.start(plain[1])
     planted = (
         _planted(plain[0])
@@ -289,12 +360,13 @@ def destroy_a_process_that_ignores_sigterm(rig: Rig) -> Cell:
     )
 
 
-def destroy_a_jail_whose_supervisor_is_stopped(rig: Rig) -> Cell:
-    jail = rig()
+def destroy_a_jail_whose_supervisor_is_stopped(subject: Rig | Harness) -> Cell:
+    harness = _harness(subject)
+    jail = harness.rig()
     plain, escaping = unique_sleep(), unique_sleep()
-    parent = jail.start(python(_PLANT_SETSID, plain[0], escaping[0]))
+    parent = jail.start(harness.plants.setsid_parent(plain[0], escaping[0]))
     planted = _planted(plain[0], escaping[0]) and _in_a_session_of_its_own(escaping[0], parent.pid)
-    supervisor = _stop_the_supervisor(jail)
+    supervisor = _stop_the_supervisor(jail, harness)
     planted = planted and supervisor != 0
     jail.destroy()
     return Cell(
@@ -308,7 +380,7 @@ def destroy_a_jail_whose_supervisor_is_stopped(rig: Rig) -> Cell:
 
 
 #: Every cell of the battery, in the order they are run.
-CELLS: tuple[Callable[[Rig], Cell], ...] = (
+CELLS: tuple[Callable[[Rig | Harness], Cell], ...] = (
     stop_a_setsid_child,
     stop_a_process_that_ignores_sigterm,
     stop_through_a_stopped_supervisor,
@@ -318,6 +390,6 @@ CELLS: tuple[Callable[[Rig], Cell], ...] = (
 )
 
 
-def run(rig: Rig) -> tuple[Cell, ...]:
-    """Every cell, each in a jail of its own made by `rig`."""
-    return tuple(cell(rig) for cell in CELLS)
+def run(subject: Rig | Harness) -> tuple[Cell, ...]:
+    """Every cell, each in a jail of its own made by the subject's rig."""
+    return tuple(cell(subject) for cell in CELLS)

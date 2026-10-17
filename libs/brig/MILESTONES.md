@@ -501,9 +501,11 @@ spec edit + ticket, not a drive-by). Devcontainer stays on the old path
   dead-relay recovery (the serialized-handle fix, proven by killing the
   relay first and tearing down from rehydration).
   *Part landed 2026-10-17 (decision-202, TASK-0079.09):* the `oci` mechanism and `OciRuntime` (a
-  container created, checked and ended through the Docker daemon, tethered). Not landed: the relay,
-  channels, a process started in a container (`docker exec` or the supervisor, TASK-0079.10), and
-  egress.
+  container created, checked and ended through the Docker daemon, tethered). *Part landed 2026-10-17
+  (decision-203, TASK-0079.10):* the channel directory bind-mounted, each start's socket dialled from the
+  host, and a container's processes started by the supervisor as its PID 1 (an image with python3) or by
+  `docker exec` and the host's ladder (an image with none), the control battery planted in both. Not
+  landed: the relay for Docker Desktop, namespaces of a process's own in a container, and egress.
 - **M11 `nix_closure`**: provisioning axis; jail.nix-style bwrap pairing;
   closure pinning aligned with Spec provisioning digests.
 - **M12 `pasta`/`slirp4netns`**: filtered egress inside an unshared netns —

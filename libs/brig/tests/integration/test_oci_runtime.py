@@ -88,9 +88,11 @@ def test_the_container_is_labelled_and_has_the_flags_the_spec_compiled(
     assert host["ReadonlyRootfs"] is True
     assert host["CapDrop"] == ["ALL"] and host["SecurityOpt"] == ["no-new-privileges"]
     assert host["Ulimits"] == [{"Name": "cpu", "Hard": 10, "Soft": 9}]
+    chan = os.path.realpath(jail.jail_dir) + "/chan"
     assert {m["Destination"]: (m["Type"], m["Source"], m["RW"]) for m in entry["Mounts"]} == {
         reference: ("bind", reference, False),
         workspace: ("bind", workspace, True),
+        chan: ("bind", chan, True),  # decision-203: the runtime's channel directory, always
     }
     assert (config["Image"], config["Cmd"]) == (IMAGE, ["sleep", "infinity"])
     assert entry["State"]["Running"] is True
@@ -226,7 +228,7 @@ def test_the_env_file_is_mode_0600_while_docker_reads_it_and_gone_after(
     ((path, mode, owner, content),) = at_create
     assert path == os.path.join(jail_dir, "oci.env")
     assert (mode, owner, content) == (0o600, os.geteuid(), "BRIG_OCI_TOKEN=in-the-file\n")
-    assert not os.path.lexists(path) and os.listdir(jail_dir) == []
+    assert not os.path.lexists(path) and os.listdir(jail_dir) == ["chan"]
 
 
 def test_a_create_that_fails_leaves_no_env_file_and_no_container(
@@ -242,7 +244,7 @@ def test_a_create_that_fails_leaves_no_env_file_and_no_container(
         with pytest.raises(OciCreateFailed, match="docker create failed") as caught:
             oci_make(spec, jail_dir, jail_id=jail_id, image="brig-no-such-image:0")
         assert "must-not-stay" not in str(caught.value)
-        assert os.listdir(jail_dir) == []
+        assert os.listdir(jail_dir) == ["chan"]
         assert _containers_labelled(jail_id) == []
     finally:
         shutil.rmtree(jail_dir, ignore_errors=True)
@@ -262,7 +264,7 @@ def test_an_env_file_path_that_is_a_link_is_replaced_never_written_through(
     make_oci_jail(spec, jail_dir=jail_dir)
     with open(victim, encoding="utf-8") as victim_file:
         assert victim_file.read() == "untouched"
-    assert os.listdir(jail_dir) == ["victim"]
+    assert sorted(os.listdir(jail_dir)) == ["chan", "victim"]
 
 
 # --- AC2: create, check, destroy -----------------------------------------------------------
@@ -297,10 +299,13 @@ def test_alive_follows_the_container_whoever_ends_it(make_oci_jail: Make) -> Non
     assert _item(removed.destroy(), "container").outcome is KillOutcome.ALREADY_GONE
 
 
-def test_a_container_jail_holds_no_process_and_offers_no_start(make_oci_jail: Make) -> None:
+def test_a_container_jail_holds_no_process_until_one_is_started(make_oci_jail: Make) -> None:
+    """decision-203: a container jail made here offers `start` (its agent is `docker exec` for this
+    image), and holds nothing until one is started. Its dict names no supervisor: the agent is the
+    creating process's knowledge, as a supervised jail's namespaces are."""
     jail = make_oci_jail()
     assert jail.processes() == () and jail.instance_group is None
-    assert not hasattr(jail, "start") and not hasattr(jail, "probe")
+    assert hasattr(jail, "start") and hasattr(jail, "probe")
     assert jail.to_dict()["runtime"] == "OCI" and jail.to_dict()["supervisor"] is None
 
 
@@ -452,7 +457,7 @@ def test_a_start_that_fails_removes_the_container_and_the_watcher_before_it_rais
     jail_dir = tempfile.mkdtemp(prefix="bg-oci-", dir="/tmp")
     jail_id = f"oci-nostart-{uuid.uuid4().hex[:8]}"
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
-    compiled = Stack([Oci(IMAGE)]).compile(spec, ctx=ctx)
+    compiled = Stack([Oci(IMAGE, interpreter=None)]).compile(spec, ctx=ctx)
     assert compiled.container is not None
     broken = dataclasses.replace(
         compiled, container=dataclasses.replace(compiled.container, command=("/no/such/program",))
@@ -472,7 +477,7 @@ def test_a_start_that_fails_removes_the_container_and_the_watcher_before_it_rais
                 broken, cwd="/", jail_id=jail_id, jail_dir=jail_dir, tether=read_end
             )
         assert _containers_labelled(jail_id) == []
-        assert os.listdir(jail_dir) == []
+        assert os.listdir(jail_dir) == ["chan"]
         (watcher,) = watchers  # it was started, so its ending below is the failure path's doing
         assert until(lambda: process_state(watcher.pid) in ("gone", "Z"), 5.0)
     finally:

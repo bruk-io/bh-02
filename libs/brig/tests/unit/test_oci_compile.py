@@ -27,15 +27,21 @@ from brig.core import (
     ReadModel,
     Spec,
 )
-from brig.core.runtime import EnvNotRepresentable, RuntimeKind
+from brig.core.runtime import (
+    SUPERVISOR_SOURCE_PATH,
+    ContainerAgent,
+    EnvNotRepresentable,
+    RuntimeKind,
+)
 from brig.mech import CompileCtx, Oci, Step
 from brig.mech.oci import (
     ENV_FILE_NAME,
     IDLE_COMMAND,
+    SUPERVISOR_SOURCE_FILE,
     CarveOutAboveRoot,
-    ChannelsUnsupported,
     ContextMissing,
     EnvPassUnsupported,
+    JailDirReachable,
     NetworkUnsupported,
     PathNotMountable,
     PlatformUnsupported,
@@ -86,9 +92,8 @@ def _flags(spec: Spec, ctx: CompileCtx) -> tuple[str, ...]:
     return step.container.flags
 
 
-#: The flags every container gets, whatever the Spec: the first ten, then the env file.
+#: The flags every container gets, whatever the Spec: the first nine, then the env file.
 _BASE = (
-    "--init",
     "--user",
     str(_EUID),
     "--network",
@@ -102,6 +107,11 @@ _BASE = (
     f"{_JAIL_DIR}/{ENV_FILE_NAME}",
 )
 
+#: The runtime's channel directory, bound read-write at its own path in every container
+#: (decision-203), after the write roots' binds.
+_CHAN = f"{_JAIL_DIR}/chan"
+_CHAN_MOUNT = ("--mount", f"type=bind,src={_CHAN},dst={_CHAN}")
+
 
 # --- the plan and the golden ---------------------------------------------------------------
 
@@ -109,7 +119,7 @@ _BASE = (
 def test_an_empty_spec_compiles_to_the_base_flags_and_nothing_else() -> None:
     step = Oci("img:1").compile(_s(), _ctx())
     assert step.container is not None
-    assert step.container.flags == _BASE
+    assert step.container.flags == (*_BASE, *_CHAN_MOUNT)
     assert (step.container.image, step.container.command) == ("img:1", IDLE_COMMAND)
     assert step.container.env_file == f"{_JAIL_DIR}/oci.env"
     assert (step.container.env_forward, step.container.env_set) == ((), ())
@@ -143,6 +153,7 @@ def test_the_whole_flag_list_for_a_spec_with_every_mount_kind_is_this() -> None:
         "type=bind,src=/data,dst=/data,readonly",
         "--mount",
         f"type=bind,src={_WS},dst={_WS}",
+        *_CHAN_MOUNT,
         "--mount",
         f"type=bind,src={git},dst={git}",
         "--mount",
@@ -181,7 +192,8 @@ def test_the_user_is_the_embedders_uid_and_never_guessed() -> None:
 
 
 def test_a_cpu_limit_has_a_second_of_headroom_and_zero_is_no_flag() -> None:
-    assert _flags(_s(limits=Limits(cpu_seconds=3)), _ctx())[-2:] == ("--ulimit", "cpu=3:4")
+    flags = _flags(_s(limits=Limits(cpu_seconds=3)), _ctx())
+    assert flags[flags.index("--ulimit") :][:2] == ("--ulimit", "cpu=3:4")
     assert "--ulimit" not in _flags(_s(limits=Limits(memory_bytes=10**9)), _ctx())
 
 
@@ -278,12 +290,6 @@ def test_each_thing_a_container_cannot_deliver_is_refused_by_name() -> None:
             _ctx(),
             NetworkUnsupported,
             "example.com",
-        ),
-        (
-            _s(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),)),
-            _ctx(),
-            ChannelsUnsupported,
-            "ctl",
         ),
         (Spec(fs=FsPolicy()), _ctx(), ReadModelUnsupported, "DENY_LIST"),
     ]
@@ -407,3 +413,103 @@ def test_limits_are_claimed_only_when_a_cpu_limit_gives_the_mechanism_work() -> 
 def test_the_denial_signatures_are_the_two_a_container_produces() -> None:
     patterns = {p.pattern for p in Oci("img:1").compile(_s(), _ctx()).denial_signatures}
     assert patterns == {"Read-only file system", "Network is unreachable"}
+
+
+# --- the channel directory, the two variants and the jail directory (decision-203) ----------
+
+
+def test_a_spec_that_declares_a_channel_compiles_and_the_directory_is_mounted_either_way() -> None:
+    """decision-202 refused a channel; decision-203 gives the container its channel directory. It
+    is bound whether or not the Spec declares a channel: the supervisor's control socket and the
+    exec variant's files are in it too."""
+    declared = _s(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),))
+    assert _flags(declared, _ctx()) == _flags(_s(), _ctx()) == (*_BASE, *_CHAN_MOUNT)
+
+
+def test_the_channel_directory_is_the_resolved_one_under_the_jail_directory() -> None:
+    step = Oci("img:1").compile(_s(), _ctx())
+    assert step.container is not None
+    assert step.container.channel_dir == _CHAN
+    assert step.container.rendezvous == f"{_CHAN}/agent.sock"
+
+
+def test_the_exec_variant_is_the_shared_flags_with_init_and_the_idle_command() -> None:
+    step = Oci("img:1").compile(_s(), _ctx())
+    plan = step.container
+    assert plan is not None
+    assert plan.create_flags(ContainerAgent.EXEC) == ("--init", *_BASE, *_CHAN_MOUNT)
+    assert plan.create_command(ContainerAgent.EXEC) == IDLE_COMMAND
+
+
+def test_the_supervisor_variant_has_no_init_binds_the_program_read_only_and_runs_it() -> None:
+    plan = Oci("img:1", interpreter="/opt/py/bin/python3").compile(_s(), _ctx()).container
+    assert plan is not None
+    flags = plan.create_flags(ContainerAgent.SUPERVISOR)
+    source = f"{_JAIL_DIR}/{SUPERVISOR_SOURCE_FILE}"
+    assert "--init" not in flags  # the supervisor is PID 1 and reaps
+    assert flags == (
+        *_BASE,
+        *_CHAN_MOUNT,
+        "--mount",
+        f"type=bind,src={source},dst={SUPERVISOR_SOURCE_PATH},readonly",
+    )
+    assert plan.create_command(ContainerAgent.SUPERVISOR) == (
+        "/opt/py/bin/python3",
+        "-I",
+        SUPERVISOR_SOURCE_PATH,
+        f"{_CHAN}/agent.sock",
+    )
+    assert plan.supervisor_source == source
+
+
+def test_the_supervisor_is_tried_first_and_only_where_an_interpreter_is_named() -> None:
+    default = Oci("img:1").compile(_s(), _ctx()).container
+    none = Oci("img:1", interpreter=None).compile(_s(), _ctx()).container
+    assert default is not None and none is not None
+    assert default.interpreter == "/usr/bin/python3"
+    assert default.agents() == (ContainerAgent.SUPERVISOR, ContainerAgent.EXEC)
+    assert none.interpreter is None and none.agents() == (ContainerAgent.EXEC,)
+    with pytest.raises(ValueError, match="no interpreter"):
+        none.create_command(ContainerAgent.SUPERVISOR)
+
+
+@pytest.mark.parametrize("interpreter", ["", "python3", "bin/python3"])
+def test_an_interpreter_that_is_not_an_absolute_path_is_refused_at_construction(
+    interpreter: str,
+) -> None:
+    with pytest.raises(ValueError, match="absolute path inside the image"):
+        Oci("img:1", interpreter=interpreter)
+
+
+def test_the_two_variants_share_every_confinement_flag() -> None:
+    """The exec variant's `--init` and the supervisor's mount are the only difference: the
+    confinement (user, network, capabilities, read-only root, mounts, limits) is one, so a process
+    started either way is held by the same container."""
+    spec = _spec(read_allows=("/data",), write_allows=(_WS,))
+    plan = Oci("img:1").compile(spec, _ctx(paths=("/data", _WS))).container
+    assert plan is not None
+    shared = set(plan.flags)
+    assert shared <= set(plan.create_flags(ContainerAgent.EXEC))
+    assert shared <= set(plan.create_flags(ContainerAgent.SUPERVISOR))
+    assert set(plan.create_flags(ContainerAgent.EXEC)) - shared == {"--init"}
+
+
+@pytest.mark.parametrize(
+    "root",
+    [_JAIL_DIR, "/run/brig", "/", f"{_JAIL_DIR}/procs", f"{_JAIL_DIR}/procs/0123456789abcdef"],
+)
+def test_a_write_root_that_reaches_the_jails_records_is_refused(root: str) -> None:
+    """decision-173: the jail never writes a record. bwrap seals the jail directory under a write
+    root; a container refuses the root (the seal is not built)."""
+    with pytest.raises(JailDirReachable, match="records"):
+        Oci("img:1").compile(_spec(write_allows=(root,)), _ctx(paths=(root,)))
+
+
+def test_a_write_root_beside_or_inside_the_jail_directory_but_not_its_records_is_not_refused() -> (
+    None
+):
+    """The control for the refusal: the roots that do not reach the records compile, so the
+    refusal is not a refusal of every path near the directory."""
+    for root in ("/run/brig/jail1", f"{_JAIL_DIR}/work", _WS):
+        flags = _flags(_spec(write_allows=(root,)), _ctx(paths=(root,)))
+        assert f"type=bind,src={root},dst={root}" in flags

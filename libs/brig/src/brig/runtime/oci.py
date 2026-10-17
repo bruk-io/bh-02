@@ -1,10 +1,16 @@
 """`OciRuntime`: a container as a jail's instance, created and ended through the Docker daemon.
 
-SPEC.md §8 (decision-202), decision-0001's migration step 5, first half. The `oci` mechanism
+SPEC.md §8 (decision-202, decision-203), decision-0001's migration step 5. The `oci` mechanism
 (`brig/mech/oci.py`) compiles a `Spec` to a `ContainerPlan`; this runtime makes the container from
 it, identifies it, checks it and ends it. A container is created and ended through the daemon,
-never by signalling a host process group; nothing is started in it through brig yet, so it has no
-supervisor (TASK-0079.10's), and `Jail.start` is absent on its jails (SPEC.md §9).
+never by signalling a host process group.
+
+**Its processes have an agent, found out at `create`** (decision-203). The container is made as the
+supervisor's first (brig's supervisor as its PID 1, `brig/runtime/_oci_agent.py`): when `docker
+start` answers that the interpreter is not in the image (exit code 127) it is removed and made again
+as the exec variant (`--init`, idle), whose processes are started with `docker exec`
+(`brig/runtime/_oci_exec.py`). `ContainerRecord.agent` says which. Either way the channel directory is
+bind-mounted and each start's socket is dialled from the host through the verified dial.
 
 **The daemon is the runtime object's, never a record's.** Every `docker` runs with `DOCKER_HOST`
 set to `docker_host` and an environment of its own (`_cli_env`): the settings the CLI needs to reach
@@ -40,13 +46,18 @@ import subprocess
 from dataclasses import dataclass
 from typing import Final, assert_never
 
-from brig.core.runtime import Capability, ContainerPlan, RuntimeKind
-from brig.run import _identity
+from brig.core.runtime import Capability, ContainerAgent, ContainerPlan, RuntimeKind
+from brig.run import _channels, _identity, _records
+from brig.run._jail_dir import clear_earlier_records, make_channel_dir
+from brig.run._supervised import LinkedSupervisor, namespaces_of
+from brig.run._supervisor_link import SupervisorLink
 from brig.run._tether import HeldTether
 from brig.run.host import LaunchRefused
 from brig.run.runtime import (
     ContainerRecord,
+    Held,
     JailRecord,
+    ProcessNamespaces,
     ProcessRecord,
     Reservation,
     Supervisor,
@@ -58,6 +69,18 @@ from brig.run.teardown import (
     KillReport,
     end_group,
 )
+from brig.runtime._oci_agent import (
+    AgentStartFailed,
+    StartVerdict,
+    accept_hello,
+    bind_rendezvous,
+    container_state,
+    missing_interpreter_reason,
+    release_rendezvous,
+    start_verdict,
+    write_source,
+)
+from brig.runtime._oci_exec import ExecSupervisor
 from brig.stack import CompiledJail
 
 #: The default daemon: Docker's own socket.
@@ -116,9 +139,11 @@ class Gone:
 
 @dataclass(frozen=True, slots=True)
 class Ours:
-    """The container is the record's, carrying the jail's label. `running`: `State.Running`."""
+    """The container is the record's, carrying the jail's label. `running`: `State.Running`;
+    `pid`: `State.Pid`, the host's pid of its PID 1 (0 when it is not running)."""
 
     running: bool
+    pid: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +192,7 @@ def standing(
         (entry,) = parsed
         found = entry["Id"]
         running = entry["State"]["Running"]
+        pid = entry["State"].get("Pid", 0)
         labels = entry["Config"]["Labels"] or {}
     except ValueError, KeyError, TypeError:
         return Unknown("docker inspect printed something that is not one container's JSON")
@@ -177,22 +203,23 @@ def standing(
             f"the container {container_id} carries {JAIL_LABEL}={labels.get(JAIL_LABEL)!r}, not "
             f"this jail's {jail_id!r}"
         )
-    return Ours(running=running is True)
+    return Ours(running=running is True, pid=pid if type(pid) is int else 0)
 
 
-def create_args(plan: ContainerPlan, jail_id: str) -> tuple[str, ...]:
-    """The arguments `docker` is run with to create the container for `plan`: never pulls
-    (`--pull never`), labels the container with the jail, then the plan's flags, image and
-    command. The environment is in the file the flags name, never here (law 9). Pure."""
+def create_args(plan: ContainerPlan, jail_id: str, agent: ContainerAgent) -> tuple[str, ...]:
+    """The arguments `docker` is run with to create the container for `plan` as the variant of
+    `agent`: never pulls (`--pull never`), labels the container with the jail, then the variant's
+    flags, the image and the variant's command. The environment is in the file the flags name, never
+    here (law 9). Pure."""
     return (
         "create",
         "--pull",
         "never",
         "--label",
         f"{JAIL_LABEL}={jail_id}",
-        *plan.flags,
+        *plan.create_flags(agent),
         plan.image,
-        *plan.command,
+        *plan.create_command(agent),
     )
 
 
@@ -339,26 +366,34 @@ class OciRuntime:
         tether: int | None,
     ) -> JailRecord:
         """Make the jail's instance: a created and started container, labelled with `jail_id`,
-        with nothing of brig's in it (`sleep infinity` under `--init`; TASK-0079.10 replaces it
-        with the supervisor), and a tether watcher when `tether` is given.
+        its processes' agent found out (decision-203), and a tether watcher when `tether` is given.
 
-        `tether` is the read end of a pipe whose write end the caller keeps; the runtime holds a
-        duplicate while it starts the watcher, so the caller may close its own once this returns.
-        The env file is written, named by `--env-file` and removed before `docker create` is
-        judged. If anything after the container exists fails, the container and the watcher are
-        removed before the error is raised.
+        The container is made as the first of the plan's agents. For the supervisor that is: the
+        program written to `<jail_dir>/oci-supervisor.py`, a listener bound at `<chan>/agent.sock`,
+        the container created and started, the connection accepted from its PID 1 and its hello
+        read. `docker start` answering that the interpreter is not in the image (exit code 127)
+        removes the container and makes it again as the exec variant, idle under `--init`, and the
+        record says why. `tether` is the read end of a pipe whose write end the caller keeps; the
+        jail holds a duplicate (`Held`), so the caller may close its own once this returns. The env
+        file is written, named by `--env-file` and removed before `docker create` is judged. If
+        anything after a container exists fails, the container and the watcher are removed before
+        the error is raised.
 
         Raises:
             OciCreateRefused: `jail` is not an `OCI` jail with a container plan, or has helpers
                 or staged files.
             LaunchRefused: `jail.requires` names a capability this runtime lacks (it has none).
             TetherClosed: `tether` has already ended.
+            JailDirInUse: `jail_dir` holds an earlier jail's records and something they name
+                runs, or brig can't tell.
             OciUnavailable: the CLI could not be run or the daemon did not answer `docker info`.
             EnvNotRepresentable: a forwarded variable cannot be a line of the env file (it names
                 the variable, never the value).
-            OciCreateFailed: `docker create` or `docker start` failed, or the container is not
-                running right after it; carries docker's error.
-            OSError: `tether` is not open, or `jail_dir` or the env file could not be written.
+            OciCreateFailed: `docker create` or `docker start` failed, the container is not
+                running right after it, or the supervisor never connected and spoke; carries
+                docker's error, or the container's logs.
+            OSError: `tether` is not open, or `jail_dir`, the channel directory, the env file, the
+                supervisor's program or its socket could not be made.
         """
         plan = jail.container
         if jail.runtime is not RuntimeKind.OCI or plan is None:
@@ -386,31 +421,17 @@ class OciRuntime:
                     f"the daemon at {self.docker_host} did not answer `docker info`; is it "
                     "running, and is the address right? (OciRuntime(docker_host=...))"
                 )
-            container_id = self._create_container(plan, jail_id, jail_dir)
-            watcher: subprocess.Popen[bytes] | None = None
-            try:
-                if tether_fd is not None:
-                    watcher = self._start_watcher(container_id, tether_fd)
-                started = self._run("start", container_id)
-                if started.returncode != 0:
-                    raise OciCreateFailed(
-                        f"docker start failed (status {started.returncode}): "
-                        f"{started.stderr.strip()[:500]}"
-                    )
-                self._require_running(container_id, jail_id, plan)
-            except BaseException:
-                self._remove(container_id)
-                if watcher is not None:
-                    end_group(
-                        "helper", watcher.pid, watcher.pid, _identity.start_stamp(watcher.pid)
-                    )
-                raise
-        finally:
+            os.makedirs(jail_dir, mode=0o700, exist_ok=True)
+            clear_earlier_records(jail_dir)
+            make_channel_dir(jail_dir)
+            made, agent, reason = self._make_agent_container(plan, jail_id, tether_fd)
+        except BaseException:
             if hold is not None:
                 hold.release()
+            raise
 
-        helper_pids = () if watcher is None else (watcher.pid,)
-        helper_stamps = () if watcher is None else (_identity.start_stamp(watcher.pid),)
+        helper_pids = () if made.watcher is None else (made.watcher.pid,)
+        helper_stamps = () if made.watcher is None else (_identity.start_stamp(made.watcher.pid),)
         return JailRecord(
             kind=self.kind,
             jail_id=jail_id,
@@ -420,14 +441,155 @@ class OciRuntime:
             wrap_prefix=None,
             helper_pids=helper_pids,
             helper_stamps=helper_stamps,
-            container=ContainerRecord(container_id=container_id, daemon_id=daemon),
+            namespaces=made.namespaces,
+            container=ContainerRecord(
+                container_id=made.container_id,
+                daemon_id=daemon,
+                agent=agent,
+                agent_reason=reason,
+                init_pid=made.init_pid,
+            ),
+            held=Held(wrap=jail.wrap, sensors=jail.sensors, tether=hold, link=made.link),
         )
 
-    def _require_running(self, container_id: str, jail_id: str, plan: ContainerPlan) -> None:
-        """Ask once that the container started is running: under `--init` a command that is not in
-        the image ends the container at once and `docker start` still returns 0, and a jail that
-        does not run is no jail. One question, not a wait: a command that ends later reads gone by
-        `alive`.
+    def _make_agent_container(
+        self, plan: ContainerPlan, jail_id: str, tether_fd: int | None
+    ) -> tuple[_Made, ContainerAgent, str]:
+        """Make the container as each of the plan's agents in turn until one starts: the made
+        container, the agent that holds it, and why it is not the supervisor when it is not.
+
+        Raises:
+            EnvNotRepresentable, OciCreateFailed, OciUnavailable, OSError: as `create`.
+        """
+        reason = missing_interpreter_reason(None, plan.image) if plan.interpreter is None else ""
+        for agent in plan.agents():
+            attempt = self._attempt(plan, agent, jail_id, tether_fd)
+            match attempt:
+                case _Made():
+                    return attempt, agent, reason
+                case _NoInterpreter():
+                    reason = missing_interpreter_reason(plan.interpreter, plan.image)
+                case _ as unreachable:
+                    assert_never(unreachable)
+        raise OciCreateFailed(
+            f"no agent could be made for the image {plan.image!r}: {reason}"
+        )  # pragma: no cover  (EXEC is last and never answers _NoInterpreter)
+
+    def _attempt(
+        self, plan: ContainerPlan, agent: ContainerAgent, jail_id: str, tether_fd: int | None
+    ) -> _Made | _NoInterpreter:
+        """One try at the container as the variant of `agent`: create it, start the tether
+        watcher, `docker start`, and see the agent in. The supervisor's rendezvous and program are
+        made first and removed after, whatever came of it.
+
+        Raises:
+            EnvNotRepresentable, OciCreateFailed, OciUnavailable, OSError: as `create`.
+        """
+        listener: socket.socket | None = None
+        if agent is ContainerAgent.SUPERVISOR:
+            write_source(plan.supervisor_source)
+            listener = bind_rendezvous(plan.rendezvous)
+        try:
+            container_id = self._create_container(plan, agent, jail_id)
+            watcher: subprocess.Popen[bytes] | None = None
+            try:
+                if tether_fd is not None:
+                    watcher = self._start_watcher(container_id, tether_fd)
+                started = self._run("start", container_id)
+                if started.returncode != 0:
+                    return self._start_failed(plan, agent, container_id, jail_id, started, watcher)
+                init_pid = self._require_running(container_id, jail_id, plan, agent)
+                if listener is None:
+                    return _Made(container_id, watcher, None, None, init_pid)
+                link, namespaces = self._see_supervisor_in(listener, container_id, init_pid)
+                return _Made(container_id, watcher, link, namespaces, init_pid)
+            except BaseException:
+                self._abandon(container_id, watcher)
+                raise
+        finally:
+            if listener is not None:
+                release_rendezvous(listener, plan.rendezvous)
+
+    def _start_failed(
+        self,
+        plan: ContainerPlan,
+        agent: ContainerAgent,
+        container_id: str,
+        jail_id: str,
+        started: _Done,
+        watcher: subprocess.Popen[bytes] | None,
+    ) -> _NoInterpreter:
+        """`docker start` failed: if the supervisor's command is not in the image, abandon the
+        container and say so (the caller tries the next agent); otherwise it is a failure, and the
+        caller abandons the container.
+
+        Raises:
+            OciCreateFailed: any other failure.
+            OciUnavailable: the CLI could not be started.
+        """
+        inspected = self._run("inspect", "--type", "container", container_id)
+        state = container_state(inspected.stdout) if inspected.returncode == 0 else None
+        verdict = start_verdict(started.returncode, state)
+        if verdict is StartVerdict.NO_INTERPRETER and agent is ContainerAgent.SUPERVISOR:
+            self._abandon(container_id, watcher)
+            return _NoInterpreter()
+        raise OciCreateFailed(
+            f"docker start failed (status {started.returncode}) for the {agent.name.lower()} "
+            f"variant of {plan.image!r}: {started.stderr.strip()[:500]}"
+        )
+
+    def _abandon(self, container_id: str, watcher: subprocess.Popen[bytes] | None) -> None:
+        """Remove a container `create` is giving up on, and its tether watcher. Best effort: the
+        error that sent us here is the one that is raised.
+
+        Raises:
+            OciUnavailable: the CLI could not be started.
+        """
+        self._remove(container_id)
+        if watcher is not None:
+            end_group("helper", watcher.pid, watcher.pid, _identity.start_stamp(watcher.pid))
+
+    def _see_supervisor_in(
+        self, listener: socket.socket, container_id: str, init_pid: int
+    ) -> tuple[SupervisorLink, ProcessNamespaces]:
+        """Accept the supervisor from the container's PID 1 and read its hello: its link, and what
+        it found of the namespaces its processes could have (decision-195).
+
+        Raises:
+            OciCreateFailed: it never connected and spoke, with what `docker logs` said.
+            OciUnavailable: the CLI could not be started.
+        """
+
+        def alive() -> bool:
+            done = self._run("inspect", "--type", "container", container_id)
+            state = container_state(done.stdout) if done.returncode == 0 else None
+            return state is not None and state.status == "running"
+
+        def unresponsive() -> None:
+            with contextlib.suppress(OciUnavailable):
+                self._remove(container_id)
+
+        try:
+            link, hello = accept_hello(
+                listener, init_pid=init_pid, alive=alive, unresponsive=unresponsive
+            )
+        except AgentStartFailed as error:
+            logs = self._run("logs", "--tail", "40", container_id)
+            said = (logs.stderr + logs.stdout).strip()[-1500:]
+            raise OciCreateFailed(
+                f"brig's supervisor did not start in container {container_id[:12]}: {error}. Its "
+                f"logs said: {said or 'nothing'}. Usual causes: an interpreter older than Python "
+                "3.9, or a kernel without pidfd_open (Linux 5.3)"
+            ) from error
+        return link, namespaces_of(hello)
+
+    def _require_running(
+        self, container_id: str, jail_id: str, plan: ContainerPlan, agent: ContainerAgent
+    ) -> int:
+        """Ask once that the container started is running, and for the host's pid of its PID 1:
+        under `--init` a command that is not in the image ends the container at once and `docker
+        start` still returns 0, and a jail that does not run is no jail. One question, not a wait:
+        a command that ends later reads gone by `alive`.
 
         Raises:
             OciCreateFailed: the container is not running.
@@ -438,30 +600,31 @@ class OciRuntime:
             done.returncode, done.stdout, done.stderr, container_id=container_id, jail_id=jail_id
         )
         match found:
-            case Ours(running=True):
-                return
+            case Ours(running=True, pid=pid) if pid > 0:
+                return pid
             case Ours() | Gone() | NotOurs() | Unknown():
                 raise OciCreateFailed(
                     f"the container is not running right after docker start; its command "
-                    f"{' '.join(plan.command)!r} may not be in the image {plan.image!r}"
+                    f"{' '.join(plan.create_command(agent))!r} may not be in the image "
+                    f"{plan.image!r}"
                 )
             case _ as unreachable:
                 assert_never(unreachable)
 
-    def _create_container(self, plan: ContainerPlan, jail_id: str, jail_dir: str) -> str:
-        """Write the env file, `docker create`, remove the file; the container's full id.
+    def _create_container(self, plan: ContainerPlan, agent: ContainerAgent, jail_id: str) -> str:
+        """Write the env file, `docker create` the variant of `agent`, remove the file; the
+        container's full id.
 
         Raises:
             EnvNotRepresentable: a forwarded variable cannot be a line of the env file.
             OciCreateFailed: `docker create` failed.
             OciUnavailable: the CLI could not be started.
-            OSError: `jail_dir` or the env file could not be written.
+            OSError: the env file could not be written.
         """
-        os.makedirs(jail_dir, mode=0o700, exist_ok=True)
         text = plan.env_file_text(os.environ)
         try:
             _write_env_file(plan.env_file, text)
-            done = self._run(*create_args(plan, jail_id))
+            done = self._run(*create_args(plan, jail_id, agent))
         finally:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(plan.env_file)
@@ -494,23 +657,30 @@ class OciRuntime:
                 assert_never(unreachable)
 
     def processes(self, jail: JailRecord) -> tuple[ProcessRecord, ...]:
-        """The processes `jail` holds: none. Nothing is started in a container through brig yet."""
-        return jail.processes
+        """The processes `jail` holds, by the records it holds, then every other readable record
+        under `<jail_dir>/procs`, each in start order (as `HostRuntime.processes`)."""
+        held = {process.id for process in jail.processes}
+        return (
+            *jail.processes,
+            *(p for p in _records.scan(jail.jail_dir).records if p.id not in held),
+        )
 
     def tethered(self, jail: JailRecord) -> bool | None:
-        """`None`: this runtime records nothing apart from the dict, and nothing asks until a
-        start exists (TASK-0079.10)."""
+        """`None`: this runtime records nothing apart from the dict, so a rehydrated container jail
+        cannot say it was created untethered and has no `start` (decision-203)."""
         del jail
         return None
 
     def process_alive(self, jail: JailRecord, process: ProcessRecord) -> bool:
-        """`False`: no process of a container jail is brig's to ask after."""
-        del jail, process
-        return False
+        """Whether `process`'s leader holds its identity, by the host's own reading of it: a
+        recycled pid and a zombie read gone (decision-155, decision-171)."""
+        del jail
+        return _identity.identity_holds(process.pid, process.start_time)
 
     def destroy(self, jail: JailRecord, *, grace: float = DEFAULT_GRACE_S) -> KillReport:
         """`docker rm -f` the container, verified by `docker inspect`; then the tether watcher.
-        One `container` item and one `helper` item. Total: raises nothing from an item.
+        One `container` item and one `helper` item. Total: raises nothing from an item. A
+        supervisor's link is closed after the removal.
 
         `grace` is accepted and has no effect: `docker rm -f` kills at once, which is what
         `grace=0` asks for everywhere (decision-193); a graceful stop is the process scope's."""
@@ -522,6 +692,8 @@ class OciRuntime:
             end_group("helper", pid, pid, stamp)
             for pid, stamp in zip(jail.helper_pids, jail.helper_stamps, strict=True)
         )
+        if jail.held is not None and jail.held.link is not None:
+            jail.held.link.close()
         return KillReport(items=tuple(items))
 
     def _destroy_container(self, record: ContainerRecord, jail_id: str) -> KillItem:
@@ -575,41 +747,74 @@ class OciRuntime:
                 assert_never(unreachable)
 
     def supervisor(self, jail: JailRecord) -> Supervisor | None:
-        """`None`: no supervisor runs in a container yet (TASK-0079.10), so it can only be
-        destroyed, and `Jail.start` is absent (SPEC.md section 9)."""
-        del jail
+        """The agent of `jail`'s processes (decision-203): a `LinkedSupervisor` over the link to
+        brig's supervisor when the container's PID 1 is one, an `ExecSupervisor` when its agent is
+        `docker exec`, and `None` for a jail whose agent is not known here (rehydrated: the link
+        was a socket, and the exec agent is the creating process's knowledge), which can only be
+        destroyed, and whose `Jail.start` is absent (SPEC.md section 9)."""
+        container = jail.container
+        if container is None:
+            return None
+        link = None if jail.held is None else jail.held.link
+        if link is not None:
+            return LinkedSupervisor(jail, link)
+        if container.agent is ContainerAgent.EXEC:
+            return ExecSupervisor(jail, self.docker, self._cli_env())
         return None
 
     def reserve(self, jail: JailRecord, channel: str) -> Reservation:
-        """Refused: the `oci` mechanism refuses a `Spec` that declares a channel, so there is none
-        to reserve a socket for.
-
-        Raises:
-            ValueError: always.
-        """
-        raise ValueError(
-            f"jail {jail.jail_id!r} cannot reserve a socket for channel {channel!r}: a container "
-            "jail declares no channel (the channel directory is TASK-0079.10's)"
-        )
+        """A fresh socket in the jail's channel directory for `channel`, which the caller has
+        checked the jail declares (decision-184): the same `<chan>/<16 hex>.sock` a process binds
+        and the host dials. Makes nothing: the process binds it."""
+        return _channels.reserve(jail, channel)
 
     def endpoint(self, jail: JailRecord, process: ProcessRecord) -> str | None:
-        """`None`: no process of a container jail has a channel."""
-        del jail, process
-        return None
+        """The path to dial `process`'s socket at: the one it binds, in the directory bind-mounted
+        into the container (decision-203). `None` for a process started with no channel."""
+        del jail
+        return _channels.endpoint_of(process)
 
     def ready(self, jail: JailRecord, process: ProcessRecord) -> bool:
-        """`False`: a process with no channel is never ready, as the protocol says."""
-        del jail, process
-        return False
-
-    def connect(self, jail: JailRecord, process: ProcessRecord) -> socket.socket:
-        """Refused: the process was started with no channel.
+        """Whether `connect` to `process`'s socket succeeds now, closed at once; never whether the
+        path exists. `False` for a process with no channel and while nothing listens.
 
         Raises:
-            ValueError: always.
+            EndpointRefused: what is at its socket is not its own listener (decision-185).
         """
         del jail
-        raise ValueError(f"process {process.id} was started with no channel to connect to")
+        return _channels.is_ready(process)
+
+    def connect(self, jail: JailRecord, process: ProcessRecord) -> socket.socket:
+        """A connected socket to `process`'s reserved socket through the verified dial
+        (decision-185): the listener is a process of the started process's group, whose leader
+        holds its recorded identity, as the kernel numbers it in the host's pid namespace.
+
+        Raises:
+            ValueError: `process` was started with no channel.
+            EndpointRefused: the path is a link or not a socket, or the peer is not `process`'s.
+            OSError: nothing listens there yet.
+        """
+        del jail
+        return _channels.connect_to(process)
+
+
+@dataclass(frozen=True, slots=True)
+class _Made:
+    """A container an attempt made and started: its id, its tether watcher, and for the
+    supervisor's variant the link to it, what it found of namespaces, and in either the host's pid
+    of the container's PID 1."""
+
+    container_id: str
+    watcher: subprocess.Popen[bytes] | None
+    link: SupervisorLink | None
+    namespaces: ProcessNamespaces | None
+    init_pid: int
+
+
+@dataclass(frozen=True, slots=True)
+class _NoInterpreter:
+    """An attempt at the supervisor's variant found the interpreter is not in the image; the
+    container was removed."""
 
 
 def _container_item(record: ContainerRecord, outcome: KillOutcome, detail: str) -> KillItem:

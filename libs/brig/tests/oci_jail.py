@@ -34,6 +34,12 @@ from brig.stack import Stack
 #: pulls, so the tier pulls nothing either: a missing image is a visible skip.
 IMAGE = "ubuntu:24.04"
 
+#: The image whose userland has `python3` (3.12 at `/usr/bin/python3`), where brig's supervisor is
+#: the container's agent (decision-203); `IMAGE` has none, so its processes are started with
+#: `docker exec`. Cached like `IMAGE`, and a missing one is a visible skip of the tests that need it.
+PYTHON_IMAGE = "bh-02-linux-jail:latest"
+PYTHON_INTERPRETER = "/usr/bin/python3"
+
 
 def docker(*args: str, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
     """`docker *args` as the test's own door to the daemon, outside the runtime under test."""
@@ -72,6 +78,13 @@ def needs_docker() -> None:
         pytest.skip(f"a container jail needs a Docker daemon: {reason}")
 
 
+def needs_python_image() -> None:
+    """Skip, visibly and by name, where the image with an interpreter is not cached."""
+    needs_docker()
+    if docker("image", "inspect", PYTHON_IMAGE).returncode != 0:
+        pytest.skip(f"the image {PYTHON_IMAGE} is not present, and the tier pulls nothing")
+
+
 def inspect(container_id: str) -> dict[str, Any] | None:
     """`docker inspect` of a container as the test sees it, or `None` when there is none."""
     done = docker("inspect", "--type", "container", container_id)
@@ -104,13 +117,17 @@ def make(
     runtime: OciRuntime | None = None,
     image: str = IMAGE,
     euid: int | None = None,
+    interpreter: str | None = None,
 ) -> Jail:
     """A container jail for `spec` made by `OciRuntime` (or `runtime`). `euid` stands in for the
-    embedder's uid in the compile context, which is the real one otherwise."""
+    embedder's uid in the compile context, which is the real one otherwise. `interpreter` is the
+    mechanism's: `None` (the default here, not the mechanism's) skips the attempt at the
+    supervisor, which `IMAGE` would fail with a second create; the tests that mean the supervisor
+    or the fallback pass `PYTHON_INTERPRETER`."""
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
     if euid is not None:
         ctx = dataclasses.replace(ctx, euid=euid)
-    compiled = Stack([Oci(image)]).compile(spec, ctx=ctx)
+    compiled = Stack([Oci(image, interpreter=interpreter)]).compile(spec, ctx=ctx)
     return Jail.create(
         compiled,
         runtime=OciRuntime() if runtime is None else runtime,

@@ -10,6 +10,7 @@ container`), status 1, and a daemon that is down prints `Cannot connect to the D
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from brig.core import (
     Spec,
     require,
 )
-from brig.core.runtime import ContainerPlan, RuntimeKind
+from brig.core.runtime import ContainerAgent, ContainerPlan, RuntimeKind
 from brig.mech import JAIL_LIFETIME, CompileCtx, Helper, Oci, Step
 from brig.mech.bwrap import bwrap
 from brig.mech.connect_proxy import ConnectProxy
@@ -281,24 +282,31 @@ def test_the_runtime_passed_for_oci_must_be_an_oci_runtime() -> None:
         Jail.from_dict(_oci_dict(), runtimes={RuntimeKind.HOST: HostRuntime()})
 
 
-def test_a_container_jail_has_no_start_and_no_probe_and_no_processes() -> None:
-    """Absent, not raising (SPEC.md section 9): the runtime has no supervisor, so `hasattr` is
-    false, and the jail holds nothing but its container."""
+def test_a_rehydrated_container_jail_has_no_start_and_no_probe_and_no_processes() -> None:
+    """Absent, not raising (SPEC.md section 9): a rehydrated jail's agent is not known here (the
+    supervisor's link was a socket; the exec agent is the creating process's knowledge), so the
+    runtime offers no supervisor, `hasattr` is false, and the jail holds nothing but its
+    container."""
     jail = _rehydrate(_oci_dict())
     assert not hasattr(jail, "start") and not hasattr(jail, "probe")
     assert jail.processes() == ()
     assert jail.instance_group is None
 
 
-def test_the_runtime_answers_for_a_process_with_no_channel_as_the_protocol_says() -> None:
+def test_a_rehydrated_container_jail_answers_as_a_jail_with_no_agent_does() -> None:
     jail = _rehydrate(_oci_dict())
     runtime = OciRuntime()
     record = jail._record()
     assert runtime.supervisor(record) is None and runtime.tethered(record) is None
-    with pytest.raises(ValueError, match="declares no channel"):
-        runtime.reserve(record, "ctl")
+    assert record.container is not None and record.container.agent is None
     with pytest.raises(UnknownChannel):
         jail.channel("ctl")  # the jail declares none, so the runtime is never asked
+    # A channel it does declare is reserved in the directory bind-mounted into the container
+    # (decision-203): the runtime hands out a path in `<jail_dir>/chan` that the host dials too.
+    reservation = runtime.reserve(record, "ctl")
+    chan = f"{os.path.realpath(record.jail_dir)}/chan"
+    assert os.path.dirname(reservation.bound_path) == chan
+    assert reservation.endpoint == reservation.bound_path
 
 
 def test_the_runtime_object_not_a_record_names_the_daemon() -> None:
@@ -384,11 +392,29 @@ def test_the_create_arguments_label_the_container_never_pull_and_carry_no_value(
     )
     plan = Oci("img:1").compile(spec, _CTX).container
     assert plan is not None
-    args = create_args(plan, "my jail=1")
-    assert args[:6] == ("create", "--pull", "never", "--label", "brig.jail=my jail=1", "--init")
-    assert args[-3:] == ("img:1", "sleep", "infinity")
-    assert not {"-e", "--env"} & set(args)
-    assert not [arg for arg in args if "hunter2" in arg]
+    exec_args = create_args(plan, "my jail=1", ContainerAgent.EXEC)
+    assert exec_args[:6] == (
+        "create",
+        "--pull",
+        "never",
+        "--label",
+        "brig.jail=my jail=1",
+        "--init",
+    )
+    assert exec_args[-3:] == ("img:1", "sleep", "infinity")
+    supervisor_args = create_args(plan, "my jail=1", ContainerAgent.SUPERVISOR)
+    assert "--init" not in supervisor_args
+    assert supervisor_args[-5:] == (
+        "img:1",
+        "/usr/bin/python3",
+        "-I",
+        "/.brig-supervisor.py",
+        f"{plan.channel_dir}/agent.sock",
+    )
+    for args in (exec_args, supervisor_args):
+        assert args[:5] == ("create", "--pull", "never", "--label", "brig.jail=my jail=1")
+        assert not {"-e", "--env"} & set(args)
+        assert not [arg for arg in args if "hunter2" in arg]
 
 
 def test_a_jail_that_is_not_a_container_jail_is_refused_by_the_oci_runtime() -> None:

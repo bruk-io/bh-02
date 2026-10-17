@@ -177,7 +177,7 @@ def test_the_pins_keep_a_directory_with_a_carve_out_in_it_from_being_renamed_awa
     assert os.path.isdir(f"{tree.workspace}/.git/hooks")
 
     ctx = build_compile_ctx(tree.spec, jail_dir=tempfile.mkdtemp(dir="/tmp"), platform=sys.platform)
-    plan = Stack([Oci(IMAGE)]).compile(tree.spec, ctx=ctx).container
+    plan = Stack([Oci(IMAGE, interpreter=None)]).compile(tree.spec, ctx=ctx).container
     assert plan is not None
     pin = f"type=bind,src={tree.workspace}/.git,dst={tree.workspace}/.git"
     assert pin in plan.flags
@@ -186,6 +186,9 @@ def test_the_pins_keep_a_directory_with_a_carve_out_in_it_from_being_renamed_awa
     del without[at - 1 : at + 1]  # the --mount and its value
     env_file = f"{ctx.jail_dir}/control.env"
     Path(env_file).write_text("")
+    os.makedirs(
+        plan.channel_dir
+    )  # the bind source the flags name: `create` makes it, the control must
     without[without.index("--env-file") + 1] = env_file
     control = docker(
         "create", "--pull", "never", "--label", f"brig.jail=oci-pincontrol-{uuid.uuid4().hex[:8]}",

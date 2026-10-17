@@ -16,8 +16,8 @@ from typing import Any
 import pytest
 
 from brig.core import Grade
+from brig.run._supervised import namespaces_of
 from brig.run._supervisor_program import SUPERVISOR_SOURCE
-from brig.run.host import _namespaces_of
 from brig.run.jail import _process_control
 from brig.run.runtime import (
     ProcessNamespaces,
@@ -255,4 +255,4 @@ def test_only_namespaces_raise_a_process_above_cooperative_and_every_other_case_
 def test_a_hello_claims_namespaces_only_when_it_says_so_in_so_many_words(
     hello: dict[str, object], expected: ProcessNamespaces
 ) -> None:
-    assert _namespaces_of(hello) == expected
+    assert namespaces_of(hello) == expected

@@ -13,7 +13,10 @@ supervisor runs under inside the jail, and where its source is bound.
 
 `ContainerPlan` is what the `oci` mechanism hands its runtime (SPEC.md section 6,
 decision-202): the flags of `docker create`, the image and command, and the environment
-the runtime writes to the env file those flags name. It renders that file's text, purely.
+the runtime writes to the env file those flags name. It renders that file's text, purely. Since
+decision-203 it also renders the two variants a container can be created as, one per
+`ContainerAgent`: the supervisor as the container's PID 1, or an idle container that processes are
+started in with `docker exec`.
 """
 
 import re
@@ -61,6 +64,16 @@ class Scope(Enum):
 
     JAIL = "JAIL"
     PROCESS = "PROCESS"
+
+
+class ContainerAgent(Enum):
+    """Who starts, signals, waits for and stops the processes of a container jail
+    (decision-203, SPEC.md section 8): `SUPERVISOR`, brig's own supervisor as the container's PID 1,
+    for an image that has an interpreter; `EXEC`, `docker exec` and the host's own ladder, for one
+    that has none."""
+
+    SUPERVISOR = "SUPERVISOR"
+    EXEC = "EXEC"
 
 
 #: Where a supervised jail's supervisor program is bound inside it (decision-190): a file at
@@ -111,12 +124,28 @@ def env_refusal(name: str, value: str | None = None) -> str | None:
     return None
 
 
+#: The name of the control socket the host binds in a container jail's channel directory for the
+#: supervisor to connect to (decision-203): `<chan>/agent.sock`. Not a name a reservation can take
+#: (those are 16 hex and `.sock`).
+AGENT_SOCKET_NAME: Final = "agent.sock"
+
+
 @dataclass(frozen=True, slots=True)
 class ContainerPlan:
     """A jail whose instance is a container (SPEC.md section 6, decision-202): what the `oci`
     mechanism hands its runtime. `flags` are everything `docker create` takes between its own
-    verb and the image, rendered purely from the `Spec`; `image` and `command` follow them (the
-    command is the container's idle process until a supervisor replaces it, TASK-0079.10).
+    verb and the image that both variants share, rendered purely from the `Spec`; `image` and
+    `command` follow them (`command` is the idle process of the exec variant).
+
+    **Two variants, one per `ContainerAgent`** (decision-203). `interpreter` is the interpreter
+    inside the image to try brig's supervisor under, `None` for an image known to have none; the
+    runtime creates the container as the first of `agents()` and, when the image has no such
+    interpreter, as the next. `create_flags` and `create_command` render each: the supervisor's
+    is the shared flags, the program (`supervisor_source`, a file of the jail directory that the
+    runtime writes) bound read-only at `SUPERVISOR_SOURCE_PATH`, no `--init` (the supervisor is
+    PID 1 and reaps), and the command that runs the program with `rendezvous`, the path of the
+    socket the host binds in `channel_dir` for it to connect to; the exec variant's is `--init`
+    and the idle `command`.
 
     `env_file` is the path `flags` name with `--env-file`, which the runtime writes (mode 0600,
     removed once `docker create` returns) from `env_file_text`: the names of `env_forward`, from
@@ -129,6 +158,47 @@ class ContainerPlan:
     env_file: str
     env_forward: tuple[str, ...]
     env_set: tuple[tuple[str, str], ...]
+    channel_dir: str
+    interpreter: str | None
+    supervisor_source: str
+    rendezvous: str
+
+    def agents(self) -> tuple[ContainerAgent, ...]:
+        """The agents to try, in order: the supervisor when an interpreter is named, then
+        `docker exec`. Pure."""
+        if self.interpreter is None:
+            return (ContainerAgent.EXEC,)
+        return (ContainerAgent.SUPERVISOR, ContainerAgent.EXEC)
+
+    def create_flags(self, agent: ContainerAgent) -> tuple[str, ...]:
+        """The flags of `docker create` for the variant of `agent`. Pure."""
+        match agent:
+            case ContainerAgent.SUPERVISOR:
+                return (
+                    *self.flags,
+                    "--mount",
+                    f"type=bind,src={self.supervisor_source},dst={SUPERVISOR_SOURCE_PATH},readonly",
+                )
+            case ContainerAgent.EXEC:
+                return ("--init", *self.flags)
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    def create_command(self, agent: ContainerAgent) -> tuple[str, ...]:
+        """The container's command for the variant of `agent`. Pure.
+
+        Raises:
+            ValueError: `agent` is `SUPERVISOR` and the plan names no interpreter.
+        """
+        match agent:
+            case ContainerAgent.SUPERVISOR:
+                if self.interpreter is None:
+                    raise ValueError("this plan names no interpreter to run the supervisor under")
+                return (self.interpreter, "-I", SUPERVISOR_SOURCE_PATH, self.rendezvous)
+            case ContainerAgent.EXEC:
+                return self.command
+            case _ as unreachable:
+                assert_never(unreachable)
 
     def env_file_text(self, environ: Mapping[str, str]) -> str:
         """The env file's text for a creating process whose environment is `environ`: a forwarded
@@ -183,16 +253,19 @@ _OCI_CONTROL: Final[str] = (
     "daemon the runtime object names, which SIGKILLs the container's init and with it its pid "
     "namespace, and then asks `docker inspect` whether the container is gone. Proved from the "
     "host by the control battery (decision-202, tests/integration/test_oci_control.py): a "
-    "setsid() child, a process that ignores SIGTERM and a SIGSTOPped init are each planted (by "
-    "`docker exec`, the test's own door) beside a plain child the same destroy() ends, and "
-    "destroy() ends all of them. This is the jail scope; nothing is started in a container "
-    "through brig yet, so there is no process scope to grade (TASK-0079.10)"
+    "setsid() child, a process that ignores SIGTERM and a SIGSTOPped init are each planted beside "
+    "a plain child the same destroy() ends, and destroy() ends all of them; and again with the "
+    "processes started through brig, whichever agent holds them (decision-203, "
+    "tests/integration/test_oci_processes.py). This is the jail scope; a process's own is "
+    "Process.control"
 )
 
 _OCI_CHANNEL_EXCLUSIVITY: Final[str] = (
     "graded by the OCI runtime: nothing establishes that the declared channels and the "
-    "enumerated shared media are the only ways in or out of the container, and a Spec that "
-    "declares a channel is refused until the channel directory exists (TASK-0079.10)"
+    "enumerated shared media are the only ways in or out of the container. The channel directory "
+    "is bound into the container and shared by every process in it (no process has a mount "
+    "namespace of its own there, decision-203), so a co-tenant's socket is shared media, not a "
+    "channel to the host"
 )
 
 _FAKE_DETAIL: Final[str] = (

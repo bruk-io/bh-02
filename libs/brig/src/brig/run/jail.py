@@ -41,7 +41,7 @@ import socket
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, assert_never
 
 from brig.core import (
     Battery,
@@ -54,7 +54,7 @@ from brig.core import (
     SignatureBook,
     Spec,
 )
-from brig.core.runtime import RuntimeKind
+from brig.core.runtime import ContainerAgent, RuntimeKind
 from brig.run import _records, _waiters
 from brig.run._dicts import channels_from_list, channels_to_list, report_from_dict, report_to_dict
 from brig.run.events import stamp_all
@@ -169,12 +169,16 @@ def _reason(namespaces: ProcessNamespaces | None) -> str | None:
     return None if namespaces is None else namespaces.reason
 
 
-def _fidelity(wrap_prefix: tuple[str, ...] | None, *, supervised: bool) -> ExecFidelity:
+def _fidelity(
+    kind: RuntimeKind, wrap_prefix: tuple[str, ...] | None, *, supervised: bool
+) -> ExecFidelity:
     """How a process stands to the jail's confinement, decided per jail, never
     per start (decision-181): in the one instance every process of a supervised
-    jail shares (decision-192), an identical wrapper for a non-empty prefix, a
-    plain process for an empty one. Pure."""
-    if supervised:
+    jail shares (decision-192), or of a container, whichever agent started it
+    (decision-203: a `docker exec` process is in the container's own confinement,
+    measured), an identical wrapper for a non-empty prefix, a plain process for an
+    empty one. Pure."""
+    if supervised or kind is RuntimeKind.OCI:
         return ExecFidelity.SAME_INSTANCE
     return ExecFidelity.EQUIVALENT_PROFILE if wrap_prefix else ExecFidelity.PLAIN
 
@@ -201,14 +205,84 @@ _NAMESPACED: Final = (
 )
 
 
-def _process_control(*, namespaces: bool, supervised: bool, reason: str | None) -> Graded:
+_CONTAINER_SUPERVISED: Final = (
+    "stop() is a request to brig's supervisor, the container's PID 1, which signals the process's "
+    "group (SIGTERM, a grace period, SIGKILL) and verifies it empty; a child that leaves the group "
+    "with setsid() is outside it: the control battery plants one and it outlives stop (observed, "
+    "decision-203, tests/integration/test_oci_processes.py), and only the jail's destroy() "
+    "(docker rm -f) ends that. The gap beside it: a stop the supervisor does not answer takes the "
+    "request's deadline and ends the whole jail"
+)
+
+_CONTAINER_NAMESPACED_UNPROVEN: Final = (
+    "the supervisor found it could give each process namespaces of its own in this container, and "
+    "no control battery has been run against a container that can: stop() is graded as a group-shaped "
+    "stop (decision-203), no higher than the battery has proved"
+)
+
+_CONTAINER_EXEC: Final = (
+    "stop() is the host's ladder on the process's group (SIGTERM, a grace period, SIGKILL, "
+    "verified by the host's scan of the process table) as the host recorded it: docker exec makes "
+    "the process a session leader, so it leads a group of its own; a child that leaves the group "
+    "with setsid() is outside it: the control battery plants one and it outlives stop (observed, "
+    "decision-203, tests/integration/test_oci_processes.py), and only the jail's destroy() "
+    "(docker rm -f) ends that. There is no agent in the container, so nothing can be raised by "
+    "one (a subreaper per process, TASK-0130): the process's identity is the host's best reading "
+    "of a pid the jail announced and not a pidfd the supervisor returned, its exit status is "
+    "docker exec's (128 + n for a signal n) and is observable only in the process that started "
+    "it, and it needs a host that can name and signal the container's processes"
+)
+
+_CONTAINER_UNKNOWN: Final = (
+    "this container's processes were started by an agent this process does not know (the jail was "
+    "rehydrated), so nothing is claimed of how a stop would reach them: only the jail's "
+    "destroy() (docker rm -f) is"
+)
+
+
+def _container_control(
+    container: ContainerRecord, *, namespaces: bool, reason: str | None
+) -> Graded:
+    """The grade of one container process's `stop` (decision-203), by the agent that holds it:
+    both agents are group-shaped, and `cooperative` is what the battery proves for both. Pure."""
+    match container.agent:
+        case ContainerAgent.SUPERVISOR:
+            if namespaces:
+                return Graded(Grade.COOPERATIVE, _CONTAINER_NAMESPACED_UNPROVEN)
+            because = (
+                ""
+                if not reason
+                else f". Its processes share the container's namespaces because {reason}"
+            )
+            return Graded(Grade.COOPERATIVE, f"{_CONTAINER_SUPERVISED}{because}")
+        case ContainerAgent.EXEC:
+            return Graded(
+                Grade.COOPERATIVE,
+                f"{_CONTAINER_EXEC}. Started with docker exec because {container.agent_reason}",
+            )
+        case None:
+            return Graded(Grade.COOPERATIVE, _CONTAINER_UNKNOWN)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _process_control(
+    *,
+    namespaces: bool,
+    supervised: bool,
+    reason: str | None,
+    container: ContainerRecord | None = None,
+) -> Graded:
     """The grade of the control one process's `stop` delivers (decision-196, decision-201): what
     the control battery proves for its jail type, and no more. A process in namespaces of its own
     is ended with its pid namespace, a `setsid()` child included: `best_effort`, the gap named. One
     without is ended by its group, which it can leave: `cooperative`, and `reason` (what the jail's
     supervisor found, when this process knows it) says why it has none. A process of a jail with no
     supervisor has no `stop`: `cooperative`, the ceiling without a battery, which has not been run
-    against that jail type. Pure."""
+    against that jail type. A container's process is graded by its agent
+    (`_container_control`). Pure."""
+    if container is not None:
+        return _container_control(container, namespaces=namespaces, reason=reason)
     if namespaces:
         return Graded(Grade.BEST_EFFORT, _NAMESPACED)
     if not supervised:
@@ -491,7 +565,9 @@ class Jail:
             stdout_path=record.stdout_path,
             stderr_path=record.stderr_path,
             fidelity=_fidelity(
-                self._base.wrap_prefix, supervised=self._base.supervisor is not None
+                self._base.kind,
+                self._base.wrap_prefix,
+                supervised=self._base.supervisor is not None,
             ),
             channel=record.channel,
             bound_path=record.bound_path,
@@ -501,6 +577,7 @@ class Jail:
                 namespaces=record.namespaces,
                 supervised=self._base.supervisor is not None,
                 reason=_reason(self._base.namespaces),
+                container=self._base.container,
             ),
             _record=record,
             _jail=self,
