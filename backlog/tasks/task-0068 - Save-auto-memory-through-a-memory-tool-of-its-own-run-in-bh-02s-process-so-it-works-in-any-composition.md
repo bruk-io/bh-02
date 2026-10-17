@@ -3,7 +3,7 @@ id: TASK-0068
 title: >-
   Save auto memory through a memory tool of its own, run in bh-02's process, so
   it works in any composition
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-10 03:31'
@@ -76,4 +76,6 @@ Seen but not done (unsized): two sessions on one project share the memory direct
 Review (2026-10-17): READY, only #7 left for the orchestrator's full check. #1-#6 verified: only memory:auto (wiring.py:124) claims runs="memory"; extensions hardcode runs="jail" (host.py:565, tested for both spec and kwarg claims); subagents use harness. write_beneath/remove_beneath: O_EXCL|O_NOFOLLOW temp by dir_fd, rename never follows; slug checked before any path. 338 passed, 1 skipped (memory, host-paths, approval, agent, extensions host). Findings: nit - MEMORY.md read-modify-write without lock can lose a line on concurrent saves (worker noted).
 
 Full scripts/check on 5cf6e37 (this task's commits with the rest of the batch): exit 0, format, lint, types, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17; log at the session scratchpad, check-batch4b.txt).
+
+Reviewed by philosophy:reviewer (2026-10-17): READY, every criterion met but scripts/check, no blocking or should-fix findings (nits recorded in the review note). Closed by the orchestrator once the full check passed: Full scripts/check on 5cf6e37 (this task's commits with the rest of the batch): exit 0, format, lint, types, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17; log at the session scratchpad, check-batch4b.txt).
 <!-- SECTION:NOTES:END -->
