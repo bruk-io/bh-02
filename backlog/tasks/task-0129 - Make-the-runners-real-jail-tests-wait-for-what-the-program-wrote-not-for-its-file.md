@@ -3,7 +3,7 @@ id: TASK-0129
 title: >-
   Make the runner's real-jail tests wait for what the program wrote, not for its
   file
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-16 23:37'
@@ -44,4 +44,6 @@ Planted race, after the fix (sleep before the temporary's write): 3 passed. Plan
 Proof: tini -s -- loop, each test 10 times in a row in a real bwrap jail as root: 30 of 30 exit 0, each '1 passed', none skipped. tini -s -- uv run pytest runner -k linux_jail: 13 passed, 75 deselected. tini -s -- scripts/check bh-02/plugins/runner-cordis-plugin: exit 0; format, lint, types ok; tests 87 passed, 1 skipped; gates ok; docs ok; tokens skipped (no bh-01 dist beside this checkout). Machine shared with three other workers; no timings recorded.
 
 No repro: the race is timing-dependent on the unfixed file; the worker reproduced it only by planting a 1.5 s sleep between creating and writing the report (KeyError 'write beside' / 'beside'), which needs a code edit, so no unmodified test fails on demand.
+
+Reviewer verdict: CLOSED. AC1 met: all three programs write said+'.tmp' in the same directory and os.replace it in (atomic), _report waits for the final name and on timeout asserts with the directory listing and started.ended(), no FileNotFoundError/KeyError (.get/.pop with default, report as message). No vacuous pass: each test asserts on report content. AC2 met: worker's 30/30 under tini, plus reviewer's 3 runs of the three in a real jail as root under tini -s --: 3 passed each, none skipped. Only test_runner_confined.py changed (plus the task file). Nit: _report's started is typed Any; no action.
 <!-- SECTION:NOTES:END -->
