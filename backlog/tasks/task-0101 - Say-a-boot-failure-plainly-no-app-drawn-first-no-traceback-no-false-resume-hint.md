@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-15 02:27'
+updated_date: '2026-10-17 02:34'
 labels:
   - app
   - size-2
@@ -27,3 +28,9 @@ Moved out of the naming intent TASK-0099 (was TASK-0099.09), deferred by the own
 - [ ] #3 A session that fails at boot is not offered a resume; the message says it failed and what to change
 - [ ] #4 scripts/check passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Orchestrator, 2026-10-17: the owner's word to start it, which the earlier deferral asked for: "ok wrap up all tasks that you are able to" (in conversation, this date).
+<!-- SECTION:NOTES:END -->
