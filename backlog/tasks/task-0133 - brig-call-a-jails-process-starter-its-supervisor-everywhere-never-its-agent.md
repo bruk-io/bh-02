@@ -4,6 +4,7 @@ title: 'brig: call a jail''s process starter its supervisor everywhere, never it
 status: To Do
 assignee: []
 created_date: '2026-10-17 14:34'
+updated_date: '2026-10-17 19:04'
 labels:
   - brig
   - size-2
@@ -24,3 +25,9 @@ The owner, 2026-10-17. decision-0001 named the thing inside a jail that starts, 
 - [ ] #2 decision-0001 gets a dated amendment line naming the change, its body left as the record
 - [ ] #3 scripts/check passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 2026-10-17: brig moved to a repository of its own (TASK-0135, archived), and the old libs/brig is frozen until the new one replaces it. The new brig's decision-0001 (rule 12) names the role supervisor everywhere, enforced by a pypeeker rule.
+<!-- SECTION:NOTES:END -->
