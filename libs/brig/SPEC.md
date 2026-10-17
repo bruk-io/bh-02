@@ -821,7 +821,7 @@ data in this shape; M4's probe engine builds the subject.)
 
 **Helper lifetimes** are declared, not improvised: `JAIL_LIFETIME` (dies when
 the jailed tree dies — implemented by pipe-EOF or pid-watch, the mechanism
-chooses), `LAUNCH_SCOPED` (gone before the workload runs).
+chooses; since decision-199 both, §8), `LAUNCH_SCOPED` (gone before the workload runs).
 
 Planned roster (platforms in parentheses; grades are the *ceiling* each can
 honestly earn):
@@ -893,7 +893,8 @@ be the copy decision-152 deleted the event stream for).
   (1) `--unshare-all --as-pid-1 --cap-drop ALL --chdir /` (decision-190 and
   decision-177, below); (2) the jail's
   own furniture, `--proc /proc`, `/proc/sys` bound read-only over it
-  (decision-177; for uid 0 or an unknown user only, decision-194) and `--dev /dev`, first among the mounts so every
+  (decision-177; for uid 0 or an unknown user only, decision-194) and `--dev /dev`, with `/dev/shm` a tmpfs of its
+  own (`--perms 1777 --tmpfs`, decision-198), first among the mounts so every
   spec-derived mount stacks on top of it; (3) `read_allows` as `--ro-bind`; (4) the channel directory
   `<jail_dir>/chan` as `--bind` when the Spec declares a channel (decision-184,
   §10; each declared endpoint's directory too until decision-186);
@@ -913,8 +914,8 @@ be the copy decision-152 deleted the event stream for).
   read grant made by a deny (2026-09-28, decision-165); (7) the `read_denies` carve-outs that exist
   inside a mounted tree (decision-164, below); (7a) `--perms 0444
   --ro-bind-data 0 /.brig-supervisor.py`, the supervisor's own program, after
-  every mount (decision-190, below); (8) `--remount-ro /`, the
-  jail's own root tmpfs made read-only, last of all (decision-166, below); (9)
+  every mount (decision-190, below); (8) `--remount-ro /dev` and `--remount-ro /`, the
+  jail's own tmpfses made read-only, last of all (decision-198 and decision-166, below); (9)
   `--`, then the argv of the jail's PID 1, brig's supervisor, never a
   workload's (decision-190).
 - **The jail's root is read-only (2026-09-28, decision-166), and until it was,
@@ -979,9 +980,37 @@ be the copy decision-152 deleted the event stream for).
   `/proc/mtrr` (its write needs CAP_SYS_ADMIN), `/proc/pressure/*` (a write
   sets a monitor on that open file and changes nothing on the host), the
   jail's own `/proc/<pid>` files (its own pid namespace) and bwrap's own
-  `/dev` tmpfs (TASK-0079.22); `/proc/sysrq-trigger` is absent and
+  `/dev` tmpfs (TASK-0079.22, closed by decision-198: `/dev` is read-only now,
+  but for `/dev/shm`); `/proc/sysrq-trigger` is absent and
   `/proc/irq` and `/proc/bus` are read-only. (Ruled 2026-10-12,
   decision-177.)
+- **`/dev` is read-only, but for `/dev/shm` (2026-10-17, decision-198).** bwrap's
+  `--dev /dev` builds `/dev` as a tmpfs of the jail's own, and until stage 8 it was
+  writable: `touch /dev/x` inside a jail succeeded, the same false denial
+  decision-166 fixed for the root tmpfs, since `fs_write` grades a write outside every
+  write root denied. The stage that makes the root read-only now makes `/dev` read-only
+  too (`--remount-ro /dev`, before `--remount-ro /`), and a new path directly in it is refused
+  with the mechanism's read-only signature. Measured before the choice, with a jailed
+  `sh`, `python3` and `git`: `sh` writes `/dev/null` and reads `/dev/zero` and
+  `/dev/urandom`, and needs nothing else under `/dev`; `python3` needs `/dev/shm` writable,
+  since `multiprocessing` creates its semaphores there (a read-only `/dev` made
+  `multiprocessing.Lock()` and `Queue()` fail with EROFS), and `/dev/ptmx` for a pty;
+  `git` writes nothing under `/dev`. `/dev/pts` is devpts, its own mount, and
+  `pty.openpty` still works under the read-only `/dev` (the remount is not recursive).
+  `/dev/tty` has no controlling terminal in a test, so it is checked as a
+  character device, not opened. Ruled: `/dev/shm` stays writable, as a tmpfs of its own
+  (`--perms 1777 --tmpfs /dev/shm`) mounted at stage 2 over bwrap's directory, so a
+  spec-derived mount under it still stacks on top. It is mode 1777 as on the host, and
+  like the root tmpfs and `/tmp` it never reaches the host; `fs_write`'s detail names it
+  as the one writable path under `/dev` (a read-only `/dev/shm` was weighed and not taken:
+  it breaks `multiprocessing` and any other user of POSIX semaphores). `fs_write` stays
+  `enforced`: decision-166's false denial was a write the grade claimed denied and did not
+  name, while this one is named in the grade's detail beside the channel directory, so
+  what the grade claims (a write outside every write root is denied, but for the paths its
+  detail names) is what the kernel does, and the write is to memory only this jail sees,
+  gone when it ends. The stage 2 and stage 8
+  lines of the order above are the built shape. Implementing task: TASK-0079.22.
+  (Ruled 2026-10-17, decision-198.)
 - **Read carve-outs: masked where they exist, graded where they do not
   (2026-09-28, decision-164).** Each `read_denies` entry is compared, resolved,
   against every tree the render mounts (read allows, channel directories,
@@ -1215,13 +1244,40 @@ guard. Ruled:
   processes get the graded fallback (§8, decision-195). Making root work needs
   the supervisor to hold `CAP_SYS_ADMIN` at its start, long enough to unmount the
   covers and then drop it: capabilities in the jail's PID 1, which is a design
-  question this ruling does not take.
+  question this ruling does not take. *Taken 2026-10-17, decision-197: not made.*
 - **Grades don't move.** For an unprivileged user the cover guarded nothing, so
   `fs_write` is as `enforced` as it was, and its detail still names the cover
   where it is emitted. decision-177's "emitted whoever runs bwrap" is amended by
   this ruling; the rest of it stands.
 
 Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-194.)
+
+**A jail run as uid 0 gets no per-process namespaces, and its supervisor holds no
+capability to make them (2026-10-17, decision-197).** The question decision-194
+left: whether the supervisor of a jail run as root should keep `CAP_SYS_ADMIN`
+to unmount bwrap's `/proc` covers and mount each process a fresh `/proc`. Not
+made. A jail run as root has no user namespace around it, so that capability is
+the host's own, not a namespace's; and since every start mounts a `/proc`, the
+supervisor would keep it for the jail's life, not only at its start. Each fresh
+`/proc` would also have to be covered again before the process runs, or uid 0
+writes `kernel.core_pattern` (decision-177). A fault in a privileged PID 1 inside
+every root jail would be a host escape, against a gain only a jail run as root
+sees (a container or CI, where the container is usually the outer boundary).
+Ruled:
+
+- A jail run as uid 0 keeps decision-195's fallback: its processes share the
+  jail's namespaces, the process scope is graded `cooperative` and the reason
+  says so (decision-196). Its co-tenant rows (decision-0001's table) are shared
+  media, named in each process's `channel_exclusivity` detail.
+- What the fallback costs in practice is a stop that a child outside the
+  process group survives (`setsid`, a daemon). That is closed without privilege,
+  by a subreaper per process: TASK-0130, which rules on it.
+- Running a root jail as an unprivileged host uid instead (a user namespace
+  mapping onto a non-root uid) was weighed and not taken: files the workload
+  writes would be owned by that uid, and a root-owned project would not be
+  writable at all, decision-177's objection to `--uid`.
+
+Decided by the owner in conversation, 2026-10-17. (Ruled 2026-10-17, decision-197.)
 
 Deliberately absent: a cooperative filesystem guard (see §4), and `ulimit -u`
 / `RLIMIT_NPROC` anywhere (per-user on darwin and commonly on linux; capping
@@ -1483,6 +1539,8 @@ writing the project). Five things about it are constraints, not description:
   are not tethered. *Amended 2026-10-12 (decision-181, TASK-0079.25):* exec
   siblings are tethered: every start's exit wrapper starts a watcher of its
   own on the jail's tether, so no process of a tethered jail runs untethered.
+  *Amended 2026-10-17 (decision-199, TASK-0079.29):* `JAIL_LIFETIME` helpers are
+  tethered too, as the jail's processes are (below).
 - **It does not serialize.** An fd can't cross `to_dict`; a rehydrated `Handle`
   has no tether and needs none, since the process that held the write end is
   the one whose death it watched. `tether=None`, the default, launches exactly
@@ -1499,7 +1557,7 @@ writes the process's own exit record, `<jail_dir>/procs/<id>/exit`.
 **Every interpreter brig starts on the host runs isolated (2026-10-11,
 decision-169).** brig starts four Python programs of its own outside any jail:
 the exit wrapper (`python -c`), the tether's watcher the wrapper starts
-(`python -c`), the `rlimits` trampoline (`python -m brig.mech.trampoline`,
+(`python -c`), the `rlimits` trampoline (`python -m brig.trampoline`,
 outermost in every stack that has it, so on the host) and `connect_proxy`'s
 egress proxy (`python -m brig.proxy`, a `JAIL_LIFETIME` helper). Each runs in
 the workload's working directory, and `-c` and `-m` both put that directory
@@ -1566,7 +1624,8 @@ makes before the first spawn. So:
   siblings included (decision-167's "exec siblings are groups of their own
   and are not tethered" is superseded). `JAIL_LIFETIME` helpers stay
   untethered, as decision-167 states; tethering them is decision-0001's
-  ("Helpers with `JAIL_LIFETIME`"), not this step's.
+  ("Helpers with `JAIL_LIFETIME`"), not this step's. *(Done 2026-10-17 by
+  decision-199, TASK-0079.29: they are tethered, below.)*
 - **Which process is the jail's "workload".** None is special to the
   runtime. A `KillReport` keeps its vocabulary: the first process started is
   reported as `workload_group` and every later one as `exec_sibling`, in
@@ -1762,6 +1821,102 @@ every process's to reach (decision-184's residual). Ruled:
   is refused whatever the map.
 
 Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-195.)
+
+**A `JAIL_LIFETIME` helper ends with the process that created the jail, as the jail's
+processes do (2026-10-17, decision-199).** A helper (the egress proxy is one) runs on
+the host, in a group of its own, outside the jail's namespaces. decision-167 left it
+out of the tether and decision-181 kept it out, so a creator that died without calling
+`destroy` (`SIGKILL`, a crash) took the jail's processes with it, by the tether or, in a
+supervised jail, by end-of-file on the control socket (decision-191), and left the
+helpers running, orphaned to PID 1: found 2026-10-12 as an egress proxy fourteen hours
+old. Asked first, 2026-10-17, of the code at 94cd441, and the answer was yes: with the
+supervisor ending everything at end-of-file nothing had changed for a helper, since
+the kernel's end of a pid namespace does not reach a process outside it. Planted
+before the fix (a stand-in creator process killed with `SIGKILL`, a second one alive
+as the control) and seen failing in four shapes: a tethered jail, a tether closed
+without `destroy`, a supervised jail with no tether, and a supervised jail collected
+(`tests/integration/test_helpers_end_with_their_creator.py`,
+`tests/e2e/test_supervised_jail.py`). Ruled:
+
+- **A helper is started as a process is.** `create` starts each `JAIL_LIFETIME` helper
+  under the exit wrapper (decision-156), detached in a group of its own as before, and
+  that wrapper starts a watcher in the helper's group before the helper, on a
+  descriptor the wrapper is given: decision-167's watcher, unchanged, which ends its
+  group once every write end is closed. The helper's pid and start stamp
+  (`helper_pids`, decision-155) are now the wrapper's, which lives exactly as long as the
+  helper does and leads the group the helper is in, so `alive`, `destroy`, `to_dict` and
+  a rehydrated jail find and end it as they did; the watcher is in that group too, so
+  `destroy`'s ladder ends it with the helper and the group's number can't be handed to
+  a stranger while it waits. Its log stays `helper-<name>.log` (stdout and stderr
+  together); its exit record is `<jail_dir>/helper-<name>.exit`, read by nothing, as the
+  supervisor's is. A helper that can't be spawned is `WorkloadSpawnFailed`, an
+  `OSError` as the `Popen` failure it replaces was.
+- **What the watcher reads is what ties the jail's processes to the creator.** A
+  tethered jail's helpers read its tether, so `SIGKILL` of the creator, or its closing the
+  tether, ends them with the processes. A supervised jail with no tether has the jail
+  make a pipe (`HeldLifeline`, `brig/run/_tether.py`) whose write end only the jail
+  holds, in `Held`: the kernel closes it when the creator dies and the jail's collection
+  closes it, which is when the control socket closes, so a supervised jail's helpers
+  end with its processes, tether or none. A tethered, supervised jail's helpers read the
+  tether: collecting such a `Jail` while its creator lives and holds the tether
+  ends the processes at once (decision-191) and the helpers with the tether or `destroy`,
+  not before. An unsupervised jail with no tether ties nothing: its processes outlive
+  its creator, and a `Jail` rehydrated from its dict ends them and its helpers by the pids
+  it carries, so its helpers outlive it too (`create`'s docstring and the test that pins
+  it say so). A jail with no `JAIL_LIFETIME` helper makes no lifeline and asks nothing of
+  its tether.
+- **A tether that has ended refuses the create.** `create` of a tethered jail with a
+  `JAIL_LIFETIME` helper whose tether is already at end-of-file raises `TetherClosed` before
+  any helper starts, as a supervised jail's does and as every `start` of it would, where a
+  watcher on a dead tether would end the helper at once.
+- **Unchanged.** Helpers are still ended by `destroy`'s ladder as the last items of its
+  report (`"helper"`), by identity; `LAUNCH_SCOPED` helpers still run to completion first;
+  a helper's own death leaves its watcher in the group until the tether closes or `destroy`
+  runs, as a process's does (decision-167); what a mechanism's helper may do is its own.
+
+No change to what a helper is declared as. decision-0001's "helpers tethered" is this
+ruling. Implementing task: TASK-0079.29. (Ruled 2026-10-17, decision-199.)
+
+**The `rlimits` trampoline is `brig.trampoline`, outside the layers, and `wait_ready` asks sooner
+(2026-10-17, decision-200).** TASK-0079.01 measured a `strict_linux()` start at 110 to 130 ms and put
+most of it in brig's own host-side interpreters. Asked again 2026-10-17 of the code at 2a40bbf (a
+supervised jail: `create`, the first `start`, a `LISTEN` channel ready; median of 20 interleaved
+starts after one discarded, as root and as an unprivileged user, on a shared four-core machine;
+TASK-0079.21's notes carry the tables): about 150 ms as root and 165 as the user. Of it, the exit
+wrapper is 25 ms (a bare `python -I` is 20) and is not what to cut; the supervisor's own imports are
+by design (decision-191); the trampoline was 53 ms, of which the work it does (`os`, `resource`,
+`execvp`) is a few. `python -m brig.mech.trampoline` imports the package `brig.mech` first, and
+`brig/mech/__init__.py` imports every mechanism and `brig.core` with it: 22 ms of the 53 (as measured
+below), once per jail, outermost, before bwrap starts. And `wait_ready` asked on a 20 ms beat, so a bind that landed
+just after a check was seen a whole beat late: 5 of 20 starts took 41 ms to be ready, where the
+others took 21. Ruled:
+
+- **The trampoline moves out of `brig.mech`.** `brig/mech/trampoline/` is `brig/trampoline/`, run as
+  `python -I -m brig.trampoline [--cpu N] -- argv...`, and `rlimits`'s `Step.wrap` renders that name.
+  It is a standalone process like `brig/proxy/` (§6): `trampoline` is a row of
+  `[tool.pypeeker.brig-layers.allow]` with nothing in it, not a layer in the flow, and
+  `tests/integration/test_trampoline_imports.py` runs it to see that it loads nothing of brig but
+  itself. `mech` loses the one carve-out in its purity scan (`tests/unit/test_mech_events_purity.py`).
+  The program is otherwise what it was: the `--cpu` flag, its refusals (their message now names
+  `brig.trampoline`), the `(N, N + 1)` limit of decision-161, `os.execvp` and never a fork, and `-I`
+  (decision-169, whose list of four host interpreters names it at the new path). `wrap_prefix`,
+  every grade, the denial signature and the argv a jail runs are unchanged. Measured the same way,
+  the trampoline is 53 ms before and 31 after; a start is 18 to 31 ms shorter (12 to 18 per cent).
+- **`wait_ready` asks on a schedule that starts short.** The wait after a check that found nothing
+  is a tenth of the time already spent waiting, no shorter than 2 ms and no longer than the 20 ms the
+  fixed beat was (`brig/run/readiness.py`, `_next_wait`). A bind in the first 20 ms is seen within
+  2 ms of its appearance, one at time `t` within `t / 10`, and one past 200 ms, or the deadline, is
+  overshot by at most the 20 ms it always was. §10.1 states no interval and no statement changes;
+  `Process.wait_ready` and `WaitReadyTimeout` are as they were. The median is as it was, since a
+  jailed `python3` binds about 20 ms after its start returns; the slow mode is gone (5 of 20 starts
+  at 41 ms before, 1 of 20 after) and the mean falls by about 4 ms.
+- **Not changed.** The exit wrapper, its tether's watcher and the supervisor's program; the mechanism
+  roster, its order, its grades and `-I`. A cap of zero still renders the trampoline with no `--cpu`
+  (SPEC.md §5, "0 = uncapped"), which starts a Python to apply nothing: left as it is, since
+  dropping the trampoline for it changes the argv a default `Spec` composes, which tests pin; what
+  it would save (28 to 35 ms of a start) is in TASK-0079.21's notes.
+
+Implementing task: TASK-0079.21. (Ruled 2026-10-17, decision-200.)
 
 ## 9. The Jail (the Handle until decision-183)
 
@@ -2181,7 +2336,10 @@ inherited pipe fd cannot cross a process boundary to provide, and one §9's
 socket nobody owns. `LAUNCH_SCOPED` helpers run to completion *before* the
 workload is spawned, and a non-zero exit refuses the launch rather than
 starting a workload behind a preparation step that failed. (Ruled 2026-08-29,
-decision-132.)
+decision-132.) *Amended 2026-10-17 (decision-199, TASK-0079.29):* the pid is still
+what `destroy` ends a helper by, from any process; a creator that dies without
+calling it no longer leaves the helper running, for a tether now ends it as it ends
+the jail's processes (§8).
 
 ### The Jail and its processes (2026-10-12, decision-181)
 

@@ -42,7 +42,8 @@ name has now (`called`: a tool that raises, or answers with something other than
 str, ...}`, answers with an error the model reads), one restarting waited for `wait` seconds,
 and only once it may (`Asked`): at once when the `approval` rule says it runs unasked
 (`approval.unasked({"name", "input", "runs", "title", "lines", ...})`, `shown`: the tool's own
-`show(input)`, else its input as JSON; it runs in a runner that confines it), else on the
+`show(input)`, else its input as JSON; it runs in a runner that confines it, or is the memory
+tool, `runs="memory"`, which is never asked), else on the
 person's yes, which the loop asks itself (`output.confirm`, the approval modal). A no is its
 answer (`DECLINED`: `denied: ...`), so approval is one rule for any model provider and any tool,
 and the loop

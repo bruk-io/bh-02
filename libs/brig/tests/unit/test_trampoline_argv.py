@@ -1,6 +1,6 @@
-"""Pure argv parsing for the rlimits exec trampoline (`brig.mech.trampoline`).
+"""Pure argv parsing for the rlimits exec trampoline (`brig.trampoline`).
 
-Importing `brig.mech.trampoline` here never applies a limit or execs
+Importing `brig.trampoline` here never applies a limit or execs
 anything -- see that package's `__init__.py` docstring. Every case asserts
 the exact parsed dataclass or the exact refusal message, never a substring
 (a stronger-than-required message would still contain a weaker assertion --
@@ -13,8 +13,8 @@ import resource
 
 import pytest
 
-from brig.mech import trampoline
-from brig.mech.trampoline import (
+from brig import trampoline
+from brig.trampoline import (
     ParsedTrampolineArgv,
     TrampolineArgvError,
     parse_trampoline_argv,

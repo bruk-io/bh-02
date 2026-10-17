@@ -48,8 +48,18 @@ def test_layer_set_is_exactly_right() -> None:
     """AC #1b: find brig -maxdepth 1 -type d matches expected set exactly.
     No new layers have been added; the set is still core, mech, stack, run, probe."""
     brig_dir = _BRIG
-    # `runtime` joined at decision-178 (TASK-0079.02), recorded as `proxy` was.
-    expected_layers = {"core", "mech", "probe", "proxy", "run", "runtime", "stack"}
+    # `runtime` joined at decision-178 (TASK-0079.02), recorded as `proxy` was, and
+    # `trampoline` at decision-200 (TASK-0079.21).
+    expected_layers = {
+        "core",
+        "mech",
+        "probe",
+        "proxy",
+        "run",
+        "runtime",
+        "stack",
+        "trampoline",
+    }
 
     # Get actual layers (directories, excluding __pycache__)
     actual = {d.name for d in brig_dir.iterdir() if d.is_dir() and d.name != "__pycache__"}
@@ -88,7 +98,8 @@ def test_allow_table_unchanged_since_m0() -> None:
     updated rather than relaxed: a new directory under `brig/` still fails
     this test until someone writes down what it is. `runtime` joined the same
     way (decision-178, 2026-10-12): runtimes that are not `run`'s own, which
-    nothing in brig may import.
+    nothing in brig may import. So did `trampoline` (decision-200, 2026-10-17): the
+    rlimits program, a standalone process like `proxy`, with an empty row.
 
     unchanged except for rows recorded as decisions. The comparison is SCOPED
     to the ALLOW TABLE only -- not to `[tool.pypeeker]` as a whole, and never
@@ -139,6 +150,7 @@ observe = ["core", "run"]
 probe   = ["core", "run", "observe"]
 proxy   = []
 runtime = ["core", "mech", "stack", "run"]
+trampoline = []
 """
 
     working_text = _PYPROJECT.read_text()

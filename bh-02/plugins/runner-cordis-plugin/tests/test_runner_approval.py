@@ -55,6 +55,22 @@ def test_bh_02_s_own_harness_tool_is_unasked_when_the_runner_confines_and_asked_
     assert not loose.unasked({**request, "runs": "host"})
 
 
+def test_bh_02_s_memory_tool_is_never_asked_jailed_or_under_no_jail_while_host_always_is() -> None:
+    """A tool declaring `runs = "memory"` runs in bh-02's own process but writes only beneath
+    `host.auto_memory`, through no link, which the jailed model can already write unasked
+    (CONTRACTS.md: tools): nothing is gained by asking, however confined the runner. Every other
+    `"host"` call is still asked in both."""
+    request = {**_REQUEST, "name": "memory", "runs": "memory", "input": {"action": "read", "name": "x"}}
+    for report in (_CONFINED, UNENFORCED, {}):
+        runner = Approval(_Runner(report))
+        assert runner.unasked(request)
+        assert not runner.unasked({**request, "runs": "host"})
+    assert not Approval(_Runner(UNENFORCED)).unasked({**request, "name": "search", "runs": "host"})
+    assert not Approval(_Runner(UNENFORCED)).unasked(
+        {**request, "runs": "cloud"}
+    )  # an unknown value is not it
+
+
 def test_confined_is_read_from_the_runner_each_time() -> None:
     """The runner's grades are its last start's: a Python process started again under a looser
     jail makes the next call asked about, with no new rule."""

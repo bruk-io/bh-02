@@ -1125,6 +1125,22 @@ def _endpoint() -> str:
     return str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
 
 
+async def _report(said: Path, started: Any) -> str:
+    """What the program wrote to `said`, once the name exists. The programs that report this way write a
+    temporary name and rename it into place (`os.replace`), so the name exists only when the report is
+    whole. The wait is 10 seconds; when it runs out, the assertion says what is there instead: the
+    directory's entries, and why the jail ended the program itself, if it did."""
+    deadline = time.monotonic() + 10
+    while not said.exists() and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    assert said.exists(), (
+        f"no report at {said} after 10 s: the directory holds "
+        f"{sorted(p.name for p in said.parent.iterdir())}; the jail's own reason for ending the program: "
+        f"{started.ended() or 'none'}"
+    )
+    return said.read_text()
+
+
 # Listens; once the jail has seen it listen, creates the file argv[2] (as an input may), says so
 # in argv[3], and waits.
 _LISTEN_THEN_CREATE = """
@@ -1745,7 +1761,7 @@ async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_no
 
 # Listens; once the jail has seen it listen, tries what an input could do to the interpreter file
 # argv[2] (write it, write through its link argv[3], rename it, remove it) and writes a file beside
-# them, argv[4]; says what each came to in argv[5], waits.
+# them, argv[4]; says what each came to in argv[5] (renamed into place, so whole), waits.
 _LISTEN_THEN_REACH_FOR_THE_PYTHON = """
 import os, socket, sys, time
 server = socket.socket(socket.AF_UNIX)
@@ -1767,7 +1783,9 @@ for name, attempt in tries.items():
         came_to.append(name + ": done")
     except OSError as error:
         came_to.append(name + ": " + os.strerror(error.errno))
-open(said, "w").write("\\n".join(came_to))
+with open(said + ".tmp", "w") as report:
+    report.write("\\n".join(came_to))
+os.replace(said + ".tmp", said)
 time.sleep(60)
 """
 
@@ -1790,12 +1808,9 @@ async def test_a_linux_jail_refuses_an_input_that_writes_the_interpreter_bh_02_r
     argv += [str(file), str(link), str(beside), str(said)]
     started = await one.start(argv, cwd=str(project), endpoint=endpoint)
     try:
-        for _ in range(200):
-            if said.exists():
-                break
-            await asyncio.sleep(0.05)
-        came_to = dict(line.split(": ") for line in said.read_text().splitlines())
-        assert came_to["write beside"] == "done" and beside.read_text() == "fine"
+        report = await _report(said, started)
+        came_to = dict(line.split(": ") for line in report.splitlines())
+        assert came_to.get("write beside") == "done" and beside.read_text() == "fine", report
         refused = {name: how for name, how in came_to.items() if name != "write beside"}
         assert refused and "done" not in refused.values(), refused
         assert file.read_bytes() == before and not Path(f"{file}.moved").exists()
@@ -1805,8 +1820,8 @@ async def test_a_linux_jail_refuses_an_input_that_writes_the_interpreter_bh_02_r
 
 # Listens; once the jail has seen it listen, tries what an input could do to each link in argv[2:-2]
 # (replace it by one planted beside it, rename it, remove it) and writes a file, argv[-2], beside the
-# project's own; says what each came to in argv[-1], waits. The links are those on the way from the
-# interpreter bh-02 runs on to its file.
+# project's own; says what each came to in argv[-1] (renamed into place, so whole), waits. The links
+# are those on the way from the interpreter bh-02 runs on to its file.
 _LISTEN_THEN_CHANGE_THE_LINKS = """
 import os, socket, sys, time
 server = socket.socket(socket.AF_UNIX)
@@ -1832,7 +1847,9 @@ for number, link in enumerate(links):
     attempt("%d rename" % number, lambda: os.rename(link, link + ".moved"))
     attempt("%d remove" % number, lambda: os.unlink(link))
 attempt("beside", lambda: open(beside, "w").write("fine"))
-open(said, "w").write("\\n".join(came_to))
+with open(said + ".tmp", "w") as report:
+    report.write("\\n".join(came_to))
+os.replace(said + ".tmp", said)
 time.sleep(60)
 """
 
@@ -1858,12 +1875,9 @@ async def test_a_linux_jail_refuses_an_input_that_changes_a_link_on_the_way_to_t
     argv += [*map(str, chain), str(beside), str(said)]
     started = await one.start(argv, cwd=str(project), endpoint=endpoint)
     try:
-        for _ in range(200):
-            if said.exists():
-                break
-            await asyncio.sleep(0.05)
-        came_to = dict(line.split(": ") for line in said.read_text().splitlines())
-        assert came_to.pop("beside") == "done" and beside.read_text() == "fine"
+        report = await _report(said, started)
+        came_to = dict(line.split(": ") for line in report.splitlines())
+        assert came_to.pop("beside", None) == "done" and beside.read_text() == "fine", report
         assert len(came_to) == 3 * len(chain) and "done" not in came_to.values(), came_to
         assert {link: os.readlink(link) for link in chain} == before  # on the host: every link as it was
         assert not [*project.rglob("*.moved"), *project.rglob("*.planted")] and file.is_file()
@@ -2424,15 +2438,16 @@ def test_a_jail_does_not_run_its_supervisor_under_a_python_in_its_project_unless
     )
 
 
-# Listens; once the jail has seen it listen, says so in argv[2], and waits.
+# Listens; once the jail has seen it listen, says so in argv[2] (renamed into place, so whole), and waits.
 _LISTEN_THEN_SAY_SO = """
 import os, socket, sys, time
 server = socket.socket(socket.AF_UNIX)
 server.bind(sys.argv[1])
 server.listen(4)
 server.accept()
-open(sys.argv[2] + ".tmp", "w").write("listening")
-os.rename(sys.argv[2] + ".tmp", sys.argv[2])
+with open(sys.argv[2] + ".tmp", "w") as report:
+    report.write("listening")
+os.replace(sys.argv[2] + ".tmp", sys.argv[2])
 time.sleep(60)
 """
 
@@ -2472,11 +2487,8 @@ async def test_a_host_whose_python_is_not_at_the_usual_path_starts_a_confined_se
     one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"), interpreters=(str(link),))
     started = await one.start(argv, cwd=str(project), endpoint=endpoint)
     try:
-        for _ in range(200):
-            if said.exists():
-                break
-            await asyncio.sleep(0.05)
-        assert said.read_text() == "listening"
+        report = await _report(said, started)
+        assert report == "listening", report
         supervisors = _commands_running("/.brig-supervisor.py")
         assert [str(link), "-I", "/.brig-supervisor.py"] in [words[:3] for words in supervisors]
     finally:

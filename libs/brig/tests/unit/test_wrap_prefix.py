@@ -42,7 +42,7 @@ def test_prefix_is_derived_only_when_the_suffix_matches() -> None:
 
     # 2. A real prefixing wrap: two tokens ahead of argv, argv itself
     # untouched at the tail.
-    prefix = ("python3", "-m", "brig.mech.trampoline", "--cpu", "1", "--")
+    prefix = ("python3", "-m", "brig.trampoline", "--cpu", "1", "--")
     wrapped = prefix + _ARGV
     assert _derive_wrap_prefix(wrapped, _ARGV) == prefix
 

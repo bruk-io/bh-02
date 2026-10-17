@@ -75,8 +75,8 @@ No package imports another (`plugin-layering`: the units are every package under
   which leaves with it, never a place in an ordered chain.
 - **What every package must compute alike is a library function, not a key**: in `host_paths`,
   where config and state are (`config_home`, `state_home`), every place reading a file goes
-  through (`walked`, `passes`), and the opener beneath a root through no link (`read_beneath`,
-  `directory_beneath`). A copy per plugin that drifted would be a hole, and a key would add
+  through (`walked`, `passes`), and the opener, writer and remover beneath a root through no link
+  (`read_beneath`, `directory_beneath`, `write_beneath`, `remove_beneath`). A copy per plugin that drifted would be a hole, and a key would add
   reloads to rows that must not reload (the python row, `system`): the walk is code, not a value.
 - **Fakes come from a package's own `testing` module** (`chat_cordis_plugin.testing`,
   `bh_02.testing`), never from another package's tests.
@@ -104,13 +104,20 @@ What to keep when changing it; the detail is where each line points.
   `executor`, one call at a time, and must not need the event loop (agent plugin's README).
 - **Approval is one rule in one row** (`runner:approval`): its askers put what it doesn't let run
   to the person themselves and keep no copy of it; only a layer replaces it (runner plugin).
+- **The `memory` tool writes outside the jail, from bh-02's own process, and is never asked**
+  (`runs="memory"`, the one value `approval` lets through jailed or under `--no-jail`; every other
+  `"host"` call is asked). That is safe because bh-02's code does the writing, only beneath
+  `host.auto_memory` and through no link (`host_paths.write_beneath`), a directory the jailed model
+  can already write unasked. It is `memory:auto`'s, so a sub-agent never has it; a new tool never
+  takes the value for convenience, and no write by it goes outside that directory (memory plugin).
 - **No command restarts rows in the chat row's task**: it queues them in `jobs`, and the chat row
   reads its next line only once `jobs.settled()`.
 - **Only a layer's rows act in bh-02's process**: only they add to `asides` or claim a line prefix
   (`!` runs in the person's shell). An extension gets four keys that only add, never one that
   replaces or reaches the composition (the loader, `runner`, `model`) (extensions plugin).
 - **Never read on the host a file the model can write, or follow a link it could make, and hand
-  its text to the model**: read it through `host_paths`, or in the jail.
+  its text to the model**: read it through `host_paths`, or in the jail. Nor write one on the host
+  through a link it could have made: `host_paths.write_beneath`.
 - **What the host trusts, the jail keeps from the model**: a file the host reads and trusts, or
   code it imports, is in `host` and `runner:confined` denies writing it; a secret is in
   `host.secrets`. The policy is one pure function, `spec_for`
@@ -123,6 +130,10 @@ What to keep when changing it; the detail is where each line points.
 - **The app owns the terminal**: no child inherits fd 2, `--trace` takes a file, and the shell
   speaks once the app has exited. `confirm()` runs in cordis's coroutines, not Textual workers,
   so the approval modal is `push_screen` with a callback (tui plugin).
+- **What is known before a row starts is said before one does**: the ui depends on nothing, so
+  it draws the moment it mounts. `run()` refuses a layer that cannot compose and a `use` that
+  resolves to nothing before it mounts any row; the ui never waits on other rows instead, which
+  would reload it with them (`app/README.md`).
 - **Test a real launch**: `app/tests/test_real_launch.py` starts the installed script in a pty
   with a fake model from `bh_02.testing`, since `run_test()` misses what only a real launch does.
   The Linux jail's tests skip on darwin; `scripts/linux-jail-check` runs them with bubblewrap.

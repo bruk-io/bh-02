@@ -93,7 +93,7 @@ async def test_stopping_all_skips_a_child_that_ended_on_its_own_while_an_earlier
     mounts = _Mounts("general-1", "general-2")
     agents = Agents(_NoRows(), mounts, _Screen(), _types, AgentsConfig())
     for _ in range(2):
-        await agents.agent({"prompt": "p", "type": "general", "background": True})
+        await _bounded(agents.agent({"prompt": "p", "type": "general", "background": True}))
     await _bounded(asyncio.gather(*(reply.begun.wait() for reply in mounts.replies.values())))
     stopping = asyncio.ensure_future(agents.command("stop"))
     await _until(lambda: agents.running() == 1)  # general-1 is stopped, its retirement waits
@@ -103,8 +103,8 @@ async def test_stopping_all_skips_a_child_that_ended_on_its_own_while_an_earlier
     mounts.released["general-1"].set()
     said = await _bounded(stopping)
     assert said == "Stopped general-1: each conversation ended, with its python program."
-    assert await agents.command("") == "No sub-agents are running."
-    await agents.held()()
+    assert await _bounded(agents.command("")) == "No sub-agents are running."
+    await _bounded(agents.held()())
 
 
 async def _failing_in_the_background() -> None:
@@ -112,7 +112,7 @@ async def _failing_in_the_background() -> None:
     mounts = _Mounts("general-1", fails=True)
     mounts.released["general-1"].set()
     agents = Agents(_NoRows(), mounts, _Screen(), _types, AgentsConfig())
-    await agents.agent({"prompt": "p", "type": "general", "background": True})
+    await _bounded(agents.agent({"prompt": "p", "type": "general", "background": True}))
     await _until(lambda: agents.running() == 0)  # the run ended, with the failure
     await asyncio.sleep(0)
 

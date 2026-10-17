@@ -53,8 +53,21 @@ _PATCH_TYPE = click.Path(exists=True, dir_okay=False, path_type=Path)
 _TRACE_TYPE = click.Path(dir_okay=False, writable=True, path_type=Path)
 
 
+def _model_name(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
+    """`--model`'s name, refused unless it is UTF-8: argv bytes that are not UTF-8 arrive as a lone
+    surrogate, which no layer can hold, so it is refused here, before a session is made for it."""
+    if value is not None:
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise click.BadParameter(
+                f"{value!r} is not valid UTF-8; write the model's name in UTF-8", ctx=ctx, param=param
+            ) from None
+    return value
+
+
 @click.group(invoke_without_command=True)
-@click.option("--model", default=None, help=_MODEL_HELP)
+@click.option("--model", default=None, callback=_model_name, help=_MODEL_HELP)
 @click.option("--patch", "patches", multiple=True, type=_PATCH_TYPE, help=_PATCH_HELP)
 @click.option("--trace", default=None, type=_TRACE_TYPE, metavar="FILE", help=_TRACE_HELP)
 @click.option(
@@ -100,12 +113,26 @@ def main(
     if not started and resume is None:
         sessions.discard(session)  # a run that never came up made no session worth listing
     else:
-        newest = sessions.listed(sessions.state_root(), str(Path.cwd()))[:1]
-        newest_id = newest[0].id if newest else None
-        how = sessions.resume_command(session.stack, None if session.id == newest_id else session.id)
+        if started:
+            newest = sessions.listed(sessions.state_root(), str(Path.cwd()))[:1]
+            newest_id = newest[0].id if newest else None
+            how = sessions.resume_command(session.stack, None if session.id == newest_id else session.id)
+            farewell = f"session {session.id}  ({how} to continue it)"
+        else:  # a resume that did not come up: it would fail the same way until something changes
+            farewell = _not_resumable(session)
         with contextlib.suppress(OSError):  # the terminal has gone (its window closed): nobody to tell
-            click.echo(click.style(f"session {session.id}  ({how} to continue it)", dim=True), err=True)
+            click.echo(click.style(farewell, dim=True), err=True)
     sys.exit(code)
+
+
+def _not_resumable(session: sessions.Session) -> str:
+    """What to say of a resumed session that did not come up, in place of the offer to resume it
+    (which would fail the same way): it was kept, and the layer to change is the one the error
+    above names, this session's own or a `--patch` file."""
+    return (
+        f"session {session.id}  did not start and is kept as it was; change what the error above "
+        f"names, in this session's own layer ({session.layer}) or in a --patch file"
+    )
 
 
 def _no_pinned_model(model: str | None, patches: Sequence[Path]) -> None:

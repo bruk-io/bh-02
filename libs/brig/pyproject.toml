@@ -32,7 +32,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 # `main` ends in `os.execvp`, which replaces the process and never returns; RET503 can't see that.
-"src/brig/mech/trampoline/__init__.py" = ["RET503"]
+"src/brig/trampoline/__init__.py" = ["RET503"]
 
 # brig's own architecture gate, separate from the workspace's: pypeeker reads the nearest
 # pyproject.toml, so `scripts/arch-check` runs it a second time from this directory. brig is
@@ -53,7 +53,7 @@ rules = [
 allow = [
     "integration._rehydrate_and_kill_helper",
     # `python -m` entry points: running the program is the module's whole job.
-    "brig.mech.trampoline.__main__",
+    "brig.trampoline.__main__",
     "brig.proxy.__main__",
 ]
 
@@ -76,3 +76,8 @@ runtime = ["core", "mech", "stack", "run"]
 # `proxy` is a standalone PROCESS, not a layer in the flow: the egress filter runs trusted-side,
 # outside the jail. The empty row is the enforcement of that - it may import nothing from brig.
 proxy   = []
+# `trampoline` is a standalone PROCESS too (TASK-0079.21, decision-200): `python -I -m
+# brig.trampoline` runs outermost on the host once per jail, and a program under `mech` pays for
+# `brig/mech/__init__.py`'s imports (every mechanism, `brig.core`) before its first line runs.
+# The empty row keeps it to the standard library, as the proxy's does.
+trampoline = []

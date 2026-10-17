@@ -59,7 +59,9 @@ alone:
   again what its transcript holds. It has no config of its own: it asks the `memory` row, whose
   `root`, `home`, `instruction_files` and `excludes` hold for both.
 - **`memory-auto`** is a row of its own over `transcript`, so a new conversation reads the
-  MEMORY.md index afresh, and `disabled = true` on it turns auto memory off.
+  MEMORY.md index afresh, and `disabled = true` on it turns auto memory off. It also registers the
+  `memory` tool in `tools` (a row that depends on nothing, so the tool coming or going reloads no
+  other row), which is why a sub-agent, which never gets this row, never has the tool.
 - **`status`** depends on the loader, `models`, `session` and `frame`; **`grades`** on the runner,
   the `approval` rule (which tell it each start), `frame` and `output`. None of these does
   `/clear` or `/model` replace.

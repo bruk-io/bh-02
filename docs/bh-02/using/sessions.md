@@ -87,4 +87,5 @@ Either way the old transcript is kept beside the new one, so a cleared conversat
 
 A run that stops before the app comes up (a layer file that can't be read, say) leaves no
 session behind, and so does a new run whose composition never starts (`could not start`). A
-resumed session that can't start is kept, so you can fix the cause and resume it again.
+resumed session that can't start is kept, so you can fix the cause and resume it again. It isn't
+offered to resume until then: bh-02 says it did not start, and which layer to change.

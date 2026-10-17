@@ -51,7 +51,7 @@ from brig.stack import degraded
 #     decision-062), so all five enter the compiled report via
 #     `unenforced_report()`'s fill in `Stack.compile`, never overlaid.
 #   - limits: BEST_EFFORT, detail names cpu-only coverage. Checked against
-#     brig/mech/trampoline/__init__.py's `_apply_limits`, which calls
+#     brig/trampoline/__init__.py's `_apply_limits`, which calls
 #     `resource.setrlimit` exactly once, on `resource.RLIMIT_CPU` -- no
 #     RLIMIT_AS/RLIMIT_NPROC/wall-clock/output-byte limit is ever set on
 #     this host by any code this stack composes. The detail's "uncovered:

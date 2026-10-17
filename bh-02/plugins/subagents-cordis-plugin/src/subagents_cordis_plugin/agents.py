@@ -353,7 +353,8 @@ class AgentsConfig:
     `transcript_row` and `model_row`: which of them is the transcript and the model; `start`:
     how long, in seconds, a child's loop has to come up; `max_running`: how many children run at
     once (a further one waits for a slot); `session_agents`: how many children start before
-    each further start is put to the person.
+    each further start is put to the person. `rows` default to the loop's and the project's
+    guidance (`memory`, `on-touch`), never auto memory.
 
     Raises:
         ValueError: `max_running` is not at least 1, or `session_agents` is negative.
@@ -367,6 +368,8 @@ class AgentsConfig:
         "system",
         "asides",
         "access",
+        "memory",
+        "on-touch",
         "executor",
         "python",
     )
@@ -475,7 +478,8 @@ class Agents:
         (`child.framed`), or why it gave none; with `input["background"]`, its name at once.
 
         Raises:
-            ValueError: the layer's `rows` gives a child the agents row (`child.child_rows`).
+            ValueError: the layer's `rows` gives a child the agents row or auto memory
+                (`child.child_rows`).
             OSError: the child's state directory can't be made.
         """
         background = background_flag(input.get("background", False))
@@ -502,7 +506,8 @@ class Agents:
         if model is not None:
             kind = dataclasses.replace(kind, model=str(model))
         # a start is counted before anything waits (the directory is made on a thread), so no two
-        # calls can pass the budget's check together; one that never began is given back
+        # calls can pass the budget's check together; one that never began is given back, whether
+        # it failed or was cancelled while its claim waited
         self._started += 1
         hand = Hand()
         try:
@@ -518,7 +523,7 @@ class Agents:
                 place=place,
                 hand=hand,
             )
-        except ValueError, OSError:
+        except BaseException:  # re-raised: no child exists, so the start is not spent
             self._started -= 1
             raise
         live = self._live[name] = _Live(name, kind.name, background, place, hand, self._changed)
@@ -712,7 +717,9 @@ class Agents:
     async def _claim(self, kind: str, base: PurePath | None) -> tuple[str, PurePath | None]:
         """A name no child of this row or of the session had (a resumed session's children
         keep their directories), and its state directory, made 0700 on a thread (None in memory).
-        A name is taken before the directory is waited for, so no two calls are given one.
+        A name is taken before the directory is waited for, so no two calls are given one; one
+        whose directory can't be made, or whose wait is cancelled, is given back (a directory the
+        thread makes after a cancel stays, and `_made` skips its name for whoever claims it next).
 
         Raises:
             OSError: the directory can't be made.
@@ -722,7 +729,12 @@ class Agents:
             self._taken.append(name)
             if base is None:
                 return name, None
-            if (place := await asyncio.to_thread(_made, Path(base), name)) is not None:
+            try:
+                place = await asyncio.to_thread(_made, Path(base), name)
+            except BaseException:  # re-raised: the name was never given
+                self._taken.remove(name)
+                raise
+            if place is not None:
                 return name, place
 
 

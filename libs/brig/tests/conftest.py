@@ -41,7 +41,7 @@ this arm at all.
 
 **task-035's fourth arm: a grandchild.** doc-007 §8 A-3 named the gap
 decision-050's EC6 rewording left open, unruled at the M2 gate: M3 adds a
-THIRD spawn route (`python -m brig.mech.trampoline … -- argv`), and the
+THIRD spawn route (`python -m brig.trampoline … -- argv`), and the
 harness-child arm above keys on `ppid == harness_pid`, one generation only --
 a trampoline that execs, or a mechanism helper's own child, is a grandchild
 that arm cannot see. `_harness_grandchild_pids` extends the sweep by exactly
@@ -651,7 +651,7 @@ def _harness_grandchild_pids(harness_pid: int) -> set[int]:
     unreaped zombie) in THIS call's own snapshot -- the grandparent link can
     only be walked through a row this snapshot actually saw. This is
     precisely the gap doc-007 §8 A-3 named: M3's trampoline
-    (`python -m brig.mech.trampoline … -- argv`) execs into the workload, so
+    (`python -m brig.trampoline … -- argv`) execs into the workload, so
     a workload launched *through* a wrapper that itself was launched as a
     harness-child lands one generation past the harness-child arm's reach.
 

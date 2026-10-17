@@ -1,4 +1,4 @@
-"""The rlimits exec trampoline: `python -I -m brig.mech.trampoline --cpu N -- argv...`.
+"""The rlimits exec trampoline: `python -I -m brig.trampoline --cpu N -- argv...`.
 
 Per MILESTONES.md M3's scope bullet, this program is how the `rlimits`
 mechanism (a later task) puts a kernel limit under a workload: it sets the
@@ -18,6 +18,18 @@ is a pinned property, not a preference: such a hook runs in the child
 ties the limit-setting code to whichever launcher does the forking. A
 trampoline that is itself the thing `exec`'d needs no such hook and works
 identically launched directly, under `subprocess`, or inside a pty.
+
+**It is not under `brig.mech`, and that is a cost, not tidiness (TASK-0079.21,
+decision-200).** `python -m brig.mech.trampoline` imports the package `brig.mech`
+first, and `brig/mech/__init__.py` imports every mechanism and with them `brig.core`:
+22ms of the program's 53 (31 now) for a program that needs `os` and `resource`, paid once
+per jail on the host, outermost, before bwrap even starts. Like `brig.proxy`, this is
+a standalone process outside the layer DAG: its row in `[tool.pypeeker.brig-layers.allow]`
+is empty, so it may import nothing from brig, and
+`tests/integration/test_trampoline_imports.py` runs it to see that it also *loads*
+nothing from brig but itself (a parent package's `__init__` is not an import this
+module writes). It is still brig's, found by `-I` the way the proxy is, in the
+interpreter's own `site-packages`.
 
 Only `--cpu N` is implemented (`RLIMIT_CPU`, in whole seconds). Memory, task
 count and wall-clock limits are out of scope here per MILESTONES.md: they
@@ -185,7 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         parsed = parse_trampoline_argv(args)
     except TrampolineArgvError as exc:
-        print(f"brig.mech.trampoline: refused: {exc}", file=sys.stderr)
+        print(f"brig.trampoline: refused: {exc}", file=sys.stderr)
         return 2
     apply_limits(parsed)
     os.execvp(parsed.workload_argv[0], list(parsed.workload_argv))

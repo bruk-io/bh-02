@@ -418,9 +418,12 @@ class Jail:
 
         `tether` is the read end of a pipe whose write end the caller keeps:
         once every write end is closed, every process the jail started is
-        ended. The jail holds a duplicate, so the caller may close its own
-        read end once this returns. `None`: the jail lives until its
-        processes end or it is destroyed.
+        ended, and every `JAIL_LIFETIME` helper (decision-199). The jail holds
+        a duplicate, so the caller may close its own read end once this
+        returns. `None`: the jail lives until its processes end or it is
+        destroyed, and so do its helpers, except that a supervised jail's
+        helpers end with its processes when the jail object is collected or
+        its creator dies.
 
         Raises:
             ValueError: `runtime` is of another kind than the compiled jail's.
@@ -428,6 +431,8 @@ class Jail:
             JailDirInUse: `jail_dir` holds an earlier jail's records and
                 something they name runs, or brig can't tell.
             HelperFailed: a `LAUNCH_SCOPED` helper failed.
+            TetherClosed: `tether` has already ended and the jail has a
+                `JAIL_LIFETIME` helper (or a supervisor).
             OSError: `tether` is not open, or `jail_dir` could not be written.
         """
         if runtime.kind not in (jail.runtime, RuntimeKind.FAKE):

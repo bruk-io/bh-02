@@ -1,4 +1,4 @@
-"""`python -m brig.mech.trampoline` against a real OS process: MILESTONES.md
+"""`python -m brig.trampoline` against a real OS process: MILESTONES.md
 M3's rlimits exit criterion -- a spin loop under `cpu_seconds=1` dies with
 `SIGXCPU` within tolerance -- plus the control that the trampoline is not
 simply killing everything, and the claim that it EXECS rather than forks
@@ -20,7 +20,7 @@ import time
 
 import pytest
 
-_TRAMPOLINE_ARGV = [sys.executable, "-m", "brig.mech.trampoline"]
+_TRAMPOLINE_ARGV = [sys.executable, "-m", "brig.trampoline"]
 
 # A tight busy loop: no sleeps, no I/O, so it burns CPU time as fast as the
 # interpreter can -- the workload `--cpu 1` is meant to trip inside the

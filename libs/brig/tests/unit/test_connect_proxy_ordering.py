@@ -88,7 +88,7 @@ def test_rlimits_stays_outermost_of_connect_proxy() -> None:
     its caps bound connect_proxy's own port-waiting `/bin/sh` and not just
     the final workload."""
     argv = _composed([ConnectProxy(_PY), Rlimits()])
-    assert _index_of(argv, "brig.mech.trampoline") < _index_of(argv, PORT_FILE)
+    assert _index_of(argv, "brig.trampoline") < _index_of(argv, PORT_FILE)
 
 
 def test_the_proxy_helper_is_spawned_unwrapped_by_the_launcher() -> None:

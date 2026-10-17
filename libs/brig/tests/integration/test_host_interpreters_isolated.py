@@ -3,7 +3,7 @@ programs: SPEC.md section 8, decision-169 (TASK-0075).
 
 The launch runs one jail through every interpreter brig starts on the host: the exit wrapper
 (`python -c`), the tether's watcher it starts (`python -c`), the rlimits trampoline (`python -m
-brig.mech.trampoline`, outermost) and the egress proxy (`python -m brig.proxy`, a
+brig.trampoline`, outermost) and the egress proxy (`python -m brig.proxy`, a
 `JAIL_LIFETIME` helper), each started in the workload's directory. That directory holds a
 planted `subprocess.py`, `signal.py` and `brig/` package, each of which, imported, appends its
 name to a record outside the directory and then hands its importer the real module (so a plant
@@ -152,7 +152,7 @@ def test_a_module_planted_in_the_workload_s_directory_runs_in_no_host_side_progr
     # THE CONTROL: no `-I`, the same directory, and every plant runs.
     for argv in (
         [sys.executable, "-c", "import subprocess"],
-        [sys.executable, "-m", "brig.mech.trampoline", "--", "true"],
+        [sys.executable, "-m", "brig.trampoline", "--", "true"],
     ):
         subprocess.run(argv, cwd=root, check=True)
     assert set(_planted_that_ran(record)) == {"brig", "signal", "subprocess"}

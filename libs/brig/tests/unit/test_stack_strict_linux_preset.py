@@ -82,7 +82,7 @@ def test_it_composes_rlimits_outermost_then_bwrap_then_env_scrub() -> None:
     actually lands, never off the preset's own list."""
     argv = strict_linux().compile(_SPEC, ctx=_ctx()).wrap(("/bin/true",))
 
-    assert argv.index("brig.mech.trampoline") < argv.index(DEFAULT_BWRAP_PATH)
+    assert argv.index("brig.trampoline") < argv.index(DEFAULT_BWRAP_PATH)
     assert argv.index(DEFAULT_BWRAP_PATH) < argv.index("/bin/sh")
     assert argv[-1] == "/bin/true"
 

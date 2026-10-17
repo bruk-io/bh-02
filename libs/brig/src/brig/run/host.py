@@ -40,7 +40,9 @@ jail's argv: `wrap_prefix` is still derived against `jail.wrap`'s own output,
 confinement is byte for byte what ran before. `Process.pid` names the wrapper
 and the jail's own process is its child in the same group -- teardown is
 group-shaped at every rung, so nothing about it depends on which of the two
-the pid names. See that module for the `SIGKILL` case it cannot cover.
+the pid names. See that module for the `SIGKILL` case it cannot cover. A
+`JAIL_LIFETIME` helper is started under the same wrapper, on the host and not inside
+the jail, for the watcher that ties it to the jail's tether or lifeline (decision-199).
 
 **Start-time stamps (decision-155, 2026-09-08).** Every process leader's pid
 and every `JAIL_LIFETIME` helper's pid are recorded together with the moment
@@ -73,7 +75,7 @@ from brig.run._spawn_pgid import spawn_pgid
 from brig.run._supervised import LinkedSupervisor
 from brig.run._supervisor_link import SupervisorGone, SupervisorLink
 from brig.run._supervisor_program import PROTOCOL, SUPERVISOR_SOURCE, supervisor_argv
-from brig.run._tether import HeldTether
+from brig.run._tether import HeldLifeline, HeldTether
 from brig.run.dial import dial
 from brig.run.exec_ import ExecWrapNotAPrefix
 from brig.run.runtime import (
@@ -242,11 +244,12 @@ def _spawn(
     cwd: str,
     env: Mapping[str, str],
     stdout_path: str,
-    stderr_path: str,
+    stderr_path: str | None,
     exit_file: str,
     tether: int | None = None,
     stdin_fd: int | None = None,
     keep_fds: tuple[int, ...] = (),
+    helper: str | None = None,
 ) -> subprocess.Popen[bytes]:
     """Spawn the jail's argv under the exit wrapper, detached, new group.
 
@@ -262,7 +265,10 @@ def _spawn(
     `tether` is passed to this wrapper alone (`pass_fds`). `stdin_fd` is the workload's stdin,
     `/dev/null` when none (the supervisor's is the program's source, which `bwrap` reads from
     descriptor 0, decision-190), and `keep_fds` are inherited by the wrapper and its child
-    alone (the supervisor's control socket, decision-191). The ready pipe is what
+    alone (the supervisor's control socket, decision-191). `stderr_path` `None` sends stderr to
+    `stdout_path`'s file, as a helper's log is (`helper` names the `JAIL_LIFETIME` helper
+    this starts, decision-199, which runs on the host rather than inside the jail: only the
+    error says so). The ready pipe is what
     keeps a workload that cannot be exec'd a LAUNCH failure rather than a
     handle for something already dead -- the wrapper writes one token
     through it the instant the spawn succeeds or fails, and closing it is
@@ -272,7 +278,7 @@ def _spawn(
     try:
         with (
             open(stdout_path, "wb") as stdout_f,
-            open(stderr_path, "wb") as stderr_f,
+            contextlib.ExitStack() as more,
             open(os.devnull, "rb") as devnull_f,
         ):
             proc = subprocess.Popen(
@@ -283,7 +289,11 @@ def _spawn(
                 env=dict(env),
                 stdin=devnull_f if stdin_fd is None else stdin_fd,
                 stdout=stdout_f,
-                stderr=stderr_f,
+                stderr=(
+                    subprocess.STDOUT
+                    if stderr_path is None
+                    else more.enter_context(open(stderr_path, "wb"))
+                ),
                 start_new_session=True,
                 pass_fds=(write_fd, *(() if tether is None else (tether,)), *keep_fds),
             )
@@ -302,21 +312,49 @@ def _spawn(
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
+    kind = "workload" if helper is None else "helper"
     if token.startswith(b"err:"):
         raise _exit_status.WorkloadSpawnFailed(
-            f"the workload {wrapped_argv[0]!r} could not be spawned inside its jail: "
+            f"the {kind} {wrapped_argv[0] if helper is None else helper!r} could not be spawned "
+            f"{'inside its jail' if helper is None else 'on the host'}: "
             + token[4:].decode(errors="replace")
         )
     if token != b"ok":
         raise _exit_status.WorkloadSpawnFailed(
             f"the exit wrapper for {wrapped_argv[0]!r} ended before it spawned the "
-            f"workload (reported {token!r}); see {stderr_path}"
+            f"{kind} (reported {token!r}); see {stdout_path if stderr_path is None else stderr_path}"
         )
     return proc
 
 
+def _helper_tether(
+    jail: CompiledJail, tether: HeldTether | None
+) -> tuple[HeldLifeline | None, int | None]:
+    """What a jail's `JAIL_LIFETIME` helpers are tethered to (decision-199), and the descriptor
+    their wrappers' watchers read: the jail's tether when it has one, as every process of it is;
+    else, for a supervised jail, a lifeline it makes, whose write end it alone holds (its
+    processes end with the socket its supervisor reads, and a helper can't watch that); else
+    nothing, since nothing ties an unsupervised, untethered jail's processes to its creator
+    either. Nothing is made, and a tether that has ended is not asked, for a jail with no
+    `JAIL_LIFETIME` helper.
+
+    Raises:
+        TetherClosed: the jail's tether has already ended, so a helper started now would be
+            ended at once.
+        OSError: the lifeline's pipe could not be made.
+    """
+    if not any(helper.lifetime is HelperLifetime.JAIL_LIFETIME for helper in jail.helpers):
+        return None, None
+    if tether is not None:
+        return None, tether.fd()
+    if jail.supervisor is None:
+        return None, None
+    lifeline = HeldLifeline()
+    return lifeline, lifeline.fd()
+
+
 def _start_helpers(
-    jail: CompiledJail, *, cwd: str, env: Mapping[str, str], jail_dir: str
+    jail: CompiledJail, *, cwd: str, env: Mapping[str, str], jail_dir: str, tether: int | None
 ) -> tuple[tuple[int, ...], tuple[str, ...]]:
     """Start `Step.helpers`, returning the pids AND start-time stamps of the
     ones that persist (`_identity.start_stamp`, decision-155 -- a pid alone
@@ -336,16 +374,27 @@ def _start_helpers(
     something and did not must not be followed by a workload assuming it
     did.
 
-    `JAIL_LIFETIME` helpers are started detached, in their own process
-    group, and their pids returned so the jail's record can carry them. They
-    are ended by the same path that ends the processes -- `destroy` --
-    rather than by a pipe-EOF scheme. Pid-watch is chosen over pipe-EOF
-    (SPEC.md §6 allows either, "chosen once, documented") because this
-    runtime already owns a waiter thread per process, and because a pid
-    recorded in the jail's dict survives serialization: a rehydrated jail in
-    another process can kill
-    a helper it never started, which an inherited pipe fd could never give
-    it.
+    `JAIL_LIFETIME` helpers are started like a process of the jail, under
+    the exit wrapper (`_spawn`), detached in a group of their own, and their
+    pids returned so the jail's record can carry them (the wrapper's: its
+    group is the helper's, and it lives exactly as long as the helper does).
+    Their log is `helper-<name>.log`, stdout and stderr together, and their
+    exit record `helper-<name>.exit`, which nothing reads.
+
+    A helper is ended two ways. By `destroy`, through the pid and start stamp
+    the record carries (SPEC.md §9, decision-132): a pid recorded in the jail's
+    dict survives serialization, so a rehydrated jail in another process can
+    kill a helper it never started, which an inherited pipe fd could never give
+    it. And, when nobody is left to call `destroy`, by `tether` (decision-199):
+    the read end of the jail's tether, or of a supervised jail's lifeline, which
+    the wrapper's watcher reads from before the helper starts, ending the
+    helper's group once every write end is closed, the creator's death
+    included. `None`: nothing ties the helper to its creator, as nothing ties
+    the jail's processes (`_helper_tether`).
+
+    Raises:
+        HelperFailed: a `LAUNCH_SCOPED` helper exited non-zero or did not finish.
+        WorkloadSpawnFailed: a `JAIL_LIFETIME` helper could not be spawned.
     """
     persistent: list[int] = []
     stamps: list[str] = []
@@ -381,17 +430,16 @@ def _start_helpers(
                     helper.name, done.returncode, done.stderr.decode(errors="replace")
                 )
             continue
-        log_path = os.path.join(jail_dir, f"helper-{helper.name}.log")
-        with open(log_path, "wb") as sink, open(os.devnull, "rb") as devnull:
-            proc = subprocess.Popen(
-                list(helper.argv),
-                cwd=cwd,
-                env=dict(env),
-                stdin=devnull,
-                stdout=sink,
-                stderr=sink,
-                start_new_session=True,
-            )
+        proc = _spawn(
+            tuple(helper.argv),
+            cwd=cwd,
+            env=env,
+            stdout_path=os.path.join(jail_dir, f"helper-{helper.name}.log"),
+            stderr_path=None,
+            exit_file=os.path.join(jail_dir, f"helper-{helper.name}.exit"),
+            tether=tether,
+            helper=helper.name,
+        )
         # Deliberately NOT held: unlike the workload, a helper's exit STATUS
         # is not a claim anyone makes, so letting `subprocess._cleanup` reap
         # it is harmless. What matters is that it can be KILLED, and a pid in
@@ -634,8 +682,11 @@ class HostRuntime:
         `tether` (decision-167, SPEC.md section 8) is the read end of a pipe
         whose write end the caller keeps: the jail holds a duplicate of it
         (`HeldTether`), so the caller may close its own read end once this
-        returns, and every start is tethered to it. `None`: the jail lives
-        until its processes end or it is destroyed.
+        returns, and every start is tethered to it, and every `JAIL_LIFETIME`
+        helper too (decision-199). `None`: the jail lives until its processes
+        end or it is destroyed, and so do its helpers, but for a supervised jail's:
+        those end when the jail object is collected or its creator dies, as its
+        processes do (`_helper_tether`).
 
         Raises:
             LaunchRefused: `jail.requires` names a feature `capabilities`
@@ -646,9 +697,10 @@ class HostRuntime:
                 finish.
             ExecWrapNotAPrefix: a supervised jail's wrap is not a pure argv
                 prefix (decision-190).
-            TetherClosed: a supervised jail's tether has already ended.
-            WorkloadSpawnFailed: a supervised jail's supervisor could not be
-                spawned.
+            TetherClosed: a supervised jail's tether has already ended, or a
+                tethered jail has a `JAIL_LIFETIME` helper and its tether has.
+            WorkloadSpawnFailed: a `JAIL_LIFETIME` helper, or a supervised
+                jail's supervisor, could not be spawned.
             SupervisorFailed: a supervised jail's supervisor never said it was
                 ready; what `create` started is ended first.
             OSError: `tether` is not an open descriptor, or `jail_dir` could
@@ -679,7 +731,10 @@ class HostRuntime:
         # rehydrated from a hand-edited one can't start untethered (TASK-0079.26).
         # Written after the staged files, so no staged file can stand in for it.
         _records.write_jail_record(jail_dir, jail_id=jail_id, tethered=tether is not None)
-        helper_pids, helper_stamps = _start_helpers(jail, cwd=cwd, env=full_env, jail_dir=jail_dir)
+        lifeline, helper_tether = _helper_tether(jail, tether_hold)
+        helper_pids, helper_stamps = _start_helpers(
+            jail, cwd=cwd, env=full_env, jail_dir=jail_dir, tether=helper_tether
+        )
 
         instance: SupervisorRecord | None = None
         link: SupervisorLink | None = None
@@ -706,7 +761,9 @@ class HostRuntime:
                     helper_stamps=helper_stamps,
                 )
                 raise
-        held = Held(wrap=jail.wrap, sensors=jail.sensors, tether=tether_hold, link=link)
+        held = Held(
+            wrap=jail.wrap, sensors=jail.sensors, tether=tether_hold, link=link, lifeline=lifeline
+        )
 
         return JailRecord(
             kind=self.kind,

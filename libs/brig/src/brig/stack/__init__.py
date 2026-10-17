@@ -121,14 +121,14 @@ class MatrixEntry:
 #: the degenerate form of the same hazard -- not a separate process, but
 #: further SAME-PID pre-exec images, cpu-cheap and short-lived, sitting
 #: between the trampoline's own image and the workload's. `rlimits` sets
-#: `RLIMIT_CPU` on ITSELF (the trampoline, `python -I -m brig.mech.trampoline`)
+#: `RLIMIT_CPU` on ITSELF (the trampoline, `python -I -m brig.trampoline`)
 #: before it `os.execvp`s whatever argv it was handed -- a POSIX rlimit is
 #: inherited across `exec`, so once set it stays in force for every process
 #: image that pid becomes next, no matter how many more `exec`s follow.
 #: `env_scrub`'s own wrap is exactly two such further exec's-worth of
 #: script: `/bin/sh -c 'exec /usr/bin/env -i ... "$@"'`. With `rlimits`
 #: outermost, the composed argv is
-#: `python -I -m brig.mech.trampoline --cpu N -- /bin/sh -c '...' sh <argv>`:
+#: `python -I -m brig.trampoline --cpu N -- /bin/sh -c '...' sh <argv>`:
 #: the trampoline sets the cpu cap, then execs into `env_scrub`'s `/bin/sh`
 #: image (still capped, same pid), which execs into the `/usr/bin/env -i`
 #: image (still capped, same pid), which execs the workload (still capped,
@@ -146,7 +146,7 @@ class MatrixEntry:
 #: is acceptable ONLY because both intermediate process images --
 #: the trampoline itself and `env_scrub`'s `/bin/sh` -- are brig's own
 #: trusted code, never the caller's workload, and both `exec` away in
-#: turn (never fork, per `brig/mech/trampoline/__init__.py`'s own pinned
+#: turn (never fork, per `brig/trampoline/__init__.py`'s own pinned
 #: property) rather than lingering: the workload itself never runs until
 #: `env -i` has already replaced the process image with the scrubbed one.
 #: `tests/integration/test_stack_matrix_ordering.py` runs this composed

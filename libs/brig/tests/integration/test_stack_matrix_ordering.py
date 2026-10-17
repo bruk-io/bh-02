@@ -139,7 +139,7 @@ def test_composed_stack_rlimits_outermost_workload_environ_still_scrubbed(
         sys.executable,
         "-I",
         "-m",
-        "brig.mech.trampoline",
+        "brig.trampoline",
         "--cpu",
         "60",
         "--",

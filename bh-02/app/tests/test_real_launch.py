@@ -620,10 +620,9 @@ def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tm
         m["content"] for m in map(json.loads, transcript.read_text().splitlines()) if m["role"] == "tool"
     ]
     assert results[0].startswith("not run: the person stopped the turn before this call started")
-    assert results[1].endswith(
-        "tools.agent, tools.agent_send, tools.agent_stop, tools.agent_wait; "
-        "help(tools.NAME) says what one takes)\n42"
-    )
+    # the first input's result: the note on bh-02's other tools (which tools they are is the
+    # python plugin's tests' to pin, not this one's), then what the input printed
+    assert results[1].endswith("; help(tools.NAME) says what one takes)\n42"), results[1][-300:]
 
 
 def test_a_narrow_screen_keeps_every_jail_grade_named(launch: Launch) -> None:
@@ -789,21 +788,20 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     waiting = app.wait_for(
         "⧗ waiting for model to start; this message is sent once it is up", 5, after=starting
     )
+    # active again: the bar's own text, waited for like the reply's, not read out of whatever has
+    # arrived when the reply does (the name is followed by a space, not by `s/slow-2…`'s ellipsis)
+    app.wait_for("model: s/slow-2 ", 20, after=starting)
     replied = app.wait_for("echo: HELLO", 20, after=waiting)
-    status = app.text()[app.text().rfind("model: s/slow-2") :]
-    assert status.startswith("model: s/slow-2 "), status[:80]  # active again
     app.type("/clear")  # the loop, its transcript and the python row restart; the model stays up
     app.type("again")
-    # the chat row reads `again` once the restart /clear queued is done (`jobs`): typed while it
+    # the chat row reads `again` once the restart /clear queued is done (`jobs`). Typed while it
     # runs, the line says it waits for the rows /clear named; typed after, the new loop says it
-    # waits for `python` (the Python process coming up). Which is timing; the new loop answers
-    # either way.
+    # waits for `python` if the Python process is not up yet, and nothing if it is. Which one is
+    # when this process types the line against how long the restart takes, so only what holds
+    # either way is asserted: the new loop answers, and nothing was stopped. The waiting line is
+    # pinned by the next test, which types both lines in one burst.
     again = app.wait_for("echo: AGAIN (message 1)", 20, after=replied)
-    said = app.text()[replied:again]
-    assert (
-        "⧗ waiting for agents, loop, python, transcript to start" in said or "waiting for `python`" in said
-    ), said
-    assert "stopped: interrupted" not in said
+    assert "stopped: interrupted" not in app.text()[replied:again]
     app.press(b"\x11")
     assert app.exit_code() == 0
 
@@ -820,12 +818,12 @@ def test_a_message_typed_the_moment_after_model_waits_for_the_new_model(launch: 
     switching = app.wait_for("switching to s/slow-2", 10, after=up)
     waiting = app.wait_for("⧗ waiting for model to start; this message is sent once it is up", 5, after=up)
     replied = app.wait_for("echo: HELLO", 20, after=max(switching, waiting))
+    starting = app.wait_for("model: s/slow-2…", 10, after=up)
+    assert starting < replied  # it was answered once the new model had started
+    # up again: the bar's own text, waited for, not read out of whatever has arrived by the reply
+    app.wait_for("model: s/slow-2 ", 20, after=starting)
     shown = app.text()
     assert "stopped: interrupted" not in shown[up:], shown[up:][-2000:]
-    starting = shown.find("model: s/slow-2…", up)
-    assert 0 <= starting < replied  # it was answered once the new model had started
-    status = shown[shown.rfind("model: s/slow-2") :]
-    assert status.startswith("model: s/slow-2 "), status[:80]  # up again
     app.press(b"/clear\ragain\r")  # the same for /clear, which restarts the python row too
     waiting = app.wait_for("⧗ waiting for agents, loop, python, transcript to start", 10, after=replied)
     again = app.wait_for("echo: AGAIN", 20, after=waiting)
@@ -963,6 +961,17 @@ def _said(app: Launched) -> str:
     return " ".join(app.text().split())
 
 
+# What Textual writes to take the terminal's alternate screen, before it draws anything.
+_ALTERNATE_SCREEN = b"\x1b[?1049h"
+
+
+def _never_drawn(app: Launched) -> None:
+    """The app never took the terminal: it did not switch to the alternate screen, and the line
+    the composer's screen opens with (`_READY`) was never written."""
+    assert _ALTERNATE_SCREEN not in app.written(), f"the app was drawn first:\n{app.text()[-3000:]}"
+    assert _READY not in app.text(), f"the composer was drawn first:\n{app.text()[-3000:]}"
+
+
 def test_a_patch_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s_error(
     launch: Launch, tmp_path: Path
 ) -> None:
@@ -978,6 +987,7 @@ def test_a_patch_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s
     assert "loop: unresolved:" in said and "use 'nonesuch:loop'" in said, said
     assert "installed plugins: " in said and "subagents" in said, said  # what to name instead
     assert "Traceback" not in said
+    _never_drawn(app)  # the ui row depends on nothing and starts at once: the run knows first
 
 
 def test_a_resumed_session_whose_layer_names_a_use_no_plugin_provides_fails_at_boot_too(
@@ -999,4 +1009,52 @@ def test_a_resumed_session_whose_layer_names_a_use_no_plugin_provides_fails_at_b
     assert "error: could not start:" in said, said
     assert "python: unresolved:" in said and "use 'claude-agent-sdk:agent'" in said, said
     assert "Traceback" not in said
+    _never_drawn(again)
     assert layer.is_file(), "the session's directory is kept"
+    # a resume that would fail the same way is not offered; the person is told what to change
+    assert "to continue it" not in said and "--resume" not in said, said
+    assert f"session {layer.parent.name} did not start" in said, said  # (_said folds the two spaces)
+    assert f"in this session's own layer ({layer})" in said, said
+
+
+def test_a_patch_row_with_no_use_that_no_layer_added_is_a_layer_error_naming_the_row_and_what_to_add(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """A patch row only changes a row some layer below it added, so one with no `use` that nothing
+    added (a mistyped id, or a row of your own that forgot its `use`) used to end in cordis's
+    ValueError and a Traceback. It is a layer error now: the file, the row and what to write, the
+    app never drawn, and no session left behind (the run never came up)."""
+    mine = tmp_path / "mine.toml"
+    mine.write_text('[[plugin]]\nid = "mine"\nconfig = { size = 3 }\n')
+    app = launch("echo", "--patch", str(mine))
+    assert app.exit_code(60) == 1
+    said = _said(app)
+    assert f"error: {mine}: row 'mine' has no `use`" in said, said
+    assert 'add use = "plugin:component"' in said, said  # what to add
+    assert "Traceback" not in said and "ValueError" not in said, said
+    _never_drawn(app)
+    assert not list((tmp_path / "state").glob("bh-02/sessions/*")), (
+        "a run that never came up leaves no session"
+    )
+
+
+def test_a_session_layer_row_with_no_use_is_the_same_layer_error_and_the_session_is_kept(
+    launch: Launch, tmp_path: Path
+) -> None:
+    """The session's layer is a layer like any other, hand-edited here to add a row with no `use`:
+    the resume says which file and row, the app is never drawn, and the session is kept."""
+    first = launch("echo")
+    first.wait_for(_READY, 60)
+    first.press(b"\x11")
+    assert first.exit_code() == 0
+    (layer,) = (tmp_path / "state").glob("bh-02/sessions/*/session.toml")
+    layer.write_text(layer.read_text() + '\n[[plugin]]\nid = "mine"\nconfig = { size = 3 }\n')
+    again = launch("echo", "--resume")
+    assert again.exit_code(60) == 1
+    said = _said(again)
+    assert f"error: {layer}: row 'mine' has no `use`" in said, said
+    assert 'add use = "plugin:component"' in said, said
+    assert "Traceback" not in said and "ValueError" not in said, said
+    _never_drawn(again)
+    assert layer.is_file(), "the session's directory is kept"
+    assert "to continue it" not in said, said

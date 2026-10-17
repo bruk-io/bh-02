@@ -140,7 +140,7 @@ def test_the_render_requires_the_interpreter_as_a_keyword() -> None:
         interpreter="/usr/bin/python3",
     )
     assert prefix[:3] == ("/usr/bin/bwrap", "--unshare-all", "--as-pid-1")
-    assert prefix[-3:] == ("--remount-ro", "/", "--")
+    assert prefix[-5:] == ("--remount-ro", "/dev", "--remount-ro", "/", "--")
 
 
 def test_the_supervisors_program_is_the_last_mount_before_the_root_goes_read_only() -> None:
@@ -151,7 +151,7 @@ def test_the_supervisors_program_is_the_last_mount_before_the_root_goes_read_onl
     at = argv.index("--ro-bind-data")
     assert argv[at - 2 : at] == ("--perms", "0444")
     assert argv[at + 1 : at + 3] == ("0", SUPERVISOR_SOURCE_PATH)
-    assert argv[at + 3 :] == ("--remount-ro", "/", "--", "sv")
+    assert argv[at + 3 :] == ("--remount-ro", "/dev", "--remount-ro", "/", "--", "sv")
     mounts = [i for i, token in enumerate(argv) if token in ("--ro-bind", "--bind", "--tmpfs")]
     assert max(mounts) < at
 

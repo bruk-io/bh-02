@@ -21,7 +21,7 @@ this task's (`RLIMIT_NPROC`/task count is SPEC.md §6's "Deliberately absent",
 never attempted by this or any mechanism).
 
 `compile` is a pure `spec -> argv` render, no I/O: it renders `Step.wrap` as
-the trampoline invocation task-035 ships, `python -I -m brig.mech.trampoline
+the trampoline invocation task-035 ships, `python -I -m brig.trampoline
 --cpu N -- <argv>` (isolated, decision-169: it is outermost, so it runs on
 the host in the workload's working directory, which `-m` alone would put
 first on its import path; brig is found in the interpreter's own
@@ -76,7 +76,7 @@ from brig.core import Axis, EventKind, Grade, Graded, Spec
 from brig.core.runtime import RuntimeKind
 from brig.mech.contract import ArgvTransformer, CompileCtx, EventPayload, ExitOutcome, Step
 
-_TRAMPOLINE_MODULE = "brig.mech.trampoline"
+_TRAMPOLINE_MODULE = "brig.trampoline"
 _CPU_FLAG = "--cpu"
 _SEPARATOR = "--"
 

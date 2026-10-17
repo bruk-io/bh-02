@@ -274,7 +274,9 @@ def test_bwrap_mounts_a_carve_out_under_the_channel_directory_after_it() -> None
     carve_out = ("--tmpfs", deny, "--remount-ro", deny)
     assert _runs(argv, carve_out) == 1, argv
     bind_at = next(i for i in range(len(argv)) if argv[i : i + 3] == _CHAN_BIND)
-    assert argv.index("--tmpfs") > bind_at
+    # Its position, not the first `--tmpfs` in argv: stage 2's `/dev/shm` is one too (decision-198).
+    carve_at = next(i for i in range(len(argv)) if argv[i : i + 4] == carve_out)
+    assert carve_at > bind_at
 
 
 @pytest.mark.parametrize("deny", [_CHAN, _JAIL_DIR])

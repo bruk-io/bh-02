@@ -14,7 +14,8 @@ from typing import Protocol, runtime_checkable
 
 from bh_02.sessions import Listing
 from cordis import Booted, Effects, Inspection, Row, Runtime, bind, boot, component, enter
-from cordis.loader import read_layer
+from cordis.composition import Entry, compose
+from cordis.loader import read_layer, resolve
 from host_paths import config_home, state_home
 
 __all__ = [
@@ -229,7 +230,8 @@ class CompositionError(Exception):
 
 
 class LayerError(CompositionError):
-    """A layer file that could not be read at launch: missing, not TOML, or not rows."""
+    """A layer that could not be used at launch: a file that is missing, not TOML or not rows, or
+    a row that cannot compose (a patch row with no `use` that no layer below it added)."""
 
 
 class NotStarted(CompositionError):
@@ -246,14 +248,57 @@ def _layer_problem(path: str, error: Exception) -> str:
     return f"{path}: {why}; fix the file or drop it"
 
 
-def read_layers(paths: Iterable[str | Path | Traversable]) -> None:
-    """Read every layer file once before anything boots; raise `LayerError` for the first that
-    can't be read, so a broken file is one line and not a traceback from inside the loader."""
+def read_layers(paths: Iterable[str | Path | Traversable]) -> list[tuple[str, list[Row]]]:
+    """Read every layer file once before anything boots, each with its rows, in order; raise
+    `LayerError` for the first that can't be read, so a broken file is one line and not a
+    traceback from inside the loader."""
+    read: list[tuple[str, list[Row]]] = []
     for path in paths:
         try:
-            read_layer(str(path))
+            read.append((str(path), read_layer(str(path))))
         except (OSError, ValueError) as error:
             raise LayerError(_layer_problem(str(path), error)) from None
+    return read
+
+
+def _row_without_use(layers: Iterable[tuple[str, Iterable[Row]]]) -> str | None:
+    """What to tell the person about the first row that cannot compose, or None: one that gives no
+    `use` and that no row before it added (in a layer below, or earlier in its own), which cordis's
+    `compose` refuses with a ValueError. `layers` are each source's name and its rows, in the
+    order they apply."""
+    known: set[str] = set()
+    for source, rows in layers:
+        for row in rows:
+            if row.use is None and row.id not in known:
+                return (
+                    f"{source}: row {row.id!r} has no `use`, and no layer below it adds a row {row.id!r}; "
+                    f'add use = "plugin:component" to make it a row of your own, or, to change a row '
+                    f"bh-02 has, write that row's id (/rows lists them)"
+                )
+            known.add(row.id)
+    return None
+
+
+def _unresolved_line(entry: Entry, error: Exception) -> str:
+    """One unresolved row as the loader says it once mounted (`cordis.loader.describe`, which `/rows`
+    shows): the error, then the `use` the layer wrote and what `resolve` noted on the error (the
+    plugins installed). A test holds the two together."""
+    noted = "".join(f"; {note}" for note in getattr(error, "__notes__", ()))
+    return f"{entry.id}: unresolved: {type(error).__name__}: {error} (use {entry.use!r}{noted})"
+
+
+def _unresolved(entries: Iterable[Entry]) -> list[str]:
+    """A line for each enabled row whose `use` names no component, found as the loader finds
+    it when it mounts the row (`resolve`), but before any row has started."""
+    lines: list[str] = []
+    for entry in entries:
+        if entry.disabled:
+            continue
+        try:
+            resolve(entry.use)
+        except Exception as error:  # importing a module runs it and it can raise anything, as in the loader
+            lines.append(_unresolved_line(entry, error))
+    return lines
 
 
 def layers() -> list[Traversable]:
@@ -278,7 +323,12 @@ async def run(
 ) -> None:
     """Boot, wait for the chat row's own work to end (CONTRACTS.md: `done`), then unwind.
 
-    Every layer is read once first: one that can't be read is a `LayerError` naming it.
+    Every layer is read once first: one that can't be read is a `LayerError` naming it, and so is
+    a row with no `use` that no layer below it added (`compose` would refuse it). Then each
+    enabled row's `use` is resolved, as the loader does when it mounts the row, and one that names
+    nothing is a `NotStarted` before any row starts: the ui row depends on nothing, so it would
+    draw the app first. A row that cannot start for another reason (it waits on a key no row
+    binds, or its component fails) is known only by starting rows, and is diagnosed afterwards.
 
     Adds three rows of its own after `overrides`, pinned on: `host`, which binds the layer
     files' paths, `credentials`, where the model rows look for the credential file (none: a
@@ -311,10 +361,7 @@ async def run(
     itself.
     """
     paths = [str(layer) for layer in layers]
-    read_layers(paths)
-    rt = Runtime()
-    if trace is not None:
-        rt.listeners.append(lambda event: trace(str(event)))
+    read = read_layers(paths)
     watched = {
         "paths": [str(Path(path).resolve()) for path in paths],
         "credentials": list(credentials),
@@ -323,18 +370,23 @@ async def run(
         "code": list(code),
         "auto_memory": auto_memory,
     }
-    booted: Booted = await boot(
-        paths,
-        [
-            *overrides,
-            # bh-02's own rows, after every layer and pinned on, so no layer can take them away
-            Row("shell", "bh_02.bootstrap:shell", disabled=False),
-            Row("host", "bh_02.bootstrap:host", config=watched, disabled=False),
-            Row("session", "bh_02.bootstrap:session", config=asdict(session or Listing()), disabled=False),
-        ],
-        rt,
-        report=report,
-    )
+    last = [
+        *overrides,
+        # bh-02's own rows, after every layer and pinned on, so no layer can take them away
+        Row("shell", "bh_02.bootstrap:shell", disabled=False),
+        Row("host", "bh_02.bootstrap:host", config=watched, disabled=False),
+        Row("session", "bh_02.bootstrap:session", config=asdict(session or Listing()), disabled=False),
+    ]
+    # What is known before a row starts is said before one does: the ui row depends on nothing and
+    # would draw the app, only for it to vanish when the error is said.
+    if problem := _row_without_use([*read, ("run()'s overrides", last)]):
+        raise LayerError(problem)
+    if unresolved := _unresolved(compose([*(rows for _, rows in read), last])):
+        raise NotStarted("could not start:\n" + "\n".join(unresolved))
+    rt = Runtime()
+    if trace is not None:
+        rt.listeners.append(lambda event: trace(str(event)))
+    booted: Booted = await boot(paths, last, rt, report=report)
     try:
         _raise_if_stalled(booted, "could not start", NotStarted)
         await _await_chat(booted)

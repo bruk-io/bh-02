@@ -34,10 +34,11 @@ _ENDPOINT = '[local]\nprovider = "openai"\ndiscover = true\nbase_url = "http://l
 # the model row's own endpoint, which a layer gives it: usable whatever the models file says
 _EXTRA = {"sub": {"provider": "claude-code", "models": {"haiku": {"id": "haiku"}}}}
 
-# What can't be read: its text, and what the row says of it.
-_UNREAD = {
+# What can't be read: its text (bytes when it is not text), and what the row says of it.
+_UNREAD: dict[str, tuple[str | bytes | None, str, str]] = {
     "not toml": ("default = [\n", "is not TOML", "fix it"),
     "a key that is no table": ('llama = "x"\n', "'llama' is not a table", "each endpoint is one, e.g."),
+    "not UTF-8 text": ('default = "llama"\n'.encode("utf-16"), "is not UTF-8 text", "fix it or remove it"),
     "a directory": (None, "can't read the models file", "fix it or remove it"),
 }
 # A default that can't be used: the file's text, and what the row says of it.
@@ -75,11 +76,13 @@ class _Fake:
         return [_Entry("model", "bh_02.testing:echo_model", {})]
 
 
-def _file(tmp_path: Path, text: str | None) -> Path:
+def _file(tmp_path: Path, text: str | bytes | None) -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / "models.toml"
     if text is None:
         path.mkdir()  # a path that can't be read as a file
+    elif isinstance(text, bytes):
+        path.write_bytes(text)
     else:
         path.write_text(text)
     return path

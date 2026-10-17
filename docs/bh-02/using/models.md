@@ -64,15 +64,20 @@ model, since the default chooses what you spend: the session starts, the model r
 write at your first message (a default that is not a name, a number say, or names no model: `no
 model named 'gone', the default in the models file ...`), the status bar says `model: default
 (unusable)` or `gone (unusable)`, and `/model` lists the models and a line saying the default is
-refused and why. `/model NAME` of a model that works switches, and so does `--model`; such a
-session is listed by `bh-02 sessions` as started on `default`. Like the models themselves, the
-default is read only from the models file in your config directory, never from one in the
-project.
+refused and why. `/model NAME` of a model that works switches, and so does `--model`.
 
-If the models file itself can't be read (not TOML, a key that is no table, a path that is no
-file), it offers no models: the first message says what is wrong with the file, and `/model` ends
-with that problem in place of where to add models. Models a layer's `extra` names (a `--patch`)
-still work.
+`bh-02 sessions` lists a new session as started on `default` when it records no model. That is
+when the models file's `default` is not a name (a number, an empty string, a list), when the file
+has no `default`, when it is not TOML, has a key that is no table, or can't be read (text that is
+not UTF-8 counts), and when it is in your project. A `default` that names no model is recorded,
+so that session is listed by that name (`gone`), and the first message says which model is
+missing. Like the models themselves, the default is read only from the models file in your config
+directory, never from one in the project.
+
+If the models file itself can't be read (not TOML, not UTF-8 text, a key that is no table, a path
+that is no file), it offers no models: the first message says what is wrong with the file, and
+`/model` ends with that problem in place of where to add models. Models a layer's `extra` names (a
+`--patch`) still work.
 
 ## Adding your own: the models file
 

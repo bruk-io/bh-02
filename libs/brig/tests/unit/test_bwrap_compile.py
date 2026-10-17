@@ -236,6 +236,12 @@ def test_golden_argv_for_the_reference_spec() -> None:
         "/proc/sys",
         "--dev",
         "/dev",
+        # ... and `/dev/shm` a tmpfs of its own, writable (decision-198): the one
+        # writable path under `/dev`, which stage 8 leaves alone.
+        "--perms",
+        "1777",
+        "--tmpfs",
+        "/dev/shm",
         # Stage 3: the readable tree (allowlist), in the Spec's own sorted
         # order -- `FsPolicy.__post_init__` already sorted it.
         "--ro-bind",
@@ -281,8 +287,11 @@ def test_golden_argv_for_the_reference_spec() -> None:
         "--ro-bind-data",
         "0",
         "/.brig-supervisor.py",
-        # Stage 8: the jail's own root tmpfs, read-only, last -- decision-166.
-        # Until it was, a write outside every write root landed in it.
+        # Stage 8: the jail's own tmpfses, read-only, last: `/dev` (decision-198),
+        # then the root (decision-166), where until it was a write outside every
+        # write root landed in it.
+        "--remount-ro",
+        "/dev",
         "--remount-ro",
         "/",
         "--",
@@ -662,7 +671,7 @@ def test_the_three_mechanism_linux_stack_composes_rlimits_bwrap_env_scrub() -> N
     order would be caught rather than hidden."""
     argv = Stack([env_scrub, bwrap, rlimits]).compile(_SPEC, ctx=_spec_ctx()).wrap(("/bin/true",))
 
-    trampoline_at = argv.index("brig.mech.trampoline")
+    trampoline_at = argv.index("brig.trampoline")
     bwrap_at = argv.index(DEFAULT_BWRAP_PATH)
     shell_at = argv.index("/bin/sh")
 
@@ -719,6 +728,7 @@ def test_a_read_carve_out_inside_a_root_is_masked_last_by_its_kind() -> None:
         "--ro-bind", "/dev/null", _SECRET,
         "--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE,
         "--perms", "0444", "--ro-bind-data", "0", "/.brig-supervisor.py",
+        "--remount-ro", "/dev",
         "--remount-ro", "/",
         "--", "w",
     )  # fmt: skip
@@ -759,7 +769,7 @@ def test_a_read_carve_out_that_holds_a_root_is_masked_too() -> None:
         path_is_dir={_STATE: True},
     )
     argv = bwrap.compile(spec, ctx).wrap(("w",))
-    assert argv[-15:-9] == ("--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE)
+    assert argv[-17:-11] == ("--perms", "0000", "--tmpfs", _STATE, "--remount-ro", _STATE)
 
 
 @pytest.mark.unit
@@ -794,7 +804,7 @@ def test_a_write_carve_out_no_writable_tree_reaches_is_not_mounted() -> None:
     )
     argv = bwrap.compile(spec, ctx).wrap(("w",))
     assert layer not in argv
-    assert argv[-12:-9] == ("--ro-bind", _HOOKS, _HOOKS)
+    assert argv[-14:-11] == ("--ro-bind", _HOOKS, _HOOKS)
 
 
 @pytest.mark.unit
@@ -897,6 +907,10 @@ def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
         "/proc/sys",
         "--dev",
         "/dev",
+        "--perms",
+        "1777",
+        "--tmpfs",
+        "/dev/shm",
         "--ro-bind",
         "/usr",
         "/usr",
@@ -943,6 +957,8 @@ def test_a_write_root_above_the_jail_directory_is_sealed_out_of_it() -> None:
         "0",
         "/.brig-supervisor.py",
         "--remount-ro",
+        "/dev",
+        "--remount-ro",
         "/",
         "--",
         "w",
@@ -958,7 +974,7 @@ def test_the_seal_is_shown_where_each_writable_tree_puts_the_jail_directory() ->
         spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, write_allows=(root,)))
         argv = bwrap.compile(spec, _ctx(resolved={root: resolved_root})).wrap(())
         seal = ("--ro-bind", _JAIL_DIR, dest, "--bind-try", f"{_JAIL_DIR}/tmp", f"{dest}/tmp")
-        assert argv[-14:-8] == seal, argv
+        assert argv[-16:-10] == seal, argv
 
 
 @pytest.mark.unit

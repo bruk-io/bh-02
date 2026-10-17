@@ -10,7 +10,7 @@ section to it.
 | Row | Binds | Consumes |
 |---|---|---|
 | `memory:files` | `memory` (`text() -> str`, `touched(paths) -> [(file, text)]`, `listed() -> [Entry]`, `places()`); registers `/memory`; config: `root` (default `.`), `home`, `instruction_files` (default `claude-md-or-agents-md`), `excludes`, `managed` | `system` (`add`), `commands` (`register`), `host` (`auto_memory`: for `/memory`) |
-| `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index | `system` (`add`), `host` (`auto_memory`), `transcript` (its lifetime) |
+| `memory:auto` | adds auto memory to `system`: how to keep it, and its MEMORY.md index; registers the `memory` tool (`runs="memory"`) that saves, reads and deletes a memory | `system` (`add`), `host` (`auto_memory`), `transcript` (its lifetime), `tools` (`register`) |
 | `memory:on_touch` | adds `OnTouch` to `asides`, and its `before_write` to `access`; no config: the memory files are `memory`'s | `memory` (`touched`), `asides` (`add`), `transcript` (`messages`), `access` (`before_write`) |
 
 ## What loads at launch
@@ -98,10 +98,23 @@ text an input printed that way counts too.
 - **`/memory` lists, it doesn't open.** bh-02's app owns the terminal, so `/memory` names each
   file, marked by how it loads (✓ at launch, … on demand, · not there, ✗ excluded or not read),
   and you open one in your own editor.
-- **Auto memory adds no tool.** The model writes its memories with whatever tools the
-  composition gives it, as it writes any file, and this plugin names none: bh-02 is not CodeAct
-  only. A tool that can write the directory says so itself (the python tool names the
-  directories its jail lets it write).
+- **A sub-agent has the guidance, never auto memory.** The subagents plugin copies the `memory` and
+  `on-touch` rows into each child's sealed realm, with a `commands:registry` of its own for
+  `memory:files` to register `/memory` with, so a child's prompt has the project's files and its
+  inputs are told what loads on demand, in its own conversation. `memory:auto` is refused there: N
+  children writing one directory would race the parent, and the `memory` tool is that row's, so a
+  child never has it
+  ([subagents-cordis-plugin](../subagents-cordis-plugin/README.md#the-projects-guidance-in-a-child)).
+- **The `memory` tool writes outside the jail, from bh-02's own process.** Auto memory works in
+  any composition because this plugin brings the tool that keeps it, instead of assuming some
+  tool can write files (bh-02 is not CodeAct only). The tool runs in bh-02's process, not in the
+  jail, and is never asked about, jailed or under `--no-jail` (`runs="memory"`, the one value
+  `approval` lets through whatever the runner confines). That is safe for one reason: the code
+  that writes is bh-02's, not the model's, and it writes only beneath the auto memory directory,
+  through no link (`host_paths.write_beneath`), which the jailed model can already write without
+  being asked. Asking would protect nothing there, and a jailed program per save would be a whole
+  process for a small file write
+  (the rule: [runner-cordis-plugin](../runner-cordis-plugin/README.md), where approval is described).
 
 ## Auto memory
 
@@ -114,31 +127,57 @@ command line works it out (`bh_02.bootstrap.memory_directory`), makes it, and ha
 `host` value, whose `auto_memory` the jail lets an input write. On Linux it is the one directory
 outside the project the jail lets an input read, so another project's memory is not there.
 
-The model is told how to keep it (`auto_section`): what is worth a memory and what is not, its
-four kinds (`user`, `feedback`, `project`, `reference`), one topic file per memory with
-frontmatter, and one line for each in `MEMORY.md`, the index. The index's first 200 lines or
-25KB (`indexed`) follow, read from the directory through no link (the model writes it). It is
-read once a conversation, at its first reading of the prompt, and kept for the rest of it
-(`AutoMemory`; the row depends on `transcript`, so `/clear` and `/compact` read it afresh), as
-Claude Code reads it at the start of one: a write to it later in the conversation is the
-model's own, and telling it back as a change in its instructions would only repeat it.
-`disabled = true` on the `memory-auto` row turns auto memory off.
+The model keeps it with the `memory` tool, which this row registers with the section that tells
+the model of it (`keeping.py` and `directory.py`):
+
+- `save` takes a `name` (a slug), a `type` (`user`, `feedback`, `project` or `reference`), a
+  one-line `description` and a `body`. It writes the topic file `NAME.md`, opening with `name`,
+  `description` and `type` frontmatter, and the memory's line in `MEMORY.md`. A save under a name
+  that exists updates that memory, never a second file. A name that is not a slug, a `type` that
+  is missing or unknown, a `description` of more than one line and a `body` that is empty are
+  refused with what to fix, and nothing is written.
+- `read` gives the text of a memory by name, and `delete` removes the file and its line.
+- `MEMORY.md` is kept for the tool's own lines only, one per topic file (`- [name](name.md):
+  description`): a save adds or replaces the memory's line, a delete removes it, and every other
+  line is left as it is, to the byte, so a person's own headings, notes and links stay. The
+  index's cap is unchanged.
+- It reads and writes only beneath the directory, through no link (`host_paths`): a link, or a
+  second name for another file, that the model left as a topic file or as `MEMORY.md` is
+  refused, never followed, replaced or removed, and nothing outside the directory is touched.
+  Each file is written whole under a name of its own and moved into place, so a reader never
+  sees half of one. The work runs in a thread, off the event loop.
+- It is also a function in a python input, `tools.memory(...)`, like any registered tool. A file
+  written through Python is the model's own and is not checked.
+
+The model is told how to use it (`auto_section`): what is worth a memory and what is not, its
+four kinds, and to keep memories with `memory`, not by writing files. The index's first 200
+lines or 25 KB (`indexed`) follow, read from the directory through no link (the model writes
+it). It is read once a conversation, at its first reading of the prompt, and kept for the rest of
+it (`AutoMemory`; the row depends on `transcript`, so `/clear` and `/compact` read it afresh, and
+a memory saved in one conversation is in the next one's index), as Claude Code reads it at the
+start of one: a write to it later in the conversation is the model's own, and telling it back as
+a change in its instructions would only repeat it. `disabled = true` on the `memory-auto` row
+turns auto memory off, and with it the tool.
 
 Among its rules for keeping memories, the model is told:
 
-- to check for a memory that already covers a new one, and update that one rather than add a
-  duplicate;
+- to check the index for a memory that already covers a new one, and save under its name rather
+  than add a duplicate;
 - for `feedback` and `project`, to follow the rule or fact with a **Why:** line and a **How to
   apply:** line;
 - to write dates as absolute ones, not relative ones;
-- to make `description` one specific line, since it decides whether the memory is relevant later;
+- to make `description` one specific line, since it decides whether the memory is relevant;
 - not to save what only matters to this conversation, or what the code, its history or CLAUDE.md
   already records; asked to save one of those, to ask what was non-obvious about it and save that;
-- to check a memory that names a file, function or flag against the code before recommending it;
-- to keep each memory file under 200 lines and 4 KB, organised by topic.
+- to check a memory that names a file, function or flag against the code or git log before
+  recommending it;
+- to keep each memory under 200 lines and 4 KB, organised by topic: to split or summarise one
+  that outgrows that.
 
 ## Reading safely
 
 `reading.py`'s `read(path, files, root)` is the one way a memory file is read, for the prompt
 and for an input's result alike. `markdown.py` (`imports`, `uncommented`) and `rules.py`
-(`rule`, `matches`) are pure.
+(`rule`, `matches`) are pure, and so is `keeping.py`, the `memory` tool's spec and the decisions it
+makes (`understood`, `topic_text`, `with_line`); `directory.py` is the tool at work, over
+`host_paths`' opener and writer.

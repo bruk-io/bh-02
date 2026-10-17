@@ -41,7 +41,7 @@ from brig.run import _records
 from brig.run._records import RESERVED_NAMES
 from brig.run._records import ProcessRecord as ProcessRecord
 from brig.run._supervisor_link import SupervisorLink
-from brig.run._tether import HeldTether
+from brig.run._tether import HeldLifeline, HeldTether
 from brig.run.teardown import DEFAULT_GRACE_S, KillReport
 from brig.stack import CompiledJail
 
@@ -228,15 +228,18 @@ class Held:
     serialized does (decision-181): the compiled `wrap`, so each start checks
     that `wrap` of its own argv is the jail's prefix followed by the argv; the
     sensors, which the exit waiter asks about each process's ending; the
-    jail's hold on its tether, which every start's watcher reads; and, in a
+    jail's hold on its tether, which every start's watcher reads; in a
     supervised jail, the link to its supervisor (decision-191), the only way
-    anything starts in it: a socket cannot cross `to_dict`, so a record
+    anything starts in it; and, in a supervised jail with no tether and a
+    `JAIL_LIFETIME` helper, the lifeline that helper's watcher reads
+    (decision-199). A socket or a pipe cannot cross `to_dict`, so a record
     rehydrated in another process has none of it, and no supervisor."""
 
     wrap: ArgvTransformer
     sensors: tuple[EventSource, ...] = ()
     tether: HeldTether | None = None
     link: SupervisorLink | None = None
+    lifeline: HeldLifeline | None = None
 
 
 @dataclass(frozen=True, slots=True)

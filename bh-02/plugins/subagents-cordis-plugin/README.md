@@ -8,7 +8,7 @@ foreground or, with `background`, to `agent_wait`. The design is decision-0002
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `subagents:parent` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `executor`, `python`), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
+| `subagents:parent` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor`, `python`; never auto memory), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
 | `subagents:status` | the status bar's `agents` field: `agents: N running` while a sub-agent runs, absent at none; config: none | `roster` (`running`, `watch`), `frame` (`status`) |
 | `subagents:output` | a child's `output`, inside its realm: `confirm(request)` through `asker`, the request labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
 | `subagents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system`, `asides` (`add`: what `agent_send` left) |
@@ -66,8 +66,9 @@ input, which the loop serves as it does the model's own calls) starts one child:
    A model a yes chose is the child's alone: its model row's `default`, in its realm. A start is
    counted as it is admitted, before the child's directory is made (on a thread), so two calls
    made together cannot both pass the last of the budget unasked; one that fails before a child
-   exists (its directory can't be made, a layer gives it the agents row) is given back, and one
-   that was admitted but never comes up has spent its start.
+   exists (its directory can't be made, a layer gives it the agents row, the call is cancelled
+   while the directory is waited for) is given back with its name, and one that was admitted but
+   never comes up has spent its start.
 
 2. **Its name**: bh-02's, `TYPE-N`, the first `N` this row has not given whose state directory
    is not there yet (a resumed session's children keep theirs), so a description the model gives
@@ -80,10 +81,12 @@ input, which the loop serves as it does the model's own calls) starts one child:
    them: `transcript.path` (`agents/NAME/transcript.jsonl`), the model's Claude Code `state`
    (`agents/NAME/claude`, when the parent's model row keeps one) and the model its type (or the
    call) names (the shipped types name none: the session's). Of the rows in `tools`, only those
-   its type grants. No memory rows, no `chat`, no `input`, no `agents`
-   row: a child can't start one of its own (depth one). A layer whose `rows` names the agents row
-   (by its id, or any row using `subagents:parent`) gets an error from the call saying so, not a
-   child with one (decision-0002). Then `subagents:output` and `subagents:child`.
+   its type grants. The project's guidance is among them (`memory` and `on-touch`, below), with a
+   `commands:registry` of the child's own beside it; no auto memory, no `chat`, no `input`, no
+   `agents` row: a child can't start one of its own (depth one). A layer whose `rows` names the
+   agents row (by its id, or any row using `subagents:parent`) gets an error from the call saying
+   so, not a child with one (decision-0002); one that names the auto memory row (any row using
+   `memory:auto`) gets the same, below. Then `subagents:output` and `subagents:child`.
 4. **Its realm**: `performer.perform(use(cordis.loader:loader, config=LoaderConfig(overrides=rows,
    watch=None), expose={runner, approval, host, asker}, id="agents/NAME"))`. The realm's own
    loader resolves each row by name (this plugin imports no other), and every key its rows bind
@@ -229,4 +232,33 @@ runs.
   to the tmux socket, are TASK-0080.10. `TMUX` and `TMUX_PANE` are in the environment of no program
   the runner starts (`runner-cordis-plugin`).
 
-Later (decision-0002's split): the project's guidance in a child (TASK-0080.07).
+## The project's guidance in a child
+
+A child's prompt has the project's guidance as the parent's has it, and its python inputs are
+told what loads on demand: its `rows` (by default) include the parent's `memory` row
+(`memory:files`: the CLAUDE.md and AGENTS.md files, imports and rules, a section of its
+`system` prompt, read fresh before each message the child reads) and `on-touch` row
+(`memory:on_touch`: a subdirectory's CLAUDE.md or a rule for the files an input opened, an aside to
+that input's result, once in the child's conversation), each copied with the parent's config (the
+project, the person's home, the excludes) like every other row. A child's conversation is its
+own, so it is told afresh what the parent was told; its `access` row refuses its first write to a
+file whose instructions it has not been told, as the parent's does. A layer with no memory rows
+gives a child none.
+
+`memory:files` registers `/memory` with `commands`, which the sealed realm does not read from
+outside. So the agents row writes a `commands:registry` into each child's realm beside the memory
+row (`agents/NAME/commands`, unless the layer's `rows` already gave it one): the child's own
+value, which nobody runs a line through (a child has no `chat`), so the parent's registry never
+holds the child's `/memory` and the child never reaches the parent's `/agents`. The exposed set is
+still `runner`, `approval`, `host` and `asker`.
+
+**No auto memory in a child.** N children writing one auto memory directory would race the
+parent (decision-0002), and the child is a task's worker, not a conversation the person has with
+the model. A `rows` that names a row using `memory:auto` is refused as one naming the agents row
+is: the call answers `a child has no auto memory ...; take it out of `rows``, and mounts nothing
+(`test_no_child_composition_includes_auto_memory_though_the_parent_has_it`,
+`test_a_layer_naming_the_auto_memory_row_among_the_child_s_rows_fails_the_call_and_mounts_no_child`).
+The `memory` tool, which writes that directory from bh-02's own process, is `memory:auto`'s, so a
+child never has it either (the first of those tests checks the child's own `tools`). The jail
+still lets a child's python input write the directory the parent's `host` names (`auto_memory`),
+as it lets the parent's; the child is not told it is there.

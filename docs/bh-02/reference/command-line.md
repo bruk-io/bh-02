@@ -120,7 +120,7 @@ block that does not parse, or has no blank line before it).
 | Code | When |
 |---|---|
 | `0` | the session ended normally, or a subcommand did its job (`check-examples`: no finding) |
-| `1` | a layer file can't be read or names old rows, the composition could not start, or the session ended with an error. bh-02 says why in one line, starting `error:`. |
+| `1` | a layer file can't be read, names old rows or has a row with no `use`, the composition could not start, or the session ended with an error. bh-02 says why in one line, starting `error:`. |
 | `2` | a usage error: an unknown option, a `--patch` file that doesn't exist, a `--resume` that matches no session or more than one. For `check-examples`, also a file it can't check (not readable, not Python): it exits `1` only for a finding. |
 
 ## Environment

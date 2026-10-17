@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from bh_02 import CompositionError, layers, run
-from bh_02.bootstrap import NotStarted
+from bh_02.bootstrap import LayerError, NotStarted
 from cordis import Effects, Inspection, Row, Runtime, State, bind, boot, component
 from cordis.loader import read_layer, resolve
 
@@ -300,13 +300,52 @@ async def test_slash_commands_act_on_the_running_session(composition: Callable[.
     assert fragile.SHOWN == ["after"]  # only the message reached the model, after the restart
 
 
-async def test_a_composition_that_cannot_be_read_says_why_instead_of_crashing(
+async def test_a_patch_row_with_no_use_that_no_layer_added_is_a_layer_error_naming_it(
     composition: Callable[..., Path],
 ) -> None:
+    """cordis's `compose` refuses it with a ValueError; the run says it first, as a layer error that
+    names the file, the row and what to add, and mounts nothing (`trace` hears every row's
+    lifecycle from the first, so it hears nothing)."""
     patch = composition('[[plugin]]\nid = "nothing_before_me"\ndisabled = true\n')  # a patch row with no use
-    with pytest.raises(CompositionError) as raised:
-        await asyncio.wait_for(run([*layers(), patch]), 5)
-    assert "could not start" in raised.value.message and "nothing_before_me" in raised.value.message
+    heard: list[str] = []
+    with pytest.raises(LayerError) as raised:
+        await asyncio.wait_for(run([*layers(), patch], trace=heard.append), 5)
+    message = raised.value.message
+    assert message.startswith(f"{patch}: row 'nothing_before_me' has no `use`"), message
+    assert 'add use = "plugin:component"' in message
+    assert heard == []
+
+
+async def test_a_row_that_cannot_resolve_stops_the_run_before_any_row_starts(
+    composition: Callable[..., Path],
+) -> None:
+    """The ui row depends on nothing, so it starts at once and the app is drawn: a run that already
+    knows a row's `use` names nothing says so first, mounting no row (`trace` hears nothing), and
+    names the cause alone, not the rows that would have waited on it."""
+    stale = composition('[[plugin]]\nid = "loop"\nuse = "nonesuch:loop"\n', one_reply=True)
+    heard: list[str] = []
+    with pytest.raises(NotStarted) as raised:
+        await asyncio.wait_for(run([*layers(), stale], trace=heard.append), 10)
+    message = raised.value.message
+    assert message.startswith("could not start:\nloop: unresolved: "), message
+    assert "use 'nonesuch:loop'" in message and "installed plugins: " in message
+    assert "waiting on" not in message
+    assert heard == []
+
+
+async def test_the_line_for_a_row_that_cannot_resolve_is_the_one_the_loader_gives_it(
+    composition: Callable[..., Path],
+) -> None:
+    """The run says it before the loader mounts a row, in the words the loader gives the same row
+    once mounted (`/rows` shows them): the two are compared, so a change to one shows in the other."""
+    stale = composition('[[plugin]]\nid = "loop"\nuse = "nonesuch:loop"\n')
+    with pytest.raises(NotStarted) as raised:
+        await asyncio.wait_for(run([stale]), 10)
+    booted = await boot([stale], watch=None)
+    try:
+        assert raised.value.message == f"could not start:\nloop: {booted.loader.status()['loop']}"
+    finally:
+        await booted.runtime.shutdown()
 
 
 async def test_a_shipped_layer_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s_error(

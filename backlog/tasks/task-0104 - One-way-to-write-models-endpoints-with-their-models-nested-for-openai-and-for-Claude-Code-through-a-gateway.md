@@ -3,11 +3,11 @@ id: TASK-0104
 title: >-
   One way to write models: endpoints with their models nested, for openai and
   for Claude Code through a gateway
-status: To Do
+status: Done
 assignee:
   - '@bruk'
 created_date: '2026-10-15 20:32'
-updated_date: '2026-10-15 20:32'
+updated_date: '2026-10-17 01:49'
 labels:
   - models
   - size-8
@@ -63,18 +63,18 @@ max_tokens = 4096
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An endpoint is a top-level table holding `provider` and how to reach the server; its models are `[NAME.models.ALIAS]` tables (or the same data inline), each with an `id` and the provider's per-model settings, named `NAME/ALIAS`, the same for openai and claude-code
-- [ ] #2 A flat one-model table in the models file or in `extra` is refused, with an error showing how to rewrite it as an endpoint
-- [ ] #3 With `base_url` and `key_command`, a claude-code endpoint runs the Claude Code CLI against that gateway with the command as its token helper; bh-02's own process never runs the command or holds the token, and no `CLAUDE_CODE_OAUTH_TOKEN` is needed
-- [ ] #4 An openai endpoint may take `key_command` instead of `key`; what it prints is held only in the request headers, kept for `key_ttl_ms` and dropped when the server refuses it, and is never printed, logged or shown in an error
-- [ ] #5 A claude-code endpoint without `base_url` runs on the subscription token as today
-- [ ] #6 There are no built-in models (owner's call, 2026-10-15): every model comes from an endpoint; with no models file, or no `default` and no `--model`, the model row is unusable and says to add an endpoint and a default, and a new session records no model
-- [ ] #7 The Claude Code CLI still loads none of the person's settings, hooks, plugins, MCP servers or CLAUDE.md
-- [ ] #8 `key_command` and `discover` are read only from the models file; `extra` otherwise takes the same nested format
-- [ ] #9 `NAME/ID` for an id not listed under `models` still resolves, as endpoint names do today; with `discover`, `/model` lists the named models first, then the server's
-- [ ] #10 On this machine, a message sent through bh-02 on a gateway model gets a reply, with `[1m]` ids checked too (by hand, with the evidence in the notes)
-- [ ] #11 This machine's models file uses the new shape (`qwen38` under an endpoint) and its models work
-- [ ] #12 `scripts/check` passes, and the docs describe the one format
+- [x] #1 An endpoint is a top-level table holding `provider` and how to reach the server; its models are `[NAME.models.ALIAS]` tables (or the same data inline), each with an `id` and the provider's per-model settings, named `NAME/ALIAS`, the same for openai and claude-code
+- [x] #2 A flat one-model table in the models file or in `extra` is refused, with an error showing how to rewrite it as an endpoint
+- [x] #3 With `base_url` and `key_command`, a claude-code endpoint runs the Claude Code CLI against that gateway with the command as its token helper; bh-02's own process never runs the command or holds the token, and no `CLAUDE_CODE_OAUTH_TOKEN` is needed
+- [x] #4 An openai endpoint may take `key_command` instead of `key`; what it prints is held only in the request headers, kept for `key_ttl_ms` and dropped when the server refuses it, and is never printed, logged or shown in an error
+- [x] #5 A claude-code endpoint without `base_url` runs on the subscription token as today
+- [x] #6 There are no built-in models (owner's call, 2026-10-15): every model comes from an endpoint; with no models file, or no `default` and no `--model`, the model row is unusable and says to add an endpoint and a default, and a new session records no model
+- [x] #7 The Claude Code CLI still loads none of the person's settings, hooks, plugins, MCP servers or CLAUDE.md
+- [x] #8 `key_command` and `discover` are read only from the models file; `extra` otherwise takes the same nested format
+- [x] #9 `NAME/ID` for an id not listed under `models` still resolves, as endpoint names do today; with `discover`, `/model` lists the named models first, then the server's
+- [x] #10 On this machine, a message sent through bh-02 on a gateway model gets a reply, with `[1m]` ids checked too (by hand, with the evidence in the notes)
+- [x] #11 This machine's models file uses the new shape (`qwen38` under an endpoint) and its models work
+- [x] #12 `scripts/check` passes, and the docs describe the one format
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -93,4 +93,8 @@ Done uncommitted on the owner's machine (2026-10-15; the owner asked for no comm
 - Built-ins removed (#12): no `BUILT_IN`; no default and no `--model` means no model (`chosen` raises "no model is chosen" with an endpoint to write; status bar `none`); `bh_02.sessions._pinned` records none; a broken or untrusted models file leaves only `extra`. Docs: get-started gains "Your models" (a `claude` endpoint with sonnet/opus/haiku), models guide, README, CONTRACTS, GLOSSARY, plugin READMEs, CLI help. `scripts/check` after: format, lint, gates, docs ok; 2776 passed, the 9 failures environment-bound or flaky alone (as above).
 
 Accepted 2026-10-15 by the owner, who asked for these changes on this branch, made carefully rather than copied, since the codebase may have moved. Their diff is kept at the orchestrator's scratchpad (models-endpoints.diff, 48 files). Measured before porting: 42 of its 44 changed files have exactly the diff's base here; bh-02/CLAUDE.md and GLOSSARY.md differ only by TASK-0099.05's and TASK-0100's edits, and the whole diff applies. Criteria #9 and #10 are about the owner's machine: their notes above are that evidence, and nothing here can repeat it (no gateway, no owner models file).
+
+Owner, 2026-10-17, in conversation: criteria #10 (a gateway reply through bh-02, [1m] ids included) and #11 (their models file in the new shape, its models working) hold on their machine with the merged code: "i can confirm its fine". And no backwards compatibility is needed: an old flat table, an old session's model name or an old layer's `extra` is refused or errors, as the criteria already say, with nothing translated.
+
+Closing review (reviewer, did not do the work): CLOSED. Children TASK-0104.01 and .02 Done. #1,#5,#8,#9 from .01's review and named.py/_endpoint_problem reading. #2 spot-checked: a flat [qwen] table with id through named.parsed+problem is refused with a [qwen.models.MODEL] rewrite. #6: with an empty XDG_CONFIG_HOME, read_models gives None and chosen says 'no model is chosen ... add an endpoint and a default' with an example. #3/#4/#7: credential.gateway_settings hands key_command to the CLI as apiKeyHelper; provider.py:433 setting_sources=[]; pinned by test_models_gateway.py (test_the_environment_through_a_gateway_holds_no_token..., test_the_provider_starts_claude_code_with_the_layer_and_needs_no_local_env) and test_models_key_command.py (test_a_command_that_gives_no_key_names_itself_never_what_it_printed, test_a_refused_printed_key_is_dropped..., test_a_printed_key_a_header_can_not_carry_is_said_without_it); plugin tests 349 passed, 2 skipped. #10/#11: not judged here; ticked on the owner's confirmation of 2026-10-17 in the notes. #12: orchestrator's full scripts/check on a head with all the code exit 0 (3311 passed, 50 skipped, check-wave3.txt); docs, READMEs, CONTRACTS, GLOSSARY show only nested endpoint tables and say there are no built-in models. Open questions all ticked. Findings: nits only, unfiled: an error quotes key_command text in full (a key written into the command would show); mkdocs strict does not fail on broken anchors (raised in .02's review).
 <!-- SECTION:NOTES:END -->

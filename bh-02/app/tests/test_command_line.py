@@ -1,5 +1,6 @@
 """The `bh-02` command with the ui and the model patched to fakes: what it prints, and when."""
 
+import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -7,6 +8,10 @@ import pytest
 from click.testing import CliRunner
 
 from bh_02 import main
+
+# A `--model` value from argv bytes that are not UTF-8, as Python hands it over: each byte that
+# does not decode becomes a lone surrogate (`os.fsdecode` decodes argv the same way).
+_NOT_UTF8 = os.fsdecode(b"claude/\xff")
 
 
 @pytest.fixture
@@ -56,14 +61,18 @@ def test_a_composition_that_cannot_start_is_one_line_and_exit_code_1(
     assert "no sessions" in CliRunner().invoke(main, ["sessions"]).stderr  # and none is listed
 
 
-def test_a_resumed_session_that_cannot_start_is_kept(composition: Callable[..., Path], state: Path) -> None:
+def test_a_resumed_session_that_cannot_start_is_kept_and_not_offered_a_resume(
+    composition: Callable[..., Path], state: Path
+) -> None:
     ran = CliRunner().invoke(main, ["--no-jail", "--patch", str(_patch(composition))])
     assert ran.exit_code == 0, ran.output
     patch = composition('[[plugin]]\nid = "loop"\ndisabled = true\n[[plugin]]\nid = "ui"\ndisabled = true\n')
     result = CliRunner().invoke(main, ["--resume", "--patch", str(patch)])
     assert result.exit_code == 1 and "error: could not start" in result.stderr
-    assert "bh-02 --resume" in result.stderr  # it is still there to continue
-    assert CliRunner().invoke(main, ["sessions"]).stdout.count("\n") == 1
+    assert "bh-02 --resume" not in result.stderr  # it would fail the same way until a layer changes
+    assert "did not start and is kept as it was" in result.stderr  # said instead, with what to change
+    assert "session.toml" in result.stderr and "--patch file" in result.stderr
+    assert CliRunner().invoke(main, ["sessions"]).stdout.count("\n") == 1  # kept
 
 
 @pytest.mark.parametrize(
@@ -184,3 +193,33 @@ def test_resume_skips_a_broken_record_and_says_why_when_it_is_named(
     assert runner.invoke(main, ["--no-jail", "--patch", str(_patch(composition))]).exit_code == 0
     resumed = runner.invoke(main, ["--resume", "--patch", str(_patch(composition))])
     assert resumed.exit_code == 0, resumed.output  # the newest readable one
+
+
+def test_a_model_name_that_is_not_utf8_is_a_usage_error_and_makes_no_session(state: Path) -> None:
+    """Bytes of argv that are not UTF-8 reach the program as a lone surrogate, which no layer can
+    hold: refused as a one-line usage error before a session directory is made, not a traceback
+    after one."""
+    result = CliRunner().invoke(main, ["--no-jail", "--model", _NOT_UTF8])
+    assert result.exit_code == 2 and isinstance(result.exception, SystemExit)
+    assert "Traceback" not in result.output
+    assert result.stderr.splitlines()[-1] == (
+        "Error: Invalid value for '--model': 'claude/\\udcff' is not valid UTF-8; "
+        "write the model's name in UTF-8"
+    )
+    assert not (state / "state" / "bh-02" / "sessions").exists()  # no directory, no meta.json
+
+
+def test_a_resume_with_a_model_name_that_is_not_utf8_changes_nothing(
+    composition: Callable[..., Path], state: Path
+) -> None:
+    runner = CliRunner()
+    assert runner.invoke(main, ["--no-jail", "--patch", str(_patch(composition))]).exit_code == 0
+    before = {path: path.read_bytes() for path in (state / "state").rglob("*") if path.is_file()}
+    result = runner.invoke(main, ["--resume", "--model", _NOT_UTF8])
+    assert result.exit_code == 2 and "Traceback" not in result.output
+    assert result.stderr.splitlines()[-1] == (
+        "Error: Invalid value for '--model': 'claude/\\udcff' is not valid UTF-8; "
+        "write the model's name in UTF-8"
+    )
+    after = {path: path.read_bytes() for path in (state / "state").rglob("*") if path.is_file()}
+    assert after == before  # the session's layer and record are as they were, and no other file
