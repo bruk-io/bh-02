@@ -789,21 +789,20 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     waiting = app.wait_for(
         "⧗ waiting for model to start; this message is sent once it is up", 5, after=starting
     )
+    # active again: the bar's own text, waited for like the reply's, not read out of whatever has
+    # arrived when the reply does (the name is followed by a space, not by `s/slow-2…`'s ellipsis)
+    app.wait_for("model: s/slow-2 ", 20, after=starting)
     replied = app.wait_for("echo: HELLO", 20, after=waiting)
-    status = app.text()[app.text().rfind("model: s/slow-2") :]
-    assert status.startswith("model: s/slow-2 "), status[:80]  # active again
     app.type("/clear")  # the loop, its transcript and the python row restart; the model stays up
     app.type("again")
-    # the chat row reads `again` once the restart /clear queued is done (`jobs`): typed while it
+    # the chat row reads `again` once the restart /clear queued is done (`jobs`). Typed while it
     # runs, the line says it waits for the rows /clear named; typed after, the new loop says it
-    # waits for `python` (the Python process coming up). Which is timing; the new loop answers
-    # either way.
+    # waits for `python` if the Python process is not up yet, and nothing if it is. Which one is
+    # when this process types the line against how long the restart takes, so only what holds
+    # either way is asserted: the new loop answers, and nothing was stopped. The waiting line is
+    # pinned by the next test, which types both lines in one burst.
     again = app.wait_for("echo: AGAIN (message 1)", 20, after=replied)
-    said = app.text()[replied:again]
-    assert (
-        "⧗ waiting for agents, loop, python, transcript to start" in said or "waiting for `python`" in said
-    ), said
-    assert "stopped: interrupted" not in said
+    assert "stopped: interrupted" not in app.text()[replied:again]
     app.press(b"\x11")
     assert app.exit_code() == 0
 
