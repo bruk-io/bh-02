@@ -309,7 +309,7 @@ async def _up(where: Path, count: int) -> list[int]:
 
 
 async def _booted(rows: list[Row], layers: Sequence[Path] = ()) -> Booted:
-    booted = await boot(layers, rows, watch=None)
+    booted = await _bounded(boot(layers, rows, watch=None))
     await _bounded(booted.runtime.settle())
     assert all(state == "active" for state in booted.loader.status().values()), booted.loader.status()
     return booted
@@ -359,7 +359,7 @@ async def test_a_call_mounts_a_child_in_a_sealed_realm_and_answers_with_its_repo
     assert said  # the child's conversation, in its own file
     assert "## Sub-agents" in model.prompts[0] and "You are agent general-1" in model.prompts[1]
     assert rt.root.get("asker") is not None and rt.root.get("loop") is not None  # the parent's keys stand
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_child_s_state_directories_are_made_off_the_event_loop(
@@ -394,7 +394,7 @@ async def test_a_child_s_state_directories_are_made_off_the_event_loop(
     assert sorted(name for name, _ in made) == ["agents", "agents", "general-1", "general-2"]
     assert all(thread != loop_thread for _, thread in made)
     assert stat.S_IMODE(os.stat(tmp_path / "agents" / "general-2").st_mode) == 0o700
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_second_child_gets_the_next_name_and_an_unknown_type_mounts_nothing(tmp_path: Path) -> None:
@@ -413,7 +413,7 @@ async def test_a_second_child_gets_the_next_name_and_an_unknown_type_mounts_noth
     unknown, report = _results(await _bounded(_reply(booted.runtime, "go")))
     assert unknown == "error: there is no agent type 'nosuch'; the types are explore, general"
     assert report.startswith("Report from agent general-2 (general)")
-    await booted.runtime.shutdown()
+    await _bounded(booted.runtime.shutdown())
 
 
 async def test_retiring_a_child_while_it_replies_ends_the_call_with_no_report(tmp_path: Path) -> None:
@@ -435,7 +435,7 @@ async def test_retiring_a_child_while_it_replies_ends_the_call_with_no_report(tm
     assert result == "agent general-1 (general) gave no report: it was stopped before it answered"
     assert model.closed == 1 and _children(rt) == []
     assert await _all_gone([program])  # the child's REPL program with it
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_unloading_the_agents_row_retires_every_child_it_holds(tmp_path: Path) -> None:
@@ -459,7 +459,7 @@ async def test_unloading_the_agents_row_retires_every_child_it_holds(tmp_path: P
     assert await _all_gone(programs)
     await _bounded(rt.settle())
     assert rt.root.get("tools").get("agent") is not None  # the row came back
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_child_s_question_reaches_the_person_labelled_and_nothing_else_of_the_output_does() -> None:
@@ -485,7 +485,7 @@ async def test_a_child_s_question_reaches_the_person_labelled_and_nothing_else_o
     agent_call, child_call = screen.asked
     assert agent_call["name"] == "agent" and "agent" not in agent_call  # the parent's own question
     assert child_call["name"] == "echo" and child_call["agent"] == {"name": "general-1", "type": "general"}
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_the_child_s_output_is_a_confirm_and_nothing_else() -> None:
@@ -493,7 +493,7 @@ async def test_the_child_s_output_is_a_confirm_and_nothing_else() -> None:
     booted = await _booted(_rows(model, _Screen()))
     rt = booted.runtime
     replying = asyncio.ensure_future(_reply(rt, "go"))
-    await model.hanging.wait()
+    await _bounded(model.hanging.wait())
     inner = Inspection(rt).fiber("agents/general-1/output")
     assert inner is not None
     output = inner.ctx.get("output")
@@ -501,7 +501,7 @@ async def test_the_child_s_output_is_a_confirm_and_nothing_else() -> None:
     assert output is not rt.root.get("output")
     replying.cancel()
     await _bounded(asyncio.gather(replying, return_exceptions=True))
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_ctrl_c_stops_the_parent_s_reply_and_the_child_it_waits_on_from_the_tool(
@@ -527,7 +527,7 @@ async def test_ctrl_c_stops_the_parent_s_reply_and_the_child_it_waits_on_from_th
     assert await _all_gone([program])  # the child's REPL program too
     answered = rt.root.get("transcript").messages[-1]
     assert answered["role"] == "tool" and answered["content"].startswith("interrupted:")
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_ctrl_c_stops_the_child_a_python_input_waits_on(tmp_path: Path) -> None:
@@ -554,7 +554,7 @@ async def test_ctrl_c_stops_the_child_a_python_input_waits_on(tmp_path: Path) ->
     assert await _all_gone([program])
     answered = rt.root.get("transcript").messages[-1]
     assert answered["role"] == "tool" and answered["content"].startswith("interrupted:")
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_ctrl_c_withdraws_the_open_question_of_the_foreground_child_it_stops() -> None:
@@ -582,7 +582,7 @@ async def test_ctrl_c_withdraws_the_open_question_of_the_foreground_child_it_sto
     assert screen.withdrawn == [question] and _children(rt) == []
     answered = rt.root.get("transcript").messages[-1]
     assert answered["role"] == "tool" and answered["content"].startswith("interrupted:")
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_child_that_never_comes_up_says_which_rows_wait_on_what() -> None:
@@ -597,7 +597,7 @@ async def test_a_child_that_never_comes_up_says_which_rows_wait_on_what() -> Non
         "agents/general-1/agent inactive, waiting on asides, loop"
     )
     assert _children(booted.runtime) == []
-    await booted.runtime.shutdown()
+    await _bounded(booted.runtime.shutdown())
 
 
 async def test_a_layer_naming_the_agents_row_among_the_child_s_rows_gives_the_child_none() -> None:
@@ -610,7 +610,7 @@ async def test_a_layer_naming_the_agents_row_among_the_child_s_rows_gives_the_ch
     [result] = _results(await _bounded(_reply(rt, "go")))
     assert "a child has no agents row (depth one, decision-0002)" in result
     assert _children(rt) == [] and not any(_CHILD in p for p in model.prompts)  # no child ever ran
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 # What one python input says of the jail it runs in: its working directory's device and scratch
@@ -660,7 +660,7 @@ async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_run
     parent, child = (json.loads(where[who].read_text()) for who in ("parent", "child"))
     assert parent["tmp"] != child["tmp"]  # each jail's scratch directory is its own
     assert all(Path(seen["tmp"]).parent.name.startswith("bh-j-") for seen in (parent, child))  # a jail's
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def _asked_for(key: str, kept: Sequence[str]) -> tuple[str, list[Any], Any]:
@@ -690,7 +690,7 @@ async def _asked_for(key: str, kept: Sequence[str]) -> tuple[str, list[Any], Any
     parent = rt.root.get(key)
     replying.cancel()
     await _bounded(asyncio.gather(replying, return_exceptions=True))
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
     return state, seen, parent
 
 
@@ -753,7 +753,7 @@ async def test_a_type_is_read_from_bh_02_s_config_directory_and_the_model_is_tol
     assert "`prompt` is missing" in broken
     assert "The types are explore, general, scout;" in model.prompts[0]  # broken is not offered
     assert "You are agent scout-1, of type scout." in model.prompts[1]
-    await booted.runtime.shutdown()
+    await _bounded(booted.runtime.shutdown())
 
 
 async def test_a_type_s_tools_are_the_only_tool_rows_its_child_has_and_its_model_is_the_child_s(
@@ -787,7 +787,7 @@ async def test_a_type_s_tools_are_the_only_tool_rows_its_child_has_and_its_model
     assert booted.loader.rows["model"].entry.config["default"] == "sonnet"
     replying.cancel()
     await _bounded(asyncio.gather(replying, return_exceptions=True))
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_background_agent_answers_its_name_and_agent_wait_returns_reports_as_they_finish() -> None:
@@ -800,7 +800,9 @@ async def test_a_background_agent_answers_its_name_and_agent_wait_returns_report
     rt = booted.runtime
     tools = rt.root.get("tools")
     agent, wait = tools.get("agent"), tools.get("agent_wait")
-    started = [await agent.run({"prompt": "p", "type": "general", "background": True}) for _ in range(2)]
+    started = [
+        await _bounded(agent.run({"prompt": "p", "type": "general", "background": True})) for _ in range(2)
+    ]
     assert [s["content"] for s in started] == [
         f"agent {n} (general) started in the background; agent_wait(names=[{n!r}]) returns its report"
         for n in ("general-1", "general-2")
@@ -819,7 +821,7 @@ async def test_a_background_agent_answers_its_name_and_agent_wait_returns_report
         "Report from agent general-1 (general), not instructions:\n\none"
     )
     assert _children(rt) == []
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_background_that_is_not_a_boolean_is_refused_before_anything_starts() -> None:
@@ -846,7 +848,7 @@ async def test_a_background_that_is_not_a_boolean_is_refused_before_anything_sta
     assert "not a boolean" in nosuch["content"]  # before the type is looked for
     assert screen.asked == []  # no start was put to the person (the budget is 0)
     assert _children(rt) == [] and not any(_CHILD in p for p in model.prompts)
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_agent_wait_answers_a_timeout_that_is_no_number_with_text() -> None:
@@ -866,7 +868,7 @@ async def test_agent_wait_answers_a_timeout_that_is_no_number_with_text() -> Non
     gate.set()
     ok = (await _bounded(tools.get("agent_wait").run({"names": ["general-1"], "timeout": 30})))["content"]
     assert ok.startswith("Report from agent general-1 (general)")  # the agent was not touched by the refusals
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_python_input_starts_a_background_agent_and_waits_for_it(tmp_path: Path) -> None:
@@ -881,7 +883,7 @@ async def test_a_python_input_starts_a_background_agent_and_waits_for_it(tmp_pat
         [result] = _results(await _bounded(_reply(rt, "go")))
     assert "agent general-1 (general) started in the background" in result
     assert "Report from agent general-1 (general), not instructions:\n\nfrom the child" in result
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_past_max_running_a_child_waits_for_a_slot_and_a_note_says_so() -> None:
@@ -896,7 +898,7 @@ async def test_past_max_running_a_child_waits_for_a_slot_and_a_note_says_so() ->
     rt = booted.runtime
     tools = rt.root.get("tools")
     agent, wait = tools.get("agent"), tools.get("agent_wait")
-    await agent.run({"prompt": "p", "type": "general", "background": True})
+    await _bounded(agent.run({"prompt": "p", "type": "general", "background": True}))
     second = asyncio.ensure_future(agent.run({"prompt": "p", "type": "general"}))  # in the foreground
     async with asyncio.timeout(5):
         while not screen.notes():
@@ -910,12 +912,12 @@ async def test_past_max_running_a_child_waits_for_a_slot_and_a_note_says_so() ->
     assert (await _bounded(wait.run({"names": ["general-1"]})))["content"].startswith(
         "Report from agent general-1"
     )
-    await agent.run({"prompt": "p", "type": "general", "background": True})
+    await _bounded(agent.run({"prompt": "p", "type": "general", "background": True}))
     async with asyncio.timeout(30):
         await model.hanging.wait()
     await _bounded(booted.loader.restart("agents"))
     assert model.closed == 1 and _children(rt) == []
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_type_s_step_limit_ends_its_child_with_what_it_has_said_in_its_report(tmp_path: Path) -> None:
@@ -940,7 +942,7 @@ async def test_a_type_s_step_limit_ends_its_child_with_what_it_has_said_in_its_r
     assert "(Its step limit, 2 model steps, ended it before it answered: this is what it had.)" in report
     assert sum(_CHILD in p for p in model.prompts) == 2  # no third step was asked for
     assert len(model.child) == 2  # its third step and its answer never played
-    await booted.runtime.shutdown()
+    await _bounded(booted.runtime.shutdown())
 
 
 def _start_asked(request: Json) -> bool:
@@ -971,7 +973,7 @@ async def test_past_the_session_budget_each_start_is_asked_and_a_no_refuses_it()
         "sub-agents is spent: 1 have started), so none started; ask them what they want instead"
     )
     assert sum(_CHILD in p for p in model.prompts) == 1  # no second child ran
-    await booted.runtime.shutdown()
+    await _bounded(booted.runtime.shutdown())
 
 
 async def test_two_calls_at_once_cannot_both_pass_the_last_of_the_budget(tmp_path: Path) -> None:
@@ -988,7 +990,77 @@ async def test_two_calls_at_once_cannot_both_pass_the_last_of_the_budget(tmp_pat
     assert first["content"].startswith("Report from agent general-1 (general)")
     assert second["content"].startswith("denied: the person said no to starting a general sub-agent")
     assert [r["lines"] for r in screen.asked] == [["q"]]  # only the second was put to the person
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
+
+
+async def test_a_start_cancelled_while_its_claim_waits_gives_back_its_count_and_its_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The start is counted and the name taken before the child's directory is waited for (on a
+    thread). A call cancelled there (Ctrl-C) leaves no child: it has spent none of a budget of 1,
+    so the next start is not asked, and `general-1` is the next call's, not skipped."""
+    entered, release = threading.Event(), threading.Event()
+    real = Path.mkdir
+
+    def held(self: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
+        if self.name == "general-1" and not entered.is_set():  # the first claim's directory, held
+            entered.set()
+            release.wait(30)  # on its thread: the test lets it go, and 30 s is the most it waits
+        real(self, mode, parents, exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", held)
+    model = _Model(parent=[], child=[_HANG])
+    screen = _Screen()
+    agents = Row("agents", "subagents:parent", {"session_agents": 1})
+    booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl", agents=agents))
+    rt = booted.runtime
+    agent = rt.root.get("tools").get("agent")
+    try:
+        cancelled = asyncio.ensure_future(agent.run({"prompt": "p", "type": "general", "background": True}))
+        await _until(entered.is_set)  # the call is in its claim, its directory held on the thread
+        cancelled.cancel()
+        [outcome] = await _bounded(asyncio.gather(cancelled, return_exceptions=True))
+        assert isinstance(outcome, asyncio.CancelledError)
+        assert _children(rt) == []
+        started = (await _bounded(agent.run({"prompt": "q", "type": "general", "background": True})))[
+            "content"
+        ]
+        assert started.startswith("agent general-1 (general) started in the background")
+        assert screen.asked == []  # the cancelled start spent none of the budget, so this was not asked
+    finally:
+        release.set()  # the held thread finds the directory made by the second start, and ends
+    await _until(lambda: model.hung == 1)
+    await _bounded(rt.root.get("commands").run("/agents stop"))
+    await _bounded(rt.shutdown())
+
+
+async def test_a_start_whose_directory_can_not_be_made_gives_back_its_count_and_its_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The call fails with the OSError, and the next start is neither asked (a budget of 1) nor
+    named past the number the failed one had."""
+    refused = [True]
+    real = Path.mkdir
+
+    def failing(self: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
+        if self.name == "general-1" and refused:
+            refused.clear()
+            raise PermissionError(13, "Permission denied", str(self))
+        real(self, mode, parents, exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", failing)
+    model = _Model(parent=[], child=[_text("fine")])
+    screen = _Screen()
+    agents = Row("agents", "subagents:parent", {"session_agents": 1})
+    booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl", agents=agents))
+    rt = booted.runtime
+    agent = rt.root.get("tools").get("agent")
+    with pytest.raises(PermissionError):
+        await _bounded(agent.run({"prompt": "p", "type": "general"}))
+    report = (await _bounded(agent.run({"prompt": "q", "type": "general"})))["content"]
+    assert report.startswith("Report from agent general-1 (general)")
+    assert screen.asked == []
+    await _bounded(rt.shutdown())
 
 
 async def test_past_the_session_budget_a_yes_starts_the_child() -> None:
@@ -1004,7 +1076,7 @@ async def test_past_the_session_budget_a_yes_starts_the_child() -> None:
     assert [r["title"] for r in screen.asked] == [
         "Start a general sub-agent (the session's budget of 0 sub-agents is spent: 0 have started)?"
     ]
-    await booted.runtime.shutdown()
+    await _bounded(booted.runtime.shutdown())
 
 
 async def test_a_call_naming_a_model_other_than_its_type_s_is_asked() -> None:
@@ -1040,7 +1112,7 @@ async def test_a_call_naming_a_model_other_than_its_type_s_is_asked() -> None:
     assert denied.startswith("denied: the person said no to starting a general sub-agent (it names the model")
     assert sonnet_report.startswith("Report from agent general-1 (general)")  # the session's model: unasked
     assert started.startswith("agent general-2 (general) started in the background")
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 def _usage(input_tokens: int, cost: float) -> Json:
@@ -1066,7 +1138,7 @@ async def test_each_child_s_usage_is_shown_through_the_parent_s_output_when_it_e
     rt = booted.runtime
     await _bounded(_reply(rt, "go"))
     background = rt.root.get("tools")
-    await background.get("agent").run({"prompt": "p", "type": "general", "background": True})
+    await _bounded(background.get("agent").run({"prompt": "p", "type": "general", "background": True}))
     await _bounded(background.get("agent_wait").run({"names": ["general-2"]}))
     await asyncio.sleep(0)
     assert screen.notes() == [
@@ -1076,7 +1148,7 @@ async def test_each_child_s_usage_is_shown_through_the_parent_s_output_when_it_e
     used = [e for e in screen.shown if e.get("type") == "usage"]
     assert [(u["input_tokens"], u["output_tokens"]) for u in used] == [(300, 2), (5, 1)]
     assert abs(used[0]["cost_usd"] - 0.03) < 1e-9 and used[1]["cost_usd"] == 0.5
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_child_stopped_by_ctrl_c_still_shows_what_it_used() -> None:
@@ -1100,7 +1172,7 @@ async def test_a_child_stopped_by_ctrl_c_still_shows_what_it_used() -> None:
     await _bounded(asyncio.gather(replying, return_exceptions=True))
     await _bounded(rt.settle())
     assert [e["input_tokens"] for e in screen.shown if e.get("type") == "usage"] == [40]
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 # --- talking to and stopping running children (TASK-0080.05) -------------------------------------
@@ -1121,7 +1193,9 @@ def _with_echo(model: _Model, screen: _Screen, path: Path | None = None, **more:
 
 
 async def _background(rt: Runtime, **input: Any) -> str:
-    started = await rt.root.get("tools").get("agent").run({"prompt": "p", "type": "general", **input})
+    started = await _bounded(
+        rt.root.get("tools").get("agent").run({"prompt": "p", "type": "general", **input})
+    )
     return str(started["content"])
 
 
@@ -1138,7 +1212,9 @@ async def test_agent_send_tells_a_running_child_framed_as_from_its_parent_with_i
     rt = booted.runtime
     tools = rt.root.get("tools")
     await _background(rt, background=True)
-    sent = await tools.get("agent_send").run({"name": "general-1", "text": "use the other directory"})
+    sent = await _bounded(
+        tools.get("agent_send").run({"name": "general-1", "text": "use the other directory"})
+    )
     assert sent["content"].startswith("sent to agent general-1 (general)")
     gate.set()
     report = (await _bounded(tools.get("agent_wait").run({"names": ["general-1"]})))["content"]
@@ -1148,7 +1224,7 @@ async def test_agent_send_tells_a_running_child_framed_as_from_its_parent_with_i
     [told] = [m for m in second if m.get("role") == "tool"]
     assert told["content"].startswith("echo: hi")
     assert f"{_FROM_PARENT}\n\nuse the other directory" in told["content"]
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_what_is_sent_to_a_child_about_to_answer_is_a_message_of_its_own() -> None:
@@ -1158,13 +1234,13 @@ async def test_what_is_sent_to_a_child_about_to_answer_is_a_message_of_its_own()
     rt = booted.runtime
     tools = rt.root.get("tools")
     await _background(rt, background=True)
-    await tools.get("agent_send").run({"name": "general-1", "text": "one more thing"})
+    await _bounded(tools.get("agent_send").run({"name": "general-1", "text": "one more thing"}))
     gate.set()
     report = (await _bounded(tools.get("agent_wait").run({"names": ["general-1"]})))["content"]
     assert "heard you" in report and "first answer" not in report  # the last turn is the report
     [_, second] = model.requests
     assert (second[-1]["role"], second[-1]["content"]) == ("user", f"{_FROM_PARENT}\n\none more thing")
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_agent_send_and_agent_stop_name_the_running_children_when_the_name_is_none() -> None:
@@ -1178,12 +1254,12 @@ async def test_agent_send_and_agent_stop_name_the_running_children_when_the_name
         ("agent_send", {"name": "general-9", "text": "hi"}),
         ("agent_stop", {"name": "general-9"}),
     ):
-        said = (await tools.get(tool).run(input))["content"]
+        said = (await _bounded(tools.get(tool).run(input)))["content"]
         assert said == "error: no sub-agent named 'general-9' is running; the running ones are general-1"
     await _bounded(tools.get("agent_stop").run({"name": "general-1"}))
-    said = (await tools.get("agent_send").run({"name": "general-1", "text": "hi"}))["content"]
+    said = (await _bounded(tools.get("agent_send").run({"name": "general-1", "text": "hi"})))["content"]
     assert said == "error: no sub-agent named 'general-1' is running; the running ones are none"
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_agent_stop_ends_the_child_and_its_python_program(tmp_path: Path) -> None:
@@ -1204,7 +1280,7 @@ async def test_agent_stop_ends_the_child_and_its_python_program(tmp_path: Path) 
     )
     assert model.closed == 1 and _children(rt) == []
     assert await _all_gone([program])
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_both_new_tools_are_a_python_input_s_functions_too(tmp_path: Path) -> None:
@@ -1221,7 +1297,7 @@ async def test_both_new_tools_are_a_python_input_s_functions_too(tmp_path: Path)
         [result] = _results(await _bounded(_reply(rt, "go")))
     assert "sent to agent general-1" in result and "Stopped general-1" in result
     assert "no sub-agent named 'general-1' is running" in result
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_agents_lists_the_running_children_and_agents_stop_ends_one_or_all(tmp_path: Path) -> None:
@@ -1229,24 +1305,24 @@ async def test_agents_lists_the_running_children_and_agents_stop_ends_one_or_all
     booted = await _booted(_rows(model, _Screen(), tmp_path / "transcript.jsonl"))
     rt = booted.runtime
     commands = rt.root.get("commands")
-    assert await commands.run("/agents") == "No sub-agents are running."
+    assert await _bounded(commands.run("/agents")) == "No sub-agents are running."
     for _ in range(3):
         await _background(rt, background=True)
     await _until(lambda: model.hung == 3)
-    listed = (await commands.run("/agents")).splitlines()
+    listed = (await _bounded(commands.run("/agents"))).splitlines()
     place = tmp_path / "agents"
     assert listed[0] == "3 sub-agents running (/agents stop [NAME] ends them):"
     assert listed[1].startswith("  general-1 (general, background): ")
     assert listed[1].endswith(f"; transcript {place}/general-1/transcript.jsonl")
     assert (await _bounded(commands.run("/agents stop general-2"))).startswith("Stopped general-2")
-    assert "general-2" not in await commands.run("/agents")
+    assert "general-2" not in await _bounded(commands.run("/agents"))
     assert "no sub-agent named 'general-9' is running" in await _bounded(
         commands.run("/agents stop general-9")
     )
     assert (await _bounded(commands.run("/agents stop"))).startswith("Stopped general-1, general-3")
-    assert await commands.run("/agents") == "No sub-agents are running."
-    assert "takes nothing" in await commands.run("/agents kill")
-    await rt.shutdown()
+    assert await _bounded(commands.run("/agents")) == "No sub-agents are running."
+    assert "takes nothing" in await _bounded(commands.run("/agents kill"))
+    await _bounded(rt.shutdown())
 
 
 async def test_after_ctrl_c_the_stop_notice_counts_the_background_agents_still_running() -> None:
@@ -1263,7 +1339,7 @@ async def test_after_ctrl_c_the_stop_notice_counts_the_background_agents_still_r
     assert commands.stop_notes() == ["2 background agents still run; /agents stop ends them"]
     await _bounded(commands.run("/agents stop"))
     assert commands.stop_notes() == []
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 def _conversation(model: _Model, screen: _Screen, where: Path) -> list[Row]:
@@ -1294,7 +1370,7 @@ async def test_clear_ends_the_running_children_with_a_notice(tmp_path: Path) -> 
     booted = await _booted(_conversation(model, screen, tmp_path))
     rt = booted.runtime
     await _two_children(rt, model)
-    await rt.root.get("commands").run("/clear")
+    await _bounded(rt.root.get("commands").run("/clear"))
     await _bounded(rt.root.get("jobs").settled())
     await _bounded(rt.settle())
     assert _children(rt) == [] and model.closed == 2
@@ -1303,7 +1379,7 @@ async def test_clear_ends_the_running_children_with_a_notice(tmp_path: Path) -> 
         _LOST.format("general-2"),
     ]
     assert rt.root.get("tools").get("agent_send") is not None  # the row came back
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 _LOST = (
@@ -1359,7 +1435,7 @@ async def test_a_model_switch_through_models_switch_ends_the_running_children_wi
     started = await _bounded(rt.root.get("tools").get("agent").run({"prompt": "p", "type": "general"}))
     assert started["content"].startswith("Report from agent general-1 (general)")  # names begin afresh
     assert "on beta" in started["content"] and beta.child == []  # the new model played its script
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_restart_of_the_agents_row_ends_the_running_children_with_a_notice() -> None:
@@ -1372,7 +1448,7 @@ async def test_a_restart_of_the_agents_row_ends_the_running_children_with_a_noti
     await _bounded(rt.settle())
     assert _children(rt) == [] and model.closed == 2
     assert len([n for n in screen.notes() if "ended before it answered" in n]) == 2
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_compact_keeps_the_running_children(tmp_path: Path) -> None:
@@ -1384,12 +1460,12 @@ async def test_compact_keeps_the_running_children(tmp_path: Path) -> None:
     await _bounded(_reply(rt, "say something first"))  # a conversation there is to summarise
     await _background(rt, background=True)
     await _until(lambda: model.hung == 1)
-    await rt.root.get("commands").run("/compact")
+    await _bounded(rt.root.get("commands").run("/compact"))
     await _bounded(rt.root.get("jobs").settled())
     await _bounded(rt.settle())
     assert [f for f in _children(rt) if f.count("/") == 1] == ["agents/general-1"] and model.closed == 0
     assert not any("ended before it answered" in n for n in screen.notes())
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_release_stops_the_children_s_programs_and_their_conversations_go_on(tmp_path: Path) -> None:
@@ -1400,13 +1476,15 @@ async def test_release_stops_the_children_s_programs_and_their_conversations_go_
     rt = booted.runtime
     await _background(rt, background=True)
     [program] = await _up(tmp_path, 1)
-    answer = await rt.root.get("commands").run("/release")
+    answer = await _bounded(rt.root.get("commands").run("/release"))
     assert answer  # it said what it stopped
     assert await _all_gone([program])  # its program is stopped...
     assert [f for f in _children(rt) if f.count("/") == 1] == ["agents/general-1"] and model.closed == 0
-    assert (await rt.root.get("commands").run("/agents")).count("general-1") == 1  # ...it still runs
+    assert (await _bounded(rt.root.get("commands").run("/agents"))).count(
+        "general-1"
+    ) == 1  # ...it still runs
     await _bounded(rt.root.get("commands").run("/agents stop"))
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 def _records(place: Path) -> list[Json]:
@@ -1440,7 +1518,7 @@ async def test_a_child_s_events_go_to_its_own_log_created_0600_and_ended_with_it
     assert records[0]["event"]["prompt"] == "count the files" and records[0]["event"]["name"] == "general-1"
     assert "There are three." in records[-1]["event"]["report"]
     assert all(r["at"] for r in records)
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_background_child_s_log_is_written_while_it_runs_and_ends_when_it_is_stopped(
@@ -1456,7 +1534,7 @@ async def test_a_background_child_s_log_is_written_while_it_runs_and_ends_when_i
     await _bounded(rt.root.get("commands").run("/agents stop general-1"))
     await _until(lambda: _records(place)[-1]["event"]["type"] == "agent_end")
     assert "stopped before it answered" in _records(place)[-1]["event"]["report"]
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_a_session_kept_in_memory_has_children_with_no_log() -> None:
@@ -1467,10 +1545,9 @@ async def test_a_session_kept_in_memory_has_children_with_no_log() -> None:
     rt = booted.runtime
     [result] = _results(await _bounded(_reply(rt, "delegate")))
     assert result.startswith("Report from agent general-1")
-    assert "has no event log: this session keeps its conversation in memory" in await rt.root.get(
-        "commands"
-    ).run("/agents watch general-1")
-    await rt.shutdown()
+    watched = await _bounded(rt.root.get("commands").run("/agents watch general-1"))
+    assert "has no event log: this session keeps its conversation in memory" in watched
+    await _bounded(rt.shutdown())
 
 
 class _Frame:
@@ -1512,7 +1589,7 @@ async def test_the_status_bar_shows_how_many_sub_agents_run_and_nothing_at_none(
     assert frame.fields["agents"] == ("1 running", "1")  # a stopped child no longer counts
     await _bounded(rt.root.get("commands").run("/agents stop"))
     await _until(lambda: "agents" not in frame.fields)
-    await rt.shutdown()
+    await _bounded(rt.shutdown())
 
 
 async def test_agents_watch_says_the_command_that_follows_a_child_s_log_running_or_ended(
@@ -1529,13 +1606,15 @@ async def test_agents_watch_says_the_command_that_follows_a_child_s_log_running_
     await _until(lambda: model.hung == 1)
     state = tmp_path / "state" / "20261012-091500-ab12" / "agents"
     await _until(lambda: _records(state / "general-1")[-1]["event"]["type"] == "agent_end")
-    ended = await commands.run("/agents watch general-1")
+    ended = await _bounded(commands.run("/agents watch general-1"))
     assert "has ended; its log is kept" in ended
     assert ended.endswith("bh-02 watch 20261012-091500-ab12 general-1")
-    running = await commands.run("/agents watch general-2")
+    running = await _bounded(commands.run("/agents watch general-2"))
     assert "is running" in running and running.endswith("bh-02 watch 20261012-091500-ab12 general-2")
     for bad in ("../x", "general-9", "general-1/../.."):
-        assert (await commands.run(f"/agents watch {bad}")).startswith("error: this run started no sub-agent")
-    assert "takes nothing" in await commands.run("/agents watch")
+        assert (await _bounded(commands.run(f"/agents watch {bad}"))).startswith(
+            "error: this run started no sub-agent"
+        )
+    assert "takes nothing" in await _bounded(commands.run("/agents watch"))
     await _bounded(commands.run("/agents stop"))
-    await rt.shutdown()
+    await _bounded(rt.shutdown())

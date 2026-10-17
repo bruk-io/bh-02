@@ -502,7 +502,8 @@ class Agents:
         if model is not None:
             kind = dataclasses.replace(kind, model=str(model))
         # a start is counted before anything waits (the directory is made on a thread), so no two
-        # calls can pass the budget's check together; one that never began is given back
+        # calls can pass the budget's check together; one that never began is given back, whether
+        # it failed or was cancelled while its claim waited
         self._started += 1
         hand = Hand()
         try:
@@ -518,7 +519,7 @@ class Agents:
                 place=place,
                 hand=hand,
             )
-        except ValueError, OSError:
+        except BaseException:  # re-raised: no child exists, so the start is not spent
             self._started -= 1
             raise
         live = self._live[name] = _Live(name, kind.name, background, place, hand, self._changed)
@@ -712,7 +713,9 @@ class Agents:
     async def _claim(self, kind: str, base: PurePath | None) -> tuple[str, PurePath | None]:
         """A name no child of this row or of the session had (a resumed session's children
         keep their directories), and its state directory, made 0700 on a thread (None in memory).
-        A name is taken before the directory is waited for, so no two calls are given one.
+        A name is taken before the directory is waited for, so no two calls are given one; one
+        whose directory can't be made, or whose wait is cancelled, is given back (a directory the
+        thread makes after a cancel stays, and `_made` skips its name for whoever claims it next).
 
         Raises:
             OSError: the directory can't be made.
@@ -722,7 +725,12 @@ class Agents:
             self._taken.append(name)
             if base is None:
                 return name, None
-            if (place := await asyncio.to_thread(_made, Path(base), name)) is not None:
+            try:
+                place = await asyncio.to_thread(_made, Path(base), name)
+            except BaseException:  # re-raised: the name was never given
+                self._taken.remove(name)
+                raise
+            if place is not None:
                 return name, place
 
 

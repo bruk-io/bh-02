@@ -66,8 +66,9 @@ input, which the loop serves as it does the model's own calls) starts one child:
    A model a yes chose is the child's alone: its model row's `default`, in its realm. A start is
    counted as it is admitted, before the child's directory is made (on a thread), so two calls
    made together cannot both pass the last of the budget unasked; one that fails before a child
-   exists (its directory can't be made, a layer gives it the agents row) is given back, and one
-   that was admitted but never comes up has spent its start.
+   exists (its directory can't be made, a layer gives it the agents row, the call is cancelled
+   while the directory is waited for) is given back with its name, and one that was admitted but
+   never comes up has spent its start.
 
 2. **Its name**: bh-02's, `TYPE-N`, the first `N` this row has not given whose state directory
    is not there yet (a resumed session's children keep theirs), so a description the model gives
