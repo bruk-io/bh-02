@@ -64,4 +64,6 @@ Criteria: 1 and 4 are ticked. 2 is left for the reviewer (scripts/check at root 
 Orchestrator, 2026-10-17: finish moved again, on the docs criterion. It asked the README to say the shell and the row both use the working directory and the layer's cwd as roots; the worker found the shell does not (sessions.create checks the CLI's working directory with os.getcwd(); a layer's cwd composes after create, and a layer that sets the model row replaces the session's whole, pins_model). Docs say what the code does, so the criterion now asks for the roots each side really checks. Also the owner's word to start, which the 2026-10-15 deferral asked for: "ok wrap up all tasks that you are able to" (2026-10-17).
 
 Full scripts/check on 5cf6e37 (this task's commits with the rest of the batch): exit 0, format, lint, types, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17; log at the session scratchpad, check-batch4b.txt).
+
+No repro: the fixed tree cannot fail it. The worker recorded the repro before the fix (4 tests failed with UnicodeDecodeError from named.py:225 and sessions.py:223, and a real start exited 1 with a traceback at 2fd63fa); those tests are now in the suite and pass.
 <!-- SECTION:NOTES:END -->
