@@ -3,7 +3,7 @@ id: TASK-0097
 title: >-
   Make the real-launch restart status-bar test wait for what it asserts, not for
   time
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 13:40'
@@ -74,4 +74,6 @@ Reviewer: AC1 and AC2 verified (no settle/sleep in the changed test, every wait_
 Full scripts/check on 5cf6e37 (this task's commits with the rest of the batch): exit 0, format, lint, types, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17; log at the session scratchpad, check-batch4b.txt).
 
 No repro: the race only shows when the test process stalls between /clear and again; the worker reproduced it with a planted 3 s settle (the old test failed at its last assertion, the shape of TASK-0093's recorded failure) and the fixed test passes with the same plant.
+
+Reviewed by philosophy:reviewer (2026-10-17): READY, every criterion met but scripts/check, no blocking findings (TASK-0097's one should-fix, the burst test's bar read, fixed by the orchestrator in 14c8ca5). Closed once the full check passed: Full scripts/check on 5cf6e37: exit 0, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17).
 <!-- SECTION:NOTES:END -->
