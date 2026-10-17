@@ -3,7 +3,7 @@ id: TASK-0098
 title: >-
   bh-02 --model with a name that is not valid UTF-8 leaves a half-made session
   directory and a traceback
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 14:06'
@@ -38,4 +38,6 @@ Fix: refused in the CLI (where the name enters), not in sessions.create: bh-02/a
 Orchestrator, 2026-10-17: the owner's word to start it, which the 2026-10-15 deferral asked for: "ok wrap up all tasks that you are able to" (in conversation, this date).
 
 No repro: the reviewer sees the tree after the fix, so the test can no longer fail; the worker's notes record both new tests failing before it (exit 1, ValueError, meta.json with no session.toml), and they stay as the regression tests.
+
+Review (claude reviewer, 2026-10-17): CLOSED. AC1 met: _model_name is a click option callback, run at parse time before read_layers/sessions.create/set_model; test passes, and by hand argv with os.fsdecode(b'x\xff') exits 2 with the one-line usage error and the temporary XDG_STATE_HOME stays empty. AC2 met: resume test snapshots every state file before/after, equal. encode('utf-8') fails only on lone surrogates, so no valid name is refused. test_command_line.py: 20 passed. Nit: the criteria were already ticked in the worker's commit, before review; no action. Full scripts/check left to the orchestrator's batch run (worker's scripts/check bh-02/app exit 0 covers the touched member).
 <!-- SECTION:NOTES:END -->
