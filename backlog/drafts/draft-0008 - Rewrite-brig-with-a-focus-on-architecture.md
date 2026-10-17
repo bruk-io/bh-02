@@ -5,9 +5,10 @@ status: Draft
 assignee:
   - '@bruk'
 created_date: '2026-10-17 14:58'
-updated_date: '2026-10-17 17:31'
+updated_date: '2026-10-17 17:37'
 labels:
   - brig
+  - size-8
 dependencies: []
 references:
   - >-
@@ -58,20 +59,26 @@ set up. I would prefer all logs to be JSON-shaped and consistent.
 ## Open questions
 
 - [ ] Reservations (`.reserve(`): carry them over for bh-02's per-jail socket directory
-  (bh-02 TASK-0079.31), or drop them?
+  (bh-02 TASK-0079.31), or drop them? Carried forward: only bh-02's runner would use them, so it is
+  decided when the runner moves (criterion 17).
 - [ ] Egress: cooperative as today (the workload is pointed at the proxy and may ignore it), or
-  enforced, by relaying the jail's only route out through the supervisor to the proxy?
+  enforced, by relaying the jail's only route out through the supervisor to the proxy? Carried
+  forward: a design task before the egress work; the skeleton has no egress.
 - [ ] Seatbelt: build its slice before a Mac run proves it, or leave macOS unjailed (like every
-  host until the new brig jails it) until a Mac run can prove it?
+  host until the new brig jails it) until a Mac run can prove it? Carried forward: bwrap comes
+  first; this is decided before the Seatbelt work starts.
 - [ ] The SPEC's numbering: continue from the old SPEC's decision-203, or start a fresh series with
-  the old SPEC kept as history?
-- [ ] The docs theme: bh-01's components, as bh-02's site uses, or Material for MkDocs?
+  the old SPEC kept as history? Carried forward: settled when the owner accepts the updated
+  decision-0008, which proposes continuing from decision-204 so no number means two things.
+- [x] The docs theme: bh-01's components, as bh-02's site uses, or Material for MkDocs? Settled by
+  staying in bh-02: brig's docs live in bh-02's site (criterion 12), which uses bh-01's components.
 - [x] The ruff hook that formats every file an agent edits: settled by staying in bh-02, whose
   `.claude/settings.json` already runs it on every edited file; ruff's checks still run only in
   `just done`.
 - [ ] The log envelope: its fields (time, level, source, event, then the event's own fields?), and
   whether "all logs JSON-shaped and consistent" becomes a rule in the philosophy plugin, for every
-  repository and not only brig.
+  repository and not only brig. Carried forward: a design task before the supervisor program
+  writes its first log line, likely within the walking skeleton.
 - [x] Is "breaking is mostly fine" fully covered by criteria 16 and 17? Settled by the owner: bh-02
   may be broken while brig is rebuilt, so the ten laws (criterion 16) are all that must not break.
 
@@ -113,3 +120,11 @@ set up. I would prefer all logs to be JSON-shaped and consistent.
 - [ ] #16 Must not break: Every one of brig's ten laws (the old SPEC, section 2) holds in the new brig. Each has a test that would fail if it stopped holding, law 10's with a planted violation and its positive control.
 - [ ] #17 When the new brig can jail bh-02's Python process, bh-02's runner moves to the new API in one change, and bh-02 works again, jailed. Until then bh-02 may be broken.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Spec waived by @bruk (2026-10-17): the owner is both requester and approver, and decision-0008 carries the design.
+
+Accepted by @bruk in conversation (2026-10-17), with the open questions resolved as above: five carried forward, the docs theme settled by staying in bh-02.
+<!-- SECTION:NOTES:END -->
