@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-14 13:40'
-updated_date: '2026-10-15 02:27'
+updated_date: '2026-10-17 02:33'
 labels:
   - app
   - tests
@@ -33,4 +33,6 @@ bh-02/app/tests/test_real_launch.py::test_while_the_model_restarts_the_status_ba
 
 <!-- SECTION:NOTES:BEGIN -->
 Deferred by the owner (2026-10-15): this run fixes only critical bugs; this one is not critical (no data loss, no security exposure, a workaround exists). Not to be started without the owner's word.
+
+Orchestrator, 2026-10-17: the owner's word to start it, which the earlier deferral asked for: "ok wrap up all tasks that you are able to" (in conversation, this date).
 <!-- SECTION:NOTES:END -->
