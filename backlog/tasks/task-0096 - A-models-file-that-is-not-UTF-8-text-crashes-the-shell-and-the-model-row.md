@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-14 13:05'
-updated_date: '2026-10-17 02:45'
+updated_date: '2026-10-17 04:18'
 labels:
   - models
   - size-1
@@ -24,7 +24,7 @@ Found while building TASK-0093 (probed on e049e4b): a models.toml holding bytes 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 sessions.create records no model for it and bh-02 starts; the shell-and-row contract test in test_session_dirs.py has a case of it and fails if either side crashes or they disagree
-- [ ] #2 scripts/check passes
+- [x] #2 scripts/check passes
 - [x] #3 A models file that is not UTF-8 text is the model row's ModelsError saying what to do (fix it or remove it), never a traceback, and bh-02 starts
 - [x] #4 docs/bh-02/using/models.md says which new sessions list as 'default' in bh-02 sessions (a default that is not a name, an unreadable file) and that one whose default names no model lists by that name; the models plugin README says which roots the shell and the row each check the models file against, as the code does
 <!-- AC:END -->
@@ -62,4 +62,6 @@ Proof commands:
 Criteria: 1 and 4 are ticked. 2 is left for the reviewer (scripts/check at root not run; app member check not green here, see above). 3 is left unticked: the criterion says the shell uses "the working directory and the layer's cwd". The code does not do that. create is given the CLI's working directory and uses it plus os.getcwd(), and a layer's cwd composes after create (a --patch that sets the model row replaces the session's whole, pins_model). The README now says what the code does. The reviewer should decide whether the criterion's wording is amended.
 
 Orchestrator, 2026-10-17: finish moved again, on the docs criterion. It asked the README to say the shell and the row both use the working directory and the layer's cwd as roots; the worker found the shell does not (sessions.create checks the CLI's working directory with os.getcwd(); a layer's cwd composes after create, and a layer that sets the model row replaces the session's whole, pins_model). Docs say what the code does, so the criterion now asks for the roots each side really checks. Also the owner's word to start, which the 2026-10-15 deferral asked for: "ok wrap up all tasks that you are able to" (2026-10-17).
+
+Full scripts/check on 5cf6e37 (this task's commits with the rest of the batch): exit 0, format, lint, types, tests 3454 passed 50 skipped, five gates, docs (orchestrator, 2026-10-17; log at the session scratchpad, check-batch4b.txt).
 <!-- SECTION:NOTES:END -->
