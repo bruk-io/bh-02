@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-14 13:05'
-updated_date: '2026-10-17 02:44'
+updated_date: '2026-10-17 02:45'
 labels:
   - models
   - size-1
@@ -26,7 +26,7 @@ Found while building TASK-0093 (probed on e049e4b): a models.toml holding bytes 
 - [x] #1 sessions.create records no model for it and bh-02 starts; the shell-and-row contract test in test_session_dirs.py has a case of it and fails if either side crashes or they disagree
 - [ ] #2 scripts/check passes
 - [x] #3 A models file that is not UTF-8 text is the model row's ModelsError saying what to do (fix it or remove it), never a traceback, and bh-02 starts
-- [ ] #4 docs/bh-02/using/models.md says which new sessions list as 'default' in bh-02 sessions (a default that is not a name, an unreadable file) and that one whose default names no model lists by that name; the models plugin README says which roots the shell and the row each check the models file against, as the code does
+- [x] #4 docs/bh-02/using/models.md says which new sessions list as 'default' in bh-02 sessions (a default that is not a name, an unreadable file) and that one whose default names no model lists by that name; the models plugin README says which roots the shell and the row each check the models file against, as the code does
 <!-- AC:END -->
 
 ## Implementation Plan
