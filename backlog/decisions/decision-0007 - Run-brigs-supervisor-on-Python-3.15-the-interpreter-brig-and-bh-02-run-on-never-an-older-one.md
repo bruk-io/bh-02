@@ -4,8 +4,13 @@ title: >-
   Run brig's supervisor on Python 3.15, the interpreter brig and bh-02 run on,
   never an older one
 date: '2026-10-17 14:50'
-status: accepted
+status: superseded
 ---
+> **Superseded, 2026-10-17.** brig moved to a repository of its own, whose decision-0001 (rule 17)
+> carries this rule: the supervisor runs only on Python 3.15. TASK-0134, which would have built it
+> here, is archived; the old `libs/brig` is frozen until the new one replaces it. Point 2 (the runner
+> offers only bh-02's own interpreter) comes back when bh-02's runner moves to the new brig.
+
 ## Context
 
 brig's supervisor (decision-0001, built by TASK-0079.06) is a stdlib-only program that runs as each
