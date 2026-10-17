@@ -11,26 +11,19 @@ Three claims, each falsifiable on its own, same posture as task-028's
 3. `EventSource` is a `Protocol`, not a `dataclass`, and its shape is
    satisfiable by both of M3's two known cases (decision-069).
 
-**The `brig/mech/trampoline/` carve-out.** `brig/mech/__init__.py`'s own
-docstring calls this module's purity claim "Pure module: no I/O, no clock,
-no randomness, no subprocess" -- but `brig/mech/trampoline/` (task-035,
-Done, M3) ships a program whose entire job is `resource.setrlimit` and
-`os.execvp`; its own module docstring's first paragraph says so. It lives
-under `brig/mech/` for namespacing -- it is the argv program the `rlimits`
-mechanism's `Step.wrap` points at (`python -m brig.mech.trampoline --cpu N
--- argv...`) -- not because it is part of the "mech" CONTRACT layer SPEC.md
-§6 calls pure ("mech performs no I/O of its own during compile"). That
-claim is about `Mechanism.compile()` and the types compile() produces
-(`Step`, `EventSource`, ...), all of which live in `brig/mech/contract.py`
-alone (in `brig/mech/__init__.py` until the workspace's task-0017 moved them) -- corroborated by task-031 AC#6's own plant/revert, which names
-`brig/mech/__init__.py` specifically, not the trampoline package.
-
-So this file does NOT silently skip the trampoline package: its two files
-are in `_EXPECTED_IMPORTS_BY_FILE` below, pinned exactly like every other
-file, imports and all -- `os`, `resource`, `sys` included, with the reason
-stated inline. What changes is only the banned-set check
-(`test_only_the_mech_contract_layer_is_import_pure`), which is scoped to
-`__init__.py`, the one file the purity claim is actually about.
+**There was a `brig/mech/trampoline/` carve-out, and it is gone (TASK-0079.21,
+decision-200).** `brig/mech/__init__.py`'s own docstring calls this module's purity claim
+"Pure module: no I/O, no clock, no randomness, no subprocess" -- but `brig/mech/trampoline/`
+(task-035, M3) shipped a program whose entire job is `resource.setrlimit` and `os.execvp`,
+and lived under `brig/mech/` only for namespacing: it is the argv program the `rlimits`
+mechanism's `Step.wrap` points at, not part of the "mech" CONTRACT layer SPEC.md §6 calls pure
+("mech performs no I/O of its own during compile"). Its two files were pinned here like every
+other, `os`, `resource` and `sys` included, and exempted from the banned-set check by a prefix
+(`_TRAMPOLINE_PREFIX`). It is `brig/trampoline/` now, beside the layers as `brig/proxy/` is, because
+running it as `python -m brig.mech.trampoline` imported all of `brig.mech` first (its own module
+docstring has the numbers). So every file left under `brig/mech/` is in the banned-set check, the
+prefix and the exemption are deleted, and `tests/integration/test_trampoline_imports.py` pins the
+other half: the program loads nothing of brig but itself.
 
 **task-036 adds a fourth file, `rlimits.py`, forced rather than chosen.**
 The file-set pin above (`test_mech_module_set_is_pinned`) goes red the
@@ -161,12 +154,6 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
             "brig.mech.seatbelt",
         }
     ),
-    # The carve-out (see module docstring): a program that sets rlimits and
-    # execs, by design, per task-035.
-    "trampoline/__init__.py": frozenset(
-        {"__future__", "collections.abc", "dataclasses", "os", "resource", "sys"}
-    ),
-    "trampoline/__main__.py": frozenset({"__future__", "sys", "brig.mech.trampoline"}),
     # task-036: the `rlimits` mechanism. NOT a carve-out (see module
     # docstring) -- `signal`/`sys` here are pure attribute reads
     # (`signal.SIGXCPU`, `sys.executable`), never syscalls, so this file
@@ -261,8 +248,6 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
 #: cannot see, noted here rather than silently claimed to be covered.
 _BANNED_IMPORT_NAMES: Final = frozenset({"os", "io", "time", "random", "subprocess", "pathlib"})
 
-_TRAMPOLINE_PREFIX = "trampoline/"
-
 
 @pytest.mark.unit
 def test_mech_module_set_is_pinned() -> None:
@@ -298,7 +283,7 @@ def test_mech_file_imports_exactly_the_pinned_set(relpath: str) -> None:
 @pytest.mark.unit
 def test_only_the_mech_contract_layer_is_import_pure() -> None:
     """AC#5's literal claim, stated directly rather than only implied by
-    the pinned-set tests above: every NON-trampoline module under
+    the pinned-set tests above: every module under
     brig/mech/ -- the contract layer (contract.py) and every mechanism -- never
     top-level-imports open/os/io/time/random/subprocess/pathlib.
 
@@ -307,14 +292,11 @@ def test_only_the_mech_contract_layer_is_import_pure() -> None:
     literals it wrote itself would be a tautology, unable to fail short of
     someone editing the test -- exactly the "true-as-tested but weaker than
     it reads" defect CLAUDE.md names as this repo's recurring one. Iterates
-    the pinned dict's KEYS only, to know which files exist and which are the
-    documented trampoline carve-out; the file set itself is proven equal to
-    the real files by test_mech_module_set_is_pinned above.
+    the pinned dict's KEYS only, to know which files exist; the file set itself
+    is proven equal to the real files by test_mech_module_set_is_pinned above.
     """
     violations: dict[str, frozenset[str]] = {}
     for relpath in _EXPECTED_IMPORTS_BY_FILE:
-        if relpath.startswith(_TRAMPOLINE_PREFIX):
-            continue
         actual = _top_level_imported_modules((_MECH_ROOT / relpath).read_text())
         overlap = actual & _BANNED_IMPORT_NAMES
         if overlap:

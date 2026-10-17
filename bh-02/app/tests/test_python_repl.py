@@ -608,7 +608,7 @@ async def test_on_linux_a_module_an_input_plants_in_the_project_runs_nowhere_out
 
     for argv in (
         [sys.executable, "-c", "import subprocess"],
-        [sys.executable, "-m", "brig.mech.trampoline", "--", "true"],
+        [sys.executable, "-m", "brig.trampoline", "--", "true"],
     ):
         subprocess.run(argv, cwd=project, check=True)
     assert set(record.read_text().split()) == {"brig", "signal", "subprocess"}

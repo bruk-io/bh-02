@@ -138,7 +138,7 @@ def test_the_exit_wrapper_and_its_tether_s_watcher_run_isolated() -> None:
 def test_the_rlimits_trampoline_runs_isolated() -> None:
     ctx = CompileCtx(jail_dir="/tmp/j", platform=sys.platform)
     wrapped = rlimits.compile(Spec(limits=Limits(cpu_seconds=5)), ctx).wrap(("true",))
-    assert wrapped[:4] == (sys.executable, "-I", "-m", "brig.mech.trampoline")
+    assert wrapped[:4] == (sys.executable, "-I", "-m", "brig.trampoline")
 
 
 def test_the_egress_proxy_runs_isolated() -> None:

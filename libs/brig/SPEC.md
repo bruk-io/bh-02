@@ -1557,7 +1557,7 @@ writes the process's own exit record, `<jail_dir>/procs/<id>/exit`.
 **Every interpreter brig starts on the host runs isolated (2026-10-11,
 decision-169).** brig starts four Python programs of its own outside any jail:
 the exit wrapper (`python -c`), the tether's watcher the wrapper starts
-(`python -c`), the `rlimits` trampoline (`python -m brig.mech.trampoline`,
+(`python -c`), the `rlimits` trampoline (`python -m brig.trampoline`,
 outermost in every stack that has it, so on the host) and `connect_proxy`'s
 egress proxy (`python -m brig.proxy`, a `JAIL_LIFETIME` helper). Each runs in
 the workload's working directory, and `-c` and `-m` both put that directory
@@ -1876,6 +1876,47 @@ without `destroy`, a supervised jail with no tether, and a supervised jail colle
 
 No change to what a helper is declared as. decision-0001's "helpers tethered" is this
 ruling. Implementing task: TASK-0079.29. (Ruled 2026-10-17, decision-199.)
+
+**The `rlimits` trampoline is `brig.trampoline`, outside the layers, and `wait_ready` asks sooner
+(2026-10-17, decision-200).** TASK-0079.01 measured a `strict_linux()` start at 110 to 130 ms and put
+most of it in brig's own host-side interpreters. Asked again 2026-10-17 of the code at 2a40bbf (a
+supervised jail: `create`, the first `start`, a `LISTEN` channel ready; median of 20 interleaved
+starts after one discarded, as root and as an unprivileged user, on a shared four-core machine;
+TASK-0079.21's notes carry the tables): about 150 ms as root and 165 as the user. Of it, the exit
+wrapper is 25 ms (a bare `python -I` is 20) and is not what to cut; the supervisor's own imports are
+by design (decision-191); the trampoline was 53 ms, of which the work it does (`os`, `resource`,
+`execvp`) is a few. `python -m brig.mech.trampoline` imports the package `brig.mech` first, and
+`brig/mech/__init__.py` imports every mechanism and `brig.core` with it: 22 ms of the 53 (as measured
+below), once per jail, outermost, before bwrap starts. And `wait_ready` asked on a 20 ms beat, so a bind that landed
+just after a check was seen a whole beat late: 5 of 20 starts took 41 ms to be ready, where the
+others took 21. Ruled:
+
+- **The trampoline moves out of `brig.mech`.** `brig/mech/trampoline/` is `brig/trampoline/`, run as
+  `python -I -m brig.trampoline [--cpu N] -- argv...`, and `rlimits`'s `Step.wrap` renders that name.
+  It is a standalone process like `brig/proxy/` (§6): `trampoline` is a row of
+  `[tool.pypeeker.brig-layers.allow]` with nothing in it, not a layer in the flow, and
+  `tests/integration/test_trampoline_imports.py` runs it to see that it loads nothing of brig but
+  itself. `mech` loses the one carve-out in its purity scan (`tests/unit/test_mech_events_purity.py`).
+  The program is otherwise what it was: the `--cpu` flag, its refusals (their message now names
+  `brig.trampoline`), the `(N, N + 1)` limit of decision-161, `os.execvp` and never a fork, and `-I`
+  (decision-169, whose list of four host interpreters names it at the new path). `wrap_prefix`,
+  every grade, the denial signature and the argv a jail runs are unchanged. Measured the same way,
+  the trampoline is 53 ms before and 31 after; a start is 18 to 31 ms shorter (12 to 18 per cent).
+- **`wait_ready` asks on a schedule that starts short.** The wait after a check that found nothing
+  is a tenth of the time already spent waiting, no shorter than 2 ms and no longer than the 20 ms the
+  fixed beat was (`brig/run/readiness.py`, `_next_wait`). A bind in the first 20 ms is seen within
+  2 ms of its appearance, one at time `t` within `t / 10`, and one past 200 ms, or the deadline, is
+  overshot by at most the 20 ms it always was. §10.1 states no interval and no statement changes;
+  `Process.wait_ready` and `WaitReadyTimeout` are as they were. The median is as it was, since a
+  jailed `python3` binds about 20 ms after its start returns; the slow mode is gone (5 of 20 starts
+  at 41 ms before, 1 of 20 after) and the mean falls by about 4 ms.
+- **Not changed.** The exit wrapper, its tether's watcher and the supervisor's program; the mechanism
+  roster, its order, its grades and `-I`. A cap of zero still renders the trampoline with no `--cpu`
+  (SPEC.md §5, "0 = uncapped"), which starts a Python to apply nothing: left as it is, since
+  dropping the trampoline for it changes the argv a default `Spec` composes, which tests pin; what
+  it would save (28 to 35 ms of a start) is in TASK-0079.21's notes.
+
+Implementing task: TASK-0079.21. (Ruled 2026-10-17, decision-200.)
 
 ## 9. The Jail (the Handle until decision-183)
 

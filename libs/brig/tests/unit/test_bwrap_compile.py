@@ -671,7 +671,7 @@ def test_the_three_mechanism_linux_stack_composes_rlimits_bwrap_env_scrub() -> N
     order would be caught rather than hidden."""
     argv = Stack([env_scrub, bwrap, rlimits]).compile(_SPEC, ctx=_spec_ctx()).wrap(("/bin/true",))
 
-    trampoline_at = argv.index("brig.mech.trampoline")
+    trampoline_at = argv.index("brig.trampoline")
     bwrap_at = argv.index(DEFAULT_BWRAP_PATH)
     shell_at = argv.index("/bin/sh")
 

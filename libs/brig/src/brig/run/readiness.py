@@ -13,14 +13,21 @@ module only polls it. `Jail.wait_ready(channel)` and the helper here that
 connected to a declared endpoint as found are gone (decision-186): a channel
 names no path, and every dial goes through the runtime.
 
-**Poll interval: 20ms (50Hz)**, chosen so polling granularity does not skew
-the elapsed-time assertions this task's ACs make: the positive case (a bind
-appearing after a ~0.5s workload sleep, timeout=10s) and the negative case
-(a timeout=1.0s deadline expected to fire within [1.0, 3.0)s) both carry at
-least a full second of slack, and 50 polls/sec bounds the worst-case
-overshoot past either the bind's true appearance or the deadline itself to
-20ms -- negligible against that slack, and fast enough that the positive
-case does not visibly stall past the sleep it is timing.
+**Poll schedule: 2ms, growing to 20ms (TASK-0079.21).** A jail's process binds its
+socket some milliseconds after it starts (a jailed `python3` is up in about 15ms),
+and a fixed 20ms interval saw that bind late: on the 20ms mark when it was a few
+milliseconds old, on the 40ms mark when the first check had landed just before it,
+about 10ms late on average. Each wait is now a tenth of the time already spent
+waiting, no shorter than 2ms and no longer than the old 20ms (`_next_wait`): a bind
+in the first 20ms is seen within 2ms, one at time `t` within `t / 10`, and one
+past 200ms, or a deadline, is overshot by at most the 20ms the fixed interval
+always bounded it by. That bound is what the elapsed-time assertions of
+`tests/integration/test_wait_ready.py` were chosen against (the positive case, a
+bind appearing after a ~0.5s workload sleep with timeout=10s, and the negative
+case, a timeout=1.0s deadline expected to fire within [1.0, 3.0)s), so they hold
+as they did. A check that finds
+nothing is an `lstat` that fails with `ENOENT`: the 25 extra checks in the first
+200ms (35 against 10) cost microseconds each.
 """
 
 from __future__ import annotations
@@ -28,7 +35,16 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-_POLL_INTERVAL_S = 0.02
+#: The wait after a refused check never falls below this (so a bind in the first 20ms is seen
+#: within it), ...
+_POLL_FIRST_S = 0.002
+
+#: ... never rises above this (the fixed interval this schedule replaced, which bounds the
+#: overshoot of a bind or a deadline), ...
+_POLL_LAST_S = 0.02
+
+#: ... and between them is this share of the time already spent waiting.
+_POLL_SHARE = 0.1
 
 
 class UnknownChannel(KeyError):
@@ -67,10 +83,16 @@ class WaitReadyTimeout(TimeoutError):
         )
 
 
+def _next_wait(elapsed: float) -> float:
+    """How long to sleep before asking again, `elapsed` seconds after the first ask: a tenth of
+    `elapsed`, kept between `_POLL_FIRST_S` and `_POLL_LAST_S`. Pure."""
+    return min(_POLL_LAST_S, max(_POLL_FIRST_S, elapsed * _POLL_SHARE))
+
+
 def poll_ready(ready: Callable[[], bool], *, channel: str, endpoint: str, timeout: float) -> None:
-    """Block until `ready()` is true, asked every `_POLL_INTERVAL_S`, or raise
-    a named timeout: `Process.wait_ready`'s loop, with the runtime's own
-    readiness (`Runtime.ready`, decision-184) as `ready`.
+    """Block until `ready()` is true, asked on the schedule in this module's docstring
+    (`_next_wait`), or raise a named timeout: `Process.wait_ready`'s loop, with the runtime's
+    own readiness (`Runtime.ready`, decision-184) as `ready`.
 
     Whatever `ready()` raises propagates at once, never waited out: a
     runtime's `EndpointRefused` (decision-185) is a refusal, not "not yet".
@@ -79,8 +101,10 @@ def poll_ready(ready: Callable[[], bool], *, channel: str, endpoint: str, timeou
         WaitReadyTimeout: `ready()` was still false `timeout` seconds after
             entry.
     """
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
     while not ready():
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        if now >= deadline:
             raise WaitReadyTimeout(channel, endpoint, timeout)
-        time.sleep(_POLL_INTERVAL_S)
+        time.sleep(_next_wait(now - started))

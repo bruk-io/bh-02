@@ -54,8 +54,18 @@ def test_layer_set_is_exactly_right() -> None:
     """AC #1: find brig -maxdepth 1 -type d matches expected set exactly."""
     brig_dir = _BRIG
     # `runtime` joined at decision-178 (TASK-0079.02): runtimes that are not
-    # `run`'s own, `fake` first.
-    expected_layers = {"core", "mech", "probe", "proxy", "run", "runtime", "stack"}
+    # `run`'s own, `fake` first. `trampoline` joined at decision-200
+    # (TASK-0079.21): the rlimits program, a standalone process beside the layers.
+    expected_layers = {
+        "core",
+        "mech",
+        "probe",
+        "proxy",
+        "run",
+        "runtime",
+        "stack",
+        "trampoline",
+    }
 
     # Get actual layers (directories, excluding __pycache__)
     actual = {d.name for d in brig_dir.iterdir() if d.is_dir() and d.name != "__pycache__"}
@@ -147,6 +157,10 @@ def test_allow_table_unchanged_since_m0() -> None:
         # decision-178: runtimes that are not `run`'s own. No other row names
         # `runtime`, so nothing in brig imports one, `run` included.
         "runtime": ["core", "mech", "stack", "run"],
+        # decision-200: the rlimits trampoline is a standalone process too, outermost on
+        # the host, and the EMPTY value is again the point: under `mech` it paid for that
+        # package's imports before its first line ran. A non-empty row fails this test.
+        "trampoline": [],
     }
     working = allow_table(working_text)
     folded = {key: value for key, value in working.items() if key not in SANCTIONED_ROWS}

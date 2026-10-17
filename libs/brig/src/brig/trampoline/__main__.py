@@ -1,6 +1,6 @@
-"""Entry point for `python -I -m brig.mech.trampoline`.
+"""Entry point for `python -I -m brig.trampoline`.
 
-Kept separate from `brig/mech/trampoline/__init__.py` so that importing the
+Kept separate from `brig/trampoline/__init__.py` so that importing the
 package -- which the unit tests do directly, for `parse_trampoline_argv` and
 `apply_limits` -- never runs `main()`. pypeeker's `import-time-side-effects`
 rule treats a module-level `if` body as import-time unconditionally, so a
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import sys
 
-from brig.mech.trampoline import main
+from brig.trampoline import main
 
 if __name__ == "__main__":
     sys.exit(main())

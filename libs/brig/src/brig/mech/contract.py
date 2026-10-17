@@ -9,10 +9,9 @@ and `ArgvTransformer`. A `Step` requires the runtime's `Capability`s and a
 
 Pure module: no I/O, no clock, no randomness, no subprocess. The layer gate
 enforces the import side of that; convention enforces the rest.
-(`brig/mech/trampoline/` is a separate program, not part of this claim --
-see its own module docstring, and `tests/unit/test_mech_events_purity.py`'s
-module docstring for why an ast-level purity scan of `brig/mech/` treats it
-as a documented carve-out rather than silently exempting it.)
+(`brig/trampoline/`, the program `rlimits` wraps an argv in, is a separate
+program and lives beside this layer, not in it since TASK-0079.21: see its
+own module docstring.)
 
 `Step.events` (an `EventSource | None` field from SPEC.md §6) carries a
 mechanism's optional sensor feed, as of M3 (decision-060, decision-069;

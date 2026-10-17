@@ -300,7 +300,7 @@ def test_three_mechanism_stack_composes_rlimits_outermost_then_seatbelt_then_env
     compiled = stack.compile(Spec(), ctx=ctx)
     result = compiled.wrap(("/bin/true",))
 
-    trampoline_idx = result.index("brig.mech.trampoline")
+    trampoline_idx = result.index("brig.trampoline")
     sandbox_idx = result.index("/usr/bin/sandbox-exec")
     shell_idx = result.index("/bin/sh")
     assert trampoline_idx < sandbox_idx < shell_idx
