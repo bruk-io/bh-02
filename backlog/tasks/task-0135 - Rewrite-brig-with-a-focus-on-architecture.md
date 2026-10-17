@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-17 14:58'
-updated_date: '2026-10-17 17:45'
+updated_date: '2026-10-17 18:59'
 labels:
   - brig
   - size-8
@@ -20,66 +20,11 @@ type: intent
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-## Problem
+## Moved
 
-brig works, and it jails bh-02's Python process today, but it grew stage by stage and it shows.
-A jail type is spread over four packages, pure decisions sit inside the code that does I/O, grades
-are stated before anything proves them, one role has two names (supervisor and "agent"), and the
-supervisor program is written to an older Python than the rest. About half of what it ships, bh-02
-never uses.
+brig is rebuilt in a repository of its own, seeded on 2026-10-17 with its own board: this intent continues there as TASK-0001, and decision-0008's design as its decision-0001. The rebuild knows nothing of bh-02.
 
-I want it rewritten with a focus on architecture, in my Python approach. It stays in bh-02 for now,
-not a new repository, and the `libs/brig` folder should not contain the old brig code.
-"io needs to be separate", and it "should not care about domain": three layers, domain, infra and
-presentation, with standard test layers (unit, integration, e2e, defined by where the mocks start). We won't care about backwards compatibility; breaking is
-mostly fine, and it's fine if bh-02 is in a broken state while we do this, on main. Keep egress. Keep oci, but pause on it for now.
-
-Working in it should be really clean. While working, only the unit and integration tests the change
-reaches run. E2e, the full suites, pypeeker, ruff and mypy run only when the work is done. `just` is the entry point for running these things. It needs a docs directory, MkDocs
-with an auto-generated reference, and LikeC4 with the LikeC4 MCP enabled, following my best
-practices. It should also create a Claude settings file at the start, to make sure my plugins are
-set up. I would prefer all logs to be JSON-shaped and consistent.
-
-## Affected users and systems
-
-- **The owner (@bruk)**, who builds, reviews and accepts brig's work.
-- **The agents working on brig in bh-02**: implementing workers and the reviewer that closes
-  tasks. `just check`, `just done` and the LikeC4 MCP are their tools as much as the owner's.
-- **bh-02**, brig's only embedder. Its runner plugin (`runner_cordis_plugin.jail`) is the only code
-  that imports brig. Once the old brig is deleted, bh-02 is broken until its runner moves to the new
-  brig's API.
-- **The old brig**, deleted from `libs/brig` and reachable only in git history (as of d297a50,
-  2026-10-17): the reference the rewrite reads with `git show` (its code, its 3,950-line SPEC and
-  the measured facts in its rulings, decisions 1-203).
-- **bh-02's `main` and its CI**: the rebuild lands on `main`. From the old brig's deletion until the
-  runner moves, bh-02's own checks (`scripts/check`, the `linux-jail` workflow, the runner's tests)
-  fail on `main` and on every pull request, as expected; brig's `just done` is the gate for brig's
-  work. CI is Linux with bubblewrap and Docker. Seatbelt needs a Mac.
-
-## Open questions
-
-- [ ] Reservations (`.reserve(`): carry them over for bh-02's per-jail socket directory (bh-02 TASK-0079.31), or drop them? Carried forward: only bh-02's runner would use them, so it is decided when the runner moves (criterion 17).
-- [ ] Egress: cooperative as today (the workload is pointed at the proxy and may ignore it), or enforced, by relaying the jail's only route out through the supervisor to the proxy? Carried forward: a design task before the egress work; the skeleton has no egress.
-- [ ] Seatbelt: build its slice before a Mac run proves it, or leave macOS unjailed (like every host until the new brig jails it) until a Mac run can prove it? Carried forward: bwrap comes first; this is decided before the Seatbelt work starts.
-- [x] The SPEC's numbering: continue from the old SPEC's decision-203, or start a fresh series? Settled by decision-0008 (rule 18): new rulings are numbered from decision-204, so no number means two things.
-- [x] The docs theme: bh-01's components, as bh-02's site uses, or Material for MkDocs? Settled by staying in bh-02: brig's docs live in bh-02's site (criterion 12), which uses bh-01's components.
-- [x] The ruff hook that formats every file an agent edits: settled by staying in bh-02, whose `.claude/settings.json` already runs it on every edited file; ruff's checks still run only in `just done`.
-- [ ] The log envelope: its fields (time, level, source, event, then the event's own fields?), and whether "all logs JSON-shaped and consistent" becomes a rule in the philosophy plugin, for every repository and not only brig. Carried forward: a design task before the supervisor program writes its first log line, likely within the walking skeleton.
-- [x] Is "breaking is mostly fine" fully covered by criteria 16 and 17? Settled by the owner: bh-02 may be broken while brig is rebuilt, so the ten laws (criterion 16) are all that must not break.
-
-## References
-
-- bh-02 decision-0008 (accepted 2026-10-17): the design. Where it is built, the layout, the rules
-  and the pypeeker rule that enforces each boundary, what is kept, cut and paused, and the order,
-  outside-in.
-- bh-02 decision-0007 (accepted): Python 3.15 everywhere, the supervisor included.
-- bh-02 TASK-0133 (supervisor, never agent) and TASK-0134 (decision-0007's implementation) are
-  absorbed by criteria 1 and 5. TASK-0131 (earlier helpers left running) has nowhere to happen once
-  the proxy is the only helper.
-- The c4-architecture plugin, in knowhere (`likec4-diagrams`: scaffold.py's layout, c4lint, the
-  hard rules).
-- `@likec4/mcp` (1.60.0), `mkdocs-likec4` (1.2.2), `mkdocstrings-python` (2.0.9), `rust-just`
-  (1.59.0): the versions current on 2026-10-17.
+bh-02 keeps its old `libs/brig`, unchanged, and keeps working jailed. When the new brig can jail bh-02's Python process, moving the runner to its API is a bh-02 task of its own.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -109,4 +54,6 @@ set up. I would prefer all logs to be JSON-shaped and consistent.
 Spec waived by @bruk (2026-10-17): the owner is both requester and approver, and decision-0008 carries the design.
 
 Accepted by @bruk in conversation (2026-10-17), with the open questions resolved as above: five carried forward, the docs theme settled by staying in bh-02.
+
+Moved 2026-10-17 at the owner's call: brig is rebuilt in its own repository, seeded from this intent and decision-0008 with bh-02 left out. Archived here; its four first-task drafts (DRAFT-0008 to DRAFT-0011) archived with it.
 <!-- SECTION:NOTES:END -->
