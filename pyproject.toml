@@ -317,6 +317,9 @@ exclude = [
     "memory_cordis_plugin.wiring:files.run",
     # auto memory's index, read once a conversation from its directory through no link
     "memory_cordis_plugin.auto:AutoMemory.*",
+    # the memory tool: a memory saved, read or deleted in that directory, through no link (the
+    # decision of what a call asks is `keeping`, pure)
+    "memory_cordis_plugin.directory:*",
     # the python tool: a socket to a process a jail started, the process itself, and the worker program
     "python_cordis_plugin.client:PythonProcess.*",
     "runner_cordis_plugin.unconfined:_Process.*", "runner_cordis_plugin.unconfined:Unjailed.start",

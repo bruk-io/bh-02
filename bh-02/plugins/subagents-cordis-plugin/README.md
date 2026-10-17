@@ -258,5 +258,7 @@ the model. A `rows` that names a row using `memory:auto` is refused as one namin
 is: the call answers `a child has no auto memory ...; take it out of `rows``, and mounts nothing
 (`test_no_child_composition_includes_auto_memory_though_the_parent_has_it`,
 `test_a_layer_naming_the_auto_memory_row_among_the_child_s_rows_fails_the_call_and_mounts_no_child`).
-The jail still lets a child's python input write the directory the parent's `host` names
-(`auto_memory`), as it lets the parent's; the child is not told it is there.
+The `memory` tool, which writes that directory from bh-02's own process, is `memory:auto`'s, so a
+child never has it either (the first of those tests checks the child's own `tools`). The jail
+still lets a child's python input write the directory the parent's `host` names (`auto_memory`),
+as it lets the parent's; the child is not told it is there.

@@ -116,7 +116,7 @@ agent:loop              binds Loop                         depends on Model, Too
 agent:conversation      registers /clear, /compact         depends on Model, Tools, Loader, Commands, Output, Jobs (the transcript row's file, not Transcript)
 memory:files            binds Memory, registers /memory    depends on System, Commands, Host
 memory:on_touch         adds memory loaded on demand       depends on Memory, Asides, Transcript, Access
-memory:auto             adds auto memory to System         depends on System, Host, Transcript
+memory:auto             adds auto memory to System, registers the memory tool  depends on System, Host, Transcript, Tools
 runner:confined         binds Runner                       depends on Host
 runner:unconfined       binds Runner                       depends on nothing
 runner:approval         binds Approval                     depends on Runner
@@ -166,7 +166,7 @@ has its rows' config and the keys' methods each one uses.
 | [`chat-cordis-plugin`](../plugins/chat-cordis-plugin/README.md) | `done` (`chat:converse`, the chat itself) | `loop`, `input`, `output`, `commands`, `jobs` |
 | [`commands-cordis-plugin`](../plugins/commands-cordis-plugin/README.md) | `commands` (the broker), `jobs`; `/rows`, `/explain`, `/restart` (`commands:operator`); the `!` prefix (`commands:shell_command`) | `output`, `commands`, `loader`, `jobs` |
 | [`extensions-cordis-plugin`](../plugins/extensions-cordis-plugin/README.md) | nothing: loads the model's own plugins into the extensions process, whose additions go into `commands`, `frame`, `system` and `tools` | `runner`, `commands`, `frame`, `system`, `tools`, `approval`, `output` |
-| [`memory-cordis-plugin`](../plugins/memory-cordis-plugin/README.md) | `memory` and `/memory` (`memory:files`); auto memory (`memory:auto`) and memory loaded on demand (`memory:on_touch`) | `system`, `commands`, `host`, `transcript`, `memory`, `asides`, `access` |
+| [`memory-cordis-plugin`](../plugins/memory-cordis-plugin/README.md) | `memory` and `/memory` (`memory:files`); auto memory and its `memory` tool (`memory:auto`) and memory loaded on demand (`memory:on_touch`) | `system`, `commands`, `host`, `transcript`, `tools`, `memory`, `asides`, `access` |
 | [`models-cordis-plugin`](../plugins/models-cordis-plugin/README.md) | `model` (`models:model`: named models over the `claude-code` and `openai` providers), `models` (`models:catalog`), `/model` (`models:switch`) | `host`, `loader`, `commands`, `models`, `jobs` |
 | [`python-cordis-plugin`](../plugins/python-cordis-plugin/README.md) | nothing: registers the `python` tool and its `system` section, over a persistent Python process in the runner (`python:tool`) | `runner`, `approval`, `tools`, `system`, `access` |
 | [`runner-cordis-plugin`](../plugins/runner-cordis-plugin/README.md) | `runner` (`runner:confined`, a brig jail per start, or `runner:unconfined`), `approval` (`runner:approval`), `/release` (`runner:release`) | `host`, `runner`, `commands` |

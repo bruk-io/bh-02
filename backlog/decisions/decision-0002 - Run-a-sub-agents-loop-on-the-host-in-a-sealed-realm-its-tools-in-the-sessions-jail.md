@@ -55,7 +55,7 @@ The `agents` row registers four tools, each also a function in a python input (`
 
 bh-02 names agents (`TYPE-N`); a description the model gives is shown as text, never used as an argument (tmux, paths, labels take only bh-02's names).
 
-They run in bh-02's process. Today a request with `runs="host"` is always asked (CONTRACTS `tools`, runner approval.py). These declare a new value, `runs="harness"`: bh-02's own code, acting only on the session's jail and bh-02's own state, unasked when the runner confines and asked when it doesn't (`--no-jail`). Only a layer's row can make that claim (extensions are forced to `"jail"`). TASK-0068's memory tool uses the same case. CONTRACTS' `request.runs` gains the value. A sub-agent's own calls go through the same rule, from inside its realm.
+They run in bh-02's process. Today a request with `runs="host"` is always asked (CONTRACTS `tools`, runner approval.py). These declare a new value, `runs="harness"`: bh-02's own code, acting only on the session's jail and bh-02's own state, unasked when the runner confines and asked when it doesn't (`--no-jail`). Only a layer's row can make that claim (extensions are forced to `"jail"`). CONTRACTS' `request.runs` gains the value. (Amended 2026-10-17, TASK-0068: the memory tool does not use this case. It took a `runs` value of its own, `"memory"`, which is never asked, jailed or under `--no-jail`, since it writes only beneath `host.auto_memory` through no link, which the jailed model can already write; the owner ruled so. This case stays the agents tools'.) A sub-agent's own calls go through the same rule, from inside its realm.
 
 ### Limits, and what the person controls
 
@@ -96,7 +96,7 @@ M6 needs no brig task: a child's REPL runs in a jail of its own from the same po
 ## Consequences
 
 - No second copy of the prompt, approval or access in the jail; a child is a conversation like the parent's, mounted with cordis as it is.
-- Approval gains one rule case, used by the agents tools and TASK-0068's memory tool.
+- Approval gains one rule case, used by the agents tools (TASK-0068's memory tool has a case of its own, see the amendment above).
 - The person keeps the spend: a model a type didn't choose, and children past the session budget, are asked; Ctrl-C and `/agents stop` end them.
 - A child's REPL shares the session's jail once TASK-0074 lands; before that it runs in a jail of its own from the same policy, so sub-agents don't wait on the brig work.
 

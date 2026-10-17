@@ -169,8 +169,11 @@ async def fake_host() -> Effects:
 
 @component(provides=("host",))
 async def trusted_host(*, config: Mapping[str, Any]) -> Effects:
-    """A `host` whose `trusted` is the config's: where the agents row reads type files."""
-    yield bind("host", _Host(trusted=tuple(config.get("trusted", ()))))
+    """A `host` whose `trusted` is the config's (where the agents row reads type files) and whose
+    `auto_memory` is the config's, if it names one."""
+    yield bind(
+        "host", _Host(trusted=tuple(config.get("trusted", ())), auto_memory=str(config.get("memory", "")))
+    )
 
 
 @component
@@ -811,12 +814,17 @@ async def test_a_child_s_memory_has_a_commands_registry_of_its_own_and_the_paren
 async def test_no_child_composition_includes_auto_memory_though_the_parent_has_it(tmp_path: Path) -> None:
     """The parent has `memory:auto` and the default rows: a child's realm holds the guidance rows
     (`memory:files`, `memory:on_touch`) and none that uses `memory:auto`, whose writes to one
-    directory by N children would race the parent."""
+    directory by N children would race the parent. The `memory` tool is that row's, so the parent
+    has it and the child's own tools never do."""
     model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")]], child=[_HANG])
     auto = {"memory-auto": Row("memory-auto", "memory:auto")}
-    booted = await _booted(_rows(model, _Screen(), **_guidance(_project(tmp_path), **auto)))
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    host = Row("host", f"{__name__}:trusted_host", {"memory": str(memory)})
+    booted = await _booted(_rows(model, _Screen(), host=host, **_guidance(_project(tmp_path), **auto)))
     rt = booted.runtime
     assert any(row.entry.use == "memory:auto" for row in booted.loader.rows.values())  # the parent's
+    assert rt.root.get("tools").get("memory") is not None
     replying = asyncio.ensure_future(_reply(rt, "go"))
     async with asyncio.timeout(30):
         await model.hanging.wait()
@@ -825,6 +833,7 @@ async def test_no_child_composition_includes_auto_memory_though_the_parent_has_i
     uses = {row.entry.use for row in realm.ctx.get("loader").rows.values()}
     assert {"memory:files", "memory:on_touch", "commands:registry"} <= uses
     assert "memory:auto" not in uses
+    assert realm.ctx.get("tools").get("memory") is None and realm.ctx.get("tools") is not rt.root.get("tools")
     replying.cancel()
     await _bounded(asyncio.gather(replying, return_exceptions=True))
     await _bounded(rt.shutdown())

@@ -2,17 +2,19 @@
 in a directory of the project's own outside the repository (`$XDG_STATE_HOME/bh-02/projects/
 <project>/memory`, the `host` value's `auto_memory`), which the jail lets an input write. A
 `MEMORY.md` index, one line per memory, and a topic file for each; the index's first 200 lines
-or 25KB are told at the start of every conversation, the topic files read when they are needed.
+or 25 KB are told at the start of every conversation, the topic files read when they are needed.
 
-The model writes them with whatever tools the composition gives it, as it writes any file:
-this plugin adds none, and says nothing of any (a tool that can write there says so itself, as
-the python tool names the directories its jail lets it write). What it is told (`auto_section`)
-is what is worth keeping, of which kind, and where. The index
-is read once a conversation (`AutoMemory`, a section of the system prompt whose row lives as long
-as the conversation does), as Claude Code reads it at the start of one: a write to it during the
-conversation is the model's own, and telling it back as a change in its instructions would only
-repeat it. The model can write the directory, so the index is read from it through no link
-(`reading.read`, the directory its root).
+The model keeps them with the `memory` tool (`keeping.py`, `directory.py`), which the
+`memory-auto` row registers with the section: it saves, reads and deletes a memory by name, and
+runs in bh-02's own process, outside the jail, writing only beneath this directory and through no
+link (`directory.py` says why that is safe). What the model is told (`auto_section`) is how to use
+it, what is worth keeping, and of which kind.
+
+The index is read once a conversation (`AutoMemory`, a section of the system prompt whose row
+lives as long as the conversation does), as Claude Code reads it at the start of one: a write to
+it during the conversation is the model's own, and telling it back as a change in its
+instructions would only repeat it. The model can write the directory, so the index is read from
+it through no link (`reading.read`, the directory its root).
 """
 
 import os
@@ -28,7 +30,7 @@ _BYTES = 25 * 1024  # and its bytes
 
 
 def indexed(text: str) -> tuple[str, bool]:
-    """The index as it is told: its first 200 lines or 25KB, whichever ends first, ending at a
+    """The index as it is told: its first 200 lines or 25 KB, whichever ends first, ending at a
     whole line; and whether there was more."""
     lines = text.splitlines(keepends=True)
     kept, size = [], 0
@@ -45,25 +47,23 @@ def auto_section(directory: str, index: str | None, cut: bool) -> str:
     index (None: there is none yet), with a word when it was `cut`."""
     how = (
         f"Auto memory: {directory} is a directory of your own, kept across conversations for "
-        "this project (on this machine; never in the repository). Save there what would help a "
-        "later conversation and that the code, its history and the memory files above don't "
-        "already say: the person's role, expertise and preferences (type "
-        "`user`), corrections they gave you and approaches they confirmed (`feedback`), ongoing "
-        "work, deadlines and decisions (`project`), and where to find things outside the project "
-        "(`reference`). Don't save what only matters to this conversation. Asked to save something "
-        "the code, its history or CLAUDE.md already records, ask what was non-obvious about it, and "
-        "save that. Before you save, check for a memory that already covers it, and update that one "
-        "rather than add a duplicate. One topic file per memory, opening with frontmatter (`name`, "
-        "`description`, `type`), and one line for it in MEMORY.md, the index: its first 200 "
-        "lines or 25KB are told to you at the start of every conversation, so keep each entry to "
-        "a line and the detail in its topic file, which you read when you need it. Make "
-        "`description` one specific line: it decides later whether the memory is relevant. For "
-        "`feedback` and `project`, write the rule or fact, then a **Why:** line and a **How to "
-        "apply:** line. Write dates as absolute ones (2026-10-14), not relative ones (Thursday, "
-        "next week). Keep each memory under 200 lines and 4 KB, organised by topic: split or "
-        "summarise one that outgrows that. A memory that names a file, function or flag was true "
-        "when written: check it still exists before you recommend it, and read the code or git log "
-        "for the current state. When the "
+        "this project (on this machine; never in the repository). Keep it with the `memory` tool, "
+        "not by writing files there: `save` writes one memory by name, with its line in MEMORY.md, "
+        "the index; `read` and `delete` take the name. The index's first 200 lines or 25 KB are "
+        "told to you at the start of every conversation, so keep each entry to a line and the "
+        "detail in the memory, which you read when you need it. Save what would help a later "
+        "conversation: the person's role, expertise and preferences (type `user`), corrections "
+        "they gave you and approaches they confirmed (`feedback`), ongoing work, deadlines and "
+        "decisions (`project`), and where to find things outside the project (`reference`). Don't "
+        "save what only matters to this conversation, or what the code, its history or CLAUDE.md "
+        "already records; asked to save one of those, ask what was non-obvious about it and save "
+        "that. Before you save, check the index for a memory that already covers it, and save "
+        "under its name to update it rather than add a duplicate. Make `description` one specific "
+        "line: it decides whether the memory is relevant. For `feedback` and `project`, write the "
+        "rule or fact, then a **Why:** line and a **How to apply:** line. Write dates as absolute "
+        "ones (2026-10-14), not relative ones. Keep each memory under 200 lines and 4 KB, "
+        "organised by topic: split or summarise one that outgrows that. Check a memory that names "
+        "a file, function or flag against the code or git log before you recommend it. When the "
         "person asks you to remember something, save it here; when they ask you to add it to "
         "CLAUDE.md, edit that instead. Change or remove a memory that turns out to be wrong."
     )
@@ -72,7 +72,7 @@ def auto_section(directory: str, index: str | None, cut: bool) -> str:
     if not index.strip():
         return f"{how}\n\nMEMORY.md is empty."
     more = (
-        "\n\n(MEMORY.md is longer than this: what is past its first 200 lines or 25KB is not "
+        "\n\n(MEMORY.md is longer than this: what is past its first 200 lines or 25 KB is not "
         "told, so shorten it: one line per memory, the detail in topic files.)"
         if cut
         else ""

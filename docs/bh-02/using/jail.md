@@ -16,6 +16,13 @@ In short; the policy itself, path by path and why, is the
 | **Network** | none |
 | **Environment** | scrubbed to a short list of variables |
 
+One thing bh-02 does writes outside the jail: the `memory` tool, which saves the model's auto
+memories, runs in bh-02's own process, not in the jail. It writes only in the auto memory
+directory, through no link (a link or a second name the model left there is refused, never
+followed), and the jailed model can already write that directory, so bh-02 runs the tool without
+asking, jailed or under `--no-jail`. Every other tool declared to run in bh-02's own process
+(`runs = "host"`) is still asked about. [Why](../how-it-works/jail-and-approval.md#the-memory-tool-runs-outside-the-jail).
+
 Programs the model's code starts run inside the same jail. brig's host process, which starts the
 Python process from outside the jail, keeps the environment bh-02 was launched with (brig's
 launcher passes it on, and bh-02 never puts its own token there); a jailed input can't read it.
@@ -54,7 +61,7 @@ Use this where the jail can't run. The model's code then runs with your own perm
 asks you about each input before it runs: the code is shown, `y` runs it, and `n` or `Esc`
 doesn't. The question ignores keys for its first 0.4 seconds, its keys dimmed meanwhile, so a
 message you were typing can't answer it; those keys are dropped. The model's own extensions are
-put to you the same way before each loads.
+put to you the same way before each loads. The `memory` tool is not asked about, as above.
 
 !!! warning
     An input you approve can do anything you can. Its environment has no `CLAUDE*` or

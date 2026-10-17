@@ -43,13 +43,28 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 
 `approval.py` is the rule, written once: `is_confined(report)` (the runner enforces `fs_write`
 and `network`), and `Approval`, the `approval` value over the runner: `confined` (read from its
-`report()` each time) and `unasked(request)` (it runs in the runner, `runs` `"jail"` when the
-request says nothing, or is bh-02's own tool bounded to the session's jail and bh-02's own
-state, `runs` `"harness"`, and the runner confines it). Asking is not the rule's: the loop puts each
-call the rule does not let run unasked to the person (`{"name", "input", "runs", "title",
-"lines", ...}`: a call to a tool that runs in bh-02's own process, `runs = "host"`, is put to
-the person however confined the runner; a `"harness"` one only when the runner does not confine), and the extensions row each extension it loads, each
-through `output.confirm`; the python row's `confined`, what the model is told, is the rule's.
+`report()` each time) and `unasked(request)` (it is the memory tool, `runs` `"memory"`, whatever
+the runner confines; or it runs in the runner, `runs` `"jail"` when the request says nothing, or is
+bh-02's own tool bounded to the session's jail and bh-02's own state, `runs` `"harness"`, and the
+runner confines it). Asking is not the rule's: the loop puts each call the rule does not let run
+unasked to the person (`{"name", "input", "runs", "title", "lines", ...}`: a call to a tool that
+runs in bh-02's own process, `runs = "host"`, is put to the person however confined the runner; a
+`"harness"` one only when the runner does not confine), and the extensions row each extension it
+loads, each through `output.confirm`; the python row's `confined`, what the model is told, is the
+rule's.
+
+**The memory tool runs outside the jail and is never asked.** The memory plugin's `memory` tool
+(`runs` `"memory"`) runs in bh-02's own process, not in the jail, and writes files there. That is
+on purpose, and safe for one reason: the code that writes is bh-02's, not the model's, and
+it writes only beneath `host.auto_memory`, the project's auto memory directory, through no link
+(`host_paths.write_beneath`: a link or a second name the model planted there is refused, never
+followed), and the jailed model can already write that directory without being asked (the jail's
+`writes`, below), so asking would protect nothing, jailed or under `--no-jail`. It is also why
+the tool is not run in the jail: a jailed program per save would be a whole process for a small
+file write. Every other call that runs in bh-02's own process (`"host"`) is still asked, and a
+tool takes the value only in a layer's row (an extension's tool is always `"jail"`). The rule
+does not check that a tool keeps to that directory; keeping to it is the tool's and
+`host_paths`' to prove, so a new tool never gets the value for convenience.
 Its row depends on `runner` alone, so `/clear` (a new Python process) and a new ui leave it up,
 and the rows that depend on it. It is a capability, bound by one row: two rows' answers could
 not be combined, so it is not a broker. It runs in bh-02's own process, so only a layer

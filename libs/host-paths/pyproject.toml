@@ -35,6 +35,8 @@ exclude = [
     "host_paths.paths:walked", "host_paths.paths:roots", "host_paths.paths:passes",
     # the one opener of a file beneath a root through no link: opening and reading it is the point
     "host_paths.beneath:directory_beneath", "host_paths.beneath:read_beneath", "host_paths.beneath:_stopped",
+    # and the one writer and remover of a file in a directory the model can write, through no link
+    "host_paths.beneath:write_beneath", "host_paths.beneath:remove_beneath",
 ]
 
 [tool.pypeeker.over-exposed-module-symbol]

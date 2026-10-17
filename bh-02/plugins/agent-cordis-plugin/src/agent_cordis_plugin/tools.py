@@ -8,8 +8,10 @@ every registered spec and runs each call through the tool its name has. CodeAct'
 registration (the python row's), not something the loop knows of.
 
 A registration also says where its calls run (`runs`: "jail", in the runner's jail, which
-`approval` decides about by whether it confines; "host", bh-02's own process, which it always puts
-to the person) and how a call is put to the person (`show(input) -> {"title", "lines",
+`approval` decides about by whether it confines; "harness", bh-02's own tool acting only on the
+jail and bh-02's own state, decided the same way; "memory", bh-02's own tool writing only beneath
+the auto memory directory, which `approval` never asks about; "host", bh-02's own process, which
+it always puts to the person) and how a call is put to the person (`show(input) -> {"title", "lines",
 "language"}`; without one, the tool's name and its input as JSON).
 
 The specs are given in name order (`specs`), never in the order rows registered them: a row that
@@ -30,7 +32,7 @@ from typing import Any
 
 from cordis_helpers import Registry
 
-__all__ = ["HARNESS", "HOST", "JAIL", "ToolBroker"]
+__all__ = ["HARNESS", "HOST", "JAIL", "MEMORY", "ToolBroker"]
 
 type Json = Mapping[str, Any]
 
@@ -38,8 +40,11 @@ JAIL = "jail"  # a call runs in the runner's jail: asked about only when the run
 # bh-02's own tool, acting only on the session's jail and bh-02's own state: asked about only when
 # the runner does not confine
 HARNESS = "harness"
+# bh-02's own tool that writes only beneath the auto memory directory, through no link: never asked
+# about (what that is safe: `approval`'s docstring)
+MEMORY = "memory"
 HOST = "host"  # a call runs in bh-02's own process: always put to the person
-_WHERE = (JAIL, HARNESS, HOST)
+_WHERE = (JAIL, HARNESS, MEMORY, HOST)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +88,8 @@ class ToolBroker:
         if runs not in _WHERE:
             raise ValueError(
                 f"the tool {name!r} says its calls run in {runs!r}; say {JAIL!r} (in the runner's "
-                f"jail), {HARNESS!r} (bh-02's own tool acting only on the jail and bh-02's own state) or "
+                f"jail), {HARNESS!r} (bh-02's own tool acting only on the jail and bh-02's own state), "
+                f"{MEMORY!r} (bh-02's own tool writing only the auto memory directory, never asked) or "
                 f"{HOST!r} (in bh-02's own process, every call put to the person)"
             )
         remove = self._tools.register(name, _Tool(spec, run, runs, show))

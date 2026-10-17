@@ -20,6 +20,26 @@ told and what happens agree. `approval` runs in bh-02's own process and depends 
 alone, not on the Python process or the app, so `/clear` leaves it up. Only a layer replaces it;
 an extension has no way to.
 
+### The memory tool runs outside the jail
+
+One call is never asked, whether the runner confines or not: the `memory` tool of the memory
+plugin, which saves, reads and deletes the model's auto memories. It runs in bh-02's own process,
+not in the jail, and it writes files there. That is on purpose.
+
+- **It is bh-02's code, not the model's.** The model chooses a name and a text; bh-02 writes the
+  file and its line in `MEMORY.md`.
+- **It writes only the auto memory directory** (`host.auto_memory`), through no link: a link or a
+  second name for another file that the model left there is refused, never followed, so nothing
+  outside the directory is read, written or removed.
+- **The jailed model can already write that directory** without being asked, so asking about this
+  tool would protect nothing.
+- **A jail per save would cost a whole process** for a small file write.
+
+Every other tool declared to run in bh-02's own process (`runs = "host"`) is still asked about,
+jailed or not; the sub-agent tools (`"harness"`) are asked about only under `--no-jail`. A tool
+gets this treatment only from a layer's row (`runs = "memory"`); an extension's tool is always
+the jail's. [The memory plugin](../reference/plugins/memory.md#auto-memory) says how the tool works.
+
 ## The runner row
 
 The `runner` row starts the programs the model's code runs in: the Python process, and the

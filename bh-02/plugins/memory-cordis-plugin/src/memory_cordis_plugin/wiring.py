@@ -1,13 +1,17 @@
 """The rows: memory, bound under `memory`, which adds what loads at launch to the system prompt
 (`system.add`) and offers `/memory`; what loads on demand for the files an input opened, added
-to `asides`; and auto memory, a section of the system prompt for each conversation."""
+to `asides`; and auto memory, a section of the system prompt for each conversation, and the
+`memory` tool that keeps it."""
 
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from cordis import Effects, acquire, bind, component
 from memory_cordis_plugin.auto import AutoMemory
+from memory_cordis_plugin.directory import call
+from memory_cordis_plugin.keeping import MEMORY
 from memory_cordis_plugin.listing import SPEC, listing
 from memory_cordis_plugin.memory import Memory, MemoryConfig
 from memory_cordis_plugin.touch import Asides, OnTouch, Transcript
@@ -31,6 +35,20 @@ class _Host(Protocol):
 
     @property
     def auto_memory(self) -> str: ...
+
+
+@runtime_checkable
+class _Tools(Protocol):
+    """What the auto memory row needs of the `tools` value (CONTRACTS.md: tools): a tool
+    registered, and its remover back."""
+
+    def register(
+        self,
+        spec: Mapping[str, Any],
+        run: Callable[[Mapping[str, Any]], Awaitable[Mapping[str, Any]]],
+        *,
+        runs: str = ...,
+    ) -> Callable[[], None]: ...
 
 
 @runtime_checkable
@@ -85,17 +103,22 @@ async def on_touch(*, memory: Touched, asides: Asides, transcript: Transcript, a
 
 
 @component
-async def auto(*, system: _System, host: _Host, transcript: Transcript) -> Effects:
+async def auto(*, system: _System, host: _Host, transcript: Transcript, tools: _Tools) -> Effects:
     """Fills a `memory-auto` row: `use = "memory:auto"`. Claude Code's auto memory: how the model
     keeps memories of its own across conversations, in the project's auto memory directory
-    (`host.auto_memory`, which the jail lets an input write), and its MEMORY.md index, a section of
-    the system prompt read at a conversation's first reading of the prompt and kept for the rest
-    of it (`AutoMemory`). It depends on `transcript` for that lifetime: a new conversation
-    (`/clear`, `/compact`) starts a new row, which reads the index afresh. Disabling the row turns
-    auto memory off; with no directory it adds nothing."""
+    (`host.auto_memory`), and its MEMORY.md index, a section of the system prompt read at a
+    conversation's first reading of the prompt and kept for the rest of it (`AutoMemory`); and the
+    `memory` tool that saves, reads and deletes them, registered with `runs="memory"`: it runs in
+    bh-02's own process, outside the jail, writes only beneath that directory through no link, and
+    is never asked about (`approval`). The tool is this row's, so a composition without the row
+    has none, and a sub-agent, which never gets this row, never has it. The row depends on
+    `transcript` for the index's lifetime: a new conversation (`/clear`, `/compact`) starts a new
+    row, which reads the index afresh, and registers the tool again, the same one. Disabling the
+    row turns auto memory off; with no directory it adds nothing."""
     del transcript  # its lifetime is this row's; nothing of it is read
     if host.auto_memory:
         directory = Path(host.auto_memory)
         home = Path.home()
         named = f"~/{directory.relative_to(home)}" if directory.is_relative_to(home) else str(directory)
         yield acquire(system.add, "memory: auto", AutoMemory(directory, named))
+        yield acquire(tools.register, MEMORY, partial(call, directory), runs="memory")

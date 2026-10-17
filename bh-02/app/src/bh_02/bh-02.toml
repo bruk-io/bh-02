@@ -63,7 +63,9 @@ use = "memory:files"
 id = "on-touch"
 use = "memory:on_touch"
 
-# Auto memory, the memories the model keeps for itself; `disabled = true` turns it off.
+# Auto memory, the memories the model keeps for itself, and the `memory` tool that saves, reads and
+# deletes them (it runs in bh-02's own process, outside the jail, and is never asked); `disabled = true`
+# turns both off.
 [[plugin]]
 id = "memory-auto"
 use = "memory:auto"

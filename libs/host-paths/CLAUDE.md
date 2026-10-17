@@ -9,8 +9,10 @@ says what each name is; this file is where things go and what the gate holds.
   `passes`.
 - `src/host_paths/beneath.py`: the opener of a file beneath a root through no link,
   `directory_beneath` and `read_beneath`, and what they raise (`Linked`, `NotOneFile`,
-  `TooLarge`) or answer for a final link (`Link`). Its docstring says why each flag. `__init__.py`
-  only re-exports.
+  `TooLarge`) or answer for a final link (`Link`); and the writer and remover of one,
+  `write_beneath` and `remove_beneath`, which refuse a link or a second name (`Linked`,
+  `NotOneFile`) and never follow it. Its docstring says why each flag. `__init__.py` only
+  re-exports.
 - `tests/test_host_paths.py`: the XDG directories (an empty or relative value is unset), the walk
   against a table of links in a temporary directory (absolute, relative, the file itself, `..`
   after a link, dangling, missing, a loop that ends at `MOST_LINKS`), and `passes` over roots as
@@ -19,12 +21,16 @@ says what each name is; this file is where things go and what the gate holds.
   beneath a root: a link at each depth, a final link (and a dangling one), a hard link, a pipe, a
   directory, a file on the way, a file over the cap, a file gone between the walk and the read,
   and names that are not one step.
+- `tests/test_host_paths_writing.py`: the writer and the remover against the same table, with a
+  link to a file outside the root, a dangling one and a hard link among the cases: nothing outside
+  the root is written or removed, and a link planted after the check is replaced, not followed.
 
 ## What belongs here
 
 A function every package that decides whether to trust a file by where it is, and how it is
 reached, must compute alike: the models plugin (the models file), the python plugin (the person's
-startup file), memory (memory files outside the project, and in it through no link), the app
+startup file), memory (memory files outside the project, and in it through no link; the auto
+memory directory, written through no link), the app
 and brig (the XDG directories), agent (the project's `.git/HEAD`) and the extensions host (the
 model's extensions). bh-02's plugins may import nothing of each other's, so a copy in each would
 drift, and a drifted copy is a hole. It depends on the standard library alone: no cordis, no key, row
@@ -35,4 +41,5 @@ or bh-02 path. A function that names any of those stays in its plugin.
 `pyproject.toml` here keeps its own `[tool.pypeeker]` gate, run by `scripts/arch-check` with the
 rest. Everything under `host_paths.*` is pure except the names in
 `[tool.pypeeker.no-impure-functions].exclude`: `walked`, `roots` and `passes` read links and
-resolve paths, and the opener opens and reads files, which is what they are for.
+resolve paths, and the opener, writer and remover open, read, write and remove files, which is
+what they are for.

@@ -7,10 +7,19 @@ from pathlib import Path
 import pytest
 
 from cordis.testing import drive
-from memory_cordis_plugin import AutoMemory, Memory, MemoryConfig, auto, auto_section, indexed, listing
+from memory_cordis_plugin import (
+    MEMORY,
+    AutoMemory,
+    Memory,
+    MemoryConfig,
+    auto,
+    auto_section,
+    indexed,
+    listing,
+)
 
 
-def test_the_index_is_told_to_200_lines_or_25kb_whichever_ends_first() -> None:
+def test_the_index_is_told_to_200_lines_or_25_kb_whichever_ends_first() -> None:
     short = "\n".join(f"- line {n}" for n in range(10))
     assert indexed(short) == (short, False)
     long = "\n".join(f"- line {n}" for n in range(300))
@@ -34,21 +43,41 @@ def test_the_model_is_told_how_to_keep_it_and_where() -> None:
 @pytest.mark.parametrize(
     "phrase",
     [
-        pytest.param("update that one rather than add a duplicate", id="check-for-existing-first"),
+        pytest.param("with the `memory` tool, not by writing files there", id="keep-it-with-the-tool"),
+        pytest.param("`save` writes one memory by name", id="save"),
+        pytest.param("`read` and `delete` take the name", id="read-and-delete"),
+        pytest.param(
+            "save under its name to update it rather than add a duplicate", id="check-for-existing-first"
+        ),
         pytest.param("**Why:** line", id="feedback-and-project-why"),
         pytest.param("**How to apply:** line", id="feedback-and-project-how-to-apply"),
         pytest.param("absolute ones (2026-10-14)", id="absolute-dates"),
         pytest.param("one specific line", id="specific-description"),
         pytest.param("only matters to this conversation", id="not-this-conversation"),
         pytest.param("what was non-obvious about it", id="asked-for-what-is-not-recorded"),
-        pytest.param("check it still exists before you recommend it", id="check-against-the-code"),
-        pytest.param("git log for the current state", id="current-state-from-code-or-git"),
+        pytest.param("against the code or git log before you recommend it", id="check-against-the-code"),
         pytest.param("under 200 lines and 4 KB", id="short-memory-files"),
-        pytest.param("organised by topic", id="organised-by-topic"),
+        pytest.param(
+            "organised by topic: split or summarise one that outgrows that", id="organised-by-topic"
+        ),
     ],
 )
 def test_the_model_is_told_each_rule_for_keeping_memories(phrase: str) -> None:
     assert phrase in auto_section("/m", None, False)
+
+
+def test_the_rule_about_what_other_places_record_is_said_once_and_the_cap_is_spelled_one_way() -> None:
+    said = auto_section("/m", None, False)
+    assert said.count("the code, its history or CLAUDE.md already records") == 1
+    assert said.count("its history") == 1
+    assert "KB" in said and "KB)" not in said and "25KB" not in said and "4KB" not in said
+
+
+def test_the_model_is_not_told_to_write_the_files_itself() -> None:
+    """Saves go through the tool, which makes the file and its line in the index: the prompt no
+    longer describes the file layout for the model to follow."""
+    said = auto_section("/m", None, False)
+    assert "frontmatter" not in said and "topic file" not in said
 
 
 def test_the_index_is_read_once_a_conversation(tmp_path: Path) -> None:
@@ -85,12 +114,30 @@ class _Prompt:
         return lambda: None
 
 
-async def test_the_row_adds_the_section_and_adds_nothing_without_a_directory(tmp_path: Path) -> None:
-    prompt = _Prompt()
-    effects = await drive(auto(system=prompt, host=_Host(str(tmp_path)), transcript=object()))
-    assert [(e.name, e.args[0]) for e in effects] == [("acquire", prompt.add)]
+class _Tools:
+    def register(self, spec: object, run: object, *, runs: str) -> object:
+        return lambda: None
+
+
+async def test_the_row_adds_the_section_and_the_tool_and_nothing_without_a_directory(tmp_path: Path) -> None:
+    prompt, tools = _Prompt(), _Tools()
+    effects = await drive(auto(system=prompt, host=_Host(str(tmp_path)), transcript=object(), tools=tools))
+    assert [(e.name, e.args[0]) for e in effects] == [("acquire", prompt.add), ("acquire", tools.register)]
     assert effects[0].args[1] == "memory: auto" and isinstance(effects[0].args[2], AutoMemory)
-    assert await drive(auto(system=prompt, host=_Host(""), transcript=object())) == []
+    assert effects[1].args[1] is MEMORY and effects[1].kwargs == {"runs": "memory"}
+    assert await drive(auto(system=prompt, host=_Host(""), transcript=object(), tools=tools)) == []
+
+
+async def test_the_tool_the_row_registers_keeps_the_directory_the_host_names(tmp_path: Path) -> None:
+    effects = await drive(
+        auto(system=_Prompt(), host=_Host(str(tmp_path)), transcript=object(), tools=_Tools())
+    )
+    run = effects[1].args[2]
+    said = await run({"action": "save", "name": "a-fact", "type": "user", "description": "d", "body": "b"})
+    assert str(said["content"]).startswith("saved the memory 'a-fact'")
+    assert (tmp_path / "a-fact.md").is_file() and (tmp_path / "MEMORY.md").is_file()
+    read = await run({"action": "read", "name": "a-fact"})
+    assert str(read["content"]).endswith("b\n")
 
 
 def test_memory_lists_the_index(tmp_path: Path) -> None:
