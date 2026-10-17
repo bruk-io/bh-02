@@ -1003,7 +1003,12 @@ be the copy decision-152 deleted the event stream for).
   spec-derived mount under it still stacks on top. It is mode 1777 as on the host, and
   like the root tmpfs and `/tmp` it never reaches the host; `fs_write`'s detail names it
   as the one writable path under `/dev` (a read-only `/dev/shm` was weighed and not taken:
-  it breaks `multiprocessing` and any other user of POSIX semaphores). The stage 2 and stage 8
+  it breaks `multiprocessing` and any other user of POSIX semaphores). `fs_write` stays
+  `enforced`: decision-166's false denial was a write the grade claimed denied and did not
+  name, while this one is named in the grade's detail beside the channel directory, so
+  what the grade claims (a write outside every write root is denied, but for the paths its
+  detail names) is what the kernel does, and the write is to memory only this jail sees,
+  gone when it ends. The stage 2 and stage 8
   lines of the order above are the built shape. Implementing task: TASK-0079.22.
   (Ruled 2026-10-17, decision-198.)
 - **Read carve-outs: masked where they exist, graded where they do not
