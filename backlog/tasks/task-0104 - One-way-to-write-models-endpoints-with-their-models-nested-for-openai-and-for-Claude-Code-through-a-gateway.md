@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-15 20:32'
-updated_date: '2026-10-17 01:48'
+updated_date: '2026-10-17 01:49'
 labels:
   - models
   - size-8
@@ -63,18 +63,18 @@ max_tokens = 4096
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An endpoint is a top-level table holding `provider` and how to reach the server; its models are `[NAME.models.ALIAS]` tables (or the same data inline), each with an `id` and the provider's per-model settings, named `NAME/ALIAS`, the same for openai and claude-code
-- [ ] #2 A flat one-model table in the models file or in `extra` is refused, with an error showing how to rewrite it as an endpoint
-- [ ] #3 With `base_url` and `key_command`, a claude-code endpoint runs the Claude Code CLI against that gateway with the command as its token helper; bh-02's own process never runs the command or holds the token, and no `CLAUDE_CODE_OAUTH_TOKEN` is needed
-- [ ] #4 An openai endpoint may take `key_command` instead of `key`; what it prints is held only in the request headers, kept for `key_ttl_ms` and dropped when the server refuses it, and is never printed, logged or shown in an error
-- [ ] #5 A claude-code endpoint without `base_url` runs on the subscription token as today
-- [ ] #6 There are no built-in models (owner's call, 2026-10-15): every model comes from an endpoint; with no models file, or no `default` and no `--model`, the model row is unusable and says to add an endpoint and a default, and a new session records no model
-- [ ] #7 The Claude Code CLI still loads none of the person's settings, hooks, plugins, MCP servers or CLAUDE.md
-- [ ] #8 `key_command` and `discover` are read only from the models file; `extra` otherwise takes the same nested format
-- [ ] #9 `NAME/ID` for an id not listed under `models` still resolves, as endpoint names do today; with `discover`, `/model` lists the named models first, then the server's
-- [ ] #10 On this machine, a message sent through bh-02 on a gateway model gets a reply, with `[1m]` ids checked too (by hand, with the evidence in the notes)
-- [ ] #11 This machine's models file uses the new shape (`qwen38` under an endpoint) and its models work
-- [ ] #12 `scripts/check` passes, and the docs describe the one format
+- [x] #1 An endpoint is a top-level table holding `provider` and how to reach the server; its models are `[NAME.models.ALIAS]` tables (or the same data inline), each with an `id` and the provider's per-model settings, named `NAME/ALIAS`, the same for openai and claude-code
+- [x] #2 A flat one-model table in the models file or in `extra` is refused, with an error showing how to rewrite it as an endpoint
+- [x] #3 With `base_url` and `key_command`, a claude-code endpoint runs the Claude Code CLI against that gateway with the command as its token helper; bh-02's own process never runs the command or holds the token, and no `CLAUDE_CODE_OAUTH_TOKEN` is needed
+- [x] #4 An openai endpoint may take `key_command` instead of `key`; what it prints is held only in the request headers, kept for `key_ttl_ms` and dropped when the server refuses it, and is never printed, logged or shown in an error
+- [x] #5 A claude-code endpoint without `base_url` runs on the subscription token as today
+- [x] #6 There are no built-in models (owner's call, 2026-10-15): every model comes from an endpoint; with no models file, or no `default` and no `--model`, the model row is unusable and says to add an endpoint and a default, and a new session records no model
+- [x] #7 The Claude Code CLI still loads none of the person's settings, hooks, plugins, MCP servers or CLAUDE.md
+- [x] #8 `key_command` and `discover` are read only from the models file; `extra` otherwise takes the same nested format
+- [x] #9 `NAME/ID` for an id not listed under `models` still resolves, as endpoint names do today; with `discover`, `/model` lists the named models first, then the server's
+- [x] #10 On this machine, a message sent through bh-02 on a gateway model gets a reply, with `[1m]` ids checked too (by hand, with the evidence in the notes)
+- [x] #11 This machine's models file uses the new shape (`qwen38` under an endpoint) and its models work
+- [x] #12 `scripts/check` passes, and the docs describe the one format
 <!-- AC:END -->
 
 ## Implementation Notes
