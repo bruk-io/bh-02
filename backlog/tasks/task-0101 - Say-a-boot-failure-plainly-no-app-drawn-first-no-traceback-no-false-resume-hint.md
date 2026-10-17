@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-15 02:27'
-updated_date: '2026-10-17 03:52'
+updated_date: '2026-10-17 03:53'
 labels:
   - app
   - size-2
@@ -27,7 +27,7 @@ Moved out of the naming intent TASK-0099 (was TASK-0099.09), deferred by the own
 - [x] #1 A launch whose composition cannot start prints the error without first drawing the app (checked in a pty: the screen never shows the composer), or the notes say why that cannot be done without a worse dependency
 - [x] #2 A layer row with no use makes bh-02 exit with a layer error naming the row and what to add, never a traceback; a test through the real launch
 - [x] #3 A session that fails at boot is not offered a resume; the message says it failed and what to change
-- [ ] #4 scripts/check passes
+- [x] #4 scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
