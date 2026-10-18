@@ -49,9 +49,9 @@ Drafted by the orchestrator from the owner's ask and a brainstorm (2026-10-14); 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every model step, tool call, approval, context change, sub-agent and row reload in a session is recorded with its start, end and tokens, off the event loop, where the jail can't reach it
-- [ ] #2 I can browse a session's trajectory (a timeline and the steps, each step's detail) while a reply runs and after the session has ended
-- [ ] #3 Must not break: what the model is sent is unchanged; nothing blocks the event loop; tui:ui depends on nothing
+- [x] #1 Every model step, tool call, approval, context change, sub-agent and row reload in a session is recorded with its start, end and tokens, off the event loop, where the jail can't reach it
+- [x] #2 I can browse a session's trajectory (a timeline and the steps, each step's detail) while a reply runs and after the session has ended
+- [x] #3 Must not break: what the model is sent is unchanged; nothing blocks the event loop; tui:ui depends on nothing
 <!-- AC:END -->
 
 ## Implementation Notes
