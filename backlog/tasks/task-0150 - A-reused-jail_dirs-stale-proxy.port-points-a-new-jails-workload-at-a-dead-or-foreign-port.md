@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:55'
-updated_date: '2026-10-18 22:38'
+updated_date: '2026-10-18 22:42'
 labels:
   - brig
   - size-3
@@ -144,4 +144,70 @@ FAILED libs/brig/tests/integration/test_connect_proxy_launch.py::test_a_port_fil
 ```
 
 Round 2 (review finding: a bug closes with a recorded repro). No code changed; the finding was that the repro was never recorded with record-check --repro, and it cannot be recorded on HEAD because the test passes there. Recorded it against the code before the fix instead: a scratch git worktree at c57b8169 (the commit before the fix; brig imported from that worktree's own venv, uv sync --all-packages --offline, and I confirmed brig there has no ready_path), with only libs/brig/tests/integration/test_connect_proxy_launch.py taken from the branch HEAD (4c34d65) and committed there as b4812b1f5959 (parent c57b8169; git diff --quiet 4c34d65 b4812b1f5959 -- that file exits 0, so the recorded file is byte-identical to the one on this branch). Ran: python3 <philosophy>/scripts/record-check TASK-0150 --repro --root /home/user/bh-02 -- uv run pytest libs/brig/tests/integration/test_connect_proxy_launch.py::test_a_port_file_an_earlier_jail_left_is_not_the_port_the_workload_is_pointed_at -q. It failed as the bug says (the workload saw URLError(ConnectionRefusedError(111)) instead of the proxy's 403, pointed at the planted stale port), record-check exited 0 and the 'Repro at b4812b1f5959, test files: ...' note above is its record. Repeat runs on the same pre-fix worktree: 8 runs in all, 7 failed with ConnectionRefusedError(111), 1 passed (the race the task describes: when the proxy publishes before the wrap reads, the stale file is not read in time to matter), so the earlier note's '6 of 6' was the sample then, 7 of 8 is the sample now. Evidence this clears the finding: python3 <philosophy>/scripts/board-check close TASK-0150 prints 'ok: TASK-0150 can close' and exits 0, run after the scratch worktree was removed (git worktree remove, prune; git worktree list shows only the main checkout), so it does not depend on the worktree. The repro commit b4812b1f5959 is no longer on any branch (it was made in the scratch worktree and the branch history here is squashed to one commit), it is a loose object in this repository's .git; close-task's check (git diff --quiet b4812b1f5959 -- the test file) needs that object to still exist, so close before a git gc --prune would drop it. Nothing else was changed: the SPEC.md decision-204, the code and the tests are as the reviewer found them (the reviewer's full scripts/check, exit 0, is recorded above), so scripts/check was not re-run for this round. AC1-3 stay ticked on the evidence above and in round 1.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 46%]
+.......................................................s......sss...ssss [ 48%]
+..ss.s...sss..ss.s.s.s..s..s.ssss.s........s............................ [ 50%]
+........................................................................ [ 52%]
+...............s........................................................ [ 54%]
+...................sssssssssssssssssssssssssssssssssssssssssssssssssssss [ 55%]
+ssssssssssssss..............................sssssssssss...s............. [ 57%]
+........................................................................ [ 59%]
+....................................s................................... [ 61%]
+.......................................................................s [ 63%]
+s....s.................................................................. [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+......................................                                   [100%]
+3882 passed, 118 skipped in 205.11s (0:03:25)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 4.11 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
