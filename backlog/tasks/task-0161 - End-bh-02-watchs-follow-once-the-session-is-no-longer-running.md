@@ -102,4 +102,6 @@ INFO    -  Documentation built in 4.40 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+No repro: the fix is in HEAD, so the repro test (test_session_lock.py::test_a_follow_goes_on_while_the_session_is_held_and_ends_when_the_holder_has_crashed_with_no_end_line) passes here. The worker recorded it failing against the bug planted back (gone = False in watched: the follow hung until timeout 20 exit 124).
 <!-- SECTION:NOTES:END -->
