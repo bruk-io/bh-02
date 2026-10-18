@@ -30,18 +30,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 type Message = Mapping[str, Any]
 
 # What each signal means, in the order the report lists them.
 SIGNALS = {
-    "no_such_tool": "called a tool that does not exist (Claude Code's Bash, Read, Edit, ...): it thought it was elsewhere",
+    "no_such_tool": (
+        "called a tool that does not exist (Claude Code's Bash, Read, Edit, ...): it thought it was elsewhere"
+    ),
     "no_code": "called python without a `code` string",
-    "nudged": "a step the loop had to send back (cut off at the output limit, empty, or a call that did not decode)",
+    "nudged": (
+        "a step the loop had to send back (cut off at the output limit, empty, or a call that did not decode)"
+    ),
     "shell_shaped": "an input that only ran programs and printed what they said: the REPL used as a shell",
     "shell_for_files": "ran cat, sed, ls or the like through a shell, for work Python does itself",
     "error": "an input that raised",
-    "forgotten_name": "a NameError for a name the REPL never had: usually one an earlier session or REPL defined",
+    "forgotten_name": (
+        "a NameError for a name the REPL never had: usually one an earlier session or REPL defined"
+    ),
     "uncaptured_output": "ran a program without capturing its output, so the input saw nothing of it",
     "timeout": "a program that ran out of its timeout",
     "cut_output": "an input whose output was cut at 20,000 characters",
@@ -50,7 +55,9 @@ SIGNALS = {
     "interrupted": "a reply the person stopped mid-input",
     "claude_code": "the model's own text mentions Claude Code",
     "extension_written": "an input that wrote into .bh-02/plugins (the model extending bh-02)",
-    "instructions_changed": "the model was told its instructions changed mid-conversation (an extension, a branch, CLAUDE.md)",
+    "instructions_changed": (
+        "the model was told its instructions changed mid-conversation (an extension, a branch, CLAUDE.md)"
+    ),
     "startup_file": "an input that wrote .bh-02/startup.py (the model keeping functions for later sessions)",
 }
 _STARTUP_FILE = ".bh-02/startup.py"  # the project's startup file, the one the model may write
@@ -351,7 +358,9 @@ def _report(found: Sequence[Finding], totals: Totals, examples: int) -> str:
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--sessions", help="bh-02's sessions directory (default: its state directory's)")
-    parser.add_argument("--model", help="only the sessions that started on this model (by its name, ENDPOINT/MODEL)")
+    parser.add_argument(
+        "--model", help="only the sessions that started on this model (by its name, ENDPOINT/MODEL)"
+    )
     parser.add_argument("--examples", type=int, default=3, help="examples per signal (default 3)")
     parser.add_argument("--json", action="store_true", help="print the findings as JSON lines")
     args = parser.parse_args(argv)
