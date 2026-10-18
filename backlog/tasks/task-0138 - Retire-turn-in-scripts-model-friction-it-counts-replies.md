@@ -1,7 +1,7 @@
 ---
 id: TASK-0138
 title: 'Retire turn in scripts/model-friction: it counts replies'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 04:15'
@@ -122,4 +122,6 @@ INFO    -  Documentation built in 5.47 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review: full scripts/check exit 0 recorded. Diff is prose/names only in scripts/model-friction; no 'turn' remains. AC1 met (signal text, Totals.replies, counter). AC2 met: --json unchanged (no turn in JSON fields), report headline already said replies; only the interrupted meaning line changed, which AC1 requires. Pre-existing lint/format in the script is already filed as TASK-0146. No blocking findings.
 <!-- SECTION:NOTES:END -->
