@@ -113,4 +113,6 @@ INFO    -  Documentation built in 4.31 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer, 2026-10-18): not closed. Full scripts/check exit 1: one failure, chat-cordis-plugin test_chat.py::test_an_interrupt_stops_the_reply_says_so_and_the_session_carries_on (fixed 10 ms sleeps, flaky under -n auto; passed 3/3 alone; unrelated to this diff). AC #3 needs scripts/check to pass, so it stays unticked. Draft filed for the flaky test. Diff reviewed: ACs #1-#2 met by the tests shown; no other findings beyond nits. Re-run the full check (after the flake is fixed, or on a green rerun) to close.
 <!-- SECTION:NOTES:END -->
