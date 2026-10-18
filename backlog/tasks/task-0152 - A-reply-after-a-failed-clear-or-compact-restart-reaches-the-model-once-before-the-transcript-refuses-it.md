@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 13:24'
-updated_date: '2026-10-18 21:19'
+updated_date: '2026-10-18 21:23'
 labels:
   - agent
   - size-1
@@ -184,4 +184,70 @@ FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_
 ```
 
 Round 1 review fix. (1) Repro recorded: planted the violation (the 'await self._checked()' at loop.py:759 replaced by 'pass'), ran 'record-check TASK-0152 --repro -- uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart' (4 failed: model.requests held the old conversation's request, and for 'nothing written yet' the tools entry was kept; recorded on the task as 'Repro at b3a739b73d56'), then restored loop.py (byte-identical to the committed one, cmp) and re-ran the test: 4 passed. (2) The reviewer's nit: a two-line comment in libs/host-paths/src/host_paths/appender.py Appender.check saying _last becomes the look so flush waits for it, and why that is right (the writer runs its jobs in order on one thread). Comment only, no behaviour change. scripts/check libs/host-paths: exit 0 (format, lint, types, 80 passed, gates ok, docs ok). loop.py is unchanged from the previous commit, so the agent plugin check was not re-run. The two known limits stay unfiled as the reviewer ruled. The full scripts/check stays the reviewer's.
+
+Check `scripts/check` exited 1
+
+(124 earlier lines omitted)
+```text
+    def clear_earlier_records(
+        jail_dir: str, *, read_table: Callable[[], str] = read_process_table
+    ) -> None:
+        """Remove the records an earlier jail left under `<jail_dir>/procs`, once
+        nothing they name runs; on any doubt remove nothing and refuse
+        (decision-181). Per record, the stamp before the group
+        (`_records.standing`): a leader that holds its identity runs; one whose pid
+        now names another process holds no group; one that is gone runs while its
+        group has a live member. An unreadable record, an unknown stamp, a link or
+        a file under `procs/`, or a process table that can't be read is a doubt.
+        `read_table` is the process table's seam, as `group_alive`'s.
+    
+        Raises:
+            _records.JailDirInUse: something a record names runs, or is in doubt.
+            OSError: the records could not be removed.
+        """
+        scanned = _records.scan(jail_dir)
+        if not scanned.records and not scanned.unreadable:
+            return
+        try:
+            live: frozenset[int] | None = live_groups(read_table())
+        except OSError, subprocess.CalledProcessError, UnreadableProcessTable:
+            live = None
+        pids = {record.pid for record in scanned.records}
+        held = _records.held_by(
+            jail_dir,
+            scanned,
+            stamps={pid: _identity.start_stamp(pid) for pid in pids},
+            zombies=frozenset(pid for pid in pids if _identity.is_zombie(pid)),
+            live_groups=live,
+        )
+        if held:
+>           raise _records.JailDirInUse(jail_dir, held)
+E           brig.run._records.JailDirInUse: jail directory '/tmp/bh20363-0' holds the records of an earlier jail that is not known to be gone: /tmp/bh20363-0/procs/945c0e16c4363d18 has a record.json that is missing key(s) namespaces. Destroy that jail (`Jail.destroy()`, or end what those records name), or choose another directory. If the process it names has already been waited for in another process (an exit record exists), it is still leaving: wait a moment and retry; nothing was removed
+
+libs/brig/src/brig/run/_jail_dir.py:75: JailDirInUse
+=========================== short test summary info ============================
+FAILED libs/brig/tests/integration/test_helpers.py::test_a_launch_scoped_helper_that_never_exits_fails_instead_of_hanging
+1 failed, 3855 passed, 118 skipped in 199.09s (0:03:19)
+   FAILED: tests
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.88 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
