@@ -105,18 +105,19 @@ async def test_a_models_file_default_of_an_endpoint_s_model_starts_the_session_o
 async def test_the_model_flag_naming_a_model_of_a_broken_endpoint_starts_the_session_and_its_model_says_why(
     _own_config: Path, tmp_path: Path
 ) -> None:
-    """TASK-0095: `--model local/x:7b` over an endpoint table with a problem (an id of its own) is
+    """TASK-0095: `--model local/x:7b` over an endpoint table with a problem (a setting it does not take) is
     recorded as it is typed; the model row still binds, so bh-02 starts, and refuses each step with the
     table's problem. Nothing is asked of the server."""
     with StubServer(models=["x:7b"]) as server:
         _models_default(
             _own_config,
-            f'[local]\nprovider = "openai"\ndiscover = true\nid = "x"\nbase_url = "{server.base_url}"\n',
+            f'[local]\nprovider = "openai"\ndiscover = true\ncolour = "red"\n'
+            f'base_url = "{server.base_url}"\n',
         )
         made = create(tmp_path / "s", "/work/a", model="local/x:7b", no_jail=False)
         assert _recorded(made) == "local/x:7b"
         async with opened(ModelConfig(default=_recorded(made))) as model:
-            with pytest.raises(ModelsError, match="names an id, as a single model's table did") as step:
+            with pytest.raises(ModelsError, match="colour is not a setting of a openai endpoint") as step:
                 [c async for c in model.complete([{"role": "user", "content": "hi"}], [])]
         assert step.value.message.startswith("endpoint 'local' (")
     assert server.requests == []

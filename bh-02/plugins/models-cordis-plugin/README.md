@@ -71,9 +71,7 @@ include = ["qwen*"]                       # optional: the ids matching one of th
 
 A model's own table takes `id` and, for `openai`, `max_tokens` and `temperature`; everything about
 reaching the server is its endpoint's. `ENDPOINT/ID`, an id the endpoint's `models` doesn't name, is
-that id on the endpoint (`derived`), with no network. A table with an `id` of its own (the format
-before endpoints) is that table's problem, which says how to move the id under its `models`. An
-endpoint's name may not hold `/`.
+that id on the endpoint (`derived`), with no network. An endpoint's name may not hold `/`.
 
 A top-level `default = "NAME"` above the tables makes NAME the model a session starts on. The
 model is chosen, lowest first, by the file's `default`, a layer's model row `default` (the
@@ -116,7 +114,7 @@ with; none of them raises.
 
 A table's problems are said with what to do, and a model that can't be used still binds: an
 unknown name (the message lists the models and shows an endpoint to add), no provider, an unknown
-provider or setting (an endpoint's, or a model's), an `id` on the endpoint itself, no models, a
+provider or setting (an endpoint's, or a model's), no models, a
 model with no id, no `base_url` or one that is not an http(s) URL with a host and a numeric port (a
 malformed one is that endpoint's problem alone, never the catalog's), a row `extra` that is not one
 table per endpoint or a `default` that is not a name, a `key` that is not the name of a line
@@ -258,8 +256,8 @@ table's `problem`, said like any other.
   `--model`, `/model NAME`, a layer's `default` and the file's `default` mean the model with no
   request, the status bar shows `local/qwen (openai)`, and the model row has no way to ask a server at
   all: an id the server lacks is the first step's 404. The endpoint alone names no model
-  (`not_a_model` says to name one of its models). An endpoint whose table has a problem (an `id`
-  on it, a bad `include` or `base_url`) names no model either: `derived` hands back the
+  (`not_a_model` says to name one of its models). An endpoint whose table has a problem (an unknown
+  setting, a bad `include` or `base_url`) names no model either: `derived` hands back the
   table itself, so `--model local/x`, `/model local/x` and a `default` are refused with that problem
   and what to write, and the model row binds `Unusable` as for any table with one.
 - **Only `/model` asks.** `Catalog.refresh()`, awaited by `/model` with no argument in its own

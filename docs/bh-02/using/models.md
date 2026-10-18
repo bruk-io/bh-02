@@ -140,8 +140,7 @@ without a `base_url` reaches other Claude models on your subscription by their i
 `/model router/meta-llama/llama-4` works without a table for it. The name is split at the first `/`,
 so an id may hold more of them, and `:`.
 
-A table with an `id` of its own is refused, since a table is an endpoint and its models are under
-it: bh-02 shows how to move the id under the table's `models`. An endpoint's name may not hold `/`.
+An endpoint's name may not hold `/`.
 
 ### Claude through a gateway
 
@@ -199,7 +198,7 @@ and switches with the server down. An id the server doesn't have is that first m
 What to know:
 - The endpoint is not a model itself: it takes no `id`, and `--model local` says to name one of its
   models. Its models share its `key`, `max_tokens` and `temperature`. An endpoint with something
-  wrong in it (an `id`, a bad `include` or `base_url`) names no models: `local/ID` is refused, as a
+  wrong in it (an unknown setting, a bad `include` or `base_url`) names no models: `local/ID` is refused, as a
   model of any endpoint with a problem is, with that table's problem and what to write.
 - `include` is a list of globs (`*`, `?`, `[abc]`), case-sensitive, tried on the id as the server
   says it (`qwen*`, not `local/qwen*`); a model is listed if any matches. Use it for a server that
