@@ -41,8 +41,8 @@ class _Screen:
     def __init__(self) -> None:
         self.asked: list[Json] = []
 
-    async def confirm(self, request: Json) -> bool:
-        self.asked.append(request)
+    async def confirm(self, question: Json) -> bool:
+        self.asked.append(question)
         return False
 
     async def show(self, events: AsyncIterator[Json]) -> None:
@@ -167,7 +167,7 @@ async def test_the_model_saves_reads_and_deletes_a_memory_unasked_with_no_python
         sorted(p.name for p in memory.iterdir()) == ["MEMORY.md"] and not (memory / "MEMORY.md").read_text()
     )
     # the memory tool was never put to the person; the other host tool was, and a no ran nothing
-    assert [request["name"] for request in screen.asked] == ["elsewhere"]
+    assert [question["name"] for question in screen.asked] == ["elsewhere"]
     assert screen.asked[0]["runs"] == "host" and elsewhere.startswith("denied")
     await booted.runtime.shutdown()
 

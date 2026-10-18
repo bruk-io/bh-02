@@ -1,7 +1,7 @@
 """Under Pilot: a clipped tool result, diff or piece of code opens to show every line and closes
 again, by a click and by Enter or Space once its line has the focus (TASK-0089.07), as a finished
 thinking block opens; closed is how every new block starts; and opening one moves nothing else:
-a transcript that follows its end goes on following, one scrolled away stays where it is."""
+a chat view that follows its end goes on following, one scrolled away stays where it is."""
 
 import asyncio
 from collections.abc import Mapping
@@ -15,7 +15,7 @@ from textual.widgets import Static
 
 from tui_cordis_plugin import BhApp, History, replayable
 from tui_cordis_plugin.messages import Asked, Shown
-from tui_cordis_plugin.widgets import ApprovalScreen, Clipped, Composer, Transcript
+from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Clipped, Composer
 
 _SIZE = (80, 24)
 
@@ -239,103 +239,103 @@ async def test_tab_leaves_the_line_for_the_composer_and_typing_goes_on() -> None
 # Opening moves nothing else.
 
 
-async def _fill(app: BhApp, pilot: Pilot[None], *, before: int = 0, after: int = 60) -> Transcript:
-    """A transcript longer than its page, ending in a long result, at its end (following)."""
+async def _fill(app: BhApp, pilot: Pilot[None], *, before: int = 0, after: int = 60) -> ChatView:
+    """A chat view longer than its page, ending in a long result, at its end (following)."""
     events = [_text(n) for n in range(before)] + [_call(3), _result(20)] + [_text(n) for n in range(after)]
     await _draw(app, pilot, *events)
-    transcript = app.query_one(Transcript)
-    assert transcript.max_scroll_y > 0 and transcript.scroll_y == transcript.max_scroll_y
-    return transcript
+    chat_view = app.query_one(ChatView)
+    assert chat_view.max_scroll_y > 0 and chat_view.scroll_y == chat_view.max_scroll_y
+    return chat_view
 
 
 @pytest.mark.parametrize("how", ["click", "key"])
-async def test_opening_the_block_at_the_end_keeps_the_transcript_following_its_end(how: str) -> None:
+async def test_opening_the_block_at_the_end_keeps_the_chat_view_following_its_end(how: str) -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await _draw(app, pilot, _call(3), _result(20))
-        transcript = app.query_one(Transcript)
+        chat_view = app.query_one(ChatView)
         await _draw(app, pilot, *[_text(n) for n in range(3)])  # a few lines after it, in view
         (block,) = _clipped(app)
-        assert transcript.max_scroll_y > 0 and transcript.scroll_y == transcript.max_scroll_y
+        assert chat_view.max_scroll_y > 0 and chat_view.scroll_y == chat_view.max_scroll_y
         if how == "click":
             await _click(pilot, block)
         else:
             await pilot.press("shift+tab", "enter")
             await pilot.pause()
         assert block.opened
-        assert transcript.scroll_y == transcript.max_scroll_y  # still at the end
+        assert chat_view.scroll_y == chat_view.max_scroll_y  # still at the end
         await _draw(app, pilot, {"type": "text", "text": "newest, after opening\n\n"})
-        assert transcript.scroll_y == transcript.max_scroll_y and "newest, after opening" in _screen(app)
+        assert chat_view.scroll_y == chat_view.max_scroll_y and "newest, after opening" in _screen(app)
         if how == "click":
             await _click(pilot, block)
         else:
             await pilot.press("enter")
             await pilot.pause()
-        assert not block.opened and transcript.scroll_y == transcript.max_scroll_y
+        assert not block.opened and chat_view.scroll_y == chat_view.max_scroll_y
         await _draw(app, pilot, {"type": "text", "text": "newest, after closing\n\n"})
-        assert transcript.scroll_y == transcript.max_scroll_y and "newest, after closing" in _screen(app)
+        assert chat_view.scroll_y == chat_view.max_scroll_y and "newest, after closing" in _screen(app)
 
 
-async def test_opening_a_block_in_a_transcript_scrolled_away_leaves_it_where_it_is() -> None:
+async def test_opening_a_block_in_a_chat_view_scrolled_away_leaves_it_where_it_is() -> None:
     """Scrolled away from the end it is not following, and opening a block does not take it to
     the end (nor does closing it); scrolled back to its end it follows again."""
     app = BhApp()
     async with app.run_test(size=(80, 40)) as pilot:  # tall enough for the block's line to be in view
-        transcript = await _fill(app, pilot)
-        transcript.scroll_to(y=0, animate=False, immediate=True)  # as the person does by scrolling up
+        chat_view = await _fill(app, pilot)
+        chat_view.scroll_to(y=0, animate=False, immediate=True)  # as the person does by scrolling up
         await pilot.pause()
         (block,) = _clipped(app)
-        assert transcript.scroll_y == 0 and transcript.max_scroll_y > 0
+        assert chat_view.scroll_y == 0 and chat_view.max_scroll_y > 0
         await _click(pilot, block)
-        assert block.opened and transcript.scroll_y == 0
-        before = transcript.max_scroll_y
+        assert block.opened and chat_view.scroll_y == 0
+        before = chat_view.max_scroll_y
         await _draw(app, pilot, {"type": "text", "text": "while scrolled away\n\n"})
-        assert transcript.scroll_y == 0 and transcript.max_scroll_y > before  # not followed
+        assert chat_view.scroll_y == 0 and chat_view.max_scroll_y > before  # not followed
         await _click(pilot, block)
-        assert not block.opened and transcript.scroll_y == 0
-        transcript.scroll_end(animate=False)
+        assert not block.opened and chat_view.scroll_y == 0
+        chat_view.scroll_end(animate=False)
         await pilot.pause()
-        assert transcript.scroll_y == transcript.max_scroll_y
+        assert chat_view.scroll_y == chat_view.max_scroll_y
         await _draw(app, pilot, {"type": "text", "text": "back at the end\n\n"})
-        assert transcript.scroll_y == transcript.max_scroll_y and "back at the end" in _screen(app)
+        assert chat_view.scroll_y == chat_view.max_scroll_y and "back at the end" in _screen(app)
 
 
 @pytest.mark.parametrize("focus", ["on the line", "back on the composer"])
 async def test_reaching_a_line_off_screen_by_the_keyboard_scrolls_to_it_and_stops_following_until_the_end(
     focus: str,
 ) -> None:
-    """Focusing a line shows it (Textual scrolls to what takes the focus), and a transcript scrolled
+    """Focusing a line shows it (Textual scrolls to what takes the focus), and a chat view scrolled
     up stops following new output, as TASK-0089.04 has it: until it is back at its end. Opening
     the block then scrolls nothing."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
-        transcript = await _fill(app, pilot)  # following the end, the block far above it
+        chat_view = await _fill(app, pilot)  # following the end, the block far above it
         (block,) = _clipped(app)
         line = _toggle(block)
-        assert line.region.bottom <= transcript.region.y  # off screen, above the transcript's view
-        end = transcript.max_scroll_y
+        assert line.region.bottom <= chat_view.region.y  # off screen, above the chat view's view
+        end = chat_view.max_scroll_y
         await pilot.press("shift+tab")
         await pilot.pause()
         assert app.focused is line
-        assert transcript.region.y <= line.region.y < transcript.region.bottom  # scrolled into view
-        assert transcript.scroll_y < end  # which is not the end any more
-        shown = transcript.scroll_y
+        assert chat_view.region.y <= line.region.y < chat_view.region.bottom  # scrolled into view
+        assert chat_view.scroll_y < end  # which is not the end any more
+        shown = chat_view.scroll_y
         await pilot.press("enter")
         await pilot.pause()
-        assert block.opened and transcript.scroll_y == shown  # opening scrolls nothing
+        assert block.opened and chat_view.scroll_y == shown  # opening scrolls nothing
         await _draw(app, pilot, {"type": "text", "text": "while scrolled up\n\n"})
-        assert transcript.scroll_y == shown and "while scrolled up" not in _screen(app)  # not following
+        assert chat_view.scroll_y == shown and "while scrolled up" not in _screen(app)  # not following
         if focus == "back on the composer":
             await pilot.press("tab")
             assert isinstance(app.focused, Composer)
-        for _ in range(40):  # PageDown, the transcript's own with the focus on the line, the composer's else
-            if transcript.scroll_y >= transcript.max_scroll_y:
+        for _ in range(40):  # PageDown, the chat view's own with the focus on the line, the composer's else
+            if chat_view.scroll_y >= chat_view.max_scroll_y:
                 break
             await pilot.press("pagedown")
             await pilot.pause()
-        assert transcript.scroll_y == transcript.max_scroll_y  # back at its end
+        assert chat_view.scroll_y == chat_view.max_scroll_y  # back at its end
         await _draw(app, pilot, {"type": "text", "text": "back at the end again\n\n"})
-        assert transcript.scroll_y == transcript.max_scroll_y and "back at the end again" in _screen(app)
+        assert chat_view.scroll_y == chat_view.max_scroll_y and "back at the end again" in _screen(app)
 
 
 # What it sits beside.
@@ -345,18 +345,18 @@ async def test_with_the_line_focused_esc_stops_a_running_reply_and_ctrl_p_opens_
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await _draw(app, pilot, _result(20))
-        turn = asyncio.ensure_future(app.bridge.interrupted())  # a reply waiting to be stopped
+        reply_task = asyncio.ensure_future(app.bridge.interrupted())  # a reply waiting to be stopped
         await pilot.pause()
         await pilot.press("shift+tab")
         assert app.focused is _toggle(_clipped(app)[0])
         await pilot.press("ctrl+p")
         await pilot.pause()
-        assert isinstance(app.screen, CommandPalette) and not turn.done()
+        assert isinstance(app.screen, CommandPalette) and not reply_task.done()
         await pilot.press("escape")  # closes the palette only
         await pilot.pause()
-        assert not isinstance(app.screen, CommandPalette) and not turn.done()
+        assert not isinstance(app.screen, CommandPalette) and not reply_task.done()
         await pilot.press("escape")
-        await asyncio.wait_for(turn, 1)  # the reply heard it
+        await asyncio.wait_for(reply_task, 1)  # the reply heard it
         assert not _clipped(app)[0].opened  # and the line did not take the key
 
 

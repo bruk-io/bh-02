@@ -11,8 +11,8 @@ from textual.command import CommandPalette
 from textual.pilot import Pilot
 
 from tui_cordis_plugin import BhApp, render
-from tui_cordis_plugin.messages import Shown, TurnEnded
-from tui_cordis_plugin.widgets import Composer, Keys, StatusBar, Transcript
+from tui_cordis_plugin.messages import ReplyEnded, Shown
+from tui_cordis_plugin.widgets import ChatView, Composer, Keys, StatusBar
 
 _DOCS = Path(__file__).resolve().parents[4] / "docs" / "bh-02" / "using" / "commands.md"
 _FULL = render.keys_line(500)
@@ -136,27 +136,27 @@ async def _new_line(app: BhApp, pilot: Pilot[None], keys: list[str]) -> None:
 
 
 async def _stop(app: BhApp, pilot: Pilot[None], keys: list[str]) -> None:
-    turn = asyncio.ensure_future(app.bridge.interrupted())  # a reply waiting to be stopped
+    reply_task = asyncio.ensure_future(app.bridge.interrupted())  # a reply waiting to be stopped
     await pilot.pause()
-    assert app.bridge.turn_running
+    assert app.bridge.reply_running
     await pilot.press(keys[0])
-    await asyncio.wait_for(turn, 1)  # it heard it
+    await asyncio.wait_for(reply_task, 1)  # it heard it
 
 
 async def _scroll(app: BhApp, pilot: Pilot[None], keys: list[str]) -> None:
     for n in range(60):
         app.post_message(Shown({"type": "text", "text": f"line {n}\n\n"}))
     await pilot.pause()
-    transcript = app.query_one(Transcript)
-    end = transcript.scroll_y
-    assert end > 0 and end == transcript.max_scroll_y
+    chat_view = app.query_one(ChatView)
+    end = chat_view.scroll_y
+    assert end > 0 and end == chat_view.max_scroll_y
     up, down = keys  # PgUp/PgDn
     await pilot.press(up)
     await pilot.pause()
-    assert transcript.scroll_y < end
+    assert chat_view.scroll_y < end
     await pilot.press(down)
     await pilot.pause()
-    assert transcript.scroll_y == end
+    assert chat_view.scroll_y == end
 
 
 async def _history(app: BhApp, pilot: Pilot[None], keys: list[str]) -> None:
@@ -172,7 +172,7 @@ async def _history(app: BhApp, pilot: Pilot[None], keys: list[str]) -> None:
 
 async def _copy(app: BhApp, pilot: Pilot[None], keys: list[str]) -> None:
     app.post_message(Shown({"type": "text", "text": "the whole reply"}))
-    app.post_message(TurnEnded())
+    app.post_message(ReplyEnded())
     await pilot.pause()
     await pilot.press(keys[0])
     assert app.clipboard == "the whole reply"

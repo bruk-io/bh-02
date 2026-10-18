@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,10 +14,13 @@ from typing import Any
 import pytest
 
 from agent_cordis_plugin import (
+    Answer,
+    Clock,
     ConversationConfig,
     FileTranscript,
     LoopModel,
     MemoryTranscript,
+    StepRecord,
     ToolBroker,
     Unchanged,
     asked,
@@ -26,9 +30,11 @@ from agent_cordis_plugin import (
     kept_in,
     rewrite,
     seeded,
+    stamp,
     summarise,
     unrestarted,
 )
+from agent_cordis_plugin.testing import Stepped, noon, on
 from cordis import Effects, Runtime, bind, component
 from cordis.composition import Entry
 from cordis.loader import resolve
@@ -86,6 +92,29 @@ class Failing:
     async def complete(self, messages: Sequence[Json], tools: Sequence[Json]) -> AsyncIterator[Json]:
         raise self.error
         yield  # pragma: no cover
+
+
+class Timed:
+    """A `model` that plays one scripted step per call, moving a test clock `after` seconds before
+    each chunk (`steps`: `(after, chunk)` pairs), and says what the loop reads of a model: its
+    `settings`, and how it wants its tools offered (`tool_changes`)."""
+
+    def __init__(
+        self,
+        clock: Stepped,
+        *steps: Sequence[tuple[float, Json]],
+        settings: Json | None = None,
+        tool_changes: str = "fixed",
+    ) -> None:
+        self.clock = clock
+        self.steps = list(steps)
+        self.settings = settings
+        self.tool_changes = tool_changes
+
+    async def complete(self, messages: Sequence[Json], tools: Sequence[Json]) -> AsyncIterator[Json]:
+        for after, chunk in self.steps.pop(0):
+            self.clock.advance(after)
+            yield chunk
 
 
 class Limited(Exception):
@@ -168,6 +197,7 @@ async def _compact(
     loader: Loader | None = None,
     screen: Screen | None = None,
     jobs: Jobs | None = None,
+    clock: Clock | None = None,
 ) -> Any:
     """`/compact ARGS` over the session's file at `path`, as the conversation row runs it."""
     return await compact_conversation(
@@ -178,7 +208,23 @@ async def _compact(
         output=screen or Screen(),
         config=ConversationConfig(),
         jobs=jobs if jobs is not None else Jobs(),
+        clock=clock,
     )
+
+
+AT = "2026-10-18T03:47:12.345Z"
+# What `seeded` wrote before it recorded `seed`: a file from then has the wording alone.
+LEGACY_SEEDED = (
+    "(bh-02: this conversation carries on from an earlier one, compacted (/compact) to the summary of "
+    "it you wrote, which follows. Your Python namespace was kept when it was compacted, holding what "
+    "the earlier inputs defined; it empties as your instructions about python say (bh-02 starting "
+    "again, a resumed session too), so check that a name is still there before relying on it.)"
+)
+
+
+def _seed(summary: str, keep: str = "") -> list[Json]:
+    """A compacted conversation's seed, as /compact writes it, with a step that has only its time."""
+    return seeded(summary, keep, {"at": AT})
 
 
 def text(s: str) -> Json:
@@ -231,12 +277,12 @@ async def test_the_new_conversation_is_bh_02_s_message_then_the_summary_and_the_
 ):
     """The seed holds no prompt and no date, so the loop's first message after it keeps the
     prompt as it reads now as the conversation's start (no aside of a change) and tells the date."""
-    seed = seeded("  x holds 42.  ")
+    seed = _seed("  x holds 42.  ")
     assert [m["role"] for m in seed] == ["user", "assistant"] and seed[1]["content"] == "x holds 42."
     assert str(seed[0]["content"]).startswith("(bh-02: this conversation carries on from an earlier one")
-    history = MemoryTranscript()
+    transcript = MemoryTranscript()
     for message in seed:
-        history.append(message)
+        transcript.append(message)
     model = Scripted([text("carrying on"), stop("end_turn")])
 
     class Prompt:
@@ -244,22 +290,27 @@ async def test_the_new_conversation_is_bh_02_s_message_then_the_summary_and_the_
             return "the prompt as it reads now"
 
     class Approved:
-        async def approve(self, request: Json) -> bool:
-            return True
+        async def approve(self, question: Json) -> Answer:
+            return Answer.YES
 
     async def nothing(input: Json) -> Json:
         return {"content": ""}
 
     tools = ToolBroker()
     tools.register(PYTHON, nothing)
-    loop = LoopModel(model, tools, history, Approved(), system=Prompt(), today=lambda: "2026-10-07")
+    loop = LoopModel(model, tools, transcript, Approved(), system=Prompt(), clock=on("2026-10-07"))
     events = [e async for e in loop.reply("next")]
     assert not [e for e in events if e["type"] == "note"]  # nothing told as changed
     ((messages, _),) = model.requests
     assert messages == [
         {"role": "system", "content": "the prompt as it reads now"},
         *seed,
-        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nnext", "today": "2026-10-07"},
+        {
+            "role": "user",
+            "content": "(Today's date: 2026-10-07.)\n\nnext",
+            "today": "2026-10-07",
+            "at": stamp(noon("2026-10-07")),
+        },
     ]
 
 
@@ -283,7 +334,7 @@ def test_rewrite_replaces_the_file_in_one_step_and_keeps_the_old_one_as_bak(
 ) -> None:
     path = _session(tmp_path)
     old = path.read_bytes()
-    new = seeded("x holds 42")
+    new = _seed("x holds 42")
     renames: list[tuple[str, str]] = []
     real = os.replace
 
@@ -306,9 +357,9 @@ def test_a_later_rewrite_keeps_every_earlier_backup(tmp_path: Path) -> None:
     """The conversation before the first /compact is never replaced by a later one's."""
     path = _session(tmp_path)
     first = path.read_bytes()
-    assert rewrite(str(path), seeded("one")) == f"{path}.bak"
+    assert rewrite(str(path), _seed("one")) == f"{path}.bak"
     second = path.read_bytes()
-    assert rewrite(str(path), seeded("two")) == f"{path}.bak.2"
+    assert rewrite(str(path), _seed("two")) == f"{path}.bak.2"
     assert Path(f"{path}.bak").read_bytes() == first and Path(f"{path}.bak.2").read_bytes() == second
 
 
@@ -323,7 +374,7 @@ def test_a_rewrite_that_fails_leaves_the_transcript_as_it_was(
 
     monkeypatch.setattr(os, "replace", full)
     with pytest.raises(OSError):
-        rewrite(str(path), seeded("x holds 42"))
+        rewrite(str(path), _seed("x holds 42"))
     assert path.read_bytes() == old
     assert sorted(p.name for p in tmp_path.iterdir()) == ["transcript.jsonl"]  # no .new, no .bak
 
@@ -332,7 +383,14 @@ async def test_a_summary_is_the_text_of_a_step_that_answered_with_its_usage() ->
     model = Scripted(
         [text("x holds "), text("42."), {"type": "thinking", "text": "hm"}, USAGE, stop("end_turn")]
     )
-    assert await summarise(model, asked(CONVERSATION), [PYTHON], 5) == ("x holds 42.", [USAGE])
+    summary, usage, step = await summarise(model, asked(CONVERSATION), [PYTHON], 5)
+    assert (summary, usage) == ("x holds 42.", [USAGE])
+    assert step["usage"] == {  # the step's record holds the usage the answer counts
+        "input_tokens": 1200,
+        "output_tokens": 80,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+    }
     assert model.requests == [(asked(CONVERSATION), [PYTHON])]  # the tool offered as the loop offers it
 
 
@@ -359,7 +417,7 @@ async def test_a_step_that_did_not_answer_gives_no_summary_and_says_why(step: li
 
 
 async def test_a_summary_not_written_in_time_closes_the_step_and_says_so() -> None:
-    """Ctrl-C stops only a turn, so the step has `timeout` seconds; then it is closed, so its
+    """Ctrl-C stops only a reply, so the step has `timeout` seconds; then it is closed, so its
     provider stops what it runs."""
     model = Scripted([USAGE, text("x holds")], hang=True)
     with pytest.raises(Unchanged, match=r"no summary within 0\.05 seconds, so nothing changed") as raised:
@@ -429,7 +487,8 @@ async def test_compact_writes_the_new_conversation_and_queues_the_loop_and_trans
         {"type": "restarting", "rows": ["loop", "transcript"]},
     ]
     assert model.requests == [(asked(CONVERSATION), [PYTHON])]
-    assert FileTranscript(str(path)).messages == tuple(seeded(summary))
+    kept = FileTranscript(str(path)).messages
+    assert kept == tuple(seeded(summary, "", kept[1]["step"]))
     assert Path(f"{path}.bak").read_bytes() == old
     assert loader.batches == []  # queued, not run in the caller's task
     await _drain(jobs)
@@ -460,7 +519,33 @@ async def test_however_many_usage_parts_a_provider_sends_the_note_comes_right_af
         ),
         (lambda loader, path: path.write_text(json.dumps(CONVERSATION[0]) + "\n"), "nothing to compact"),
         (
-            lambda loader, path: path.write_text("".join(json.dumps(m) + "\n" for m in seeded("x"))),
+            lambda loader, path: path.write_text("".join(json.dumps(m) + "\n" for m in _seed("x"))),
+            "nothing to compact: nothing has been said since the last /compact",
+        ),
+        (
+            # a seed is known by its field: this one's wording is not what `seeded` writes
+            lambda loader, path: path.write_text(
+                "".join(
+                    json.dumps(m) + "\n"
+                    for m in [
+                        {"role": "user", "content": "(carrying on)", "at": AT, "seed": {"keep": "the API"}},
+                        {"role": "assistant", "content": "x holds 42"},
+                    ]
+                )
+            ),
+            "nothing to compact: nothing has been said since the last /compact",
+        ),
+        (
+            # a file from before the field: the seed has only its wording
+            lambda loader, path: path.write_text(
+                "".join(
+                    json.dumps(m) + "\n"
+                    for m in [
+                        {"role": "user", "content": LEGACY_SEEDED},
+                        {"role": "assistant", "content": "x holds 42"},
+                    ]
+                )
+            ),
             "nothing to compact: nothing has been said since the last /compact",
         ),
         (
@@ -483,10 +568,135 @@ async def test_compact_with_nothing_to_compact_says_so_and_asks_nothing(
 
 async def test_a_seed_with_a_message_after_it_compacts_again(tmp_path: Path) -> None:
     """Once something has been said since, the conversation is more than the summary."""
-    path = _session(tmp_path, [*seeded("x holds 42"), {"role": "user", "content": "and y?"}])
+    path = _session(tmp_path, [*_seed("x holds 42"), {"role": "user", "content": "and y?"}])
     said = await _compact(path, Scripted([text("x holds 42, y unset"), stop("end_turn")]))
     assert said[0] == {"type": "cleared", "compacted": True}
-    assert FileTranscript(str(path)).messages == tuple(seeded("x holds 42, y unset"))
+    kept = FileTranscript(str(path)).messages
+    assert kept == tuple(seeded("x holds 42, y unset", "", kept[1]["step"]))
+
+
+async def test_a_conversation_that_only_reads_like_a_seed_is_compacted(tmp_path: Path) -> None:
+    """Neither the field nor the wording: two messages that are a person's and the model's."""
+    path = _session(
+        tmp_path,
+        [
+            {"role": "user", "content": "carry on from the earlier one", "at": AT},
+            {"role": "assistant", "content": "x holds 42"},
+        ],
+    )
+    said = await _compact(path, Scripted([text("x holds 42"), stop("end_turn")]))
+    assert said[0] == {"type": "cleared", "compacted": True}
+
+
+def test_the_seed_says_when_it_began_and_what_to_keep_and_the_summary_carries_the_step() -> None:
+    step: StepRecord = {"at": AT, "first_chunk": 0.25, "took": 1.5, "model": "m-1"}
+    user, assistant = seeded("  x holds 42.  ", "  the API's endpoints  ", step)
+    assert (user["role"], user["at"], user["seed"]) == ("user", AT, {"keep": "the API's endpoints"})
+    assert (assistant["role"], assistant["content"], assistant["step"]) == ("assistant", "x holds 42.", step)
+    assert seeded("x", "", step)[0]["seed"] == {"keep": ""}  # none asked: the empty string, not absent
+
+
+_SETTINGS: Json = {"model": "work/opus", "provider": "claude-code", "max_tokens": 4096}
+_ANSWERED: list[tuple[float, Json]] = [
+    (0.25, text("x holds ")),
+    (0.5, text("42.")),
+    (0.75, {"type": "usage", "input_tokens": 1200, "output_tokens": 80, "cost_usd": 0.01, "model": "m-1"}),
+    (0.0, stop("end_turn")),
+]
+
+
+async def test_compact_keeps_what_the_person_asked_to_keep_and_records_the_summary_step(
+    tmp_path: Path,
+) -> None:
+    """The user entry says when the new conversation began and the text after `/compact`, as the
+    summary was asked to keep it; the summary carries its step: when its request was handed over,
+    the seconds to its first and last chunk, who answered, what it cost and how it was made."""
+    path = _session(tmp_path)
+    clock = Stepped()
+    model = Timed(clock, _ANSWERED, settings=_SETTINGS)
+    await _compact(path, model, "  the API's endpoints ", clock=clock.clock)
+    user, assistant = FileTranscript(str(path)).messages
+    assert user["at"] == AT and user["seed"] == {"keep": "the API's endpoints"}
+    assert assistant["content"] == "x holds 42."
+    assert assistant["step"] == {
+        "at": AT,
+        "first_chunk": 0.25,
+        "took": 1.5,
+        "model": "m-1",
+        "usage": {
+            "input_tokens": 1200,
+            "output_tokens": 80,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cost_usd": 0.01,
+        },
+        "settings": {"model": "work/opus", "provider": "claude-code", "max_tokens": 4096},
+    }
+
+
+async def test_the_summary_step_is_recorded_by_the_code_the_loop_records_the_same_step_with(
+    tmp_path: Path,
+) -> None:
+    """The same chunks, at the same times, from a model that wants its tools `listed`: the loop's
+    step and /compact's summary step have the same record, down to what the loop leaves out when
+    a model says nothing."""
+    for settings, mode in [(_SETTINGS, "listed"), (None, "fixed")]:
+        looped = Stepped()
+        transcript = MemoryTranscript()
+        tools = ToolBroker()
+
+        async def python(input: Json) -> Json:
+            return {"content": ""}
+
+        tools.register(PYTHON, python)
+        loop = LoopModel(
+            Timed(looped, _ANSWERED, settings=settings, tool_changes=mode),
+            tools,
+            transcript,
+            _Approved(),
+            clock=looped.clock,
+        )
+        assert [e["type"] async for e in loop.reply("find x")][-1] == "stop"
+        (answer,) = [m for m in transcript.messages if m["role"] == "assistant"]
+
+        path = _session(tmp_path)
+        compacting = Stepped()
+        await _compact(
+            path, Timed(compacting, _ANSWERED, settings=settings, tool_changes=mode), clock=compacting.clock
+        )
+        _, summary = FileTranscript(str(path)).messages
+        assert summary["step"] == answer["step"] and ("tool_changes" in summary["step"]) is (mode == "listed")
+        assert ("settings" in summary["step"]) is (settings is not None)
+
+
+@pytest.mark.parametrize(
+    ("then", "repeated"),
+    [
+        (_SETTINGS, False),  # the settings the seed recorded stand: the loop does not repeat them
+        ({**_SETTINGS, "model": "work/haiku"}, True),  # the model changed since: the loop records them
+    ],
+)
+async def test_the_loop_repeats_the_model_s_settings_after_a_compaction_only_when_they_changed(
+    tmp_path: Path, then: Json, repeated: bool
+) -> None:
+    """The summary is the new conversation's first step, so it records the settings (whatever the
+    old conversation recorded) and the loop's first step after it compares with those."""
+    path = _session(tmp_path)
+    clock = Stepped()
+    await _compact(path, Timed(clock, _ANSWERED, settings=_SETTINGS), clock=clock.clock)
+    tools = ToolBroker()
+
+    async def python(input: Json) -> Json:
+        return {"content": ""}
+
+    tools.register(PYTHON, python)
+    async with FileTranscript(str(path)) as transcript:
+        loop = LoopModel(
+            Timed(clock, _ANSWERED, settings=then), tools, transcript, _Approved(), clock=clock.clock
+        )
+        assert [e["type"] async for e in loop.reply("next")][-1] == "stop"
+        answer = transcript.messages[-1]
+    assert answer["role"] == "assistant" and ("settings" in answer["step"]) is repeated
 
 
 async def test_compact_without_a_summary_changes_nothing_and_counts_what_it_cost(tmp_path: Path) -> None:
@@ -553,6 +763,9 @@ async def test_the_conversation_row_registers_clear_and_compact_and_queues_resta
     assert spec["usage"] == "[WHAT TO KEEP]"
     said = await run("")
     assert said[-1] == {"type": "restarting", "rows": ["loop", "transcript"]}
+    user, summary = FileTranscript(str(path)).messages  # the row's own clock: the real one
+    assert user["seed"] == {"keep": ""} and user["at"] == summary["step"]["at"]
+    assert user["at"].endswith("Z") and summary["step"]["took"] >= 0
     assert loader.batches == []  # queued, not run in the command's task
     await _drain(jobs)
     assert loader.batches == [("loop", "transcript")]
@@ -642,3 +855,74 @@ async def test_clear_that_can_t_write_changes_nothing(
         assert jobs.empty() and path.read_bytes() == old
     finally:
         os.chmod(tmp_path, 0o700)
+
+
+class _Approved:
+    async def approve(self, question: Json) -> Answer:
+        return Answer.YES
+
+
+def _slow_disk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every write to a file takes its time, on the thread that makes it: when a reply has ended
+    the thread is still behind the loop, unless the reply waited for it."""
+    real = os.write
+
+    def slow(fd: int, data: bytes | memoryview) -> int:
+        time.sleep(0.05)
+        return real(fd, data)
+
+    monkeypatch.setattr(os, "write", slow)
+
+
+async def _replied(transcript: FileTranscript) -> None:
+    """The loop answers a message over `transcript`: a tool step, then the answer."""
+
+    async def python(input: Json) -> Json:
+        return {"content": "42"}
+
+    tools = ToolBroker()
+    tools.register(PYTHON, python)
+    scripted = Scripted(
+        [text("let me see"), {"type": "tool_call", "id": "c1", "name": "python", "input": {"code": "x"}}],
+        [text("x holds 42")],
+    )
+    loop = LoopModel(scripted, tools, transcript, _Approved(), clock=on("2026-10-07"))
+    assert [e["type"] async for e in loop.reply("find x")][-1] == "stop"
+
+
+def _entries(path: Path) -> list[Json]:
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+async def test_clear_after_a_reply_keeps_every_entry_of_it_in_the_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A command runs only once the reply before it has ended (the chat row reads its next line
+    then), and the loop has flushed the transcript by that time, though the row is still running:
+    /clear finds the whole reply in the file it keeps as the `.bak`, the last entry included, and
+    does not find the file empty."""
+    path = tmp_path / "transcript.jsonl"
+    _slow_disk(monkeypatch)
+    async with FileTranscript(str(path)) as transcript:
+        await _replied(transcript)
+        await _clear(Loader(str(path)))
+        appended = list(transcript.messages)
+    assert [m["role"] for m in appended] == ["tools", "user", "assistant", "tool", "assistant"]
+    assert _entries(Path(f"{path}.bak")) == appended
+    assert path.read_text() == ""
+
+
+async def test_compact_after_a_reply_summarises_every_entry_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "transcript.jsonl"
+    _slow_disk(monkeypatch)
+    model = Scripted([text("x holds 42"), stop("end_turn")])
+    async with FileTranscript(str(path)) as transcript:
+        await _replied(transcript)
+        await _compact(path, model)
+        appended = list(transcript.messages)
+    assert model.requests == [(asked(appended), [PYTHON])]  # the whole reply, its answer included
+    assert _entries(Path(f"{path}.bak")) == appended
+    kept = FileTranscript(str(path)).messages
+    assert kept == tuple(seeded("x holds 42", "", kept[1]["step"]))

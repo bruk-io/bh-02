@@ -35,7 +35,7 @@ __all__ = [
 class Usage:
     """A session's running totals of usage events (CONTRACTS.md: event); `cost_usd` is None
     until a provider reports a cost. `cached_tokens` is how many of `input_tokens` were read
-    from the provider's prompt cache. `uncounted` is how many turns ended before their provider
+    from the provider's prompt cache. `uncounted` is how many replies ended before their provider
     counted their output (a reply stopped mid-stream, its usage still `partial`), so
     `output_tokens` and `cost_usd` are then lower bounds, which the field says with a `+`."""
 
@@ -47,7 +47,7 @@ class Usage:
 
 
 def add_usage(total: Usage, event: Mapping[str, Any]) -> Usage:
-    """`total` with one usage event added: each event is one turn's usage, so they sum."""
+    """`total` with one usage event added: each event is one step's usage, so they sum."""
     cost = event.get("cost_usd")
     return Usage(
         total.input_tokens + int(event.get("input_tokens") or 0),
@@ -59,25 +59,25 @@ def add_usage(total: Usage, event: Mapping[str, Any]) -> Usage:
 
 
 def output_uncounted(total: Usage) -> Usage:
-    """`total` after a turn that ended with its usage still `partial`: its output not counted."""
+    """`total` after a reply that ended with its usage still `partial`: its output not counted."""
     return Usage(
         total.input_tokens, total.output_tokens, total.cost_usd, total.cached_tokens, total.uncounted + 1
     )
 
 
-# Entries that add to the usage totals: a turn's usage event, and the history file's own
+# Entries that add to the usage totals: a step's usage event, and the history file's own
 # `carried` entry (what the usage events it trimmed away added up to; see `history`).
 _USAGE_ENTRIES = frozenset({"usage", "carried"})
 
 
 def total_usage(entries: Iterable[Mapping[str, Any]]) -> Usage:
     """The totals of every usage event in `entries` (a session's history, say), counting each
-    turn that ended (`turn_end`) with its last usage event still `partial` as `uncounted`."""
+    reply that ended (`turn_end`) with its last usage event still `partial` as `uncounted`."""
     return functools.reduce(_add_entry, entries, (Usage(), False))[0]
 
 
 def _add_entry(state: tuple[Usage, bool], entry: Mapping[str, Any]) -> tuple[Usage, bool]:
-    """(totals, whether the turn's usage so far is `partial`) after one history entry."""
+    """(totals, whether the reply's usage so far is `partial`) after one history entry."""
     total, partial = state
     match entry.get("type"):
         case "usage":
@@ -91,7 +91,7 @@ def _add_entry(state: tuple[Usage, bool], entry: Mapping[str, Any]) -> tuple[Usa
 
 def usage_text(total: Usage) -> str:
     """The usage field: tokens in, how many of them came from the prompt cache (when any did),
-    tokens out, and the cost when there is one; the last two end in `+` once a stopped turn's
+    tokens out, and the cost when there is one; the last two end in `+` once a stopped reply's
     output went uncounted (they are then at least that)."""
     more = "+" if total.uncounted else ""
     parts = [f"{_tokens(total.input_tokens)} in", f"{_tokens(total.output_tokens)}{more} out"]

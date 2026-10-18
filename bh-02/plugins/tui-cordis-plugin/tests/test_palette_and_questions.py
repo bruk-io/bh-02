@@ -16,7 +16,7 @@ from textual.widgets import OptionList, Static
 
 from tui_cordis_plugin import BhApp, render, running
 from tui_cordis_plugin.messages import Asked
-from tui_cordis_plugin.widgets import ApprovalScreen, Composer, Transcript
+from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Composer
 
 _SIZE = (120, 36)
 
@@ -27,7 +27,7 @@ _SPECS: list[Mapping[str, Any]] = [
 
 
 def _said(app: BhApp) -> list[str]:
-    return [str(block.content) for block in app.query_one(Transcript).query(Static)]
+    return [str(block.content) for block in app.query_one(ChatView).query(Static)]
 
 
 async def _settle(pilot: Pilot[None], times: int = 3) -> None:
@@ -45,10 +45,10 @@ async def _armed(pilot: Pilot[None]) -> None:
     raise AssertionError("the approval modal never began answering keys")
 
 
-def _ask(app: BhApp, request: Mapping[str, Any]) -> asyncio.Future[bool]:
+def _ask(app: BhApp, question: Mapping[str, Any]) -> asyncio.Future[bool]:
     answer = app.bridge.question()
     assert answer is not None
-    app.post_message(Asked(request, answer))
+    app.post_message(Asked(question, answer))
     return answer
 
 
@@ -107,7 +107,7 @@ async def test_the_modal_shows_an_input_highlighted() -> None:
         assert isinstance(app.screen, ApprovalScreen)
         source = app.screen.query_one("#approval-source", Static).content
         assert isinstance(source, Content) and source.plain == code  # whole, not cut to a glance
-        assert source == render.code(code)  # highlighted as the transcript does, in theme tokens
+        assert source == render.code(code)  # highlighted as the chat view does, in theme tokens
         assert all(str(span.style).startswith(("$", "bold", "italic")) for span in source.spans)
         title = str(app.screen.query_one("#approval-title", Static).content)
         assert title.startswith("Run this python code (61 lines)?")
@@ -184,7 +184,7 @@ async def test_keys_typed_as_the_modal_comes_up_answer_nothing_and_reach_nothing
         assert app.query_one(Composer).text == "Run"  # what was typed before it, and nothing after
 
 
-async def test_ctrl_c_stops_the_turn_while_the_modal_is_not_answering_yet() -> None:
+async def test_ctrl_c_stops_the_reply_while_the_modal_is_not_answering_yet() -> None:
     app = BhApp(grace=2.0)
     async with app.run_test(size=_SIZE) as pilot:
         shown = _ask(app, {"name": "python", "input": {"code": "1"}})
@@ -218,7 +218,7 @@ async def test_questions_are_asked_one_at_a_time_in_order() -> None:
         await pilot.press("y")
         assert await asyncio.wait_for(first, 1) is True
         await _settle(pilot)
-        assert isinstance(app.screen, ApprovalScreen) and app.screen.request["input"] == {"code": "2"}
+        assert isinstance(app.screen, ApprovalScreen) and app.screen.question["input"] == {"code": "2"}
         await _armed(pilot)
         await pilot.press("n")
         assert await asyncio.wait_for(second, 1) is False
@@ -235,15 +235,15 @@ async def test_a_withdrawn_question_comes_down_even_when_it_is_not_on_top() -> N
         app.push_screen(Screen())  # something over the modal
         await _settle(pilot)
         assert not isinstance(app.screen, ApprovalScreen)
-        queued.cancel()  # its turn was interrupted: dropped before it is shown
+        queued.cancel()  # its reply was interrupted: dropped before it is shown
         shown.cancel()
         await _settle(pilot)
         assert not any(isinstance(s, ApprovalScreen) for s in app.screen_stack)
         assert not app.asking and len(app.screen_stack) == 1
 
 
-async def test_ctrl_c_with_a_question_up_stops_the_turn_which_withdraws_it() -> None:
-    """As `chat:converse` races a turn against `interrupted()`: the turn is cancelled while it
+async def test_ctrl_c_with_a_question_up_stops_the_reply_which_withdraws_it() -> None:
+    """As `chat:converse` races a reply against `interrupted()`: the reply is cancelled while it
     waits on the answer, so it never carries on with one, and the modal comes down."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
@@ -253,33 +253,33 @@ async def test_ctrl_c_with_a_question_up_stops_the_turn_which_withdraws_it() -> 
             answer = _ask(app, {"name": "python", "input": {"code": "1"}})
             answered.append(await answer)
 
-        async def turn() -> None:
+        async def reply() -> None:
             doing = asyncio.ensure_future(work())
             stop = asyncio.ensure_future(app.bridge.interrupted())
             await asyncio.wait({doing, stop}, return_when=asyncio.FIRST_COMPLETED)
             doing.cancel()
 
-        running_turn = asyncio.ensure_future(turn())
+        running_reply = asyncio.ensure_future(reply())
         await _settle(pilot)
         assert isinstance(app.screen, ApprovalScreen)
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(running_turn, 1)
+        await asyncio.wait_for(running_reply, 1)
         await _settle(pilot)
-        assert answered == []  # cancelled, not answered: the turn did not carry on
+        assert answered == []  # cancelled, not answered: the reply did not carry on
         assert not app.asking and not isinstance(app.screen, ApprovalScreen)
         assert not any(text.startswith("Nothing is running") for text in _said(app))
 
 
-async def test_ctrl_c_answers_no_to_questions_no_turn_withdraws() -> None:
+async def test_ctrl_c_answers_no_to_questions_no_reply_withdraws() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
-        turn = asyncio.ensure_future(app.bridge.interrupted())  # a turn that asks nothing itself
+        reply_task = asyncio.ensure_future(app.bridge.interrupted())  # a reply that asks nothing itself
         shown = _ask(app, {"name": "python", "input": {"code": "1"}})
         queued = _ask(app, {"name": "python", "input": {"code": "2"}})
         await _settle(pilot)
         assert isinstance(app.screen, ApprovalScreen)
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(turn, 1)
+        await asyncio.wait_for(reply_task, 1)
         assert await asyncio.wait_for(shown, 2) is False and await asyncio.wait_for(queued, 2) is False
         await _settle(pilot)
         assert not app.asking and not isinstance(app.screen, ApprovalScreen)
@@ -305,23 +305,23 @@ async def test_ctrl_c_refuses_only_the_stopped_reply_s_questions_and_a_backgroun
             }
             answered.append(await _ask(app, child))
 
-        async def turn() -> None:
+        async def reply() -> None:
             doing = asyncio.ensure_future(foreground_child())
             stop = asyncio.ensure_future(app.bridge.interrupted())
             await asyncio.wait({doing, stop}, return_when=asyncio.FIRST_COMPLETED)
             doing.cancel()
 
-        running_turn = asyncio.ensure_future(turn())
+        running_reply = asyncio.ensure_future(reply())
         parent = _ask(app, {"name": "python", "input": {"code": "2"}})
         await _settle(pilot)
-        assert isinstance(app.screen, ApprovalScreen) and app.screen.request["agent"]["name"] == "general-2"
+        assert isinstance(app.screen, ApprovalScreen) and app.screen.question["agent"]["name"] == "general-2"
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(running_turn, 1)
+        await asyncio.wait_for(running_reply, 1)
         assert await asyncio.wait_for(parent, 2) is False  # the parent's own: no
         await _settle(pilot, 6)
         assert answered == []  # the foreground child's: withdrawn, not answered
         assert not background.done()  # the background child's: still open, still up
-        assert isinstance(app.screen, ApprovalScreen) and app.screen.request["agent"]["name"] == "general-2"
+        assert isinstance(app.screen, ApprovalScreen) and app.screen.question["agent"]["name"] == "general-2"
         await _armed(pilot)
         await pilot.press("y")
         assert await asyncio.wait_for(background, 2) is True
@@ -338,13 +338,13 @@ async def test_ctrl_c_with_only_questions_open_answers_them_no_at_once() -> None
         assert not isinstance(app.screen, ApprovalScreen)
 
 
-async def test_ctrl_c_after_a_line_is_sent_is_held_for_its_turn() -> None:
+async def test_ctrl_c_after_a_line_is_sent_is_held_for_its_reply() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         reading = asyncio.ensure_future(app.bridge.line())
         await pilot.press(*"hello", "enter")
         assert await asyncio.wait_for(reading, 1) == "hello"
-        await pilot.press("ctrl+c")  # before the turn listens
+        await pilot.press("ctrl+c")  # before the reply listens
         assert not any(text.startswith("Nothing is running") for text in _said(app))
         await asyncio.wait_for(app.bridge.interrupted(), 1)
 

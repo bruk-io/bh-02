@@ -10,7 +10,7 @@ reads `local.env`.
 The app owns the terminal, so the command gets none of it: no input, its output (stdout and
 stderr as one stream, as a terminal shows them) captured, and a session of its own, so the
 terminal's Ctrl-C never reaches it and a program that opens /dev/tty fails rather than drawing
-over the app. A command is not a turn, and Ctrl-C does not stop it (CONTRACTS.md: input), so it
+over the app. A command is not a reply, and Ctrl-C does not stop it (CONTRACTS.md: input), so it
 has a `timeout`, at which its process group is ended; so is a program it left running in the
 background that still holds its output, once it has exited, since nobody would read what that
 prints, and so is the command when it is cancelled (the person left bh-02). What it printed is
@@ -20,7 +20,7 @@ reaches the terminal that a terminal acts on (an escape, a control character).
 Its answer (CONTRACTS.md: commands) is a `note` for the person, what it printed and how it
 ended, and a `for_model` event, the same framed for the model, which the `commands` value
 holds and `chat:converse` puts in front of the person's next message: the model reads it with
-that, never during a turn.
+that, never during a reply.
 """
 
 import asyncio

@@ -1,13 +1,13 @@
 """The Textual app, and `running`, which runs it on the event loop already running cordis.
 
-Layout, in bh-01's words: the conversation (Transcript over Composer), the whole width, a line
+Layout, in bh-01's words: the conversation (ChatView over Composer), the whole width, a line
 naming the everyday keys (Keys) under the composer, and a StatusBar along the bottom. The app owns
 the screen: its input, output and frame post it messages (`messages.py`) and it draws them.
 
 Leaving: Ctrl-Q, or `/exit` or `/quit` in the composer. The terminal going away (its window
 closed: SIGHUP, or, with no controlling terminal, stdin at end of file) leaves the same way, so
 the composition unwinds rather than the process dying where it stands or spinning on a dead
-fd. Ctrl-C interrupts the running turn and never quits; with no turn running it says how to
+fd. Ctrl-C interrupts the running reply and never quits; with no reply running it says how to
 leave, and while a command runs (a `!` one may take minutes) that Ctrl-C doesn't stop it. Esc
 stops a running reply as Ctrl-C does, once nothing nearer wants it: the composer's list of
 commands (Esc closes it), a question (Esc declines it) and the palette (Esc closes it); with no
@@ -17,21 +17,21 @@ Copying goes to the terminal's clipboard through Textual (`copy_to_clipboard`, a
 sequence), and every way of copying says how much in one line: Ctrl-C with text selected that
 has not been copied yet (it stops nothing then; a selection already copied, as a mouse selection
 is when it ends, leaves Ctrl-C to stop the reply), Cmd-C (Textual's own `super+c`), a mouse
-selection finished in the transcript (copied at once), and Ctrl-T for the newest reply. A click
-or a selection in the transcript gives the focus back to the composer as the mouse lets go, so
+selection finished in the chat view (copied at once), and Ctrl-T for the newest reply. A click
+or a selection in the chat view gives the focus back to the composer as the mouse lets go, so
 typing carries on (`_return_focus`).
 
 While a reply runs or a command does, a line above the composer says for how long (`Working`,
-redrawn by a timer that starts and stops with them): a reply is what streams (`TurnStarted`,
-`TurnEnded`), a command is a line the bridge says is being handled (`Handling`).
+redrawn by a timer that starts and stops with them): a reply is what streams (`ReplyStarted`,
+`ReplyEnded`), a command is a line the bridge says is being handled (`Handling`).
 
-Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
+Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted reply
 withdraws its own (shown or queued), and Ctrl-C with one up answers no to every open question
 but a sub-agent's: the reply it stops withdraws its foreground child's, and a background
 child's stays queued.
 
 A session's history is drawn again when the app starts (`replay`, what `history.replayable`
-chose from the file), and everything the transcript shows after that is appended to `history`,
+chose from the file), and everything the chat view shows after that is appended to `history`,
 so a resumed session shows what was said.
 """
 
@@ -64,9 +64,9 @@ from tui_cordis_plugin.messages import (
     FrameChanged,
     Handling,
     Noted,
+    ReplyEnded,
+    ReplyStarted,
     Shown,
-    TurnEnded,
-    TurnStarted,
     Withdrawn,
 )
 from tui_cordis_plugin.ports import AppCrashed, Bridge, Frame
@@ -74,21 +74,21 @@ from tui_cordis_plugin.widgets import (
     GRACE,
     WORKING_EVERY,
     ApprovalScreen,
+    ChatView,
     CommandsProvider,
     Completions,
     Composer,
     Keys,
     StatusBar,
-    Transcript,
     Working,
 )
 
 __all__ = ["BhApp", "running"]
 
 EXIT_COMMANDS = frozenset({"/exit", "/quit"})
-_HOW_TO_LEAVE = "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running turn; Ctrl-P lists commands."
+_HOW_TO_LEAVE = "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running reply; Ctrl-P lists commands."
 _COMMAND_RUNS = (
-    "A command is running, and Ctrl-C stops only a turn: a `!` command or /compact runs until it "
+    "A command is running, and Ctrl-C stops only a reply: a `!` command or /compact runs until it "
     "ends or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
 )
 
@@ -102,10 +102,10 @@ _TOLD_FOR = 3.0
 _NOTHING_TO_COPY = "Nothing to copy: no reply yet"
 # A selection of fewer characters than this is not copied when the mouse ends it.
 _COPY_ON_SELECT = 2
-# How long an interrupted turn has to withdraw its own questions before they are answered no.
+# How long an interrupted reply has to withdraw its own questions before they are answered no.
 _WITHDRAW_GRACE = 0.5
 # How long a Ctrl-C held for the line being handled may go unheard before the app says a
-# command is running: a turn that is starting hears it within a tick.
+# command is running: a reply that is starting hears it within a tick.
 _UNHEARD_GRACE = 0.3
 # How often the terminal is checked for having gone away, and how many checks in a row must
 # say so: a key arriving between one check's two reads looks like a hangup once, never twice.
@@ -116,7 +116,7 @@ _HANGUP_CHECKS = 2
 class BhApp(App[None]):
     """bh-02's screen. `bridge` is what its input, output and frame share with it; `frame` is
     what rows push into; `replay` is drawn when it starts; `history`, when given, is appended
-    to as the transcript draws; `grace` is how long a question just put up ignores y, n and
+    to as the chat view draws; `grace` is how long a question just put up ignores y, n and
     Escape (keys typed ahead); `clock` and `working_every` are the time and the seconds between
     redraws of the line that says how long a reply has run (`Working`)."""
 
@@ -170,7 +170,7 @@ class BhApp(App[None]):
         return dict(theme.VARIABLES)
 
     def compose(self) -> ComposeResult:
-        yield Transcript(id="transcript")
+        yield ChatView(id="chat-view")
         yield Working(id="working", clock=self._clock, every=self._working_every)
         listed = Completions(id="completions")
         yield listed
@@ -181,11 +181,11 @@ class BhApp(App[None]):
     def on_mount(self) -> None:
         self.query_one(Composer).focus()
         if self.replay is not None:
-            self.query_one(Transcript).replay(self.replay)
+            self.query_one(ChatView).replay(self.replay)
         self._check_history()  # a history that couldn't be read says so
         if self.history is not None and self.history.warning is not None:
-            self.query_one(Transcript).note(self.history.warning, "failure")  # nor trimmed
-        self.query_one(Transcript).note(_HOW_TO_LEAVE)
+            self.query_one(ChatView).note(self.history.warning, "failure")  # nor trimmed
+        self.query_one(ChatView).note(_HOW_TO_LEAVE)
         stdin = sys.__stdin__
         if not self.is_headless and stdin is not None and stdin.isatty():
             self.set_interval(_HANGUP_EVERY, functools.partial(self._watch_terminal, stdin.fileno()))
@@ -232,9 +232,9 @@ class BhApp(App[None]):
     def on_composer_paged(self, message: Composer.Paged) -> None:
         """PageUp or PageDown in the composer: the conversation scrolls a page, at once as the
         composer's own cursor does, and the focus stays where it is. Scrolling up releases the
-        transcript's anchor, so it stops following new output; scrolling back to its end anchors
+        chat view's anchor, so it stops following new output; scrolling back to its end anchors
         it again: what the mouse wheel does, since both go through `scroll_to`."""
-        self.query_one(Transcript).page(up=message.up)
+        self.query_one(ChatView).page(up=message.up)
 
     def palette_entries(self) -> Sequence[PaletteEntry]:
         """What the command palette lists: the commands rows offer now, `/help`, `/exit`."""
@@ -294,15 +294,15 @@ class BhApp(App[None]):
             super().action_command_palette()
 
     def on_shown(self, message: Shown) -> None:
-        """Draw a batch of a turn's events (each run of streamed text joined first, so it is
+        """Draw a batch of a reply's events (each run of streamed text joined first, so it is
         drawn and kept once), then say it is drawn, so the output sends the next. A `cleared`
         drops the conversation so far, but not a line typed after `/clear` and not read yet:
         it is drawn again, since it is sent in the new conversation (one typed during this
         reply is drawn once it ends, as always)."""
         try:
-            transcript = self.query_one(Transcript)
+            chat_view = self.query_one(ChatView)
             for event in merged(message.events):
-                transcript.event(event)
+                chat_view.event(event)
                 self._record(event)
                 if event.get("type") == "cleared":
                     # the newest kept lines are the ones held for this reply's end: drawn then
@@ -314,15 +314,15 @@ class BhApp(App[None]):
                 message.drawn.set_result(None)
 
     def _draw_typed(self, line: str) -> None:
-        self.query_one(Transcript).user(line)
+        self.query_one(ChatView).user(line)
         self._record({"type": "user", "text": line})
 
-    def on_turn_started(self, message: TurnStarted) -> None:
+    def on_reply_started(self, message: ReplyStarted) -> None:
         self._replying += 1
         self._follow_working()
 
-    def on_turn_ended(self, message: TurnEnded) -> None:
-        self.query_one(Transcript).end_turn()
+    def on_reply_ended(self, message: ReplyEnded) -> None:
+        self.query_one(ChatView).end_reply()
         self._record({"type": "turn_end"})
         self._replying = max(0, self._replying - 1)
         self._follow_working()
@@ -347,7 +347,7 @@ class BhApp(App[None]):
             working.end()
 
     def on_noted(self, message: Noted) -> None:
-        self.query_one(Transcript).note(message.text, message.kind)
+        self.query_one(ChatView).note(message.text, message.kind)
         self._record({"type": "noted", "text": message.text, "kind": message.kind})
 
     def _record(self, entry: Mapping[str, Any]) -> None:
@@ -360,7 +360,7 @@ class BhApp(App[None]):
     def _check_history(self) -> None:
         """A history that failed says why, once, and is not used again."""
         if self.history is not None and self.history.failed is not None:
-            self.query_one(Transcript).note(self.history.failed, "failure")
+            self.query_one(ChatView).note(self.history.failed, "failure")
             self.history = None
 
     def on_frame_changed(self, message: FrameChanged) -> None:
@@ -373,7 +373,7 @@ class BhApp(App[None]):
 
     def on_asked(self, message: Asked) -> None:
         """Queue a question; the answer resolves the asker's future. An asker that stops
-        waiting (its turn was interrupted) withdraws it."""
+        waiting (its reply was interrupted) withdraws it."""
         answer = message.answer
         if answer.done():
             return
@@ -383,16 +383,16 @@ class BhApp(App[None]):
                 self.post_message(Withdrawn(answer))
 
         answer.add_done_callback(withdrawn)
-        self._queued.append((message.request, answer))
+        self._queued.append((message.question, answer))
         self._ask_next()
 
     def _ask_next(self) -> None:
         """Put the oldest question still waiting in a modal, unless one is up."""
         while self._asking is None and self._queued:
-            request, answer = self._queued.popleft()
+            question, answer = self._queued.popleft()
             if answer.done():
                 continue
-            screen = ApprovalScreen(request, grace=self.grace)
+            screen = ApprovalScreen(question, grace=self.grace)
             self._asking = (screen, answer)
             self.query_one(Completions).close()
             self.push_screen(screen, self._answerer(answer))
@@ -425,14 +425,14 @@ class BhApp(App[None]):
 
     def action_interrupt(self) -> None:
         """Ctrl-C: copy the text that is selected and not copied yet, and stop nothing
-        (`_copy_selection`); otherwise stop the running turn (`_stop`)."""
+        (`_copy_selection`); otherwise stop the running reply (`_stop`)."""
         if not self._copy_selection():
             self._stop()
 
     def _copy_selection(self) -> bool:
         """Copy the text selected now, clear the selection, and say whether it did. It is the
         composer's own selection when the composer has the focus and some, else the screen's (the
-        transcript's, which Textual keeps), but not one that was copied already: a mouse selection
+        chat view's, which Textual keeps), but not one that was copied already: a mouse selection
         is copied when it ends and stays shown, so the Ctrl-C that follows stops the reply (which
         comes first) and never copies it a second time. Never while a question is up: Ctrl-C then answers
         it no, as ever."""
@@ -469,41 +469,41 @@ class BhApp(App[None]):
         """The mouse let go (the screen says so at every mouse up, a click or a drag ending
         anywhere): what is selected is copied at once. A click, or one character, copies nothing
         and says nothing. The selection stays shown, remembered as copied (`copy_to_clipboard`),
-        so a Ctrl-C after it stops the reply. Then the focus the mouse took for the transcript
+        so a Ctrl-C after it stops the reply. Then the focus the mouse took for the chat view
         goes back to the composer (`_return_focus`), so typing carries on."""
         if len(text := self.screen.get_selected_text() or "") >= _COPY_ON_SELECT:
             self.copy_to_clipboard(text)
         self._return_focus()
 
     def _return_focus(self) -> None:
-        """The focus goes back to the composer when the Transcript has it. A click or a drag in
-        the transcript focuses it (Textual focuses what is clicked), and
-        the person who clicked or selected goes on typing. Only the Transcript itself: a clipped
+        """The focus goes back to the composer when the ChatView has it. A click or a drag in
+        the chat view focuses it (Textual focuses what is clicked), and
+        the person who clicked or selected goes on typing. Only the ChatView itself: a clipped
         line or a thinking title the person clicked keeps the focus (it is a control they
         chose), and so does a question's modal. The selection stays, since the screen holds it
-        and not the focus. Tab still takes the focus to the transcript and back, and PageUp and
+        and not the focus. Tab still takes the focus to the chat view and back, and PageUp and
         PageDown scroll it from the composer."""
-        if self.focused is self.query_one(Transcript):
+        if self.focused is self.query_one(ChatView):
             self.query_one(Composer).focus()
 
     def action_copy_reply(self) -> None:
-        """Ctrl-T: copy the newest reply's text whole (`Transcript.reply`), or say there is none."""
-        if (text := self.query_one(Transcript).reply()) is None:
+        """Ctrl-T: copy the newest reply's text whole (`ChatView.reply`), or say there is none."""
+        if (text := self.query_one(ChatView).reply()) is None:
             self.notify(_NOTHING_TO_COPY, timeout=_TOLD_FOR, markup=False)
         else:
             self.copy_to_clipboard(text)
 
     def _stop(self) -> None:
-        """Stop the running turn and take its questions down as a no; with nothing
+        """Stop the running reply and take its questions down as a no; with nothing
         running, say how to leave; while a command runs, say that Ctrl-C doesn't stop it. A
         sub-agent's question is never answered here: the stopped reply withdraws its foreground
         child's, and a background child's stays queued (the reply it stops is not its own).
 
-        A turn that hears Ctrl-C is cancelled, which cancels the questions it is waiting on,
-        and those come down as withdrawn: answering them no first would let the turn carry on
+        A reply that hears Ctrl-C is cancelled, which cancels the questions it is waiting on,
+        and those come down as withdrawn: answering them no first would let the reply carry on
         with the answer before it hears the interrupt. Any question still open a moment later
-        (asked from outside a turn) is answered no; one with no turn to stop, at once. A Ctrl-C
-        the bridge holds for the line being handled is a turn's that is starting, which hears it
+        (asked from outside a reply) is answered no; one with no reply to stop, at once. A Ctrl-C
+        the bridge holds for the line being handled is a reply's that is starting, which hears it
         at once, or a command's, which never does: still held a moment later, it is the second.
         """
         questions = self._open_questions()
@@ -513,7 +513,7 @@ class BhApp(App[None]):
         elif questions:
             self._decline(questions)
         elif not stopped:
-            self.query_one(Transcript).note(f"Nothing is running. {_HOW_TO_LEAVE}")
+            self.query_one(ChatView).note(f"Nothing is running. {_HOW_TO_LEAVE}")
         elif self.bridge.interrupt_held:
             self.set_timer(_UNHEARD_GRACE, self._unheard)
 
@@ -522,23 +522,23 @@ class BhApp(App[None]):
         reply running it does nothing, and says nothing: Esc is pressed out of habit, and the
         composer is not its business. It reaches here only when the list of commands, a question
         and the palette have passed on it."""
-        if self.bridge.turn_running:
+        if self.bridge.reply_running:
             self._stop()
 
     def _unheard(self) -> None:
-        """A Ctrl-C held for the line being handled went unheard: a command is running (no turn
+        """A Ctrl-C held for the line being handled went unheard: a command is running (no reply
         took it), which Ctrl-C does not stop; say so, and how to leave."""
-        if self.bridge.interrupt_held and not self.bridge.turn_running and not self.bridge.ended:
-            self.query_one(Transcript).note(_COMMAND_RUNS)
+        if self.bridge.interrupt_held and not self.bridge.reply_running and not self.bridge.ended:
+            self.query_one(ChatView).note(_COMMAND_RUNS)
 
     def _open_questions(self) -> list[asyncio.Future[bool]]:
         """Every question not yet answered that Ctrl-C answers no: the one up, then the queued
         ones, but a sub-agent's."""
-        shown = [(self._asking[0].request, self._asking[1])] if self._asking is not None else []
+        shown = [(self._asking[0].question, self._asking[1])] if self._asking is not None else []
         return [
             answer
-            for request, answer in [*shown, *self._queued]
-            if not answer.done() and not render.asked_by_a_sub_agent(request)
+            for question, answer in [*shown, *self._queued]
+            if not answer.done() and not render.asked_by_a_sub_agent(question)
         ]
 
     def _decline(self, answers: Sequence[asyncio.Future[bool]]) -> None:

@@ -20,7 +20,7 @@ from typing import TextIO
 
 import click
 
-from bh_02 import sessions, watching
+from bh_02 import sessions, viewing, watching
 from bh_02.bootstrap import (
     CREDENTIAL_FILE,
     CompositionError,
@@ -109,7 +109,7 @@ def main(
         sys.exit(1)
     # the status bar shows the session's id from here, marked as resumed on a resume
     listing = sessions.Listing(str(sessions.state_root()), session.id, resume is not None)
-    code, started = _run([*layers(), session.layer, *patches], trace, listing)
+    code, started = _run([*layers(), session.layer, *patches], trace, listing, session.row_log)
     if not started and resume is None:
         sessions.discard(session)  # a run that never came up made no session worth listing
     else:
@@ -208,6 +208,34 @@ def watch_command(session: str, agent: str, once: bool) -> None:
         click.echo(err=True)
 
 
+@main.command("trajectory")
+@click.argument("session_id", metavar="[ID]", required=False)
+@click.option(
+    "--follow", "-f", is_flag=True, help="Keep reading the files and print what is new, until Ctrl-C."
+)
+def trajectory_command(session_id: str | None, follow: bool) -> None:
+    """Print a session laid out in time, read-only: each reply, its steps (model, time to first
+    chunk, generation time, speed, usage, cost), their calls (answer, wait, run time), the
+    sub-agents they started and the rows that reloaded, with times in your local time. ID is the
+    session as `--resume` takes it (its id, the start of it or its last part; `bh-02 sessions` lists
+    them), the newest in this directory when left out. Nothing is written, and the files are read
+    through no link."""
+    root = sessions.state_root()
+    found = sessions.chosen(
+        sessions.find(root, str(Path.cwd()), session_id or None), session_id or "", "show"
+    )
+    if isinstance(found, str):
+        raise click.UsageError(found)
+    try:
+        for line in viewing.shown(root, found.dir.name, follow=follow):
+            click.echo(line)
+    except watching.Refused as error:
+        click.echo(f"error: {error.message}", err=True)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        click.echo(err=True)
+
+
 def _session(
     resume: str | None, *, model: str | None, no_jail: bool, patches: Sequence[Path]
 ) -> sessions.Session:
@@ -216,19 +244,9 @@ def _session(
     if resume is None:
         names = [patch.name for patch in patches]
         return sessions.create(root, cwd, model=model, no_jail=no_jail, patches=names)
-    candidates = sessions.find(root, cwd, resume or None)
-    if not candidates and not resume:
-        raise click.UsageError("no sessions in this directory yet; run bh-02 to start one")
-    if not candidates:
-        raise click.UsageError(f"no session {resume!r} in this directory; `bh-02 sessions` lists them")
-    if len(candidates) > 1:
-        ids = ", ".join(s.id for s in candidates)
-        raise click.UsageError(
-            f"{resume!r} matches {len(candidates)} sessions' ids ({ids}); give more of one"
-        )
-    (found,) = candidates
-    if isinstance(found, sessions.Broken):
-        raise click.UsageError(f"can't resume {found.id}: {found.message}")
+    found = sessions.chosen(sessions.find(root, cwd, resume or None), resume, "resume")
+    if isinstance(found, str):
+        raise click.UsageError(found)
     read_layers([found.layer])  # a hand-edited session.toml: one line, before /model rewrites it
     if no_jail:
         raise click.UsageError("a resumed session keeps the jail it started with")
@@ -241,9 +259,10 @@ def _run(
     layers: Iterable[str | Path | Traversable],
     trace: Path | None,
     listing: sessions.Listing,
+    row_log: Path,
 ) -> tuple[int, bool]:
     """Run the composition; return the exit code, and whether it came up at all. Reports
-    kept during the run print after it."""
+    kept during the run print after it. `row_log` is the file the session's row reloads go to."""
     reports: list[str] = []
     with contextlib.ExitStack() as stack:
         traced = stack.enter_context(trace.open("a")) if trace is not None else None
@@ -255,7 +274,7 @@ def _run(
             if reported is not None:
                 reported(line)
 
-        code, started = _launch(layers, listen, report, listing)
+        code, started = _launch(layers, listen, report, listing, row_log)
     for line in reports:
         click.echo(f"error: {line}", err=True)
     return code, started
@@ -266,6 +285,7 @@ def _launch(
     trace: Callable[[str], None] | None,
     report: Callable[[str], None],
     listing: sessions.Listing,
+    row_log: Path,
 ) -> tuple[int, bool]:
     """Run to the end; return the exit code and whether the composition came up. A failure
     the person should see is printed (the terminal is theirs again by then) and becomes exit
@@ -293,6 +313,7 @@ def _launch(
                 layers,
                 trace=trace,
                 report=report,
+                row_log=row_log,
                 session=listing,
                 credentials=credentials,
                 secrets=secrets,

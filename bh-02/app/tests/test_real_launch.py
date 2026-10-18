@@ -234,7 +234,7 @@ def test_a_message_gets_its_reply_ctrl_c_only_explains_and_ctrl_q_leaves(launch:
     app.wait_for("jail: unjailed", after=0)  # the status row pushed into the status bar
     app.type("hello there")
     replied = app.wait_for("echo: HELLO THERE", after=ready)
-    app.press(b"\x03")  # Ctrl-C with no turn running: a note, not an exit
+    app.press(b"\x03")  # Ctrl-C with no reply running: a note, not an exit
     app.wait_for("Nothing is running.", after=replied)
     assert app.process.poll() is None
     app.press(b"\x11")  # Ctrl-Q
@@ -282,7 +282,7 @@ def test_ctrl_c_says_a_bang_command_runs_on_and_ctrl_q_leaves_at_once_ending_it(
         app.settle(0.1)
     shell = int(pid.read_text())
     app.press(b"\x03")
-    app.wait_for("A command is running, and Ctrl-C stops only a turn", 10, after=ready)
+    app.wait_for("A command is running, and Ctrl-C stops only a reply", 10, after=ready)
     assert _alive(shell)  # Ctrl-C did not stop it
     left = time.monotonic()
     app.press(b"\x11")
@@ -423,7 +423,7 @@ def test_an_input_asks_in_a_modal_and_its_output_comes_back(launch: Launch) -> N
     asked = app.wait_for("Run this python code (1 line)?", after=answered)
     app.answer(b"y")
     app.wait_for("⏺ python", after=asked)
-    app.press(b"\x03")  # Ctrl-C while the input runs: the turn stops, the app stays
+    app.press(b"\x03")  # Ctrl-C while the input runs: the reply stops, the app stays
     app.wait_for("stopped: interrupted", 10, after=asked)
     app.press(b"\x11")
     assert app.exit_code() == 0
@@ -432,7 +432,7 @@ def test_an_input_asks_in_a_modal_and_its_output_comes_back(launch: Launch) -> N
 def test_a_sub_agent_s_question_is_labelled_and_its_report_comes_back(launch: Launch, tmp_path: Path) -> None:
     """The `agents` fake (`delegating_provider`) hands each message to a sub-agent (`agent`), which
     runs a python input and reports what it printed: unjailed, the person is asked about the call
-    and then about the child's input, labelled with its name and type; the parent's turn reads the
+    and then about the child's input, labelled with its name and type; the parent's next step reads the
     report. The child's rows never show on the screen, and `--trace` keeps them."""
     trace = tmp_path / "trace.txt"
     app = launch("agents", "--trace", str(trace))
@@ -452,6 +452,10 @@ def test_a_sub_agent_s_question_is_labelled_and_its_report_comes_back(launch: La
     assert app.exit_code() == 0
     traced = trace.read_text()
     assert "agents/general-1/loop" in traced and "agents/general-1/python" in traced
+    # the session keeps the child's rows too, in its own file, for `bh-02 trajectory`
+    (session,) = (tmp_path / "state" / "bh-02" / "sessions").iterdir()
+    kept = [json.loads(line) for line in (session / "rows.jsonl").read_text().splitlines()]
+    assert {"agents/general-1/loop", "agents/general-1/python"} <= {record["row"] for record in kept}
 
 
 def test_an_unjailed_input_runs_on_a_yes_and_not_at_all_on_a_no(launch: Launch, tmp_path: Path) -> None:
@@ -597,15 +601,15 @@ def test_a_patch_that_cannot_be_read_is_one_line_not_a_traceback(launch: Launch,
     assert "Traceback" not in app.text()
 
 
-def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tmp_path: Path) -> None:
-    """Ctrl-C while an input waits for approval: the modal comes down as a no, the turn stops, the
-    transcript tells the model the input never ran, and the next turn runs as usual. (The Ctrl-C
-    held between a line and its turn is a race a pty cannot aim at; the bridge's and Pilot tests
+def test_ctrl_c_with_the_modal_up_declines_and_stops_the_reply(launch: Launch, tmp_path: Path) -> None:
+    """Ctrl-C while an input waits for approval: the modal comes down as a no, the reply stops, the
+    transcript tells the model the input never ran, and the next reply runs as usual. (The Ctrl-C
+    held between a line and its reply is a race a pty cannot aim at; the bridge's and Pilot tests
     pin it.)"""
     app = launch("inputs")
     ready = app.wait_for(_READY, 60)
     app.type("import time; time.sleep(30)")
-    asked = app.wait_for("Ctrl-C  stop the turn", 10, after=ready)
+    asked = app.wait_for("Ctrl-C  stop the reply", 10, after=ready)
     app.press(b"\x03")
     stopped = app.wait_for("stopped: interrupted", 10, after=asked)
     assert "Nothing is running." not in app.text()[ready:]
@@ -619,7 +623,7 @@ def test_ctrl_c_with_the_modal_up_declines_and_stops_the_turn(launch: Launch, tm
     results = [
         m["content"] for m in map(json.loads, transcript.read_text().splitlines()) if m["role"] == "tool"
     ]
-    assert results[0].startswith("not run: the person stopped the turn before this call started")
+    assert results[0].startswith("not run: the person stopped the reply before this call started")
     # the first input's result: the note on bh-02's other tools (which tools they are is the
     # python plugin's tests' to pin, not this one's), then what the input printed
     assert results[1].endswith("; help(tools.NAME) says what one takes)\n42"), results[1][-300:]
@@ -649,7 +653,7 @@ def test_ctrl_c_stops_a_reply_mid_stream_whether_it_comes_paced_or_all_at_once(l
     stopped = app.wait_for("stopped: interrupted", 10, after=begun)
     assert "line 99999 of the" not in app.text()
     assert "Nothing is running." not in app.text()[ready:]
-    app.type("tour")  # and the next turn streams as usual
+    app.type("tour")  # and the next reply streams as usual
     app.wait_for("stopped: max_tokens", 10, after=stopped)
     app.press(b"\x11")
     assert app.exit_code() == 0
@@ -677,7 +681,7 @@ def test_a_resumed_session_s_usage_adds_to_what_it_had(launch: Launch) -> None:
     assert first.exit_code() == 0
     again = launch("showcase", "--resume")
     ready = again.wait_for(_READY, 60)
-    again.wait_for("usage: 1.2k/56 $0.01", 10)  # the session's so far, before any turn
+    again.wait_for("usage: 1.2k/56 $0.01", 10)  # the session's so far, before any reply
     again.type("tour")
     again.wait_for("usage: 2.5k/112 $0.02", 10, after=ready)
     screen = again.text()
@@ -689,7 +693,7 @@ def test_a_resumed_session_s_usage_adds_to_what_it_had(launch: Launch) -> None:
 
 
 def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
-    """`/clear` answers `cleared` (CONTRACTS.md: event): the old turns leave the screen and one
+    """`/clear` answers `cleared` (CONTRACTS.md: event): the old replies leave the screen and one
     note says why. `/model` keeps them. What was written stays in the pty's stream, so each
     check reads what follows a resize of the terminal, which makes the app draw the transcript
     again at its new width: only what the transcript holds then."""
@@ -736,7 +740,7 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
 
 def test_compact_carries_on_from_a_summary_and_a_resume_draws_from_it(launch: Launch, tmp_path: Path) -> None:
     """`/compact` answers `cleared`, a note carrying the model's summary, then `restarting`: the
-    old turns leave the screen, the loop and its transcript restart, and the next message is the
+    old replies leave the screen, the loop and its transcript restart, and the next message is the
     new conversation's second (bh-02's message before the summary was its first). The old transcript
     is kept beside the new one, and a resume draws from the note on. The fake's summary is its
     echo of bh-02's request for one."""
@@ -835,7 +839,7 @@ def test_a_message_typed_the_moment_after_model_waits_for_the_new_model(launch: 
 def test_a_line_typed_with_compact_or_restart_loop_reaches_the_new_loop(launch: Launch) -> None:
     """The chat row reads its next line only once the restart a command queued in `jobs` is done,
     so a line typed in the same burst of keys as `/compact` or `/restart loop` reaches the new
-    loop: it is the compacted conversation's second message, and no restart stops a turn it
+    loop: it is the compacted conversation's second message, and no restart stops a reply it
     started (`/restart loop` answered and announced nothing before, so one could)."""
     app = launch("fake")
     ready = app.wait_for(_READY, 60)
@@ -861,7 +865,7 @@ def test_model_switches_by_name_between_a_fake_and_an_openai_model_on_a_stub_ser
     python call runs as an input like any model's (the model row, up before the app heard it,
     notes its first reload); `/model fake` moves it back, the transcript
     carried across both providers. `fake` (a factory model) stands in for claude-code, which
-    needs the real CLI here; Claude's own turns reaching an openai model are the models
+    needs the real CLI here; Claude's own steps reaching an openai model are the models
     plugin's `test_claude_code_to_openai.py` (the real provider over its fake session)."""
     with StubServer() as stub:
         stub_model = (
@@ -892,7 +896,7 @@ def test_model_switches_by_name_between_a_fake_and_an_openai_model_on_a_stub_ser
         app.press(b"\x11")
         assert app.exit_code() == 0
     first, *_ = [r["body"]["messages"] for r in stub.requests]
-    assert [m["role"] for m in first] == ["system", "user", "assistant", "user"]  # the fake's turn, carried
+    assert [m["role"] for m in first] == ["system", "user", "assistant", "user"]  # the fake's step, carried
     assert first[2]["content"].startswith("[fake] echo: HELLO")
     assert all(r["authorization"] is None for r in stub.requests)  # no key named, none sent
 

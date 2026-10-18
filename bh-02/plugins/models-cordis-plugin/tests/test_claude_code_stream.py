@@ -28,6 +28,14 @@ def test_text_streams_as_it_comes_then_usage_stop_and_the_message() -> None:
     assert all("cost_usd" in u for u in usage)  # a model the price table lists
 
 
+def test_each_usage_chunk_names_the_model_that_answered() -> None:
+    """The id comes from `message_start` and rides on every part, for the loop's step record."""
+    folded, chunks = _fold(FakeStep([{"type": "text", "text": "Hello"}], input_tokens=50, output_tokens=7))
+    usage = [c for c in chunks if c["type"] == "usage"]
+    assert len(usage) == 2 and {u["model"] for u in usage} == {folded.model} == {"claude-sonnet-5"}
+    assert next(c for c in chunks if c["type"] == "text").keys() == {"type", "text"}  # only usage says it
+
+
 def test_a_tool_call_is_one_chunk_under_the_loop_s_name_and_the_message_keeps_claude_code_s() -> None:
     call = {"type": "tool_use", "id": "toolu_1", "name": "mcp__bh__python", "input": {"code": "print(1)"}}
     folded, chunks = _fold(FakeStep([{"type": "text", "text": "\n\n"}, call], stop="tool_use"))

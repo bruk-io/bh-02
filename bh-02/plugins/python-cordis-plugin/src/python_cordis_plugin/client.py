@@ -2,9 +2,9 @@
 runner started, and the `python(code)` tool's call (`call`), which runs an input in it; the
 python row registers that with `tools`.
 
-An input is one request and one answer: the worker runs the code and says it is done. Whether
-the person is asked first is the `approval` rule's to answer and the loop's to ask, so the
-process depends on its runner alone and a new ui keeps the namespace. It reads `confined` from
+An input goes to the worker once and is answered once: the worker runs the code and says it is
+done. Whether the person is asked first is the `approval` rule's to answer and the loop's to ask,
+so the process depends on its runner alone and a new ui keeps the namespace. It reads `confined` from
 that rule (`Rule`) only to decide what the model is told and whether the startup files run
 unasked: one place decides what runs unasked. The python row starts and stops it, and on
 `/release` stops it itself (`stopped`), so nothing else ever ends it. Every failure the process knows of (a
@@ -767,7 +767,7 @@ class PythonProcess:
     async def _run_startup(self, startup: _Ready) -> tuple[_Output, _Output | None]:
         """Run the startup file as an input and, when it ran and told something, the input that checks
         its docstrings and types (`_check_input`): the file's own and the check's, which is None when
-        there was nothing to check. Both are the file's turn, so one that ends the worker or is stopped
+        there was nothing to check. Both are the file's, so one that ends the worker or is stopped
         ends this one's, and `_opening` answers either the same way."""
         ran = await self._exchange(_startup_input(startup.path, startup.source))
         if ran.error or not _bound(_last(ran.output)):

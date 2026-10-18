@@ -20,9 +20,9 @@ from typing import Any, assert_never
 from host_paths import Link, Linked, NotOneFile, read_beneath, remove_beneath, write_beneath
 from memory_cordis_plugin.auto import INDEX
 from memory_cordis_plugin.keeping import (
+    Action,
     Delete,
     Read,
-    Request,
     Save,
     index_line,
     topic_file,
@@ -49,7 +49,7 @@ async def call(directory: Path, input: Json) -> Json:
     return {"content": await asyncio.to_thread(keep, directory, asked)}
 
 
-def keep(directory: Path, asked: Request) -> str:
+def keep(directory: Path, asked: Action) -> str:
     """Do what `asked` asks in `directory`, and say what happened: the text the model reads. A
     name the model made a link, or a second name for another file, is refused, saying so."""
     match asked:

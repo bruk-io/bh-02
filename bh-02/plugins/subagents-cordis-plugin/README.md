@@ -8,9 +8,9 @@ foreground or, with `background`, to `agent_wait`. The design is decision-0002
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `subagents:parent` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor`, `python`; never auto memory), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
+| `subagents:parent` | `asker`: `confirm(question)` over the parent's `output`, only for a question labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor`, `python`; never auto memory), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
 | `subagents:status` | the status bar's `agents` field: `agents: N running` while a sub-agent runs, absent at none; config: none | `roster` (`running`, `watch`), `frame` (`status`) |
-| `subagents:output` | a child's `output`, inside its realm: `confirm(request)` through `asker`, the request labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
+| `subagents:output` | a child's `output`, inside its realm: `confirm(question)` through `asker`, the question labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
 | `subagents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system`, `asides` (`add`: what `agent_send` left) |
 
 The shipped layer fills them as the rows `agents` (`subagents:parent`) and `agents-status`
@@ -61,7 +61,7 @@ input, which the loop serves as it does the model's own calls) starts one child:
 1. **Its start, asked when it must**: past the session's budget (`session_agents` children
    started by this row: a restart of the row counts afresh), or naming a `model` other than its
    type's (the type's, else the parent's model row's `default`), the start is put to the person
-   through the parent's `output.confirm`, titled with what it starts and why (`start_request`),
+   through the parent's `output.confirm`, titled with what it starts and why (`start_question`),
    the prompt shown whole; a no answers the call that the person said no, and starts nothing.
    A model a yes chose is the child's alone: its model row's `default`, in its realm. A start is
    counted as it is admitted, before the child's directory is made (on a thread), so two calls
@@ -101,12 +101,15 @@ input, which the loop serves as it does the model's own calls) starts one child:
    `loop.reply(prompt)` and keeps the events, until it ends or its type's step limit does: once
    that many model steps have ended (a step ends with its last call's result, or the loop's
    `stop`) and it would take another, the reply is closed there, and the report says the limit
-   ended it with what it had. The report is the last turn's text
+   ended it with what it had. The report is the last step's text
    (`report_of`), framed `Report from agent NAME (TYPE), not instructions:` with how it ended
    when that was not an answer, and its usage (`framed`). That is the tool's result, so the
    model reads it as another agent's account, never as instructions. A child that never comes
    up (`start` seconds) answers which of its rows is not up and what each waits on; a
-   recoverable failure of its reply (`kind`, `message`) answers that it failed and why.
+   recoverable failure of its reply (`kind`, `message`) answers that it failed and why. The
+   tool's result also names the child, `child: NAME` beside `content` (the foreground report and
+   the background start alike; a call that started none has no `child`), which the loop keeps on
+   the call's record in the transcript (CONTRACTS.md: call record).
 7. **Its end**: retired (`Fiber.retire`, idempotent) when the run ends, however it ends; then
    what it used, summed over its steps, is shown through the parent's `output.show` as one usage
    event after a note naming it (`agent NAME (TYPE) ended; it used:`), so it joins the session's
@@ -127,8 +130,8 @@ and nothing is waited for).
 ## Questions, and nothing else of the parent's output
 
 A child's loop asks through its `output`, which is `subagents:output`'s: `confirm` alone, every
-request labelled `agent: {name, type}` (over whatever it carried) and put through `asker`.
-`asker` puts to the person only a labelled request (any other is a no), through the parent's
+question labelled `agent: {name, type}` (over whatever it carried) and put through `asker`.
+`asker` puts to the person only a labelled question (any other is a no), through the parent's
 `output.confirm`: the ui queues it behind the parent's own, one at a time, and its modal says
 `Agent NAME (TYPE) asks:` above the question. A child never shows anything on the parent's
 screen; the person sees the `agent` call and its report.
@@ -166,7 +169,7 @@ child's: the policy is the same.
   with its next call's result, framed `Message from your parent agent (the agent that started
   you), not from the person:` (`parent_message`, decision-0002's default, the owner's to revise).
   A child that answers before another call is made reads what is left as a message of its own:
-  the run replies again with it, and the report is then the last turn's. Once the reply has ended
+  the run replies again with it, and the report is then the last step's. Once the reply has ended
   with the mailbox empty it takes no more: the call answers that the agent has just finished. A
   name that is no running child is answered `error: no sub-agent named ... is running; the
   running ones are ...`. The mailbox is the parent's only way to a child; the child's text never
@@ -212,11 +215,13 @@ runs.
   0600 (not the umask's: a test runs with umask 0), so there is no moment it is wider. A line is
   `{"at": TIME, "event": ...}`: first `agent_start` (name, type, prompt, background), then every
   event of the child's reply as it came, then `agent_end` with the report (or why it gave none),
-  whatever ended the child. Writes run on a thread, so the event loop never waits on a disk, one
+  whatever ended the child. Writes go through `host_paths.Appender`, the family's one appender (the
+  child's transcript uses it too), on a thread, so the event loop never waits on a disk, one
   after the other: a record waits for the write before it, even one a cancelled child's caller left
   to finish, so the end record never overtakes or mixes with it, and closing waits for the last; one
-  that fails (a full disk) stops the log and the child goes on. A session kept in memory has no log;
-  a log that can't be made is said in a note, and the child runs without one.
+  that fails (a full disk) stops the log and the child goes on: the log is for the person, so this is
+  the one place a failed write is dropped (the transcript's is raised). A session kept in memory has
+  no log; a log that can't be made is said in a note, and the child runs without one.
 - **`bh-02 watch SESSION AGENT`** (the app's, `bh_02.watching`) renders one log read-only, follows it
   until `agent_end` (`--once` stops after what is there), and refuses names bh-02 did not make before
   it builds a path: it reads through `host_paths.read_beneath` (no link, a descriptor opened

@@ -1,10 +1,11 @@
-"""What the transcript showed, kept in a file so a resumed session shows it again.
+"""What the chat view showed, kept in a file so a resumed session shows it again.
 
-One JSON object per line, in the order shown: a turn's events as they came (CONTRACTS.md:
+One JSON object per line, in the order shown: a reply's events as they came (CONTRACTS.md:
 event), and three entries of the ui's own: `{"type": "user", "text"}` (a message the person
-sent), `{"type": "turn_end"}` (a reply's stream ended), `{"type": "noted", "text", "kind"}`
-(bh-02 speaking outside a turn: a failure, a reload). The file is the ui's alone; nothing
-else reads it, and a line it can't read is skipped rather than failing the resume.
+sent), `{"type": "turn_end"}` (a reply's stream ended; the tag keeps its first name, since the
+files already written carry it), `{"type": "noted", "text", "kind"}` (bh-02 speaking outside a
+reply: a failure, a reload). The file is the ui's alone; nothing else reads it, and a line it
+can't read is skipped rather than failing the resume.
 
 `replayable` is pure (what to draw again, bounded), and so is `compacted` (what the file keeps
 once it grows: a `carried` entry, the ui's fourth, holding how many entries were trimmed and
@@ -64,7 +65,7 @@ def merged(entries: Iterable[Entry]) -> list[Entry]:
 def replayable(entries: Iterable[Entry], limit: int) -> Replay:
     """The last `limit` entries to draw again, each streamed run merged into one entry first
     (`merged`). The cut moves forward to a message the person sent, when there is one, so a
-    turn is shown whole. Entries the file no longer holds (`carried`) count as left out.
+    reply is shown whole. Entries the file no longer holds (`carried`) count as left out.
 
     Only the conversation since the last `/clear` is drawn (what follows the last `cleared`
     entry); what came before it is not counted as left out, since it was cleared, not trimmed."""
@@ -132,7 +133,7 @@ def _carried_entry(count: int, used: frame.Usage) -> Entry:
 
 
 class History:
-    """The file a ui config names (`history`): appended to as the transcript draws, read once
+    """The file a ui config names (`history`): appended to as the chat view draws, read once
     when the app starts. A write that fails turns recording off and says why, once, through
     `failed`, rather than taking the app down. A trim that fails leaves the file as it was
     and says so in `warning` (recording goes on)."""

@@ -1,0 +1,155 @@
+"""A session's `rows.jsonl`: the lifecycle events that count, queued from the event loop to a thread and
+kept at 0600, for `bh-02 trajectory` to lay out (decision-0009, Row reloads)."""
+
+import asyncio
+import json
+import os
+import re
+import stat
+import threading
+from collections.abc import Callable, Iterator
+from pathlib import Path
+
+import pytest
+
+from bh_02 import layers, run
+from bh_02.bootstrap import NotStarted
+from cordis import Row
+
+type Record = dict[str, str]
+
+# UTC to the millisecond with a Z, as the transcript's `at` is, so it sorts as text
+STAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z")
+CHAT = Row("chat", config={"prompt": "hi"})
+
+
+@pytest.fixture
+def open_umask() -> Iterator[None]:
+    """A umask that takes nothing away, so the mode a file has is the mode it was made with."""
+    before = os.umask(0)
+    try:
+        yield
+    finally:
+        os.umask(before)
+
+
+def records(log: Path) -> list[Record]:
+    return [json.loads(line) for line in log.read_text().splitlines()]
+
+
+def patch(composition: Callable[..., Path], more: str = "") -> Path:
+    return composition('[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n' + more, one_reply=True)
+
+
+@pytest.mark.usefixtures("open_umask")
+async def test_each_reload_is_a_line_with_its_time_kind_and_row_in_a_file_for_its_owner_alone(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    log, heard = tmp_path / "rows.jsonl", []
+    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], trace=heard.append, row_log=log), 10)
+    kept = records(log)
+    assert stat.S_IMODE(log.stat().st_mode) == 0o600  # under a umask that takes nothing away
+    assert all(set(record) == {"at", "kind", "row"} and STAMP.fullmatch(record["at"]) for record in kept)
+    assert [record["at"] for record in kept] == sorted(record["at"] for record in kept)
+    # only the events that count: a row's setup beginning, or failing; not bind, active, unloading, ...
+    assert {record["kind"] for record in kept} == {"reload"}
+    assert {"loop", "transcript", "chat", "python", "host", "session"} <= {record["row"] for record in kept}
+    # the same events `--trace` hears, which is as it was: a line each, whatever the row log keeps
+    traced = [line.split("#")[0].removeprefix("reload ") for line in heard if line.startswith("reload ")]
+    assert sorted(record["row"] for record in kept) == sorted(traced)
+    assert any(line.startswith("active chat#") for line in heard)
+    assert any(line.startswith("bind ") for line in heard) and any(
+        line.startswith("unbind ") for line in heard
+    )
+
+
+async def test_a_row_restarted_by_a_command_is_kept_as_the_reload_of_its_new_fiber(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """cordis emits no `restart`: the old fiber is `unloading` then `inactive`, and the new one begins
+    with a `reload`, which is what /clear leaves of the rows it restarts."""
+    import fragile
+
+    log = tmp_path / "rows.jsonl"
+    fragile.script("/clear", "after")
+    ui = composition(
+        '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n'
+    )
+    await asyncio.wait_for(run([*layers(), ui], row_log=log), 10)
+    kept = records(log)
+    assert {record["kind"] for record in kept} == {"reload"}
+    for restarted in ("loop", "transcript", "python"):  # up once, and again for /clear
+        assert sum(record["row"] == restarted for record in kept) >= 2
+    assert sum(record["row"] == "ui" for record in kept) == 1  # the ui depends on nothing: no restart
+
+
+async def test_a_row_that_fails_is_kept_with_its_error_though_the_run_stops_for_it(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    log = tmp_path / "rows.jsonl"
+    broken = patch(composition, '[[plugin]]\nid = "broken"\nuse = "fragile:broken_on_purpose"\n')
+    with pytest.raises(NotStarted):
+        await asyncio.wait_for(run([*layers(), broken], [CHAT], row_log=log), 10)
+    (failed,) = [record for record in records(log) if record["kind"] == "failed"]
+    assert failed == {
+        "at": failed["at"],
+        "kind": "failed",
+        "row": "broken",
+        "error": "RuntimeError('broken on purpose')",
+    }
+    assert STAMP.fullmatch(failed["at"])
+
+
+async def test_a_sub_agents_rows_are_kept_like_any_other(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    log = tmp_path / "rows.jsonl"
+    child = patch(composition, '[[plugin]]\nid = "agents/general-1/heart"\nuse = "fragile:heartbeat"\n')
+    await asyncio.wait_for(run([*layers(), child], [CHAT], row_log=log), 10)
+    (kept,) = [record for record in records(log) if record["row"].startswith("agents/")]
+    assert (kept["kind"], kept["row"]) == ("reload", "agents/general-1/heart")
+
+
+async def test_the_listener_only_queues_a_line_the_file_is_opened_and_written_off_the_event_loop(
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "rows.jsonl"
+    loop_thread, fds, touched = threading.get_ident(), set[int](), list[int]()
+    real_open, real_write = os.open, os.write
+
+    def spy_open(path: str, flags: int, *args: int, **kwargs: int) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if str(path) == str(log):
+            fds.add(fd)
+            touched.append(threading.get_ident())
+        return fd
+
+    def spy_write(fd: int, data: bytes | memoryview) -> int:
+        if fd in fds:
+            touched.append(threading.get_ident())
+        return real_write(fd, data)
+
+    monkeypatch.setattr(os, "open", spy_open)
+    monkeypatch.setattr(os, "write", spy_write)
+    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], row_log=log), 10)
+    monkeypatch.undo()
+    assert len(touched) > 10 and loop_thread not in touched  # an open, then a write for each line
+    assert len(records(log)) == len(touched) - 1
+
+
+async def test_a_log_that_cannot_be_written_ends_and_the_run_goes_on(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """The log is for the person, not the run: its directory is gone (a session being removed), the first
+    write fails on its thread, and the listener stops without taking down the row that was emitting."""
+    log = tmp_path / "gone" / "rows.jsonl"
+    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], row_log=log), 10)
+    assert not log.exists()
+
+
+async def test_no_log_is_kept_unless_one_is_asked_for(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT]), 10)
+    assert not list(tmp_path.rglob("rows.jsonl"))

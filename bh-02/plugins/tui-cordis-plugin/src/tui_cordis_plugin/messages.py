@@ -11,11 +11,11 @@ from typing import Any
 
 from textual.message import Message
 
-__all__ = ["Asked", "FrameChanged", "Handling", "Noted", "Shown", "TurnEnded", "TurnStarted", "Withdrawn"]
+__all__ = ["Asked", "FrameChanged", "Handling", "Noted", "ReplyEnded", "ReplyStarted", "Shown", "Withdrawn"]
 
 
 class Shown(Message):
-    """Events of a turn (CONTRACTS.md: event), in order, to draw as they stream in. `drawn`,
+    """Events of a reply (CONTRACTS.md: event), in order, to draw as they stream in. `drawn`,
     when given, is settled once the app has drawn them, so the output posts no faster than
     the app draws (and a Ctrl-C never waits behind a queue of them)."""
 
@@ -25,11 +25,11 @@ class Shown(Message):
         self.drawn = drawn
 
 
-class TurnStarted(Message):
+class ReplyStarted(Message):
     """A reply began streaming: a line the person types from now until it ends is drawn after it."""
 
 
-class TurnEnded(Message):
+class ReplyEnded(Message):
     """A reply's stream ended: whatever streams next starts a block of its own."""
 
 
@@ -55,9 +55,9 @@ class Noted(Message):
 class Asked(Message):
     """A yes-or-no question about a call; the answer goes in `answer`."""
 
-    def __init__(self, request: Mapping[str, Any], answer: asyncio.Future[bool]) -> None:
+    def __init__(self, question: Mapping[str, Any], answer: asyncio.Future[bool]) -> None:
         super().__init__()
-        self.request = request
+        self.question = question
         self.answer = answer
 
 
@@ -71,7 +71,7 @@ class FrameChanged(Message):
 
 
 class Withdrawn(Message):
-    """A question nobody waits for any more (its turn was interrupted): take its modal down,
+    """A question nobody waits for any more (its reply was interrupted): take its modal down,
     or drop it from the queue if it was not shown yet."""
 
     def __init__(self, answer: asyncio.Future[bool]) -> None:

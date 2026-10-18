@@ -20,13 +20,13 @@ the shapes.
 Which lines are commands is the `commands` value's to say (`claims(line)`), never the chat's:
 a slash command, or a line starting with a prefix a layer's row claimed (`!`). A command runs
 until it answers or the input closes (`input.closed()`: the person left), which cancels it, so
-bh-02 doesn't live on, blank, until a `!` command ends; Ctrl-C (`interrupted()`) is a turn's
+bh-02 doesn't live on, blank, until a `!` command ends; Ctrl-C (`interrupted()`) is a reply's
 and doesn't stop a command. A command's answer may carry `for_model` events (CONTRACTS.md:
 event; `!COMMAND`'s output): the `commands` value holds them, not this row, and the chat takes
 them (`take_for_model()`) for the person's next message, in the order the commands ran, each a
 paragraph of its own in front of it, so `loop.reply` is still given one message and the model
-reads the output with it, never during a turn. Lines are read one at a time, so a `!` line
-typed during a turn runs after it. `commands` depends on nothing, so a restart of this row (a
+reads the output with it, never during a reply. Lines are read one at a time, so a `!` line
+typed during a reply runs after it. `commands` depends on nothing, so a restart of this row (a
 `/model` switch reloads the loop, and this row with it) keeps what is held; a `cleared` event
 (`/clear`) drops it, and a `compacted` one (`/compact`, whose summary never held it) keeps it.
 
@@ -34,4 +34,4 @@ Before each read the chat waits until no restart a command queued in `jobs` is p
 (`jobs.settled()`): `/clear`, `/compact`, `/model NAME` and `/restart loop` restart the loop,
 which reloads this row, and the row is then waiting, not holding a line. So a line typed right
 after such a command stays with the input, and the new row reads it for the new loop: the old
-loop never answers it, a restart never stops a turn it started, and none is dropped.
+loop never answers it, a restart never stops a reply it started, and none is dropped.

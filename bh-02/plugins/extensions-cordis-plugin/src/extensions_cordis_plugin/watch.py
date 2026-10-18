@@ -183,7 +183,7 @@ def instructions(
         "in, the text to show the person out. What a command shows reaches the person, not you.",
         "- `frame.status(field, text)`: text in the status bar. The latest push of a field shows: "
         "to change it from background work, push the new text, then call the old remover.",
-        "- `system.add(text)`: text added to this prompt for your later turns.",
+        "- `system.add(text)`: text added to this prompt for your later replies.",
         "- `tools.register(spec, run)`: a tool offered to you, as `python` is. `spec` has `name` "
         "(lowercase letters, digits and _; not one of bh-02's own tools), `description` (what it "
         'does and when to call it) and `parameters` (a JSON Schema object: `type` "object", '

@@ -165,7 +165,7 @@ class Rule(Protocol):
 
     @property
     def confined(self) -> bool: ...
-    def unasked(self, request: Mapping[str, Any]) -> bool: ...
+    def unasked(self, question: Mapping[str, Any]) -> bool: ...
 
 
 @runtime_checkable
@@ -173,7 +173,7 @@ class Confirm(Protocol):
     """What the extensions need of the `output` value: the person's yes or no about a load the
     rule does not let run unasked."""
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool: ...
+    async def confirm(self, question: Mapping[str, Any]) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -467,12 +467,12 @@ class Extensions:
         """Whether an extension may load: at once when the `approval` rule says it runs unasked
         (the runner confines it); else the model's code would run with the person's permissions,
         so they are asked (`output.confirm`)."""
-        request = {
+        question = {
             "name": "extension",
             "title": f"Load the model's extension {name} into bh-02, unjailed?",
             "input": {"code": source},
         }
-        return self._approval.unasked(request) or await self._output.confirm(request)
+        return self._approval.unasked(question) or await self._output.confirm(question)
 
     async def _unload(self, name: str) -> None:
         self._statuses.pop(name, None)

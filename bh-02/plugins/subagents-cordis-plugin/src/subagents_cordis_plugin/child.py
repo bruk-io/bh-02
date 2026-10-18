@@ -56,7 +56,7 @@ __all__ = [
     "prefixed",
     "report_of",
     "session_model",
-    "start_request",
+    "start_question",
     "started_record",
     "stepped",
     "stop_note",
@@ -232,8 +232,8 @@ def asked_why(
     return tuple(why)
 
 
-def start_request(kind: AgentType, input: Mapping[str, Any], why: Sequence[str]) -> dict[str, Any]:
-    """The question a child's start puts to the person (CONTRACTS.md: request): the `agent`
+def start_question(kind: AgentType, input: Mapping[str, Any], why: Sequence[str]) -> dict[str, Any]:
+    """The question a child's start puts to the person (CONTRACTS.md: question): the `agent`
     call, titled with what it starts and why it is asked, its prompt shown whole."""
     return {
         "name": "agent",
@@ -253,13 +253,13 @@ def denied(kind: str, why: Sequence[str]) -> str:
 
 
 def label(name: str, kind: str) -> dict[str, str]:
-    """Who asks, as a request carries it (CONTRACTS.md: request, `agent`)."""
+    """Who asks, as a question carries it (CONTRACTS.md: question, `agent`)."""
     return {"name": name, "type": kind}
 
 
-def labelled(request: Mapping[str, Any]) -> bool:
-    """Whether a request says which agent asks, with a name and a type."""
-    agent = request.get("agent")
+def labelled(question: Mapping[str, Any]) -> bool:
+    """Whether a question says which agent asks, with a name and a type."""
+    agent = question.get("agent")
     return isinstance(agent, Mapping) and bool(agent.get("name")) and bool(agent.get("type"))
 
 
@@ -298,7 +298,7 @@ def limited(steps: Steps, event: Mapping[str, Any], limit: int) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class Report:
-    """What a child's reply came to: its last turn's text, how its last step stopped (None: no
+    """What a child's reply came to: its last step's text, how its last step stopped (None: no
     step stopped), and what it used."""
 
     text: str
@@ -310,8 +310,8 @@ class Report:
 
 
 def report_of(events: Iterable[Mapping[str, Any]]) -> Report:
-    """Fold a child's reply events into its report: only the text of its last turn (a turn
-    begins after a call's result, or after a step the loop fed back), its last stop, and its
+    """Fold a child's reply events into its report: only the text of its last step (a step
+    begins after a call's result, or after one the loop fed back), its last stop, and its
     usage summed (each `usage` event is one step's, CONTRACTS.md: event)."""
     text, fresh, stop = "", True, None
     used_in = used_out = cached = 0

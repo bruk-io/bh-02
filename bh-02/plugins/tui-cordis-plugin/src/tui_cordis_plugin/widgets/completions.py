@@ -1,5 +1,5 @@
 """The composer's list of commands (decision-0003): the entries a `/` line completes, between
-the transcript and the composer. It never takes focus, so the composer keeps the keys, and it
+the chat view and the composer. It never takes focus, so the composer keeps the keys, and it
 takes plain `PaletteEntry` values, nothing of the commands broker."""
 
 from collections.abc import Callable, Sequence

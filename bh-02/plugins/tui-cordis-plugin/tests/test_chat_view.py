@@ -1,4 +1,4 @@
-"""The transcript under Pilot: each kind of event as it streams, a long reply staying quick,
+"""The chat view under Pilot: each kind of event as it streams, a long reply staying quick,
 wrapped lines keeping their gutter, and a session's history drawn again when the app starts."""
 
 import asyncio
@@ -9,8 +9,8 @@ from pathlib import Path
 from textual.widgets import Collapsible, Static
 
 from tui_cordis_plugin import BhApp, History, replayable
-from tui_cordis_plugin.messages import Noted, Shown, TurnEnded, TurnStarted
-from tui_cordis_plugin.widgets import Stream, Transcript
+from tui_cordis_plugin.messages import Noted, ReplyEnded, ReplyStarted, Shown
+from tui_cordis_plugin.widgets import ChatView, Stream
 
 _SIZE = (120, 36)
 
@@ -26,8 +26,8 @@ def _screen(app: BhApp) -> str:
 async def test_every_kind_of_event_gets_a_block_of_its_own_kind() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
-        transcript = app.query_one(Transcript)
-        before = len(transcript.blocks())
+        chat_view = app.query_one(ChatView)
+        before = len(chat_view.blocks())
         for event in (
             {"type": "thinking", "text": "Let me "},
             {"type": "thinking", "text": "check.\nThen answer."},
@@ -39,9 +39,9 @@ async def test_every_kind_of_event_gets_a_block_of_its_own_kind() -> None:
             {"type": "stop", "reason": "end_turn"},  # quiet: no block
         ):
             app.post_message(Shown(event))
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await pilot.pause()
-        assert transcript.blocks()[before:] == [
+        assert chat_view.blocks()[before:] == [
             ("thinking", "Let me check.\nThen answer."),
             ("text", "Here is the plan:\n• run it"),
             ("tool_call", "⏺ python\nprint(1)"),
@@ -49,16 +49,16 @@ async def test_every_kind_of_event_gets_a_block_of_its_own_kind() -> None:
             ("usage", "1,200 in · 30 out · $0.0100"),
             ("note", "rows: 12"),
         ]
-        (result,) = transcript.query(".tool_result")
+        (result,) = chat_view.query(".tool_result")
         assert result.has_class("-error")
 
 
 async def test_a_model_step_s_usage_in_parts_is_one_line_after_what_it_said() -> None:
-    """Anthropic sends what a turn read as it starts and the rest as it ends: one line, the sum,
-    under the turn; the next model step (after a result) gets a line of its own."""
+    """Anthropic sends what a step read as it starts and the rest as it ends: one line, the sum,
+    under that step; the next model step (after a result) gets a line of its own."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
-        transcript = app.query_one(Transcript)
+        chat_view = app.query_one(ChatView)
         for event in (
             {"type": "usage", "input_tokens": 1000, "output_tokens": 0, "cost_usd": 0.001, "partial": True},
             {"type": "text", "text": "Running it."},
@@ -69,9 +69,9 @@ async def test_a_model_step_s_usage_in_parts_is_one_line_after_what_it_said() ->
             {"type": "stop", "reason": "interrupted"},  # stopped before the end: what was read stands
         ):
             app.post_message(Shown(event))
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await pilot.pause()
-        assert [b for b in transcript.blocks() if b[0] != "note"] == [
+        assert [b for b in chat_view.blocks() if b[0] != "note"] == [
             ("text", "Running it."),
             ("tool_call", "⏺ python\n1"),
             ("usage", "1,000 in · 30 out · $0.0012"),
@@ -86,8 +86,8 @@ async def test_a_line_typed_while_a_reply_streams_is_drawn_after_it() -> None:
     usage line stay together above it."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
-        transcript = app.query_one(Transcript)
-        app.post_message(TurnStarted())
+        chat_view = app.query_one(ChatView)
+        app.post_message(ReplyStarted())
         app.post_message(Shown({"type": "usage", "input_tokens": 900, "output_tokens": 0, "partial": True}))
         app.post_message(Shown({"type": "text", "text": "twenty-"}))
         await pilot.pause()
@@ -95,16 +95,16 @@ async def test_a_line_typed_while_a_reply_streams_is_drawn_after_it() -> None:
         await pilot.pause()
         app.post_message(Shown({"type": "text", "text": "eight"}))
         app.post_message(Shown({"type": "usage", "input_tokens": 0, "output_tokens": 118}))
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await pilot.pause()
-        assert [b for b in transcript.blocks() if b[0] != "note"] == [
+        assert [b for b in chat_view.blocks() if b[0] != "note"] == [
             ("text", "twenty-eight"),
             ("usage", "900 in · 118 out"),
             ("user", "› What is 3+4?"),
         ]
         app.send("and 5+5?")  # no reply streaming: drawn at once
         await pilot.pause()
-        assert transcript.blocks()[-1] == ("user", "› and 5+5?")
+        assert chat_view.blocks()[-1] == ("user", "› and 5+5?")
 
 
 async def test_thinking_folds_to_one_line_once_the_reply_moves_on() -> None:
@@ -203,7 +203,7 @@ async def test_what_is_shown_is_kept_and_drawn_again_by_the_next_app(tmp_path: P
         for text in ("Hel", "lo ", "back"):
             first.post_message(Shown({"type": "text", "text": text}))
         first.post_message(Shown({"type": "tool_call", "id": "c", "name": "python", "input": {"code": "1"}}))
-        first.post_message(TurnEnded())
+        first.post_message(ReplyEnded())
         first.post_message(Noted("error: slow down", "failure"))
         await pilot.pause()
     kinds = [json.loads(line)["type"] for line in path.read_text().splitlines()]
@@ -213,7 +213,7 @@ async def test_what_is_shown_is_kept_and_drawn_again_by_the_next_app(tmp_path: P
     second = BhApp(history=history, replay=replayable(history.read(), 400))
     async with second.run_test(size=_SIZE) as pilot:
         await pilot.pause()
-        assert second.query_one(Transcript).blocks() == [
+        assert second.query_one(ChatView).blocks() == [
             ("user", "› hello"),
             ("text", "Hello back"),  # the streamed run, merged
             ("tool_call", "⏺ python\n1"),
@@ -221,7 +221,7 @@ async def test_what_is_shown_is_kept_and_drawn_again_by_the_next_app(tmp_path: P
             ("note", "↑ the session so far (a resumed session's Python process starts empty)"),
             (
                 "note",
-                "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running turn; Ctrl-P lists commands.",
+                "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running reply; Ctrl-P lists commands.",
             ),
         ]
         await pilot.press(*"again", "enter")
@@ -236,7 +236,7 @@ async def test_a_history_that_cannot_be_kept_is_said_once_and_the_app_goes_on(tm
         await pilot.press(*"one", "enter")
         await pilot.press(*"two", "enter")
         await pilot.pause()
-        failures = [text for kind, text in app.query_one(Transcript).blocks() if kind == "failure"]
+        failures = [text for kind, text in app.query_one(ChatView).blocks() if kind == "failure"]
         assert len(failures) == 1 and failures[0].startswith("history is not being kept")
         assert app.return_code is None
 
@@ -244,7 +244,7 @@ async def test_a_history_that_cannot_be_kept_is_said_once_and_the_app_goes_on(tm
 async def test_cleared_drops_the_conversation_from_the_screen_and_a_resume_starts_after_it(
     tmp_path: Path,
 ) -> None:
-    """`/clear` answers `cleared` then a note (CONTRACTS.md: event): the transcript keeps only
+    """`/clear` answers `cleared` then a note (CONTRACTS.md: event): the chat view keeps only
     the note, the history keeps everything (the session's usage), and a resume draws from the
     clear on."""
     path = tmp_path / "events.jsonl"
@@ -254,14 +254,14 @@ async def test_cleared_drops_the_conversation_from_the_screen_and_a_resume_start
         await pilot.press(*"hello", "enter")
         assert await asyncio.wait_for(first.bridge.line(), 1) == "hello"  # the chat row reads it
         first.post_message(Shown({"type": "text", "text": "old reply"}, used))
-        first.post_message(TurnEnded())
+        first.post_message(ReplyEnded())
         await pilot.pause()
-        assert ("text", "old reply") in first.query_one(Transcript).blocks()
+        assert ("text", "old reply") in first.query_one(ChatView).blocks()
         cleared = {"type": "note", "text": "the conversation was cleared"}
         first.post_message(Shown({"type": "cleared"}, cleared))
-        first.post_message(TurnEnded())
+        first.post_message(ReplyEnded())
         await pilot.pause()
-        assert first.query_one(Transcript).blocks() == [("note", "the conversation was cleared")]
+        assert first.query_one(ChatView).blocks() == [("note", "the conversation was cleared")]
         await pilot.press(*"after", "enter")
         await pilot.pause()
     kinds = [json.loads(line)["type"] for line in path.read_text().splitlines()]
@@ -273,6 +273,6 @@ async def test_cleared_drops_the_conversation_from_the_screen_and_a_resume_start
     second = BhApp(history=history, replay=replay)
     async with second.run_test(size=_SIZE) as pilot:
         await pilot.pause()
-        blocks = second.query_one(Transcript).blocks()
+        blocks = second.query_one(ChatView).blocks()
         assert blocks[:2] == [("note", "the conversation was cleared"), ("user", "› after")]
         assert all("old reply" not in text and "hello" not in text for _, text in blocks)

@@ -2,9 +2,11 @@
 
 import asyncio
 import contextlib
+import datetime
+import json
 import os
 import re
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from importlib import resources
 from importlib.resources.abc import Traversable
@@ -13,10 +15,10 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from bh_02.sessions import Listing
-from cordis import Booted, Effects, Inspection, Row, Runtime, bind, boot, component, enter
+from cordis import Booted, Effects, Event, Inspection, Row, Runtime, bind, boot, component, enter
 from cordis.composition import Entry, compose
 from cordis.loader import read_layer, resolve
-from host_paths import config_home, state_home
+from host_paths import Appender, config_home, state_home
 
 __all__ = [
     "CREDENTIAL_FILE",
@@ -308,12 +310,73 @@ def layers() -> list[Traversable]:
     return [resources.files("bh_02") / "bh-02.toml"]
 
 
+# The lifecycle events a session keeps in its `rows.jsonl` (decision-0009, Row reloads). cordis emits no
+# `restart`: a row restarted (`Loader.restart`, as `/clear` does) ends its old fiber `unloading` and
+# `inactive`, and its new fiber starts with a `reload`, so a restart is kept as that `reload` (as is a
+# row coming up for the first time). `failed` is a row whose setup raised.
+_KEPT = frozenset({"reload", "failed"})
+
+
+def _stamp(moment: datetime.datetime) -> str:
+    """`moment` as the transcript writes a time: UTC ISO-8601 to the millisecond with `Z`
+    (`2026-10-18T03:47:12.345Z`), which sorts as text."""
+    return moment.astimezone(datetime.UTC).isoformat(timespec="milliseconds").removesuffix("+00:00") + "Z"
+
+
+def _row_line(event: Event, at: datetime.datetime) -> bytes | None:
+    """The line of `rows.jsonl` for a lifecycle `event` heard at `at` (aware): one JSON object,
+    `{at, kind, row, error?}`, ending in a newline; the event's fiber is the row, a sub-agent's
+    (`agents/NAME/...`) included. None for an event the session does not keep."""
+    if event.kind not in _KEPT:
+        return None
+    record = {"at": _stamp(at), "kind": event.kind, "row": event.fiber}
+    if event.error:
+        record["error"] = event.error
+    return f"{json.dumps(record)}\n".encode()
+
+
+@contextlib.asynccontextmanager
+async def _row_log(runtime: Runtime, path: Path | None) -> AsyncIterator[None]:
+    """Keep the lifecycle events that count (`_KEPT`) in the session's `rows.jsonl`, at `path`, while
+    the body runs; with no path, keep none. The shell hears every row's events, a sub-agent's
+    included, as `--trace` does.
+
+    A listener runs on the event loop the TUI shares, inside the transition that emitted the event, so
+    this one only queues the line to a `host_paths.Appender`, which writes it on a thread, in order, at
+    0600 and through no link; the log is closed (every line written) once the body, which unwinds the
+    rows, is done. A write that fails (the disk is full, the session's directory is gone) ends the log
+    and not the run: the file is for the person, as a sub-agent's event log is.
+    """
+    if path is None:
+        yield
+        return
+    appender = Appender(str(path))  # opened by the first write, on its thread
+
+    def hear(event: Event) -> None:
+        if (line := _row_line(event, datetime.datetime.now(datetime.UTC))) is None:
+            return
+        try:
+            appender.append(line)
+        except OSError:  # an earlier line could not be written: nothing after it will be
+            runtime.listeners.remove(hear)
+
+    runtime.listeners.append(hear)
+    try:
+        yield
+    finally:
+        if hear in runtime.listeners:
+            runtime.listeners.remove(hear)
+        with contextlib.suppress(OSError):  # the log is best-effort
+            await appender.close()
+
+
 async def run(
     layers: Iterable[str | Path | Traversable],
     overrides: Iterable[Row] = (),
     *,
     trace: Callable[[str], None] | None = None,
     report: Callable[[str], None] | None = None,
+    row_log: Path | None = None,
     session: Listing | None = None,
     credentials: Iterable[str] = (),
     secrets: Iterable[str] = (),
@@ -355,7 +418,10 @@ async def run(
     or newly-inactive rows) can end a run early. A background failure elsewhere stays visible
     in `status()`/`explain()`, not surfaced here. `trace` sees every lifecycle event (reload,
     active, bind, unbind, unloading, ...) as one line, from the first row on; `report` hears
-    about a layer file that changed but could not be reloaded.
+    about a layer file that changed but could not be reloaded. `row_log` is the file the
+    session's row reloads and failures are kept in (`sessions.ROWS`; none: none is kept), one
+    `{at, kind, row, error?}` a line, queued to a thread and closed once the rows have unwound
+    (`_row_log`).
 
     The layer files are watched while the program runs: edit one and the composition reshapes
     itself.
@@ -386,13 +452,14 @@ async def run(
     rt = Runtime()
     if trace is not None:
         rt.listeners.append(lambda event: trace(str(event)))
-    booted: Booted = await boot(paths, last, rt, report=report)
-    try:
-        _raise_if_stalled(booted, "could not start", NotStarted)
-        await _await_chat(booted)
-        _raise_if_stalled(booted, "stopped early")
-    finally:
-        await booted.runtime.shutdown()
+    async with _row_log(rt, row_log):
+        booted: Booted = await boot(paths, last, rt, report=report)
+        try:
+            _raise_if_stalled(booted, "could not start", NotStarted)
+            await _await_chat(booted)
+            _raise_if_stalled(booted, "stopped early")
+        finally:
+            await booted.runtime.shutdown()
 
 
 async def _await_chat(booted: Booted) -> None:

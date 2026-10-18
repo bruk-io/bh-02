@@ -34,6 +34,7 @@ from models_cordis_plugin.openai.wire import (
     rejects_usage,
     request_for,
     scrubbed,
+    settings_for,
     sse_data,
     stream_error,
 )
@@ -157,7 +158,10 @@ class OpenAIModel:
     `tool_changes` is `fixed` (CONTRACTS.md: model): a conversation is offered the tools it began
     with for its life, and a change is told as an aside. A chat template renders the tool list at
     the start of the prompt (llama.cpp, Ollama, vLLM), and OpenAI's prompt cache is a prefix
-    too, so a changed list would make the whole conversation new to the server again."""
+    too, so a changed list would make the whole conversation new to the server again.
+
+    `settings` is what its requests are made with (CONTRACTS.md: model): the named model, the
+    provider, and the `max_tokens` and `temperature` it sends (`wire.settings_for`)."""
 
     tool_changes: Final = "fixed"
 
@@ -171,6 +175,7 @@ class OpenAIModel:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._named = named
+        self.settings: Final = settings_for(named)
         self._env_file = env_file
         self._searched = tuple(searched)
         self._client = httpx2.AsyncClient(timeout=_TIMEOUT, transport=transport)

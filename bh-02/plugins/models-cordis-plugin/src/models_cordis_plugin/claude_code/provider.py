@@ -117,6 +117,7 @@ __all__ = [
 
 type Json = Mapping[str, Any]
 
+_PROVIDER: Final = "claude-code"  # what `settings` calls this provider (`named.CLAUDE_CODE`)
 _DETACHED: Final = "claude-code-detached"  # this plugin's console script (detach.py)
 _MAX_TURNS: Final = 100_000  # one query runs a whole reply's steps; the loop decides when it ends
 _DRAIN_S: Final = 15.0  # how long an interrupted query gets to reach its result
@@ -173,7 +174,8 @@ class ClaudeCodeConfig:
     above bh-02's install and its environment, nearest first). `cwd`: the project Claude Code
     is told it works in (bh-02's working directory when unset). `gateway`: where Claude Code sends
     its requests and how it gets their key, instead of the subscription token (None: the
-    subscription)."""
+    subscription). `name`: the named model (`ENDPOINT/MODEL`) the id belongs to, which the model's
+    `settings` name (empty when built with none: they then name the id)."""
 
     model: str = "sonnet"
     state: str | None = None
@@ -181,6 +183,7 @@ class ClaudeCodeConfig:
     cwd: str | None = None
     searched: tuple[str, ...] = ()
     gateway: Gateway | None = None
+    name: str = ""
 
 
 class Session(Protocol):
@@ -329,12 +332,16 @@ class ClaudeCodeModel:
     and the in-process MCP server has no way to tell Claude Code its tools changed (the Agent
     SDK drops a server's `notifications/tools/list_changed`): the models README has what Claude
     Code would do with one.
+
+    `settings` is what its steps are made with (CONTRACTS.md: model): the named model and the
+    provider. Claude Code is given no `max_tokens` or `temperature`, so it names neither.
     """
 
     tool_changes: Final = "fixed"
 
     def __init__(self, config: ClaudeCodeConfig, open: Opener | None = None) -> None:
         self._config = config
+        self.settings: Final = frozendict({"model": config.name or config.model, "provider": _PROVIDER})
         self._open: Opener = open or ClaudeSDKClient
         self._client: Session | None = None
         self._running: tuple[str, list[dict[str, Any]]] | None = (

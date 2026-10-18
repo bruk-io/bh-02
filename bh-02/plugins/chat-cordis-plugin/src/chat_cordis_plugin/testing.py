@@ -56,7 +56,7 @@ class Typed:
         self.type(None)
 
     def interrupt(self) -> None:
-        """Ctrl-C: stop the turn that is running."""
+        """Ctrl-C: stop the reply that is running."""
         self._interrupt.set()
 
     async def read(self) -> str | None:

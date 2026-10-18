@@ -2,11 +2,11 @@
 
 `Bridge` is what the app and the ports share: lines the person typed, Ctrl-C, pending
 questions, and whether the app has ended. Ctrl-C is never dropped while bh-02 is busy with a
-line: between a line being handed out and the turn it starts listening for Ctrl-C (or while a
+line: between a line being handed out and the reply it starts listening for Ctrl-C (or while a
 command runs: a slash command, a `!` one), one interrupt is held for the next `interrupted()`,
 and the next `read()` drops it (a command is not interrupted, and a held Ctrl-C must not kill
-the next turn); the app says so when a held one is still unheard a moment later
-(`interrupt_held`: a command is running, not a turn starting).
+the next reply); the app says so when a held one is still unheard a moment later
+(`interrupt_held`: a command is running, not a reply starting).
 
 The bridge also says when a line is being handled (`handling`, and `Handling` posted to the app at every
 change): from the line handed out until the chat row reads again, or until a command's answer says it restarts
@@ -49,9 +49,9 @@ from tui_cordis_plugin.messages import (
     FrameChanged,
     Handling,
     Noted,
+    ReplyEnded,
+    ReplyStarted,
     Shown,
-    TurnEnded,
-    TurnStarted,
 )
 
 __all__ = ["AppCrashed", "Bridge", "Frame", "TuiInput", "TuiOutput"]
@@ -86,7 +86,7 @@ class Bridge:
         self._crash: AppCrashed | None = None
         self._draws: set[asyncio.Future[None]] = set()  # batches posted and not yet drawn
         self._busy = False  # a line was handed out and nobody has read since
-        self._interrupt_held = False  # a Ctrl-C that came while busy with no turn listening yet
+        self._interrupt_held = False  # a Ctrl-C that came while busy with no reply listening yet
         self._starting: frozenset[str] = frozenset()  # rows coming (back) up, by lifecycle
         self._keyless = frame.Keyless()  # rows that bind no key: no line waits on them
         self._unnoted = False  # a line was kept while no row was coming up: it has not said it waits
@@ -118,12 +118,12 @@ class Bridge:
 
     @property
     def interrupt_held(self) -> bool:
-        """Whether a Ctrl-C is waiting for the turn a line is about to start."""
+        """Whether a Ctrl-C is waiting for the reply a line is about to start."""
         return self._interrupt_held
 
     @property
-    def turn_running(self) -> bool:
-        """Whether a turn is waiting to hear about Ctrl-C (CONTRACTS.md: input.interrupted)."""
+    def reply_running(self) -> bool:
+        """Whether a reply is waiting to hear about Ctrl-C (CONTRACTS.md: input.interrupted)."""
         return any(not w.done() for w in self._interrupts)
 
     @property
@@ -134,13 +134,13 @@ class Bridge:
     @property
     def waiting_on(self) -> frozenset[str]:
         """The rows a line kept for later waits on: those a command announced it restarts
-        (the chat row reads again once they are: `jobs`); else, with nothing in hand (no turn
+        (the chat row reads again once they are: `jobs`); else, with nothing in hand (no reply
         running, no line being handled, such as a slash command), those coming (back) up, as
         the chat row is down with them, except a row that binds no key (a status-bar row such
-        as `status`): the chat row depends on none of them. A line typed during a turn or a
+        as `status`): the chat row depends on none of them. A line typed during a reply or a
         command waits for it, as it always has, and does not name a row reloading meanwhile
         that it does not wait on."""
-        if self.turn_running:
+        if self.reply_running:
             return frozenset()
         if self._announced:
             return self._announced
@@ -216,9 +216,9 @@ class Bridge:
         return line
 
     def interrupt(self) -> bool:
-        """Ctrl-C: settle every turn waiting on it; say whether anything was running.
+        """Ctrl-C: settle every reply waiting on it; say whether anything was running.
 
-        A line handed out with no turn listening yet (its turn is starting, or it is a command:
+        A line handed out with no reply listening yet (its reply is starting, or it is a command:
         a slash command, a `!` one) is running too: the interrupt is held for the next
         `interrupted()`, and the next `read()` drops it.
         """
@@ -269,7 +269,7 @@ class Bridge:
         return drawn
 
     def end(self, crash: AppCrashed | None = None) -> None:
-        """The app has ended: settle every reader, turn and question waiting on it."""
+        """The app has ended: settle every reader, reply and question waiting on it."""
         if self._ended:
             return
         self._ended, self._crash = True, crash
@@ -315,7 +315,7 @@ class TuiInput:
         return await self._bridge.line()
 
     async def interrupted(self) -> None:
-        """Return when the person asks to stop the turn that is running (Ctrl-C)."""
+        """Return when the person asks to stop the reply that is running (Ctrl-C)."""
         await self._bridge.interrupted()
 
     async def closed(self) -> None:
@@ -335,7 +335,7 @@ _BATCH = 512
 
 
 class TuiOutput:
-    """Implements `output`: a turn's events, notices and questions, posted to the app.
+    """Implements `output`: a reply's events, notices and questions, posted to the app.
 
     Usage events also add up, for the session, into the status bar's `usage` field (`status`
     is the frame's), replaced as each one streams in. `used` is where the totals start: what
@@ -365,16 +365,16 @@ class TuiOutput:
             self._usage_shown = None
 
     async def show(self, events: AsyncIterator[Mapping[str, Any]]) -> None:
-        """Draw a turn as it streams in; stop reading once the app has ended.
+        """Draw a reply as it streams in; stop reading once the app has ended.
 
         Events go to the app in batches, never faster than it draws them: while one batch is
         being drawn, the next gathers (and once it is large, reading waits for the app), and
         it is posted as soon as the app has drawn the last, whether or not another event comes
         (a reply that pauses mid-stream, thinking, still shows what it said so far). The
-        loop is given a turn after every event, so a reply that never waits (every event at
+        event loop runs after every event, so a reply that never waits (every event at
         once) still leaves the app free to hear Ctrl-C, which cancels this mid-stream. Every
-        event read is posted before the turn's end, even when the turn stops mid-stream; the
-        turn's start and end are posted too (`TurnStarted`, `TurnEnded`). A
+        event read is posted before the reply's end, even when the reply stops mid-stream; the
+        reply's start and end are posted too (`ReplyStarted`, `ReplyEnded`). A
         `restarting` event (a command's answer) is handed to the bridge as it is read.
         """
         batch: list[Mapping[str, Any]] = []
@@ -382,7 +382,7 @@ class TuiOutput:
         over = False
         partial = False  # whether the usage so far awaits its output count (CONTRACTS.md: usage)
         if not self._bridge.ended:
-            self._post(TurnStarted())
+            self._post(ReplyStarted())
 
         def flush() -> None:
             """Post what gathered, if anything, and follow the app's drawing of it."""
@@ -412,15 +412,15 @@ class TuiOutput:
                     self._announce(event)
                 await asyncio.sleep(0)
         finally:
-            # whatever was read is drawn (and recorded), however the turn ends: finished,
+            # whatever was read is drawn (and recorded), however the reply ends: finished,
             # stopped by Ctrl-C mid-stream, or a provider that raised; posting does not wait
             if batch and not self._bridge.ended:
                 self._draw(batch)
-            over, batch = True, []  # a draw still pending posts nothing after the turn's end
+            over, batch = True, []  # a draw still pending posts nothing after the reply's end
             if partial:  # stopped before its output was counted: the totals are lower bounds
                 self._used = frame.output_uncounted(self._used)
                 self._show_usage()
-            self._post(TurnEnded())
+            self._post(ReplyEnded())
 
     def _announce(self, event: Mapping[str, Any]) -> None:
         """A command is restarting rows (CONTRACTS.md: `restarting`): a line already kept says
@@ -455,12 +455,12 @@ class TuiOutput:
         """Show a failure the person can recover from."""
         self._post(Noted(f"error: {message}", "failure"))
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
         """Ask about a call in a modal; no once the app has ended."""
         answer = self._bridge.question()
         if answer is None:
             return False
-        self._post(Asked(request, answer))
+        self._post(Asked(question, answer))
         return await answer
 
     def lifecycle(self, event: _Lifecycle) -> None:

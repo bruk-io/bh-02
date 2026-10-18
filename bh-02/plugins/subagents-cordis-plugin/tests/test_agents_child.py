@@ -98,13 +98,13 @@ def test_a_type_naming_a_model_sets_it_and_a_parent_in_memory_has_children_in_me
     assert agents_dir([_Entry("transcript", "agent:transcript")], "transcript") is None
 
 
-def test_the_report_is_the_last_turn_s_text_its_stop_and_the_usage_summed() -> None:
+def test_the_report_is_the_last_step_s_text_its_stop_and_the_usage_summed() -> None:
     events = [
         {"type": "text", "text": "Let me look."},
         {"type": "tool_call", "id": "1", "name": "python", "input": {}},
         {"type": "usage", "input_tokens": 100, "output_tokens": 10, "cost_usd": 0.01},
         {"type": "tool_result", "call_id": "1", "content": "3", "is_error": False},
-        {"type": "stop", "reason": "silent"},  # fed back: what follows is a new turn
+        {"type": "stop", "reason": "silent"},  # fed back: what follows is a new step
         {"type": "text", "text": "There are "},
         {"type": "text", "text": "three. "},
         {"type": "usage", "input_tokens": 200, "output_tokens": 20, "cost_usd": 0.02},
@@ -135,12 +135,12 @@ class _Screen:
     def __init__(self) -> None:
         self.asked: list[Mapping[str, Any]] = []
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
-        self.asked.append(request)
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
+        self.asked.append(question)
         return True
 
 
-async def test_the_asker_puts_only_a_labelled_request_to_the_person() -> None:
+async def test_the_asker_puts_only_a_labelled_question_to_the_person() -> None:
     """A child's question reaches the person only labelled with who asks; an unlabelled one is a
     no, never put to them."""
     screen = _Screen()

@@ -222,10 +222,14 @@ exclude = [
     "bh_02.sessions:find",                                    # resolves --resume: reads the state dir (scanned)
     "bh_02.sessions:Listing.listed",                          # the `session` value, read fresh per call
     "bh_02.cli:_session", "bh_02.cli:main", "bh_02.cli:sessions_command",
+    "bh_02.cli:trajectory_command",                           # finds the session in the state dir (find), then prints its files
     "bh_02.cli:check_examples_command",                       # runs the python plugin's startup check as a subprocess
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
     "bh_02.cli:_launch",                                      # makes the project's auto memory directory
     "bh_02.bootstrap:project_of",                             # reads .git: a worktree's main repository
+    # the session's rows.jsonl: a listener that reads the clock and queues each kept lifecycle event
+    # to host_paths.Appender (a thread writes it), and `run`, which mounts it around the composition
+    "bh_02.bootstrap:_row_log", "bh_02.bootstrap:_row_log.hear", "bh_02.bootstrap:run",
     "agent_cordis_plugin.transcript:FileTranscript.*",
     "agent_cordis_plugin.transcript:rewrite",                 # /compact: the new conversation written whole (temp, then replace), the old kept as .bak, .bak.2, ...
     "agent_cordis_plugin.conversation:compact_conversation",  # /compact: reads the transcript's file, shows that it asks, then rewrites it
@@ -238,7 +242,7 @@ exclude = [
     # the loops between input, output and the model
     "chat_cordis_plugin.chat:converse",
     "agent_cordis_plugin.loop:LoopModel.reply",
-    "agent_cordis_plugin.loop:_today",                        # the clock: the date the loop tells with a message
+    "agent_cordis_plugin.loop:LoopModel._flushed",            # the end of every reply: the transcript's queued writes awaited
     # a sub-agent: its state directory made (the session's agents/NAME, 0700), on a thread, by the
     # one function that makes it (the name is chosen on the loop, purely); the call that starts
     # its run (impure through `_run`); a finished background run's failure marked retrieved, so
@@ -250,7 +254,8 @@ exclude = [
     "subagents_cordis_plugin.agents:Agents._run", "subagents_cordis_plugin.agents:_driven",
     "subagents_cordis_plugin.agents:_driven.reply",
     # a sub-agent's event log: stamped with the clock and appended to a file, on a thread
-    "subagents_cordis_plugin.eventlog:EventLog.write", "subagents_cordis_plugin.eventlog:_append",
+    # (host_paths.Appender's)
+    "subagents_cordis_plugin.eventlog:EventLog.write",
     # agent types: the type files read from bh-02's config directories
     "subagents_cordis_plugin.kinds:type_files", "subagents_cordis_plugin.kinds:type_names",
     "agent_cordis_plugin.transcript:MemoryTranscript.append",
@@ -359,7 +364,8 @@ allow = [
     "bh_02.testing:echo_provider", "bh_02.testing:slow_provider", "bh_02.testing:repl_provider",
     "bh_02.testing:delegating_provider",
     # registered by decorator or by [project.scripts], never called by name
-    "bh_02.cli:sessions_command", "bh_02.cli:watch_command", "bh_02.cli:check_examples_command",
+    "bh_02.cli:sessions_command", "bh_02.cli:watch_command", "bh_02.cli:trajectory_command",
+    "bh_02.cli:check_examples_command",
     "models_cordis_plugin.claude_code.detach:main",
     # the documentation site's MkDocs hook: MkDocs calls these by name (mkdocs.yml `hooks`)
     "bh_docs:on_config", "bh_docs:on_page_markdown",

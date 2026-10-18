@@ -31,7 +31,7 @@ __all__ = ["grades", "palette", "status", "ui"]
 @component(provides=("input", "output", "frame"))
 async def ui(*, config: TuiConfig) -> Effects:
     """Fills a `ui` row: `use = "tui:ui"`. Depends on nothing but its config, so no reload
-    elsewhere ever restarts the app (and loses the transcript). Runs the app on cordis's loop
+    elsewhere ever restarts the app (and loses the chat view). Runs the app on cordis's loop
     for as long as the row is up, and notes the composition changing (a reload, a failure).
     With `history` configured, the app draws that file again (its last `replay` entries) and
     keeps what it shows there, and the status bar's `usage` starts from the usage it holds."""

@@ -1,4 +1,4 @@
-"""The app under Pilot: the layout, the composer, Ctrl-C, a turn drawn as it streams, the
+"""The app under Pilot: the layout, the composer, Ctrl-C, a reply drawn as it streams, the
 approval modal, the status bar; and `running`, which is how the ui row runs it."""
 
 import asyncio
@@ -9,24 +9,25 @@ from textual.pilot import Pilot
 from textual.widgets import Static
 
 from tui_cordis_plugin import AppCrashed, BhApp, running, theme
-from tui_cordis_plugin.messages import Asked, Noted, Shown, TurnEnded
-from tui_cordis_plugin.widgets import ApprovalScreen, Composer, StatusBar, Transcript
+from tui_cordis_plugin.messages import Asked, Noted, ReplyEnded, Shown
+from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Composer, StatusBar
 
 _SIZE = (120, 36)
 
 
 def _blocks(app: BhApp) -> list[tuple[str, str]]:
-    """The transcript's blocks as (kind, text)."""
-    return app.query_one(Transcript).blocks()
+    """The chat view's blocks as (kind, text)."""
+    return app.query_one(ChatView).blocks()
 
 
 async def test_the_conversation_fills_the_width_over_the_status_bar_in_bh_01_s_dark_theme() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await pilot.pause()
-        transcript, composer, bar = (app.query_one(widget) for widget in (Transcript, Composer, StatusBar))
-        assert transcript.region.width == composer.region.width == bar.region.width == _SIZE[0]
-        assert transcript.region.y < composer.region.y < bar.region.y == _SIZE[1] - 1
+        chat_view, composer, bar = (app.query_one(widget) for widget in (ChatView, Composer, StatusBar))
+        assert chat_view.region.width == composer.region.width == bar.region.width == _SIZE[0]
+        assert chat_view.region.y < composer.region.y < bar.region.y == _SIZE[1] - 1
+        assert app.query_one("#chat-view") is chat_view
         assert app.theme == theme.NAME
         assert isinstance(app.focused, Composer)
 
@@ -34,7 +35,7 @@ async def test_the_conversation_fills_the_width_over_the_status_bar_in_bh_01_s_d
 def test_every_custom_token_a_widget_names_has_a_default() -> None:
     """A real launch parses every stylesheet at startup and dies on an undefined `$token`,
     which `run_test()` does not notice."""
-    sheets = [cls.DEFAULT_CSS for cls in (Transcript, Composer, StatusBar)]
+    sheets = [cls.DEFAULT_CSS for cls in (ChatView, Composer, StatusBar)]
     named = {
         name for css in [*sheets, ApprovalScreen.DEFAULT_CSS] for name in re.findall(r"\$(bh-[\w-]+)", css)
     }
@@ -65,23 +66,23 @@ async def test_exit_in_the_composer_leaves_without_sending_anything() -> None:
         await pilot.press(*"/exit", "enter")
         await pilot.pause()
         assert app.return_code == 0
-    assert not app.bridge.turn_running
+    assert not app.bridge.reply_running
 
 
-async def test_ctrl_c_stops_the_running_turn_and_otherwise_says_how_to_leave() -> None:
+async def test_ctrl_c_stops_the_running_reply_and_otherwise_says_how_to_leave() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await pilot.press("ctrl+c")
         assert any(text.startswith("Nothing is running.") for _, text in _blocks(app))
         assert app.return_code is None  # still running: Ctrl-C never quits
-        turn = asyncio.ensure_future(app.bridge.interrupted())
+        reply_task = asyncio.ensure_future(app.bridge.interrupted())
         await pilot.pause()
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(turn, 1)
+        await asyncio.wait_for(reply_task, 1)
 
 
-async def test_ctrl_c_while_a_command_runs_says_it_does_not_stop_one_and_a_starting_turn_hears_it() -> None:
-    """A Ctrl-C held for the line being handled: a turn starting hears it at once and nothing is
+async def test_ctrl_c_while_a_command_runs_says_it_does_not_stop_one_and_a_starting_reply_hears_it() -> None:
+    """A Ctrl-C held for the line being handled: a reply starting hears it at once and nothing is
     said; a command (a `!` one may take minutes) never does, so the app says Ctrl-C doesn't stop
     it, and how to leave."""
     app = BhApp()
@@ -92,11 +93,11 @@ async def test_ctrl_c_while_a_command_runs_says_it_does_not_stop_one_and_a_start
         await pilot.pause(0.5)
         said = [text for _, text in _blocks(app) if text.startswith("A command is running")]
         assert said == [
-            "A command is running, and Ctrl-C stops only a turn: a `!` command or /compact runs until "
+            "A command is running, and Ctrl-C stops only a reply: a `!` command or /compact runs until "
             "it ends or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
         ]
         await pilot.press(*"hello", "enter")
-        assert await asyncio.wait_for(app.bridge.line(), 1) == "hello"  # a turn starts
+        assert await asyncio.wait_for(app.bridge.line(), 1) == "hello"  # a reply starts
         await pilot.press("ctrl+c")
         await asyncio.wait_for(app.bridge.interrupted(), 1)  # and hears the held Ctrl-C
         await pilot.pause(0.5)
@@ -117,7 +118,7 @@ async def test_a_reply_streams_into_one_block_and_other_events_get_their_own() -
             {"type": "stop", "reason": "interrupted"},
         ):
             app.post_message(Shown(event))
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         app.post_message(Shown({"type": "text", "text": "Next"}))
         app.post_message(Noted("error: slow down", "failure"))
         await pilot.pause()
@@ -127,7 +128,7 @@ async def test_a_reply_streams_into_one_block_and_other_events_get_their_own() -
             ("tool_result", "⎿ 2"),
             ("text", "Two."),
             ("stop", "stopped: interrupted"),
-            ("text", "Next"),  # a new turn: a new block, not appended to the last one
+            ("text", "Next"),  # a new reply: a new block, not appended to the last one
             ("failure", "error: slow down"),
         ]
 
@@ -149,18 +150,18 @@ async def test_a_question_is_a_modal_and_its_answer_goes_back() -> None:
 
 
 async def test_a_sub_agent_s_question_says_which_agent_asks() -> None:
-    """A child's question comes through the parent's `output` labelled (CONTRACTS.md: request,
+    """A child's question comes through the parent's `output` labelled (CONTRACTS.md: question,
     `agent`): the modal says who asks above the question."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         answer = app.bridge.question()
         assert answer is not None
-        request = {
+        question = {
             "name": "python",
             "input": {"code": "1"},
             "agent": {"name": "general-1", "type": "general"},
         }
-        app.post_message(Asked(request, answer))
+        app.post_message(Asked(question, answer))
         await pilot.pause()
         assert isinstance(app.screen, ApprovalScreen)
         title = str(app.screen.query_one("#approval-title", Static).content)
@@ -177,7 +178,7 @@ async def test_a_question_nobody_waits_for_is_taken_down() -> None:
         app.post_message(Asked({"name": "python", "input": {"code": "1"}}, answer))
         await pilot.pause()
         assert isinstance(app.screen, ApprovalScreen)
-        answer.cancel()  # the turn asking was interrupted
+        answer.cancel()  # the reply asking was interrupted
         await pilot.pause()
         await pilot.pause()
         assert not isinstance(app.screen, ApprovalScreen)

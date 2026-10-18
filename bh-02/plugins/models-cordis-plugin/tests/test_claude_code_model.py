@@ -77,7 +77,7 @@ def _said(chunks: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _entry(chunks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """The loop's transcript entry for an act or answered step (agent:loop's `_Turn.entry`)."""
+    """The loop's transcript entry for an act or answered step (agent:loop's `Step.entry`)."""
     calls = [
         {"id": c["id"], "name": c["name"], "input": c["input"]} for c in chunks if c["type"] == "tool_call"
     ]
@@ -303,13 +303,13 @@ async def test_a_conversation_that_cannot_be_written_for_claude_code_says_so_and
     deep = tmp_path.joinpath(*["a-rather-long-directory-name"] * 8)
     h.config = ClaudeCodeConfig(state=h.config.state, env_file=h.config.env_file, cwd=str(deep))
     h.model = ClaudeCodeModel(h.config, h.open)
-    history = [
+    messages = [
         {"role": "user", "content": "a"},
         {"role": "assistant", "content": "ok"},
         {"role": "user", "content": "what did I say?"},
     ]
     with pytest.raises(ClaudeCodeError) as raised:
-        await h.step(history)
+        await h.step(messages)
     assert raised.value.kind == "path_too_long" and "shorter path" in raised.value.message
     assert h.fakes == []  # never a fresh conversation that silently lost the transcript
     cleared = await h.step([{"role": "user", "content": "hi"}])  # /clear, as the error says
@@ -345,7 +345,7 @@ async def test_a_conversation_claude_code_never_saw_is_written_as_a_session_and_
     tmp_path: Path,
 ) -> None:
     h = _Harness(tmp_path, [FakeStep([_text("you said a")])])
-    history = [
+    messages = [
         {"role": "user", "content": "a"},
         {
             "role": "assistant",
@@ -360,7 +360,7 @@ async def test_a_conversation_claude_code_never_saw_is_written_as_a_session_and_
         {"role": "assistant", "content": "ok"},
         {"role": "user", "content": "what did I say?"},
     ]
-    await h.step(history)
+    await h.step(messages)
     (fake,) = h.fakes
     resume = fake.options.resume
     assert resume is not None and fake.asked == ["what did I say?"]

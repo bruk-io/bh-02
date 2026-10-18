@@ -4,7 +4,7 @@ sections to; `asides`, the broker of what the model is told beside a call's resu
 the broker of what is asked before a file is read or written; `executor`, where the loop reads
 the prompt and asks `asides`; and the conversation's commands, `/clear` and `/compact`.
 
-The transcript is its own row so the history outlives the loop: replace the `model` row
+The transcript is its own row so the conversation outlives the loop: replace the `model` row
 and the loop reloads against the new provider while the conversation carries on. `asides` is
 its own row too, depending on nothing, so neither the loop nor a row adding to it reloads the
 other, and `tools`, so a tool's row restarting (the python row's) reloads neither the loop nor
@@ -48,7 +48,7 @@ from agent_cordis_plugin.loop import (
 from agent_cordis_plugin.system import SystemConfig, SystemPrompt
 from agent_cordis_plugin.tools import ToolBroker
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
-from cordis import Effects, acquire, bind, component
+from cordis import Effects, acquire, bind, component, enter
 from cordis_helpers import Hooks
 
 __all__ = [
@@ -74,13 +74,19 @@ class TranscriptConfig:
 
 @component(provides=("transcript",))
 async def transcript(*, config: TranscriptConfig) -> Effects:
-    """Fills a `transcript` row: `use = "agent:transcript"`."""
-    yield bind("transcript", FileTranscript(config.path) if config.path else MemoryTranscript())
+    """Fills a `transcript` row: `use = "agent:transcript"`. A file's is entered, so what it has
+    queued is written and its file closed when the row leaves (a restart, a retired sub-agent)."""
+    if config.path:
+        kept = FileTranscript(config.path)
+        yield enter(kept)
+        yield bind("transcript", kept)
+    else:
+        yield bind("transcript", MemoryTranscript())
 
 
 @dataclass(frozen=True, slots=True)
 class LoopConfig:
-    """`max_nudges`: how many times one reply feeds a truncated, silent or undecodable turn back.
+    """`max_nudges`: how many times one reply feeds a truncated, silent or undecodable step back.
     `requires`: the tools a conversation can't begin without (the shipped layer: `["python"]`),
     waited for at the loop's first request, `wait` seconds at most; a call to a tool restarting
     waits as long."""
@@ -208,7 +214,7 @@ async def conversation(
     conversation each, written over the transcript row's file in one step, the old kept beside
     it (`.bak`, `.bak.2`, ...). `/clear`'s is empty, and the loop, the transcript and the python
     row restart (`config.clear`); `/compact [WHAT TO KEEP]`'s begins from the model's summary (in
-    `config.timeout` seconds: Ctrl-C stops only a turn; a note says so as it begins), and the
+    `config.timeout` seconds: Ctrl-C stops only a reply; a note says so as it begins), and the
     loop and the transcript restart, the python row keeping its namespace.
 
     It depends on neither the loop nor the transcript, which it restarts. It finds the

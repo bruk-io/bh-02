@@ -1,7 +1,7 @@
 # Command line
 
-`bh-02` starts a session in the current directory. Its subcommands list sessions, follow a
-sub-agent's event log and check a startup file's docstrings. Each block below is the command's own
+`bh-02` starts a session in the current directory. Its subcommands list sessions, print one laid out in
+time, follow a sub-agent's event log and check a startup file's docstrings. Each block below is the command's own
 `--help`.
 
 ## `bh-02`
@@ -35,6 +35,7 @@ Options:
 Commands:
   check-examples  Check the docstrings of the functions and classes...
   sessions        List this directory's sessions, newest first: each...
+  trajectory      Print a session laid out in time, read-only: each...
   watch           Follow one sub-agent's event log, read-only: SESSION is...
 ```
 
@@ -90,6 +91,78 @@ text run together. It opens the file read-only, follows no link, and refuses a S
 that is not a name bh-02 made (a session id such as `20261012-091500-ab12`, an agent such as
 `general-1`), so neither can name a path. Anything the model wrote is shown as plain text, with
 no escape sequence. It works the same inside tmux or outside it.
+
+## `bh-02 trajectory`
+
+```text
+Usage: bh-02 trajectory [OPTIONS] [ID]
+
+  Print a session laid out in time, read-only: each reply, its steps (model,
+  time to first chunk, generation time, speed, usage, cost), their calls
+  (answer, wait, run time), the sub-agents they started and the rows that
+  reloaded, with times in your local time. ID is the session as `--resume`
+  takes it (its id, the start of it or its last part; `bh-02 sessions` lists
+  them), the newest in this directory when left out. Nothing is written, and
+  the files are read through no link.
+
+Options:
+  -f, --follow  Keep reading the files and print what is new, until Ctrl-C.
+  --help        Show this message and exit.
+```
+
+It prints what the session's files hold, as lines indented by what is inside what. Times are in
+your local time (the files keep UTC), shown as a time of day, with the date where it differs from
+the reply's. The date the model is told is also your local day, so near midnight UTC it can
+differ from the date in the files.
+
+```text
+row reload loop  20:40:00.000
+conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
+  reply 1  2026-10-17 20:47:12.345  fix the bug in foo
+    step 1  20:47:12.400  claude-opus-5-5  first chunk 1.20s  generated in 3.40s  62.4 tokens/s  in 1,200 tokens  out 212 tokens  cache read 1,000  cost $0.0312
+      settings: work/opus via claude-code, max_tokens 4096, temperature 0.2
+      row reload transcript  20:47:14.000
+      call python  20:47:17.000  answer yes (waited 4.20s)  ran 0.80s
+        nested call read_file  20:47:17.100  answer unasked  ran 0.01s
+      call agent  20:47:18.000  answer unasked  ran 12.00s  started sub-agent general-1
+        sub-agent general-1
+          conversation 1  transcript.jsonl  2026-10-17 20:47:19.000
+            reply 1  2026-10-17 20:47:19.000  count the files
+              step 1  20:47:20.000  claude-haiku-5  first chunk 0.30s  generated in 0.70s
+    row failed model  20:47:21.500  RuntimeError('boom')
+    step 2  20:47:31.000  first chunk 0.50s  generated in 1.00s  30.0 tokens/s  in 1,500 tokens  out 30 tokens
+```
+
+- **A reply** is a message of yours and the steps taken to answer it (with the loop's nudges, when a
+  step did not count). **A step** shows the model that answered, the seconds to its first chunk,
+  the generation time after it, output tokens per second over that time, the tokens used and the
+  cost, and its settings (`settings:`) only when they are new to the conversation or changed. **A
+  call** shows its tool, what approval made of it (`answer unasked`, `yes` or `no`) and how long you
+  took to answer, how long the tool ran, and the calls its input made through `tools` under it. A
+  call whose result is not in the transcript says `no result recorded`.
+- **A row reload** is a row of the composition starting to load (`row reload NAME`: it came up, was
+  restarted, as `/clear` does, or a dependency it uses was replaced) or failing (`row failed NAME`,
+  with the error), from the session's `rows.jsonl`. It is printed in time order, before the first reply,
+  step or call that came after it, at that line's indentation; one with nothing after it comes last. A
+  sub-agent's rows (`agents/NAME/...`) are placed among that sub-agent's lines. A session starts with a
+  `row reload` for each row, and each restart adds those of the rows that depend on what it replaced.
+- **Conversations** are the session's transcript files: the backups `/clear` and `/compact` kept
+  come first, in the order of their first `at` (else of the time they were copied), and the live
+  `transcript.jsonl` is last. A conversation `/compact` began says so, with what you asked it to
+  keep, and the summary step's time and cost; one that follows another without that was cleared.
+- **A sub-agent** is shown under the call that started it, with its own times (a background agent
+  keeps running after the call returns). One no call names, such as a call you interrupted, comes
+  after the conversations, in the order of its own times.
+- **A session from before the records**, or a field the file does not have, prints with no times.
+- **`--follow`** reads every file again each second and prints the lines it has not printed, so a
+  `/clear` or `/compact` that replaces the live file carries on with the new one. A call whose result
+  is not written yet is printed once it is. Ctrl-C leaves it.
+- It only reads: the files are opened read-only through `host_paths`, beneath the sessions' state,
+  following no link; a sub-agent is a name in the session's `agents/` directory that `bh-02 watch`
+  would accept; a line being written when it reads is skipped; and nothing in a transcript reaches the
+  terminal as an escape sequence or any other control character.
+
+The raw request of a step is not shown yet.
 
 ## `bh-02 check-examples`
 

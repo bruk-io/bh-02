@@ -21,7 +21,7 @@ from typing import Any
 
 from host_paths import Link, read_beneath
 
-__all__ = ["Refused", "refused", "rendered", "watched"]
+__all__ = ["Refused", "clean", "refused", "refused_agent", "refused_session", "rendered", "watched"]
 
 # A session id as `sessions.create` makes it (`20261012-091500-ab12`), an agent's name as the
 # agents row gives it (`TYPE-N`; a type's name is at most 32 of lower-case letters, digits, `_`
@@ -45,13 +45,18 @@ class Refused(Exception):
         self.message = message
 
 
-def refused(session: str, agent: str) -> str | None:
-    """Why `session` and `agent` are not names bh-02 made (so no path is built from them), or None."""
+def refused_session(session: str) -> str | None:
+    """Why `session` is not a session id bh-02 made (so no path is built from it), or None."""
     if not _SESSION.fullmatch(session):
         return (
             f"{session!r} is not a session id bh-02 made (such as 20261012-091500-ab12); "
             "`bh-02 sessions` lists this directory's"
         )
+    return None
+
+
+def refused_agent(agent: str) -> str | None:
+    """Why `agent` is not an agent name bh-02 made (so no path is built from it), or None."""
     if not _AGENT.fullmatch(agent):
         return (
             f"{agent!r} is not an agent name bh-02 made (a type and a number, such as general-1); "
@@ -60,13 +65,18 @@ def refused(session: str, agent: str) -> str | None:
     return None
 
 
-def _clean(text: str) -> str:
+def refused(session: str, agent: str) -> str | None:
+    """Why `session` and `agent` are not names bh-02 made (so no path is built from them), or None."""
+    return refused_session(session) or refused_agent(agent)
+
+
+def clean(text: str) -> str:
     """`text` less every control character but newline and tab (escape sequences included)."""
     return _UNSAFE.sub("", text.replace("\r\n", "\n").replace("\r", "\n"))
 
 
 def _clipped(text: str) -> str:
-    one = " ".join(_clean(text).split())
+    one = " ".join(clean(text).split())
     return one if len(one) <= _CLIP else f"{one[:_CLIP]}…"
 
 
@@ -83,7 +93,7 @@ def rendered(line: bytes, inline: bool) -> tuple[str, bool, bool]:
     except json.JSONDecodeError, KeyError, TypeError, AttributeError:
         return _after("? a line of the log that is not a record\n", inline), False, False
     if kind == "text":
-        return _clean(str(event.get("text", ""))), True, False
+        return clean(str(event.get("text", ""))), True, False
     body, last = _described(kind, event)
     return _after(f"{stamp}  {body}\n", inline), False, last
 
@@ -104,7 +114,7 @@ def _described(kind: str, event: Mapping[str, Any]) -> tuple[str, bool]:
             return f"ended. Its report to its parent: {_clipped(str(event.get('report', '')))}", True
         case "tool_call":
             call = _clipped(json.dumps(event.get("input"), default=str))
-            return f"-> {_clean(str(event.get('name')))} {call}", False
+            return f"-> {clean(str(event.get('name')))} {call}", False
         case "tool_result":
             failed = "error " if event.get("is_error") else ""
             return f"<- {failed}{_clipped(str(event.get('content', '')))}", False
@@ -116,10 +126,10 @@ def _described(kind: str, event: Mapping[str, Any]) -> tuple[str, bool]:
                 False,
             )
         case "stop":
-            return f"step ended: {_clean(str(event.get('reason')))}", False
+            return f"step ended: {clean(str(event.get('reason')))}", False
         case "note":
             return f"note: {_clipped(str(event.get('text', '')))}", False
-    return f"({_clean(kind)})", False
+    return f"({clean(kind)})", False
 
 
 def _read(root: Path, session: str, agent: str) -> bytes:

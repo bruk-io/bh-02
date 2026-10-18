@@ -47,8 +47,8 @@ still holds its output is ended once the shell has exited; one whose output goes
 says why and which of the row's config to set. Its answer is a `note` for the person (what it
 printed, how it ended) and a `for_model` event (CONTRACTS.md: event), which the `commands`
 value holds rather than answering; `chat:converse` takes it (`take_for_model()`) and puts it in
-front of the person's next message, so the model reads the output with it, never during a turn
-(a line typed during a turn runs once the turn has ended). The registry depends on nothing, so
+front of the person's next message, so the model reads the output with it, never during a reply
+(a line typed during a reply runs once the reply has ended). The registry depends on nothing, so
 a restart of the chat row (`/model` switching reloads it) keeps what is held; a new
 conversation (`/clear`'s `cleared`) drops it, with a note saying so, and one carried on from a
 summary (`/compact`'s `cleared`, `compacted`) keeps it: the summary was written from what the

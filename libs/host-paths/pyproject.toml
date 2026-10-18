@@ -37,6 +37,9 @@ exclude = [
     "host_paths.beneath:directory_beneath", "host_paths.beneath:read_beneath", "host_paths.beneath:_stopped",
     # and the one writer and remover of a file in a directory the model can write, through no link
     "host_paths.beneath:write_beneath", "host_paths.beneath:remove_beneath",
+    # the one appender of a file bh-02 keeps for the person: opening, writing and closing it, on a
+    # thread, is what it is for
+    "host_paths.appender:Appender.*",
 ]
 
 [tool.pypeeker.over-exposed-module-symbol]

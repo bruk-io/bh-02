@@ -1,9 +1,9 @@
 """A conversation that moves from the claude-code provider to the openai one (`/model`): Claude's
-turns, made by the real `ClaudeCodeModel` over its fake session (no process, no network), are
+steps, made by the real `ClaudeCodeModel` over its fake session (no process, no network), are
 sent to an OpenAI-compatible stand-in server (a real socket) rebuilt as that API's messages,
 the python call and its result included; Claude's own content blocks never reach it.
 
-The transcript entries are built as agent:loop builds them (`_Turn.entry`): its text, its
+The transcript entries are built as agent:loop builds them (`Step.entry`): its text, its
 calls, and the provider's message from the step's last chunk."""
 
 import json
@@ -39,7 +39,7 @@ def _entry(chunks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return entry
 
 
-async def test_claude_s_turns_reach_an_openai_model_rebuilt_as_its_own_messages(tmp_path: Path) -> None:
+async def test_claude_s_steps_reach_an_openai_model_rebuilt_as_its_own_messages(tmp_path: Path) -> None:
     env = tmp_path / "local.env"
     env.write_text(f"{TOKEN_VARIABLE}=sentinel-not-a-real-token\n")
     script = [

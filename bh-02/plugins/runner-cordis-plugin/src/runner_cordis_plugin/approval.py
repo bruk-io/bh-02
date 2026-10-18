@@ -1,7 +1,7 @@
 """The `approval` value: the rule that decides what the model asked for runs unasked, the same
 for every row that runs some.
 
-The rule: a call runs without asking when it runs in the runner (`runs`, "jail" when the request
+The rule: a call runs without asking when it runs in the runner (`runs`, "jail" when the question
 says nothing) and the runner confines it (`is_confined`: it enforces writes and the network);
 otherwise (an unconfined runner, or a tool that runs in bh-02's own process, "host") it is put to
 the person first. One kind of call is never put to the person: `runs` "memory", bh-02's own
@@ -30,7 +30,7 @@ _CONFINING = (
     "fs_write",
     "network",
 )  # the axes a runner must enforce for what runs in it to count as confined
-_JAIL = "jail"  # where a call runs when its request says nothing (CONTRACTS.md: tools, `runs`)
+_JAIL = "jail"  # where a call runs when its question says nothing (CONTRACTS.md: tools, `runs`)
 # bh-02's own tool that reaches only the jail and bh-02's own state: asked exactly as the jail's are
 _HARNESS = "harness"
 # bh-02's own tool that writes only beneath host.auto_memory, through no link: never asked, jailed or not
@@ -55,7 +55,7 @@ def is_confined(report: Mapping[str, str]) -> bool:
 @dataclass(frozen=True, slots=True)
 class Approval:
     """Implements `approval` (CONTRACTS.md): `confined`, read from the runner each time, and
-    `unasked(request)`."""
+    `unasked(question)`."""
 
     runner: Graded
 
@@ -64,12 +64,12 @@ class Approval:
         """Whether the runner confines what runs in it, so nothing that runs there is asked about."""
         return is_confined(self.runner.report())
 
-    def unasked(self, request: Mapping[str, Any]) -> bool:
-        """Whether what `request` asks for runs without asking the person: it is bh-02's own
-        memory tool (`request["runs"]` `"memory"`, which writes only beneath `host.auto_memory`
+    def unasked(self, question: Mapping[str, Any]) -> bool:
+        """Whether what `question` asks for runs without asking the person: it is bh-02's own
+        memory tool (`question["runs"]` `"memory"`, which writes only beneath `host.auto_memory`
         through no link, which the jailed model can already write), whatever the runner confines;
         or it runs in the runner (the runner when `runs` says nothing) or is bh-02's own tool
         bounded to the jail and bh-02's own state (`"harness"`), and the runner confines it.
         `"host"` is never."""
-        runs = request.get("runs", _JAIL)
+        runs = question.get("runs", _JAIL)
         return runs in _UNASKED or (runs in _UNASKED_WHEN_CONFINED and self.confined)

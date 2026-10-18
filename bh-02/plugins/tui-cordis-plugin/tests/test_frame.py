@@ -6,7 +6,7 @@ from typing import Any
 from tui_cordis_plugin import frame
 
 
-def test_usage_sums_turn_by_turn_and_shows_cost_once_there_is_one() -> None:
+def test_usage_sums_step_by_step_and_shows_cost_once_there_is_one() -> None:
     total = frame.add_usage(frame.Usage(), {"input_tokens": 900, "output_tokens": 40})
     assert frame.usage_text(total) == "900 in · 40 out"
     total = frame.add_usage(total, {"input_tokens": 12_000, "output_tokens": 60, "cost_usd": 0.02})
@@ -163,7 +163,7 @@ def test_a_command_s_choices_are_entries_of_their_own_read_each_time() -> None:
     assert "/model opus" in [e.call for e in frame.palette_entries(specs)]
 
 
-def test_a_turn_stopped_before_its_output_was_counted_makes_the_totals_lower_bounds() -> None:
+def test_a_reply_stopped_before_its_output_was_counted_makes_the_totals_lower_bounds() -> None:
     read = {"type": "usage", "input_tokens": 900, "output_tokens": 0, "cost_usd": 0.001, "partial": True}
     rest = {"type": "usage", "input_tokens": 0, "output_tokens": 40, "cost_usd": 0.0002}
     whole = frame.total_usage([read, rest, {"type": "turn_end"}])  # the count came: exact

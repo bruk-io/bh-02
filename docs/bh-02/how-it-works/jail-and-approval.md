@@ -7,12 +7,13 @@ the runner confines the code, it runs; when it doesn't, you are asked.
 ## Approval: one rule, one row
 
 `runner:approval` binds `approval`, the one place that decides whether the model's code runs
-unasked. The loop asks it about every input, and the extensions row about every extension it
-loads. Neither keeps a copy of the rule, and each asks you itself when the rule says no.
+unasked. What it doesn't let run is put to you as a **question**. The loop asks the rule about
+every input (`unasked(question)`), and the extensions row about every extension it loads. Neither
+keeps a copy of the rule, and each puts the question to you itself when the rule says no.
 
 - **Confined** (the runner enforces writes and network): yes, at once.
-- **Unconfined** (`--no-jail`): the loop or the extensions row asks you through the app's
-  approval question, with the code shown, and it runs only on a yes. With nobody to ask, the
+- **Unconfined** (`--no-jail`): the loop or the extensions row puts the question to you in the
+  app's approval modal, with the code shown, and it runs only on a yes. With nobody to ask, the
   answer is no.
 
 The python row tells the model whether it is confined by the same rule, so what the model is

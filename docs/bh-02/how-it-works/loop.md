@@ -4,9 +4,9 @@ The agent loop is bh-02's own row, `agent:loop`. It sends the conversation to th
 tool calls the model asks for, and decides when a reply is done. Every model goes through the same
 loop: only the model row's provider differs.
 
-## A turn
+## A reply
 
-A turn is the reply to one message. It takes one model step or more:
+A reply answers one message. It takes one model step or more:
 
 1. The loop sends the model the conversation: the system prompt, then the transcript. It offers
    the tools rows have registered with `tools` (`agent:tools`, a broker), through the provider's
@@ -41,6 +41,12 @@ section of the system prompt, never in the tool's description.
 
 The transcript is a row of its own (`agent:transcript`), written to the session's
 `transcript.jsonl`. So a `/model` switch, which reloads the loop, keeps the conversation.
+
+The file is written on a thread, in order, so the screen never waits on a disk, and the loop waits
+for the last write when a reply ends, however it ends. `/clear` and `/compact` run only after the
+reply before them, so they find every entry. The file, its backups and the session's directory are
+readable by you alone (0600 and 0700, not the umask's). A line that can't be written (a full disk)
+is an error at the end of that reply, not an entry quietly missing from the file.
 
 ## Steps that don't count
 

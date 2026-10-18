@@ -1,6 +1,8 @@
 """The `bh-02` command with the ui and the model patched to fakes: what it prints, and when."""
 
+import json
 import os
+import stat
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -43,6 +45,29 @@ def test_trace_goes_to_a_file_because_the_app_owns_the_terminal(
     assert any(line.startswith("unbind loop by loop#") for line in lines)  # the unwind is traced too
     assert "active chat#" not in result.output  # nothing of it on the terminal
     assert result.stderr.startswith("session ") and "bh-02 --resume" in result.stderr  # said after the run
+
+
+def test_a_session_keeps_its_row_reloads_beside_its_transcript_and_trace_hears_the_same_rows(
+    composition: Callable[..., Path], state: Path
+) -> None:
+    """`rows.jsonl` is in the session's directory, for its owner alone; `--trace` is written as before,
+    and the rows it traces as reloading are the rows the file keeps."""
+    trace = state / "trace.log"
+    result = CliRunner().invoke(
+        main, ["--no-jail", "--patch", str(_patch(composition)), "--trace", str(trace)]
+    )
+    assert result.exit_code == 0, result.output
+    (session,) = (state / "state" / "bh-02" / "sessions").iterdir()
+    log = session / "rows.jsonl"
+    assert stat.S_IMODE(log.stat().st_mode) == 0o600
+    kept = [json.loads(line) for line in log.read_text().splitlines()]
+    traced = [
+        line.split("#")[0].removeprefix("reload ")
+        for line in trace.read_text().splitlines()
+        if line.startswith("reload ")
+    ]
+    assert kept and sorted(record["row"] for record in kept) == sorted(traced)
+    assert "chat" in traced and all(record["kind"] == "reload" for record in kept)
 
 
 def test_there_is_no_one_shot_command() -> None:

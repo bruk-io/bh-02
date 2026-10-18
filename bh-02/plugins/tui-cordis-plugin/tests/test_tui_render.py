@@ -2,7 +2,7 @@
 
 from textual.content import Content
 
-from tui_cordis_plugin import render
+from tui_cordis_plugin import frame, render
 
 
 def _styles(content: Content) -> dict[str, str]:
@@ -150,15 +150,27 @@ def test_usage_and_stops() -> None:
     cached = {"input_tokens": 6393, "output_tokens": 5, "cache_read_input_tokens": 6378, "cost_usd": 0.0007}
     assert render.usage_line(cached) == "6,393 in · 6,378 cached · 5 out · $0.0007"
     read = {"input_tokens": 8119, "output_tokens": 0, "cache_read_input_tokens": 8062, "cost_usd": 0.0009}
-    started = read | {"partial": True}  # what was read, sent as the turn started
+    started = read | {"partial": True}  # what was read, sent as the step started
     assert render.usage_line(started) == "8,119 in · 8,062 cached · output not counted · $0.0009 for input"
     rest = {"input_tokens": 0, "output_tokens": 150, "cost_usd": 0.0008}
-    whole = render.usage_sum(started, rest)  # the output count came: the turn is whole
+    whole = render.usage_sum(started, rest)  # the output count came: the step is whole
     assert "partial" not in whole and render.usage_line(whole).endswith("150 out · $0.0017")
     assert render.usage_sum(started, started)["partial"] is True  # nothing brought it yet
     assert render.is_quiet_stop({"reason": "end_turn"})
     assert not render.is_quiet_stop({"reason": "interrupted"})
     assert render.stop_line({"reason": "interrupted"}) == "stopped: interrupted"
+
+
+def test_a_usage_event_that_names_the_model_that_answered_renders_as_one_that_does_not() -> None:
+    """The providers add `model` to their usage chunks, for the loop's step record (CONTRACTS.md:
+    event): the ui shows and sums the counts, and nothing else."""
+    usage = {"type": "usage", "input_tokens": 1200, "output_tokens": 30, "cost_usd": 0.01}
+    named = usage | {"model": "claude-opus-5-5"}
+    assert render.usage_line(named) == render.usage_line(usage) == "1,200 in · 30 out · $0.0100"
+    started = {"type": "usage", "input_tokens": 8119, "cache_read_input_tokens": 8062, "partial": True}
+    rest = {"type": "usage", "output_tokens": 150, "model": "claude-opus-5-5"}
+    assert render.usage_sum(started | {"model": "claude-opus-5-5"}, rest) == render.usage_sum(started, rest)
+    assert frame.add_usage(frame.Usage(), named) == frame.add_usage(frame.Usage(), usage)
 
 
 def test_only_a_reload_or_a_failure_is_worth_a_note() -> None:
@@ -175,7 +187,7 @@ def test_an_approval_names_the_input_and_shows_its_code_whole() -> None:
     empty = {"name": "python", "input": {"code": ""}}
     assert render.approval_title(empty) == "Run this python code (0 lines)?"
     assert render.approval_lines(empty) == []
-    # a request about something other than an input (an extension to load) asks its own question
+    # a question about something other than an input (an extension to load) has its own title
     asked = {"name": "extension", "title": "Load extension todo, unjailed?", "input": {"code": "x = 1"}}
     assert render.approval_title(asked) == "Load extension todo, unjailed (1 line)?"
     assert render.approval_lines(asked) == ["x = 1"]

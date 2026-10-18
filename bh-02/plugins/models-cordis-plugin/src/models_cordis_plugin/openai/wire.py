@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from models_cordis_plugin.named import ModelsError
+from models_cordis_plugin.named import ModelsError, Named
 
 __all__ = [
     "Fold",
@@ -24,6 +24,7 @@ __all__ = [
     "replayed",
     "request_for",
     "scrubbed",
+    "settings_for",
     "sse_data",
     "stop_for",
     "stream_error",
@@ -41,6 +42,7 @@ _STOPS: Final[Mapping[str, str]] = {
     "function_call": "tool_calls",
     "content_filter": "refusal",
 }
+_SAMPLING: Final = ("max_tokens", "temperature")  # the settings of a model's table a request carries
 _SERVER_TEXT: Final = 300  # how much of a server's error body a message quotes
 _KEY_SHOWN: Final = "<key>"  # what a key the server echoed back reads as in an error
 # A word the server masked a key in (OpenAI's `sk-proj-****abcd`): stars, or dots, in a run.
@@ -88,14 +90,22 @@ def request_for(
             }
             for t in tools
         ]
-    for name in ("max_tokens", "temperature"):
+    for name in _SAMPLING:
         if settings.get(name) is not None:
             body[name] = settings[name]
     return body
 
 
+def settings_for(named: Named) -> frozendict[str, Any]:
+    """What a model's requests are made with, for the transcript to record when it changes
+    (CONTRACTS.md: model, `settings`): the named model (`ENDPOINT/MODEL`), its provider, and the
+    `max_tokens` and `temperature` `request_for` sends, each left out when the model's table sets none."""
+    sent = {name: named.table[name] for name in _SAMPLING if named.table.get(name) is not None}
+    return frozendict({"model": named.name, "provider": named.provider} | sent)
+
+
 def replayed(message: Json) -> dict[str, Any]:
-    """A transcript message as the API takes it. An assistant turn this provider sent is
+    """A transcript message as the API takes it. An assistant message this provider sent is
     replayed as it came (`provider`); another provider's (Claude's content blocks, Ollama's
     parsed arguments), in a conversation that switched models, is rebuilt from the
     transcript's own text and calls."""
@@ -179,6 +189,7 @@ class Fold:
     _calls: dict[int, _Call] = field(default_factory=dict, init=False)
     _at: dict[int, int] = field(default_factory=dict, init=False)  # a server's index -> its call
     _usage: Json | None = field(default=None, init=False)
+    _model: str = field(default="", init=False)  # the id the server answered with (every event names it)
     finish_reason: str | None = field(default=None, init=False)
 
     def take(self, event: Json) -> list[dict[str, Any]]:
@@ -186,6 +197,8 @@ class Fold:
         out: list[dict[str, Any]] = []
         if isinstance(event.get("usage"), Mapping):
             self._usage = event["usage"]
+        if isinstance(answered := event.get("model"), str) and answered:
+            self._model = answered
         for choice in event.get("choices") or []:
             delta = choice.get("delta") or {}
             # DeepSeek's `reasoning_content`, OpenRouter's and Ollama's `reasoning`
@@ -259,7 +272,7 @@ class Fold:
             out.append(chunk)
             sent.append({"id": ident, "type": "function", "function": {"name": call.name, "arguments": raw}})
         if self._usage is not None:
-            out.append(_usage(self._usage))
+            out.append(_usage(self._usage, self._model))
         out.append({"type": "stop", "reason": stop_for(self.finish_reason)})
         message: dict[str, Any] = {"role": "assistant", "content": "".join(self._text) or None}
         if sent:
@@ -280,13 +293,16 @@ def _whole(arguments: Sequence[str]) -> bool:
     return bool(raw.strip())
 
 
-def _usage(usage: Json) -> dict[str, Any]:
-    """The API's usage as a `usage` event: what the model read (cached or not) and wrote."""
+def _usage(usage: Json, model: str) -> dict[str, Any]:
+    """The API's usage as a `usage` event: what the model read (cached or not) and wrote, and
+    the id that answered (`model`, from the response; left out when the server named none)."""
     out: dict[str, Any] = {
         "type": "usage",
         "input_tokens": int(usage.get("prompt_tokens") or 0),
         "output_tokens": int(usage.get("completion_tokens") or 0),
     }
+    if model:
+        out["model"] = model
     details = usage.get("prompt_tokens_details")
     if isinstance(details, Mapping) and details.get("cached_tokens"):
         out["cache_read_input_tokens"] = int(details["cached_tokens"])

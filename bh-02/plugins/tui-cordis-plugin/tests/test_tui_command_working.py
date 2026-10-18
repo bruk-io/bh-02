@@ -17,7 +17,7 @@ from textual.pilot import Pilot
 from tui_cordis_plugin import BhApp, Bridge, TuiOutput
 from tui_cordis_plugin.app import running
 from tui_cordis_plugin.messages import Handling
-from tui_cordis_plugin.widgets import Transcript, Working
+from tui_cordis_plugin.widgets import ChatView, Working
 
 _SIZE = (80, 20)
 _FAST = 0.05  # seconds between ticks
@@ -86,7 +86,7 @@ def _note(text: str) -> Mapping[str, Any]:
 
 
 def _notes(app: BhApp) -> list[str]:
-    return [text for kind, text in app.query_one(Transcript).blocks() if kind == "note"]
+    return [text for kind, text in app.query_one(ChatView).blocks() if kind == "note"]
 
 
 # The bridge's side: when it tells the app a line is being handled.
@@ -271,12 +271,12 @@ async def test_a_reply_is_one_line_from_the_line_handed_out_and_goes_when_it_end
             yield {"type": "tool_result", "call_id": "c", "content": "done", "is_error": False}
 
         await _handed(app, pilot, "hello")
-        turn = asyncio.ensure_future(TuiOutput(app.post_message, app.bridge).show(reply()))
+        reply_task = asyncio.ensure_future(TuiOutput(app.post_message, app.bridge).show(reply()))
         await _until(pilot, lambda: app.query_one(Working).ticking)
         clock.now += 9
         await _until(pilot, lambda: _line(app) == "Working · 9s")
         release.set()
-        await turn
+        await reply_task
         _read(app)
         await _until(pilot, lambda: _line(app) is None)
         assert not app.query_one(Working).ticking
@@ -291,10 +291,10 @@ async def test_esc_and_ctrl_c_are_as_before_while_a_command_runs_with_the_line_u
         await _handed(app, pilot, "!sleep 600")
         clock.now += 3
         await _until(pilot, lambda: _line(app) == "Working · 3s")
-        before = app.query_one(Transcript).blocks()
+        before = app.query_one(ChatView).blocks()
         await pilot.press("escape")
         await pilot.pause(0.5)
-        assert not app.bridge.interrupt_held and app.query_one(Transcript).blocks() == before
+        assert not app.bridge.interrupt_held and app.query_one(ChatView).blocks() == before
         assert _line(app) is not None
         await pilot.press("ctrl+c")
         await _until(pilot, lambda: any("A command is running" in text for text in _notes(app)))
@@ -317,18 +317,18 @@ async def test_esc_and_ctrl_c_still_stop_a_reply_and_take_the_line_down_with_it(
             await asyncio.Event().wait()
             yield {"type": "text", "text": "never"}
 
-        turn = asyncio.ensure_future(output.show(endless()))
+        reply_task = asyncio.ensure_future(output.show(endless()))
 
         async def stopped_by_the_person() -> None:
             """What `chat:converse` does: cancel the reply once the input is interrupted."""
             await app.bridge.interrupted()
-            turn.cancel()
+            reply_task.cancel()
 
         stopper = asyncio.ensure_future(stopped_by_the_person())
         clock.now += 2
         await _until(pilot, lambda: _line(app) == "Working · 2s")
         await pilot.press("escape")
-        await asyncio.gather(turn, stopper, return_exceptions=True)
+        await asyncio.gather(reply_task, stopper, return_exceptions=True)
         _read(app)
         await _until(pilot, lambda: _line(app) is None)
 

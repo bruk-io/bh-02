@@ -11,8 +11,8 @@ from textual.content import Content
 from textual.pilot import Pilot
 
 from tui_cordis_plugin import BhApp, frame
-from tui_cordis_plugin.messages import Asked, Shown, TurnEnded, TurnStarted
-from tui_cordis_plugin.widgets import ApprovalScreen, Completions, Composer, Transcript
+from tui_cordis_plugin.messages import Asked, ReplyEnded, ReplyStarted, Shown
+from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Completions, Composer
 from tui_cordis_plugin.widgets.completions import row
 
 _SIZE = (100, 30)
@@ -65,7 +65,7 @@ async def _no_line(app: BhApp) -> None:
     assert not app.bridge.kept
 
 
-async def test_a_slash_shows_the_matching_commands_between_the_transcript_and_the_composer() -> None:
+async def test_a_slash_shows_the_matching_commands_between_the_chat_view_and_the_composer() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await _open(pilot)
@@ -75,7 +75,7 @@ async def test_a_slash_shows_the_matching_commands_between_the_transcript_and_th
         assert listed.display and _listed(app) == [
             "/model", "/model haiku", "/model opus", "/agents", "/clear", "/help", "/exit",
         ]  # fmt: skip
-        assert app.query_one(Transcript).region.bottom <= listed.region.y
+        assert app.query_one(ChatView).region.bottom <= listed.region.y
         assert listed.region.bottom <= _composer(app).region.y
         await pilot.press("m", "o")
         await pilot.pause()
@@ -120,7 +120,7 @@ def test_a_row_is_plain_text_cut_with_an_ellipsis_with_the_help_dimmed() -> None
     assert cut.cell_length <= 30 and cut.plain.endswith("…")
 
 
-async def test_eight_entries_on_a_short_terminal_leave_the_transcript_its_newest_line() -> None:
+async def test_eight_entries_on_a_short_terminal_leave_the_chat_view_its_newest_line() -> None:
     app = BhApp()
     async with app.run_test(size=(80, 15)) as pilot:
         app.frame.commands(lambda: [{"name": f"cmd{n}", "help": "x", "usage": ""} for n in range(12)])
@@ -131,9 +131,9 @@ async def test_eight_entries_on_a_short_terminal_leave_the_transcript_its_newest
         await pilot.pause()
         listed = app.query_one(Completions)
         assert listed.region.height == 8
-        transcript = app.query_one(Transcript)
-        assert transcript.region.height >= 1
-        assert transcript.max_scroll_y - transcript.scroll_y <= 1  # the newest line stays in view
+        chat_view = app.query_one(ChatView)
+        assert chat_view.region.height >= 1
+        assert chat_view.max_scroll_y - chat_view.scroll_y <= 1  # the newest line stays in view
 
 
 async def test_tab_completes_without_running_and_focus_stays() -> None:
@@ -373,17 +373,17 @@ async def test_enter_on_an_entry_while_a_reply_streams_is_drawn_after_the_reply(
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await _open(pilot)
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         app.post_message(Shown({"type": "text", "text": "streaming"}))
         await pilot.pause()
         await pilot.press(*"/he", "enter")
         await pilot.pause()
-        transcript = app.query_one(Transcript)
-        assert ("user", "› /help") not in transcript.blocks()  # held until the reply ends
+        chat_view = app.query_one(ChatView)
+        assert ("user", "› /help") not in chat_view.blocks()  # held until the reply ends
         assert await _line(app) == "/help"
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await pilot.pause()
-        assert transcript.blocks()[-1] == ("user", "› /help")
+        assert chat_view.blocks()[-1] == ("user", "› /help")
 
 
 async def test_a_command_text_is_shown_as_text_and_its_control_characters_are_not() -> None:

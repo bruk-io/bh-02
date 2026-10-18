@@ -20,7 +20,7 @@ Everything here is pure.
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Final
 
-__all__ = ["FIXED", "LISTED", "begun", "changed", "listed", "removed", "told"]
+__all__ = ["FIXED", "LISTED", "begun", "changed", "listed", "mode_of", "removed", "told"]
 
 type Json = Mapping[str, Any]
 
@@ -28,6 +28,13 @@ FIXED: Final = "fixed"  # the list a conversation began with, for its life
 LISTED: Final = "listed"  # the list as it reads now
 
 _DESCRIBED = 200  # how much of a tool's description the model is told with its name
+
+
+def mode_of(model: object) -> str:
+    """How `model` wants its tools offered (CONTRACTS.md: model, `tool_changes`): `fixed` when it
+    says nothing, or something that is neither."""
+    mode = getattr(model, "tool_changes", FIXED)
+    return mode if mode in (FIXED, LISTED) else FIXED
 
 
 def _named(specs: Iterable[Json]) -> dict[str, Json]:

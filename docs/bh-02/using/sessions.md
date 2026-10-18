@@ -14,6 +14,7 @@ started and a short suffix, such as `20261008-225423-07f8`. It holds:
 | `session.toml` | the session's own layer: the model, and where the rows below keep their files. `/model` edits it. |
 | `transcript.jsonl` | the conversation, which the model is sent again at each step |
 | `events.jsonl` | what the screen showed, drawn again when you resume |
+| `rows.jsonl` | each row that reloaded or failed, with the time (one JSON object a line, readable by you alone); `bh-02 trajectory` prints it |
 | `meta.json` | the session's id, the directory it ran in, when it started, the model it started on, and any `--patch` files it started with |
 | `claude/` | Claude Code's own state for the session, when the model is Claude |
 
@@ -41,8 +42,28 @@ part, such as `07f8`, and `--resume` takes that too.
 
 A session's sub-agents keep their conversation and an event log beside it
 (`<id>/agents/NAME/transcript.jsonl` and `events.jsonl`, the log readable by you alone and, like the
-rest of the session's state, not by the model's code). `bh-02 watch ID NAME` follows one; the
+rest of the session's state, not by the model's code). `bh-02 watch ID NAME` follows one, and
+`bh-02 trajectory` shows each under the call that started it; the
 [command line](../reference/command-line.md#bh-02-watch) says how.
+
+## Seeing what happened
+
+```sh
+bh-02 trajectory              # the newest session in this directory, laid out in time
+bh-02 trajectory 07f8         # a session by its id, the start of it, or its last part
+bh-02 trajectory --follow     # keep reading, and print what is new, while a reply runs
+```
+
+`bh-02 trajectory` prints a session read-only, from its files: each reply with your message and the
+time, each model step with the model, the time to its first chunk, how long it generated, the speed
+in tokens per second, the tokens used, what it cost and its settings, each call with what approval
+made of it, how long you took to answer, how long it ran and the calls its input made, each sub-agent
+under the call that started it, each `/compact` with the summary step's time and cost, and each row
+that reloaded or failed (from `rows.jsonl`) among the lines it fell between. Times are your local
+time. Conversations come in order, the ones `/clear` and `/compact` kept first, and `--follow`
+carries on across either. A session from before bh-02 recorded times prints without them.
+The [command line](../reference/command-line.md#bh-02-trajectory) shows the output and says what it
+holds back.
 
 ## Resuming
 

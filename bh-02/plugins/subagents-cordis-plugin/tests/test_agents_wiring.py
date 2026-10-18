@@ -24,7 +24,7 @@ from cordis.loader import Booted, boot, read_layer
 
 type Json = Mapping[str, Any]
 
-_CHILD = "You are a sub-agent"  # what the general type's section says, so the model knows whose turn
+_CHILD = "You are a sub-agent"  # what the general type's section says, so the model knows it is a child
 _HANG = "hang"  # a step that never ends, until it is closed
 
 
@@ -75,9 +75,9 @@ class _Screen:
         self.shown: list[Json] = []
         self.answer = answer
 
-    async def confirm(self, request: Json) -> bool:
-        self.asked.append(request)
-        return self.answer(request) if callable(self.answer) else self.answer
+    async def confirm(self, question: Json) -> bool:
+        self.asked.append(question)
+        return self.answer(question) if callable(self.answer) else self.answer
 
     async def show(self, events: AsyncIterator[Json]) -> None:
         self.shown += [event async for event in events]
@@ -98,15 +98,15 @@ class _Holding(_Screen):
         self.held = asyncio.Event()  # a sub-agent's question is open
         self.withdrawn: list[Json] = []
 
-    async def confirm(self, request: Json) -> bool:
-        self.asked.append(request)
-        if "agent" not in request:
+    async def confirm(self, question: Json) -> bool:
+        self.asked.append(question)
+        if "agent" not in question:
             return True
         self.held.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            self.withdrawn.append(request)
+            self.withdrawn.append(question)
             raise
         return False
 
@@ -115,7 +115,7 @@ class _Rule:
     def __init__(self, unasked: bool) -> None:
         self._unasked = unasked
 
-    def unasked(self, request: Json) -> bool:
+    def unasked(self, question: Json) -> bool:
         return self._unasked
 
 
@@ -397,6 +397,38 @@ async def test_a_child_s_state_directories_are_made_off_the_event_loop(
     assert sorted(name for name, _ in made) == ["agents", "agents", "general-1", "general-2"]
     assert all(thread != loop_thread for _, thread in made)
     assert stat.S_IMODE(os.stat(tmp_path / "agents" / "general-2").st_mode) == 0o700
+    await _bounded(rt.shutdown())
+
+
+async def test_a_call_that_started_a_child_keeps_its_name_on_its_record_in_the_foreground_and_the_background(
+    tmp_path: Path,
+) -> None:
+    """The `agent` tool answers `child: NAME` beside its content, and the loop keeps it on the
+    call's record as it keeps `touched`; a call that started none (an unknown type, a start the
+    person refused) has no `child`."""
+    model = _Model(
+        parent=[
+            [
+                _call("1", "agent", prompt="p", type="nosuch"),
+                _call("2", "agent", prompt="count", type="general"),
+                _call("3", "agent", prompt="later", type="general", background=True),
+            ],
+            _text("ok"),
+        ],
+        child={"general-1": [_text("three")], "general-2": [_text("four")]},
+    )
+    booted = await _booted(_rows(model, _Screen(), tmp_path / "transcript.jsonl"))
+    rt = booted.runtime
+    tool = rt.root.get("tools").get("agent")
+    refused = await _bounded(tool.run({"prompt": "p", "type": "nosuch"}))
+    assert "child" not in refused  # no child started
+    await _bounded(_reply(rt, "go"))
+    await _bounded(rt.root.get("tools").get("agent_wait").run({"names": ["general-2"]}))  # it has ended
+    answers = [m for m in rt.root.get("transcript").messages if m["role"] == "tool"]
+    assert [a["call"].get("child") for a in answers] == [None, "general-1", "general-2"]
+    assert all("answer" in a["call"] and "took" in a["call"] for a in answers[1:])  # they ran
+    assert answers[1]["content"].startswith("Report from agent general-1")
+    assert answers[2]["content"].startswith("agent general-2 (general) started in the background")
     await _bounded(rt.shutdown())
 
 
@@ -860,7 +892,7 @@ async def test_a_layer_naming_the_auto_memory_row_among_the_child_s_rows_fails_t
     await _bounded(rt.shutdown())
 
 
-# What a person's type's prompt says, so the scripted model knows a child's turn and its name.
+# What a person's type's prompt says, so the scripted model knows it is a child and its name.
 _TYPE = 'prompt = """You are a sub-agent: You are agent {{name}}, of type {kind}."""\n'
 
 
@@ -949,6 +981,7 @@ async def test_a_background_agent_answers_its_name_and_agent_wait_returns_report
         f"agent {n} (general) started in the background; agent_wait(names=[{n!r}]) returns its report"
         for n in ("general-1", "general-2")
     ]
+    assert [s["child"] for s in started] == ["general-1", "general-2"]  # the name, beside the content
     first = (await _bounded(wait.run({"names": ["general-1", "general-2", "general-9"], "timeout": 0.5})))[
         "content"
     ]
@@ -1087,8 +1120,8 @@ async def test_a_type_s_step_limit_ends_its_child_with_what_it_has_said_in_its_r
     await _bounded(booted.runtime.shutdown())
 
 
-def _start_asked(request: Json) -> bool:
-    return request.get("name") != "agent" or "title" not in request
+def _start_asked(question: Json) -> bool:
+    return question.get("name") != "agent" or "title" not in question
 
 
 async def test_past_the_session_budget_each_start_is_asked_and_a_no_refuses_it() -> None:
@@ -1236,7 +1269,7 @@ async def test_a_call_naming_a_model_other_than_its_type_s_is_asked() -> None:
         child=[_text("on sonnet"), _HANG],
     )
     answers = iter([False, True])
-    screen = _Screen(answer=lambda request: next(answers))
+    screen = _Screen(answer=lambda question: next(answers))
     sonnet = Row("model", f"{__name__}:fake_model", {"model": model, "default": "sonnet"})
     booted = await _booted(_rows(model, screen, model=sonnet))
     rt = booted.runtime
@@ -1379,7 +1412,7 @@ async def test_what_is_sent_to_a_child_about_to_answer_is_a_message_of_its_own()
     await _bounded(tools.get("agent_send").run({"name": "general-1", "text": "one more thing"}))
     gate.set()
     report = (await _bounded(tools.get("agent_wait").run({"names": ["general-1"]})))["content"]
-    assert "heard you" in report and "first answer" not in report  # the last turn is the report
+    assert "heard you" in report and "first answer" not in report  # the last step is the report
     [_, second] = model.requests
     assert (second[-1]["role"], second[-1]["content"]) == ("user", f"{_FROM_PARENT}\n\none more thing")
     await _bounded(rt.shutdown())

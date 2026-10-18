@@ -90,7 +90,7 @@ class Drop:
 
     async def notice(self, message: str) -> None: ...
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
         return False
 
 
@@ -192,8 +192,8 @@ class Record(Drop):
             elif chunk.get("type") == "note":
                 NOTES.append(str(chunk["text"]))
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
-        ASKED.append(request)
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
+        ASKED.append(question)
         return ANSWERS.pop(0) if ANSWERS else False
 
 
@@ -251,7 +251,7 @@ async def paced_ui() -> Effects:
 
 
 class Counting:
-    """A model that says how many user messages it was shown: history, made visible."""
+    """A model that says how many user messages it was shown: the conversation, made visible."""
 
     async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
         users = [m for m in messages if m["role"] == "user"]
@@ -371,6 +371,13 @@ async def one_message_ui() -> Effects:
     yield bind("input", OneMessage())
     yield bind("frame", Pushed())
     yield bind("output", Drop())
+
+
+@component
+async def broken_on_purpose() -> Effects:
+    """A row whose setup raises."""
+    raise RuntimeError("broken on purpose")
+    yield
 
 
 @component
@@ -538,7 +545,7 @@ DRAWN: list[str] = []
 
 
 class Drawing(Record):
-    """A recording output that gives the loop a turn after each event, as the app's output does
+    """A recording output that yields to the event loop after each event, as the app's output does
     while it draws (so a restart queued meanwhile can land mid-answer)."""
 
     async def show(self, chunks: AsyncIterator[Mapping[str, Any]]) -> None:

@@ -1,7 +1,7 @@
 """A harness-owned agent loop: a `model` plus the tools rows register (`tools`, a broker), provided
 as a `loop`.
 
-Also the transcript row, so the history outlives the loop; `system`, the system prompt rows add
+Also the transcript row, so the conversation outlives the loop; `system`, the system prompt rows add
 sections to; `asides`, what the model is told beside a call's result; `access`, what is asked
 before a file is read or written; `executor`, where the loop
 reads the prompt and asks `asides`, one call at a time across the loop's reloads; and the
@@ -31,6 +31,7 @@ from agent_cordis_plugin.loop import (
     Executor,
     LoopModel,
     Model,
+    Ran,
     System,
     Tool,
     Tools,
@@ -43,6 +44,18 @@ from agent_cordis_plugin.loop import (
     shown,
 )
 from agent_cordis_plugin.prompt import changes, edits, latest
+from agent_cordis_plugin.records import (
+    Answer,
+    CallRecord,
+    Clock,
+    NestedRecord,
+    Settings,
+    StepRecord,
+    Usage,
+    day_of,
+    stamp,
+    summed,
+)
 from agent_cordis_plugin.stops import classify
 from agent_cordis_plugin.system import SystemConfig, SystemPrompt, branch_of, describe
 from agent_cordis_plugin.tools import HOST, JAIL, ToolBroker
@@ -69,9 +82,12 @@ __all__ = [
     "STOPPED",
     "WRITE",
     "Access",
+    "Answer",
     "Approval",
     "Asides",
     "Asked",
+    "CallRecord",
+    "Clock",
     "ConversationConfig",
     "Executor",
     "Model",
@@ -79,7 +95,11 @@ __all__ = [
     "LoopConfig",
     "LoopModel",
     "MemoryTranscript",
+    "NestedRecord",
     "OneAtATime",
+    "Ran",
+    "Settings",
+    "StepRecord",
     "System",
     "SystemConfig",
     "SystemPrompt",
@@ -90,6 +110,7 @@ __all__ = [
     "TranscriptConfig",
     "Unchanged",
     "Unstarted",
+    "Usage",
     "access",
     "asides",
     "asides_for",
@@ -101,6 +122,7 @@ __all__ = [
     "clear_conversation",
     "compact_conversation",
     "conversation",
+    "day_of",
     "describe",
     "edits",
     "executor",
@@ -112,7 +134,9 @@ __all__ = [
     "rewrite",
     "seeded",
     "shown",
+    "stamp",
     "summarise",
+    "summed",
     "system",
     "tools",
     "transcript",
