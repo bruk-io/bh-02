@@ -108,4 +108,6 @@ INFO    -  Documentation built in 3.95 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (not the worker): every criterion met (AC3 ticked: full scripts/check exit 0, 3812 passed, gates and docs ok). Not closed: close-task refuses a bug without a recorded repro. The worker should record one from the pre-fix tree (e.g. at d30ae9c, record-check TASK-0143 --repro -- uv run pytest bh-02/app/tests/test_session_lock.py::test_resume_of_a_session_another_process_holds_is_refused_before_any_row_starts), or add a 'No repro:' note saying why; then it closes as is. Nits: running.lock opened with os.open, not host_paths' no-link opener (no realistic path: the state dir is outside the jail); the real-launch test was never seen failing under the plant.
 <!-- SECTION:NOTES:END -->
