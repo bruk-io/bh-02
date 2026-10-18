@@ -2,10 +2,9 @@
 
 One JSON object per line, in the order shown: a reply's events as they came (CONTRACTS.md:
 event), and three entries of the ui's own: `{"type": "user", "text"}` (a message the person
-sent), `{"type": "turn_end"}` (a reply's stream ended; the tag keeps its first name, since the
-files already written carry it), `{"type": "noted", "text", "kind"}` (bh-02 speaking outside a
-reply: a failure, a reload). The file is the ui's alone; nothing else reads it, and a line it
-can't read is skipped rather than failing the resume.
+sent), `{"type": "reply_end"}` (a reply's stream ended), `{"type": "noted", "text", "kind"}` (bh-02
+speaking outside a reply: a failure, a reload). The file is the ui's alone; nothing else reads it,
+and a line it can't read is skipped rather than failing the resume.
 
 `replayable` is pure (what to draw again, bounded), and so is `compacted` (what the file keeps
 once it grows: a `carried` entry, the ui's fourth, holding how many entries were trimmed and

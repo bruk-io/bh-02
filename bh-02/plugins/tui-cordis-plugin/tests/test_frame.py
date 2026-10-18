@@ -166,9 +166,9 @@ def test_a_command_s_choices_are_entries_of_their_own_read_each_time() -> None:
 def test_a_reply_stopped_before_its_output_was_counted_makes_the_totals_lower_bounds() -> None:
     read = {"type": "usage", "input_tokens": 900, "output_tokens": 0, "cost_usd": 0.001, "partial": True}
     rest = {"type": "usage", "input_tokens": 0, "output_tokens": 40, "cost_usd": 0.0002}
-    whole = frame.total_usage([read, rest, {"type": "turn_end"}])  # the count came: exact
+    whole = frame.total_usage([read, rest, {"type": "reply_end"}])  # the count came: exact
     assert whole.uncounted == 0 and frame.usage_text(whole) == "900 in · 40 out · $0.0012"
-    stopped = frame.total_usage([read, rest, {"type": "turn_end"}, read, {"type": "turn_end"}])
+    stopped = frame.total_usage([read, rest, {"type": "reply_end"}, read, {"type": "reply_end"}])
     assert stopped.uncounted == 1
     assert frame.usage_forms(stopped) == ("1,800 in · 40+ out · $0.0022+", "1.8k/40+ $0.00+")
     carried = frame.add_usage(frame.Usage(), {"type": "carried", "input_tokens": 5, "uncounted": 2})

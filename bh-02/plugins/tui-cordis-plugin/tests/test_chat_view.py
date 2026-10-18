@@ -8,7 +8,7 @@ from pathlib import Path
 
 from textual.widgets import Collapsible, Static
 
-from tui_cordis_plugin import BhApp, History, replayable
+from tui_cordis_plugin import BhApp, History, frame, replayable
 from tui_cordis_plugin.messages import Noted, ReplyEnded, ReplyStarted, Shown
 from tui_cordis_plugin.widgets import ChatView, Stream
 
@@ -207,7 +207,7 @@ async def test_what_is_shown_is_kept_and_drawn_again_by_the_next_app(tmp_path: P
         first.post_message(Noted("error: slow down", "failure"))
         await pilot.pause()
     kinds = [json.loads(line)["type"] for line in path.read_text().splitlines()]
-    assert kinds == ["user", "text", "text", "text", "tool_call", "turn_end", "noted"]
+    assert kinds == ["user", "text", "text", "text", "tool_call", "reply_end", "noted"]
 
     history = History(str(path))
     second = BhApp(history=history, replay=replayable(history.read(), 400))
@@ -227,6 +227,33 @@ async def test_what_is_shown_is_kept_and_drawn_again_by_the_next_app(tmp_path: P
         await pilot.press(*"again", "enter")
         await pilot.pause()
     assert json.loads(path.read_text().splitlines()[-1]) == {"type": "user", "text": "again"}
+
+
+async def test_a_reply_end_written_now_closes_its_reply_and_counts_its_usage_when_resumed(
+    tmp_path: Path,
+) -> None:
+    """The ui writes `reply_end` where a reply's stream ends and reads only that tag back (a file
+    from before the rename is not read, TASK-0137): a resume keeps two replies' text apart and
+    counts a stopped reply's output as uncounted."""
+    path = tmp_path / "events.jsonl"
+    stopped = {"type": "usage", "input_tokens": 900, "output_tokens": 0, "partial": True}
+    first = BhApp(history=History(str(path)))
+    async with first.run_test(size=_SIZE) as pilot:
+        first.post_message(Shown({"type": "text", "text": "one"}))
+        first.post_message(ReplyEnded())
+        first.post_message(Shown({"type": "text", "text": "two"}, stopped))
+        first.post_message(ReplyEnded())
+        await pilot.pause()
+    history = History(str(path))
+    entries = history.read()
+    assert [entry["type"] for entry in entries] == ["text", "reply_end", "text", "usage", "reply_end"]
+    assert frame.total_usage(entries).uncounted == 1
+
+    second = BhApp(history=history, replay=replayable(entries, 400))
+    async with second.run_test(size=_SIZE) as pilot:
+        await pilot.pause()
+        blocks = second.query_one(ChatView).blocks()
+        assert [text for kind, text in blocks if kind == "text"] == ["one", "two"]  # not "onetwo"
 
 
 async def test_a_history_that_cannot_be_kept_is_said_once_and_the_app_goes_on(tmp_path: Path) -> None:
@@ -265,7 +292,7 @@ async def test_cleared_drops_the_conversation_from_the_screen_and_a_resume_start
         await pilot.press(*"after", "enter")
         await pilot.pause()
     kinds = [json.loads(line)["type"] for line in path.read_text().splitlines()]
-    assert kinds == ["user", "text", "usage", "turn_end", "cleared", "note", "turn_end", "user"]
+    assert kinds == ["user", "text", "usage", "reply_end", "cleared", "note", "reply_end", "user"]
 
     history = History(str(path))
     replay = replayable(history.read(), 400)

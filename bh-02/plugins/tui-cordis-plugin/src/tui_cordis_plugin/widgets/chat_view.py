@@ -364,7 +364,7 @@ class ChatView(VerticalScroll):
             match entry.get("type"):
                 case "user":
                     self.user(str(entry.get("text", "")))
-                case "turn_end":
+                case "reply_end":
                     self.end_reply()
                 case "noted":
                     self.note(str(entry.get("text", "")), str(entry.get("kind", "note")))

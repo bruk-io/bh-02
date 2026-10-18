@@ -323,7 +323,7 @@ class BhApp(App[None]):
 
     def on_reply_ended(self, message: ReplyEnded) -> None:
         self.query_one(ChatView).end_reply()
-        self._record({"type": "turn_end"})
+        self._record({"type": "reply_end"})
         self._replying = max(0, self._replying - 1)
         self._follow_working()
         if not self._replying:

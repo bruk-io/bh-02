@@ -18,7 +18,7 @@ def test_a_streamed_run_is_merged_into_one_entry_per_block() -> None:
         {"type": "thinking", "text": "m"},
         {"type": "text", "text": "Hel"},
         {"type": "text", "text": "lo"},
-        {"type": "turn_end"},
+        {"type": "reply_end"},
         {"type": "text", "text": "next reply"},
     ]
     replay = replayable(entries, 100)
@@ -27,17 +27,17 @@ def test_a_streamed_run_is_merged_into_one_entry_per_block() -> None:
         {"type": "user", "text": "hi"},
         {"type": "thinking", "text": "hmm"},
         {"type": "text", "text": "Hello"},
-        {"type": "turn_end"},
+        {"type": "reply_end"},
         {"type": "text", "text": "next reply"},  # a reply's end is never merged across
     ]
     assert entries[3] == {"type": "text", "text": "Hel"}  # the entries given are left alone
 
 
 def test_a_long_history_is_cut_to_the_last_entries_starting_at_a_message() -> None:
-    reply = [{"type": "user", "text": "q"}, {"type": "text", "text": "a"}, {"type": "turn_end"}]
+    reply = [{"type": "user", "text": "q"}, {"type": "text", "text": "a"}, {"type": "reply_end"}]
     replay = replayable(reply * 10, 4)
     assert replay.skipped == 27  # the last 4 would start mid-reply: move on to the next message
-    assert [e["type"] for e in replay.entries] == ["user", "text", "turn_end"]
+    assert [e["type"] for e in replay.entries] == ["user", "text", "reply_end"]
     no_messages = replayable([{"type": "note", "text": str(n)} for n in range(10)], 3)
     assert no_messages.skipped == 7 and len(no_messages.entries) == 3
 
@@ -146,7 +146,7 @@ def test_a_file_grown_past_twice_what_is_kept_is_trimmed_and_carries_its_usage()
             "cost_usd": 0.5,
             "cache_read_input_tokens": 4,
         },
-        {"type": "turn_end"},
+        {"type": "reply_end"},
     ]
     entries = reply * 10  # 40 entries once merged
     assert compacted(entries, 20) is None  # not yet past twice 20

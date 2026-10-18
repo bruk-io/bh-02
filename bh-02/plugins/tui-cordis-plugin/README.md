@@ -227,7 +227,7 @@ not copied. A click leaves the focus on the label, as it does on a thinking bloc
 
 **History.** With `history` in its config (a session's layer sets `{"history":
 "<session>/events.jsonl"}`), the app appends every entry the chat view draws to that file
-(JSON lines: the events, streamed runs joined, and the ui's own `user`, `turn_end` and
+(JSON lines: the events, streamed runs joined, and the ui's own `user`, `reply_end` and
 `noted`), and the row draws
 its last `replay` entries (400; a streamed run counts as one) again when it starts. Once the
 file holds more than twice `replay` entries it is trimmed as the row starts (a temporary file,
