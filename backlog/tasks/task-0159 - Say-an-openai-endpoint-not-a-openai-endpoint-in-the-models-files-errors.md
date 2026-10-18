@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 19:28'
-updated_date: '2026-10-18 19:46'
+updated_date: '2026-10-18 19:51'
 labels:
   - models
   - size-1
@@ -43,4 +43,70 @@ Planted check: with the test expectations changed and named.py not yet fixed, uv
 Sweep (AC 1): grep -rnIE for 'a openai', 'a OpenAI', 'a claude-code' and 'a {...provider' across py, md, toml and txt, excluding site/ and backlog/: no article-before-provider wording left; the remaining 'a claude-code' hits are correct. Every provider interpolation in the models and app source (models src/tests, app src/tests) is quoted (provider 'x'), 'via' (trajectory.py) or _article(...). No stored format or name changed: a wording change, so no old file is affected. No docs page quoted the old wording.
 Commands and real results: scripts/check bh-02/plugins/models-cordis-plugin: exit 0 (format: 47 files already formatted; lint: all checks passed; types: no issues in 23 source files; tests: 364 passed, 2 skipped; gates: root and libs ok; docs: built). scripts/check bh-02/app --no-gates --no-docs: exit 0 (format: 30 already formatted; lint: passed; types: no issues in 9 files; tests: 347 passed, 1 skipped). ruff format --check and ruff check on the six touched files: exit 0 after ruff format reflowed one test line.
 AC 2 left unticked on purpose: its 'scripts/check passes' part is the reviewer's to prove. The test half is done: the five files pass (191), and both member checks above pass. Not run: the full scripts/check (reviewer's), scripts/arch-check (nothing changed outside a member; the models member check ran the root and libs gates, all ok), scripts/linux-jail-check (per the delegation).
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+..........ss...ssss.s..ss.s...s.s..sss.ss.s.s..s.ss..sssss........s..... [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+.........................................sssssssssssssssssssssssssssssss [ 54%]
+ssssssssssssssssssssssssssssssssssss..............................ssssss [ 56%]
+ssss...........s.........s.............................................. [ 58%]
+.....s.................................................................. [ 60%]
+........................................................................ [ 62%]
+.................s.ss................................................... [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+.............................................                            [100%]
+3817 passed, 118 skipped in 210.65s (0:03:30)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 4.70 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
