@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:55'
-updated_date: '2026-10-18 23:22'
+updated_date: '2026-10-18 23:23'
 labels:
   - brig
   - size-4
@@ -108,4 +108,6 @@ INFO    -  Documentation built in 2.96 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer, not the worker): not closed. Every AC is met: full scripts/check exit 0 (3902 passed, 118 skipped, every gate ok, nothing reformatted). close-task refused: a bug closes with its repro recorded (record-check TASK-0151 --repro -- <failing test>) or a note starting 'No repro:' saying why. The worker should record one: the flaky pid-reuse race (3/160 under 8-way load) likely warrants a 'No repro:' note citing that measurement, or the planted-file run of test_no_test_names_a_directory_from_its_pid.py as the repro. Nits: the detector does not follow a pid through a name (stated in its docstring); darwin-only files migrated by reading only.
 <!-- SECTION:NOTES:END -->
