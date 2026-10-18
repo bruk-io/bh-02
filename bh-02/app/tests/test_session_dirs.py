@@ -117,7 +117,7 @@ async def test_the_model_flag_naming_a_model_of_a_broken_endpoint_starts_the_ses
         made = create(tmp_path / "s", "/work/a", model="local/x:7b", no_jail=False)
         assert _recorded(made) == "local/x:7b"
         async with opened(ModelConfig(default=_recorded(made))) as model:
-            with pytest.raises(ModelsError, match="colour is not a setting of a openai endpoint") as step:
+            with pytest.raises(ModelsError, match="colour is not a setting of an openai endpoint") as step:
                 [c async for c in model.complete([{"role": "user", "content": "hi"}], [])]
         assert step.value.message.startswith("endpoint 'local' (")
     assert server.requests == []
