@@ -115,4 +115,6 @@ INFO    -  Documentation built in 3.48 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review: not closed. Both ACs met (full scripts/check exit 0, 3766 passed; AC2 ticked). close-task refuses: a bug needs its repro recorded (record-check TASK-0145 --repro -- <test>) from before the fix, or a 'No repro:' note. The worker reports the tests failing before the fix but did not record it; the reviewer cannot record a pre-fix failure honestly on the fixed tree.
 <!-- SECTION:NOTES:END -->
