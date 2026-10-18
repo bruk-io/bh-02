@@ -27,7 +27,7 @@ Found designing TASK-0136 (noted there, filed at the owner's word 2026-10-18). N
 <!-- AC:BEGIN -->
 - [x] #1 A running bh-02 holds its session directory exclusively (an advisory lock on a file in it, held for the run and released however the run ends, including a crash)
 - [x] #2 bh-02 --resume of a session another process holds refuses before any row starts, with an error naming the session and the process that holds it and what to do; a test runs two and sees the second refused
-- [ ] #3 bh-02 sessions, bh-02 trajectory and bh-02 watch read a held session as before (they take no lock); scripts/check passes
+- [x] #3 bh-02 sessions, bh-02 trajectory and bh-02 watch read a held session as before (they take no lock); scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
