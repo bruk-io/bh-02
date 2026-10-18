@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 14:39'
-updated_date: '2026-10-18 14:46'
+updated_date: '2026-10-18 14:50'
 labels:
   - agent
   - app
@@ -41,4 +41,70 @@ The owner's rule (root CLAUDE.md, Conventions, 2026-10-18): no backwards compati
 
 <!-- SECTION:NOTES:BEGIN -->
 Changed. Seed: conversation.py _is_seed is now `"seed" in message`; _SEEDED_START is gone (its text is inlined into _SEEDED, same wording); docstrings no longer mention the wording. test_agent_conversation.py: LEGACY_SEEDED and the parametrized 'a file from before the field' case removed; test_a_conversation_that_only_reads_like_a_seed_is_compacted docstring says 'no seed field'. Planted: with only the wording check removed from _is_seed and the legacy case still in the test, test_compact_with_nothing_to_compact_says_so_and_asks_nothing[legacy] failed (the model was asked to summarise, IndexError from the empty Scripted model); the case is then deleted and the file passes (40 passed, 1 skipped). Trajectory: test_agent_records.py test_a_transcript_from_before_the_records_resumes_and_is_sent_exactly_as_it_was removed (the whole-transcript-sent-unchanged case with records stays in test_agent_unanswered_calls.py). bh_02 trajectory.py module docstring no longer says a transcript from before the records prints with no times; it names the absences that stay for their own reason (answer to a message never asked: no step; call refused before approval: no answer). viewing.py _rows docstring: only 'rows have not loaded yet'. test_trajectory.py: test_a_conversation_from_before_the_records_prints_with_no_times_and_does_not_fail replaced by test_what_the_loop_leaves_out_for_its_own_reason_is_left_out_of_the_line (planted: with the 'not put to approval' line removed from _answer_text it failed, restored and it passes); the reload test lost its 'no times' half and name; test_trajectory_view.py's no-rows-file test is kept for a session whose rows have not loaded yet (a real case while following), its comment no longer says 'from before they were kept'. Kept on purpose: the reader's check of every field (a hand-edited or half-written file must not stop the view; test_a_field_of_the_wrong_type... stays), the mtime fallback for ordering a backup with no `at`, and the lines-with-no-time placement of reloads, since all three also serve those cases. Docs amended: records.py, agent README (records, seed), CONTRACTS.md (transcript), GLOSSARY.md (step record, call record, bh-02 trajectory), app README, docs/bh-02 command-line.md and sessions.md. decision-0009: the records' 'every new field is optional...' sentence, the Consequences 'Old sessions read unchanged' line and the Rejected 'format header' reason amended, and an Amended section citing the rule (root CLAUDE.md, Conventions) and TASK-0156. Old files that stop working: (1) a /compact seed written before the seed field (its first entry has the wording and no `seed`): /compact no longer refuses it as 'nothing said since the last /compact', so /compact on that conversation summarises the summary and replaces its backup; (2) a transcript from before the step/call/at records is promised nothing: the trajectory reader still skips a missing field, so it prints with whatever times it lacks left out, but nothing reads or tests it as a supported form, and a resume of it is only what the loop does with any entry (no code changed there). Not touched, left to TASK-0157's sweep: loop.py _unanswered_calls 'an older bh-02 resumed it as it was' (TASK-0142), agent README lines on asides/edits from before, tui README 'an older bh-02 emptied the file', CONTRACTS.md asides/edits 'from before'. Checks: scripts/check bh-02/plugins/agent-cordis-plugin exit 0 (193 passed, 1 skipped; gates, docs ok); scripts/check bh-02/app --no-gates --no-docs exit 0 (347 passed, 1 skipped); scripts/arch-check --no-fix exit 0. AC3's 'scripts/check passes' is left for the reviewer's full run, so AC3 is unticked.
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+.............s.s...ssss.s.s..s..s.s..s.ss.s.s.s.s.s..ssss.ssss.......... [ 49%]
+s....................................................................... [ 51%]
+........................................................................ [ 53%]
+...............................................sssssssssssssssssssssssss [ 54%]
+ssssssssssssssssssssssssssssssssssssssssss...........................sss [ 56%]
+ssssssss..s............................................................. [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+.....................sss................................................ [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+.................................................s...................... [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+.................................................                        [100%]
+3821 passed, 118 skipped in 196.53s (0:03:16)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.77 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
