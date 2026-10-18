@@ -12,7 +12,7 @@ from textual.pilot import Pilot
 
 from tui_cordis_plugin import BhApp
 from tui_cordis_plugin.messages import Asked
-from tui_cordis_plugin.widgets import ApprovalScreen, Completions, Composer, Transcript
+from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Completions, Composer
 
 _SIZE = (100, 30)
 
@@ -20,7 +20,7 @@ _SPECS: list[Mapping[str, Any]] = [{"name": "model", "help": "the model", "usage
 
 
 def _blocks(app: BhApp) -> list[tuple[str, str]]:
-    return app.query_one(Transcript).blocks()
+    return app.query_one(ChatView).blocks()
 
 
 async def _reply_running(app: BhApp, pilot: Pilot[None]) -> asyncio.Future[None]:

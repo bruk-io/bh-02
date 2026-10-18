@@ -3,7 +3,7 @@
 bh-02's ui: a Textual app bound as `input`, `output` (whose `confirm` asks about the model's code in a
 modal) and `frame` by `tui:ui`, and small rows that push into the app's frame: the status
 bar's fields (`tui:status`: the session's id and the model; `tui:grades`: the jail's grades)
-and the palette's commands (`tui:palette`). The screen is the conversation (the transcript over the composer),
+and the palette's commands (`tui:palette`). The screen is the conversation (the chat view over the composer),
 the whole width, a line naming the everyday keys under the composer, and the status bar along the bottom. Imports nothing from any other plugin;
 the shapes are in `../../CONTRACTS.md`.
 
@@ -15,10 +15,10 @@ the shapes are in `../../CONTRACTS.md`.
   `frame.py` (the usage and model fields and the palette's entries, pure), `status.py` (what
   the frame's rows need, `ModelField` and `GradesField`), `theme.py` (the themes the app registers),
   `bh01_theme.py` (every colour: generated, never edited), `tokens.py` (bh-01's token CSS to
-  that module's source, pure), `widgets/` (one module per widget: `Transcript`, `Composer`,
+  that module's source, pure), `widgets/` (one module per widget: `ChatView`, `Composer`,
   `StatusBar`, `ApprovalScreen`, and the palette's `CommandsProvider`).
 - **`wiring.py`**: the rows. `tui:ui` depends on its config alone, so no reload elsewhere
-  restarts the app and loses the transcript.
+  restarts the app and loses the chat view.
 
 **The app owns the terminal.** A child process that inherits fd 2 paints over it, so every
 child's stderr goes to a file (the Python process's and brig's do) or is captured (`!COMMAND`'s,
@@ -56,7 +56,7 @@ after the push is offered with no reload; choosing one sends `/name` through the
 typed, or puts `/name ` in the composer when it takes arguments; a spec's `choices` (read each
 time it opens too) are entries of their own that run at once (`/model claude/haiku`, one per model).
 `/help` and `/exit` are the ui's own entries. Typing a one-line `/` in the composer
-shows the same entries as a list between the transcript and the composer (decision-0003): read
+shows the same entries as a list between the chat view and the composer (decision-0003): read
 once when it opens (a command registered meanwhile shows at the next opening), filtered per key,
 prefix matches then substring matches, at most 8 rows. Up/Down move the highlight, Tab completes
 without running, Enter takes the highlight only when it was moved or the text is a strict prefix
@@ -129,7 +129,7 @@ widest that fits is shown, again whenever the width changes. The keys are the on
 test presses every key the line names (read from the line itself) and sees it do what it says; the docs'
 Keys table (`docs/bh-02/using/commands.md`) is checked to list the same ones. Ctrl-O is still bound to nothing.
 
-**Working.** While a reply runs or a command does (`!`, `/compact`), a line between the transcript and the composer
+**Working.** While a reply runs or a command does (`!`, `/compact`), a line between the chat view and the composer
 says so and for how long: `Working · 12s`, then `Working · 1m 05s`, then `Working · 1h 02m` (`render.working_line`,
 pure). The `Working` widget redraws it from a Textual timer (`set_interval`, every `WORKING_EVERY`, one second),
 never a loop or a wait: the timer starts with the first of what is running and stops when the last of it ends, and
@@ -143,39 +143,39 @@ once they are up), until that answer is shown. The bridge posts `Handling` at ev
 line while a reply streams or a line is being handled, so a command's answer ends it. The app is told by message,
 never by asking the bridge afterwards, so a line read right after a reply (one typed meanwhile and kept) is a new
 one: the count starts again from zero. The first tick comes a second in and the line is hidden until then, so a
-command that answers sooner (most do) never flashes it or moves the transcript. The line is the same for both: it
+command that answers sooner (most do) never flashes it or moves the chat view. The line is the same for both: it
 says only that something runs and for how long. Esc, Ctrl-C and the note a held Ctrl-C leaves are the bridge's and
 `stop_reply`'s as before and know nothing of it. `BhApp(clock=, working_every=)` are the seams a test drives.
 
-**Paging.** PageUp and PageDown in the composer scroll the transcript a page (`Composer.Paged`, which
-the app answers with `Transcript.page`) and leave the focus and the cursor where they are, with the
-slash list open too (they are not its keys); with a question up they are the modal's. A transcript
+**Paging.** PageUp and PageDown in the composer scroll the chat view a page (`Composer.Paged`, which
+the app answers with `ChatView.page`) and leave the focus and the cursor where they are, with the
+slash list open too (they are not its keys); with a question up they are the modal's. A chat view
 follows new output while it is at its end; a page up releases it and reaching the end anchors it
 again, as the mouse wheel does (both are Textual's `scroll_to`). `page` guards the two cases
 `scroll_to` gets wrong: with nothing to scroll, or a page down from the end, it would release the
 anchor with no movement to restore it, and the output that came next would not be followed.
 
-**Focus after the mouse.** A click or a drag in the transcript focuses the Transcript (Textual focuses what is
+**Focus after the mouse.** A click or a drag in the chat view focuses the ChatView (Textual focuses what is
 clicked), and the keys typed next would go nowhere. The screen posts `TextSelected` at every mouse up, wherever the
-pointer is let go, and the app answers it by giving the focus back to the composer when the Transcript has it
-(`BhApp._return_focus`). It is given back on mouse up, and the transcript is not stopped from taking it from the mouse,
+pointer is let go, and the app answers it by giving the focus back to the composer when the ChatView has it
+(`BhApp._return_focus`). It is given back on mouse up, and the chat view is not stopped from taking it from the mouse,
 because Tab can put it there too and a click in it then would still leave the keys going nowhere (the composer also
 loses the focus for the length of the click, as it did, so the list of commands is closed by it). The selection stays
 shown (the screen holds it, not the focus) until the person types: Textual clears a screen selection when the
-composer's cursor moves. Tab still takes the focus to the transcript and back, and PageUp and PageDown scroll it from
-the composer. Only the Transcript itself is given back: a clipped line or a thinking title the person clicked keeps the
+composer's cursor moves. Tab still takes the focus to the chat view and back, and PageUp and PageDown scroll it from
+the composer. Only the ChatView itself is given back: a clipped line or a thinking title the person clicked keeps the
 focus (a control they chose, TASK-0089.07), and a question's modal keeps its own. A scrollbar dragged while the
-transcript has the focus from Tab gives it back too, since the mouse up does not say where it was.
+chat view has the focus from Tab gives it back too, since the mouse up does not say where it was.
 
 **Copying** goes to the terminal's clipboard through Textual's `copy_to_clipboard` (an OSC 52
 escape sequence, so it reaches the local clipboard over SSH where the terminal allows it, and a
 terminal that ignores it copies nothing: a test sees only what the app asked to copy, `app.clipboard`,
 and the line it showed). `BhApp` overrides `copy_to_clipboard` to say how much in one line, so every
 way of copying says it alike, Textual's own included. The line is a toast, not a line of the
-conversation: one there would split a reply that is still streaming (the transcript draws the
+conversation: one there would split a reply that is still streaming (the chat view draws the
 person's own lines only once the reply ends, for the same reason). Four ways: **Ctrl-C** with text
 selected that has not been copied yet copies it, clears the selection and stops nothing (the
-composer's own selection when it has the focus, else the transcript's, which Textual keeps), and
+composer's own selection when it has the focus, else the chat view's, which Textual keeps), and
 otherwise stops the reply as before, so a second Ctrl-C after a copy stops it. A selection counts as
 copied once any copy of it was made (`BhApp.copy_to_clipboard` remembers it, with where it is and
 what it reads, so a different selection or new text under the same range is new): a mouse
@@ -185,20 +185,20 @@ made without a mouse up (Textual's select all), and the composer's own; Ctrl-C c
 while a question is up (Ctrl-C then answers it no).
 **Cmd-C** is Textual's own `super+c`, bound by the screen's copy and by the text area's: the priority
 Ctrl-C binding never shadowed it, and it reaches the app only where the terminal passes Cmd to
-programs (the kitty keyboard protocol). A **mouse selection** in the transcript is copied when the
+programs (the kitty keyboard protocol). A **mouse selection** in the chat view is copied when the
 mouse lets go (the screen's `TextSelected`, posted at every mouse up, a click included); a click, or
 one character, copies nothing and says nothing, and the selection stays shown. **Ctrl-T** copies the
-newest reply whole (`Transcript.reply`, `render.newest_reply`): the text blocks after the last
+newest reply whole (`ChatView.reply`, `render.newest_reply`): the text blocks after the last
 message, as the model wrote them (the markdown source, not what is drawn), a blank line between,
 so a reply that stops for tool calls and goes on comes whole; when the newest message has no text
 yet it is the one before; with none, it says `Nothing to copy: no reply yet`. It is a free key:
 the text area binds no `ctrl+t`, nor does a screen or the app, and no terminal keeps it, while
 Ctrl-O (Claude Code's), Ctrl-R, Ctrl-G and Ctrl-N are keys readline and Claude Code give other
 meanings. Esc never copies (it also clears a selection: Textual's own, the screen's escape key, which the
-app's non-priority Esc binding leaves to run; a test presses it with the focus in the transcript and
+app's non-priority Esc binding leaves to run; a test presses it with the focus in the chat view and
 in the composer, a reply running or not).
 
-**The transcript** draws a reply as it streams: a block per event, a CSS class per kind. Text
+**The chat view** draws a reply as it streams: a block per event, a CSS class per kind. Text
 and thinking grow one `Stream`, which settles its text into pieces of a couple of dozen lines
 and re-draws only the open one, so a chunk costs the same at line 2,000 as at line 1 (a Pilot
 test times it). Text with no newlines settles by size: a piece longer than 2,000 characters is
@@ -217,24 +217,24 @@ a block nobody opens costs what its first lines do (a result is at most 20,000 c
 from the Python tool; 2,000 lines took about 0.1 s to draw on opening and 10,000 about 1 s, on
 the event loop, once, when the person asked). Opening only changes the block's height. It does not use
 Textual's `Collapsible`, which scrolls itself into view when it toggles, and a scroll releases the
-transcript's anchor: a transcript following its end (its layout pins it to the new end) goes on
+chat view's anchor: a chat view following its end (its layout pins it to the new end) goes on
 following, and one scrolled away stays where it is. Reaching a line by keyboard is different and
-deliberate: Shift+Tab onto a line that is off screen scrolls the transcript to it (Textual scrolls to
-what takes the focus, a scroll like any other), so the transcript stops following new output until
+deliberate: Shift+Tab onto a line that is off screen scrolls the chat view to it (Textual scrolls to
+what takes the focus, a scroll like any other), so the chat view stops following new output until
 it is back at its end, as TASK-0089.04 has it for PageUp; a test follows that through (Shift+Tab,
 Enter, PageDown to the end, then new output is followed again). The label is not selectable, so it is
 not copied. A click leaves the focus on the label, as it does on a thinking block's title.
 
 **History.** With `history` in its config (a session's layer sets `{"history":
-"<session>/events.jsonl"}`), the app appends every entry the transcript draws to that file
+"<session>/events.jsonl"}`), the app appends every entry the chat view draws to that file
 (JSON lines: the events, streamed runs joined, and the ui's own `user`, `turn_end` and
 `noted`), and the row draws
 its last `replay` entries (400; a streamed run counts as one) again when it starts. Once the
 file holds more than twice `replay` entries it is trimmed as the row starts (a temporary file,
 then a rename) to a `carried` entry (how many were trimmed, and the usage they added up to)
 and the last `replay`, so it never grows without bound; a trim that fails leaves the file
-whole, removes its temporary file and says so in the transcript. `/clear` reaches the ui as a
-`cleared` event: the transcript drops every block and the note that follows is all it shows,
+whole, removes its temporary file and says so in the chat view. `/clear` reaches the ui as a
+`cleared` event: the chat view drops every block and the note that follows is all it shows,
 with any line typed after `/clear` that is still waiting to be read (it is drawn again);
 the file records `cleared` like any event, and a replay starts after the last one (`/compact`'s
 too, so a resume shows the conversation from the note carrying the summary), while the
@@ -268,4 +268,4 @@ shortest forms don't fit is the widest field cut at a word's end with `…`, the
 the modal's keys) is `$bh-text 70%`, not bh-01's `text-muted`, which
 measures about 2.2 to 2.6:1 on these surfaces; 70% is 5.2:1 or better in both themes. The
 approval modal's background is translucent, so the conversation shows through around it; its
-code is highlighted as the transcript's is (`render.code`, in theme tokens).
+code is highlighted as the chat view's is (`render.code`, in theme tokens).

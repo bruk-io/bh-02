@@ -17,7 +17,7 @@ from textual.pilot import Pilot
 
 from tui_cordis_plugin import BhApp, TuiOutput, render
 from tui_cordis_plugin.messages import Asked, ReplyEnded, ReplyStarted, Shown
-from tui_cordis_plugin.widgets import ApprovalScreen, Completions, Composer, Transcript, Working
+from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Completions, Composer, Working
 
 _SIZE = (80, 20)
 _FAST = 0.05  # seconds between ticks in the tests that set the clock themselves
@@ -107,15 +107,15 @@ async def test_while_a_reply_runs_the_screen_says_so_and_for_how_long() -> None:
         await _until(pilot, lambda: _line(app) == "Working · 1m 05s")  # then minutes
 
 
-async def test_the_line_sits_between_the_transcript_and_the_composer_and_is_one_row() -> None:
+async def test_the_line_sits_between_the_chat_view_and_the_composer_and_is_one_row() -> None:
     clock = _Clock()
     app = _app(clock)
     async with app.run_test(size=_SIZE) as pilot:
         app.post_message(ReplyStarted())
         await _until(pilot, lambda: _line(app) is not None)
-        transcript, working, composer = (app.query_one(each) for each in (Transcript, Working, Composer))
+        chat_view, working, composer = (app.query_one(each) for each in (ChatView, Working, Composer))
         assert working.region.height == 1
-        assert transcript.region.bottom <= working.region.y < composer.region.y
+        assert chat_view.region.bottom <= working.region.y < composer.region.y
         assert working.region.width == _SIZE[0]
 
 
@@ -197,7 +197,7 @@ async def test_a_reply_that_ends_before_the_first_tick_never_shows_it() -> None:
         await pilot.pause(0.7)  # past the first tick the reply would have had
         assert not working.display and not working.ticking
         assert str(working.content) == ""  # never drawn, not just hidden again
-        assert ("note", "a command's answer") in app.query_one(Transcript).blocks()
+        assert ("note", "a command's answer") in app.query_one(ChatView).blocks()
 
 
 @pytest.mark.parametrize("ending", ["finishes", "is stopped with Esc", "is stopped with Ctrl-C", "fails"])
@@ -243,8 +243,8 @@ async def test_it_goes_when_the_reply_finishes_is_stopped_or_fails(ending: str) 
         await _until(pilot, lambda: _line(app) is None)
 
 
-async def test_the_transcript_keeps_its_end_in_view_as_the_line_comes_and_goes() -> None:
-    """The line takes a row from the transcript; the transcript, anchored to its end, must
+async def test_the_chat_view_keeps_its_end_in_view_as_the_line_comes_and_goes() -> None:
+    """The line takes a row from the chat view; the chat view, anchored to its end, must
     still show its newest line and follow what comes next."""
     clock = _Clock()
     app = _app(clock)
@@ -252,19 +252,19 @@ async def test_the_transcript_keeps_its_end_in_view_as_the_line_comes_and_goes()
         for n in range(60):
             app.post_message(Shown({"type": "text", "text": f"line {n}\n\n"}))
         await pilot.pause()
-        transcript = app.query_one(Transcript)
-        assert transcript.max_scroll_y > 0 and transcript.scroll_y == transcript.max_scroll_y
+        chat_view = app.query_one(ChatView)
+        assert chat_view.max_scroll_y > 0 and chat_view.scroll_y == chat_view.max_scroll_y
         app.post_message(ReplyStarted())
         await _until(pilot, lambda: _line(app) is not None)
         await pilot.pause()
-        assert transcript.scroll_y == transcript.max_scroll_y and "line 59" in _screen(app)
+        assert chat_view.scroll_y == chat_view.max_scroll_y and "line 59" in _screen(app)
         app.post_message(Shown({"type": "text", "text": "newest while working\n\n"}))
         await pilot.pause()
         assert "newest while working" in _screen(app)
         app.post_message(ReplyEnded())
         await _until(pilot, lambda: _line(app) is None)
         await pilot.pause()
-        assert transcript.scroll_y == transcript.max_scroll_y and "newest while working" in _screen(app)
+        assert chat_view.scroll_y == chat_view.max_scroll_y and "newest while working" in _screen(app)
 
 
 _SPECS: list[Mapping[str, Any]] = [{"name": "model", "help": "the model", "usage": "[NAME]"}]

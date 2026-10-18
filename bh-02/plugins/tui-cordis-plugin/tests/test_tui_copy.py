@@ -18,7 +18,7 @@ from textual.widgets import Static
 
 from tui_cordis_plugin import BhApp, render
 from tui_cordis_plugin.messages import Asked, Shown
-from tui_cordis_plugin.widgets import ApprovalScreen, Composer, Transcript
+from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Composer
 
 _SIZE = (100, 30)
 _SAID = "Hello brave new world, here is the answer."
@@ -75,7 +75,7 @@ async def _say(app: BhApp, pilot: Pilot[None], text: str = _SAID) -> Static:
     """The model says `text`; the block that shows it."""
     app.post_message(Shown({"type": "text", "text": text}))
     await pilot.pause()
-    return next(s for s in app.query_one(Transcript).query(Static) if text.split("\n")[0] in _plain(s))
+    return next(s for s in app.query_one(ChatView).query(Static) if text.split("\n")[0] in _plain(s))
 
 
 def _plain(block: Static) -> str:
@@ -91,7 +91,7 @@ async def _select(pilot: Pilot[None], block: Static, first: int, last: int) -> N
     await pilot.pause()
 
 
-async def test_a_mouse_selection_in_the_transcript_is_copied_when_it_ends() -> None:
+async def test_a_mouse_selection_in_the_chat_view_is_copied_when_it_ends() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
@@ -219,14 +219,14 @@ async def test_ctrl_c_copies_the_composer_s_own_selection_too_and_stops_nothing(
         await asyncio.wait_for(reply_task, 1)
 
 
-@pytest.mark.parametrize("focus", [Composer, Transcript])
-async def test_cmd_c_copies_the_transcript_selection_as_textual_reports_it_and_stops_nothing(
+@pytest.mark.parametrize("focus", [Composer, ChatView])
+async def test_cmd_c_copies_the_chat_view_selection_as_textual_reports_it_and_stops_nothing(
     focus: type,
 ) -> None:
     """Where a terminal passes Cmd through (the kitty keyboard protocol), it is `super+c`,
     which Textual binds to the screen's copy (and the composer's own): the app's priority Ctrl-C
     does not shadow it. With the focus in the composer (its copy has nothing selected and
-    passes) or in the transcript, where a mouse selection leaves it."""
+    passes) or in the chat view, where a mouse selection leaves it."""
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
@@ -316,12 +316,12 @@ async def test_esc_stops_a_reply_and_never_copies_a_selection() -> None:
 
 
 @pytest.mark.parametrize("running", [True, False])
-@pytest.mark.parametrize("focus", [Transcript, Composer])
+@pytest.mark.parametrize("focus", [ChatView, Composer])
 async def test_esc_clears_a_selection_as_textual_does_copies_nothing_and_still_stops_a_reply(
     focus: type, running: bool
 ) -> None:
     """The README says Esc "also clears a selection, Textual's own" (the screen's escape key),
-    with the focus in the transcript (where a mouse selection leaves it) or the composer, a
+    with the focus in the chat view (where a mouse selection leaves it) or the composer, a
     reply running or not. The app's Esc binding is not a priority one, so the key still reaches
     the screen: as a priority binding it would stop the reply and leave the selection."""
     app = BhApp()
@@ -377,6 +377,6 @@ async def test_what_was_copied_is_said_off_the_conversation_so_a_streaming_reply
         await pilot.press("ctrl+t")
         await pilot.pause()
         assert _told(app) == ["Copied 9 characters", "Copied 9 characters", "Copied 41 characters"]
-        texts = [text for kind, text in app.query_one(Transcript).blocks() if kind == "text"]
+        texts = [text for kind, text in app.query_one(ChatView).blocks() if kind == "text"]
         assert texts == ["Streaming reply, first part and the rest."]  # one block, whole
         assert app.clipboard == "Streaming reply, first part and the rest." and not reply_task.done()

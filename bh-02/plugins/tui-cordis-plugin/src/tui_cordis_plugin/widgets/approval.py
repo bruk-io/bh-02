@@ -98,7 +98,7 @@ class ApprovalScreen(ModalScreen[bool]):
             yield Static(render.approval_heading(self.request), id="approval-title", markup=False)
             if code:
                 with VerticalScroll(id="approval-code"):
-                    # highlighted as the transcript highlights code: the theme's colours
+                    # highlighted as the chat view highlights code: the theme's colours
                     yield Static(
                         render.code("\n".join(code), render.approval_language(self.request)),
                         id="approval-source",

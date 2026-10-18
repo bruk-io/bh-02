@@ -1,4 +1,4 @@
-"""What the transcript showed, kept in a file so a resumed session shows it again.
+"""What the chat view showed, kept in a file so a resumed session shows it again.
 
 One JSON object per line, in the order shown: a reply's events as they came (CONTRACTS.md:
 event), and three entries of the ui's own: `{"type": "user", "text"}` (a message the person
@@ -133,7 +133,7 @@ def _carried_entry(count: int, used: frame.Usage) -> Entry:
 
 
 class History:
-    """The file a ui config names (`history`): appended to as the transcript draws, read once
+    """The file a ui config names (`history`): appended to as the chat view draws, read once
     when the app starts. A write that fails turns recording off and says why, once, through
     `failed`, rather than taking the app down. A trim that fails leaves the file as it was
     and says so in `warning` (recording goes on)."""

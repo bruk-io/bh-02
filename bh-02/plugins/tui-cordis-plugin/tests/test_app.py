@@ -10,23 +10,24 @@ from textual.widgets import Static
 
 from tui_cordis_plugin import AppCrashed, BhApp, running, theme
 from tui_cordis_plugin.messages import Asked, Noted, ReplyEnded, Shown
-from tui_cordis_plugin.widgets import ApprovalScreen, Composer, StatusBar, Transcript
+from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Composer, StatusBar
 
 _SIZE = (120, 36)
 
 
 def _blocks(app: BhApp) -> list[tuple[str, str]]:
-    """The transcript's blocks as (kind, text)."""
-    return app.query_one(Transcript).blocks()
+    """The chat view's blocks as (kind, text)."""
+    return app.query_one(ChatView).blocks()
 
 
 async def test_the_conversation_fills_the_width_over_the_status_bar_in_bh_01_s_dark_theme() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await pilot.pause()
-        transcript, composer, bar = (app.query_one(widget) for widget in (Transcript, Composer, StatusBar))
-        assert transcript.region.width == composer.region.width == bar.region.width == _SIZE[0]
-        assert transcript.region.y < composer.region.y < bar.region.y == _SIZE[1] - 1
+        chat_view, composer, bar = (app.query_one(widget) for widget in (ChatView, Composer, StatusBar))
+        assert chat_view.region.width == composer.region.width == bar.region.width == _SIZE[0]
+        assert chat_view.region.y < composer.region.y < bar.region.y == _SIZE[1] - 1
+        assert app.query_one("#chat-view") is chat_view
         assert app.theme == theme.NAME
         assert isinstance(app.focused, Composer)
 
@@ -34,7 +35,7 @@ async def test_the_conversation_fills_the_width_over_the_status_bar_in_bh_01_s_d
 def test_every_custom_token_a_widget_names_has_a_default() -> None:
     """A real launch parses every stylesheet at startup and dies on an undefined `$token`,
     which `run_test()` does not notice."""
-    sheets = [cls.DEFAULT_CSS for cls in (Transcript, Composer, StatusBar)]
+    sheets = [cls.DEFAULT_CSS for cls in (ChatView, Composer, StatusBar)]
     named = {
         name for css in [*sheets, ApprovalScreen.DEFAULT_CSS] for name in re.findall(r"\$(bh-[\w-]+)", css)
     }

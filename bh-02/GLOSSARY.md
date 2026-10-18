@@ -110,6 +110,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **composer**: the box along the bottom of the app where you type a message or a command.
 - **ui** (row): `tui:ui`, the Textual app: it binds `input`, `output` and `frame`, and depends on nothing, so it never reloads.
 - **input**, **output** (keys): what the chat reads your lines from and shows replies, notes and questions through; the ui binds both.
+- **chat view**: the TUI widget that shows the conversation as a column of blocks, one per thing said (`ChatView`, `widgets/chat_view.py`); the `transcript` row is the conversation's record, not this widget.
 - **port**: a word in the tui plugin's code (`ports.py`): the values the ui binds for other rows, `input`, `output` and `frame`.
 - **frame** (key): the app around the conversation, a broker rows push status bar fields and palette commands into.
 - **status** (row): `tui:status`: the status bar's session id and model (the `usage` field is the ui's own).

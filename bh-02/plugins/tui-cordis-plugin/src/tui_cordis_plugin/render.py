@@ -142,7 +142,7 @@ def settle_point(text: str, limit: int, most: int) -> int:
 
 def code(source: str, language: str = "python") -> Content:
     """Source code, syntax-highlighted with the theme's colours (Textual's highlight tokens,
-    which the theme resolves), as the transcript and the approval modal both draw it."""
+    which the theme resolves), as the chat view and the approval modal both draw it."""
     return highlight(source, language=language).rstrip("\n")
 
 
@@ -414,7 +414,7 @@ def copied_line(text: str) -> str:
 
 
 def newest_reply(blocks: Iterable[tuple[str, str]]) -> str | None:
-    """The newest reply's text, from the transcript's blocks (a (kind, text) pair each, oldest
+    """The newest reply's text, from the chat view's blocks (a (kind, text) pair each, oldest
     first, the text of a `text` block as the model wrote it): every `text` block after the
     message it answers (a `user` block), in order, a blank line between, so a reply that stops
     for tool calls and goes on is whole. While the newest message has no text yet, the newest

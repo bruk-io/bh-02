@@ -16,7 +16,7 @@ from textual.widgets import OptionList, Static
 
 from tui_cordis_plugin import BhApp, render, running
 from tui_cordis_plugin.messages import Asked
-from tui_cordis_plugin.widgets import ApprovalScreen, Composer, Transcript
+from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Composer
 
 _SIZE = (120, 36)
 
@@ -27,7 +27,7 @@ _SPECS: list[Mapping[str, Any]] = [
 
 
 def _said(app: BhApp) -> list[str]:
-    return [str(block.content) for block in app.query_one(Transcript).query(Static)]
+    return [str(block.content) for block in app.query_one(ChatView).query(Static)]
 
 
 async def _settle(pilot: Pilot[None], times: int = 3) -> None:
@@ -107,7 +107,7 @@ async def test_the_modal_shows_an_input_highlighted() -> None:
         assert isinstance(app.screen, ApprovalScreen)
         source = app.screen.query_one("#approval-source", Static).content
         assert isinstance(source, Content) and source.plain == code  # whole, not cut to a glance
-        assert source == render.code(code)  # highlighted as the transcript does, in theme tokens
+        assert source == render.code(code)  # highlighted as the chat view does, in theme tokens
         assert all(str(span.style).startswith(("$", "bold", "italic")) for span in source.spans)
         title = str(app.screen.query_one("#approval-title", Static).content)
         assert title.startswith("Run this python code (61 lines)?")

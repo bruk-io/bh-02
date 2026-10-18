@@ -1,4 +1,4 @@
-"""The Transcript: the conversation as a scrolling column of blocks.
+"""The ChatView: the conversation as a scrolling column of blocks.
 
 A block is one widget per thing said: a message the person sent, a run of streamed text or
 thinking, a tool call, its result, usage, a stop, a note. What each says is `render`'s (pure);
@@ -34,7 +34,7 @@ from textual.widgets import Collapsible, Static
 from tui_cordis_plugin import render
 from tui_cordis_plugin.history import Replay
 
-__all__ = ["Clipped", "Stream", "Transcript"]
+__all__ = ["ChatView", "Clipped", "Stream"]
 
 # How many lines a streaming piece grows to before it is settled and a new one opened, and
 # how many characters, for text that comes without newlines (a long paragraph).
@@ -127,7 +127,7 @@ class Clipped(Vertical):
     first opening, not before, so a block nobody opens costs what its first lines do.
 
     Opening only changes this block's height: it scrolls nothing and calls nothing that
-    releases the transcript's anchor, so a transcript that follows its end goes on following
+    releases the chat view's anchor, so a chat view that follows its end goes on following
     (its layout puts it at the new end), and one scrolled away stays where it is."""
 
     DEFAULT_CSS = """
@@ -192,92 +192,92 @@ class Clipped(Vertical):
         self._more.update(render.clip_label(self._clip, opened=self._opened))
 
 
-class Transcript(VerticalScroll):
+class ChatView(VerticalScroll):
     """Blocks appended as a reply streams in; it follows the end unless scrolled away."""
 
     DEFAULT_CSS = """
-    Transcript {
+    ChatView {
         height: 1fr;
         padding: 0 1;
     }
-    Transcript > .block {
+    ChatView > .block {
         width: 100%;
         height: auto;
         margin: 1 0 0 0;
     }
-    Transcript > .text {
+    ChatView > .text {
         color: $bh-text;
     }
-    Transcript > .user {
+    ChatView > .user {
         color: $bh-text-bright;
         background: $bh-surface-raised;
         padding: 0 1;
         text-style: bold;
     }
-    Transcript > .thinking {
+    ChatView > .thinking {
         border: none;
         padding: 0;
         background: transparent;
         color: $bh-text-muted;
         text-style: italic;
     }
-    Transcript > .thinking Contents {
+    ChatView > .thinking Contents {
         padding: 0 0 0 2;
     }
-    Transcript .row {
+    ChatView .row {
         height: auto;
     }
-    Transcript .marker {
+    ChatView .marker {
         width: 2;
         color: $bh-accent-secondary;
     }
-    Transcript .body {
+    ChatView .body {
         width: 1fr;
     }
-    Transcript > .tool_call {
+    ChatView > .tool_call {
         margin: 1 0 0 0;
     }
-    Transcript > .tool_call .head {
+    ChatView > .tool_call .head {
         color: $bh-accent-secondary;
         text-style: bold;
     }
-    Transcript > .tool_call .code {
+    ChatView > .tool_call .code {
         margin: 0 0 0 2;
         padding: 0 0 0 1;
         border-left: solid $bh-accent-secondary;
     }
-    Transcript > .tool_result {
+    ChatView > .tool_result {
         margin: 0;
         color: $bh-text-muted;
     }
-    Transcript > .tool_result .marker {
+    ChatView > .tool_result .marker {
         width: 4;
         padding: 0 0 0 2;
         color: $bh-text-muted;
     }
-    Transcript > .tool_result.-error .body {
+    ChatView > .tool_result.-error .body {
         color: $bh-danger;
     }
-    Transcript > .usage {
+    ChatView > .usage {
         width: auto;
         margin: 0 0 0 2;
         padding: 0 1;
         background: $panel;
         color: $bh-text 70%;  /* readable: 5.2:1 on the panel, where text-tertiary is 2.2:1 */
     }
-    Transcript > .stop {
+    ChatView > .stop {
         width: auto;
         margin: 0 0 0 2;
         padding: 0 1;
         background: $bh-danger 20%;
         color: $bh-danger;
     }
-    Transcript > .note {
+    ChatView > .note {
         border-left: wide $bh-link-subtle;
         padding: 0 0 0 1;
         color: $bh-link-subtle;
     }
-    Transcript > .failure {
+    ChatView > .failure {
         border-left: wide $bh-danger;
         padding: 0 0 0 1;
         color: $bh-danger;
@@ -298,7 +298,7 @@ class Transcript(VerticalScroll):
         `scroll_to`, as the mouse wheel does: up from the end releases the anchor (it stops
         following new output) and reaching the end anchors it again. Two cases `scroll_to`
         would get wrong are handled here: with nothing to scroll, or down from the end, it
-        would release the anchor with no movement to restore it, and the transcript would not
+        would release the anchor with no movement to restore it, and the chat view would not
         follow the output that came next."""
         if not self.allow_vertical_scroll:
             return
@@ -381,7 +381,7 @@ class Transcript(VerticalScroll):
         )
 
     def blocks(self) -> list[tuple[str, str]]:
-        """What the transcript shows, as (kind, plain text) per block, top to bottom."""
+        """What the chat view shows, as (kind, plain text) per block, top to bottom."""
         return [(_kind(block), _plain(block)) for block in self.children]
 
     def _settle_usage(self) -> None:
