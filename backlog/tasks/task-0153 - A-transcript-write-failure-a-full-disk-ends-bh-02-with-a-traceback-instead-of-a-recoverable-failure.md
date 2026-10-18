@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 13:24'
-updated_date: '2026-10-18 21:37'
+updated_date: '2026-10-18 21:41'
 labels:
   - agent
   - chat
@@ -174,4 +174,70 @@ FAILED bh-02/plugins/agent-cordis-plugin/tests/test_loop.py::test_a_reply_over_a
 ```
 
 Review round 1 (blocking: no repro recorded). Fixed by recording it, no code or test changed (git diff dff0025 over bh-02/ and libs/ is empty). With the 'except OSError' branch of FileTranscript._refusing planted out (replaced by 'except ZeroDivisionError', source edited and uncommitted, test files clean), ran record-check TASK-0153 --repro -- uv run pytest test_loop.py::<the reply whose entries could not be written> test_loop.py::<the reply over a file that is a directory>: both FAILED (bare NotADirectoryError / IsADirectoryError, not Recoverable), exit 1, recorded above at dff00254afd7 (the commit this round started from, still an ancestor of the squashed commit, so close-task can diff the test file against it). The source was then restored with git checkout; the tree held only the task file as the auto-commit. With the guard restored: uv run pytest test_loop.py test_agent_transcript.py test_agent_conversation.py: 119 passed, 1 skipped (the existing /dev/full skip), exit 0. board-check close TASK-0153: 'ok: TASK-0153 can close'. The TUI nit (no test drives the TUI to show the notice) stands, as the reviewer left it. scripts/check not re-run: no code changed since its exit 0 above.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+....................................s......s..ssss..s.s.s..s.ss.s.s..ss. [ 48%]
+s.s.s.s.s..sssss.s.........s............................................ [ 50%]
+........................................................................ [ 52%]
+......................................................................ss [ 54%]
+sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss....... [ 56%]
+.......................sssssssssss....s................................. [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+.............................................sss........................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+...................................s.................................... [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+...............                                                          [100%]
+3859 passed, 118 skipped in 201.21s (0:03:21)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 4.16 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
