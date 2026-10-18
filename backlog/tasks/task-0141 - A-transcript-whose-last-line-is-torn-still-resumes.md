@@ -108,4 +108,6 @@ INFO    -  Documentation built in 4.96 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (philosophy:reviewer): not closed. Full scripts/check exit 0 (3796 passed, 118 skipped), tree unchanged; AC1-3 met and ticked. Blocking: close-task refuses a bug with no recorded repro. The worker saw the new tests fail on the old transcript.py but did not record it; record it with record-check TASK-0141 --repro -- uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py -k torn_last_line against the code before 80e157a, then re-run close. Nits: _beside docstring (transcript.py) gives only the .bak example; nothing tells the person a torn line was set aside; a concurrent appender during resume could have its in-flight line cut (known, decision-0009).
 <!-- SECTION:NOTES:END -->
