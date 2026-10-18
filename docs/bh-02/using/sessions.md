@@ -41,8 +41,27 @@ part, such as `07f8`, and `--resume` takes that too.
 
 A session's sub-agents keep their conversation and an event log beside it
 (`<id>/agents/NAME/transcript.jsonl` and `events.jsonl`, the log readable by you alone and, like the
-rest of the session's state, not by the model's code). `bh-02 watch ID NAME` follows one; the
+rest of the session's state, not by the model's code). `bh-02 watch ID NAME` follows one, and
+`bh-02 trajectory` shows each under the call that started it; the
 [command line](../reference/command-line.md#bh-02-watch) says how.
+
+## Seeing what happened
+
+```sh
+bh-02 trajectory              # the newest session in this directory, laid out in time
+bh-02 trajectory 07f8         # a session by its id, the start of it, or its last part
+bh-02 trajectory --follow     # keep reading, and print what is new, while a reply runs
+```
+
+`bh-02 trajectory` prints a session read-only, from its files: each reply with your message and the
+time, each model step with the model, the time to its first chunk, how long it generated, the speed
+in tokens per second, the tokens used, what it cost and its settings, each call with what approval
+made of it, how long you took to answer, how long it ran and the calls its input made, each sub-agent
+under the call that started it, and each `/compact` with the summary step's time and cost. Times are
+your local time. Conversations come in order, the ones `/clear` and `/compact` kept first, and
+`--follow` carries on across either. A session from before bh-02 recorded times prints without them.
+The [command line](../reference/command-line.md#bh-02-trajectory) shows the output and says what it
+holds back.
 
 ## Resuming
 

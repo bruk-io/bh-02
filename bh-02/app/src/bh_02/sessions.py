@@ -37,6 +37,7 @@ __all__ = [
     "Broken",
     "Listing",
     "Session",
+    "chosen",
     "create",
     "discard",
     "find",
@@ -329,6 +330,23 @@ def find(root: Path, cwd: str, sid: str | None) -> list[Session | Broken]:
     if sid is None:
         return [*sessions[:1]]
     return _matching([*sessions, *broken], sid)
+
+
+def chosen(found: Sequence[Session | Broken], sid: str, action: str) -> Session | str:
+    """The one session `find` returned for `sid` (empty: the newest), or what to tell the person
+    when it returned none, more than one, or a record that can't be read: `action` is the verb the
+    last of those is said with (`resume`, `show`)."""
+    if not found and not sid:
+        return "no sessions in this directory yet; run bh-02 to start one"
+    if not found:
+        return f"no session {sid!r} in this directory; `bh-02 sessions` lists them"
+    if len(found) > 1:
+        ids = ", ".join(s.id for s in found)
+        return f"{sid!r} matches {len(found)} sessions' ids ({ids}); give more of one"
+    (only,) = found
+    if isinstance(only, Broken):
+        return f"can't {action} {only.id}: {only.message}"
+    return only
 
 
 def resume_command(stack: str, session_id: str | None = None) -> str:

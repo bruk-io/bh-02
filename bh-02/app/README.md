@@ -7,6 +7,7 @@ process), inside a Textual TUI (`tui:ui`), with every part of the program a plug
 replaced while it runs. `bh_02` is the shell: `cli.py` (the `bh-02` command), `bootstrap.py`
 (`run()`: read every layer, boot, follow the chat row's `done`, unwind; its own `shell`, `host`
 and `session` rows), `sessions.py` (a session is `$XDG_STATE_HOME/bh-02/sessions/<id>/`),
+`watching.py` and `trajectory.py` with `viewing.py` (`bh-02 watch` and `bh-02 trajectory`, which read a session's files),
 the layer file (`bh-02.toml`) and `testing.py` (fake models). Every capability is a `*-cordis-plugin` workspace member
 (`../plugins/`) that a layer names by string; no package imports another, and they agree on the
 names and shapes in [`CONTRACTS.md`](../CONTRACTS.md). The words used here are in
@@ -16,6 +17,7 @@ names and shapes in [`CONTRACTS.md`](../CONTRACTS.md). The words used here are i
 uv run bh-02                                       # a new session
 uv run bh-02 --resume [ID]                         # continue this directory's newest session (or ID: all of it, its start, or its last part)
 uv run bh-02 sessions                              # list them
+uv run bh-02 trajectory [ID] [--follow]             # a session laid out in time: replies, steps, calls, sub-agents
 uv run bh-02 check-examples FILE...                # a startup file's docstring examples, with no session (exit 1 on a finding)
 uv run bh-02 --no-jail | --model NAME | --patch mine.toml | --trace trace.log
 uv tool install --editable ./bh-02/app --reinstall # an installed bh-02, after a pull that adds or renames a plugin
@@ -152,6 +154,36 @@ keeps the conversation (`transcript` is a row of its own) and reloads neither `/
 status bar (they depend on `models`, not `model`).
 [Rows and layers](../../docs/bh-02/how-it-works/rows-and-layers.md) says why each row is cut
 where it is.
+
+## Reading a session: `bh-02 trajectory`
+
+A session's trajectory is its record laid out in time, and it is stored nowhere: the transcript's
+entries carry when they came, how long each step and call took, who answered a call's question, what
+a step cost and which sub-agent a call started (decision-0009; [`CONTRACTS.md`](../CONTRACTS.md),
+step record and call record), and `bh-02 trajectory [ID]` reads them back. It is split like the loop
+is, a pure core and a thin shell:
+
+- `trajectory.py` is pure. `trajectory(conversations, rows)` takes the bytes of the transcript files
+  (the session's own, and each sub-agent's) and returns frozen dataclasses: a session's conversations
+  in order (the live `transcript.jsonl` last, the backups `/clear` and `/compact` kept before it by their
+  first `at`, else their modification time), each with its replies, their steps and calls, and
+  each sub-agent under the call that started it, or after the conversations by its own times when no
+  call names it. `rendered` lays it out as lines, in local time, with every control character stripped.
+  `bh_02` imports no plugin (`plugin-layering`), so it reads the entries as TypedDicts of its own; a
+  test holds them to what the agent plugin's loop writes (`test_trajectory_records.py`). A line that is
+  not a JSON object (the loop's half-written last line) is skipped, a field that is missing or of the
+  wrong type is left out, and a conversation from before the records prints with no times.
+- `viewing.py` is the shell: it lists a session's directory and reads each file through
+  `host_paths` (`directory_beneath`, `read_beneath`: beneath the sessions' state, through no link, with a
+  cap), takes a sub-agent only from the names in `agents/` that `bh-02 watch` would accept, and runs the
+  `--follow` loop. A follow re-reads every file by its path every second and prints the lines whose
+  `Line.key` it has not printed, so a `/clear` or `/compact` that replaced the live file is simply new;
+  no offset into a file is kept. A call whose result is not written yet is held back while following (it
+  may be running).
+- `cli.py` finds the session as `--resume` does (`sessions.find`, `sessions.chosen`) and prints.
+
+What it does not show yet: row reloads (TASK-0136.11) and the raw request, which needs the agent
+plugin's pure projection functions in a library both may import.
 
 ## The plugins
 
