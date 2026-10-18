@@ -99,6 +99,15 @@ row's dependencies are active would make it depend on them, and a `/model` switc
 with them. A resumed session that does not come up is kept and not offered a resume (it would fail
 the same way): the command line says it did not start and where its own layer is.
 
+`main` holds the session for the whole run (`sessions.held`, entered in `cli._session`): an exclusive
+`flock` on `running.lock` in the session's directory, with the process's pid written there, taken
+for a new session right after it is made and for a resumed one before its layer is read or `--model`
+rewrites it. A second run of the same session finds it taken and is refused (`sessions.Held`, said
+as `error: ...`, exit code 1) before any row starts, naming the pid. The operating system drops the
+lock with the process, so a crash leaves nothing to clear, and the descriptor is not inherited, so
+no child outlives the run holding it. The commands that only read a session (`sessions`,
+`trajectory`, `watch`) never take it.
+
 What the rows depend on, which is what decides what reloads when:
 
 ```

@@ -350,6 +350,28 @@ def test_a_resumed_session_shows_what_was_said(launch: Launch) -> None:
     assert again.exit_code() == 0
 
 
+def test_a_running_bh_02_holds_its_session_and_a_second_resume_of_it_is_refused_until_it_ends(
+    launch: Launch,
+) -> None:
+    """The first run of a session holds it for as long as it runs: another `--resume` of it is
+    refused at once, naming the process, with no screen drawn; the operating system lets go of the
+    lock when that process dies, even killed, so the session is not left locked."""
+    first = launch("echo")
+    first.wait_for(_READY, 60)
+    second = launch("echo", "--resume")
+    assert second.exit_code() == 1
+    said = second.text()
+    assert "error: session " in said and f"is held by bh-02 process {first.process.pid}" in said
+    assert "Leave that bh-02 first" in said
+    assert _READY not in said  # refused before the app drew anything
+    first.process.kill()  # a crash: nothing is cleaned up
+    first.process.wait()
+    third = launch("echo", "--resume")
+    third.wait_for(_READY, 60)
+    third.type("/exit")
+    assert third.exit_code() == 0
+
+
 def _children(pid: int) -> list[int]:
     listed = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True, check=False)
     return [int(line) for line in listed.stdout.split()]

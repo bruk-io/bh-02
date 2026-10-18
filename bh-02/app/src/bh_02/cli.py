@@ -100,16 +100,17 @@ def main(
     run is a session that `--resume` continues."""
     if ctx.invoked_subcommand is not None:
         return
-    try:
-        read_layers(patches)  # before a session is made for a run that can't start
-        _no_pinned_model(model, patches)
-        session = _session(resume, model=model, no_jail=no_jail, patches=patches)
-    except LayerError as error:
-        click.echo(f"error: {error.message}", err=True)
-        sys.exit(1)
-    # the status bar shows the session's id from here, marked as resumed on a resume
-    listing = sessions.Listing(str(sessions.state_root()), session.id, resume is not None)
-    code, started = _run([*layers(), session.layer, *patches], trace, listing, session.row_log)
+    with contextlib.ExitStack() as holding:  # the session is held until the run is over
+        try:
+            read_layers(patches)  # before a session is made for a run that can't start
+            _no_pinned_model(model, patches)
+            session = _session(resume, model=model, no_jail=no_jail, patches=patches, holding=holding)
+        except (LayerError, sessions.Held) as error:
+            click.echo(f"error: {error.message}", err=True)
+            sys.exit(1)
+        # the status bar shows the session's id from here, marked as resumed on a resume
+        listing = sessions.Listing(str(sessions.state_root()), session.id, resume is not None)
+        code, started = _run([*layers(), session.layer, *patches], trace, listing, session.row_log)
     if not started and resume is None:
         sessions.discard(session)  # a run that never came up made no session worth listing
     else:
@@ -237,16 +238,28 @@ def trajectory_command(session_id: str | None, follow: bool) -> None:
 
 
 def _session(
-    resume: str | None, *, model: str | None, no_jail: bool, patches: Sequence[Path]
+    resume: str | None,
+    *,
+    model: str | None,
+    no_jail: bool,
+    patches: Sequence[Path],
+    holding: contextlib.ExitStack,
 ) -> sessions.Session:
-    """A new session, its layer written before anything boots, or the one `--resume` names."""
+    """A new session, its layer written before anything boots, or the one `--resume` names. Either
+    is held (`sessions.held`) in `holding`, which keeps it for the run; a resumed one is held before
+    its layer is read or rewritten, so a session another bh-02 is running is refused (`Held`) with
+    nothing of it touched.
+    """
     root, cwd = sessions.state_root(), str(Path.cwd())
     if resume is None:
         names = [patch.name for patch in patches]
-        return sessions.create(root, cwd, model=model, no_jail=no_jail, patches=names)
+        made = sessions.create(root, cwd, model=model, no_jail=no_jail, patches=names)
+        holding.enter_context(sessions.held(made))
+        return made
     found = sessions.chosen(sessions.find(root, cwd, resume or None), resume, "resume")
     if isinstance(found, str):
         raise click.UsageError(found)
+    holding.enter_context(sessions.held(found))
     read_layers([found.layer])  # a hand-edited session.toml: one line, before /model rewrites it
     if no_jail:
         raise click.UsageError("a resumed session keeps the jail it started with")

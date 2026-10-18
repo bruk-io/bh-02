@@ -43,6 +43,10 @@ Commands:
   model ([Models](../using/models.md#a-patch-that-sets-the-model)).
 - `--resume` with `--no-jail` is refused: a resumed session keeps the jail it started with.
 - `--resume` with `--model` carries the session on with that model.
+- `--resume` of a session another bh-02 is running is refused, exit code 1, naming the process that
+  holds it, before any row starts and before the session is touched; leave that bh-02 first
+  ([One bh-02 at a time](../using/sessions.md#one-bh-02-at-a-time)). `sessions`, `trajectory` and
+  `watch` read a held session as they do any other.
 - A layer (the shipped one, the session's or a `--patch` file) that names a plugin or component
   bh-02 doesn't have fails at boot, exit code 1, with the loader's error naming the row, its `use`
   and the installed plugins; nothing translates an old name
@@ -193,7 +197,7 @@ block that does not parse, or has no blank line before it).
 | Code | When |
 |---|---|
 | `0` | the session ended normally, or a subcommand did its job (`check-examples`: no finding) |
-| `1` | a layer file can't be read, names old rows or has a row with no `use`, the composition could not start, or the session ended with an error. bh-02 says why in one line, starting `error:`. |
+| `1` | a layer file can't be read, names old rows or has a row with no `use`, the session `--resume` names is held by another bh-02, the composition could not start, or the session ended with an error. bh-02 says why in one line, starting `error:`. |
 | `2` | a usage error: an unknown option, a `--patch` file that doesn't exist, a `--resume` that matches no session or more than one. For `check-examples`, also a file it can't check (not readable, not Python): it exits `1` only for a finding. |
 
 ## Environment

@@ -16,7 +16,26 @@ started and a short suffix, such as `20261008-225423-07f8`. It holds:
 | `events.jsonl` | what the screen showed, drawn again when you resume |
 | `rows.jsonl` | each row that reloaded or failed, with the time (one JSON object a line, readable by you alone); `bh-02 trajectory` prints it |
 | `meta.json` | the session's id, the directory it ran in, when it started, the model it started on, and any `--patch` files it started with |
+| `running.lock` | the lock the running bh-02 holds on the session, with its process id in it (see [One bh-02 at a time](#one-bh-02-at-a-time)) |
 | `claude/` | Claude Code's own state for the session, when the model is Claude |
+
+## One bh-02 at a time
+
+A running bh-02 holds its session: it takes a lock on `running.lock` in the session's directory when
+it starts and keeps it until it ends. A second `bh-02 --resume` of that session, from another
+terminal, is refused before it starts a thing, because two bh-02s writing one session would
+interleave their conversations in its transcript, its screen history and its row log:
+
+```text
+error: session 20261008-225423-07f8 is held by bh-02 process 4242, which is running it; two bh-02s writing one session would interleave its conversation. Leave that bh-02 first (Ctrl-Q in its window), then resume the session again
+```
+
+Leave the one that holds it (Ctrl-Q, or end the process the message names) and resume again. The
+lock is the operating system's, so it goes when the process does, however it ends: a bh-02 that
+crashed or was killed leaves no stale lock, and `running.lock` staying in the directory means
+nothing. `bh-02 sessions`, `bh-02 trajectory` and `bh-02 watch` only read, take no lock and work on
+a session that is held; so does a second bh-02 that starts a new session, which is a session of its
+own.
 
 ## When bh-02 was killed mid-write
 
