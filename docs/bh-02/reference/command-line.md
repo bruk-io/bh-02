@@ -80,8 +80,9 @@ Usage: bh-02 watch [OPTIONS] SESSION AGENT
   Follow one sub-agent's event log, read-only: SESSION is a session's id
   (`bh-02 sessions`) and AGENT the agent's name (`/agents` in the session says
   the command, such as `bh-02 watch 20261012-091500-ab12 general-1`). Stops
-  when the agent ends; Ctrl-C leaves it sooner. Nothing is written, and only
-  names bh-02 made are accepted.
+  when the agent ends, or when the session is no longer running (no bh-02 is
+  running it) and the log has no end; Ctrl-C leaves it sooner. Nothing is
+  written or locked, and only names bh-02 made are accepted.
 
 Options:
   --once  Print what the log holds now and stop, instead of following it.
@@ -95,6 +96,14 @@ text run together. It opens the file read-only, follows no link, and refuses a S
 that is not a name bh-02 made (a session id such as `20261012-091500-ab12`, an agent such as
 `general-1`), so neither can name a path. Anything the model wrote is shown as plain text, with
 no escape sequence. It works the same inside tmux or outside it.
+
+The follow ends at the agent's end. A log that never gets one (the bh-02 that ran the session crashed
+or was killed) would keep it going, so it also ends, saying that the session is no longer running,
+once the process that held the session (the pid in its `running.lock`) is gone. That is read, not
+locked: a lock taken and let go would refuse a bh-02 starting in that instant. It cannot see a bh-02
+in another pid namespace (a container sharing the state directory), where the process looks gone and
+the follow ends early, and it goes on while a process of that pid exists, so a pid a crash left that
+another process has since taken keeps it going until Ctrl-C.
 
 ## `bh-02 trajectory`
 

@@ -35,7 +35,8 @@ lock is the operating system's, so it goes when the process does, however it end
 crashed or was killed leaves no stale lock, and `running.lock` staying in the directory means
 nothing. `bh-02 sessions`, `bh-02 trajectory` and `bh-02 watch` only read, take no lock and work on
 a session that is held; so does a second bh-02 that starts a new session, which is a session of its
-own.
+own. `bh-02 watch` reads the pid in `running.lock` to end its follow once the bh-02 running the
+session has gone ([the command line](../reference/command-line.md#bh-02-watch)).
 
 ## When bh-02 was killed mid-write
 

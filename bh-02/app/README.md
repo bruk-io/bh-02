@@ -106,7 +106,9 @@ rewrites it. A second run of the same session finds it taken and is refused (`se
 as `error: ...`, exit code 1) before any row starts, naming the pid. The operating system drops the
 lock with the process, so a crash leaves nothing to clear, and the descriptor is not inherited, so
 no child outlives the run holding it. The commands that only read a session (`sessions`,
-`trajectory`, `watch`) never take it.
+`trajectory`, `watch`) never take it; `watch` asks `sessions.running`, which reads the pid in the file
+and whether that process is alive (a lock tried and let go at once would make a bh-02 starting then find
+the session held), and ends its follow, saying so, when the run is gone and the agent's log has no end.
 
 What the rows depend on, which is what decides what reloads when:
 

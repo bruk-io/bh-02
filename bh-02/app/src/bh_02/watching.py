@@ -8,6 +8,11 @@ writing and creates nothing. The two names are judged before any path is made of
 session id and an agent name that bh-02 makes are accepted, so neither can be a path (`..`, a
 `/`, an absolute path, a link's name).
 
+A follow ends at the agent's `agent_end`. A log that stopped without one (the session crashed, or
+was left) would never end it, so the follow also ends, saying why, once the session is no longer
+running (`sessions.running`: the pid its `running.lock` holds is gone). It is asked and nothing is
+locked: a lock tried and let go would refuse a bh-02 starting in that instant.
+
 What the log holds is what the model said, so it is shown as text: no escape sequence and no
 control character but newline and tab reaches the terminal.
 """
@@ -153,25 +158,37 @@ def _read(root: Path, session: str, agent: str) -> bytes:
     return data
 
 
+def _gone(session: str, agent: str) -> str:
+    """What to say when a follow ends because the session no longer runs: why, and that it is not an end."""
+    return (
+        f"session {session} is no longer running (the bh-02 that ran it has gone), and agent {agent}'s "
+        "log has no end: nothing more will be written to it\n"
+    )
+
+
 def watched(
     root: Path,
     session: str,
     agent: str,
     *,
     follow: bool,
+    running: Callable[[], bool],
     sleep: Callable[[float], None] = time.sleep,
 ) -> Iterator[str]:
     """The text of the agent's log, a chunk at a time: what is there, then (with `follow`) what is
-    added, until the agent's end is read. The file is read again for each poll and never opened
-    for writing.
+    added, until the agent's end is read, or `running` (whether a bh-02 still runs the session)
+    says it does not and the log has no end, which is said at the last. `running` is asked before
+    each read, so whatever the session wrote before it went is shown. The file is read again for
+    each poll and never opened for writing.
 
     Raises:
         Refused: the names are not bh-02's, or the log can't be read (`refused`, `_read`).
     """
     if (why := refused(session, agent)) is not None:
         raise Refused(why)
-    done, offset, inline = False, 0, False
-    while not done:
+    done, offset, inline, gone = False, 0, False, False
+    while not done and not gone:
+        alive = running() if follow else True
         data = _read(root, session, agent)
         end = data.rfind(b"\n") + 1  # only whole lines: the writer may be half through one
         for line in data[offset:end].splitlines():
@@ -181,7 +198,10 @@ def watched(
         offset = max(offset, end)
         if not follow:
             break
-        if not done:
+        gone = not (done or alive)
+        if not (done or gone):
             sleep(_POLL_S)
-    if inline:
+    if gone:
+        yield _after(_gone(session, agent), inline)
+    elif inline:
         yield "\n"
