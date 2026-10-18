@@ -1,7 +1,7 @@
 ---
 id: TASK-0159
 title: 'Say an openai endpoint, not a openai endpoint, in the models file''s errors'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 19:28'
@@ -258,4 +258,6 @@ INFO    -  Documentation built in 5.30 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 3: closed. Full scripts/check exit 0 (recorded). AC1: named.py's three provider messages use _article; repro recorded (12 failed pre-fix, 191 pass after). AC2: tests follow the wording; check green. No findings.
 <!-- SECTION:NOTES:END -->
