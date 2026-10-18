@@ -112,7 +112,7 @@ def test_the_sessions_row_reloads_are_read_with_its_files_and_shown_among_the_li
         {"at": "2026-10-18T03:00:00.500Z", "kind": "failed", "row": "model", "error": "RuntimeError('x')"},
     )
     assert lines_of(tmp_path) == [
-        "row reload loop  19:59:00.000",
+        "row first load loop  19:59:00.000",
         "conversation 1  transcript.jsonl  2026-10-17 20:00:00.000",
         "  reply 1  2026-10-17 20:00:00.000  first",
         "    row failed model  20:00:00.500  RuntimeError('x')",
@@ -485,7 +485,7 @@ def test_a_reload_that_comes_while_following_is_printed_once_where_it_belongs_an
     put(rows, {"at": "2026-10-18T03:00:00.500Z", "kind": "reload", "row": "first"})
 
     def reloaded() -> None:  # the shell appended another, after the last line; the next poll finds it
-        pushed(rows, {"at": "2026-10-18T03:00:02.000Z", "kind": "reload", "row": "second"})
+        pushed(rows, {"at": "2026-10-18T03:00:02.000Z", "kind": "reload", "row": "first"})
 
     def replied() -> None:
         pushed(path, message("next", "2026-10-18T03:01:00.000Z"))
@@ -494,10 +494,34 @@ def test_a_reload_that_comes_while_following_is_printed_once_where_it_belongs_an
     assert [text.strip().split("  ")[0] for text in out] == [
         "conversation 1",
         "reply 1",
-        "row reload first",
+        "row first load first",
         "step 1",
-        "row reload second",
+        "row reload first",
         "reply 2",
+    ]
+
+
+def test_a_sub_agents_rows_coming_up_while_following_are_one_line_printed_once_with_all_of_them(
+    tmp_path: Path,
+) -> None:
+    path, rows = tmp_path / SESSION / "transcript.jsonl", tmp_path / SESSION / "rows.jsonl"
+    child = tmp_path / SESSION / "agents" / "general-1" / "transcript.jsonl"
+    put(path, *ONE)
+    put(
+        rows,
+        {"at": "2026-10-18T03:00:04.000Z", "kind": "reload", "row": "agents/general-1"},
+        {"at": "2026-10-18T03:00:04.010Z", "kind": "reload", "row": "agents/general-1/loop"},
+    )
+
+    def more() -> None:  # still coming up: the poll must not print the two it has seen
+        pushed(rows, {"at": "2026-10-18T03:00:04.020Z", "kind": "reload", "row": "agents/general-1/python"})
+
+    def started() -> None:  # its first line: the rows are all there
+        put(child, message("count", "2026-10-18T03:00:05.000Z"))
+
+    out, _ = following(tmp_path, [lambda: None, more, started, lambda: None])
+    assert [text for text in out if "row first load" in text] == [
+        "  row first load  20:00:04.000  3 rows in 0.02s"
     ]
 
 

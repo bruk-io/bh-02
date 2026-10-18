@@ -179,10 +179,15 @@ is, a pure core and a thin shell:
   in order (the live `transcript.jsonl` last, the backups `/clear` and `/compact` kept before it by their
   first `at`, else their modification time), each with its replies, their steps and calls, and
   each sub-agent under the call that started it, or after the conversations by its own times when no
-  call names it, and its row reloads by time. `rendered` lays it out as lines, in local time, with every
-  control character stripped, each row reload a line of its own before the first line that came after
-  it, among the lines of the writer whose row it is (the session's, or the sub-agent's for
-  `agents/NAME/...`).
+  call names it, and its row reloads by time, each marked `first` when its row id is not in the records
+  before it (cordis has no first-load event, so a row's first load is recorded as a `reload`). `rendered`
+  lays it out as lines, in local time, with every control character stripped, each row reload a line of
+  its own before the first line that came after it, among the lines of the writer whose row it is (the
+  session's, or the sub-agent's for `agents/NAME/...`), except that first loads which follow one another
+  there, with no reload, failure or line of that writer's between, are one line (`row first load`, how
+  many rows and the time from the first to the last): the session's boot, and a sub-agent's rows coming
+  up, under its `sub-agent` line. While following, a run of them at the very end waits for something
+  after it, so it is printed once with its final count.
   `bh_02` imports no plugin (`plugin-layering`), so it reads the entries as TypedDicts of its own; a
   test holds them to what the agent plugin's loop writes (`test_trajectory_records.py`). A line that is
   not a JSON object (the loop's half-written last line) is skipped, a field that is missing or of the
@@ -205,9 +210,11 @@ runtime beside `--trace`'s (`_row_log`), which hears every row's lifecycle event
 writes it on a thread at 0600, so the event loop never waits on a disk. `reload` is a row's setup
 beginning (it came up, was restarted, or a dependency was replaced) and `failed` its setup raising,
 with the error; cordis emits no `restart`, a restarted row's old fiber ends `unloading` and `inactive`
-and the new one begins with a `reload`. A write that fails ends the log and not the run, and the shell
-says so once after the app has exited: the file, when it found the write failing, and the error. `--trace FILE`
-is the same stream in full, untimed and written on the loop, and stays as it was.
+and the new one begins with a `reload`; so does a row's first load, which the file does not mark, and
+the trajectory tells it by the row id (a row's first record in the file). A write that fails ends the
+log and not the run, and the shell says so once after the app has exited: the file, when it found the
+write failing, and the error. `--trace FILE` is the same stream in full, untimed and written on the
+loop, and stays as it was.
 
 ## The plugins
 

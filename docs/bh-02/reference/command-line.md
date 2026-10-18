@@ -120,7 +120,7 @@ the reply's. The date the model is told is also your local day, so near midnight
 differ from the date in the files.
 
 ```text
-row reload loop  20:40:00.000
+row first load  20:40:00.000  34 rows in 0.12s
 conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   reply 1  2026-10-17 20:47:12.345  fix the bug in foo
     step 1  20:47:12.400  claude-opus-5-5  first chunk 1.20s  generated in 3.40s  62.4 tokens/s  in 1,200 tokens  out 212 tokens  cache read 1,000  cost $0.0312
@@ -130,6 +130,7 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
         nested call read_file  20:47:17.100  answer unasked  ran 0.01s
       call agent  20:47:18.000  answer unasked  ran 12.00s  started sub-agent general-1
         sub-agent general-1
+          row first load  20:47:18.900  15 rows in 0.06s
           conversation 1  transcript.jsonl  2026-10-17 20:47:19.000
             reply 1  2026-10-17 20:47:19.000  count the files
               step 1  20:47:20.000  claude-haiku-5  first chunk 0.30s  generated in 0.70s
@@ -144,12 +145,23 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   call** shows its tool, what approval made of it (`answer unasked`, `yes` or `no`) and how long you
   took to answer, how long the tool ran, and the calls its input made through `tools` under it. A
   call whose result is not in the transcript says `no result recorded`.
-- **A row reload** is a row of the composition starting to load (`row reload NAME`: it came up, was
-  restarted, as `/clear` does, or a dependency it uses was replaced) or failing (`row failed NAME`,
-  with the error), from the session's `rows.jsonl`. It is printed in time order, before the first reply,
-  step or call that came after it, at that line's indentation; one with nothing after it comes last. A
-  sub-agent's rows (`agents/NAME/...`) are placed among that sub-agent's lines. A session starts with a
-  `row reload` for each row, and each restart adds those of the rows that depend on what it replaced.
+- **A row line** is a row of the composition loading or failing, from the session's `rows.jsonl`. It is
+  printed in time order, before the first reply, step or call that came after it, at that line's
+  indentation; one with nothing after it comes last. A sub-agent's rows (`agents/NAME/...`) are placed
+  among that sub-agent's lines. There are three kinds:
+  - **`row first load`** is a row loading for the first time in the session: its row id is not in the
+    file before. The first loads that follow one another, with no reload or failure of that
+    writer's rows and none of its lines between, are one line with how many rows came up and the time
+    from the first to the last (`row first load  20:40:00.000  34 rows in 0.12s`): that is the session
+    starting, before your first reply, and under a `sub-agent` line the rows that sub-agent came up with.
+    A single row is named (`row first load NAME`). Rows that come up after your first reply, such as
+    ones a layer edit adds, are a line of their own, counted the same way. `rows.jsonl` has the names.
+  - **`row reload NAME`** is a row that loaded again: it was restarted, as `/clear` does, or a
+    dependency it uses was replaced (a `/model` switch, an edit to a layer). Each is a line.
+  - **`row failed NAME`** is a row whose setup failed, with the error. Each is a line.
+
+  A session you `--resume` goes on in the same `rows.jsonl`, so the rows of the resumed run, which
+  were all seen before, are `row reload` lines.
 - **Conversations** are the session's transcript files: the backups `/clear` and `/compact` kept
   come first, in the order of their first `at` (else of the time they were copied), and the live
   `transcript.jsonl` is last. A conversation `/compact` began says so, with what you asked it to

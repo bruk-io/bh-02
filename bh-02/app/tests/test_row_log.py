@@ -2,6 +2,7 @@
 kept at 0600, for `bh-02 trajectory` to lay out (decision-0009, Row reloads)."""
 
 import asyncio
+import datetime
 import errno
 import json
 import os
@@ -15,6 +16,7 @@ import pytest
 
 from bh_02 import layers, run
 from bh_02.bootstrap import NotStarted
+from bh_02.trajectory import rendered, trajectory
 from cordis import Row
 
 type Record = dict[str, str]
@@ -83,6 +85,35 @@ async def test_a_row_restarted_by_a_command_is_kept_as_the_reload_of_its_new_fib
     for restarted in ("loop", "transcript", "python"):  # up once, and again for /clear
         assert sum(record["row"] == restarted for record in kept) >= 2
     assert sum(record["row"] == "ui" for record in kept) == 1  # the ui depends on nothing: no restart
+
+
+async def test_the_trajectory_of_the_rows_written_is_the_boot_as_one_line_and_each_restart_as_reloads(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """cordis has no first-load event, so the log records a row's first load as a reload; the trajectory
+    tells it by the row id, from the file as the shell writes it."""
+    import fragile
+
+    log = tmp_path / "rows.jsonl"
+    fragile.script("/clear", "after")
+    ui = composition(
+        '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n'
+    )
+    await asyncio.wait_for(run([*layers(), ui], row_log=log), 10)
+    seen: set[str] = set()
+    firsts: list[str] = []
+    again: list[str] = []
+    for record in records(log):
+        (again if record["row"] in seen else firsts).append(record["row"])
+        seen.add(record["row"])
+    assert len(firsts) > 20 and {"loop", "transcript", "python"} <= set(
+        again
+    )  # a boot, and what /clear restarted
+    lines = [line.text for line in rendered(trajectory([], log.read_bytes()), datetime.UTC)]
+    assert re.fullmatch(rf"row first load  [0-9:.-]+ [0-9:.]+  {len(firsts)} rows in [0-9.]+s", lines[0])
+    assert [line.split()[2] for line in lines[1:]] == again
+    assert all(line.startswith("row reload ") for line in lines[1:])
 
 
 async def test_a_row_that_fails_is_kept_with_its_error_though_the_run_stops_for_it(
