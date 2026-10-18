@@ -3,7 +3,7 @@ id: TASK-0152
 title: >-
   A reply after a failed /clear or /compact restart reaches the model once
   before the transcript refuses it
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 13:24'
@@ -250,4 +250,6 @@ INFO    -  Documentation built in 3.88 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 2 (independent): closed. Full scripts/check exited 0 again on HEAD 5051b53. AC#1: loop._reply awaits _checked() before any append; the failed-restart conversation test asserts model.requests == [] and TranscriptReplaced naming /restart transcript; the repro is recorded (4 failures with the call removed). AC#2: the check is a no-write stat on the writer thread (test asserts no stat on the event loop), no flush, and the existing flush-count tests are unchanged. The round-1 repro finding is resolved; the round-1 nit got a comment-only fix in appender.py. Known limits (Ctrl-C in the check window; Appender.__init__ stats on the caller's thread) stay unfiled, as ruled in round 1.
 <!-- SECTION:NOTES:END -->
