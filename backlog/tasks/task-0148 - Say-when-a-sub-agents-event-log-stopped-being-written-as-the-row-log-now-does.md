@@ -3,10 +3,11 @@ id: TASK-0148
 title: >-
   Say when a sub-agent's event log stopped being written, as the row log now
   does
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-18 12:33'
-updated_date: '2026-10-18 19:31'
+updated_date: '2026-10-18 20:27'
 labels:
   - subagents
   - size-2
@@ -23,10 +24,16 @@ Follow-up from TASK-0145. A child's events.jsonl (subagents plugin, eventlog.py)
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A sub-agent whose event log stops after a failed write, or at its close, is said once as a note through the parent's output.show when its run ends, naming the file, when the failure was found, the error, and that bh-02 watch shows nothing after it and must be left with Ctrl-C
-- [ ] #2 A run whose logs never failed, or whose log could not be opened (already a note), says nothing new
+- [x] #1 A sub-agent whose event log stops after a failed write, or at its close, is said once as a note through the parent's output.show when its run ends, naming the file, when the failure was found, the error, and that bh-02 watch shows nothing after it and must be left with Ctrl-C
+- [x] #2 A run whose logs never failed, or whose log could not be opened (already a note), says nothing new
 - [ ] #3 Subagents tests with no monkeypatch: the file removed under the appender mid-run (Replaced) gives one note, a healthy run none; scripts/check passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Tests first (no monkeypatch), seen failing: EventLog (test_agents_eventlog.py): file removed under the appender -> write leaves .stopped = host_paths.Failure (Replaced, at between before/after); a cancelled write whose failure only close hears of -> stopped set by close, at = the failure time not the close time; a healthy/none log -> stopped None. child.log_stopped pure (test_agents_child.py). Agents row (test_agents_wiring.py): background child, file removed mid-run, gate opened -> exactly one note naming the file, the time, the error, bh-02 watch + Ctrl-C, shown before the usage note; healthy run and in-memory session -> no such note. 2. eventlog.py: _broken -> _stopped (host_paths.Failure: frozen at+error, at is the Appender's failure time from TASK-0147), set by write on first OSError (appender.failure) and by close; read-only stopped property; docstring. 3. child.py: pure log_stopped(name, kind, path, stopped) -> str + _stamp (UTC Z like the row log), exported; agents.py _run finally: one note after log.close(), before the usage note. 4. Docs: eventlog.py docstring, subagents README event-log bullet, CONTRACTS.md subagents:parent show list, GLOSSARY event log. 5. scripts/check bh-02/plugins/subagents-cordis-plugin (gates+docs), arch-check --no-fix (purity budget / pyproject unchanged unless needed). Risk: a failure found only at close is unreachable without monkeypatch except via a cancelled write (used).
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
@@ -35,4 +42,9 @@ Ruled 2026-10-18 by Fable, at the owner's request ("for 1 and 2, ask fable"): te
 Why: the agents row already speaks for this file through output (a log that cannot be opened is a note, agents.py around 692-706; each child ends with a note and its usage, around 680-690). The after-exit channel is the shell's report, a parameter of run() (bootstrap.py around 406-411) that no key carries, and a key for one line is what decision-0009 refuses. Best effort (eventlog.py around 11-13) is the write policy, not silence: once _broken is set, agent_end is dropped (around 65-72), and bh-02 watch ends only at agent_end, so it follows forever. A shown note is kept in the ui's history, so a resume replays it.
 Shape: eventlog.py's _broken becomes _stopped (a frozen at and error), set by write on the first OSError and by close when none was (close suppresses its OSError today, around 79, so a failure found at close is lost); a read-only stopped property. child.py: a pure log_stopped(name, kind, path, stopped) -> str beside lost and watch_command. agents.py _run's finally, after log.close(): one note before the usage note. Docs: eventlog.py docstring, the README's event log bullet, CONTRACTS.md (subagents:parent's show list), GLOSSARY (event log).
 Order: after TASK-0147 (the failure's own time), which serves both lines.
+
+Implemented per the ruling. eventlog.py: _broken became _stopped (host_paths.Failure, the frozen at+error TASK-0147 added to the Appender, so at is the failure's own time taken on the writer thread); write sets it from appender.failure on the first OSError, close sets it when no write did (close still suppresses its OSError); read-only EventLog.stopped. child.py: pure log_stopped(name, kind, path, stopped) -> str (file, 'it failed at STAMP' in UTC with Z as the row log writes it, the error, and that bh-02 watch shows nothing after it and must be left with Ctrl-C), exported from the package. agents.py _run's finally: after log.close(), one note, before the usage note. Docs: eventlog.py docstring, subagents README (event log bullet, step 7, table cell), CONTRACTS.md (output row's subagents:parent show list, asker row's event log), GLOSSARY (event log). No stored format changed (the log's records are as before), so no old file stops working.
+Evidence. Tests with no monkeypatch, written first and seen failing (no 'stopped' attribute / no note: 'assert 0 == 1', 'not enough values to unpack') before the implementation, passing after: test_agents_wiring.py::test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage (file removed under the appender mid-run, host_paths raises Replaced; exactly one note naming the file, the time, the error, bh-02 watch and Ctrl-C, ordered before the usage note; the child still reports), ::test_only_the_child_whose_log_stopped_is_told (a second child with a whole log adds none); the healthy run (test_a_child_s_events_go_to_its_own_log...) and the in-memory session now assert screen.notes() == []. test_agents_eventlog.py: removed file -> stopped is Replaced with at between before/after; a failure only close hears of (a pipe whose reader goes while the caller was cancelled; BrokenPipeError) -> stopped set by close with at before the close began. Planted: close not reading the appender's failure failed the close test; close stamping its own clock failed both at-tests (removed after restoring). test_agents_child.py: log_stopped exact text, UTC conversion.
+AC #2 not run at the wiring level for a log that could not be opened: that needs EventLog.open to fail (the file already there, or an unwritable directory), which the row's own order of work (claim, mkdir, open) and a root test user make unreachable without a monkeypatch; the code path is unchanged (_opened returns EventLog.none(), whose stopped is None, asserted in test_a_log_that_kept_every_record_never_stopped) and an in-memory session, which also has no log, says nothing.
+Checks: scripts/check bh-02/plugins/subagents-cordis-plugin exit 0 (format, lint, mypy, 138 tests, every gate, docs); scripts/arch-check --no-fix exit 0. AC #3's 'scripts/check passes' is left unticked: the full scripts/check is the reviewer's to prove.
 <!-- SECTION:NOTES:END -->

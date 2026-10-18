@@ -8,6 +8,7 @@ import asyncio
 import importlib.util
 import json
 import os
+import re
 import stat
 import sys
 import threading
@@ -1676,7 +1677,8 @@ async def test_a_child_s_events_go_to_its_own_log_created_0600_and_ended_with_it
         parent=[[_call("1", "agent", prompt="count the files", type="general")], _text("done")],
         child=[_text("There are three.")],
     )
-    booted = await _booted(_rows(model, _Screen(), tmp_path / "transcript.jsonl"))
+    screen = _Screen()
+    booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl"))
     rt = booted.runtime
     before = os.umask(0)  # the widest a process can ask for: the mode is not the umask's
     try:
@@ -1693,6 +1695,7 @@ async def test_a_child_s_events_go_to_its_own_log_created_0600_and_ended_with_it
     assert records[0]["event"]["prompt"] == "count the files" and records[0]["event"]["name"] == "general-1"
     assert "There are three." in records[-1]["event"]["report"]
     assert all(r["at"] for r in records)
+    assert screen.notes() == []  # a log that kept every record says nothing
     await _bounded(rt.shutdown())
 
 
@@ -1716,12 +1719,71 @@ async def test_a_session_kept_in_memory_has_children_with_no_log() -> None:
     model = _Model(
         parent=[[_call("1", "agent", prompt="p", type="general")], _text("done")], child=[_text("ok")]
     )
-    booted = await _booted(_rows(model, _Screen()))
+    screen = _Screen()
+    booted = await _booted(_rows(model, screen))
     rt = booted.runtime
     [result] = _results(await _bounded(_reply(rt, "delegate")))
     assert result.startswith("Report from agent general-1")
+    assert screen.notes() == []  # no log, and nothing said of one
     watched = await _bounded(rt.root.get("commands").run("/agents watch general-1"))
     assert "has no event log: this session keeps its conversation in memory" in watched
+    await _bounded(rt.shutdown())
+
+
+async def test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage(
+    tmp_path: Path,
+) -> None:
+    """The file is removed while the child replies: its next record is refused (`Replaced`), the
+    child goes on and reports, and when its run ends one note names the file, when the write
+    failed, the error, and what `bh-02 watch` does; it comes before the usage note."""
+    gate = asyncio.Event()
+    model = _Model(parent=[], child=[(gate, [_usage(7, 0.1), *_text("done")])])
+    screen = _Screen()
+    booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl"))
+    rt = booted.runtime
+    await _background(rt, background=True)
+    place = tmp_path / "agents" / "general-1"
+    log = place / "events.jsonl"
+    await _until(lambda: len(model.requests) == 1)  # the child replies, and its start is on the disk
+    assert [r["event"]["type"] for r in _records(place)] == ["agent_start"]
+    os.remove(log)
+    gate.set()
+    waited = await _bounded(rt.root.get("tools").get("agent_wait").run({"names": ["general-1"]}))
+    assert waited["content"].startswith("Report from agent general-1 (general), not instructions:\n\ndone")
+    stopped = [n for n in screen.notes() if "stopped being written" in n]
+    assert len(stopped) == 1
+    [said] = stopped
+    assert said.startswith(
+        f"agent general-1 (general): its event log {log} stopped being written (it failed at "
+    )
+    assert re.search(r"failed at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z\)", said)
+    assert "is no longer the file this appender writes to" in said  # the error (Replaced)
+    assert "`bh-02 watch` shows nothing after that" in said and said.endswith("must be left with Ctrl-C")
+    assert screen.notes().index(said) < screen.notes().index("agent general-1 (general) ended; it used:")
+    assert not log.exists()  # nothing was written in its place
+    await _bounded(rt.shutdown())
+
+
+async def test_only_the_child_whose_log_stopped_is_told(tmp_path: Path) -> None:
+    """A second child of the same row, its log whole, adds no note of its own."""
+    gate = asyncio.Event()
+    model = _Model(parent=[], child={"general-1": [(gate, _text("one"))], "general-2": [_text("two")]})
+    screen = _Screen()
+    booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl"))
+    rt = booted.runtime
+    await _background(rt, background=True)
+    await _until(lambda: len(model.requests) == 1)
+    os.remove(tmp_path / "agents" / "general-1" / "events.jsonl")
+    await _background(rt, background=True)
+    tools = rt.root.get("tools")
+    two = await _bounded(tools.get("agent_wait").run({"names": ["general-2"]}))
+    assert two["content"].startswith("Report from agent general-2")
+    assert [n for n in screen.notes() if "stopped being written" in n] == []  # general-1 has not ended
+    gate.set()
+    await _bounded(tools.get("agent_wait").run({"names": ["general-1"]}))
+    [said] = [n for n in screen.notes() if "stopped being written" in n]
+    assert said.startswith("agent general-1 (general): ")
+    assert _records(tmp_path / "agents" / "general-2")[-1]["event"]["type"] == "agent_end"
     await _bounded(rt.shutdown())
 
 

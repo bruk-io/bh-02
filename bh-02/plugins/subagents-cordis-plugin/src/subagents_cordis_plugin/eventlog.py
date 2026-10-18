@@ -8,9 +8,13 @@ opens nothing for writing. Writes go through `host_paths.Appender`, the one appe
 family, on a thread, so the event loop is never blocked on a disk, one after the other: a record
 waits for the write before it, even one whose caller was cancelled and left it to finish (a
 cancelled child's end record, written next, would otherwise overtake it or mix with it), and
-closing waits for the last. A log that can't be written (the disk is full) stops writing; the
-child goes on, since the log is for the person, not the run. (The transcript's failed write is
-raised instead: it is the conversation.)
+closing waits for the last. A log that can't be written (the disk is full, the file removed or
+replaced under it) stops writing; the child goes on, since the log is for the person, not the run.
+(The transcript's failed write is raised instead: it is the conversation.) Best effort is the
+write policy, not silence: the log keeps its first failure and when it happened (`stopped`, found
+by a write, or by `close` when no write heard of it), so the agents row can tell the person once
+the child's run ends. Without it `bh-02 watch`, which ends only at the `agent_end` record the
+stopped log never writes, would follow the file for good.
 """
 
 import contextlib
@@ -19,7 +23,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from host_paths import Appender
+from host_paths import Appender, Failure
 
 __all__ = ["LOG", "EventLog", "record_line"]
 
@@ -42,7 +46,14 @@ class EventLog:
 
     def __init__(self, appender: Appender | None) -> None:
         self._appender = appender
-        self._broken = False
+        self._stopped: Failure | None = None
+
+    @property
+    def stopped(self) -> Failure | None:
+        """The first write that failed and when (the appender's own time, taken on its thread where
+        the write failed, not when the caller heard of it), or None while every record has gone.
+        Read it after `close`: a failure no write heard of is found there. Set once, then kept."""
+        return self._stopped
 
     @classmethod
     def open(cls, path: str) -> EventLog:
@@ -62,19 +73,22 @@ class EventLog:
         """Append `event`, stamped with the time, off the event loop, after every write asked
         before it has finished (whatever it came to). A caller stopped meanwhile leaves the write
         to finish, which the next one waits for."""
-        if self._appender is None or self._broken:
+        if (appender := self._appender) is None or self._stopped is not None:
             return
         line = record_line(datetime.datetime.now().astimezone(), event)
         try:
-            self._appender.append(line)
-            await self._appender.flush()
+            appender.append(line)
+            await appender.flush()
         except OSError:
-            self._broken = True  # the log stops here; the child goes on
+            # the log stops here and the child goes on; the appender kept when the write failed
+            self._stopped = appender.failure
 
     async def close(self) -> None:
         """Wait for the last write, which has waited for the rest, then close the file (off the
-        event loop); later writes are nothing."""
+        event loop); later writes are nothing. A failure no write heard of (a write whose caller was
+        stopped, a file that would not close) stops the log here: it is kept, not raised."""
         appender, self._appender = self._appender, None
         if appender is not None:
-            with contextlib.suppress(OSError):  # best-effort, as `write` is
+            with contextlib.suppress(OSError):  # best-effort, as `write` is: `stopped` tells
                 await appender.close()
+            self._stopped = self._stopped or appender.failure
