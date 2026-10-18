@@ -114,4 +114,6 @@ INFO    -  Documentation built in 3.61 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (independent): every criterion met on the evidence; full scripts/check exit 0 (3766 passed, 118 skipped), the run changed no files. Not closed: close-task refuses a bug without a recorded repro. The planted reproduction was a scratch copy since deleted, so the worker should add either record-check TASK-0140 --repro -- <planted test> or a note starting 'No repro:' explaining why (the race needs a stale proxy.port planted in a pid-named dir, which the fixed test no longer uses). Then it can close. Note: decision-0009 (session trajectories) does not bear on this task.
 <!-- SECTION:NOTES:END -->
