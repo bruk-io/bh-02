@@ -104,4 +104,6 @@ INFO    -  Documentation built in 4.54 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (not closed): full scripts/check exited 0, AC1-3 met and ticked, no code findings. close-task refused: a bug needs a recorded repro (record-check TASK-0154 --repro -- <the AC1 test failing before the fix>) or a 'No repro:' note. The worker's notes describe planted violations failing, but none is recorded. Worker to record the repro (e.g. against the parent commit 5ca3338) and resubmit.
 <!-- SECTION:NOTES:END -->
