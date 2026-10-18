@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:33'
-updated_date: '2026-10-18 20:11'
+updated_date: '2026-10-18 20:15'
 labels:
   - host-paths
   - size-1
@@ -48,4 +48,70 @@ Changed: libs/host-paths/src/host_paths/appender.py (Failure(at, error), a froze
 AC1 proof: libs/host-paths/tests/test_host_paths_appender.py::test_the_first_failure_says_when_its_write_failed_not_when_the_caller_heard_of_it (one write succeeds, the next fails; the caller waits 100 ms after the thread failed; asserts before <= at, at + 50 ms < heard, the same error object, and a later close does not replace it). Before the change: AttributeError (no failure). Planted: failure stamped at the caller's time -> FAILED on the at/heard assertion (both times equal to the microsecond); reverted, passes.
 AC2 proof: bh-02/app/tests/test_row_log.py::test_a_log_that_cannot_be_written_ends_and_the_run_goes_on: spies os.open on the log path to record when the open failed; a trace callback holds the loop 0.2 s once that failure is recorded, so the shell would hear of it late; asserts the stamp is within 50 ms of the recorded failure. Planted: _stopped stamped with the shell's clock -> FAILED (gap 376 ms against 50 ms); reverted, passes.
 Commands and results: uv run pytest libs/host-paths/tests/test_host_paths_appender.py -q: 28 passed. scripts/check libs/host-paths (gates and docs): format, lint, types, 69 passed, gates (root, every lib), docs, all ok. scripts/check bh-02/app --no-gates --no-docs: first run failed format (2) and lint (2) on lines I wrote; fixed, ruff format --check and ruff check clean, rerun: format, lint, mypy (9 files), 347 passed 1 skipped. uv run pytest bh-02/plugins/agent-cordis-plugin bh-02/plugins/subagents-cordis-plugin (the other Appender users): 322 passed 1 skipped. scripts/arch-check --no-fix: every gate ok. Not run: the full scripts/check (left to the reviewer), scripts/linux-jail-check (not asked).
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+.........s......sss.s.s...s..s.ssss.s.s.s.s.s.s.s.s.s.ssss.......s.s.... [ 49%]
+........................................................................ [ 51%]
+...............................................s........................ [ 53%]
+.........................................sssssssssssssssssssss.sssssssss [ 54%]
+ssssssssssssssssssssssss.ssssssssss..sss.........................sssssss [ 56%]
+s.ss..........ss........................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+...............sss...................................................... [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+.................................................s...................... [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+..............................................                           [100%]
+3818 passed, 118 skipped in 207.90s (0:03:27)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 5.28 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
