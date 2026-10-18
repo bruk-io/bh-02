@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 14:39'
-updated_date: '2026-10-18 17:29'
+updated_date: '2026-10-18 17:33'
 labels:
   - agent
   - app
@@ -55,4 +55,70 @@ NOT COMPATIBILITY (left): the OpenAI wire's legacy `function_call` (the server's
 OLD FILES THAT STOP WORKING (none is read by an error; each is just no longer treated as a supported form): (a) a transcript whose `tool` entries have no `asides`: a memory rule it told is told again on first touch after a resume; (b) a transcript that kept each changed prompt as a whole `system` entry: the request still begins with its first prompt, but what the model was last told is now that first prompt, so the next message tells a diff against it (the date line and every change since), and later whole entries are passed over; (c) a transcript whose last assistant step has calls and a `user` entry after them: the calls are now answered with "interrupted: ..." after the person's message (the entries already written are never changed); (d) a Claude Code session from the Messages-API provider (provider tool_use blocks named `python`): rebuilt with the bare name, which Claude Code does not know as a declared tool; /clear starts a clean one; (e) an events.jsonl a pre-`cleared` bh-02 emptied: a resume's usage totals count what the file holds; (f) a jail record (state dir jails/*.json) with a path and no mark: swept as before (record deleted, nothing removed). (g) scripts/model-friction run over old sessions no longer strips the shell hint and old guidance asides from results, so an old session may show a few more or fewer signals.
 
 CHECKS: scripts/check bh-02/plugins/agent-cordis-plugin (gates, docs) exit 0, 191 passed 1 skipped; --no-gates --no-docs: memory 149 passed, models 363 passed 2 skipped, tui 344 passed, runner 88 passed 1 skipped, bh-02/app 347 passed 1 skipped, all exit 0 (memory and models after one reformat/fix each: my scripted edits bypassed the format hook, and a models test used an unprefixed provider block); scripts/arch-check --no-fix exit 0. Not run: the full scripts/check (AC3 "scripts/check passes" is the reviewer's, unticked), scripts/linux-jail-check, the e2e tests.
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+........s.s...ssss.s.s.s.s..ss..ss.s..s..sss....ss.s.s..ssss.......s.... [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+............................................ssssssssssssssssssssssssssss [ 54%]
+ssssssssssssssssssssssssssssssssssssss.s.......................sssssssss [ 56%]
+sss..................................................................... [ 58%]
+..s..................................................................... [ 60%]
+........................................................................ [ 62%]
+................sss..................................................... [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+............................................                             [100%]
+3816 passed, 118 skipped in 212.01s (0:03:32)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 5.69 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
