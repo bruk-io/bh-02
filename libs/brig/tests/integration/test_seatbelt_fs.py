@@ -58,10 +58,8 @@ it is the permanent one).
 
 `sun_path` is not implicated (no channel, no socket) but the jail_dir
 convention is followed anyway for consistency with every sibling
-integration file: a short `/tmp/bg<pid>sf<n>` scratch root, never
-`tmp_path` (CLAUDE.md's trap list). The `sf` infix ("seatbelt fs") is
-distinct from `test_seatbelt_smoke.py`'s own `sb` infix so this file's jail
-dirs never collide with that sibling's counter in the same pytest session.
+integration file: a short scratch root from `tests/conftest.py`'s `jail_dir` /
+`new_jail_dir`, never `tmp_path` (CLAUDE.md's trap list).
 
 Darwin-gated at module level with a visible skip reason: `sandbox-exec` and
 SBPL do not exist on any other platform.
@@ -69,7 +67,6 @@ SBPL do not exist on any other platform.
 
 from __future__ import annotations
 
-import itertools
 import os
 import re
 import sys
@@ -89,11 +86,10 @@ pytestmark = pytest.mark.skipif(
     reason="seatbelt/sandbox-exec is darwin-only (SPEC.md §6's seatbelt roster row)",
 )
 
-_jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 10.0
 
 
-def _denial_signature() -> re.Pattern[str]:
+def _denial_signature(jail_dir: str) -> re.Pattern[str]:
     """`seatbelt`'s own declared denial signature (SPEC.md §6: "Seatbelt
     'Operation not permitted'"), fetched from a real compiled `Step` --
     never hand-copied as a literal string -- so this file tests THIS
@@ -102,16 +98,8 @@ def _denial_signature() -> re.Pattern[str]:
     nothing here runs during collection on a non-darwin host ahead of the
     module-level `skipif`."""
     return seatbelt.compile(
-        Spec(), build_compile_ctx(Spec(), jail_dir=_new_jail_dir(), platform="darwin")
+        Spec(), build_compile_ctx(Spec(), jail_dir=jail_dir, platform="darwin")
     ).denial_signatures[0]
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>sf<n>` -- never `tmp_path`
-    (`sun_path` is 104 bytes on darwin). The `sf` infix keeps this file's
-    jail dirs from colliding with `test_seatbelt_smoke.py`'s own `sb`
-    infix's counter when both run in the same pytest session."""
-    return f"/tmp/bg{os.getpid()}sf{next(_jail_counter)}"
 
 
 def _run_and_capture(
@@ -155,13 +143,12 @@ def _run_and_capture(
 
 
 @pytest.mark.integration
-def test_write_outside_write_allows_denied_and_inside_succeeds() -> None:
+def test_write_outside_write_allows_denied_and_inside_succeeds(jail_dir: str) -> None:
     """A write to a path that is a SIBLING of the granted workspace (not
     under it, so outside every `write_allows` entry) fails; a write inside
     the workspace, read back via `cat` in the same command, succeeds. Both
     outcomes observed from ONE real jailed process's own captured stdio."""
-    signature = _denial_signature()
-    jail_dir = _new_jail_dir()
+    signature = _denial_signature(jail_dir)
     workspace = f"{jail_dir}/workspace"
     os.makedirs(workspace, exist_ok=True)
     outside_path = f"{jail_dir}/outside.txt"
@@ -201,7 +188,7 @@ def test_write_outside_write_allows_denied_and_inside_succeeds() -> None:
 
 
 @pytest.mark.integration
-def test_write_denies_carveout_denied_and_sibling_succeeds() -> None:
+def test_write_denies_carveout_denied_and_sibling_succeeds(jail_dir: str) -> None:
     """A write under a `write_denies` carve-out (`.git/hooks`, inside a
     granted `write_allows` workspace) fails; a write to a SIBLING path
     inside that SAME workspace, in the SAME jail run, succeeds. The
@@ -218,8 +205,7 @@ def test_write_denies_carveout_denied_and_sibling_succeeds() -> None:
     recorded with its pasted sha256 in this task's Implementation Notes,
     not left in this file.
     """
-    signature = _denial_signature()
-    jail_dir = _new_jail_dir()
+    signature = _denial_signature(jail_dir)
     workspace = f"{jail_dir}/workspace"
     hooks_dir = f"{workspace}/.git/hooks"
     os.makedirs(hooks_dir, exist_ok=True)
@@ -251,15 +237,13 @@ def test_write_denies_carveout_denied_and_sibling_succeeds() -> None:
 
 
 @pytest.mark.integration
-def test_read_denies_path_denied_and_sibling_succeeds() -> None:
+def test_read_denies_path_denied_and_sibling_succeeds(jail_dir: str) -> None:
     """Reads default-allow under seatbelt's denylist model (SPEC.md §6):
     a `read_denies` path fails to read, a sibling path NOT named in
     `read_denies` reads successfully -- the control that separates "this
     one path is denied" from "reads are denied everywhere," in one real
     jailed `cat ...; cat ...` run."""
-    signature = _denial_signature()
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
+    signature = _denial_signature(jail_dir)
     denied_path = f"{jail_dir}/denied.txt"
     allowed_path = f"{jail_dir}/allowed.txt"
     with open(denied_path, "w", encoding="utf-8") as f:
@@ -304,14 +288,13 @@ def test_read_denies_path_denied_and_sibling_succeeds() -> None:
 
 
 @pytest.mark.integration
-def test_control_stack_with_no_mechanisms_the_same_probes_all_succeed() -> None:
+def test_control_stack_with_no_mechanisms_the_same_probes_all_succeed(jail_dir: str) -> None:
     """The identical probe shapes from all three pairs above -- a write
     outside a nominal `write_allows`, a write under a nominal `.git/hooks`
     `write_denies` carve-out, and a read of a nominal `read_denies` path --
     run through `Stack([])` instead of `Stack([seatbelt])`. Every one now
     succeeds, proving the denials observed above come from seatbelt's own
     enforcement, not from this host's ordinary file permissions."""
-    jail_dir = _new_jail_dir()
     workspace = f"{jail_dir}/workspace"
     hooks_dir = f"{workspace}/.git/hooks"
     os.makedirs(hooks_dir, exist_ok=True)

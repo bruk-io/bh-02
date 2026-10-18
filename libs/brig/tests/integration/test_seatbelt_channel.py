@@ -62,8 +62,8 @@ everywhere else. Observation 1 succeeding IS the check that the render's
 `network-bind` line, wherever it sits, does what it claims.
 
 `sun_path` is 104 bytes on darwin (CLAUDE.md's trap list): every endpoint
-here lives directly under a short `/tmp/bg<pid>ch<n>` scratch root, never
-pytest's `tmp_path`, and its realpath'd `/private/tmp/...` form (the one the
+here lives directly under a short scratch root from `tests/conftest.py`'s
+`jail_dir`, never pytest's `tmp_path`, and its realpath'd `/private/tmp/...` form (the one the
 kernel actually checks) stays comfortably under the limit by construction.
 
 Darwin-gated at module level with a visible skip reason, same posture as
@@ -74,10 +74,8 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import itertools
 import os
 import pathlib
-import shutil
 import sys
 from collections.abc import Callable
 
@@ -89,14 +87,13 @@ from brig.mech.seatbelt import seatbelt
 from brig.run import HostRuntime, IoPolicy, Jail, Process
 from brig.run.compile_ctx import build_compile_ctx
 from brig.stack import CompiledJail, Stack
-from tests.conftest import launch, teardown_group
+from tests.conftest import NewJailDir, launch, teardown_group
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
     reason="seatbelt/sandbox-exec is darwin-only (SPEC.md §6's seatbelt roster row)",
 )
 
-_jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 10.0
 
 #: Path to the ONE file this task's mutation check must prove it never wrote
@@ -168,15 +165,6 @@ else:
 """
 
 
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>ch<n>` -- never `tmp_path`. The
-    `ch` infix ("channel") keeps this file's jail dirs from colliding with
-    any sibling integration file's own counter (same convention as
-    `test_seatbelt_smoke.py`'s own `sb` infix, `test_env_scrub.py`'s `es`,
-    etc.)."""
-    return f"/tmp/bg{os.getpid()}ch{next(_jail_counter)}"
-
-
 def _pair_bind_script(ep1: str, ep2: str) -> str:
     return _PAIR_BIND_SCRIPT_TEMPLATE.format(ep1=ep1, ep2=ep2)
 
@@ -185,10 +173,11 @@ def _single_bind_script(ep: str) -> str:
     return _SINGLE_BIND_SCRIPT_TEMPLATE.format(ep=ep)
 
 
-def _teardown(process: Process, jail_dir: str) -> None:
-    """Group-kill the workload regardless of how the test above fared, then
-    remove the whole jail directory -- AC #8's "every socket the test binds
-    is unlinked by the test's own teardown". The kill is deliberately
+def _teardown(process: Process) -> None:
+    """Group-kill the workload regardless of how the test above fared. (AC
+    #8's "every socket the test binds is unlinked by the test's own
+    teardown": the test's `jail_dir`, sockets and all, is removed after
+    it.) The kill is deliberately
     hand-rolled (`killpg`), same posture as `test_wait_ready.py`'s own
     `_teardown`: a test's cleanup path must not be the code under test.
     `process.wait()` blocks until the launcher's exit-waiter has reaped it
@@ -199,7 +188,6 @@ def _teardown(process: Process, jail_dir: str) -> None:
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
     teardown_group(process)
-    shutil.rmtree(jail_dir, ignore_errors=True)
 
 
 def _start_on_a_reserved_socket(
@@ -208,7 +196,6 @@ def _start_on_a_reserved_socket(
     """A jail whose one process is started on a socket reserved for `ch`
     (decision-184); `script_for` gets the in-jail path it binds. Returns that
     path too."""
-    os.makedirs(jail_dir, exist_ok=True)
     jail = Jail.create(
         compiled, runtime=HostRuntime(), cwd=jail_dir, jail_id=jail_id, jail_dir=jail_dir
     )
@@ -247,7 +234,7 @@ def _staged_profile(jail: CompiledJail) -> StagedFile:
 
 
 @pytest.mark.integration
-def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -> None:
+def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied(jail_dir: str) -> None:
     """AC #2 and #3. One jailed `python3 -c` process: binds+listens at the
     declared LISTEN channel's own endpoint (`ep1`), then attempts a second
     bind at an undeclared path (`ep2`) inside the same scratch root, then
@@ -261,7 +248,6 @@ def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -
     denial signature in both directions is AC #5, split out into its own
     control-bearing assertion below (`pattern.search` on the BIND2 line
     only, never on the BIND1_OK / DONE lines)."""
-    jail_dir = _new_jail_dir()
     ep2 = _outside_the_channel_directory(jail_dir)
     channel = Channel(name="ch", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
@@ -313,7 +299,7 @@ def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -
         # declared endpoint's own successful bind line.
         assert pattern.search("BIND1_OK") is None
     finally:
-        _teardown(process, jail_dir)
+        _teardown(process)
 
 
 # ---------------------------------------------------------------------------
@@ -324,14 +310,15 @@ def test_declared_endpoint_binds_readiness_by_connect_and_second_path_denied() -
 
 
 @pytest.mark.integration
-def test_no_channel_declared_denies_bind_and_profile_carries_no_network_bind_allow() -> None:
+def test_no_channel_declared_denies_bind_and_profile_carries_no_network_bind_allow(
+    jail_dir: str,
+) -> None:
     """AC #4. `spec.channels == ()`: `render_sbpl` emits zero
     `(allow network-bind)` lines (`brig.mech.seatbelt.profile`'s own
     documented conditionality, plan ambiguity A2) -- asserted directly
     against the profile THIS test compiled and staged, not merely assumed.
     A jailed bind attempt against that exact profile is then denied,
     matching seatbelt's declared signature."""
-    jail_dir = _new_jail_dir()
     ep = f"{jail_dir}/nobind.sock"
     spec = Spec()
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="darwin")
@@ -368,7 +355,7 @@ def test_no_channel_declared_denies_bind_and_profile_carries_no_network_bind_all
             f"signature {pattern.pattern!r}: {stdout_text!r}"
         )
     finally:
-        _teardown(process, jail_dir)
+        _teardown(process)
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +366,9 @@ def test_no_channel_declared_denies_bind_and_profile_carries_no_network_bind_all
 
 
 @pytest.mark.integration
-def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
+def test_control_unconfined_stack_binds_succeed_at_both_denied_paths(
+    new_jail_dir: NewJailDir,
+) -> None:
     """AC #7. The exact same two probes as the two denial tests above,
     launched through `Stack([])` -- no mechanisms, so `CompiledJail.wrap`
     is the identity and the workload runs entirely unconfined -- succeed at
@@ -390,7 +379,7 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
     user already owns."""
 
     # --- the pair probe, unconfined: BOTH binds succeed -----------------
-    jail_dir = _new_jail_dir()
+    jail_dir = new_jail_dir()
     ep2 = _outside_the_channel_directory(jail_dir)
     channel = Channel(name="ch", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
@@ -416,10 +405,10 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
             f"jail's doing, not the filesystem's: {stdout_text!r}"
         )
     finally:
-        _teardown(process, jail_dir)
+        _teardown(process)
 
     # --- the no-channel probe, unconfined: still succeeds ----------------
-    jail_dir2 = _new_jail_dir()
+    jail_dir2 = new_jail_dir()
     ep3 = f"{jail_dir2}/nobind.sock"
     spec2 = Spec()
     jail2 = Stack([]).compile(spec2)
@@ -445,7 +434,7 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
             f"the filesystem's: {stdout_text2!r}"
         )
     finally:
-        _teardown(process2, jail_dir2)
+        _teardown(process2)
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +445,9 @@ def test_control_unconfined_stack_binds_succeed_at_both_denied_paths() -> None:
 
 
 @pytest.mark.integration
-def test_mutation_check_removing_the_channel_directory_rule_denies_the_reserved_bind() -> None:
+def test_mutation_check_removing_the_channel_directory_rule_denies_the_reserved_bind(
+    jail_dir: str,
+) -> None:
     """AC #6. Never edits `brig/mech/seatbelt/` (this task's Out-of-scope
     section forbids it outright) -- mutates only an in-memory
     `CompiledJail.staged` copy this test itself built, via
@@ -473,7 +464,6 @@ def test_mutation_check_removing_the_channel_directory_rule_denies_the_reserved_
     real kernel."""
     digest_before = hashlib.sha256(_PROFILE_PY_PATH.read_bytes()).hexdigest()
 
-    jail_dir = _new_jail_dir()
     channel = Channel(name="ch", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="darwin")
@@ -511,7 +501,7 @@ def test_mutation_check_removing_the_channel_directory_rule_denies_the_reserved_
             f"signature {pattern.pattern!r}: {stdout_text!r}"
         )
     finally:
-        _teardown(process, jail_dir)
+        _teardown(process)
 
     digest_after = hashlib.sha256(_PROFILE_PY_PATH.read_bytes()).hexdigest()
     assert digest_after == digest_before, (

@@ -81,8 +81,10 @@ import contextlib
 import os
 import pathlib
 import select
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -981,6 +983,88 @@ def run_id() -> Iterator[str]:
             )
 
 
+#: What a test's jail directory is named: `/tmp/bg-<eight random characters>`, `tempfile.mkdtemp`'s
+#: own. The dash keeps it out of the scratch sweep's reach (`_scratch_sweep` takes the roots whose
+#: name after `bg` begins with the harness pid), and the whole path is 16 characters, short because
+#: the proxy's port file, the channel sockets (`sun_path` is 104 bytes on darwin) and the leak
+#: sweep's truncated argv all carry it.
+_JAIL_DIR_PREFIX = "bg-"
+
+#: What the `new_jail_dir` fixture is: a call that makes another jail directory.
+type NewJailDir = Callable[[], str]
+
+#: How often `_remove_tree` tries, and how long it waits between tries.
+_REMOVE_TRIES = 20
+_REMOVE_PAUSE_S = 0.05
+
+
+def _remove_tree(path: str) -> None:
+    """Remove `path` and all it holds, trying again for about a second if it is still there.
+
+    A jail the test did not `destroy` has a supervisor that may still be exiting, and it writes
+    its exit record into `<jail_dir>/supervisor` while the tree is removed: `rmtree` then finds
+    the directory not empty ("Directory not empty", seen in CI), and without another try the
+    jail directory outlives the test. What cannot be removed in that time (not owned, say) stays,
+    as it did when this was a single `rmtree(ignore_errors=True)`.
+    """
+    for attempt in range(_REMOVE_TRIES):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.lexists(path):
+            return
+        if attempt + 1 < _REMOVE_TRIES:
+            time.sleep(_REMOVE_PAUSE_S)
+
+
+@contextlib.contextmanager
+def _jail_dirs() -> Iterator[NewJailDir]:
+    """What `new_jail_dir` is: a call that makes a jail directory, each of which is removed, with
+    what the jail left in it, when the block ends."""
+    made: list[str] = []
+
+    def make() -> str:
+        path = os.path.realpath(tempfile.mkdtemp(prefix=_JAIL_DIR_PREFIX, dir="/tmp"))
+        made.append(path)
+        return path
+
+    try:
+        yield make
+    finally:
+        for path in made:
+            _remove_tree(path)
+
+
+@pytest.fixture
+def new_jail_dir() -> Iterator[NewJailDir]:
+    """`new_jail_dir()` makes a jail directory no earlier process ever used, and every one made is
+    removed, with what the jail left in it, when the test is done.
+
+    **A jail directory is never named from the process id.** A name made from the pid is handed
+    to a later process with the same pid (a pid space of 32768 wraps within a day of test runs)
+    along with the earlier one's files: its `proxy.port`, its `procs/` records, its `jail.json`.
+    Measured on `test_connect_proxy_launch.py` under 8-way load, 3 of 160 runs failed on a reused
+    directory, two with `JailDirInUse` from `Jail.create` and one with `ConnectionRefusedError`
+    (TASK-0140); the other files were exposed the same way wherever stale state matters
+    (TASK-0151). `tempfile.mkdtemp` makes a directory that did not exist.
+
+    Short, under `/tmp` and not `tmp_path` or `$TMPDIR` (darwin's is a long `/private/var/folders`
+    path): see `_JAIL_DIR_PREFIX`. Resolved, as `CompileCtx` requires of a `jail_dir` (darwin's
+    `/tmp` is a link to `/private/tmp`). It exists and is empty and `0700`, which `Jail.create`
+    takes as it takes any directory it finds: a test that needs one that does not exist yet names
+    a path inside it.
+
+    A test that needs a directory asks for `jail_dir`; one that needs several, or a helper that
+    makes its own, takes this factory.
+    """
+    with _jail_dirs() as make:
+        yield make
+
+
+@pytest.fixture
+def jail_dir(new_jail_dir: NewJailDir) -> str:
+    """One jail directory for the test, new and removed after it: see `new_jail_dir`."""
+    return new_jail_dir()
+
+
 @pytest.fixture
 def make_oci_jail(run_id: str) -> Iterator[Callable[..., Jail]]:
     """`make(spec, jail_id=None, ...)` makes a container jail (`tests/oci_jail.py`): its id carries
@@ -995,8 +1079,6 @@ def make_oci_jail(run_id: str) -> Iterator[Callable[..., Jail]]:
     def make(
         spec: Any = None, *, jail_id: str | None = None, jail_dir: str | None = None, **more: Any
     ) -> Jail:
-        import shutil
-
         from brig.core import Spec
 
         directory = oci_jail.new_jail_dir() if jail_dir is None else jail_dir
@@ -1014,8 +1096,6 @@ def make_oci_jail(run_id: str) -> Iterator[Callable[..., Jail]]:
         return jail
 
     yield make
-    import shutil
-
     failed: list[str] = []
     for jail, directory in made:
         report = jail.destroy()

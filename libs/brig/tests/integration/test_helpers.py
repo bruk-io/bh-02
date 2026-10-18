@@ -22,9 +22,7 @@ helper would be a listening socket nobody owns.
 from __future__ import annotations
 
 import contextlib
-import itertools
 import os
-import shutil
 import subprocess
 import time
 
@@ -40,13 +38,6 @@ from brig.stack import CompiledJail
 from tests.conftest import launch, workload_argv
 
 pytestmark = pytest.mark.integration
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bh<pid>-<n>` -- never `tmp_path`."""
-    return f"/tmp/bh{os.getpid()}-{next(_jail_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -117,7 +108,7 @@ def _launch(jail: CompiledJail, run_id: str, jail_dir: str) -> tuple[Jail, Proce
     )
 
 
-def test_jail_lifetime_helper_runs_and_destroy_reaps_it(run_id: str) -> None:
+def test_jail_lifetime_helper_runs_and_destroy_reaps_it(run_id: str, jail_dir: str) -> None:
     """A JAIL_LIFETIME helper is a live process while the jail lives, and
     is gone after `Jail.destroy` -- both observed from the OS.
 
@@ -128,8 +119,6 @@ def test_jail_lifetime_helper_runs_and_destroy_reaps_it(run_id: str) -> None:
     SPEC.md §12 names, and the exact shape the `helpers` field was in
     before this test existed.
     """
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
     beacon = os.path.join(jail_dir, "helper-ran")
 
     helper = Helper(
@@ -189,7 +178,9 @@ def test_jail_lifetime_helper_runs_and_destroy_reaps_it(run_id: str) -> None:
     )
 
 
-def test_launch_scoped_helper_completes_before_the_workload_starts(run_id: str) -> None:
+def test_launch_scoped_helper_completes_before_the_workload_starts(
+    run_id: str, jail_dir: str
+) -> None:
     """LAUNCH_SCOPED means "gone before the workload runs" (SPEC.md §6) --
     a guarantee, so it is asserted on ORDERING, not merely on "it ran".
 
@@ -197,8 +188,6 @@ def test_launch_scoped_helper_completes_before_the_workload_starts(run_id: str) 
     started concurrently instead of run to completion, this races and
     fails; if it were skipped entirely, it fails outright.
     """
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
     prepared = os.path.join(jail_dir, "prepared")
     observed = os.path.join(jail_dir, "workload-saw-it")
 
@@ -238,7 +227,7 @@ def test_launch_scoped_helper_completes_before_the_workload_starts(run_id: str) 
         jail.destroy()
 
 
-def test_failed_launch_scoped_helper_refuses_the_launch(run_id: str) -> None:
+def test_failed_launch_scoped_helper_refuses_the_launch(run_id: str, jail_dir: str) -> None:
     """A preparation step that failed must not be followed by a workload
     assuming it succeeded.
 
@@ -247,8 +236,6 @@ def test_failed_launch_scoped_helper_refuses_the_launch(run_id: str) -> None:
     green cannot come from the jail being unlaunchable for some other
     reason.
     """
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
     marker = os.path.join(jail_dir, "workload-started")
 
     helper = Helper(
@@ -276,7 +263,7 @@ def test_failed_launch_scoped_helper_refuses_the_launch(run_id: str) -> None:
 
 
 def test_a_launch_scoped_helper_that_never_exits_fails_instead_of_hanging(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """Found by a mutation check, not by design review.
 
@@ -293,8 +280,6 @@ def test_a_launch_scoped_helper_that_never_exits_fails_instead_of_hanging(
     the workload really is never started.
     """
     monkeypatch.setattr(host_mod, "_LAUNCH_SCOPED_TIMEOUT_S", 1.0)
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
     marker = os.path.join(jail_dir, "workload-started")
 
     helper = Helper(
@@ -332,7 +317,7 @@ def _ready_probe(ready: str, saw: str) -> str:
     "lifetime", [HelperLifetime.JAIL_LIFETIME, HelperLifetime.LAUNCH_SCOPED], ids=lambda e: e.name
 )
 def test_a_ready_file_an_earlier_jail_left_is_gone_before_the_helper_starts(
-    run_id: str, lifetime: HelperLifetime
+    run_id: str, lifetime: HelperLifetime, jail_dir: str
 ) -> None:
     """TASK-0150, decision-204: the jail directory is reused, so the file a helper
     publishes when it is ready can already be there, an earlier jail's, and whatever
@@ -345,8 +330,6 @@ def test_a_ready_file_an_earlier_jail_left_is_gone_before_the_helper_starts(
     directory's); a neighbour the helper does not declare survives (the removal is
     one file, not the directory); and the file the helper then publishes is there at
     the end, so the removal does not stand in the way of the thing it protects."""
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir)
     ready = os.path.join(jail_dir, "helper.ready")
     neighbour = os.path.join(jail_dir, "neighbour")
     saw = os.path.join(jail_dir, "saw")
@@ -380,11 +363,11 @@ def test_a_ready_file_an_earlier_jail_left_is_gone_before_the_helper_starts(
         assert _read(neighbour) == "kept", "the removal took a file the helper did not declare"
     finally:
         jail.destroy()
-        shutil.rmtree(jail_dir, ignore_errors=True)
 
 
 def test_a_ready_file_that_cannot_be_removed_refuses_the_create_before_any_helper_starts(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """A declared ready file that is there and cannot be removed (here a directory)
     is an `OSError` from `create` with a note saying what to do, and NO helper has
@@ -395,8 +378,6 @@ def test_a_ready_file_that_cannot_be_removed_refuses_the_create_before_any_helpe
     THE CONTROL, in the same test: with the directory gone, the same helpers start
     and the first one runs, so the refusal was the directory's and not a jail that
     could not start for another reason."""
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir)
     ready = os.path.join(jail_dir, "helper.ready")
     ran = os.path.join(jail_dir, "first-ran")
     os.mkdir(ready)
@@ -412,34 +393,29 @@ def test_a_ready_file_that_cannot_be_removed_refuses_the_create_before_any_helpe
         lifetime=HelperLifetime.JAIL_LIFETIME,
         ready_path=ready,
     )
-    try:
-        with pytest.raises(OSError) as refused:
-            Jail.create(
-                _jail((first, second)),
-                runtime=HostRuntime(),
-                cwd=jail_dir,
-                jail_id="jail-ready-stuck",
-                jail_dir=jail_dir,
-            )
-        assert any(
-            "remove it, or choose another jail directory" in n for n in refused.value.__notes__
-        )
-        time.sleep(0.5)
-        assert not os.path.exists(ran), "a helper started although the create was refused"
-
-        os.rmdir(ready)
-        jail = Jail.create(
+    with pytest.raises(OSError) as refused:
+        Jail.create(
             _jail((first, second)),
             runtime=HostRuntime(),
             cwd=jail_dir,
             jail_id="jail-ready-stuck",
             jail_dir=jail_dir,
         )
-        try:
-            assert _wait_until(lambda: os.path.exists(ran)), (
-                "the control jail did not start its first helper either"
-            )
-        finally:
-            jail.destroy()
+    assert any("remove it, or choose another jail directory" in n for n in refused.value.__notes__)
+    time.sleep(0.5)
+    assert not os.path.exists(ran), "a helper started although the create was refused"
+
+    os.rmdir(ready)
+    jail = Jail.create(
+        _jail((first, second)),
+        runtime=HostRuntime(),
+        cwd=jail_dir,
+        jail_id="jail-ready-stuck",
+        jail_dir=jail_dir,
+    )
+    try:
+        assert _wait_until(lambda: os.path.exists(ran)), (
+            "the control jail did not start its first helper either"
+        )
     finally:
-        shutil.rmtree(jail_dir, ignore_errors=True)
+        jail.destroy()

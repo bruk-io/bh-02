@@ -36,17 +36,15 @@ test's own teardown misses; the probes themselves are short-lived and
 assertions run, so none of them need a `workload_argv` token (same posture
 as `test_exec_confinement.py`'s own docstring).
 
-Short `/tmp/bg<pid>pr<run_id[:8]><n>` scratch roots throughout (`pr` --
-"probe runner") -- never `tmp_path` (`sun_path` is 104 bytes on darwin;
-CLAUDE.md's own trap list).
+Short scratch roots from `tests/conftest.py`'s `jail_dir` / `new_jail_dir`
+throughout -- never `tmp_path` (`sun_path` is 104 bytes on darwin; CLAUDE.md's
+own trap list).
 """
 
 from __future__ import annotations
 
 import dataclasses
-import itertools
 import os
-import shutil
 import stat
 import subprocess
 from collections.abc import Sequence
@@ -73,25 +71,14 @@ from brig.probe.battery import Battery, Expectation, Probe
 from brig.probe.runner import run_battery
 from brig.run import IoPolicy, Jail, Process, group_alive
 from brig.stack import Stack, degraded
-from tests.conftest import launch, teardown_group, workload_argv
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
-_jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 15.0
 
 
-def _new_root(run_id: str, tag: str) -> str:
-    """A short scratch root, `/tmp/bg<pid><tag><run_id[:8]><n>` -- never
-    `tmp_path` (`sun_path` is 104 bytes on darwin). The `run_id[:8]` salt is
-    load-bearing, not decorative -- see `test_exec_confinement.py`'s own
-    `_new_jail_dir` docstring for the confirmed pid-reuse collision it
-    closes, reproduced here for the same reason."""
-    return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
-
-
 def _launch(
-    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str, jail_dir: str
 ) -> tuple[Jail, Process]:
-    jail_dir = _new_root(run_id, "pr")
     jail = stack.compile(spec)
     return launch(
         jail,
@@ -183,71 +170,73 @@ def _workspace_control_battery(workspace: str) -> Battery:
 
 
 @pytest.mark.integration
-def test_a_failed_control_marks_the_battery_vacuous_not_passed(run_id: str) -> None:
+def test_a_failed_control_marks_the_battery_vacuous_not_passed(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #1 / MILESTONES M4 EC2, executed literally: the battery's
     `CONTROL` probe attempts to write a file whose path is a directory
     (EISDIR) -- a REAL OS denial that root obeys too, not a faked
     verdict. `report.battery_verdict` is `BatteryVerdict.VACUOUS`, the
     control's own `ProbeOutcome.verdict` is `Verdict.FAIL`, and that
     outcome's `probe_name` names the failing control."""
-    workspace = _new_root(run_id, "ws")
-    os.makedirs(workspace)
+    workspace = new_jail_dir()
     # The denial must hold for root too: root's CAP_DAC_OVERRIDE ignores mode
     # bits, so a `chmod 0o500` workspace is writable to it. A directory where
     # the control's marker file should be (EISDIR) refuses every user.
     os.mkdir(f"{workspace}/probe.txt")
+    jail, process = _launch(
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t050-ac1",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
+    )
     try:
-        jail, process = _launch(
-            Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac1", run_id=run_id
-        )
-        try:
-            battery = _workspace_control_battery(workspace)
-            report = _probe(jail, battery)
+        battery = _workspace_control_battery(workspace)
+        report = _probe(jail, battery)
 
-            assert report.battery_verdict is BatteryVerdict.VACUOUS
-            control_outcome = next(
-                o for o in report.outcomes if o.probe_name == "workspace-write-control"
-            )
-            assert control_outcome.verdict is Verdict.FAIL
-            assert control_outcome.probe_name == "workspace-write-control"
-        finally:
-            _teardown_group(process)
+        assert report.battery_verdict is BatteryVerdict.VACUOUS
+        control_outcome = next(
+            o for o in report.outcomes if o.probe_name == "workspace-write-control"
+        )
+        assert control_outcome.verdict is Verdict.FAIL
+        assert control_outcome.probe_name == "workspace-write-control"
     finally:
-        shutil.rmtree(workspace)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
-def test_the_same_battery_against_a_writable_workspace_does_not_go_vacuous(run_id: str) -> None:
+def test_the_same_battery_against_a_writable_workspace_does_not_go_vacuous(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #2, the discriminating half: the IDENTICAL battery
     (`_workspace_control_battery`), against the SAME shape of directory
     left writable, does NOT go `Verdict.VACUOUS` -- without this, the first
     test cannot distinguish "the control mechanism works" from "this battery
     always reports VACUOUS no matter what"."""
-    workspace = _new_root(run_id, "ws")
-    os.makedirs(workspace)
+    workspace = new_jail_dir()
     os.chmod(workspace, stat.S_IRWXU)  # 0o700: writable
+    jail, process = _launch(
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t050-ac2-control",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
+    )
     try:
-        jail, process = _launch(
-            Stack([]),
-            Spec(),
-            _sleep_workload(run_id),
-            jail_id="jail-t050-ac2-control",
-            run_id=run_id,
-        )
-        try:
-            battery = _workspace_control_battery(workspace)
-            report = _probe(jail, battery)
+        battery = _workspace_control_battery(workspace)
+        report = _probe(jail, battery)
 
-            assert report.battery_verdict is not BatteryVerdict.VACUOUS
-            assert report.battery_verdict is BatteryVerdict.CONSISTENT
-            control_outcome = next(
-                o for o in report.outcomes if o.probe_name == "workspace-write-control"
-            )
-            assert control_outcome.verdict is Verdict.PASS
-        finally:
-            _teardown_group(process)
+        assert report.battery_verdict is not BatteryVerdict.VACUOUS
+        assert report.battery_verdict is BatteryVerdict.CONSISTENT
+        control_outcome = next(
+            o for o in report.outcomes if o.probe_name == "workspace-write-control"
+        )
+        assert control_outcome.verdict is Verdict.PASS
     finally:
-        shutil.rmtree(workspace)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +246,7 @@ def test_the_same_battery_against_a_writable_workspace_does_not_go_vacuous(run_i
 
 
 @pytest.mark.integration
-def test_controls_run_before_other_probes(run_id: str) -> None:
+def test_controls_run_before_other_probes(run_id: str, new_jail_dir: NewJailDir) -> None:
     """AC #3. The battery declares its non-`CONTROL` probe FIRST and its
     `CONTROL` probe SECOND -- so if `run_battery` merely preserved
     declaration order, the control would run second.
@@ -271,8 +260,7 @@ def test_controls_run_before_other_probes(run_id: str) -> None:
     wrote about them anyway -- it cannot be right while the execution is
     wrong. The non-control probe still exits non-zero, so its `DENIAL`
     shape is unchanged."""
-    order_dir = _new_root(run_id, "ord")
-    os.makedirs(order_dir, exist_ok=True)
+    order_dir = new_jail_dir()
     order_path = os.path.join(order_dir, "order.txt")
     other = Probe(
         name="other-denial",
@@ -294,7 +282,12 @@ def test_controls_run_before_other_probes(run_id: str) -> None:
     battery = Battery(name="t050-ordering", axis=Axis.LIMITS, probes=(other, control))
 
     jail, process = _launch(
-        Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac3", run_id=run_id
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t050-ac3",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     try:
         _probe(jail, battery)
@@ -306,7 +299,6 @@ def test_controls_run_before_other_probes(run_id: str) -> None:
         )
     finally:
         _teardown_group(process)
-        shutil.rmtree(order_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -342,14 +334,21 @@ def _contradiction_battery() -> Battery:
 
 
 @pytest.mark.integration
-def test_a_probe_that_contradicts_an_enforced_grade_fails_the_battery(run_id: str) -> None:
+def test_a_probe_that_contradicts_an_enforced_grade_fails_the_battery(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #4. `jail.report` is forced to grade `Axis.NETWORK` `ENFORCED`
     (`_with_axis_grade`); the battery's `DENIAL` probe verdicts `FAIL`
     (see `_contradiction_battery`'s docstring). `battery_verdict` is
     `BatteryVerdict.CONTRADICTED` and `report.contradictions` is non-empty
     and names the axis."""
     jail, process = _launch(
-        Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac4", run_id=run_id
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t050-ac4",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         enforced_jail = _with_axis_grade(jail, Axis.NETWORK, Grade.ENFORCED)
@@ -364,7 +363,9 @@ def test_a_probe_that_contradicts_an_enforced_grade_fails_the_battery(run_id: st
 
 
 @pytest.mark.integration
-def test_the_same_fail_against_an_unenforced_grade_is_consistent(run_id: str) -> None:
+def test_the_same_fail_against_an_unenforced_grade_is_consistent(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #4's named control (MILESTONES M4 EC1's parenthetical): the
     IDENTICAL battery (`_contradiction_battery`, so the identical probe
     verdicts `FAIL` for the identical reason) against a handle whose
@@ -373,7 +374,12 @@ def test_the_same_fail_against_an_unenforced_grade_is_consistent(run_id: str) ->
     `Axis.NETWORK` -- leaves `report.contradictions` empty and does NOT
     make the battery `FAIL`."""
     jail, process = _launch(
-        Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac4-control", run_id=run_id
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t050-ac4-control",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         assert jail.report.grade_for(Axis.NETWORK).grade is Grade.UNENFORCED
@@ -394,7 +400,7 @@ def test_the_same_fail_against_an_unenforced_grade_is_consistent(run_id: str) ->
 
 @pytest.mark.integration
 def test_probes_run_through_handle_exec_and_therefore_inside_the_confinement(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, new_jail_dir: NewJailDir
 ) -> None:
     """AC #5. `degraded()` under `EnvPolicy(SCRUB, allow_names=("PATH",
     "HOME"))`, with a canary set in the LAUNCHING (this test) process's own
@@ -427,10 +433,20 @@ def test_probes_run_through_handle_exec_and_therefore_inside_the_confinement(
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH", "HOME")),
     )
     scrubbed_jail, scrubbed_process = _launch(
-        degraded(), spec, _sleep_workload(run_id), jail_id="jail-t050-ac5", run_id=run_id
+        degraded(),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="jail-t050-ac5",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     control_jail, control_process = _launch(
-        Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac5-control", run_id=run_id
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t050-ac5-control",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     try:
         scrubbed_report = _probe(scrubbed_jail, battery)
@@ -474,7 +490,9 @@ class _RecordingBattery:
 
 
 @pytest.mark.integration
-def test_handle_probe_is_a_bound_method_returning_the_battery_report(run_id: str) -> None:
+def test_handle_probe_is_a_bound_method_returning_the_battery_report(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #6. `jail.probe(battery)` returns the EXACT SAME `ProbeReport`
     object the battery's `run` returned (identity, via a battery whose `run`
     is instrumented to record its call and hand back a fixed report). Since
@@ -482,7 +500,12 @@ def test_handle_probe_is_a_bound_method_returning_the_battery_report(run_id: str
     describes, not the handle, so each probe is a `jail.start`: same jail id,
     directory, report and runtime, with a `start`."""
     jail, process = _launch(
-        Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac6", run_id=run_id
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t050-ac6",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         fixed_report = ProbeReport(
@@ -516,7 +539,7 @@ def test_handle_probe_is_a_bound_method_returning_the_battery_report(run_id: str
 
 
 @pytest.mark.integration
-def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
+def test_a_failed_control_dominates_a_contradiction(run_id: str, new_jail_dir: NewJailDir) -> None:
     """AC #7: the case a rule written in the wrong order gets backwards. A
     battery carrying BOTH a failing `CONTROL` (its write fails: a
     directory sits where the marker file goes) AND a contradicting
@@ -526,54 +549,53 @@ def test_a_failed_control_dominates_a_contradiction(run_id: str) -> None:
     read `BatteryVerdict.CONTRADICTED`; the correct order reads
     `BatteryVerdict.VACUOUS` (task-053 AC #15 proves this order by
     mutation: reordering the branches makes this exact test fail)."""
-    workspace = _new_root(run_id, "ws")
-    os.makedirs(workspace)
+    workspace = new_jail_dir()
     # The denial must hold for root too: root's CAP_DAC_OVERRIDE ignores mode
     # bits, so a `chmod 0o500` workspace is writable to it. A directory where
     # the control's marker file should be (EISDIR) refuses every user.
     os.mkdir(f"{workspace}/probe.txt")
+    control = Probe(
+        name="failing-workspace-control",
+        shape=ProbeShape.CONTROL,
+        axis=Axis.FS_WRITE,
+        argv=(
+            "/bin/sh",
+            "-c",
+            f"echo t050ok > {workspace}/probe.txt && cat {workspace}/probe.txt",
+        ),
+        expect=Expectation(token="t050ok"),
+    )
+    denial = Probe(
+        name="contradicting-denial",
+        shape=ProbeShape.DENIAL,
+        axis=Axis.FS_WRITE,
+        argv=("/usr/bin/true",),
+        expect=Expectation(),
+    )
+    battery = Battery(name="t050-control-dominates", axis=Axis.FS_WRITE, probes=(control, denial))
+
+    jail, process = _launch(
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t050-ac7",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
+    )
     try:
-        control = Probe(
-            name="failing-workspace-control",
-            shape=ProbeShape.CONTROL,
-            axis=Axis.FS_WRITE,
-            argv=(
-                "/bin/sh",
-                "-c",
-                f"echo t050ok > {workspace}/probe.txt && cat {workspace}/probe.txt",
-            ),
-            expect=Expectation(token="t050ok"),
-        )
-        denial = Probe(
-            name="contradicting-denial",
-            shape=ProbeShape.DENIAL,
-            axis=Axis.FS_WRITE,
-            argv=("/usr/bin/true",),
-            expect=Expectation(),
-        )
-        battery = Battery(
-            name="t050-control-dominates", axis=Axis.FS_WRITE, probes=(control, denial)
-        )
+        enforced_jail = _with_axis_grade(jail, Axis.FS_WRITE, Grade.ENFORCED)
+        report = _probe(enforced_jail, battery)
 
-        jail, process = _launch(
-            Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t050-ac7", run_id=run_id
-        )
-        try:
-            enforced_jail = _with_axis_grade(jail, Axis.FS_WRITE, Grade.ENFORCED)
-            report = _probe(enforced_jail, battery)
-
-            assert report.contradictions != ()  # the contradiction really is present
-            # `is BatteryVerdict.VACUOUS` -- never `BatteryVerdict.CONTRADICTED` --
-            # is the whole claim under test here: `BatteryVerdict` members are
-            # mutually exclusive, so this single assertion already rules
-            # CONTRADICTED out (mypy narrows the two as non-overlapping literals; a
-            # separate `is not BatteryVerdict.CONTRADICTED` assert is flagged
-            # `comparison-overlap` under --strict as redundant).
-            assert report.battery_verdict is BatteryVerdict.VACUOUS
-        finally:
-            _teardown_group(process)
+        assert report.contradictions != ()  # the contradiction really is present
+        # `is BatteryVerdict.VACUOUS` -- never `BatteryVerdict.CONTRADICTED` --
+        # is the whole claim under test here: `BatteryVerdict` members are
+        # mutually exclusive, so this single assertion already rules
+        # CONTRADICTED out (mypy narrows the two as non-overlapping literals; a
+        # separate `is not BatteryVerdict.CONTRADICTED` assert is flagged
+        # `comparison-overlap` under --strict as redundant).
+        assert report.battery_verdict is BatteryVerdict.VACUOUS
     finally:
-        shutil.rmtree(workspace)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -591,12 +613,12 @@ def _shell_gone(pid: int) -> bool:
 
 
 @pytest.mark.integration
-def test_an_unfinished_control_adds_no_contradiction_under_an_enforced_grade(run_id: str) -> None:
+def test_an_unfinished_control_adds_no_contradiction_under_an_enforced_grade(
+    run_id: str, jail_dir: str
+) -> None:
     """A CONTROL that hangs past its deadline is `VACUOUS` (decision-188), so under a
     network grade that is not `UNENFORCED` the report carries no contradiction, and the
     battery is `VACUOUS` as any non-passing control makes it."""
-    scratch = _new_root(run_id, "dc")
-    os.makedirs(scratch)
     hang = workload_argv(run_id, "sleep 100")
     control = Probe(
         name="hangs-control",
@@ -605,35 +627,38 @@ def test_an_unfinished_control_adds_no_contradiction_under_an_enforced_grade(run
         argv=tuple(hang),
         expect=Expectation(token="never"),
     )
+    jail, process = _launch(
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t084-01",
+        run_id=run_id,
+        jail_dir=jail_dir,
+    )
     try:
-        jail, process = _launch(
-            Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t084-01", run_id=run_id
+        enforced = _with_axis_grade(jail, Axis.NETWORK, Grade.ENFORCED)
+        assert enforced.report.grade_for(Axis.NETWORK).grade is not Grade.UNENFORCED
+        report = run_battery(
+            enforced,
+            Battery(name="t084-01", axis=Axis.NETWORK, probes=(control,)),
+            deadline_s=0.5,
         )
-        try:
-            enforced = _with_axis_grade(jail, Axis.NETWORK, Grade.ENFORCED)
-            assert enforced.report.grade_for(Axis.NETWORK).grade is not Grade.UNENFORCED
-            report = run_battery(
-                enforced,
-                Battery(name="t084-01", axis=Axis.NETWORK, probes=(control,)),
-                deadline_s=0.5,
-            )
-            assert report.contradictions == ()
-            assert [o.verdict for o in report.outcomes] == [Verdict.VACUOUS]
-            assert report.battery_verdict is BatteryVerdict.VACUOUS
-        finally:
-            _teardown_group(process)
+        assert report.contradictions == ()
+        assert [o.verdict for o in report.outcomes] == [Verdict.VACUOUS]
+        assert report.battery_verdict is BatteryVerdict.VACUOUS
     finally:
-        shutil.rmtree(scratch)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
-def test_a_probe_still_running_at_its_deadline_is_stopped_and_recorded(run_id: str) -> None:
+def test_a_probe_still_running_at_its_deadline_is_stopped_and_recorded(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """A DENIAL probe that never finishes (a connect that waits out the OS's timeout) is
     `VACUOUS` saying it did not finish; a CONTROL that never finishes is `VACUOUS` too and so
     is its battery; the probe's whole process group is gone afterwards. The deadline is injected
     (0.5 s), not waited out."""
-    scratch = _new_root(run_id, "dl")
-    os.makedirs(scratch)
+    scratch = new_jail_dir()
     pidfile = f"{scratch}/pid"
     hang = workload_argv(run_id, f"echo $$ $(ps -o pgid= -p $$) > {pidfile}; sleep 100")
     denial = Probe(
@@ -657,43 +682,45 @@ def test_a_probe_still_running_at_its_deadline_is_stopped_and_recorded(run_id: s
         argv=("/bin/sh", "-c", "echo t079ok"),
         expect=Expectation(token="t079ok"),
     )
+    jail, process = _launch(
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t079-35",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
+    )
     try:
-        jail, process = _launch(
-            Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t079-35", run_id=run_id
+        alone = run_battery(
+            jail,
+            Battery(name="t079-35-denial", axis=Axis.NETWORK, probes=(fine, denial)),
+            deadline_s=0.5,
         )
-        try:
-            alone = run_battery(
-                jail,
-                Battery(name="t079-35-denial", axis=Axis.NETWORK, probes=(fine, denial)),
-                deadline_s=0.5,
-            )
-            outcome = next(o for o in alone.outcomes if o.probe_name == "hangs-denial")
-            assert outcome.verdict is Verdict.VACUOUS
-            assert (
-                next(o for o in alone.outcomes if o.probe_name == "finishes-control").verdict
-                is Verdict.PASS
-            )
-            assert "did not finish in 0.5 s" in outcome.detail
-            assert alone.battery_verdict is BatteryVerdict.VACUOUS  # a non-control asserted nothing
-            with open(pidfile, encoding="utf-8") as f:
-                pid, pgid = (int(field) for field in f.read().split())
-            # the group the probe really ran in (brig's exit wrapper leads it, the shell is
-            # its child), read while the probe ran: nothing of it, `sleep` included, runs
-            assert not group_alive(pgid), "the probe's process group still runs"
-            assert _shell_gone(pid), "the probe's shell still runs"
+        outcome = next(o for o in alone.outcomes if o.probe_name == "hangs-denial")
+        assert outcome.verdict is Verdict.VACUOUS
+        assert (
+            next(o for o in alone.outcomes if o.probe_name == "finishes-control").verdict
+            is Verdict.PASS
+        )
+        assert "did not finish in 0.5 s" in outcome.detail
+        assert alone.battery_verdict is BatteryVerdict.VACUOUS  # a non-control asserted nothing
+        with open(pidfile, encoding="utf-8") as f:
+            pid, pgid = (int(field) for field in f.read().split())
+        # the group the probe really ran in (brig's exit wrapper leads it, the shell is
+        # its child), read while the probe ran: nothing of it, `sleep` included, runs
+        assert not group_alive(pgid), "the probe's process group still runs"
+        assert _shell_gone(pid), "the probe's shell still runs"
 
-            both = run_battery(
-                jail,
-                Battery(name="t079-35-both", axis=Axis.NETWORK, probes=(denial, control)),
-                deadline_s=0.5,
-            )
-            verdicts = {o.probe_name: o.verdict for o in both.outcomes}
-            assert verdicts == {
-                "hangs-control": Verdict.VACUOUS,
-                "hangs-denial": Verdict.VACUOUS,
-            }
-            assert both.battery_verdict is BatteryVerdict.VACUOUS
-        finally:
-            _teardown_group(process)
+        both = run_battery(
+            jail,
+            Battery(name="t079-35-both", axis=Axis.NETWORK, probes=(denial, control)),
+            deadline_s=0.5,
+        )
+        verdicts = {o.probe_name: o.verdict for o in both.outcomes}
+        assert verdicts == {
+            "hangs-control": Verdict.VACUOUS,
+            "hangs-denial": Verdict.VACUOUS,
+        }
+        assert both.battery_verdict is BatteryVerdict.VACUOUS
     finally:
-        shutil.rmtree(scratch)
+        _teardown_group(process)

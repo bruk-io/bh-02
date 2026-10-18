@@ -18,8 +18,9 @@ posture as `test_probe_runner.py`'s own docstring) -- except
 `test_control_limits_battery_against_the_empty_stack_is_not_consistent`,
 whose own docstring explains the one deliberate exception.
 
-Short `/tmp/bg<pid>e1<run_id[:8]><n>` scratch roots throughout -- never
-`tmp_path` (`sun_path` is 104 bytes on darwin; CLAUDE.md's own trap list).
+Short scratch roots from `tests/conftest.py`'s `jail_dir` / `new_jail_dir`
+throughout -- never `tmp_path` (`sun_path` is 104 bytes on darwin; CLAUDE.md's
+own trap list).
 
 --------------------------------------------------------------------------
 **AC #2 is a REAL, green assertion -- decision-104's rename, not
@@ -43,7 +44,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
-import itertools
 import os
 import signal
 import time
@@ -73,9 +73,7 @@ from brig.probe.batteries.limits import limits_battery
 from brig.probe.batteries.network import network_battery
 from brig.run import IoPolicy, Jail, Process, _identity, _records
 from brig.stack import Stack, degraded
-from tests.conftest import launch, teardown_group, workload_argv
-
-_jail_counter = itertools.count()
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 #: `run_battery`'s own internal per-probe timeout (`brig/probe/runner.py`'s
 #: `_PROBE_WAIT_TIMEOUT_S`) is 15.0s -- this file never depends on that
@@ -85,19 +83,9 @@ _jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 15.0
 
 
-def _new_root(run_id: str, tag: str) -> str:
-    """A short scratch root, `/tmp/bg<pid><tag><run_id[:8]><n>` -- never
-    `tmp_path` (`sun_path` is 104 bytes on darwin). The `e1` infix (this
-    file's own tag below) avoids colliding with a sibling integration
-    file's own counter -- same reasoning as `test_env_scrub.py`'s and
-    `test_probe_runner.py`'s own `_new_jail_dir`/`_new_root` docstrings."""
-    return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
-
-
 def _launch(
-    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str, jail_dir: str
 ) -> tuple[Jail, Process]:
-    jail_dir = _new_root(run_id, "e1")
     jail = stack.compile(spec)
     return launch(
         jail,
@@ -186,7 +174,7 @@ def _wait_for_spin_loop_pgid(jail_dir: str, deadline: float = 10.0) -> int:
 
 @pytest.mark.integration
 def test_env_battery_is_consistent_against_degraded(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #1: `env_battery(spec)` against a real `degraded()` jail is
     `BatteryVerdict.CONSISTENT`, and -- stated as a PER-PROBE expectation,
@@ -205,7 +193,12 @@ def test_env_battery_is_consistent_against_degraded(
     monkeypatch.setenv(CANARY_ENV_NAME, "topsecret-should-not-leak")
     spec = Spec(env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH",)))
     jail, process = _launch(
-        degraded(), spec, _sleep_workload(run_id), jail_id="ec1-env-pass", run_id=run_id
+        degraded(),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="ec1-env-pass",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         battery = env_battery(spec)
@@ -226,7 +219,7 @@ def test_env_battery_is_consistent_against_degraded(
 
 @pytest.mark.integration
 def test_control_env_battery_against_the_empty_stack_is_consistent_with_a_failing_probe(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #2, the operator's own words (decision-104 consequences): "the
     strict xfail in 053 becomes a real green assertion under the new name."
@@ -248,7 +241,12 @@ def test_control_env_battery_against_the_empty_stack_is_consistent_with_a_failin
     monkeypatch.setenv(CANARY_ENV_NAME, "topsecret-should-leak-here")
     spec = Spec(env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH",)))
     jail, process = _launch(
-        Stack([]), spec, _sleep_workload(run_id), jail_id="ec1-env-control", run_id=run_id
+        Stack([]),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="ec1-env-control",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         report = _probe(jail, env_battery(spec))
@@ -275,7 +273,7 @@ def test_control_env_battery_against_the_empty_stack_is_consistent_with_a_failin
 
 
 @pytest.mark.integration
-def test_limits_battery_is_consistent_against_degraded(run_id: str) -> None:
+def test_limits_battery_is_consistent_against_degraded(run_id: str, jail_dir: str) -> None:
     """AC #3: `limits_battery(spec)` against a real `degraded()` jail with
     `Limits(cpu_seconds=1)` is `BatteryVerdict.CONSISTENT`, and -- per-probe,
     stated explicitly -- the `cpu_spin_is_killed` outcome's OWN verdict is
@@ -286,7 +284,12 @@ def test_limits_battery_is_consistent_against_degraded(run_id: str) -> None:
     attempt failed, and not to the battery's summary word."""
     spec = Spec(limits=Limits(cpu_seconds=1))
     jail, process = _launch(
-        degraded(), spec, _sleep_workload(run_id), jail_id="ec1-limits-pass", run_id=run_id
+        degraded(),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="ec1-limits-pass",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         report = _probe(jail, limits_battery(spec))
@@ -300,7 +303,9 @@ def test_limits_battery_is_consistent_against_degraded(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_control_limits_battery_against_the_empty_stack_is_not_consistent(run_id: str) -> None:
+def test_control_limits_battery_against_the_empty_stack_is_not_consistent(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #4: the IDENTICAL battery against `Stack([])` -- no `rlimits`, so
     the spin loop never trips `SIGXCPU` on its own; it spins forever.
 
@@ -333,7 +338,12 @@ def test_control_limits_battery_against_the_empty_stack_is_not_consistent(run_id
     the criterion cannot be satisfied by an outcome nobody looked at."""
     spec = Spec(limits=Limits(cpu_seconds=1))
     jail, process = _launch(
-        Stack([]), spec, _sleep_workload(run_id), jail_id="ec1-limits-control", run_id=run_id
+        Stack([]),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="ec1-limits-control",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     battery = limits_battery(spec)
     killed_pgid: int | None = None
@@ -364,7 +374,9 @@ def test_control_limits_battery_against_the_empty_stack_is_not_consistent(run_id
 
 
 @pytest.mark.integration
-def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: str) -> None:
+def test_fs_and_network_batteries_report_honestly_without_contradicting(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #11: `fs_write_battery`, `fs_read_battery`, and `network_battery`
     -- all three, against the SAME `degraded()` handle -- report honestly
     on axes `degraded()` does not claim (`fs_read`, `fs_write`, `network`
@@ -409,8 +421,7 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
     (its own `Verdict.VACUOUS`, per `run_battery`'s third branch). Which
     of the two each battery actually reaches on THIS host is recorded in
     the implementer's notes, not assumed."""
-    workspace = _new_root(run_id, "fw")
-    os.makedirs(workspace, exist_ok=True)
+    workspace = new_jail_dir()
     # task-062: fs_write_battery/fs_read_battery now take their targets as
     # required, HOST-resolved keyword arguments (doc-016 §7 deviation 4) --
     # these three scratch paths replace the old, jail-env-dependent
@@ -418,14 +429,11 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
     # unjailed process can write into; `credential_canary` /
     # `ssh_directory_canary` are seeded so absence can never masquerade as
     # denial (defect 3).
-    outside_writable = _new_root(run_id, "fwo")
-    os.makedirs(outside_writable, exist_ok=True)
-    ssh_directory_canary = _new_root(run_id, "fws")
-    os.makedirs(ssh_directory_canary, exist_ok=True)
+    outside_writable = new_jail_dir()
+    ssh_directory_canary = new_jail_dir()
     with open(os.path.join(ssh_directory_canary, "known_hosts"), "w", encoding="utf-8") as f:
         f.write("canary\n")
-    credential_canary_dir = _new_root(run_id, "fwc")
-    os.makedirs(credential_canary_dir, exist_ok=True)
+    credential_canary_dir = new_jail_dir()
     credential_canary = os.path.join(credential_canary_dir, "credentials")
     with open(credential_canary, "w", encoding="utf-8") as f:
         f.write("canary\n")
@@ -438,7 +446,12 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
         channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),),
     )
     jail, process = _launch(
-        degraded(), spec, _sleep_workload(run_id), jail_id="ec1-fs-net", run_id=run_id
+        degraded(),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="ec1-fs-net",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     try:
         batteries = (
@@ -474,6 +487,7 @@ def test_fs_and_network_batteries_report_honestly_without_contradicting(run_id: 
 @pytest.mark.integration
 def test_the_network_control_fails_when_the_reserved_socket_cannot_be_bound(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """AC #12, the control on the control (task-053's own name for this
     test was `test_the_network_control_fails_without_a_listener`; task-053
@@ -501,7 +515,12 @@ def test_the_network_control_fails_when_the_reserved_socket_cannot_be_bound(
     occupies that reserved path."""
     spec = Spec(channels=(Channel(name="ctl", kind=ChannelKind.LISTEN),))
     jail, process = _launch(
-        degraded(), spec, _sleep_workload(run_id), jail_id="ec1-net-control-fail", run_id=run_id
+        degraded(),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="ec1-net-control-fail",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         reservation = jail.channel("ctl")

@@ -26,8 +26,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import itertools
-import os
 import socket
 import sys
 import threading
@@ -44,27 +42,16 @@ from brig.mech import env_scrub, rlimits
 from brig.probe.batteries.network import network_battery
 from brig.run import IoPolicy, Jail, Process, build_compile_ctx
 from brig.stack import Stack, confined_egress_darwin
-from tests.conftest import launch, teardown_group
+from tests.conftest import NewJailDir, launch, teardown_group
 
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.skipif(sys.platform != "darwin", reason="seatbelt is sandbox-exec, darwin only"),
 ]
 
-_jail_counter = itertools.count()
-
 #: RFC 5737 TEST-NET-1: a literal address that is routable-looking and never
 #: actually reachable, so only policy can decide the DENIAL probe's outcome.
 _DENIED_ADDRESS = "192.0.2.1:80"
-
-
-def _new_root(run_id: str, tag: str) -> str:
-    """Short scratch root -- `sun_path` is 104 bytes on darwin (CLAUDE.md's
-    own trap list), so never `tmp_path`. The `nb` infix keeps this file's
-    counter from colliding with a sibling e2e file's."""
-    path = f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
-    os.makedirs(path, exist_ok=True)
-    return os.path.realpath(path)
 
 
 @pytest.fixture
@@ -90,10 +77,11 @@ def origin():  # type: ignore[no-untyped-def]
     sock.close()
 
 
-def _launch(stack: Stack, spec: Spec, argv: Sequence[str], *, run_id: str) -> tuple[Jail, Process]:
+def _launch(
+    stack: Stack, spec: Spec, argv: Sequence[str], *, run_id: str, jail_dir: str
+) -> tuple[Jail, Process]:
     """`Spec -> Stack -> Jail.create -> jail.start`, the public chain
     `.claude/rules/system-tests.md` names. No internal seam."""
-    jail_dir = _new_root(run_id, "nb")
     # seatbelt needs a real platform and resolved paths, so the ctx is built
     # through the public `build_compile_ctx` rather than left to
     # `Stack.compile`'s ctx=None placeholder.
@@ -149,7 +137,9 @@ def _battery(port: int):  # type: ignore[no-untyped-def]
     )
 
 
-def test_the_battery_is_consistent_against_a_stack_that_really_enforces(origin: int) -> None:
+def test_the_battery_is_consistent_against_a_stack_that_really_enforces(
+    origin: int, jail_dir: str
+) -> None:
     """AC #1, #2, #4 together, because separately each is vacuous.
 
     The DENIAL probe must fail to reach a literal address (the confinement
@@ -164,6 +154,7 @@ def test_the_battery_is_consistent_against_a_stack_that_really_enforces(origin: 
         _spec(),
         ("/bin/sh", "-c", "while :; do sleep 0.2; done"),
         run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         report = _probe(jail, _battery(origin))
@@ -186,6 +177,7 @@ def test_the_battery_is_consistent_against_a_stack_that_really_enforces(origin: 
 
 def test_forgery_a_stack_with_no_confinement_carrying_the_confined_report_fails_its_battery(
     origin: int,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """AC #3, and the honest strength of it.
 
@@ -216,7 +208,7 @@ def test_forgery_a_stack_with_no_confinement_carrying_the_confined_report_fails_
     """
     run_id = uuid.uuid4().hex
     spec = _spec()
-    honest_dir = _new_root(run_id, "nc")
+    honest_dir = new_jail_dir()
     honest_report = (
         confined_egress_darwin(sys.executable)
         .compile(spec, ctx=build_compile_ctx(spec, jail_dir=honest_dir, platform=sys.platform))
@@ -226,7 +218,11 @@ def test_forgery_a_stack_with_no_confinement_carrying_the_confined_report_fails_
 
     weakened = Stack([rlimits, env_scrub])
     jail, process = _launch(
-        weakened, spec, ("/bin/sh", "-c", "while :; do sleep 0.2; done"), run_id=run_id
+        weakened,
+        spec,
+        ("/bin/sh", "-c", "while :; do sleep 0.2; done"),
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     forged = dataclasses.replace(jail, report=honest_report)
     try:

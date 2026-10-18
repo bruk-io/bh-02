@@ -23,8 +23,9 @@ environment traps CLAUDE.md and this task name are live here and nowhere
 else in the tier:
 
 - `sun_path` is 104 bytes on darwin. Every endpoint here lives under a short
-  `/tmp/bg<pid>wr<n>` scratch root, never pytest's `tmp_path` (AC #5 pins the
-  arithmetic that makes this a hard exclusion, not a style preference).
+  scratch root from `tests/conftest.py`'s `jail_dir`, never pytest's
+  `tmp_path` (AC #5 pins the arithmetic that makes this a hard exclusion, not
+  a style preference).
 - `/tmp` is a symlink to `/private/tmp` on darwin. `os.path.realpath` is
   applied before any assertion that compares two independently-obtained
   spellings of the same path (AC #6).
@@ -39,10 +40,8 @@ definition itself turns on).
 
 from __future__ import annotations
 
-import itertools
 import os
 import pathlib
-import shutil
 import socket
 import sys
 import time
@@ -62,16 +61,6 @@ from brig.run import (
 )
 from brig.stack import CompiledJail
 from tests.conftest import teardown_group, workload_argv
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>wr<n>` -- never `tmp_path`
-    (CLAUDE.md: `sun_path` is 104 bytes on darwin; see
-    `test_endpoint_fits_sun_path_and_a_tmp_path_endpoint_would_not` for why
-    that is a hard exclusion here, not a preference)."""
-    return f"/tmp/bg{os.getpid()}wr{next(_jail_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -100,7 +89,6 @@ def _launch(
 ) -> tuple[Jail, Process, Reservation]:
     """A jail whose first process is started on a socket reserved for `ctl`:
     `argv_for` gets the path it binds (decision-184)."""
-    os.makedirs(jail_dir, exist_ok=True)
     jail = Jail.create(
         _compiled_jail(spec=spec),
         runtime=HostRuntime(),
@@ -119,10 +107,10 @@ def _launch(
     return jail, process, reservation
 
 
-def _teardown(process: Process, jail_dir: str) -> None:
-    """Group-kill the workload, then remove the whole jail directory -- AC
-    #9's "no socket file survives" requires deleting the file itself, not
-    merely ending the process that created it. The kill is deliberately
+def _teardown(process: Process) -> None:
+    """Group-kill the workload. (AC #9's "no socket file survives" needs the
+    file itself deleted, not merely the process that created it ended: the
+    test's `jail_dir` is removed after it.) The kill is deliberately
     hand-rolled (`killpg`) rather than `Jail.destroy`: a test's cleanup path
     must not be the code under test, so a teardown bug cannot hide behind its
     own helper. `Jail.destroy` has been functional since task-020; this is a
@@ -134,7 +122,6 @@ def _teardown(process: Process, jail_dir: str) -> None:
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
     teardown_group(process)
-    shutil.rmtree(jail_dir, ignore_errors=True)
 
 
 def _bind_script(endpoint: str, *, delay: float) -> str:
@@ -171,13 +158,12 @@ def _bind_and_record_cwd_script(endpoint: str, cwd_file: str) -> str:
 
 
 @pytest.mark.integration
-def test_wait_ready_returns_after_a_real_bind_appears(run_id: str) -> None:
+def test_wait_ready_returns_after_a_real_bind_appears(run_id: str, jail_dir: str) -> None:
     """AC #2: a workload that sleeps ~0.5s and then binds+listens on the
     declared endpoint makes `wait_ready(timeout=10)` RETURN -- elapsed is at
     least the sleep (it actually waited for the bind, not an instant false
     positive) and well under the timeout (it noticed promptly, not merely
     eventually)."""
-    jail_dir = _new_jail_dir()
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     jail, process, _ = _launch(
@@ -192,7 +178,7 @@ def test_wait_ready_returns_after_a_real_bind_appears(run_id: str) -> None:
         assert elapsed >= 0.5, f"returned before the bind could have appeared: elapsed={elapsed}"
         assert elapsed < 5.0, f"returned suspiciously close to the 10s timeout: elapsed={elapsed}"
     finally:
-        _teardown(process, jail_dir)
+        _teardown(process)
 
 
 # ---------------------------------------------------------------------------
@@ -201,12 +187,13 @@ def test_wait_ready_returns_after_a_real_bind_appears(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_wait_ready_times_out_cleanly_when_the_bind_never_appears(run_id: str) -> None:
+def test_wait_ready_times_out_cleanly_when_the_bind_never_appears(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #3: a workload that never binds makes `wait_ready(timeout=1.0)`
     raise `WaitReadyTimeout` carrying the channel name, the endpoint, and
     1.0 as structured fields (not just a message). Elapsed is at least 1.0
     (it wasn't a premature give-up) and under 3.0 (clean means promptly)."""
-    jail_dir = _new_jail_dir()
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     # never touches its socket
@@ -224,7 +211,7 @@ def test_wait_ready_times_out_cleanly_when_the_bind_never_appears(run_id: str) -
         assert exc_info.value.endpoint == reservation.endpoint
         assert exc_info.value.timeout == 1.0
     finally:
-        _teardown(process, jail_dir)
+        _teardown(process)
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +220,7 @@ def test_wait_ready_times_out_cleanly_when_the_bind_never_appears(run_id: str) -
 
 
 @pytest.mark.integration
-def test_stale_socket_file_still_times_out(run_id: str) -> None:
+def test_stale_socket_file_still_times_out(run_id: str, jail_dir: str) -> None:
     """AC #4, the discriminating one. A socket FILE exists at the endpoint
     (bound, then closed WITHOUT unlinking -- exactly what a dead process
     leaves behind), but nothing is listening behind it. `wait_ready` must
@@ -241,7 +228,6 @@ def test_stale_socket_file_still_times_out(run_id: str) -> None:
     probe from an `os.path.exists` one: without this control, the positive
     test above would also pass for an implementation that only stats the
     path -- a stat sees this stale file too."""
-    jail_dir = _new_jail_dir()
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     # never touches its socket either
@@ -270,7 +256,7 @@ def test_stale_socket_file_still_times_out(run_id: str) -> None:
         )
         assert elapsed < 3.0
     finally:
-        _teardown(process, jail_dir)
+        _teardown(process)
 
 
 # ---------------------------------------------------------------------------
@@ -286,12 +272,11 @@ _SUN_PATH_MAX = {"darwin": 104}.get(sys.platform, 108)
 
 
 @pytest.mark.integration
-def test_endpoint_fits_sun_path() -> None:
+def test_endpoint_fits_sun_path(jail_dir: str) -> None:
     """AC #5, the half that holds on every platform: this suite's actual
     scratch-root endpoint fits `sun_path` with room to spare: a reserved
     socket, `<jail_dir>/chan/<16 hex>.sock` (decision-184), the longest name
     the runtime makes there."""
-    jail_dir = _new_jail_dir()
     endpoint = os.path.join(jail_dir, "chan", f"{'0' * 16}.sock")
     real_len = len(os.fsencode(endpoint))
     print(f"AC#5: scratch-root endpoint = {endpoint!r}, byte length = {real_len}")
@@ -340,7 +325,7 @@ def test_a_tmp_path_endpoint_would_overflow_sun_path_on_darwin(
 
 
 @pytest.mark.integration
-def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str) -> None:
+def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str, jail_dir: str) -> None:
     """AC #6: darwin symlinks `/tmp` -> `/private/tmp`, so the OS itself
     reports a spawned child's cwd with the `/private/tmp` spelling even
     though this file always builds `jail_dir` with the `/tmp` prefix. Every
@@ -349,7 +334,6 @@ def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str) -> None
     test is the one that would actually catch a missing resolution, by
     reading the child's own `os.getcwd()` back and comparing it against
     `os.path.realpath(jail_dir)`."""
-    jail_dir = _new_jail_dir()
     cwd_file = os.path.join(jail_dir, "cwd.txt")
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
@@ -371,7 +355,7 @@ def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str) -> None
                 f"{child_reported_cwd!r} -- os.path.realpath() reconciles them"
             )
     finally:
-        _teardown(process, jail_dir)
+        _teardown(process)
 
 
 # ---------------------------------------------------------------------------
@@ -388,10 +372,9 @@ def test_tmp_resolves_to_private_tmp_before_path_comparison(run_id: str) -> None
 
 
 @pytest.mark.integration
-def test_wait_ready_on_unknown_channel_name_raises_and_names_it(run_id: str) -> None:
+def test_wait_ready_on_unknown_channel_name_raises_and_names_it(run_id: str, jail_dir: str) -> None:
     """AC #8: an unknown channel name raises `UnknownChannel`, naming it as
     a structured field. Control: the declared name does not raise."""
-    jail_dir = _new_jail_dir()
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     jail, process, _ = _launch(
@@ -408,4 +391,4 @@ def test_wait_ready_on_unknown_channel_name_raises_and_names_it(run_id: str) -> 
         jail.channel("ctl")
         process.wait_ready(timeout=5.0)
     finally:
-        _teardown(process, jail_dir)
+        _teardown(process)

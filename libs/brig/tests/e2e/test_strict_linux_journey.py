@@ -164,9 +164,9 @@ _CANARY_NAME = "BRIG_STRICT_LINUX_JOURNEY_CANARY"
 @pytest.mark.e2e
 def test_the_linux_preset_confines_launches_and_talks_over_its_channel(
     monkeypatch: pytest.MonkeyPatch,
+    jail_dir: str,
 ) -> None:
     monkeypatch.setenv(_CANARY_NAME, "leaked")
-    jail_dir = f"/tmp/bg{os.getpid()}sl0"
     workspace = f"{jail_dir}/ws"
     hooks = f"{workspace}/.git/hooks"
     # The socket is one the jail reserves in its channel directory

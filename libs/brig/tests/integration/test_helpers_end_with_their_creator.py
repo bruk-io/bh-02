@@ -24,7 +24,6 @@ every stack shares), each with its control in the same test:
 
 from __future__ import annotations
 
-import itertools
 import json
 import os
 import signal
@@ -40,18 +39,10 @@ from brig.run import HostRuntime, Jail, RuntimeKind
 from brig.run._tether import TetherClosed
 from brig.run.teardown import KillOutcome
 from brig.stack import CompiledJail
-from tests.conftest import launch, workload_argv
+from tests.conftest import NewJailDir, launch, workload_argv
 from tests.supervised_jail import running_with, unique_sleep
 
 pytestmark = pytest.mark.integration
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root with this file's own infix (`th`), so no other integration file's
-    numbering collides with it (see `test_tether.py`'s `_new_jail_dir`)."""
-    return f"/tmp/bg{os.getpid()}th{next(_jail_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -124,10 +115,11 @@ time.sleep(600)
 """
 
 
-def _creator(run_id: str, *, tethered: bool) -> tuple[subprocess.Popen[str], dict[str, object]]:
+def _creator(
+    run_id: str, *, tethered: bool, new_jail_dir: NewJailDir
+) -> tuple[subprocess.Popen[str], dict[str, object]]:
     """Start `_CREATOR`; it and the dict of the jail it made, whose helper is running."""
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
+    jail_dir = new_jail_dir()
     creator = subprocess.Popen(
         [
             sys.executable,
@@ -152,9 +144,11 @@ def _killed(creator: subprocess.Popen[str]) -> None:
     creator.wait(10)
 
 
-def test_a_tethered_jails_helper_ends_when_its_creator_is_killed(run_id: str) -> None:
-    dying, dead = _creator(run_id, tethered=True)
-    living, alive = _creator(run_id, tethered=True)
+def test_a_tethered_jails_helper_ends_when_its_creator_is_killed(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
+    dying, dead = _creator(run_id, tethered=True, new_jail_dir=new_jail_dir)
+    living, alive = _creator(run_id, tethered=True, new_jail_dir=new_jail_dir)
     (dead_pgid,) = dead["helper_pids"]  # type: ignore[misc]
     (alive_pgid,) = alive["helper_pids"]  # type: ignore[misc]
     try:
@@ -173,8 +167,9 @@ def test_a_tethered_jails_helper_ends_when_its_creator_is_killed(run_id: str) ->
                 os.killpg(pgid, signal.SIGKILL)
 
 
-def test_closing_the_tether_ends_the_helper_as_it_ends_the_processes(run_id: str) -> None:
-    jail_dir = _new_jail_dir()
+def test_closing_the_tether_ends_the_helper_as_it_ends_the_processes(
+    run_id: str, jail_dir: str
+) -> None:
     read_end, write_end = os.pipe()
     try:
         jail, process = launch(
@@ -201,8 +196,9 @@ def test_closing_the_tether_ends_the_helper_as_it_ends_the_processes(run_id: str
         jail.destroy()
 
 
-def test_destroy_ends_a_tethered_jails_helper_and_leaves_its_group_empty(run_id: str) -> None:
-    jail_dir = _new_jail_dir()
+def test_destroy_ends_a_tethered_jails_helper_and_leaves_its_group_empty(
+    run_id: str, jail_dir: str
+) -> None:
     read_end, write_end = os.pipe()
     try:
         jail, _ = launch(
@@ -227,9 +223,8 @@ def test_destroy_ends_a_tethered_jails_helper_and_leaves_its_group_empty(run_id:
     assert not _group_lives(helper_pgid), "the helper's group still has a member after destroy"
 
 
-def test_a_tether_that_has_ended_refuses_the_create_before_a_helper_starts() -> None:
+def test_a_tether_that_has_ended_refuses_the_create_before_a_helper_starts(jail_dir: str) -> None:
     marker, sleep = unique_sleep()
-    jail_dir = _new_jail_dir()
     read_end, write_end = os.pipe()
     os.close(write_end)  # every write end is closed: the tether has ended
     try:
@@ -252,10 +247,11 @@ def test_a_tether_that_has_ended_refuses_the_create_before_a_helper_starts() -> 
 
 def test_an_untethered_jails_helper_outlives_its_creator_and_a_rehydrated_jail_ends_it(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """The boundary the ruling states: nothing ties an untethered, unsupervised jail's processes
     to its creator, and so nothing ties its helpers. Whoever holds its dict ends it."""
-    creator, made = _creator(run_id, tethered=False)
+    creator, made = _creator(run_id, tethered=False, new_jail_dir=new_jail_dir)
     (helper_pgid,) = made["helper_pids"]  # type: ignore[misc]
     try:
         _killed(creator)

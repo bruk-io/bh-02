@@ -33,7 +33,6 @@ deleting the file.
 
 from __future__ import annotations
 
-import itertools
 import json
 import os
 import pathlib
@@ -60,8 +59,6 @@ from tests.conftest import launch
 
 _RUNTIMES = {RuntimeKind.HOST: HostRuntime()}
 
-_jail_counter = itertools.count()
-
 _HELPER = str(pathlib.Path(__file__).parent / "_rehydrate_and_kill_helper.py")
 
 
@@ -71,15 +68,7 @@ def _exit_file(jail: Jail, process: Process) -> str:
     return _records.exit_path(jail.jail_dir, process.id)
 
 
-def _new_jail_dir() -> str:
-    """Short scratch root -- `sun_path` is 104 bytes on darwin. The `xr` infix
-    is this file's alone, so it cannot collide with a sibling's counter."""
-    return f"/tmp/bg{os.getpid()}xr{next(_jail_counter)}"
-
-
-def _launch(argv: list[str]) -> tuple[Jail, Process]:
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
+def _launch(argv: list[str], *, jail_dir: str) -> tuple[Jail, Process]:
     return launch(
         Stack([]).compile(Spec()),
         argv=argv,
@@ -130,10 +119,10 @@ def _in_a_second_process(jail: Jail, tmp_path: pathlib.Path) -> dict[str, object
 
 
 @pytest.mark.integration
-def test_a_failing_status_survives_concurrent_popen_churn() -> None:
+def test_a_failing_status_survives_concurrent_popen_churn(jail_dir: str) -> None:
     """THE REGRESSION. Other spawns run `subprocess._cleanup()`, the exact
     interleaving that used to reap the workload out from under `waitpid`."""
-    jail, process = _launch(["/bin/sh", "-c", "exit 3"])
+    jail, process = _launch(["/bin/sh", "-c", "exit 3"], jail_dir=jail_dir)
     for _ in range(5):
         subprocess.run(["/bin/echo", "churn"], capture_output=True, check=True)
     assert process.wait(timeout=20.0) == 3, "the real status must survive the churn"
@@ -141,18 +130,18 @@ def test_a_failing_status_survives_concurrent_popen_churn() -> None:
 
 
 @pytest.mark.integration
-def test_a_clean_exit_is_observed_not_assumed() -> None:
+def test_a_clean_exit_is_observed_not_assumed(jail_dir: str) -> None:
     """THE CONTROL for the assertion above: the 0 case must be a real
     observation, reached by the same path, not a default."""
-    jail, process = _launch(["/bin/sh", "-c", "exit 0"])
+    jail, process = _launch(["/bin/sh", "-c", "exit 0"], jail_dir=jail_dir)
     assert process.wait(timeout=20.0) == 0
 
 
 @pytest.mark.integration
-def test_a_rehydrated_jail_in_this_process_still_reads_the_record() -> None:
+def test_a_rehydrated_jail_in_this_process_still_reads_the_record(jail_dir: str) -> None:
     """A jail object that never parented the workload can still read how
     it ended."""
-    jail, process = _launch(["/bin/sh", "-c", "exit 7"])
+    jail, process = _launch(["/bin/sh", "-c", "exit 7"], jail_dir=jail_dir)
     assert process.wait(timeout=20.0) == 7
     rehydrated = Jail.from_dict(jail.to_dict(), runtimes=_RUNTIMES)
     assert rehydrated.processes()[0].wait(timeout=20.0) == 7
@@ -161,6 +150,7 @@ def test_a_rehydrated_jail_in_this_process_still_reads_the_record() -> None:
 @pytest.mark.integration
 def test_death_by_signal_is_recorded_as_a_signal_not_as_128_plus_n(
     tmp_path: pathlib.Path,
+    jail_dir: str,
 ) -> None:
     """The status is `Popen`'s own encoding -- `-15` for death by `SIGTERM`,
     never the shell's `143` -- and the FILE says the same thing this process
@@ -172,7 +162,7 @@ def test_death_by_signal_is_recorded_as_a_signal_not_as_128_plus_n(
     which; the wrapper is a Python program precisely so it does not. Asserted
     in BOTH places, because a file that disagreed with the launching process
     would be worse than no file at all."""
-    jail, process = _launch(["/bin/sh", "-c", "kill -TERM $$"])
+    jail, process = _launch(["/bin/sh", "-c", "kill -TERM $$"], jail_dir=jail_dir)
     assert process.wait(timeout=20.0) == -signal.SIGTERM
 
     with open(_exit_file(jail, process), encoding="utf-8") as recorded:
@@ -185,6 +175,7 @@ def test_death_by_signal_is_recorded_as_a_signal_not_as_128_plus_n(
 @pytest.mark.integration
 def test_a_rehydrated_jail_in_a_second_process_reads_the_exit_file(
     tmp_path: pathlib.Path,
+    jail_dir: str,
 ) -> None:
     """decision-156's whole point: the status crosses a process boundary
     again, without the event stream decision-152 deleted coming back.
@@ -194,7 +185,7 @@ def test_a_rehydrated_jail_in_a_second_process_reads_the_exit_file(
     process runs. Nothing in this interpreter can answer the question any
     more, and the fresh one -- which never parented the workload -- answers
     it anyway, from the exit record and nothing else."""
-    jail, process = _launch(["/bin/sh", "-c", "exit 9"])
+    jail, process = _launch(["/bin/sh", "-c", "exit 9"], jail_dir=jail_dir)
     assert process.wait(timeout=20.0) == 9
 
     _forget_the_in_process_record(process)
@@ -206,7 +197,7 @@ def test_a_rehydrated_jail_in_a_second_process_reads_the_exit_file(
 
 
 @pytest.mark.integration
-def test_an_unrecorded_exit_refuses_instead_of_reporting_success() -> None:
+def test_an_unrecorded_exit_refuses_instead_of_reporting_success(jail_dir: str) -> None:
     """THE HALF THAT MATTERS MOST. With no observation of how the workload
     ended, the status is unknowable and the honest answer is a refusal.
     Returning 0 here is what made the allowed-write control vacuous.
@@ -220,7 +211,7 @@ def test_an_unrecorded_exit_refuses_instead_of_reporting_success() -> None:
     THE CONTROL is the first assertion: the same handle answers `0` while
     both records are in place, so the refusal below is attributable to their
     removal and not to `wait()` being broken outright."""
-    jail, process = _launch(["/bin/sh", "-c", "exit 0"])
+    jail, process = _launch(["/bin/sh", "-c", "exit 0"], jail_dir=jail_dir)
     assert process.wait(timeout=20.0) == 0
 
     _forget_the_in_process_record(process)
@@ -231,7 +222,7 @@ def test_an_unrecorded_exit_refuses_instead_of_reporting_success() -> None:
 
 
 @pytest.mark.integration
-def test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status() -> None:
+def test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status(jail_dir: str) -> None:
     """decision-162 (2026-09-08): a stale record is cleared at launch.
 
     The defect, in the shape it was found: two launches into the SAME jail
@@ -247,8 +238,6 @@ def test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status() -> Non
     observed the ordinary way, is what makes `7` a number that was really
     there to be wrongly returned.
     """
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
 
     def launch_in(argv: list[str], io: IoPolicy) -> tuple[Jail, Process]:
         return launch(
@@ -274,7 +263,7 @@ def test_a_second_launch_in_one_jail_dir_does_not_read_the_first_status() -> Non
 
 
 @pytest.mark.integration
-def test_wait_returns_only_once_the_process_has_left_so_the_jail_dir_is_free() -> None:
+def test_wait_returns_only_once_the_process_has_left_so_the_jail_dir_is_free(jail_dir: str) -> None:
     """decision-182 (TASK-0079.30): in the process that started it, `wait()`
     answers only after the exit wrapper has exited and been reaped.
 
@@ -284,8 +273,6 @@ def test_wait_returns_only_once_the_process_has_left_so_the_jail_dir_is_free() -
     launches back to back, each waited and then followed by the next, refuse
     nowhere.
     """
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
     compiled = Stack([]).compile(Spec())
     for round_ in range(50):
         jail, process = launch(

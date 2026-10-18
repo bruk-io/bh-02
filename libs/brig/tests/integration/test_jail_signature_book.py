@@ -25,7 +25,6 @@ precedent of reusing the SAME helper in that mode for a non-teardown claim.
 
 from __future__ import annotations
 
-import itertools
 import json
 import os
 import pathlib
@@ -46,20 +45,8 @@ _RUNTIMES = {RuntimeKind.HOST: HostRuntime()}
 _HELPER = str(pathlib.Path(__file__).parent / "_rehydrate_and_kill_helper.py")
 _HELPER_TIMEOUT_S = 30.0
 
-_jail_counter = itertools.count()
 
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>sb<n>` -- never `tmp_path`
-    (CLAUDE.md: `sun_path` is 104 bytes on darwin). The `sb` ("signature
-    book") infix keeps this file's jail-dir sequence out of the shared,
-    order-dependent `/tmp/bg<pid>-<n>` namespace other integration files'
-    own docstrings document colliding across files that share one pytest
-    process."""
-    return f"/tmp/bg{os.getpid()}sb{next(_jail_counter)}"
-
-
-def _launch(run_id: str, *, jail_id: str) -> tuple[Jail, Process]:
+def _launch(run_id: str, *, jail_id: str, jail_dir: str) -> tuple[Jail, Process]:
     """A REAL `degraded()` stack -- `rlimits` + `env_scrub`, the two
     mechanisms that exist as of M3/M4 -- compiled against a generous cpu
     limit (this file's subject is signature-book fidelity, not the cpu
@@ -68,7 +55,6 @@ def _launch(run_id: str, *, jail_id: str) -> tuple[Jail, Process]:
     for its own composed-stack claims."""
     spec = Spec(limits=Limits(cpu_seconds=30))
     jail = degraded().compile(spec)
-    jail_dir = _new_jail_dir()
     argv = workload_argv(run_id, "sleep 30")
     return launch(
         jail,
@@ -119,7 +105,7 @@ def _killpg_cleanup(process: Process) -> None:
 
 
 @pytest.mark.integration
-def test_the_book_survives_a_real_launch_and_rehydration(run_id: str) -> None:
+def test_the_book_survives_a_real_launch_and_rehydration(run_id: str, jail_dir: str) -> None:
     """AC #4. A REAL `degraded()` jail is launched (`rlimits` claims
     `Axis.LIMITS` under a real cpu limit -- the same non-vacuous claim
     `tests/unit/test_stack_signature_book.py`'s AC #1 test pins). The
@@ -132,7 +118,7 @@ def test_the_book_survives_a_real_launch_and_rehydration(run_id: str) -> None:
     claim's `mechanism` and pattern SOURCES (`re.Pattern.pattern`, since a
     compiled pattern itself never crosses the process boundary -- see
     AC #5 below) equal the live handle's."""
-    jail, process = _launch(run_id, jail_id="jail-sigbook-rehydrate")
+    jail, process = _launch(run_id, jail_id="jail-sigbook-rehydrate", jail_dir=jail_dir)
     try:
         live_claim = jail.signatures.for_axis(Axis.LIMITS)
         assert live_claim is not None
@@ -169,7 +155,7 @@ def test_the_book_survives_a_real_launch_and_rehydration(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_to_dict_carries_no_compiled_pattern(run_id: str) -> None:
+def test_to_dict_carries_no_compiled_pattern(run_id: str, jail_dir: str) -> None:
     """AC #5. `json.dumps(jail.to_dict())` succeeds (an `re.Pattern`
     object is not JSON-serializable, so this alone already fails if one
     leaked through), and every serialized `signatures` entry is a plain
@@ -178,7 +164,7 @@ def test_to_dict_carries_no_compiled_pattern(run_id: str) -> None:
     claim's `signatures` ARE `re.Pattern` objects again -- proving the
     string-only shape above is `to_dict`'s doing, not `SignatureBook`
     simply never carrying compiled patterns at all."""
-    jail, process = _launch(run_id, jail_id="jail-sigbook-nopattern")
+    jail, process = _launch(run_id, jail_id="jail-sigbook-nopattern", jail_dir=jail_dir)
     try:
         d = jail.to_dict()
         serialized = json.dumps(d)  # raises TypeError if a re.Pattern leaked through

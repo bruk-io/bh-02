@@ -20,10 +20,8 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import shutil
 import socket
 import sys
-import tempfile
 import threading
 import time
 from collections.abc import Iterator
@@ -97,33 +95,6 @@ def origin() -> Iterator[_Origin]:
         yield server
     finally:
         server.close()
-
-
-@pytest.fixture
-def jail_dir() -> Iterator[str]:
-    """A jail directory nothing has ever been in, removed after the test.
-
-    **It is new on purpose, never named from the process id.** Since decision-204
-    (TASK-0150) a `proxy.port` an earlier jail left in a reused directory is removed
-    before the proxy starts, and the test that plants one is below; before it, the wrap
-    read it the moment the workload started, and the proxy published its own some tens
-    of milliseconds later, so the workload was pointed at a port nobody listens on and
-    its request died with `ConnectionRefusedError` where the 403 under test was due
-    (TASK-0140). Every other test here still gets a directory no earlier jail was ever
-    in, so what it reads of the directory is its own and not the reused-directory case
-    the planted test owns: a name made from the pid is handed to a later process with
-    the same pid (a pid space of 32768 wraps within a day of test runs) along with the
-    earlier one's files, which would make the other tests depend on that fix too.
-
-    Short, under `/tmp` and not `tmp_path`: the proxy's port file and the
-    leak sweep's argv both want short paths. Resolved, as `CompileCtx`
-    requires of a `jail_dir`.
-    """
-    path = os.path.realpath(tempfile.mkdtemp(prefix="bp", dir="/tmp"))
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
 
 
 def _jail(jail_dir: str, domains: tuple[str, ...]) -> tuple[CompiledJail, object]:
@@ -326,6 +297,12 @@ def test_a_port_file_an_earlier_jail_left_is_not_the_port_the_workload_is_pointe
     (or, worse, at whatever listens there now). Here the file is planted, naming
     a port that is refused, BEFORE `Jail.create`, and the workload still gets
     the proxy's own 403 for a host outside the allow list.
+
+    This is the one test here that meets a leftover. Every other test takes a
+    `jail_dir` no earlier jail was ever in (`tests/conftest.py`; TASK-0140: a
+    directory named from the pid was handed to a later process with the same pid,
+    along with the earlier one's files), so what it reads of the directory is its
+    own and does not depend on the fix above.
 
     THE CONTROLS, in this test: the planted port really is closed (a connection
     to it is refused, checked before the jail exists), the file really is there

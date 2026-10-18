@@ -20,7 +20,6 @@ jail's own workload group (`ENDED`), so a decoy that survives is the refusal
 and not a teardown that ran nothing.
 """
 
-import itertools
 import json
 import os
 import subprocess
@@ -35,16 +34,6 @@ from brig.stack import Stack
 from tests.conftest import launch, teardown_group, teardown_pgid, workload_argv
 
 pytestmark = pytest.mark.integration
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root (`sun_path` is 104 bytes on darwin); the `uv`
-    infix is this file's alone, so it cannot collide with a sibling's."""
-    path = f"/tmp/bg{os.getpid()}uv{next(_jail_counter)}"
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 def _live_members(pgid: int) -> list[int]:
@@ -93,11 +82,12 @@ def _forge_registration(jail_dir: str, pid: int, pgid: int) -> None:
         )
 
 
-def test_kill_signals_no_group_a_record_with_an_empty_stamp_names(run_id: str) -> None:
+def test_kill_signals_no_group_a_record_with_an_empty_stamp_names(
+    run_id: str, jail_dir: str
+) -> None:
     """The decoy group survives the jail's `kill()`, the forged item reports
     `FAILED` with a detail saying nothing was signalled and why, and the same
     `kill()` ends the jail's own workload group (the control)."""
-    jail_dir = _new_jail_dir()
     jail, process = launch(
         Stack([]).compile(Spec()),
         argv=workload_argv(run_id, "sleep 100"),
@@ -137,11 +127,11 @@ def test_kill_signals_no_group_a_record_with_an_empty_stamp_names(run_id: str) -
 
 def test_a_record_with_an_empty_stamp_whose_group_has_ended_reads_already_gone(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """An unverifiable record naming a group with no live member is not a
     failure: nothing of it runs, so `ALREADY_GONE`, and nothing is signalled
     either way."""
-    jail_dir = _new_jail_dir()
     jail, process = launch(
         Stack([]).compile(Spec()),
         argv=workload_argv(run_id, "sleep 100"),

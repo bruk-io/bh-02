@@ -21,7 +21,6 @@ plumbing, which every stack shares; a launch is `create` then a first `start`):
 
 from __future__ import annotations
 
-import itertools
 import os
 import signal
 import subprocess
@@ -35,14 +34,6 @@ from brig.run import IoPolicy, Jail, Process
 from brig.run.teardown import KillOutcome
 from brig.stack import CompiledJail
 from tests.conftest import launch, workload_argv
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root with this file's own infix (`tt`), so no other integration file's
-    numbering collides with it (see `test_kill_group.py`'s `_new_jail_dir`)."""
-    return f"/tmp/bg{os.getpid()}tt{next(_jail_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -108,10 +99,8 @@ time.sleep(600)
 """
 
 
-def _killed_launcher(run_id: str, *, tethered: bool) -> int:
+def _killed_launcher(run_id: str, *, tethered: bool, jail_dir: str) -> int:
     """Start `_LAUNCHER`, read the jail's group from it, `SIGKILL` it; the group."""
-    jail_dir = _new_jail_dir()
-    os.makedirs(jail_dir, exist_ok=True)
     launcher = subprocess.Popen(
         [
             sys.executable,
@@ -133,16 +122,18 @@ def _killed_launcher(run_id: str, *, tethered: bool) -> int:
 
 
 @pytest.mark.integration
-def test_a_tethered_jail_ends_when_its_launching_process_is_killed(run_id: str) -> None:
-    pgid = _killed_launcher(run_id, tethered=True)
+def test_a_tethered_jail_ends_when_its_launching_process_is_killed(
+    run_id: str, jail_dir: str
+) -> None:
+    pgid = _killed_launcher(run_id, tethered=True, jail_dir=jail_dir)
     assert _gone_within(pgid, 5.0), f"group {pgid} outlived its SIGKILLed launcher"
 
 
 @pytest.mark.integration
-def test_an_untethered_jail_outlives_its_launching_process(run_id: str) -> None:
+def test_an_untethered_jail_outlives_its_launching_process(run_id: str, jail_dir: str) -> None:
     """The control: without the tether nothing ends the group, which is what makes the claim
     above the tether's and not the launcher's death alone."""
-    pgid = _killed_launcher(run_id, tethered=False)
+    pgid = _killed_launcher(run_id, tethered=False, jail_dir=jail_dir)
     try:
         time.sleep(1.0)
         assert _group_lives(pgid)
@@ -151,8 +142,7 @@ def test_an_untethered_jail_outlives_its_launching_process(run_id: str) -> None:
     assert _gone_within(pgid, 5.0)
 
 
-def _tethered(argv: list[str]) -> tuple[Jail, Process, int]:
-    jail_dir = _new_jail_dir()
+def _tethered(argv: list[str], *, jail_dir: str) -> tuple[Jail, Process, int]:
     read_end, write_end = os.pipe()
     try:
         jail, process = launch(
@@ -170,11 +160,11 @@ def _tethered(argv: list[str]) -> tuple[Jail, Process, int]:
 
 
 @pytest.mark.integration
-def test_an_interrupt_does_not_end_the_tether(run_id: str) -> None:
+def test_an_interrupt_does_not_end_the_tether(run_id: str, jail_dir: str) -> None:
     """SIGINT to the group is for the workload. A backgrounded `sleep` ignores it (POSIX gives
     a non-interactive shell's `&` jobs SIG_IGN), so the group lives on after it; closing the
     tether then still ends it, so the watcher was not among what the interrupt ended."""
-    jail, process, write_end = _tethered(workload_argv(run_id, "sleep 100"))
+    jail, process, write_end = _tethered(workload_argv(run_id, "sleep 100"), jail_dir=jail_dir)
     try:
         time.sleep(0.5)  # the watcher and the job are up
         assert process.interrupt()
@@ -186,8 +176,8 @@ def test_an_interrupt_does_not_end_the_tether(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_kill_verifies_a_tethered_jail_s_group_empty(run_id: str) -> None:
-    jail, process, write_end = _tethered(workload_argv(run_id, "sleep 100"))
+def test_kill_verifies_a_tethered_jail_s_group_empty(run_id: str, jail_dir: str) -> None:
+    jail, process, write_end = _tethered(workload_argv(run_id, "sleep 100"), jail_dir=jail_dir)
     try:
         time.sleep(0.3)
         report = jail.destroy()

@@ -16,7 +16,6 @@ import shutil
 import socket
 import sys
 import tempfile
-from collections.abc import Iterator
 
 import pytest
 
@@ -50,15 +49,6 @@ s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.bind(sys.argv[1])
 s.close()
 time.sleep(60)"""
-
-
-@pytest.fixture
-def jail_dir() -> Iterator[str]:
-    path = tempfile.mkdtemp(prefix="bg-res-", dir="/tmp")
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
 
 
 def _python(run_id: str, code: str, *args: str) -> list[str]:

@@ -38,7 +38,6 @@ is not the runner image.
 
 from __future__ import annotations
 
-import itertools
 import os
 import sys
 
@@ -75,7 +74,6 @@ def _needs_bubblewrap_and_python() -> None:
         )
 
 
-_jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 30.0
 _SYSTEM_ROOTS = ("/bin", "/usr", "/lib", "/lib64", "/etc")
 
@@ -106,10 +104,6 @@ print("LOOPBACK_OK")
 """
 
 
-def _new_jail_dir() -> str:
-    return f"/tmp/bg{os.getpid()}bn{next(_jail_counter)}"
-
-
 def _spec(workspace: str) -> Spec:
     return Spec(
         fs=FsPolicy(
@@ -120,8 +114,7 @@ def _spec(workspace: str) -> Spec:
     )
 
 
-def _run(*, jailed: bool) -> tuple[str, str]:
-    jail_dir = _new_jail_dir()
+def _run(*, jailed: bool, jail_dir: str) -> tuple[str, str]:
     workspace = f"{jail_dir}/ws"
     os.makedirs(workspace, exist_ok=True)
     spec = _spec(workspace)
@@ -144,15 +137,17 @@ def _run(*, jailed: bool) -> tuple[str, str]:
 
 
 @pytest.mark.integration
-def test_an_off_loopback_connect_is_unreachable_and_matches_the_signature() -> None:
+def test_an_off_loopback_connect_is_unreachable_and_matches_the_signature(
+    jail_dir: str,
+) -> None:
     """Observation 1. The signature is fetched from the mechanism's own
     compiled `Step` rather than written as a literal, so this tests what
     `bwrap` declares."""
     spec = _spec("/tmp")
-    ctx = build_compile_ctx(spec, jail_dir=_new_jail_dir(), platform="linux")
+    ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     signatures = bwrap.compile(spec, ctx).denial_signatures
 
-    stdout, stderr = _run(jailed=True)
+    stdout, stderr = _run(jailed=True, jail_dir=jail_dir)
 
     assert "OFFBOX_CONNECTED" not in stdout
     assert "OFFBOX_FAILED" in stderr
@@ -160,19 +155,21 @@ def test_an_off_loopback_connect_is_unreachable_and_matches_the_signature() -> N
 
 
 @pytest.mark.integration
-def test_the_jail_keeps_its_own_loopback_which_is_the_control() -> None:
+def test_the_jail_keeps_its_own_loopback_which_is_the_control(jail_dir: str) -> None:
     """Observation 2. A jailed process can still bind and connect to its
     OWN loopback -- so the failure above is the missing route, not a
     missing interpreter, and the deny-all claim is precise: the namespace
     is empty of everything except the jail's own loopback, which a LISTEN
     channel needs."""
-    stdout, _stderr = _run(jailed=True)
+    stdout, _stderr = _run(jailed=True, jail_dir=jail_dir)
 
     assert "LOOPBACK_OK" in stdout
 
 
 @pytest.mark.integration
-def test_without_the_jail_the_same_probe_does_not_report_unreachable() -> None:
+def test_without_the_jail_the_same_probe_does_not_report_unreachable(
+    jail_dir: str,
+) -> None:
     """The mutation-shaped control: the identical probe through `Stack([])`
     -- bwrap REMOVED -- does not produce the unreachable answer, because
     the host has a default route. It may still fail (a runner with no
@@ -180,9 +177,9 @@ def test_without_the_jail_the_same_probe_does_not_report_unreachable() -> None:
     SIGNATURE rather than on success: what must not happen is the denial
     text appearing without the mechanism that causes it."""
     spec = _spec("/tmp")
-    ctx = build_compile_ctx(spec, jail_dir=_new_jail_dir(), platform="linux")
+    ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     signatures = bwrap.compile(spec, ctx).denial_signatures
 
-    _stdout, stderr = _run(jailed=False)
+    _stdout, stderr = _run(jailed=False, jail_dir=jail_dir)
 
     assert not any(pattern.search(stderr) for pattern in signatures), stderr

@@ -45,7 +45,6 @@ gap needs a hook to work around). This file imports both the identical way.
 
 from __future__ import annotations
 
-import itertools
 import os
 from collections.abc import Sequence
 from dataclasses import replace
@@ -72,23 +71,15 @@ from brig.probe.batteries.network import network_battery
 from brig.run import IoPolicy, Jail, Process, Reservation
 from brig.run.teardown import KillOutcome  # not barrel-exported; same shape, justified in AC #6
 from brig.stack import degraded
-from tests.conftest import launch, teardown_group, workload_argv
-
-_jail_counter = itertools.count()
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 
-def _new_root(run_id: str, tag: str) -> str:
-    """A short scratch root -- never `tmp_path` (`sun_path` is 104 bytes on
-    darwin). The `dj` infix keeps this file's counter separate from its
-    `test_probe_forgery.py` sibling's own `pf`-tagged one."""
-    return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
-
-
-def _launch(spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str) -> tuple[Jail, Process]:
+def _launch(
+    spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str, jail_dir: str
+) -> tuple[Jail, Process]:
     """`Spec -> degraded() -> Jail.create -> jail.start`, through public
     methods on public types only -- the exact chain this file's own AC
     names."""
-    jail_dir = _new_root(run_id, "dj")
     jail = degraded().compile(spec)
     return launch(
         jail,
@@ -123,7 +114,7 @@ def _teardown_group(process: Process) -> None:
 
 @pytest.mark.e2e
 def test_degraded_journey_through_the_public_api_only(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, new_jail_dir: NewJailDir
 ) -> None:
     """AC #5. One `degraded()` jail, probed by the FOUR batteries this
     journey's `spec` can honestly stand one up for, then torn down through
@@ -181,21 +172,17 @@ def test_degraded_journey_through_the_public_api_only(
     sec 9's fixed ladder: verification is the last, non-optional rung).
     """
     monkeypatch.setenv(CANARY_ENV_NAME, "topsecret-should-not-leak")
-    workspace = _new_root(run_id, "djw")
-    os.makedirs(workspace, exist_ok=True)
+    workspace = new_jail_dir()
     # task-062: fs_write_battery/fs_read_battery now take their targets as
     # required, HOST-resolved keyword arguments (doc-016 §7 deviation 4) --
     # see tests/integration/test_battery_targets.py for the dedicated
     # coverage of the fix itself; this journey only needs valid targets to
     # keep constructing.
-    outside_writable = _new_root(run_id, "djo")
-    os.makedirs(outside_writable, exist_ok=True)
-    ssh_directory_canary = _new_root(run_id, "djs")
-    os.makedirs(ssh_directory_canary, exist_ok=True)
+    outside_writable = new_jail_dir()
+    ssh_directory_canary = new_jail_dir()
     with open(os.path.join(ssh_directory_canary, "known_hosts"), "w", encoding="utf-8") as f:
         f.write("canary\n")
-    credential_canary_dir = _new_root(run_id, "djc")
-    os.makedirs(credential_canary_dir, exist_ok=True)
+    credential_canary_dir = new_jail_dir()
     credential_canary = os.path.join(credential_canary_dir, "credentials")
     with open(credential_canary, "w", encoding="utf-8") as f:
         f.write("canary\n")
@@ -205,7 +192,11 @@ def test_degraded_journey_through_the_public_api_only(
         fs=FsPolicy(write_allows=(workspace,)),
     )
     jail, process = _launch(
-        spec, workload_argv(run_id, "sleep 100"), jail_id="dj-journey", run_id=run_id
+        spec,
+        workload_argv(run_id, "sleep 100"),
+        jail_id="dj-journey",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     try:
         verdicts: dict[str, BatteryVerdict] = {

@@ -16,7 +16,6 @@ What this file shows, each with its control in the same test:
 The real instance, a supervisor's PID 1 with a `setsid()` child, is `tests/e2e/test_supervised_jail.py`'s.
 """
 
-import itertools
 import os
 import signal
 import subprocess
@@ -29,19 +28,16 @@ from brig.core import Spec, unenforced_report
 from brig.run import IoPolicy, Jail, Process, _identity, teardown
 from brig.run.teardown import KillOutcome, kill_named
 from brig.stack import CompiledJail
-from tests.conftest import launch, teardown_group, workload_argv
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 pytestmark = pytest.mark.integration
-
-_counter = itertools.count()
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
     return argv
 
 
-def _launch(argv: list[str]) -> tuple[Jail, Process]:
-    jail_dir = f"/tmp/bg{os.getpid()}ao{next(_counter)}"
+def _launch(argv: list[str], *, jail_dir: str) -> tuple[Jail, Process]:
     compiled = CompiledJail(
         spec=Spec(),
         report=unenforced_report(),
@@ -70,14 +66,16 @@ def _answering(marker: Path) -> str:
 
 
 def test_a_destroy_with_no_grace_sends_no_sigterm_and_one_with_a_grace_does(
-    run_id: str, tmp_path: Path
+    run_id: str, tmp_path: Path, new_jail_dir: NewJailDir
 ) -> None:
     """`grace=0` is `SIGKILL` and nothing before it: the handler never ran. Control: any other
     grace sends `SIGTERM` first, and the handler did run."""
     told = {}
     for grace in (0, 5.0):
         marker = tmp_path / f"term-{grace}"
-        jail, process = _launch(workload_argv(f"{run_id}{grace}", _answering(marker)))
+        jail, process = _launch(
+            workload_argv(f"{run_id}{grace}", _answering(marker)), jail_dir=new_jail_dir()
+        )
         try:
             time.sleep(0.5)  # the shell has set its trap
             report = jail.destroy(grace=grace)
@@ -90,12 +88,15 @@ def test_a_destroy_with_no_grace_sends_no_sigterm_and_one_with_a_grace_does(
 
 def test_a_program_that_ignores_sigterm_is_ended_at_once_and_a_grace_period_is_waited_out(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """A program that ignores `SIGTERM` is ended by `SIGKILL` at once, in far less than the grace
     the same program is given otherwise (the control: 1.0 s, waited out in full)."""
     elapsed = {}
     for grace in (0, 1.0):
-        jail, process = _launch(workload_argv(f"{run_id}{grace}", "trap '' TERM; sleep 100"))
+        jail, process = _launch(
+            workload_argv(f"{run_id}{grace}", "trap '' TERM; sleep 100"), jail_dir=new_jail_dir()
+        )
         try:
             time.sleep(0.5)
             began = time.monotonic()
@@ -108,8 +109,10 @@ def test_a_program_that_ignores_sigterm_is_ended_at_once_and_a_grace_period_is_w
     assert elapsed[1.0] >= 1.0, elapsed
 
 
-def test_a_second_destroy_with_no_grace_finds_everything_already_gone(run_id: str) -> None:
-    jail, process = _launch(workload_argv(run_id, "sleep 100"))
+def test_a_second_destroy_with_no_grace_finds_everything_already_gone(
+    run_id: str, jail_dir: str
+) -> None:
+    jail, process = _launch(workload_argv(run_id, "sleep 100"), jail_dir=jail_dir)
     try:
         time.sleep(0.3)
         assert [item.outcome for item in jail.destroy(grace=0).items] == [KillOutcome.ENDED]
@@ -119,8 +122,8 @@ def test_a_second_destroy_with_no_grace_finds_everything_already_gone(run_id: st
         teardown_group(process)
 
 
-def test_a_negative_grace_is_refused_and_says_what_to_pass(run_id: str) -> None:
-    jail, process = _launch(workload_argv(run_id, "sleep 100"))
+def test_a_negative_grace_is_refused_and_says_what_to_pass(run_id: str, jail_dir: str) -> None:
+    jail, process = _launch(workload_argv(run_id, "sleep 100"), jail_dir=jail_dir)
     try:
         with pytest.raises(ValueError, match=r"pass 0 to end the jail at once"):
             jail.destroy(grace=-1.0)
@@ -129,8 +132,8 @@ def test_a_negative_grace_is_refused_and_says_what_to_pass(run_id: str) -> None:
         teardown_group(process)
 
 
-def test_a_jail_with_no_supervisor_has_no_instance_group(run_id: str) -> None:
-    jail, process = _launch(workload_argv(run_id, "sleep 100"))
+def test_a_jail_with_no_supervisor_has_no_instance_group(run_id: str, jail_dir: str) -> None:
+    jail, process = _launch(workload_argv(run_id, "sleep 100"), jail_dir=jail_dir)
     try:
         assert jail.instance_group is None
     finally:
@@ -138,7 +141,7 @@ def test_a_jail_with_no_supervisor_has_no_instance_group(run_id: str) -> None:
 
 
 def test_the_instance_is_signalled_first_then_the_link_closed_then_each_process(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, new_jail_dir: NewJailDir
 ) -> None:
     """The first signal of `destroy(grace=0)` of a supervised jail goes to the instance's group,
     ahead of every process's group, and no signal is a `SIGTERM`; the link is closed after the
@@ -147,7 +150,7 @@ def test_the_instance_is_signalled_first_then_the_link_closed_then_each_process(
     observation of a real jail can: the namespace's end is the same moment either way. Control:
     with a grace, the processes are signalled first and the instance last, as it was ruled in
     decision-192."""
-    jail, first = _launch(workload_argv(run_id, "sleep 100"))
+    jail, first = _launch(workload_argv(run_id, "sleep 100"), jail_dir=new_jail_dir())
     record = jail._record()
     instance = subprocess.Popen(["sleep", "100"], start_new_session=True)
     stamp = _identity.start_stamp(instance.pid)
@@ -185,7 +188,7 @@ def test_the_instance_is_signalled_first_then_the_link_closed_then_each_process(
 
     # The control, a fresh jail and a fresh stand-in: with a grace the process is first, the
     # instance last, and its link is closed just before its own ladder.
-    jail, first = _launch(workload_argv(f"{run_id}c", "sleep 100"))
+    jail, first = _launch(workload_argv(f"{run_id}c", "sleep 100"), jail_dir=new_jail_dir())
     record = jail._record()
     instance = subprocess.Popen(["sleep", "100"], start_new_session=True)
     stamp = _identity.start_stamp(instance.pid)

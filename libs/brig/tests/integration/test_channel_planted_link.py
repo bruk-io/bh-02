@@ -82,15 +82,6 @@ while True:
 
 
 @pytest.fixture
-def jail_dir() -> Iterator[str]:
-    path = tempfile.mkdtemp(prefix="bg-plant-", dir="/tmp")
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
-
-
-@pytest.fixture
 def outside() -> Iterator[socket.socket]:
     """A listener of this test's own, in a scratch directory outside any jail:
     the host socket a planted link points at. Non-blocking, so `accept` says

@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
-import itertools
 import os
 import signal
 import subprocess
@@ -48,33 +47,6 @@ from brig.run import teardown as teardown_mod
 from brig.run.teardown import KillOutcome, group_alive
 from brig.stack import CompiledJail
 from tests.conftest import destroy_with_grace, launch, workload_argv
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>kg<n>` -- never `tmp_path`
-    (CLAUDE.md: `sun_path` is 104 bytes on darwin).
-
-    The `kg` (kill-group) infix is load-bearing, not decorative:
-    `test_jail_launch.py`, `test_wait_ready.py` and `test_exec.py` each mint
-    their own `/tmp/bg<pid>-<n>` sequence from an independent
-    `itertools.count()` starting at 0 -- under `pytest -m integration`
-    every one of these files shares the SAME `os.getpid()` (one pytest
-    process), so without a distinguishing infix this file's Nth jail dir
-    is byte-identical to some other file's Nth jail dir, and whichever
-    test runs second silently inherits the first's leftover directory
-    (observed: this collided with `test_jail_launch.py`'s
-    `test_launch_refuses_a_jail_that_requires_pty`, which asserts its
-    jail_dir was never created, and its `test_spawn_event_...`, which read
-    back a stale `events.jsonl` from an unrelated jail_id -- only when all
-    four integration files ran together, not in any 3-of-4 subset, because
-    the collision depends on the exact cumulative dir count at the moment
-    each file happens to reuse an index). This infix removes THIS file
-    from that shared, order-dependent namespace; it does not fix the
-    remaining risk between `test_jail_launch.py`, `test_wait_ready.py` and
-    `test_exec.py`, which are outside this task's Deliverable."""
-    return f"/tmp/bg{os.getpid()}kg{next(_jail_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -116,8 +88,9 @@ def _ps_state(pid: int) -> str:
     return proc.stdout.strip()
 
 
-def _launch(argv: list[str], *, jail_id: str = "jail-under-test") -> tuple[Jail, Process]:
-    jail_dir = _new_jail_dir()
+def _launch(
+    argv: list[str], *, jail_id: str = "jail-under-test", jail_dir: str
+) -> tuple[Jail, Process]:
     return launch(
         _compiled_jail(),
         argv=argv,
@@ -188,14 +161,14 @@ def _positive_pre_assertion(process: Process) -> tuple[int, int, int]:
 
 
 @pytest.mark.integration
-def test_kill_leaves_no_process_from_the_tree_alive(run_id: str) -> None:
+def test_kill_leaves_no_process_from_the_tree_alive(run_id: str, jail_dir: str) -> None:
     """AC #2 + #3 + #6 (THE CLAIM). This is also the deterministic test
     named by the out-of-band MUTATION CHECK (AC #5): replacing the group
     signal in `brig/run/teardown.py` with a single-pid signal to the
     leader makes exactly this test fail, because the child below stops
     being torn down."""
     argv = workload_argv(run_id, "sleep 100")
-    jail, process = _launch(argv)
+    jail, process = _launch(argv, jail_dir=jail_dir)
     leader_pid, child_pid, pgid = _positive_pre_assertion(process)
     assert pgid == process._record.pgid
 
@@ -221,7 +194,7 @@ def test_kill_leaves_no_process_from_the_tree_alive(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_control_single_pid_kill_leaves_the_child_alive(run_id: str) -> None:
+def test_control_single_pid_kill_leaves_the_child_alive(run_id: str, jail_dir: str) -> None:
     """AC #4, THE CONTROL from `.claude/rules/integration-tests.md`'s
     control rule -- NOT the mutation check (see decision-026 rule 3,
     quoted in this task's description): no line of `brig/run/teardown.py`
@@ -230,7 +203,7 @@ def test_control_single_pid_kill_leaves_the_child_alive(run_id: str) -> None:
     and its child is shown to survive that -- proof that the tree-survival
     probe in the test above is discriminating, not vacuous."""
     argv = workload_argv(run_id, "sleep 100")
-    jail, process = _launch(argv)
+    jail, process = _launch(argv, jail_dir=jail_dir)
     leader_pid, child_pid, pgid = _positive_pre_assertion(process)
 
     try:
@@ -278,7 +251,9 @@ def test_control_single_pid_kill_leaves_the_child_alive(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_kill_escalates_to_sigkill_when_the_leader_ignores_sigterm(run_id: str) -> None:
+def test_kill_escalates_to_sigkill_when_the_leader_ignores_sigterm(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #7: a workload whose leader traps and ignores `SIGTERM` still
     ends up `ENDED`, and every pid from the pre-assertion is actually
     gone -- provable only if the SIGKILL escalation rung ran AND the
@@ -286,7 +261,7 @@ def test_kill_escalates_to_sigkill_when_the_leader_ignores_sigterm(run_id: str) 
     SIGTERM was merely *sent* would be wrong here: the leader ignores it)."""
     body = "trap '' TERM; sleep 100"
     argv = workload_argv(run_id, body)
-    jail, process = _launch(argv)
+    jail, process = _launch(argv, jail_dir=jail_dir)
     leader_pid, child_pid, _pgid = _positive_pre_assertion(process)
 
     report = destroy_with_grace(jail, 0.3)
@@ -297,14 +272,16 @@ def test_kill_escalates_to_sigkill_when_the_leader_ignores_sigterm(run_id: str) 
 
 
 @pytest.mark.integration
-def test_control_kill_ends_a_cooperative_group_without_needing_escalation(run_id: str) -> None:
+def test_control_kill_ends_a_cooperative_group_without_needing_escalation(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #7's control: a workload that exits on `SIGTERM` (no trap) also
     reports `ENDED` -- and does so well inside the grace window, without
     needing the `SIGKILL` rung. Without this, the escalation test above
     cannot distinguish "the SIGKILL rung actually ran" from "this
     machinery always reports ENDED no matter what"."""
     argv = workload_argv(run_id, "sleep 100")
-    jail, process = _launch(argv)
+    jail, process = _launch(argv, jail_dir=jail_dir)
     _positive_pre_assertion(process)
 
     started = time.monotonic()
@@ -362,7 +339,7 @@ def non_reaping_init() -> Iterator[list[int]]:
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="PR_SET_CHILD_SUBREAPER is Linux")
 @pytest.mark.integration
 def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
-    run_id: str, non_reaping_init: list[int]
+    run_id: str, non_reaping_init: list[int], jail_dir: str
 ) -> None:
     """The jail's leader runs a child that exits at once and is never waited
     for, so a zombie sits in the jail's group. `kill()` ends the leader, the
@@ -371,7 +348,7 @@ def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
     Before decision-171 the `/bin/ps` scan counted it and the item was
     `FAILED`."""
     body = f"{sys.executable} -c '{_PLANTS_A_ZOMBIE}'"
-    jail, process = _launch(workload_argv(run_id, body))
+    jail, process = _launch(workload_argv(run_id, body), jail_dir=jail_dir)
     deadline = time.monotonic() + 10
     zombies: list[int] = []
     while time.monotonic() < deadline and not zombies:
@@ -395,12 +372,12 @@ def test_kill_counts_a_zombie_the_init_never_reaps_as_gone(
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="PR_SET_CHILD_SUBREAPER is Linux")
 @pytest.mark.integration
 def test_group_alive_counts_a_zombie_the_init_never_reaps_as_gone(
-    run_id: str, non_reaping_init: list[int]
+    run_id: str, non_reaping_init: list[int], jail_dir: str
 ) -> None:
     """TASK-0079.19: a group whose only members are zombies reads gone through
     `group_alive`, though `os.killpg(pgid, 0)` still finds it."""
     body = f"{sys.executable} -c '{_PLANTS_A_ZOMBIE}'"
-    jail, process = _launch(workload_argv(run_id, body))
+    jail, process = _launch(workload_argv(run_id, body), jail_dir=jail_dir)
     deadline = time.monotonic() + 10
     zombies: list[int] = []
     while time.monotonic() < deadline and not zombies:
@@ -441,6 +418,7 @@ _LEADER_THAT_LEAVES_A_MEMBER = (
 @pytest.mark.integration
 def test_kill_ends_a_live_member_of_a_group_whose_leader_is_a_zombie(
     non_reaping_init: list[int],
+    jail_dir: str,
 ) -> None:
     """The leader of the group has exited and sits as a zombie (its parent,
     another process, never waits for it), while a member of its group still
@@ -476,7 +454,7 @@ def test_kill_ends_a_live_member_of_a_group_whose_leader_is_a_zombie(
         )
 
         report = teardown_mod.kill_named(
-            known=(leader,), jail_dir=_new_jail_dir(), helper_pids=(), helper_stamps=(), grace=0.5
+            known=(leader,), jail_dir=jail_dir, helper_pids=(), helper_stamps=(), grace=0.5
         )
 
         assert _gone_or_zombie(member_pid), "the live member survived kill()"
@@ -495,11 +473,11 @@ def test_kill_ends_a_live_member_of_a_group_whose_leader_is_a_zombie(
 
 
 @pytest.mark.integration
-def test_kill_is_idempotent(run_id: str) -> None:
+def test_kill_is_idempotent(run_id: str, jail_dir: str) -> None:
     """AC #8: a second `kill()` on the same handle reports `ALREADY_GONE`
     and raises nothing."""
     argv = workload_argv(run_id, "sleep 100")
-    jail, process = _launch(argv)
+    jail, process = _launch(argv, jail_dir=jail_dir)
     _positive_pre_assertion(process)
 
     first = jail.destroy()
@@ -517,7 +495,7 @@ def test_kill_is_idempotent(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_kill_returns_the_teardown_record_and_writes_none(run_id: str) -> None:
+def test_kill_returns_the_teardown_record_and_writes_none(run_id: str, jail_dir: str) -> None:
     """AC #9. It used to read a decodable `KILL` record out of the jail's
     events file. decision-152 (2026-09-08) deleted the stream and the
     `KILL` kind with it: the returned `KillReport` was always the richer
@@ -534,7 +512,7 @@ def test_kill_returns_the_teardown_record_and_writes_none(run_id: str) -> None:
     teardown rung leaves a status a later process can still read, and only
     the `SIGKILL` rung does not."""
     argv = workload_argv(run_id, "sleep 100")
-    jail, process = _launch(argv, jail_id="jail-kill-evt")
+    jail, process = _launch(argv, jail_id="jail-kill-evt", jail_dir=jail_dir)
     _positive_pre_assertion(process)
 
     records_dir = os.path.dirname(process.stdout_path)

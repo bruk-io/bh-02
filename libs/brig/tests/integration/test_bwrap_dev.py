@@ -27,10 +27,8 @@ Its controls are in the same run, one for each thing a workload uses under
 A write in the workspace lands too, so a jail that never ran fails here.
 """
 
-import itertools
 import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -53,22 +51,22 @@ def _needs_bubblewrap() -> None:
         )
 
 
-_jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 30.0
 _SYSTEM_ROOTS = ("/bin", "/usr", "/lib", "/lib64", "/etc")
 
 
-def _denial_signature() -> re.Pattern[str]:
+def _denial_signature(jail_dir: str) -> re.Pattern[str]:
     """The mechanism's own declared read-only signature, fetched from a compiled `Step`
     (as `test_bwrap_fs.py` does), never copied as a literal."""
     spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)))
-    ctx = build_compile_ctx(spec, jail_dir=f"/tmp/bgdevsig{os.getpid()}", platform="linux")
+    ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     return bwrap.compile(spec, ctx).denial_signatures[0]
 
 
 @pytest.mark.integration
-def test_a_new_path_under_dev_is_refused_and_what_a_workload_uses_there_still_works() -> None:
-    jail_dir = f"/tmp/bg{os.getpid()}dv{next(_jail_counter)}"
+def test_a_new_path_under_dev_is_refused_and_what_a_workload_uses_there_still_works(
+    jail_dir: str,
+) -> None:
     workspace = f"{jail_dir}/ws"
     os.makedirs(workspace)
     # A name no host file under /dev carries, so a write that leaked would be seen.
@@ -109,14 +107,13 @@ def test_a_new_path_under_dev_is_refused_and_what_a_workload_uses_there_still_wo
         # Ends what is left and waits for it, so the leak sweep never meets the
         # leader still exiting.
         jail.destroy()
-        shutil.rmtree(jail_dir, ignore_errors=True)
 
     assert not leaked, host_path
     assert status == 0, (stdout, stderr)
     # The claim: a new path directly in /dev is refused with the read-only signature
     # (`/dev/shm`, the one writable directory, is a control below).
     assert "DEV_WROTE" not in stdout, (stdout, stderr)
-    assert _denial_signature().search(stderr) is not None, (stdout, stderr)
+    assert _denial_signature(jail_dir).search(stderr) is not None, (stdout, stderr)
     # The controls: each thing a workload uses under /dev still works, and so does the
     # workspace, in the same run.
     for token in (

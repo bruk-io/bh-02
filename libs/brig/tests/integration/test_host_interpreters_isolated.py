@@ -17,13 +17,10 @@ not plants that could never have run.
 
 from __future__ import annotations
 
-import itertools
 import os
-import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -34,11 +31,10 @@ from brig.mech.connect_proxy import ConnectProxy
 from brig.mech.rlimits import rlimits
 from brig.run import IoPolicy, Jail, Process
 from brig.stack import Stack
-from tests.conftest import launch, teardown_group, workload_argv
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 pytestmark = pytest.mark.integration
 
-_counter = itertools.count()
 
 #: Imported, a plant records its name and pid, then loads the real module from the path
 #: without the planted directory and leaves that in `sys.modules`, which is what the import
@@ -53,14 +49,6 @@ _real = importlib.util.module_from_spec(_spec)
 sys.modules[__name__] = _real
 _spec.loader.exec_module(_real)
 """
-
-
-def _short_dir(tag: str) -> str:
-    """A short `/tmp` root, never `tmp_path`: the proxy's port file and the leak sweep's argv
-    both want short paths (the suite's `_new_jail_dir` convention)."""
-    path = os.path.realpath(f"/tmp/bg{os.getpid()}{tag}{next(_counter)}")
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 def _plant(root: str, record: str) -> None:
@@ -95,21 +83,11 @@ def _group_has_ended(pgid: int, within: float = 10.0) -> bool:
     return False
 
 
-@pytest.fixture
-def dirs() -> Iterator[tuple[str, str, str]]:
-    """The workload's directory (planted), one for the record, and the jail directory."""
-    made = (_short_dir("hw"), _short_dir("hr"), _short_dir("hj"))
-    try:
-        yield made
-    finally:
-        for path in made:
-            shutil.rmtree(path, ignore_errors=True)
-
-
 def test_a_module_planted_in_the_workload_s_directory_runs_in_no_host_side_program(
-    run_id: str, dirs: tuple[str, str, str]
+    run_id: str, new_jail_dir: NewJailDir
 ) -> None:
-    root, elsewhere, jail_dir = dirs
+    # The workload's directory (planted), one for the record, and the jail directory.
+    root, elsewhere, jail_dir = new_jail_dir(), new_jail_dir(), new_jail_dir()
     record = os.path.join(elsewhere, "ran")
     _plant(root, record)
     spec = Spec(
