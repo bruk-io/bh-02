@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
-updated_date: '2026-10-18 14:16'
+updated_date: '2026-10-18 14:18'
 labels:
   - app
   - size-3
@@ -110,4 +110,67 @@ INFO    -  Documentation built in 3.95 seconds
 ```
 
 Review (not the worker): every criterion met (AC3 ticked: full scripts/check exit 0, 3812 passed, gates and docs ok). Not closed: close-task refuses a bug without a recorded repro. The worker should record one from the pre-fix tree (e.g. at d30ae9c, record-check TASK-0143 --repro -- uv run pytest bh-02/app/tests/test_session_lock.py::test_resume_of_a_session_another_process_holds_is_refused_before_any_row_starts), or add a 'No repro:' note saying why; then it closes as is. Nits: running.lock opened with os.open, not host_paths' no-link opener (no realistic path: the state dir is outside the jail); the real-launch test was never seen failing under the plant.
+
+Repro at ba936c8e2d62, test files: bh-02/app/tests/test_session_lock.py; command: `uv run pytest bh-02/app/tests/test_session_lock.py::test_resume_of_a_session_another_process_holds_is_refused_before_any_row_starts` exited 4
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+============================= test session starts ==============================
+platform linux -- Python 3.15.0, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/user/bh-02
+configfile: pyproject.toml
+plugins: xdist-3.8.0, hypothesis-6.168.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________ ERROR collecting bh-02/app/tests/test_session_lock.py _____________
+ImportError while importing test module '/home/user/bh-02/bh-02/app/tests/test_session_lock.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+bh-02/app/tests/test_session_lock.py:18: in <module>
+    from bh_02.sessions import Held, Session, create, held
+E   ImportError: cannot import name 'Held' from 'bh_02.sessions' (/home/user/bh-02/bh-02/app/src/bh_02/sessions.py)
+=========================== short test summary info ============================
+ERROR bh-02/app/tests/test_session_lock.py
+=============================== 1 error in 0.19s ===============================
+ERROR: found no collectors for /home/user/bh-02/bh-02/app/tests/test_session_lock.py::test_resume_of_a_session_another_process_holds_is_refused_before_any_row_starts
+```
+
+Check `uv run pytest bh-02/app/tests/test_session_lock.py::test_resume_of_a_session_another_process_holds_is_refused_before_any_row_starts` exited 1
+
+(23 earlier lines omitted)
+```text
+        holding: Callable[[Path], _Holder],
+    ) -> None:
+        runner = CliRunner()
+        patch = _ran(composition)
+        assert runner.invoke(main, ["--no-jail", "--patch", str(patch)]).exit_code == 0
+        (session,) = [path for path in state.iterdir() if path.is_dir()]
+        layer = (session / "session.toml").read_text()
+        other = holding(session)
+    
+        trace = tmp_path / "trace.log"
+        refused = runner.invoke(
+            main,
+            ["--resume", session.name, "--model", "claude/haiku", "--patch", str(patch), "--trace", str(trace)],
+        )
+    
+>       assert refused.exit_code == 1, refused.output
+E       AssertionError: session 20261018-141827-1f55  (uv run bh-02 --resume to continue it)
+E         
+E       assert 0 == 1
+E        +  where 0 = <Result okay>.exit_code
+
+/home/user/bh-02/bh-02/app/tests/test_session_lock.py:153: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_session_lock.py::test_resume_of_a_session_another_process_holds_is_refused_before_any_row_starts
+============================== 1 failed in 2.52s ===============================
+```
+
+Round 2 (review finding 1: a bug closes with a repro recorded). No code changed; the only edits are these notes. Plan: run the committed test from this branch with the two source files the fix touched put back to their d30ae9c content (working tree only, never committed), record that failure, then restore them. Done:
+1. Put bh-02/app/src/bh_02/cli.py and sessions.py back to 'git show d30ae9c:<path>' (git diff d30ae9c -- bh-02/app/src was empty), then ran 'record-check TASK-0143 --repro -- uv run pytest bh-02/app/tests/test_session_lock.py::test_resume_of_a_session_another_process_holds_is_refused_before_any_row_starts'. The repro is recorded above ('Repro at ba936c8e2d62, test files: bh-02/app/tests/test_session_lock.py'). ba936c8 is where the test file lives (the test arrived with the fix in 49c82ee, so no commit holds it beside the pre-fix source); the tree it ran on is that commit with only the two fix files at their d30ae9c content. To repeat: git show d30ae9c:bh-02/app/src/bh_02/cli.py > bh-02/app/src/bh_02/cli.py, the same for sessions.py, run the command, git checkout -- those two files. The failure on the pre-fix source is an ImportError at collection (cannot import name 'Held' from 'bh_02.sessions'): the test imports the new API, so on the old code it fails for want of it, not yet on behaviour (pytest exit 4: no collectors).
+2. To show the bug itself, recorded the same test again with only cli.py at its d30ae9c content (sessions.held present, so a holder process really holds the session, but the command never takes it): 'Check ... exited 1' above, 'assert refused.exit_code == 1' fails with 0 == 1, and the output is 'session ... (uv run bh-02 --resume to continue it)': the second bh-02 resumed a session another process held, which is the bug. This is a plain record-check (not --repro), so it names no commit.
+3. Restored both files (git checkout --); git status clean; test_session_lock.py with the fix: 5 passed (uv run pytest bh-02/app/tests/test_session_lock.py -q).
+Not done, per the review: the two nits (running.lock opened with os.open rather than host_paths' no-link opener; test_real_launch.py's test never seen failing under the plant) stay as the reviewer left them, nothing filed.
 <!-- SECTION:NOTES:END -->
