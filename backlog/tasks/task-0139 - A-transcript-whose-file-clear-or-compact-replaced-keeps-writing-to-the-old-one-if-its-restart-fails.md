@@ -3,7 +3,7 @@ id: TASK-0139
 title: >-
   A transcript whose file /clear or /compact replaced keeps writing to the old
   one if its restart fails
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 05:20'
@@ -114,4 +114,6 @@ INFO    -  Documentation built in 3.92 seconds
 ```
 
 No repro: the failing test can only be shown against the code before the fix, which a reviewer cannot check out; the regression test is test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart, and the worker recorded it failing with the check planted off (5 agent tests, 8 appender tests DID NOT RAISE).
+
+Reviewed (not the worker): closed. Full scripts/check exit 0 (3783 passed, gates and docs ok), no files changed by it. AC#1 met: Appender refuses a replaced/removed/linked file (Replaced) and FileTranscript raises TranscriptReplaced naming /restart transcript, tested from the loop for /clear and /compact with a failed restart, both files left untouched. Nits only: Appender.__init__ now stats the disk on the caller's thread (event loop); decision-0009 (trajectory) is unrelated, the decision taken is the owner's, recorded in the plan. Known limits already filed as TASK-0152 and TASK-0153; no new drafts.
 <!-- SECTION:NOTES:END -->
