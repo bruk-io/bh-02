@@ -75,8 +75,10 @@ No package imports another (`plugin-layering`: the units are every package under
   which leaves with it, never a place in an ordered chain.
 - **What every package must compute alike is a library function, not a key**: in `host_paths`,
   where config and state are (`config_home`, `state_home`), every place reading a file goes
-  through (`walked`, `passes`), and the opener, writer and remover beneath a root through no link
-  (`read_beneath`, `directory_beneath`, `write_beneath`, `remove_beneath`). A copy per plugin that drifted would be a hole, and a key would add
+  through (`walked`, `passes`), the opener, writer and remover beneath a root through no link
+  (`read_beneath`, `directory_beneath`, `write_beneath`, `remove_beneath`), and the appender of a file
+  kept for the person (`Appender`: the transcript and a sub-agent's event log, off the event loop, 0600,
+  through no link). A copy per plugin that drifted would be a hole, and a key would add
   reloads to rows that must not reload (the python row, `system`): the walk is code, not a value.
 - **Fakes come from a package's own `testing` module** (`chat_cordis_plugin.testing`,
   `bh_02.testing`), never from another package's tests.
@@ -101,7 +103,9 @@ What to keep when changing it; the detail is where each line points.
   told as an aside, the date on the person's message
   ([why](../docs/bh-02/how-it-works/prompt-and-asides.md#why-the-prompt-stays-fixed-for-a-conversation)).
 - **Nothing blocks the event loop the TUI shares**: the prompt is read and `asides` asked on
-  `executor`, one call at a time, and must not need the event loop (agent plugin's README).
+  `executor`, one call at a time, and must not need the event loop (agent plugin's README). The
+  transcript and a sub-agent's event log are written on a thread (`host_paths.Appender`), and the
+  loop flushes the transcript at the end of every reply.
 - **Approval is one rule in one row** (`runner:approval`): its askers put what it doesn't let run
   to the person themselves and keep no copy of it; only a layer replaces it (runner plugin).
 - **The `memory` tool writes outside the jail, from bh-02's own process, and is never asked**

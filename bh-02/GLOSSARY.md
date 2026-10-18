@@ -136,7 +136,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **extension**: a plugin the model writes itself, `.bh-02/plugins/NAME.py` in the project, which bh-02 loads while it runs ([The model's extensions](../docs/bh-02/extending/extensions.md)).
 - **extensions** (row): `extensions:process`, bh-02's handle on the extensions process.
 - **run**: one launch of bh-02, from start to leaving; the Python process and its namespace last one run.
-- **session**: what a run keeps under `$XDG_STATE_HOME/bh-02/sessions/<id>/` (its layer, transcript and history, not the namespace), so `--resume` continues it in a later run.
+- **session**: what a run keeps under `$XDG_STATE_HOME/bh-02/sessions/<id>/` (its layer, transcript and history, not the namespace; the directory is 0700 and the transcript 0600), so `--resume` continues it in a later run.
 - **pinned** (row): one of the three rows the shell adds itself after every layer (`session`, `host`, `shell`), `disabled = false`, so no layer can remove it.
 - **session** (row and key): `bh_02.bootstrap:session`, pinned: the running session, its id (`current`), which the status bar shows, and whether it was resumed (`resumed`).
 - **host** (row and key): `bh_02.bootstrap:host`, pinned: what the host is: `paths`, `trusted` and `code` (no input may write them), `credentials` and `secrets` (no input may read them), and `auto_memory` (an input may write it).

@@ -42,6 +42,7 @@ reply leaves at most one in flight, however often the loop reloads between them.
 """
 
 import asyncio
+import contextlib
 import datetime
 import json
 import time
@@ -199,6 +200,16 @@ class Transcript(Protocol):
     @property
     def messages(self) -> Sequence[Json]: ...
     def append(self, message: Json) -> None: ...
+
+
+@runtime_checkable
+class _Flushable(Protocol):
+    """What a transcript that writes behind the loop (`FileTranscript`) has besides `Transcript`:
+    `flush()` returns once every message appended is where the transcript keeps it. A transcript
+    that keeps the conversation in memory has no such method and is asked for none (CONTRACTS.md:
+    transcript)."""
+
+    async def flush(self) -> None: ...
 
 
 _INTERRUPTED = "interrupted: the person stopped this call before it finished; it may have partly run"
@@ -439,6 +450,13 @@ class LoopModel:
 
     The prompt is read, and `asides` asked, on `executor` (the `executor` row's, which a reloaded
     loop shares with the last one); a loop built without one (a test, direct use) makes its own.
+
+    A transcript that writes behind the loop (it has `flush()`: `FileTranscript` queues each
+    entry to a thread, so the event loop never waits on a disk) is flushed at the end of every
+    reply, however it ends (answered, failed, stopped, closed), once the last entry is appended.
+    A command runs only after the reply before it has ended (the chat row reads its next line
+    then), so `/clear` and `/compact` find every entry in the file, and a failed write is
+    raised there at the latest.
     """
 
     def __init__(
@@ -610,7 +628,28 @@ class LoopModel:
         self._transcript.append({"role": "assistant", "content": why})
 
     async def reply(self, message: str) -> AsyncIterator[Json]:
-        """Run model steps until one answers the message, yielding what happens (CONTRACTS.md: event)."""
+        """Run model steps until one answers the message, yielding what happens (CONTRACTS.md: event),
+        then flush the transcript, however the reply ended.
+
+        Raises:
+            OSError: an entry could not be written to the transcript's file.
+        """
+        try:
+            # closed here, not left to the event loop to finalize: a reply the person stops must
+            # end its model step now, and be flushed after the entries that ending appends
+            async with contextlib.aclosing(self._reply(message)) as events:
+                async for event in events:
+                    yield event
+        finally:
+            await self._flushed()
+
+    async def _flushed(self) -> None:
+        """Wait for the transcript's writes, when it writes behind the loop."""
+        if isinstance(self._transcript, _Flushable):
+            await self._transcript.flush()
+
+    async def _reply(self, message: str) -> AsyncGenerator[Json]:
+        """`reply`, without the flush: run model steps until one answers the message."""
         today = self._today()
         dated = today if _undated(self._transcript.messages, today) else None
         if not self._ready and (waiting := [n for n in self._requires if self._tools.get(n) is None]):

@@ -1,9 +1,11 @@
 """The loop over a scripted model and a fake Python process, and the transcript outliving a model swap."""
 
 import asyncio
+import errno
 import gc
 import json
 import logging
+import os
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -1192,3 +1194,126 @@ def test_a_reading_a_stopped_reply_left_running_does_not_hold_bh_02_open(
         held.release.set()
     held.threads[0].join(5)
     assert not held.threads[0].is_alive() and escaped == []
+
+
+class _Flushing(MemoryTranscript):
+    """A transcript that writes behind the loop, as `FileTranscript` does: what the loop has
+    appended when each flush came, and no more than that was in it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushed: list[int] = []
+
+    async def flush(self) -> None:
+        await asyncio.sleep(0)  # the writes take their turn, as a thread's do
+        self.flushed.append(len(self.messages))
+
+
+async def test_the_transcript_is_flushed_once_a_reply_that_answered_has_appended_its_last_entry() -> None:
+    transcript = _Flushing()
+    model = LoopModel(Scripted([text("hi")]), as_tool(Shouting()), transcript, Confined())
+    events = model.reply("go")
+    assert (await anext(events)) == text("hi")
+    assert (
+        transcript.flushed == []
+    )  # not before the reply is done: a flush per entry would be a write per entry
+    assert [e async for e in events] == [{"type": "stop", "reason": "answered"}]
+    assert transcript.flushed == [len(transcript.messages)] == [3]
+
+
+async def test_the_transcript_is_flushed_after_a_reply_whose_model_failed() -> None:
+    transcript = _Flushing()
+    model = LoopModel(Scripted(), as_tool(Shouting()), transcript, Confined())
+    with pytest.raises(ScriptError, match="ran out"):
+        await _collect(model, "hi")
+    assert transcript.messages[-1] == {"role": "assistant", "content": FAILED}
+    assert transcript.flushed == [len(transcript.messages)]  # the entry the failure appended too
+
+
+async def test_the_transcript_is_flushed_after_a_reply_the_ui_closed_mid_stream() -> None:
+    transcript = _Flushing()
+    reply = LoopModel(_Story(), as_tool(Shouting()), transcript, Confined()).reply("tell me a long story")
+    assert (await anext(reply)) == text("Once upon")
+    await reply.aclose()  # Ctrl-C: chat closes the reply, which awaits the flush before it ends
+    assert transcript.messages[-1]["content"].endswith(STOPPED)
+    assert transcript.flushed == [len(transcript.messages)]
+
+
+async def test_the_transcript_is_flushed_after_a_reply_cancelled_with_a_call_running() -> None:
+    class Hanging(Shouting):
+        async def run(self, code: str) -> str:
+            await asyncio.Event().wait()
+            return "never"  # pragma: no cover
+
+    transcript = _Flushing()
+    scripted = Scripted([call("c1", "python", code="a"), call("c2", "python", code="b")])
+
+    async def run() -> None:
+        async for _ in LoopModel(scripted, as_tool(Hanging()), transcript, Confined()).reply("go"):
+            pass
+
+    task = asyncio.create_task(run())
+    await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert [m["role"] for m in transcript.messages][-2:] == ["tool", "tool"]  # both answered
+    assert transcript.flushed == [len(transcript.messages)]  # after the answers the stop appended
+
+
+async def test_a_transcript_that_keeps_the_conversation_in_memory_needs_no_flush() -> None:
+    assert (
+        await _collect(
+            LoopModel(Scripted([text("hi")]), as_tool(Shouting()), MemoryTranscript(), Confined()), "go"
+        )
+        == "hi"
+    )
+
+
+class _SlowDisk:
+    """Every write to a file takes its time, on the thread that makes it."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
+        self.threads: set[int] = set()
+        real = os.write
+
+        def write(fd: int, data: bytes | memoryview) -> int:
+            self.threads.add(threading.get_ident())
+            time.sleep(seconds)
+            return real(fd, data)
+
+        monkeypatch.setattr(os, "write", write)
+
+
+async def test_a_reply_over_a_slow_disk_ends_with_every_entry_in_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The writes are off the event loop and still behind it when the model has finished: it is
+    the flush at the end of the reply that makes the file whole, so whatever reads it next (a
+    /clear, a /compact, a resume) finds every entry, the last included."""
+    path = tmp_path / "transcript.jsonl"
+    disk = _SlowDisk(monkeypatch, 0.05)
+    scripted = Scripted([text("let me "), call("c1", "python", code="a")], [text("done")])
+    async with FileTranscript(str(path)) as transcript:
+        await _collect(LoopModel(scripted, as_tool(Shouting()), transcript, Confined()), "go")
+        entries = [json.loads(line) for line in path.read_text().splitlines()]
+        assert entries == list(transcript.messages) and len(entries) == 5
+    assert threading.get_ident() not in disk.threads  # none of it was written on the event loop
+
+
+async def test_a_reply_whose_entries_could_not_be_written_raises_it_rather_than_end_quietly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def full(fd: int, data: bytes | memoryview) -> int:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(os, "write", full)
+    transcript = FileTranscript(str(tmp_path / "transcript.jsonl"))
+    model = LoopModel(Scripted([text("hi")]), as_tool(Shouting()), transcript, Confined())
+    with pytest.raises(OSError, match="No space left"):
+        await _collect(model, "go")
+    with pytest.raises(OSError, match="No space left"):  # and so does the next message's first entry
+        transcript.append({"role": "user", "content": "again"})
+    monkeypatch.undo()  # room again: nothing after the failed write is written, the file closes
+    with pytest.raises(OSError, match="No space left"):
+        async with transcript:
+            pass

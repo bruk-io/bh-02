@@ -1,6 +1,8 @@
 """Sessions: the layer a session runs from, the state directory, and resuming from the CLI."""
 
 import json
+import os
+import stat
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +41,17 @@ def _own_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _models_default(config: Path, text: str) -> None:
     config.mkdir(parents=True, exist_ok=True)
     (config / "models.toml").write_text(text)
+
+
+def test_a_session_s_directory_is_made_readable_by_its_owner_alone(tmp_path: Path) -> None:
+    """Its files hold the conversation, the sub-agents' and the row log: under a umask that takes
+    nothing away, so the mode is the one it was made with (a plain `mkdir` makes it 0777)."""
+    before = os.umask(0)
+    try:
+        made = create(tmp_path / "s", "/work/a", model=None, no_jail=False)
+    finally:
+        os.umask(before)
+    assert stat.S_IMODE(made.dir.stat().st_mode) == 0o700
 
 
 def _recorded(session: Session) -> str | None:

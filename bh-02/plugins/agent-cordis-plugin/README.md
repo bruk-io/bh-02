@@ -7,9 +7,9 @@ and asks `asides`, and `/compact`, which begins a new conversation from the mode
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`, `serve`), `transcript` (`messages`, `append`), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `asides` (iterated), `executor` (`run`) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`, `serve`), `transcript` (`messages`, `append`; `flush`, if it has one), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `asides` (iterated), `executor` (`run`) |
 | `agent:tools` | `tools`: a `ToolBroker`, the tools rows `acquire` with `register(spec, run, *, runs, show)`, offered in name order | |
-| `agent:transcript` | `transcript`; config: `path` (a JSON-lines file), in memory when unset | |
+| `agent:transcript` | `transcript`; config: `path` (a JSON-lines file, made 0600 and written off the event loop), in memory when unset | |
 | `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch (its `.git/HEAD`, read from the root through no link), then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
 | `agent:asides` | `asides`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
 | `agent:access` | `access`: an `Access`, the functions rows `acquire` with `before_read(fn)` and `before_write(fn)`, which a tool asks before it opens a file (`refusal(kind, path)`) | |
@@ -148,6 +148,20 @@ interpreter at exit, so a reading left running would hold bh-02 open until it fi
 daemon's is left to the end of the process, and its answer to an event loop that has closed
 goes nowhere.
 
+The transcript's file is written off the event loop too. `FileTranscript.append` stays
+synchronous: it commits the entry in memory and queues its line to `host_paths.Appender`, which
+writes it on a thread of its own, in order, to a file made at 0600 through no link. The file is
+therefore a few entries behind the memory for a moment, and the loop flushes it (`flush()`, an
+optional method of a transcript that writes behind the loop; `MemoryTranscript` has none and is
+asked for none) at the end of every reply, however it ends: answered, failed, stopped, or closed
+by the ui. A command runs only after the reply before it has ended (the chat row reads its next
+line then, and only once `jobs.settled()`), so `/clear` and `/compact` read and replace a file
+with no write pending, and a reply that ends has left every entry of it in the file. A line that
+can't be written (a full disk) is not dropped: the next `append` and the flush raise it, and
+nothing after it is written, since a file with a hole in it would resume as another conversation.
+The transcript row enters its file, so a restart (or a retired sub-agent) writes what is queued
+and closes it.
+
 `/compact` (`agent:conversation`, `conversation.py`) is for a conversation grown long: a local model
 processes more prompt before each first token, and any model nears its context window. It asks
 the model for a summary in one step: the request is the loop's own (`loop.request_for`: the
@@ -169,7 +183,8 @@ then the summary as the model's answer, so the roles alternate; the message stay
 conversation's start, a resume's too, so it says the namespace was kept at the compaction and
 empties as the python tool's instructions say), written over the transcript row's file in one step
 (`transcript.rewrite`: written whole beside it, then renamed over it, the old file kept under
-the first of `.bak`, `.bak.2`, ... not taken, so no compaction's backup replaces another's),
+the first of `.bak`, `.bak.2`, ... not taken, so no compaction's backup replaces another's; the new
+file and the backup are made at 0600, not the umask's),
 and the loop and the transcript restart, together. The new conversation holds no `system`
 entry and no date, so the loop reads the prompt afresh for its first message (folding in
 whatever changed since the old one began, with no aside of a change) and tells the date. The

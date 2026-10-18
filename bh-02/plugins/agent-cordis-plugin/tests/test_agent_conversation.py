@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -642,3 +643,73 @@ async def test_clear_that_can_t_write_changes_nothing(
         assert jobs.empty() and path.read_bytes() == old
     finally:
         os.chmod(tmp_path, 0o700)
+
+
+class _Approved:
+    async def approve(self, question: Json) -> bool:
+        return True
+
+
+def _slow_disk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every write to a file takes its time, on the thread that makes it: when a reply has ended
+    the thread is still behind the loop, unless the reply waited for it."""
+    real = os.write
+
+    def slow(fd: int, data: bytes | memoryview) -> int:
+        time.sleep(0.05)
+        return real(fd, data)
+
+    monkeypatch.setattr(os, "write", slow)
+
+
+async def _replied(transcript: FileTranscript) -> None:
+    """The loop answers a message over `transcript`: a tool step, then the answer."""
+
+    async def python(input: Json) -> Json:
+        return {"content": "42"}
+
+    tools = ToolBroker()
+    tools.register(PYTHON, python)
+    scripted = Scripted(
+        [text("let me see"), {"type": "tool_call", "id": "c1", "name": "python", "input": {"code": "x"}}],
+        [text("x holds 42")],
+    )
+    loop = LoopModel(scripted, tools, transcript, _Approved(), today=lambda: "2026-10-07")
+    assert [e["type"] async for e in loop.reply("find x")][-1] == "stop"
+
+
+def _entries(path: Path) -> list[Json]:
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+async def test_clear_after_a_reply_keeps_every_entry_of_it_in_the_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A command runs only once the reply before it has ended (the chat row reads its next line
+    then), and the loop has flushed the transcript by that time, though the row is still running:
+    /clear finds the whole reply in the file it keeps as the `.bak`, the last entry included, and
+    does not find the file empty."""
+    path = tmp_path / "transcript.jsonl"
+    _slow_disk(monkeypatch)
+    async with FileTranscript(str(path)) as transcript:
+        await _replied(transcript)
+        await _clear(Loader(str(path)))
+        appended = list(transcript.messages)
+    assert [m["role"] for m in appended] == ["tools", "user", "assistant", "tool", "assistant"]
+    assert _entries(Path(f"{path}.bak")) == appended
+    assert path.read_text() == ""
+
+
+async def test_compact_after_a_reply_summarises_every_entry_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "transcript.jsonl"
+    _slow_disk(monkeypatch)
+    model = Scripted([text("x holds 42"), stop("end_turn")])
+    async with FileTranscript(str(path)) as transcript:
+        await _replied(transcript)
+        await _compact(path, model)
+        appended = list(transcript.messages)
+    assert model.requests == [(asked(appended), [PYTHON])]  # the whole reply, its answer included
+    assert _entries(Path(f"{path}.bak")) == appended
+    assert FileTranscript(str(path)).messages == tuple(seeded("x holds 42"))

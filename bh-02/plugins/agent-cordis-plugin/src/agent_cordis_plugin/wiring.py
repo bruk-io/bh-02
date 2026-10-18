@@ -48,7 +48,7 @@ from agent_cordis_plugin.loop import (
 from agent_cordis_plugin.system import SystemConfig, SystemPrompt
 from agent_cordis_plugin.tools import ToolBroker
 from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript
-from cordis import Effects, acquire, bind, component
+from cordis import Effects, acquire, bind, component, enter
 from cordis_helpers import Hooks
 
 __all__ = [
@@ -74,8 +74,14 @@ class TranscriptConfig:
 
 @component(provides=("transcript",))
 async def transcript(*, config: TranscriptConfig) -> Effects:
-    """Fills a `transcript` row: `use = "agent:transcript"`."""
-    yield bind("transcript", FileTranscript(config.path) if config.path else MemoryTranscript())
+    """Fills a `transcript` row: `use = "agent:transcript"`. A file's is entered, so what it has
+    queued is written and its file closed when the row leaves (a restart, a retired sub-agent)."""
+    if config.path:
+        kept = FileTranscript(config.path)
+        yield enter(kept)
+        yield bind("transcript", kept)
+    else:
+        yield bind("transcript", MemoryTranscript())
 
 
 @dataclass(frozen=True, slots=True)

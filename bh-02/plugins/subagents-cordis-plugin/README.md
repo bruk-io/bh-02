@@ -212,11 +212,13 @@ runs.
   0600 (not the umask's: a test runs with umask 0), so there is no moment it is wider. A line is
   `{"at": TIME, "event": ...}`: first `agent_start` (name, type, prompt, background), then every
   event of the child's reply as it came, then `agent_end` with the report (or why it gave none),
-  whatever ended the child. Writes run on a thread, so the event loop never waits on a disk, one
+  whatever ended the child. Writes go through `host_paths.Appender`, the family's one appender (the
+  child's transcript uses it too), on a thread, so the event loop never waits on a disk, one
   after the other: a record waits for the write before it, even one a cancelled child's caller left
   to finish, so the end record never overtakes or mixes with it, and closing waits for the last; one
-  that fails (a full disk) stops the log and the child goes on. A session kept in memory has no log;
-  a log that can't be made is said in a note, and the child runs without one.
+  that fails (a full disk) stops the log and the child goes on: the log is for the person, so this is
+  the one place a failed write is dropped (the transcript's is raised). A session kept in memory has
+  no log; a log that can't be made is said in a note, and the child runs without one.
 - **`bh-02 watch SESSION AGENT`** (the app's, `bh_02.watching`) renders one log read-only, follows it
   until `agent_end` (`--once` stops after what is there), and refuses names bh-02 did not make before
   it builds a path: it reads through `host_paths.read_beneath` (no link, a descriptor opened

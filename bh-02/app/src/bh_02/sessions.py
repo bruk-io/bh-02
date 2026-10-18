@@ -231,7 +231,7 @@ def create(root: Path, cwd: str, *, model: str | None, no_jail: bool, patches: S
     sid = f"{now:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
     # To the microsecond, so two sessions started in the same second still list newest first.
     session = Session(sid, root / sid, cwd, stack, now.isoformat(timespec="microseconds"), tuple(patches))
-    session.dir.mkdir(parents=True)
+    session.dir.mkdir(mode=0o700, parents=True)  # the person's alone: its files hold the conversation
     meta: dict[str, Any] = {"id": sid, "cwd": cwd, "stack": stack, "created": session.created}
     if patches:
         meta["patches"] = list(patches)

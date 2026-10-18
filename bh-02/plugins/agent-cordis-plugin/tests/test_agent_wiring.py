@@ -61,9 +61,13 @@ async def test_executor_binds_one_that_runs_a_call_at_a_time() -> None:
 async def test_a_transcript_with_a_path_is_kept_in_the_file_and_read_back(tmp_path: Path) -> None:
     path = str(tmp_path / "transcript.jsonl")
     effects = await drive(transcript(config=TranscriptConfig(path=path)))
-    first = effects[0].args[1]
+    # entered, so the row's leaving writes what is queued and closes the file; then bound
+    assert [e.name for e in effects] == ["enter", "bind"]
+    key, first = effects[1].args
+    assert key == "transcript" and effects[0].args[0] is first
     assert isinstance(first, FileTranscript)
     first.append({"role": "user", "content": "hi"})
     first.append({"role": "assistant", "content": "hello", "provider": {"role": "assistant", "x": 1}})
+    await first.flush()  # appended in memory at once, in the file once its thread has written it
     again = FileTranscript(path)  # a resumed session
     assert again.messages == first.messages
