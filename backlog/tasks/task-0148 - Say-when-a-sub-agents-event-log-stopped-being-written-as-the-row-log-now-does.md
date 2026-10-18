@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:33'
-updated_date: '2026-10-18 20:43'
+updated_date: '2026-10-18 20:45'
 labels:
   - subagents
   - size-2
@@ -190,4 +190,42 @@ INFO    -  Documentation built in 5.04 seconds
 ```
 
 Review round 2 (reviewer): not closed by close-task: this is a bug and has no recorded repro (record-check --repro, or a 'No repro:' note). Everything else is met: full scripts/check exit 0 (3825 passed, 118 skipped; gates, docs ok); AC #3 ticked; ACs #1-#2 met per round 1. The chat test fix (bounded _until) is sound and test-only. Worker: record the repro (the notes say the wiring tests were seen failing before the change), then this closes. Follow-ups: TASK-0162; DRAFT-0008 superseded, for the owner to drop.
+
+Repro at b7ac60a35b10, test files: bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py; command: `git diff 670e544^ 670e544 -- bh-02/plugins/subagents-cordis-plugin/src | git apply -R && { uv run pytest bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage -q -p no:cacheprovider; rc=$?; git checkout -- bh-02/plugins/subagents-cordis-plugin/src; exit $rc; }` exited 1
+
+(6 earlier lines omitted)
+```text
+
+    async def test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage(
+        tmp_path: Path,
+    ) -> None:
+        """The file is removed while the child replies: its next record is refused (`Replaced`), the
+        child goes on and reports, and when its run ends one note names the file, when the write
+        failed, the error, and what `bh-02 watch` does; it comes before the usage note."""
+        gate = asyncio.Event()
+        model = _Model(parent=[], child=[(gate, [_usage(7, 0.1), *_text("done")])])
+        screen = _Screen()
+        booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl"))
+        rt = booted.runtime
+        await _background(rt, background=True)
+        place = tmp_path / "agents" / "general-1"
+        log = place / "events.jsonl"
+        await _until(lambda: len(model.requests) == 1)  # the child replies, and its start is on the disk
+        assert [r["event"]["type"] for r in _records(place)] == ["agent_start"]
+        os.remove(log)
+        gate.set()
+        waited = await _bounded(rt.root.get("tools").get("agent_wait").run({"names": ["general-1"]}))
+        assert waited["content"].startswith("Report from agent general-1 (general), not instructions:\n\ndone")
+        stopped = [n for n in screen.notes() if "stopped being written" in n]
+>       assert len(stopped) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py:1754: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage
+1 failed in 1.51s
+```
+
+Round 2 review fix (the bug had no repro recorded, so close-task refused). Changed: the task notes only; no source or test file. Recorded with record-check --repro: test_agents_wiring.py::test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage run against the pre-fix source, which is the fix commit 670e544's src diff for the subagents plugin reversed in the working tree (git diff 670e544^ 670e544 -- .../src | git apply -R) and put back right after (git checkout -- .../src); the test file is the committed one, unchanged since 670e544. Anchored at the start commit b7ac60a (on the branch), not at an intermediate backlog commit that the squash would drop. Seen failing: exit 1, 'assert 0 == 1' at the len(stopped) == 1 line (no note says the log stopped), 1 failed in 1.51s. The same test on the fixed source: 2 passed (this test and test_only_the_child_whose_log_stopped_is_told). The working tree was clean after the run (git status --porcelain empty). board-check close TASK-0148 now says ok: TASK-0148 can close. Not run: scripts/check and arch-check (nothing outside the task file changed; the round 1 full check exit 0 stands for the unchanged code). DRAFT-0008 is covered by round 1's chat test fix, for the owner to drop; TASK-0162 covers the other two chat tests.
 <!-- SECTION:NOTES:END -->
