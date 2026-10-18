@@ -7,7 +7,7 @@ and asks `asides`, and `/compact`, which begins a new conversation from the mode
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`), `tools` (`specs`, `get`, `ready`, `serve`), `transcript` (`messages`, `append`; `flush`, if it has one), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `asides` (iterated), `executor` (`run`) |
+| `agent:loop` | `loop`; config: `max_nudges` (default 2), `requires` (the tools a conversation can't begin without; the shipped layer: `["python"]`), `wait` (how long it waits for them, and for a tool restarting; 30 s) | `model` (`complete`, `tool_changes`, `settings`), `tools` (`specs`, `get`, `ready`, `serve`), `transcript` (`messages`, `append`; `flush`, if it has one), `system` (`text`), `approval` (`unasked`), `output` (`confirm`), `asides` (iterated), `executor` (`run`) |
 | `agent:tools` | `tools`: a `ToolBroker`, the tools rows `acquire` with `register(spec, run, *, runs, show)`, offered in name order | |
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file, made 0600 and written off the event loop), in memory when unset | |
 | `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch (its `.git/HEAD`, read from the root through no link), then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
@@ -119,9 +119,25 @@ date yet or the last one it told is another day's: the entry's content starts
 `(Today's date: 2026-10-07.)` and the entry carries the date as `"today"`, which is how the loop
 finds the last one told. So a resumed session (the transcript is a file) does not tell it again
 the same day, and `/clear` (an empty transcript) does. A message that also tells a change in the
-instructions has the date first, then the change, then the person's words. The clock is
-`LoopModel`'s `today` (the real date in the `agent:loop` row; a test gives its own). The providers send
-`content` alone, so `today` never reaches a model.
+instructions has the date first, then the change, then the person's words. The date is the day
+where bh-02 runs, taken from the loop's clock (below). The providers send `content` alone, so
+`today` never reaches a model.
+
+The loop reads time from one clock value, `LoopModel`'s `clock` (`records.Clock`: `now()`, an aware
+UTC time, and `monotonic()`, seconds for durations; the real one in the `agent:loop` row, a test
+gives its own: `agent_cordis_plugin.testing`). It records on the entries it appends, besides the
+conversation (decision-0009; CONTRACTS.md: message, step record): on a person's message (a feedback
+line and an unanswered message too) `at`, when it came; and on each assistant entry a model step made
+(a `STOPPED` or `FAILED` one too) `step`: `at` (when its request was handed to the model),
+`first_chunk` and `took` (seconds to its first and last chunk of any kind), `model` (the id the
+provider's `usage` chunk named), `usage` (the step's usage chunks summed, `cost_usd` included, by
+`records.summed`, which `/compact` sums its own with), `settings` (the model's optional `settings`
+attribute, only on a conversation's first step and when it differs from the last one recorded, found
+from the end of the transcript, so a resumed conversation compares with what it recorded) and
+`tool_changes` (only when `listed`). All are optional: an entry from before them reads as it did and is
+sent as it was, and no provider sends one (`replayed` and `records_for` read the keys they use). The
+entry that answers a message the model was never asked (the reply stopped while the prompt was read)
+is no step and has no `step`.
 
 Reading the prompt (`system.text()`, whose sections may read many files: memory's reads every
 CLAUDE.md, the python tool's asks its jail what it reads) and asking `asides` (memory's on-touch function reads rule

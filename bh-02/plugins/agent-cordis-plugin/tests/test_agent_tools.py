@@ -10,6 +10,7 @@ import pytest
 from agent_cordis_plugin import (
     DECLINED,
     FAILED,
+    Clock,
     LoopConfig,
     LoopModel,
     MemoryTranscript,
@@ -381,7 +382,9 @@ async def test_a_tool_removed_or_redefined_is_told_and_a_call_to_a_removed_one_d
     clock = [0.0]
     model = _Scripted([_text("first")], [_call("c1", "echo", text="x")], [_text("done")], [_text("ok")])
     transcript = MemoryTranscript()
-    looped = LoopModel(model, broker, transcript, _Approval(), wait=5, clock=lambda: clock[-1])
+    looped = LoopModel(
+        model, broker, transcript, _Approval(), wait=5, clock=Clock(monotonic=lambda: clock[-1])
+    )
     await _said(looped, "one")
     remove_echo()
     await _said(looped, "two")  # missing for less than `wait`: restarting, not removed

@@ -53,6 +53,10 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **models** (row and key): `models:catalog`: the models there are and which one the model row names, for `/model` and the status bar.
 - **step**: one request to the model and the answer it streams back: it answers, or asks for calls to run.
 - **request**: what one step hands the model: the conversation's first prompt, its messages, and the tools offered.
+- **step record** (`step`, on an assistant entry): what the loop records of a step: `at` (when its request was handed to the model), `first_chunk` and `took` (seconds to its first and its last chunk), `model` (the id that answered), `usage` (its usage, summed, with cost), and, only when new to the conversation, `settings` and `tool_changes` (`listed`); every field is optional, so an older transcript reads as it did ([CONTRACTS.md](CONTRACTS.md), step record).
+- **`at`**: when something came, UTC ISO-8601 to the millisecond with `Z` (`2026-10-18T03:47:12.345Z`), which sorts as text; on a person's message entry, and in a step record, when its request was handed to the model.
+- **settings** (a model's): what its steps are made with, recorded in a step record on a conversation's first step and whenever they change: the named model (`ENDPOINT/MODEL`), its provider, and the `max_tokens` and `temperature` it sends (none for Claude Code).
+- **clock** (the loop's): the one value the loop reads time from, `now()` (aware UTC) and `monotonic()` (seconds, for durations); the date it tells the model is that day where bh-02 runs; a test gives its own.
 - **nudge**: the loop telling the model why its last step didn't count (cut off, silent, unreadable), a bounded number of times.
 - **conversation**: what the model is sent, from the session's start, `/clear` or `/compact` until the next one; one transcript file.
 - **transcript** (row and key): the conversation the model is sent again each step, kept in the session's `transcript.jsonl`.

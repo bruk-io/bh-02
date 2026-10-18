@@ -43,9 +43,7 @@ reply leaves at most one in flight, however often the loop reloads between them.
 
 import asyncio
 import contextlib
-import datetime
 import json
-import time
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
@@ -62,6 +60,15 @@ from typing import Any, Protocol, runtime_checkable
 
 from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.prompt import changes, edits, latest
+from agent_cordis_plugin.records import (
+    Clock,
+    Settings,
+    StepRecord,
+    day_of,
+    settings_to_record,
+    stamp,
+    step_record,
+)
 from agent_cordis_plugin.stops import ACT, ANSWERED, FEEDBACK, REFUSED, classify
 from agent_cordis_plugin.toolset import FIXED, LISTED, begun, changed, listed, removed, told
 
@@ -252,11 +259,6 @@ def _listed(names: Sequence[str]) -> str:
     return ", ".join(f"`{name}`" for name in names)
 
 
-def _today() -> str:
-    """Today's date as the loop tells it (`2026-10-07`): `LoopModel`'s clock unless a test gives one."""
-    return datetime.date.today().isoformat()
-
-
 def _undated(messages: Sequence[Json], today: str) -> bool:
     """Whether the model is yet to be told `today`: the transcript has told it no date (a new
     conversation, or one begun before the loop told dates), or the last one it told (a user
@@ -265,12 +267,13 @@ def _undated(messages: Sequence[Json], today: str) -> bool:
     return told != today
 
 
-def _asked(message: str, today: str | None, aside: str) -> dict[str, Any]:
+def _asked(message: str, today: str | None, aside: str, at: str) -> dict[str, Any]:
     """The person's message as the transcript keeps it: the date first when it is told
     (`today`), then what changed in the model's instructions (`aside`), then the message. The date
-    rides on the entry as `today` too, which is how a later message finds the last one told."""
+    rides on the entry as `today` too, which is how a later message finds the last one told. `at`:
+    when the message came (`records.stamp`), which a provider does not send either."""
     told = [*([_DATED.format(today)] if today else []), *([aside] if aside else []), message]
-    return {"role": "user", "content": "\n\n".join(told)} | ({"today": today} if today else {})
+    return {"role": "user", "content": "\n\n".join(told)} | ({"today": today} if today else {}) | {"at": at}
 
 
 def _answer(call: Json, content: str, asides: Sequence[str]) -> dict[str, Any]:
@@ -445,8 +448,14 @@ class LoopModel:
     (`prompt.edits`), and told on that message (`prompt.changes`), so the conversation's start
     never changes under a model server's cache and the transcript holds the prompt once, not
     once per change. The date is told on the person's message instead, when the transcript has
-    told none yet or another day's (`today`, the clock; a test gives its own): first on that
-    message, then any change to the instructions, then the message.
+    told none yet or another day's (the day where bh-02 runs, from `clock`; a test gives its own):
+    first on that message, then any change to the instructions, then the message.
+
+    The loop also records, on the entries it appends, when and how long (`records`; CONTRACTS.md:
+    message, step record): `at` on the person's message, and on each assistant entry a model step
+    made, its `step`: when its request was handed over, the seconds to its first and its last
+    chunk, the model that answered, its usage, and the model's settings when they are new to the
+    conversation. A provider sends none of it.
 
     The prompt is read, and `asides` asked, on `executor` (the `executor` row's, which a reloaded
     loop shares with the last one); a loop built without one (a test, direct use) makes its own.
@@ -468,12 +477,11 @@ class LoopModel:
         max_nudges: int = 2,
         system: System | None = None,
         asides: Asides | None = None,
-        today: Callable[[], str] = _today,
         executor: Executor | None = None,
         *,
         requires: Sequence[str] = (),
         wait: float = 30.0,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Clock | None = None,
     ) -> None:
         self._model = model
         self._tools = tools
@@ -482,14 +490,13 @@ class LoopModel:
         self._max_nudges = max_nudges
         self._system = system
         self._asides = asides
-        self._today = today
         self._requires = tuple(requires)
         self._wait = wait
         # what the model was last told (`prompt.latest`), and of how many `system` entries: the
         # transcript keeps a change as edits, so this saves applying them all for every message
         self._last: tuple[int, str | None] = (0, None)
         self._executor: Executor = executor if executor is not None else OneAtATime()
-        self._clock = clock
+        self._clock = clock if clock is not None else Clock()
         self._ready = False  # whether the tools `requires` names have registered, once
         self._missing: dict[str, float] = {}  # a tool the conversation has, missing since when
         self._nested: list[str] = []  # what `asides` said of the calls the running call made (`nested`)
@@ -529,7 +536,7 @@ class LoopModel:
         """The tools registered now, in name order, with each of `before` that is missing for
         less than `wait` seconds kept as it was: its row is restarting, not gone."""
         now = {str(spec["name"]): spec for spec in self._tools.specs()}
-        at = self._clock()
+        at = self._clock.monotonic()
         self._missing = {name: since for name, since in self._missing.items() if name not in now}
         for spec in before:
             name = str(spec["name"])
@@ -622,9 +629,10 @@ class LoopModel:
         self._nested += await self._executor.run(partial(asides_for, tuple(self._asides or ()), ran))
         return {"content": result, "failed": failed}
 
-    def _unanswered(self, message: str, dated: str | None, why: str) -> None:
-        """Keep the person's message, answered with `why`: the reply ended before the model was asked."""
-        self._transcript.append(_asked(message, dated, ""))
+    def _unanswered(self, message: str, dated: str | None, why: str, at: str) -> None:
+        """Keep the person's message (that came `at`), answered with `why`: the reply ended before
+        the model was asked, so the answer is no step and has no `step` record."""
+        self._transcript.append(_asked(message, dated, "", at))
         self._transcript.append({"role": "assistant", "content": why})
 
     async def reply(self, message: str) -> AsyncIterator[Json]:
@@ -650,7 +658,8 @@ class LoopModel:
 
     async def _reply(self, message: str) -> AsyncGenerator[Json]:
         """`reply`, without the flush: run model steps until one answers the message."""
-        today = self._today()
+        came = self._clock.now()
+        at, today = stamp(came), day_of(came)
         dated = today if _undated(self._transcript.messages, today) else None
         if not self._ready and (waiting := [n for n in self._requires if self._tools.get(n) is None]):
             yield {"type": "note", "text": _WAITING.format(_listed(waiting))}
@@ -660,19 +669,20 @@ class LoopModel:
         except asyncio.CancelledError:
             # stopped while the tools or the prompt were read: the message is kept all the same,
             # answered as one stopped in its first model step is
-            self._unanswered(message, dated, STOPPED)
+            self._unanswered(message, dated, STOPPED, at)
             raise
         except Unstarted:  # a tool it requires never came: as a model step that failed
-            self._unanswered(message, dated, FAILED)
+            self._unanswered(message, dated, FAILED, at)
             raise
-        self._transcript.append(_asked(message, dated, aside))
+        self._transcript.append(_asked(message, dated, aside, at))
         for text in shown_told:
             yield {"type": "note", "text": text}
         nudges = 0
         while True:
-            step = _Step()
             tools = self._offered()
             offered = [str(spec["name"]) for spec in tools]
+            settings = settings_to_record(getattr(self._model, "settings", None), self._transcript.messages)
+            step = _Step(self._clock, settings, self._mode())  # begins now: its request is handed over next
             chunks = self._model.complete(request_for(self._transcript.messages), tools)
             try:
                 async for chunk in chunks:
@@ -759,15 +769,27 @@ class LoopModel:
             nudges += 1
             aside, shown_told = await self._told()
             said = f"{FEEDBACK[stop]}\n\n{aside}" if aside else FEEDBACK[stop]
-            self._transcript.append({"role": "user", "content": said, "feedback": stop})
+            fed = {"role": "user", "content": said, "feedback": stop, "at": stamp(self._clock.now())}
+            self._transcript.append(fed)
             for text in shown_told:
                 yield {"type": "note", "text": text}
 
 
 class _Step:
-    """One model step's chunks, collected: its text, its calls, why it stopped, what it was."""
+    """One model step's chunks, collected: its text, its calls, why it stopped, what it was, and
+    when (`record`). It begins when it is made, as the request is handed to the model: `settings`
+    are the model's, to record when this step is the first of the conversation or they changed
+    (`records.settings_to_record`), and `mode` how it wants its tools offered."""
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Clock, settings: Settings | None, mode: str) -> None:
+        self._clock = clock
+        self._settings = settings
+        self._mode = mode
+        self._at = clock.now()
+        self._began = clock.monotonic()
+        self._first: float | None = None  # when the first chunk of any kind came
+        self._last: float | None = None  # and the last
+        self._usage: list[Json] = []
         self._text: list[str] = []
         self.calls: list[Json] = []
         self.finish: str | None = None
@@ -778,7 +800,10 @@ class _Step:
         return "".join(self._text)
 
     def take(self, chunk: Json) -> Json | None:
-        """Record one chunk; return it if the person should see it."""
+        """Record one chunk, and when it came; return it if the person should see it."""
+        self._last = self._clock.monotonic()
+        if self._first is None:
+            self._first = self._last
         match chunk["type"]:
             case "text":
                 self._text.append(chunk["text"])
@@ -793,26 +818,36 @@ class _Step:
             case "message":
                 self.provider = chunk.get("message")
                 return None
+            case "usage":
+                self._usage.append(chunk)
         return chunk
 
+    def record(self) -> StepRecord:
+        """This step's `step` (`records.step_record`): when it began, how long its first chunk and
+        its last took, the model that answered, its usage, and its settings if they are new."""
+        return step_record(
+            self._at, self._began, self._first, self._last, self._usage, self._settings, self._mode
+        )
+
     def unfinished(self, why: str) -> Json:
-        """The transcript entry for a step that never finished: what it said, then `why`. No
-        calls: none of them ran."""
+        """The transcript entry for a step that never finished: what it said, then `why`, and the
+        step's record (what came before it ended). No calls: none of them ran."""
         said = self.text.rstrip()
-        return {"role": "assistant", "content": f"{said}\n\n{why}" if said else why}
+        return {"role": "assistant", "content": f"{said}\n\n{why}" if said else why, "step": self.record()}
 
     def entry(self, stop: str) -> Json:
         """The transcript entry for this step. Only an `act` step keeps its calls: a call that
         was cut off or would not decode never ran, so nothing may answer it. The provider's own
         message (thinking blocks and their signatures included) is replayed verbatim for an `act`
         step, and for an `answered` or `refused` one that made no call; a truncated or
-        undecodable step's message is dropped, since its calls would go back with no result."""
+        undecodable step's message is dropped, since its calls would go back with no result. Each
+        carries the step's record (`record`)."""
         if stop == ACT:
             entry: dict[str, Any] = {"role": "assistant", "content": self.text, "tool_calls": self.calls}
         elif stop in (ANSWERED, REFUSED) and not self.calls:
             entry = {"role": "assistant", "content": self.text}
         else:
-            return {"role": "assistant", "content": self.text}
+            return {"role": "assistant", "content": self.text, "step": self.record()}
         if self.provider is not None:
             entry["provider"] = self.provider
-        return entry
+        return entry | {"step": self.record()}

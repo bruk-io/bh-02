@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from agent_cordis_plugin.loop import Model, request_for
+from agent_cordis_plugin.records import summed
 from agent_cordis_plugin.stops import ACT, ANSWERED, REFUSED, SILENT, TRUNCATED, UNDECODABLE, classify
 from agent_cordis_plugin.transcript import FileTranscript, rewrite
 from cordis_helpers import Job
@@ -121,8 +122,6 @@ _UNUSABLE: Mapping[str, str] = {
         "TO KEEP, naming what matters, or /clear to start afresh without a summary"
     ),
 }
-# A usage event's counts, which add up across a step's parts (CONTRACTS.md: event, usage).
-_COUNTS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
 
 class Unchanged(Exception):
@@ -254,18 +253,11 @@ def _unusable(stop: str) -> str | None:
 
 
 def _summed(usage: Sequence[Json]) -> list[Json]:
-    """A step's usage events as one, or none: each is a part of the step's (CONTRACTS.md: event),
-    so the counts and costs add up, and it is `partial` when its last part is (the step stopped
-    before its output was counted). One event, so the length of /compact's answer never depends
-    on how many parts a provider sends."""
-    if not usage:
-        return []
-    total: dict[str, Any] = {"type": "usage"} | {k: sum(int(u.get(k) or 0) for u in usage) for k in _COUNTS}
-    if costs := [float(u["cost_usd"]) for u in usage if u.get("cost_usd") is not None]:
-        total["cost_usd"] = sum(costs)
-    if usage[-1].get("partial"):
-        total["partial"] = True
-    return [total]
+    """A step's usage events as one, or none (`records.summed`, which the loop records a step's
+    usage with too). One event, so the length of /compact's answer never depends on how many
+    parts a provider sends."""
+    total = summed(usage)
+    return [] if total is None else [{"type": "usage", **total}]
 
 
 async def summarise(

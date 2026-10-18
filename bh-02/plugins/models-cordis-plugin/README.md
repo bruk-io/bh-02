@@ -305,6 +305,15 @@ table's `problem`, said like any other.
   (anything but printable ASCII), asks nothing and is said, without the key. Whatever a library
   says of a failure goes through `wire.scrubbed` and a control strip first, and a body is never quoted.
 
+## What a step tells the loop about the model
+
+Each `usage` chunk names the model that answered (`model`): claude-code's from `message_start`, openai's
+from the response's events (left out when a server names none, or sends no usage). Each provider also
+exposes `settings` (CONTRACTS.md: model), which the loop records with a conversation's first step and
+whenever it changes: the named model (`ENDPOINT/MODEL`), the provider, and, for openai, the
+`max_tokens` and `temperature` it sends (`wire.settings_for`; left out when the model's table sets none).
+Claude Code is given neither, so its settings are the model and the provider alone.
+
 ## When the tools change mid-conversation
 
 The loop keeps the list a conversation began with in its transcript and tells a change as an

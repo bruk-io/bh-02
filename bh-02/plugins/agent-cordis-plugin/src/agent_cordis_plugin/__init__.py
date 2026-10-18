@@ -43,6 +43,7 @@ from agent_cordis_plugin.loop import (
     shown,
 )
 from agent_cordis_plugin.prompt import changes, edits, latest
+from agent_cordis_plugin.records import Clock, Settings, StepRecord, Usage, day_of, stamp, summed
 from agent_cordis_plugin.stops import classify
 from agent_cordis_plugin.system import SystemConfig, SystemPrompt, branch_of, describe
 from agent_cordis_plugin.tools import HOST, JAIL, ToolBroker
@@ -72,6 +73,7 @@ __all__ = [
     "Approval",
     "Asides",
     "Asked",
+    "Clock",
     "ConversationConfig",
     "Executor",
     "Model",
@@ -80,6 +82,8 @@ __all__ = [
     "LoopModel",
     "MemoryTranscript",
     "OneAtATime",
+    "Settings",
+    "StepRecord",
     "System",
     "SystemConfig",
     "SystemPrompt",
@@ -90,6 +94,7 @@ __all__ = [
     "TranscriptConfig",
     "Unchanged",
     "Unstarted",
+    "Usage",
     "access",
     "asides",
     "asides_for",
@@ -101,6 +106,7 @@ __all__ = [
     "clear_conversation",
     "compact_conversation",
     "conversation",
+    "day_of",
     "describe",
     "edits",
     "executor",
@@ -112,7 +118,9 @@ __all__ = [
     "rewrite",
     "seeded",
     "shown",
+    "stamp",
     "summarise",
+    "summed",
     "system",
     "tools",
     "transcript",

@@ -27,9 +27,11 @@ from agent_cordis_plugin import (
     kept_in,
     rewrite,
     seeded,
+    stamp,
     summarise,
     unrestarted,
 )
+from agent_cordis_plugin.testing import noon, on
 from cordis import Effects, Runtime, bind, component
 from cordis.composition import Entry
 from cordis.loader import resolve
@@ -253,14 +255,19 @@ async def test_the_new_conversation_is_bh_02_s_message_then_the_summary_and_the_
 
     tools = ToolBroker()
     tools.register(PYTHON, nothing)
-    loop = LoopModel(model, tools, transcript, Approved(), system=Prompt(), today=lambda: "2026-10-07")
+    loop = LoopModel(model, tools, transcript, Approved(), system=Prompt(), clock=on("2026-10-07"))
     events = [e async for e in loop.reply("next")]
     assert not [e for e in events if e["type"] == "note"]  # nothing told as changed
     ((messages, _),) = model.requests
     assert messages == [
         {"role": "system", "content": "the prompt as it reads now"},
         *seed,
-        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nnext", "today": "2026-10-07"},
+        {
+            "role": "user",
+            "content": "(Today's date: 2026-10-07.)\n\nnext",
+            "today": "2026-10-07",
+            "at": stamp(noon("2026-10-07")),
+        },
     ]
 
 
@@ -674,7 +681,7 @@ async def _replied(transcript: FileTranscript) -> None:
         [text("let me see"), {"type": "tool_call", "id": "c1", "name": "python", "input": {"code": "x"}}],
         [text("x holds 42")],
     )
-    loop = LoopModel(scripted, tools, transcript, _Approved(), today=lambda: "2026-10-07")
+    loop = LoopModel(scripted, tools, transcript, _Approved(), clock=on("2026-10-07"))
     assert [e["type"] async for e in loop.reply("find x")][-1] == "stop"
 
 

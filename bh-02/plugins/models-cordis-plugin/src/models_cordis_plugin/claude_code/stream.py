@@ -95,7 +95,8 @@ class Step:
 
     Usage comes in two parts, each a `usage` chunk (CONTRACTS.md: the ui sums them): what the
     API reports at `message_start` (everything the model read, cached or not), marked
-    `partial`, then at `finish` what the final counts add to it, output included.
+    `partial`, then at `finish` what the final counts add to it, output included. Each names
+    the model id that answered (`model`, from `message_start`).
     `message_start`'s provisional output count is left out: the output is known only from the
     final `message_delta`, which a step the person stops never gets, so its usage stays
     `partial` rather than a precise-looking "1 out".
@@ -272,6 +273,8 @@ class Step:
         }
         if "output_tokens" not in self._usage:
             used["partial"] = True  # the output count is still to come (CONTRACTS.md: usage)
+        if self.model:
+            used["model"] = self.model  # the id that answered, for the loop's step record
         if (cost := cost_of(self.model, grown)) is not None:
             used["cost_usd"] = cost
         return [used]

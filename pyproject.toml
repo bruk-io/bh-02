@@ -239,7 +239,6 @@ exclude = [
     "chat_cordis_plugin.chat:converse",
     "agent_cordis_plugin.loop:LoopModel.reply",
     "agent_cordis_plugin.loop:LoopModel._flushed",            # the end of every reply: the transcript's queued writes awaited
-    "agent_cordis_plugin.loop:_today",                        # the clock: the date the loop tells with a message
     # a sub-agent: its state directory made (the session's agents/NAME, 0700), on a thread, by the
     # one function that makes it (the name is chosen on the loop, purely); the call that starts
     # its run (impure through `_run`); a finished background run's failure marked retrieved, so

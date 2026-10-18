@@ -2,7 +2,7 @@
 
 from textual.content import Content
 
-from tui_cordis_plugin import render
+from tui_cordis_plugin import frame, render
 
 
 def _styles(content: Content) -> dict[str, str]:
@@ -159,6 +159,18 @@ def test_usage_and_stops() -> None:
     assert render.is_quiet_stop({"reason": "end_turn"})
     assert not render.is_quiet_stop({"reason": "interrupted"})
     assert render.stop_line({"reason": "interrupted"}) == "stopped: interrupted"
+
+
+def test_a_usage_event_that_names_the_model_that_answered_renders_as_one_that_does_not() -> None:
+    """The providers add `model` to their usage chunks, for the loop's step record (CONTRACTS.md:
+    event): the ui shows and sums the counts, and nothing else."""
+    usage = {"type": "usage", "input_tokens": 1200, "output_tokens": 30, "cost_usd": 0.01}
+    named = usage | {"model": "claude-opus-5-5"}
+    assert render.usage_line(named) == render.usage_line(usage) == "1,200 in · 30 out · $0.0100"
+    started = {"type": "usage", "input_tokens": 8119, "cache_read_input_tokens": 8062, "partial": True}
+    rest = {"type": "usage", "output_tokens": 150, "model": "claude-opus-5-5"}
+    assert render.usage_sum(started | {"model": "claude-opus-5-5"}, rest) == render.usage_sum(started, rest)
+    assert frame.add_usage(frame.Usage(), named) == frame.add_usage(frame.Usage(), usage)
 
 
 def test_only_a_reload_or_a_failure_is_worth_a_note() -> None:

@@ -142,6 +142,7 @@ def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any
         return ClaudeCodeModel(
             ClaudeCodeConfig(
                 model=named.id,
+                name=named.name,
                 state=config.state,
                 env_file=config.env_file,
                 cwd=config.cwd,

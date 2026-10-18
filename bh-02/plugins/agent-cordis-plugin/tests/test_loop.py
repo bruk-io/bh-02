@@ -19,6 +19,7 @@ from agent_cordis_plugin import (
     FAILED,
     STOPPED,
     Asked,
+    Clock,
     FileTranscript,
     LoopModel,
     MemoryTranscript,
@@ -32,8 +33,10 @@ from agent_cordis_plugin import (
     loop,
     malformed,
     refusal,
+    stamp,
     transcript,
 )
+from agent_cordis_plugin.testing import noon, on
 from cordis import Effects, Inspection, Runtime, bind, component
 from cordis_helpers import Hooks
 
@@ -144,6 +147,11 @@ def text(s: str) -> Json:
     return {"type": "text", "text": s}
 
 
+def _bare(entry: Json) -> dict[str, Any]:
+    """An entry without the records the loop adds to it (`at`, `step`): what the model was told."""
+    return {key: value for key, value in entry.items() if key not in ("at", "step")}
+
+
 def call(id: str, name: str, **input: Any) -> Json:
     return {"type": "tool_call", "id": id, "name": name, "input": input}
 
@@ -167,7 +175,7 @@ async def test_a_text_reply_is_one_model_step_and_two_transcript_entries() -> No
     scripted, transcript = Scripted([text("hel"), text("lo")]), MemoryTranscript()
     assert (
         await _collect(
-            LoopModel(scripted, as_tool(Shouting()), transcript, Confined(), today=lambda: "2026-10-07"), "hi"
+            LoopModel(scripted, as_tool(Shouting()), transcript, Confined(), clock=on("2026-10-07")), "hi"
         )
         == "hello"
     )
@@ -175,8 +183,9 @@ async def test_a_text_reply_is_one_model_step_and_two_transcript_entries() -> No
     assert [m["role"] for m in transcript.messages] == ["tools", "user", "assistant"]
     ((messages, offered),) = scripted.requests
     assert offered == ("python",)  # the one tool, offered through tool calling
+    at = stamp(noon("2026-10-07"))
     assert messages == (
-        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nhi", "today": "2026-10-07"},
+        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nhi", "today": "2026-10-07", "at": at},
     )
 
 
@@ -259,7 +268,7 @@ async def test_a_failed_step_answers_its_message_so_the_next_request_does_not_as
     model = LoopModel(failing, as_tool(Shouting()), transcript, Confined())
     with pytest.raises(ScriptError):
         await _collect(model, "say hi")
-    assert transcript.messages[-1] == {"role": "assistant", "content": f"Hel\n\n{FAILED}"}
+    assert _bare(transcript.messages[-1]) == {"role": "assistant", "content": f"Hel\n\n{FAILED}"}
     await _collect(model, "what colour?")
     assert _roles(failing.requests[1]) == ["user", "assistant", "user"]
 
@@ -493,10 +502,6 @@ _SHOUT = "Shout when asked."  # `_Guided`'s instructions, which none of the chan
 _DAY = "2026-10-07"
 
 
-def _today() -> str:
-    return _DAY
-
-
 async def test_several_changes_keep_the_prompt_once_and_each_is_told_against_the_last_told(
     tmp_path: Path,
 ) -> None:
@@ -508,7 +513,7 @@ async def test_several_changes_keep_the_prompt_once_and_each_is_told_against_the
     where = _Where(_SHOUT)
     scripted = Scripted(*([text(f"reply {n}")] for n in range(6)))
     model = LoopModel(
-        scripted, as_tool(_Guided()), FileTranscript(str(path)), Confined(), system=where, today=_today
+        scripted, as_tool(_Guided()), FileTranscript(str(path)), Confined(), system=where, clock=on(_DAY)
     )
     readings = ["in /a", "in /b", "in /b\n\nExtensions here: sh.", "in /c\n\nExtensions here: sh."]
     for n, reading in enumerate(readings):
@@ -516,7 +521,7 @@ async def test_several_changes_keep_the_prompt_once_and_each_is_told_against_the
         await _collect(model, f"message {n}")
     # bh-02 ended and resumed: the same file, read back by a new transcript, and a new loop
     resumed = LoopModel(
-        scripted, as_tool(_Guided()), FileTranscript(str(path)), Confined(), system=where, today=_today
+        scripted, as_tool(_Guided()), FileTranscript(str(path)), Confined(), system=where, clock=on(_DAY)
     )
     await _collect(resumed, "message 4")  # it reads as it was last told
     where.text_now = "in /c"
@@ -569,7 +574,7 @@ async def test_a_transcript_that_kept_each_prompt_whole_still_loads_and_resumes(
 
     async def resume(message: str) -> None:
         loop = LoopModel(
-            scripted, as_tool(_Guided()), FileTranscript(str(path)), Confined(), system=where, today=_today
+            scripted, as_tool(_Guided()), FileTranscript(str(path)), Confined(), system=where, clock=on(_DAY)
         )
         await _collect(loop, message)
 
@@ -617,7 +622,7 @@ async def test_a_transcript_with_an_edits_entry_that_can_t_be_applied_still_answ
         transcript.append(message)
     where, scripted = _Where(_SHOUT), Scripted([text("two")])
     where.text_now = "in /b"
-    loop = LoopModel(scripted, as_tool(_Guided()), transcript, Confined(), system=where, today=_today)
+    loop = LoopModel(scripted, as_tool(_Guided()), transcript, Confined(), system=where, clock=on(_DAY))
     assert await _collect(loop, "second") == "two"
     in_b = f"in /b\n\n{_SHOUT}"
     assert scripted.requests[0][0][-1]["content"] == f"{changes(began['content'], in_b)}\n\nsecond"
@@ -709,7 +714,7 @@ async def test_a_reply_closed_mid_stream_answers_its_message_with_what_it_said_a
     reply = model.reply("tell me a long story")
     assert (await anext(reply)) == text("Once upon")
     await reply.aclose()  # the ui stopped reading and closed the reply: Ctrl-C
-    assert transcript.messages[-1] == {"role": "assistant", "content": f"Once upon\n\n{STOPPED}"}
+    assert _bare(transcript.messages[-1]) == {"role": "assistant", "content": f"Once upon\n\n{STOPPED}"}
     assert await _collect(model, "say NEXT-OK") == "NEXT-OK"
     # the next request answers the stopped message, so the model is not asked it again
     assert _roles(story.requests[1]) == ["user", "assistant", "user"]
@@ -752,7 +757,7 @@ async def test_a_reply_stopped_before_it_said_anything_is_still_answered() -> No
     await asyncio.sleep(0.01)
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
-    assert transcript.messages[-1] == {"role": "assistant", "content": STOPPED}
+    assert _bare(transcript.messages[-1]) == {"role": "assistant", "content": STOPPED}
 
 
 async def test_a_call_that_is_not_an_input_is_answered_as_text_and_runs_nothing() -> None:
@@ -957,7 +962,7 @@ async def test_a_reply_stopped_while_the_prompt_is_read_keeps_the_message_answer
         transcript,
         Confined(),
         system=Slow(),
-        today=lambda: "2026-10-07",
+        clock=on("2026-10-07"),
     )
     task = asyncio.create_task(_collect(loop, "go"))
     while not started.is_set():
@@ -965,8 +970,13 @@ async def test_a_reply_stopped_while_the_prompt_is_read_keeps_the_message_answer
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     assert tuple(m for m in transcript.messages if m["role"] != "tools") == (
-        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\ngo", "today": "2026-10-07"},
-        {"role": "assistant", "content": STOPPED},
+        {
+            "role": "user",
+            "content": "(Today's date: 2026-10-07.)\n\ngo",
+            "today": "2026-10-07",
+            "at": stamp(noon("2026-10-07")),
+        },
+        {"role": "assistant", "content": STOPPED},  # the model was never asked: no step to record
     )
 
 
@@ -977,41 +987,36 @@ async def test_the_date_is_told_with_a_conversation_s_first_message_and_the_firs
     and kept on its entry as `today`, so a resumed session (the transcript is a file) does not
     tell it again the same day, and a cleared one (an empty transcript) does."""
     day = ["2026-10-07"]
+    clock = Clock(now=lambda: noon(day[-1]))
     path = str(tmp_path / "transcript.jsonl")
     transcript = FileTranscript(path)
     scripted = Scripted([text("one")], [text("two")], [text("three")], [text("four")], [text("five")])
-    await _collect(
-        LoopModel(scripted, as_tool(Shouting()), transcript, Confined(), today=lambda: day[-1]), "first"
-    )
-    await _collect(
-        LoopModel(scripted, as_tool(Shouting()), transcript, Confined(), today=lambda: day[-1]), "second"
-    )
+    await _collect(LoopModel(scripted, as_tool(Shouting()), transcript, Confined(), clock=clock), "first")
+    await _collect(LoopModel(scripted, as_tool(Shouting()), transcript, Confined(), clock=clock), "second")
     day.append("2026-10-08")  # past midnight
-    model = LoopModel(scripted, as_tool(Shouting()), transcript, Confined(), today=lambda: day[-1])
+    model = LoopModel(scripted, as_tool(Shouting()), transcript, Confined(), clock=clock)
     await _collect(model, "third")
     await _collect(
-        LoopModel(scripted, as_tool(Shouting()), FileTranscript(path), Confined(), today=lambda: day[-1]),
+        LoopModel(scripted, as_tool(Shouting()), FileTranscript(path), Confined(), clock=clock),
         "fourth",
     )
+    one, two = stamp(noon("2026-10-07")), stamp(noon("2026-10-08"))
     assert [m for m in FileTranscript(path).messages if m["role"] == "user"] == [
-        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nfirst", "today": "2026-10-07"},
-        {"role": "user", "content": "second"},
-        {"role": "user", "content": "(Today's date: 2026-10-08.)\n\nthird", "today": "2026-10-08"},
-        {"role": "user", "content": "fourth"},  # resumed the same day
+        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nfirst", "today": "2026-10-07", "at": one},
+        {"role": "user", "content": "second", "at": one},
+        {"role": "user", "content": "(Today's date: 2026-10-08.)\n\nthird", "today": "2026-10-08", "at": two},
+        {"role": "user", "content": "fourth", "at": two},  # resumed the same day
     ]
     cleared = MemoryTranscript()
-    await _collect(
-        LoopModel(scripted, as_tool(Shouting()), cleared, Confined(), today=lambda: day[-1]), "after /clear"
-    )
+    await _collect(LoopModel(scripted, as_tool(Shouting()), cleared, Confined(), clock=clock), "after /clear")
     assert cleared.messages[1]["content"] == "(Today's date: 2026-10-08.)\n\nafter /clear"
 
 
 async def test_on_a_new_day_with_new_instructions_the_date_comes_first_then_what_changed() -> None:
     where, day = _Where(_SHOUT), ["2026-10-07"]
+    clock = Clock(now=lambda: noon(day[-1]))
     scripted, transcript = Scripted([text("one")], [text("two")]), MemoryTranscript()
-    model = LoopModel(
-        scripted, as_tool(_Guided()), transcript, Confined(), system=where, today=lambda: day[-1]
-    )
+    model = LoopModel(scripted, as_tool(_Guided()), transcript, Confined(), system=where, clock=clock)
     await _collect(model, "first")
     where.text_now, day[0] = "in /b", "2026-10-08"
     events = [e async for e in model.reply("second")]
@@ -1226,7 +1231,7 @@ async def test_the_transcript_is_flushed_after_a_reply_whose_model_failed() -> N
     model = LoopModel(Scripted(), as_tool(Shouting()), transcript, Confined())
     with pytest.raises(ScriptError, match="ran out"):
         await _collect(model, "hi")
-    assert transcript.messages[-1] == {"role": "assistant", "content": FAILED}
+    assert _bare(transcript.messages[-1]) == {"role": "assistant", "content": FAILED}
     assert transcript.flushed == [len(transcript.messages)]  # the entry the failure appended too
 
 
