@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
-updated_date: '2026-10-18 12:38'
+updated_date: '2026-10-18 12:42'
 labels:
   - app
   - size-1
@@ -117,4 +117,79 @@ INFO    -  Documentation built in 3.48 seconds
 ```
 
 Review: not closed. Both ACs met (full scripts/check exit 0, 3766 passed; AC2 ticked). close-task refuses: a bug needs its repro recorded (record-check TASK-0145 --repro -- <test>) from before the fix, or a 'No repro:' note. The worker reports the tests failing before the fix but did not record it; the reviewer cannot record a pre-fix failure honestly on the fixed tree.
+
+Review round 1 (blocking finding 1): the bug's repro is not on record, and close-task refuses a bug without one. No code change. Plan: (1) a detached git worktree at the pre-fix commit 973a789 in the scratchpad; (2) the two tests as they stand in ecd3c5e (test_row_log.py, test_command_line.py) copied onto it and committed there, so record-check can name the commit; (3) run each test there and see it fail, then record each with record-check --repro against this board (--root); (4) run the same two tests on the fixed tree (ebd3c1c) to show they pass; (5) remove the worktree; (6) squash to one commit. Risk: the worktree's bh_02 import must be the worktree's source, not the editable install of this checkout: checked with bh_02.__file__ before the recorded run.
+
+Repro at cb1d74514469, test files: bh-02/app/tests/test_row_log.py; command: `uv run pytest bh-02/app/tests/test_row_log.py::test_a_log_that_cannot_be_written_ends_and_the_run_goes_on -q` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________ test_a_log_that_cannot_be_written_ends_and_the_run_goes_on __________
+
+composition = <function composition.<locals>.layer at 0x7f2b263517a0>
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-2388/test_a_log_that_cannot_be_writ0')
+
+    async def test_a_log_that_cannot_be_written_ends_and_the_run_goes_on(
+        composition: Callable[..., Path], tmp_path: Path
+    ) -> None:
+        """The log is for the person, not the run: its directory is gone (a session being removed), the first
+        write fails on its thread, and the listener stops without taking down the row that was emitting. The
+        person is told once, after the rows have unwound, through `report`: the file, when the shell found the
+        write failing, and the error."""
+        log = tmp_path / "gone" / "rows.jsonl"
+        told: list[str] = []
+        await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], report=told.append, row_log=log), 10)
+        assert not log.exists()
+>       (line,) = told
+        ^^^^^^^
+E       ValueError: not enough values to unpack (expected 1, got 0)
+
+bh-02/app/tests/test_row_log.py:153: ValueError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_row_log.py::test_a_log_that_cannot_be_written_ends_and_the_run_goes_on
+1 failed in 2.80s
+```
+
+Repro at cb1d74514469, test files: bh-02/app/tests/test_command_line.py; command: `uv run pytest bh-02/app/tests/test_command_line.py::test_a_row_log_that_stops_is_said_once_after_the_app_exits_and_a_healthy_one_is_not -q` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_a_row_log_that_stops_is_said_once_after_the_app_exits_and_a_healthy_one_is_not _
+
+composition = <function composition.<locals>.layer at 0x7f2effe25fe0>
+state = PosixPath('/tmp/pytest-of-root/pytest-2389/test_a_row_log_that_stops_is_s0')
+
+    def test_a_row_log_that_stops_is_said_once_after_the_app_exits_and_a_healthy_one_is_not(
+        composition: Callable[..., Path], state: Path
+    ) -> None:
+        """A row log that can't be written ends the log and not the run, and the shell says so once, after
+        the app has exited: the file, when the shell found the write failing, and the error. Here a link
+        stands at the log's name (the appender never follows one), so the first write fails with ELOOP."""
+        patch = _patch(composition)
+        healthy = CliRunner().invoke(main, ["--no-jail", "--patch", str(patch)])
+        assert healthy.exit_code == 0, healthy.output
+        assert len(healthy.stderr.splitlines()) == 1  # the farewell, and nothing about the log
+        (session,) = (state / "state" / "bh-02" / "sessions").iterdir()
+        log = session / "rows.jsonl"
+        log.unlink()
+        log.symlink_to(state / "elsewhere.jsonl")
+        resumed = CliRunner().invoke(main, ["--resume", "--patch", str(patch)])
+        assert resumed.exit_code == 0, resumed.output
+        *before, farewell = resumed.stderr.splitlines()
+        assert farewell.startswith("session ")  # said last, after the line about the log
+>       (told,) = before
+        ^^^^^^^
+E       ValueError: not enough values to unpack (expected 1, got 0)
+
+/tmp/claude-0/-home-user/a0d5191d-f6a5-53e2-ae9a-0fb260cd6c48/scratchpad/prefix-973a789/bh-02/app/tests/test_command_line.py:93: ValueError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_command_line.py::test_a_row_log_that_stops_is_said_once_after_the_app_exits_and_a_healthy_one_is_not
+1 failed in 2.48s
+```
+
+Review round 1, blocking finding 1 (the repro is not on record): fixed by recording it, no code change. A detached worktree at the pre-fix commit 973a789 (in the scratchpad, removed afterwards) got the two tests as they stand in ecd3c5e, committed there as cb1d745 (tree = 973a789 plus those two test files; no source change). bh_02 imported from that worktree (checked). Seen failing on the pre-fix tree: test_row_log.py::test_a_log_that_cannot_be_written_ends_and_the_run_goes_on fails (ValueError: not enough values to unpack (expected 1, got 0): nothing reported); test_command_line.py::test_a_row_log_that_stops_is_said_once_after_the_app_exits_and_a_healthy_one_is_not fails at (told,) = before (0 lines). Both recorded: record-check TASK-0145 --repro --root /home/user/bh-02 -- uv run pytest <test> -q, each exit 0 ('recorded on TASK-0145'). Passing on the fixed tree (ebd3c1c): the same two tests, 2 passed. Test files unchanged since cb1d745 (git diff --quiet). board-check close TASK-0145 (read-only): 'ok: TASK-0145 can close'. Not closed: that is the reviewer's. Note: cb1d745 is not on the branch; it is kept by git's object store (gc does not prune it for two weeks), and close-task reads it by its sha. No criterion ticked; scripts/check not run (no code changed).
 <!-- SECTION:NOTES:END -->
