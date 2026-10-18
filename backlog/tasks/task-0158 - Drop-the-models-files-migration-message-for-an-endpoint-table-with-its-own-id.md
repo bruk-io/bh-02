@@ -23,7 +23,7 @@ The owner's no-compatibility rule (root CLAUDE.md, Conventions), decided 2026-10
 <!-- AC:BEGIN -->
 - [x] #1 _endpoint_problem has no check for an id on an endpoint table, and no message, docstring or doc page describes the old one-model-per-table shape
 - [x] #2 The test files that used an old-shape table as their broken models file use another broken table, and still prove what they proved (each test's assertion is about its own subject, not the old shape)
-- [ ] #3 A test shows an endpoint table with an id on a built-in provider is refused with the generic error; scripts/check passes
+- [x] #3 A test shows an endpoint table with an id on a built-in provider is refused with the generic error; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
