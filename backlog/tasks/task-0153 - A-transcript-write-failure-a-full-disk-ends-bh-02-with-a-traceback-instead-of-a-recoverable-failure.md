@@ -3,7 +3,7 @@ id: TASK-0153
 title: >-
   A transcript write failure (a full disk) ends bh-02 with a traceback instead
   of a recoverable failure
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 13:24'
@@ -240,4 +240,6 @@ INFO    -  Documentation built in 4.16 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 2: closed. Full scripts/check exit 0 (recorded). AC1: TranscriptWriteFailed (kind, message naming file and /restart transcript) from FileTranscript._refusing, shown by chat:converse like TranscriptReplaced. AC2: two loop tests with real failing writes assert kind/message and nothing after the failed line; repro recorded at dff0025 fails without the guard. Nit, not filed: no test drives the TUI to show the notice (same path TranscriptReplaced uses).
 <!-- SECTION:NOTES:END -->
