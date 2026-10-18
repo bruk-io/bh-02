@@ -3,7 +3,7 @@ id: TASK-0155
 title: >-
   Fold a resumed run's boot on the trajectory: mark each run's start in
   rows.jsonl
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 14:31'
@@ -112,4 +112,6 @@ INFO    -  Documentation built in 4.54 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (independent): closed. Full scripts/check passed (3874 passed, 118 skipped; all gates, docs ok; tokens skipped, no bh-01 dist), tree unchanged after it. AC1: run line written first by bootstrap._row_log, trajectory._reloads clears seen and indexes run, _grouped keys on (first, run); tests and planted violations in notes. AC2: GLOSSARY (lifecycle event, rows.jsonl, run, first load, bh-02 trajectory) and docs command-line.md / sessions.md describe the run line and the folded line. Nit only: _reloads sorts run lines by wall-clock 'at' with rows, so a backwards clock step between runs could misplace a boundary; not filed, no realistic path worth a task.
 <!-- SECTION:NOTES:END -->
