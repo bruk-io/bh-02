@@ -1,11 +1,11 @@
 ---
 id: TASK-0142
 title: A call left unanswered by a crash is answered when the session resumes
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
-updated_date: '2026-10-18 14:01'
+updated_date: '2026-10-18 14:02'
 labels:
   - agent
   - size-3
@@ -190,4 +190,6 @@ FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_unanswered_calls.py::t
 ```
 
 Round 2 (review finding 1: no recorded repro). Recorded the repro with record-check at the pre-fix tree. 0af979a has no test for this bug (the test file arrives with the fix, b58c1a6), so the repro commit is a853d315f07b: 0af979a plus test_agent_unanswered_calls.py alone, copied unchanged from b58c1a6 (a throwaway commit made in a detached worktree of 0af979a with its own venv; no source file differs from 0af979a). The command, run from that worktree: record-check TASK-0142 --repro --lines 80 --root /home/user/bh-02 -- uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_unanswered_calls.py. It exited 1: 3 failed, 5 passed. The 3 failures are the bug itself: the first request of the resumed conversation holds no result for the unanswered call (assert [] == ['c1', 'c2', 'c3'], and the file keeps only c1 where c1 and c2 were asked); the 5 that pass are the whole-transcript shapes, which the fix leaves unchanged. The 'Repro at a853d315f07b' note above is that record. The same file at HEAD (the fix) passes: uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_unanswered_calls.py -q gives 8 passed, and git diff --quiet a853d315f07b -- <the test file> exits 0, so the file is unchanged since the repro. The commit is not on the branch, so it is kept by a local ref, refs/repro/TASK-0142 (the repository has gc.auto 0 as well); close-task's check reads the commit by its sha. board-check close TASK-0142 now says 'ok: TASK-0142 can close'. No code or test changed in this round; the only change is this record.
+
+Review round 2: closed. The full scripts/check from round 1 (exit 0: 3806 passed, 118 skipped; gates and docs ok) still stands, because only the task file has changed since b58c1a6. A repro is now recorded at a853d315f07b (0af979a plus the unchanged test file): 3 failed before the fix and 8 pass after it. All three ACs are met. No code findings. TASK-0154 (/compact right after a resume) tracks the follow-up.
 <!-- SECTION:NOTES:END -->
