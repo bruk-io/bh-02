@@ -123,6 +123,7 @@ async def test_the_row_s_providers_expose_the_named_model_as_settings(tmp_path: 
 # What the loop records on an entry is the loop's own: neither provider sends it.
 _RECORDED = {
     "at": "2026-10-18T03:47:12.345Z",
+    "seed": {"keep": "the API's endpoints"},  # a compacted conversation's first entry
     "step": {
         "at": "2026-10-18T03:47:12.345Z",
         "first_chunk": 0.25,
@@ -170,6 +171,7 @@ def test_the_claude_code_records_do_not_hold_what_the_loop_records() -> None:
     assert given == plain
     text = json.dumps(given)
     assert "first_chunk" not in text and "2026-10-18T03:47:12.345Z" not in text and "tool_changes" not in text
+    assert "endpoints" not in text
 
 
 def _text(said: str) -> dict[str, Any]:

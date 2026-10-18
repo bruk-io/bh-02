@@ -1,6 +1,6 @@
 """What Claude Code holds against what the loop asks next: the decisions, pure.
 
-Messages are shaped as `agent:loop` writes them (its `_Step.entry`, `unfinished`, tool results,
+Messages are shaped as `agent:loop` writes them (its `Step.entry`, `unfinished`, tool results,
 `feedback` lines), so a change there that breaks the agreement shows up here."""
 
 from typing import Any

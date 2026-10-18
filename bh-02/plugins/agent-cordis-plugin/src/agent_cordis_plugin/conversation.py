@@ -15,14 +15,21 @@ the summary names what its namespace holds. `/clear` is the same rewrite with an
 conversation, and restarts the python row too (`clear`): nothing is lost for good, the old
 conversation is the `.bak` beside the file.
 
+The seed is also the record of the summary step (decision-0009, Conversations): its `user` entry
+says when the new conversation began (`at`) and what the person asked the summary to keep
+(`seed`, `""` for nothing), so no reader matches its wording, and its `assistant` entry, the
+summary, carries the step's record. The step is collected and recorded by the loop's own `Step`
+over the loop's own `Clock`, with the model's settings read as the loop reads them, so the
+trajectory shows the boundary with its time and cost like any other step.
+
 A command runs in the chat row's task, and Ctrl-C stops only a reply, so the model has `timeout`
 seconds to answer, and a note says so as the step begins; the person leaving cancels the
 command (`chat:converse`), and nothing is written until the summary is whole. The restart is
 queued in `jobs` (CONTRACTS.md: jobs), never run in the chat row's task, which it reloads, and
 a restart that fails is told to the person, since the new conversation is written by then; the
 chat row reads its next line only once the restart is done, so the line reaches the new loop.
-The pure parts (`asked`, `seeded`, `kept_in`, `_unsaid`, `_unusable`, `_summed`, `_answer`,
-`_unchanged`, `_cleared`, `unrestarted`) decide; the rest reads, writes and asks.
+The pure parts (`asked`, `seeded`, `kept_in`, `_is_seed`, `_unsaid`, `_unusable`, `_summed`,
+`_answer`, `_unchanged`, `_cleared`, `unrestarted`) decide; the rest reads, writes and asks.
 """
 
 import asyncio
@@ -32,9 +39,10 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from agent_cordis_plugin.loop import Model, request_for
-from agent_cordis_plugin.records import summed
+from agent_cordis_plugin.loop import Model, Step, request_for
+from agent_cordis_plugin.records import Clock, StepRecord, settings_to_record, summed
 from agent_cordis_plugin.stops import ACT, ANSWERED, REFUSED, SILENT, TRUNCATED, UNDECODABLE, classify
+from agent_cordis_plugin.toolset import mode_of
 from agent_cordis_plugin.transcript import FileTranscript, rewrite
 from cordis_helpers import Job
 
@@ -220,23 +228,38 @@ def asked(messages: Sequence[Json], keep: str = "") -> list[Json]:
     return [*request_for(messages), {"role": "user", "content": ask}]
 
 
-def seeded(summary: str) -> list[Json]:
+def seeded(summary: str, keep: str, step: StepRecord) -> list[Json]:
     """The new conversation, before its first message: bh-02 saying what it carries on from,
     then the summary as the model's answer, so the roles still alternate. No prompt: the loop
     reads it afresh for the first message and keeps it as the conversation's first `system`
-    entry, and no date, so it tells today's."""
-    return [{"role": "user", "content": _SEEDED}, {"role": "assistant", "content": summary.strip()}]
+    entry, and no date, so it tells today's.
+
+    The first entry says when the conversation began (`at`, the moment the summary step's request
+    was handed to the model) and carries `seed`: `keep`, the text the person asked the summary to
+    keep (`""` for none). The second carries the summary `step`'s record (`at`, `first_chunk`,
+    `took`, `model`, `usage`, `settings`), the first step of the conversation."""
+    return [
+        {"role": "user", "content": _SEEDED, "at": step["at"], "seed": {"keep": keep.strip()}},
+        {"role": "assistant", "content": summary.strip(), "step": step},
+    ]
+
+
+def _is_seed(message: Json) -> bool:
+    """Whether `message` is the first entry of a compacted conversation: it carries `seed`; or,
+    in a transcript from before the field, it opens with the wording `seeded` wrote."""
+    return "seed" in message or str(message.get("content", "")).startswith(_SEEDED_START)
 
 
 def _unsaid(messages: Sequence[Json]) -> str | None:
     """Why `messages` hold nothing to compact, or None: an empty conversation, or one that is only
     a summary's seed (`seeded`), nothing said since (compacting it again would summarise a
     summary, with no prompt to begin the request, and replace the backup of the conversation
-    before it)."""
+    before it). A seed is known by its `seed` field, and by its wording in a file written before
+    the field."""
     said = [m for m in messages if m.get("role") not in ("system", "tools")]
     if not said:
         return "nothing to compact: the conversation is empty"
-    if len(said) == 2 and str(said[0].get("content", "")).startswith(_SEEDED_START):
+    if len(said) == 2 and _is_seed(said[0]):
         return (
             "nothing to compact: nothing has been said since the last /compact, whose summary is "
             "the whole conversation"
@@ -261,53 +284,54 @@ def _summed(usage: Sequence[Json]) -> list[Json]:
 
 
 async def summarise(
-    model: Model, messages: Sequence[Json], tools: Sequence[Json], timeout: float
-) -> tuple[str, list[Json]]:
-    """The model's summary, from one step over `messages` (`asked`), and the usage events that
-    step sent. Raises `Unchanged` saying why there is none, with the usage sent before then: the
-    step took longer than `timeout` seconds (it is closed, so its provider stops), it called
-    rather than answered, or the model failed as a `loop` may (an exception with `kind` and
-    `message`). Cancelled (the person left), it is closed too, and nothing is said."""
-    text: list[str] = []
-    calls: list[Json] = []
-    usage: list[Json] = []
-    finish: str | None = None
+    model: Model,
+    messages: Sequence[Json],
+    tools: Sequence[Json],
+    timeout: float,
+    clock: Clock | None = None,
+) -> tuple[str, list[Json], StepRecord]:
+    """The model's summary, from one step over `messages` (`asked`), the usage events that step
+    sent, and the step's record (CONTRACTS.md: step record). The step is collected as the loop's
+    are (`loop.Step`, over `clock`, the real one unless a test gives its own), begun as the
+    request is handed to the model. Its settings are the model's, read as the loop reads them, and
+    recorded whatever the old conversation recorded, since the summary is the first step of the
+    conversation it begins (`seeded`). Raises `Unchanged` saying why there is none, with the usage
+    sent before then: the step took longer than `timeout` seconds (it is closed, so its provider
+    stops), it called rather than answered, or the model failed as a `loop` may (an exception
+    with `kind` and `message`). Cancelled (the person left), it is closed too, and nothing is
+    said."""
+    step = Step(
+        clock if clock is not None else Clock(),
+        settings_to_record(getattr(model, "settings", None), ()),
+        mode_of(model),
+    )
     chunks = model.complete(messages, tools)
     limit = asyncio.timeout(timeout)
     try:
         async with limit:
             async for chunk in chunks:
-                match chunk.get("type"):
-                    case "text":
-                        text.append(str(chunk.get("text") or ""))
-                    case "tool_call":
-                        calls.append(chunk)
-                    case "usage":
-                        usage.append(chunk)
-                    case "stop":
-                        finish = chunk.get("reason")
+                step.take(chunk)
     except TimeoutError:
         if not limit.expired():
             raise  # the model's own, not the time it had: a bug
         raise Unchanged(
             f"the model wrote no summary within {timeout:g} seconds, so nothing changed; try again, "
             "or give the conversation row a longer `timeout`",
-            usage,
+            step.usage,
         ) from None
     except Exception as error:
         message = getattr(error, "message", None)
         if not isinstance(message, str) or not isinstance(getattr(error, "kind", None), str):
             raise  # not a failure the model reports for the person: a bug
-        raise Unchanged(f"{message} (so nothing changed)", usage) from error
+        raise Unchanged(f"{message} (so nothing changed)", step.usage) from error
     finally:
         # a step left early (the timeout, or the person leaving) closes now, so its provider
         # stops what it runs
         if isinstance(chunks, AsyncGenerator):
             await chunks.aclose()
-    said = "".join(text)
-    if (why := _unusable(classify(finish, said, calls))) is not None:
-        raise Unchanged(why, usage)
-    return said.strip(), usage
+    if (why := _unusable(classify(step.finish, step.text, step.calls))) is not None:
+        raise Unchanged(why, step.usage)
+    return step.text.strip(), list(step.usage), step.record()
 
 
 def _answer(summary: str, usage: Sequence[Json], backup: str, rows: Sequence[str]) -> list[Json]:
@@ -370,13 +394,15 @@ async def compact_conversation(
     output: Shown,
     config: ConversationConfig,
     jobs: Queue,
+    clock: Clock | None = None,
 ) -> str | list[Json]:
     """`/compact [WHAT TO KEEP]`: ask the model for a summary of the conversation (a note says so
     as it begins), write the new conversation it begins in the transcript row's file (the old
-    kept beside it), and queue the restart of the loop and the transcript; answer `_answer`'s
+    kept beside it, the new one holding what the person asked to keep and the summary step's
+    record: `seeded`), and queue the restart of the loop and the transcript; answer `_answer`'s
     events, or why nothing changed (`_unchanged`). `jobs` is the conversation row's queue and
     `worker` the work that runs it, which a restart of the row ends: then nothing is written,
-    since nothing would restart the rows."""
+    since nothing would restart the rows. `clock` times the summary step (`summarise`)."""
     row = config.transcript
     try:
         path = kept_in(row, loader.rows.get(row), loader.status().get(row))
@@ -394,14 +420,16 @@ async def compact_conversation(
         return nothing
     await output.show(_once({"type": "note", "text": _ASKING.format(timeout=config.timeout)}))
     try:
-        summary, usage = await summarise(model, asked(messages, args), list(tools.specs()), config.timeout)
+        summary, usage, step = await summarise(
+            model, asked(messages, args), list(tools.specs()), config.timeout, clock
+        )
     except Unchanged as why:
         return _unchanged(str(why), why.usage)
     try:
         # on the loop, not in a thread: from the rewrite to queueing the restart nothing may
         # cancel it (the person leaving), or the file would hold the new conversation and the
         # ui's history the old; the seed is small, and copying the old file to its backup is fast
-        backup = rewrite(path, seeded(summary))
+        backup = rewrite(path, seeded(summary, args, step))
     except OSError as error:
         return _unchanged(
             f"the new conversation could not be written to {path} ({error.strerror or error}), so "

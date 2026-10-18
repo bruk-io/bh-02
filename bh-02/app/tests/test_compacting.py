@@ -54,6 +54,9 @@ async def test_compact_begins_a_new_conversation_from_the_summary_and_the_python
     assert not any("6 * 7" in str(m["content"]) for m in last)
     kept = [json.loads(line) for line in transcript.read_text().splitlines()]
     assert kept[:2] == last[1:3]
+    # the seed says when it began and what was asked to keep, and the summary carries its step
+    assert kept[0]["seed"] == {"keep": ""} and kept[0]["at"] == kept[1]["step"]["at"]
+    assert kept[1]["step"]["took"] >= 0 and kept[1]["step"]["first_chunk"] >= 0
     # the new conversation's tools, then its prompt, each kept when first read
     assert kept[2] == {"role": "tools", "tools": [*tools_of(kept)]} and kept[3]["role"] == "system"
     assert "py:x = 6 * 7" in Path(f"{transcript}.bak").read_text()

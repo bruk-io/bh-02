@@ -77,7 +77,7 @@ def _said(chunks: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _entry(chunks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """The loop's transcript entry for an act or answered step (agent:loop's `_Step.entry`)."""
+    """The loop's transcript entry for an act or answered step (agent:loop's `Step.entry`)."""
     calls = [
         {"id": c["id"], "name": c["name"], "input": c["input"]} for c in chunks if c["type"] == "tool_call"
     ]

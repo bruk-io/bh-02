@@ -3,7 +3,7 @@ steps, made by the real `ClaudeCodeModel` over its fake session (no process, no 
 sent to an OpenAI-compatible stand-in server (a real socket) rebuilt as that API's messages,
 the python call and its result included; Claude's own content blocks never reach it.
 
-The transcript entries are built as agent:loop builds them (`_Step.entry`): its text, its
+The transcript entries are built as agent:loop builds them (`Step.entry`): its text, its
 calls, and the provider's message from the step's last chunk."""
 
 import json

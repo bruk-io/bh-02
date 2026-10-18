@@ -75,7 +75,7 @@ from agent_cordis_plugin.records import (
     step_record,
 )
 from agent_cordis_plugin.stops import ACT, ANSWERED, FEEDBACK, REFUSED, classify
-from agent_cordis_plugin.toolset import FIXED, LISTED, begun, changed, listed, removed, told
+from agent_cordis_plugin.toolset import LISTED, begun, changed, listed, mode_of, removed, told
 
 __all__ = [
     "DECLINED",
@@ -90,6 +90,7 @@ __all__ = [
     "Asides",
     "Ran",
     "Rule",
+    "Step",
     "System",
     "Tool",
     "Tools",
@@ -547,8 +548,7 @@ class LoopModel:
 
     def _mode(self) -> str:
         """How the model wants its tools offered (CONTRACTS.md: model, `tool_changes`)."""
-        mode = getattr(self._model, "tool_changes", FIXED)
-        return mode if mode in (FIXED, LISTED) else FIXED
+        return mode_of(self._model)
 
     def _tools_told(self) -> str:
         """Keep a change in the tools since the transcript last recorded them as a `tools` entry,
@@ -724,7 +724,7 @@ class LoopModel:
             tools = self._offered()
             offered = [str(spec["name"]) for spec in tools]
             settings = settings_to_record(getattr(self._model, "settings", None), self._transcript.messages)
-            step = _Step(self._clock, settings, self._mode())  # begins now: its request is handed over next
+            step = Step(self._clock, settings, self._mode())  # begins now: its request is handed over next
             chunks = self._model.complete(request_for(self._transcript.messages), tools)
             try:
                 async for chunk in chunks:
@@ -886,11 +886,13 @@ class _Call:
         return call_record(self._at, self._answer, self._waited, self._took, self.child, nested)
 
 
-class _Step:
+class Step:
     """One model step's chunks, collected: its text, its calls, why it stopped, what it was, and
     when (`record`). It begins when it is made, as the request is handed to the model: `settings`
     are the model's, to record when this step is the first of the conversation or they changed
-    (`records.settings_to_record`), and `mode` how it wants its tools offered."""
+    (`records.settings_to_record`), and `mode` how it wants its tools offered. The loop's steps
+    are collected by it, and so is `/compact`'s summary step (`conversation.summarise`), so the
+    one function builds both records."""
 
     def __init__(self, clock: Clock, settings: Settings | None, mode: str) -> None:
         self._clock = clock
@@ -909,6 +911,11 @@ class _Step:
     @property
     def text(self) -> str:
         return "".join(self._text)
+
+    @property
+    def usage(self) -> Sequence[Json]:
+        """The `usage` chunks the step sent so far, in the order they came."""
+        return self._usage
 
     def take(self, chunk: Json) -> Json | None:
         """Record one chunk, and when it came; return it if the person should see it."""

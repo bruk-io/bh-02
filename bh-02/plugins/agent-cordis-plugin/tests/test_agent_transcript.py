@@ -15,6 +15,9 @@ import pytest
 
 from agent_cordis_plugin import FileTranscript, rewrite, seeded
 
+# a compacted conversation, as a rewrite is given one
+SEED = seeded("x holds 42", "", {"at": "2026-10-18T03:47:12.345Z"})
+
 
 @pytest.fixture
 def open_umask() -> Iterator[None]:
@@ -138,7 +141,7 @@ def test_rewrite_makes_the_new_file_and_the_backup_readable_by_their_owner_alone
     path = tmp_path / "transcript.jsonl"
     path.write_text(json.dumps({"role": "user", "content": "old"}) + "\n")
     path.chmod(0o644)
-    backup = rewrite(str(path), seeded("x holds 42"))
+    backup = rewrite(str(path), SEED)
     assert (_mode(path), _mode(backup)) == (0o600, 0o600)
     assert Path(backup).read_text() == json.dumps({"role": "user", "content": "old"}) + "\n"
     again = rewrite(str(path), [])  # /clear: an empty conversation, the same
@@ -152,7 +155,7 @@ def test_rewrite_narrows_a_new_file_a_crashed_rewrite_left_wider(tmp_path: Path)
     stale = tmp_path / "transcript.jsonl.new"
     stale.write_text("half of a conversation")
     stale.chmod(0o666)
-    rewrite(str(path), seeded("x holds 42"))
+    rewrite(str(path), SEED)
     assert _mode(path) == 0o600 and not stale.exists()  # the stale file was the one replaced
 
 
@@ -163,6 +166,6 @@ def test_rewrite_does_not_write_through_a_link_left_at_its_new_file(tmp_path: Pa
     elsewhere.write_text("not yours\n")
     (tmp_path / "transcript.jsonl.new").symlink_to(elsewhere)
     with pytest.raises(OSError):
-        rewrite(str(path), seeded("x holds 42"))
+        rewrite(str(path), SEED)
     assert elsewhere.read_text() == "not yours\n" and path.read_text() == "{}\n"
     assert not Path(f"{path}.bak").exists()

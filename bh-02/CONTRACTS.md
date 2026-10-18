@@ -150,14 +150,20 @@ message     {"role": "user" | "assistant" | "tool", "content": str,
                                     any change in the instructions and the person's words),
              "at"?: str            (user: when the message came, UTC ISO-8601 to the millisecond
                                     with `Z`, `2026-10-18T03:47:12.345Z`, so it sorts as text; on
-                                    `feedback` and an unanswered message too),
+                                    `feedback` and an unanswered message too, and on a seed's),
+             "seed"?: {"keep": str}  (user: the first entry of a conversation `/compact` began,
+                                    bh-02 saying it carries on from an earlier one: `keep` is the
+                                    text the person gave `/compact WHAT TO KEEP` for the summary
+                                    to keep, `""` for none, so a reader never matches the seed's
+                                    wording; the summary follows as an assistant entry whose
+                                    `step` is the summary step's),
              "step"?: step record  (assistant: the step that made the entry, on every one the
                                     loop writes from a model step, `STOPPED` and `FAILED` ones
                                     too; not on the entry that answers a message the model was
                                     never asked, which is no step),
              "call"?: call record  (tool: the call it answers, on every `tool` entry the loop
                                     writes, the `_NOT_RUN` and interrupted ones too)}
-                                   `asides`, `today`, `at`, `step` and `call` are the loop's own: a provider sends `content` alone
+                                   `asides`, `today`, `at`, `seed`, `step` and `call` are the loop's own: a provider sends `content` alone
 step record {"at": str, "first_chunk"?: float, "took"?: float, "model"?: str, "usage"?: usage total,
              "settings"?: settings, "tool_changes"?: "listed"}
                         a closed TypedDict (`agent_cordis_plugin.records`). `at`: when the request
@@ -169,7 +175,9 @@ step record {"at": str, "first_chunk"?: float, "took"?: float, "model"?: str, "u
                         the step's `usage` chunks summed (absent when it sent none). `settings`: only
                         on a conversation's first step and on any step whose settings differ from the
                         last recorded in it. `tool_changes`: only when the model's is `listed`;
-                        absent means `fixed`
+                        absent means `fixed`. `/compact`'s summary step is recorded the same way, by
+                        the same code over the same clock, on the assistant entry of the seed (its
+                        `settings` always, being its conversation's first step)
 call record {"at": str, "answer"?: "unasked" | "yes" | "no", "waited"?: float, "took"?: float,
              "child"?: str, "nested"?: [nested record, ...]}
                         a closed TypedDict (`agent_cordis_plugin.records`). `at`: when the call

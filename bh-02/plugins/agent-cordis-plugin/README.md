@@ -212,7 +212,15 @@ closed and nothing has been written. The summary then begins the new conversatio
 bh-02's message that the conversation carries on from an earlier one, as the person's,
 then the summary as the model's answer, so the roles alternate; the message stays at the
 conversation's start, a resume's too, so it says the namespace was kept at the compaction and
-empties as the python tool's instructions say), written over the transcript row's file in one step
+empties as the python tool's instructions say). The seed also records the step (decision-0009,
+Conversations): the message carries `at` and `seed: {keep}`, the text the person gave `/compact
+WHAT TO KEEP` (`""` for none), so no reader matches the seed's wording (`/compact` itself knows a
+seed by the field, and by the wording in a file from before it), and the summary carries the
+step's record (`at`, `first_chunk`, `took`, `model`, `usage`, `settings`). The step is collected
+by the loop's own `Step` over the loop's own `Clock` (`summarise`), so one piece of code builds
+both records, with the model's `settings` and `tool_changes` read as the loop reads them; the summary is
+its conversation's first step, so its `settings` are always recorded and the loop's first step after
+it records them again only if the model changed. The seed is written over the transcript row's file in one step
 (`transcript.rewrite`: written whole beside it, then renamed over it, the old file kept under
 the first of `.bak`, `.bak.2`, ... not taken, so no compaction's backup replaces another's; the new
 file and the backup are made at 0600, not the umask's),
