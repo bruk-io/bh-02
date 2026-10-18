@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-18 04:15'
+updated_date: '2026-10-18 13:06'
 labels:
   - tui
   - naming
@@ -26,3 +27,9 @@ decision-0009 retires "turn" (TASK-0136.02 renamed every use that was not a stor
 - [ ] #2 A history file written before this change either resumes as it did (the tag read as reply_end) or the task's notes record the owner's choice not to read it, with a test of whichever holds
 - [ ] #3 No match of turn_end remains under bh-02/ except where the notes say why
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner, 2026-10-18: no backwards compatibility. History files written before the rename are neither read for turn_end nor translated (criterion #2's second option); the rename is clean, as bh-02/CLAUDE.md's naming rule says.
+<!-- SECTION:NOTES:END -->
