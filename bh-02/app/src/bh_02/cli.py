@@ -1,10 +1,10 @@
 """The `bh-02` command: every run is a session in the TUI; `--resume` continues one.
 
 While the app runs it owns the terminal, so this module says nothing then: lifecycle lines
-(`--trace FILE`) go to a file, and a layer file that could not be reloaded is kept and printed
-once the app has exited and the terminal is restored. Besides the app it is the only module
-that touches the terminal, and only for what has no `output` to go through: option parsing,
-a fatal error, and those reports after the run.
+(`--trace FILE`) go to a file, and a layer file that could not be reloaded, or a session's row log
+that stopped being written, is kept and printed once the app has exited and the terminal is
+restored. Besides the app it is the only module that touches the terminal, and only for what has no
+`output` to go through: option parsing, a fatal error, and those reports after the run.
 """
 
 import asyncio

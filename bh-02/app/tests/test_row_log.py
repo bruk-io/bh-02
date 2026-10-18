@@ -2,6 +2,7 @@
 kept at 0600, for `bh-02 trajectory` to lay out (decision-0009, Row reloads)."""
 
 import asyncio
+import errno
 import json
 import os
 import re
@@ -142,10 +143,25 @@ async def test_a_log_that_cannot_be_written_ends_and_the_run_goes_on(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
     """The log is for the person, not the run: its directory is gone (a session being removed), the first
-    write fails on its thread, and the listener stops without taking down the row that was emitting."""
+    write fails on its thread, and the listener stops without taking down the row that was emitting. The
+    person is told once, after the rows have unwound, through `report`: the file, when the shell found the
+    write failing, and the error."""
     log = tmp_path / "gone" / "rows.jsonl"
-    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], row_log=log), 10)
+    told: list[str] = []
+    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], report=told.append, row_log=log), 10)
     assert not log.exists()
+    (line,) = told
+    assert line.startswith(f"{log} stopped being written (the shell found a write failing at ")
+    assert STAMP.search(line)
+    assert line.endswith(f"{os.strerror(errno.ENOENT)}; the row reloads from that write on are not in it")
+
+
+async def test_a_log_that_was_written_to_the_end_tells_nobody_anything(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    log, told = tmp_path / "rows.jsonl", []
+    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], report=told.append, row_log=log), 10)
+    assert records(log) and told == []
 
 
 async def test_no_log_is_kept_unless_one_is_asked_for(

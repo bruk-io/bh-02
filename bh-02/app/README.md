@@ -196,7 +196,8 @@ runtime beside `--trace`'s (`_row_log`), which hears every row's lifecycle event
 writes it on a thread at 0600, so the event loop never waits on a disk. `reload` is a row's setup
 beginning (it came up, was restarted, or a dependency was replaced) and `failed` its setup raising,
 with the error; cordis emits no `restart`, a restarted row's old fiber ends `unloading` and `inactive`
-and the new one begins with a `reload`. A write that fails ends the log and not the run. `--trace FILE`
+and the new one begins with a `reload`. A write that fails ends the log and not the run, and the shell
+says so once after the app has exited: the file, when it found the write failing, and the error. `--trace FILE`
 is the same stream in full, untimed and written on the loop, and stays as it was.
 
 ## The plugins

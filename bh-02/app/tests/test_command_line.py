@@ -1,7 +1,9 @@
 """The `bh-02` command with the ui and the model patched to fakes: what it prints, and when."""
 
+import errno
 import json
 import os
+import re
 import stat
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -68,6 +70,32 @@ def test_a_session_keeps_its_row_reloads_beside_its_transcript_and_trace_hears_t
     ]
     assert kept and sorted(record["row"] for record in kept) == sorted(traced)
     assert "chat" in traced and all(record["kind"] == "reload" for record in kept)
+
+
+def test_a_row_log_that_stops_is_said_once_after_the_app_exits_and_a_healthy_one_is_not(
+    composition: Callable[..., Path], state: Path
+) -> None:
+    """A row log that can't be written ends the log and not the run, and the shell says so once, after
+    the app has exited: the file, when the shell found the write failing, and the error. Here a link
+    stands at the log's name (the appender never follows one), so the first write fails with ELOOP."""
+    patch = _patch(composition)
+    healthy = CliRunner().invoke(main, ["--no-jail", "--patch", str(patch)])
+    assert healthy.exit_code == 0, healthy.output
+    assert len(healthy.stderr.splitlines()) == 1  # the farewell, and nothing about the log
+    (session,) = (state / "state" / "bh-02" / "sessions").iterdir()
+    log = session / "rows.jsonl"
+    log.unlink()
+    log.symlink_to(state / "elsewhere.jsonl")
+    resumed = CliRunner().invoke(main, ["--resume", "--patch", str(patch)])
+    assert resumed.exit_code == 0, resumed.output
+    *before, farewell = resumed.stderr.splitlines()
+    assert farewell.startswith("session ")  # said last, after the line about the log
+    (told,) = before
+    stamp = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"
+    where, why = re.escape(str(log)), re.escape(os.strerror(errno.ELOOP))
+    shown = rf"error: {where} stopped being written \(the shell found a write failing at {stamp}\): {why}"
+    assert re.fullmatch(rf"{shown}; the row reloads from that write on are not in it", told)
+    assert not (state / "elsewhere.jsonl").exists()  # the link was not followed
 
 
 def test_there_is_no_one_shot_command() -> None:
