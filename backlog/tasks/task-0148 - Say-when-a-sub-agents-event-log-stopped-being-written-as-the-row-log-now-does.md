@@ -188,4 +188,6 @@ INFO    -  Documentation built in 5.04 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 2 (reviewer): not closed by close-task: this is a bug and has no recorded repro (record-check --repro, or a 'No repro:' note). Everything else is met: full scripts/check exit 0 (3825 passed, 118 skipped; gates, docs ok); AC #3 ticked; ACs #1-#2 met per round 1. The chat test fix (bounded _until) is sound and test-only. Worker: record the repro (the notes say the wiring tests were seen failing before the change), then this closes. Follow-ups: TASK-0162; DRAFT-0008 superseded, for the owner to drop.
 <!-- SECTION:NOTES:END -->
