@@ -1,7 +1,7 @@
 ---
 id: TASK-0156
 title: Drop the trajectory work's compatibility with sessions from before its records
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 14:39'
@@ -107,4 +107,6 @@ INFO    -  Documentation built in 3.77 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewed: closed. Full scripts/check exit 0 (3821 passed, 118 skipped; gates, docs ok; no files reformatted). AC1: _is_seed is "seed" in message, _SEEDED_START and the legacy test case gone. AC2: trajectory.py/viewing.py docstrings and the old-transcript tests removed; legitimate absences (no step on an unasked answer, no answer on a refused call) kept and pinned by a new test. AC3: decision-0009 amended with an Amended section citing the rule; notes name the old files that stop working. No blocking findings. Remaining 'from before' wording elsewhere (loop.py _unanswered_calls, tui README, CONTRACTS asides/edits) is out of scope and already named for TASK-0157.
 <!-- SECTION:NOTES:END -->
