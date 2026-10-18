@@ -22,7 +22,7 @@ Found in TASK-0158's review. named.py _endpoint_problem builds 'is not a setting
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The models file's errors say 'an openai endpoint' and 'a claude-code endpoint' (the article follows the provider's name), and no other message in the models plugin builds an article before a provider name wrongly
-- [ ] #2 The tests that match the message follow it; scripts/check passes
+- [x] #2 The tests that match the message follow it; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
