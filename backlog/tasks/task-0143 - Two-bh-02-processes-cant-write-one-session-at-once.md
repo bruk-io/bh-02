@@ -1,7 +1,7 @@
 ---
 id: TASK-0143
 title: Two bh-02 processes can't write one session at once
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
@@ -239,4 +239,6 @@ INFO    -  Documentation built in 4.52 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 2 (not the worker): all three criteria met. Full scripts/check exit 0 again, no files changed by it. Repro recorded: pre-fix source fails the refusal test (ImportError with both files pre-fix; exit 0 vs 1 with cli.py pre-fix, the bug itself). Nits answered here, nothing filed: running.lock opened with os.open rather than host_paths' no-link opener (state dir is outside the jail, no realistic path); real-launch test not seen failing under the plant (the CLI test was).
 <!-- SECTION:NOTES:END -->
