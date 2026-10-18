@@ -26,7 +26,7 @@ The owner's rule (root CLAUDE.md, Conventions, 2026-10-18): no backwards compati
 <!-- AC:BEGIN -->
 - [x] #1 The notes list every path found that reads, translates or tests an old stored format or name (grep for from before, old, legacy, earlier, compat, and the bh-02 CLAUDE.md naming rule's cases), each with what it kept working
 - [x] #2 Each listed path and the tests pinning it are removed, or the notes say why one is not compatibility (a guard against a name a layer still names, say)
-- [ ] #3 The notes say which old files stop working; scripts/check passes
+- [x] #3 The notes say which old files stop working; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
