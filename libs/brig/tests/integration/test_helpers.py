@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import itertools
 import os
+import shutil
 import subprocess
 import time
 
@@ -32,7 +33,7 @@ import pytest
 from brig.core import Spec, unenforced_report
 from brig.core.runtime import Capability
 from brig.mech import Helper, HelperLifetime
-from brig.run import HelperFailed, IoPolicy, Jail, Process
+from brig.run import HelperFailed, HostRuntime, IoPolicy, Jail, Process
 from brig.run import _identity as identity
 from brig.run import host as host_mod
 from brig.stack import CompiledJail
@@ -315,3 +316,130 @@ def test_a_launch_scoped_helper_that_never_exits_fails_instead_of_hanging(
         f"the failure does not tell the mechanism author what to change: {exc_info.value.stderr!r}"
     )
     assert not os.path.exists(marker), "the workload ran anyway"
+
+
+def _ready_probe(ready: str, saw: str) -> str:
+    """The shell a helper runs: write what it finds at its own ready path the instant
+    it starts (`present` or `absent`) to `saw`, then publish the ready file, as a
+    helper does once it is ready."""
+    return (
+        f"if [ -e {ready} ]; then printf present > {saw}; else printf absent > {saw}; fi; "
+        f"printf published > {ready}"
+    )
+
+
+@pytest.mark.parametrize(
+    "lifetime", [HelperLifetime.JAIL_LIFETIME, HelperLifetime.LAUNCH_SCOPED], ids=lambda e: e.name
+)
+def test_a_ready_file_an_earlier_jail_left_is_gone_before_the_helper_starts(
+    run_id: str, lifetime: HelperLifetime
+) -> None:
+    """TASK-0150, decision-204: the jail directory is reused, so the file a helper
+    publishes when it is ready can already be there, an earlier jail's, and whatever
+    waits for it would read it as this one's. `create` removes the declared
+    `ready_path` before it starts the helper.
+
+    Observed from the helper's side, in its own process, at its own start: the file
+    was `absent` when it looked. THE CONTROLS: the file was planted and was there
+    when `create` was called (so `absent` is the removal's doing, not an empty
+    directory's); a neighbour the helper does not declare survives (the removal is
+    one file, not the directory); and the file the helper then publishes is there at
+    the end, so the removal does not stand in the way of the thing it protects."""
+    jail_dir = _new_jail_dir()
+    os.makedirs(jail_dir)
+    ready = os.path.join(jail_dir, "helper.ready")
+    neighbour = os.path.join(jail_dir, "neighbour")
+    saw = os.path.join(jail_dir, "saw")
+    for path, text in ((ready, "stale"), (neighbour, "kept")):
+        with open(path, "w") as fh:
+            fh.write(text)
+    assert _read(ready) == "stale", "the stale ready file was not planted"
+
+    probe = _ready_probe(ready, saw)
+    helper = Helper(
+        name="publisher",
+        # The leak sweep finds a helper by the run token in its argv; a LAUNCH_SCOPED one is
+        # gone before the workload starts and needs none.
+        argv=(
+            ("/bin/sh", "-c", probe)
+            if lifetime is HelperLifetime.LAUNCH_SCOPED
+            else tuple(workload_argv(run_id, f"{{ {probe}; sleep 30; }}"))
+        ),
+        lifetime=lifetime,
+        ready_path=ready,
+    )
+    jail, _process = _launch(_jail((helper,)), run_id, jail_dir)
+    try:
+        assert _wait_until(lambda: _read(ready) == "published"), (
+            f"the helper never published its ready file; it found {_read(saw)!r} at its start"
+        )
+        assert _read(saw) == "absent", (
+            "the helper started with an earlier jail's ready file still in place, "
+            f"so a reader would have taken it for this launch's: it found {_read(saw)!r}"
+        )
+        assert _read(neighbour) == "kept", "the removal took a file the helper did not declare"
+    finally:
+        jail.destroy()
+        shutil.rmtree(jail_dir, ignore_errors=True)
+
+
+def test_a_ready_file_that_cannot_be_removed_refuses_the_create_before_any_helper_starts(
+    run_id: str,
+) -> None:
+    """A declared ready file that is there and cannot be removed (here a directory)
+    is an `OSError` from `create` with a note saying what to do, and NO helper has
+    started, the one declared before the stubborn one included: the failure that
+    matters is a file that might still be read, and a half-started jail is the
+    caller's to find and end.
+
+    THE CONTROL, in the same test: with the directory gone, the same helpers start
+    and the first one runs, so the refusal was the directory's and not a jail that
+    could not start for another reason."""
+    jail_dir = _new_jail_dir()
+    os.makedirs(jail_dir)
+    ready = os.path.join(jail_dir, "helper.ready")
+    ran = os.path.join(jail_dir, "first-ran")
+    os.mkdir(ready)
+
+    first = Helper(
+        name="first",
+        argv=tuple(workload_argv(run_id, f"touch {ran}; sleep 30")),
+        lifetime=HelperLifetime.JAIL_LIFETIME,
+    )
+    second = Helper(
+        name="second",
+        argv=tuple(workload_argv(run_id, "sleep 30")),
+        lifetime=HelperLifetime.JAIL_LIFETIME,
+        ready_path=ready,
+    )
+    try:
+        with pytest.raises(OSError) as refused:
+            Jail.create(
+                _jail((first, second)),
+                runtime=HostRuntime(),
+                cwd=jail_dir,
+                jail_id="jail-ready-stuck",
+                jail_dir=jail_dir,
+            )
+        assert any(
+            "remove it, or choose another jail directory" in n for n in refused.value.__notes__
+        )
+        time.sleep(0.5)
+        assert not os.path.exists(ran), "a helper started although the create was refused"
+
+        os.rmdir(ready)
+        jail = Jail.create(
+            _jail((first, second)),
+            runtime=HostRuntime(),
+            cwd=jail_dir,
+            jail_id="jail-ready-stuck",
+            jail_dir=jail_dir,
+        )
+        try:
+            assert _wait_until(lambda: os.path.exists(ran)), (
+                "the control jail did not start its first helper either"
+            )
+        finally:
+            jail.destroy()
+    finally:
+        shutil.rmtree(jail_dir, ignore_errors=True)

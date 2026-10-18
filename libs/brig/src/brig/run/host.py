@@ -3,7 +3,8 @@
 SPEC.md section 3 (decision-178, decision-0001 step 1). Its instance is host
 process groups. Since decision-181 (TASK-0079.25) `create` holds no process:
 it makes `jail_dir`, clears what an earlier jail left there (refused while any
-of it runs), stages files, runs and starts the helpers, derives `wrap_prefix`
+of it runs), stages files, removes each helper's ready file and runs and starts the
+helpers (decision-204), derives `wrap_prefix`
 and keeps the tether; every process, the first included, is a
 `HostSupervisor.start`, with its own exit wrapper, its own tether watcher and
 its own records directory `<jail_dir>/procs/<id>/` (`brig/run/_records.py`).
@@ -320,6 +321,37 @@ def _helper_tether(
     return lifeline, lifeline.fd()
 
 
+def _remove_ready_files(jail: CompiledJail) -> None:
+    """Remove each helper's declared `ready_path`, the file it publishes once it is ready
+    (decision-204, TASK-0150), before any helper is started.
+
+    A jail directory is reused (decision-181), so a file an earlier jail's helper published
+    is still there, and whatever waits for the file (`connect_proxy`'s wrap) would read it
+    as this launch's: the workload pointed at a port nobody listens on, or at a stranger's.
+    With the file removed here, it can exist only because a helper of this launch wrote it.
+    A link at the path is removed, not followed. All are removed before the first helper
+    starts, so a path that can't be removed refuses the create with nothing of it running.
+
+    Raises:
+        OSError: a declared file is there and could not be removed (a directory, a refusal).
+    """
+    for helper in jail.helpers:
+        if helper.ready_path is None:
+            continue
+        try:
+            os.unlink(helper.ready_path)
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            error.add_note(
+                f"helper {helper.name!r} publishes {helper.ready_path!r} when it is ready, and "
+                "brig removes that file before it starts the helper, so that a file an earlier "
+                "jail left in this jail directory is never read as this one's; remove it, or "
+                "choose another jail directory"
+            )
+            raise
+
+
 def _start_helpers(
     jail: CompiledJail, *, cwd: str, env: Mapping[str, str], jail_dir: str, tether: int | None
 ) -> tuple[tuple[int, ...], tuple[str, ...]]:
@@ -359,10 +391,16 @@ def _start_helpers(
     included. `None`: nothing ties the helper to its creator, as nothing ties
     the jail's processes (`_helper_tether`).
 
+    Before any is started, each helper's declared `ready_path` is removed
+    (`_remove_ready_files`, decision-204), so the file a helper publishes when it is ready
+    can't be an earlier jail's.
+
     Raises:
+        OSError: a helper's `ready_path` is there and could not be removed.
         HelperFailed: a `LAUNCH_SCOPED` helper exited non-zero or did not finish.
         WorkloadSpawnFailed: a `JAIL_LIFETIME` helper could not be spawned.
     """
+    _remove_ready_files(jail)
     persistent: list[int] = []
     stamps: list[str] = []
     for helper in jail.helpers:
@@ -627,7 +665,8 @@ class HostRuntime:
                 ready; what `create` started is ended first.
             OSError: `tether` is not an open descriptor, or `jail_dir` could
                 not be made or written, or its `chan` is there and is not a
-                directory (`FileExistsError`).
+                directory (`FileExistsError`), or a helper's `ready_path` is
+                there and could not be removed (decision-204).
         """
         if jail.runtime is not self.kind:
             raise ValueError(

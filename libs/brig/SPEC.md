@@ -854,6 +854,57 @@ the allow list. `connect_proxy`'s step therefore carries `NO_PROXY=` and
 `no_proxy=`, both empty, which the launcher overlays on whatever it inherited.
 (Ruled 2026-10-11, decision-170.)
 
+**A helper's ready file is removed before the helper starts, so a jail never reads an
+earlier jail's (2026-10-18, decision-204).** Found 2026-10-18 while fixing TASK-0140.
+`connect_proxy`'s wrap waits for `<jail_dir>/proxy.port` to be non-empty, reads the port and
+exports the proxy variables; the proxy publishes that file (written under a temporary name,
+then `os.replace`, after `listen`) only once its Python process is up, tens of milliseconds
+after the workload's shell may already be running. A jail directory is reused (decision-181:
+`make_channel_dir` keeps an earlier jail's directory, `clear_earlier_records` clears only
+`procs/`), so a directory that still held an earlier jail's `proxy.port` made the wrap return
+at once with the OLD port. The workload was then pointed at a port nobody listens on
+(`ConnectionRefusedError`: a planted stale file failed the 403 integration test 11 of 12
+runs, and 6 of 6 in this task's own test before the change) or, worse, at whatever listens
+there now, which would receive its proxied requests. The `cooperative` grade does not excuse
+sending a jail's traffic to a foreign listener. Three ways to close it were on the table:
+the runtime removes a helper's declared ready file before it starts the
+helper; the runtime starts the proxy with its `--ready-fd` and waits for it, then passes the
+port on; or the wrap checks that the file it reads came from this launch. Ruled:
+
+- **The first: a `Helper` declares the file it publishes when it is ready, and `create`
+  removes that file before it starts the helper.** `Helper` gains `ready_path` (an absolute
+  path, `None` where the helper publishes no file), `connect_proxy` declares its port file,
+  and `create` removes each helper's before that helper is started, `LAUNCH_SCOPED` ones
+  included. A link at that path is removed, not followed; a path that cannot be removed (a
+  directory, a refusal) is an `OSError` from `create` before anything of the jail is started,
+  since a file that might still be read is the failure. After it the file can exist only
+  because the helper published it in this launch: the wrap's wait is unchanged and is correct
+  by construction, and the proxy's publish being atomic, a reader sees nothing or this
+  launch's port. A proxy that never comes up leaves the wrap its bounded wait and the
+  existing exit 71, "never published a port", where before it ran the workload at a stale one.
+- **Why this one and not a check of the file's provenance.** A file that is not there cannot be
+  read; a check is a comparison, and it can be wrong. Leaving the old file and having a
+  `/bin/sh` wrap tell this launch's from an earlier one would be by modification time (a
+  clock's granularity, a directory copied with its times), by a pid in the file (a number the
+  system recycles, decision-155's own lesson), or by a token the wrap is handed and the proxy
+  writes, and each is a new way to be wrong in the text that runs before every workload, and
+  one that fails open, to the stale port. And not the `--ready-fd` handshake: the port is
+  wanted by the wrap, which a pure `compile()` renders once, before any port exists, so the
+  port would have to reach the workload's environment through a run-time channel that does not
+  exist (`Step.env` is compile-time data), and `create` would block on a helper's start-up for
+  every helper, those that publish nothing included. That is a larger design for a bug the
+  removal closes where it arises. `--ready-fd` stays in the proxy as it was, and nothing in
+  brig reads it.
+- **Unchanged.** The file's name and format, the proxy's publishing, the wrap's wait and its
+  bound, the helper lifetimes and their tether (decision-199), the grades, and the `oci`
+  runtime, which refuses helpers. Not covered: the proxy's decisions file
+  (`proxy-decisions.jsonl`) is appended to, so a reused directory keeps an earlier jail's
+  lines in it; it is evidence and not the boundary (§11), and TASK-0164 tracks it. A
+  process that can write the jail directory while `create` runs can plant a file after the
+  removal, which is the trust decision-181's records already place in the directory.
+
+Implementing task: TASK-0150. (Ruled 2026-10-18, decision-204.)
+
 **The egress filter is a standalone process, outside the layer DAG.**
 `connect_proxy` is the only mechanism whose enforcement is a process rather
 than a kernel configuration, and that process runs trusted-side, outside the
@@ -895,6 +946,8 @@ data in this shape; M4's probe engine builds the subject.)
 **Helper lifetimes** are declared, not improvised: `JAIL_LIFETIME` (dies when
 the jailed tree dies — implemented by pipe-EOF or pid-watch, the mechanism
 chooses; since decision-199 both, §8), `LAUNCH_SCOPED` (gone before the workload runs).
+A helper that publishes a file when it is ready declares it (`ready_path`), and `create`
+removes it before the helper starts (decision-204).
 
 Planned roster (platforms in parentheses; grades are the *ceiling* each can
 honestly earn):

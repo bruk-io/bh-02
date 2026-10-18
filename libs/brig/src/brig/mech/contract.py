@@ -108,11 +108,29 @@ class Helper:
         name: A short name for this helper (e.g. "proxy", "logger").
         argv: The command line (tuple of strings, first is program name).
         lifetime: When this process exits relative to the workload.
+        ready_path: The file the helper publishes once it is ready, which something
+                    else reads (the egress proxy's port file), or `None` for a
+                    helper that publishes none. The runtime removes it before it
+                    starts the helper (SPEC.md §6, decision-204), so a reused jail
+                    directory's file from an earlier jail can never be read as
+                    this launch's: it exists only because this helper wrote it. An
+                    absolute path, like the rest of a compiled jail's.
     """
 
     name: str
     argv: tuple[str, ...]
     lifetime: HelperLifetime
+    ready_path: str | None = None
+
+    def __post_init__(self) -> None:
+        # A plain str.startswith check for the reason `StagedFile.__post_init__` gives: no `os`
+        # here. A relative path would name a file under the launcher's working directory, and
+        # the runtime would remove that one instead.
+        if self.ready_path is not None and not self.ready_path.startswith("/"):
+            raise ValueError(
+                f"Helper.ready_path must be an absolute path, got: {self.ready_path!r}; "
+                "name the file under the compile context's jail_dir"
+            )
 
 
 @dataclass(frozen=True, slots=True)

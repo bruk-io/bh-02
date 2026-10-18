@@ -33,6 +33,7 @@ import pytest
 from brig.core import NetworkPolicy, Spec
 from brig.mech import CompileCtx
 from brig.mech.connect_proxy import DECISIONS_FILE, PORT_FILE, ConnectProxy
+from brig.proxy.filter import DENIAL_PREFIX
 from brig.run import IoPolicy
 from brig.stack import CompiledJail
 from tests.conftest import launch, workload_argv
@@ -102,17 +103,17 @@ def origin() -> Iterator[_Origin]:
 def jail_dir() -> Iterator[str]:
     """A jail directory nothing has ever been in, removed after the test.
 
-    **It is new on purpose, never named from the process id.** The wrap reads
-    `proxy.port` the moment the workload starts, and the proxy publishes it
-    some tens of milliseconds later (Python start-up), so a directory that
-    already holds one -- a jail's earlier run left it -- is read first: the
-    workload is pointed at a port nobody listens on and its request dies with
-    `ConnectionRefusedError`, where the 403 under test was due (TASK-0140). A
-    directory named `/tmp/bp<pid>-<n>` and kept is exactly that: a later
-    process that gets the same pid (a pid space of 32768 wraps within a day of
-    test runs) is handed the earlier one's files, and the failure reads as a
-    proxy that did not deny. A fresh `mkdtemp` directory cannot be anyone's
-    earlier jail, so the race is not run at all.
+    **It is new on purpose, never named from the process id.** Since decision-204
+    (TASK-0150) a `proxy.port` an earlier jail left in a reused directory is removed
+    before the proxy starts, and the test that plants one is below; before it, the wrap
+    read it the moment the workload started, and the proxy published its own some tens
+    of milliseconds later, so the workload was pointed at a port nobody listens on and
+    its request died with `ConnectionRefusedError` where the 403 under test was due
+    (TASK-0140). Every other test here still gets a directory no earlier jail was ever
+    in, so what it reads of the directory is its own and not the reused-directory case
+    the planted test owns: a name made from the pid is handed to a later process with
+    the same pid (a pid space of 32768 wraps within a day of test runs) along with the
+    earlier one's files, which would make the other tests depend on that fix too.
 
     Short, under `/tmp` and not `tmp_path`: the proxy's port file and the
     leak sweep's argv both want short paths. Resolved, as `CompileCtx`
@@ -281,6 +282,83 @@ def test_the_workload_is_refused_a_host_outside_the_allow_list(
         assert _BODY.decode() not in (_wait_file(out, timeout=1.0) or ""), (
             "a denied request still returned the origin's payload"
         )
+    finally:
+        jail.destroy()
+
+
+def _closed_port() -> int:
+    """A loopback port nothing listens on: one the kernel just handed out and
+    took back. A connection to it is refused, which is what the planted file
+    below must not be able to make the workload see."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port: int = sock.getsockname()[1]
+    return port
+
+
+def _outcome_script(url: str, out: str) -> str:
+    """A workload that fetches `url` through the proxy variables and writes what
+    it saw to `out` in ONE write, whatever that was: the 403's status and body,
+    or the error that stood in its place. Writing the failure too is what lets a
+    refused connection fail the assertion at once, with its own text, rather
+    than as a timeout waiting for a file that is never written."""
+    source = (
+        "import urllib.request, urllib.error\n"
+        "try:\n"
+        f" urllib.request.urlopen({url!r}, timeout=15)\n"
+        " seen = 'UNEXPECTED-SUCCESS'\n"
+        "except urllib.error.HTTPError as e:\n"
+        " seen = 'HTTP %d: ' % e.code + e.read().decode()\n"
+        "except Exception as e:\n"
+        " seen = 'ERROR ' + repr(e)\n"
+        f"open({out!r}, 'w').write(seen)\n"
+    )
+    return f'{sys.executable} -c "{source}"'
+
+
+def test_a_port_file_an_earlier_jail_left_is_not_the_port_the_workload_is_pointed_at(
+    run_id: str, jail_dir: str, origin: _Origin
+) -> None:
+    """TASK-0150, decision-204. A jail directory is reused (decision-181), and
+    the proxy publishes `proxy.port` tens of milliseconds after the workload's
+    shell may already be running, so a `proxy.port` an earlier jail left behind
+    used to be read first: the workload was pointed at a port nobody listens on
+    (or, worse, at whatever listens there now). Here the file is planted, naming
+    a port that is refused, BEFORE `Jail.create`, and the workload still gets
+    the proxy's own 403 for a host outside the allow list.
+
+    THE CONTROLS, in this test: the planted port really is closed (a connection
+    to it is refused, checked before the jail exists), the file really is there
+    when `create` is called, and after the 403 the file names a different port,
+    the proxy's. Without them a plant that never took, or a port that happened
+    to listen, would pass for the fix.
+    """
+    stale = _closed_port()
+    planted = os.path.join(jail_dir, PORT_FILE)
+    with open(planted, "w") as fh:
+        fh.write(str(stale))
+    with pytest.raises(ConnectionRefusedError):
+        socket.create_connection(("127.0.0.1", stale), timeout=5).close()
+    assert _read_nonempty(planted) == str(stale), "the stale port file was not planted"
+
+    out = os.path.join(jail_dir, "got")
+    jail, process = _run(
+        jail_dir,
+        ("localhost",),
+        _outcome_script(f"http://127.0.0.1:{origin.port}/x", out),
+        run_id,
+    )
+    try:
+        seen = _wait_file(out)
+        assert seen is not None, "the workload neither succeeded nor failed"
+        assert seen.startswith("HTTP 403: "), (
+            f"the workload did not get a 403 from the proxy; it saw {seen!r} -- "
+            f"it was pointed at the stale port {stale} the earlier jail left"
+        )
+        assert DENIAL_PREFIX in seen, f"a 403, but not the proxy's own: {seen!r}"
+        published = _read_nonempty(planted)
+        assert published is not None
+        assert published != str(stale), "the proxy's port was never published over the stale one"
     finally:
         jail.destroy()
 

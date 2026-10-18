@@ -34,6 +34,14 @@ renders a `/bin/sh -c` that waits (bounded) for the proxy's port file,
 exports the proxy variables against the port it finds, and `exec`s the
 workload.
 
+**The file the wrap waits for is never an earlier jail's.** A jail directory is reused
+(decision-181), and the proxy publishes its port tens of milliseconds after the workload's
+shell may be running, so a `proxy.port` left by an earlier jail would be read at once: the
+workload pointed at a dead port, or at a foreign listener. The helper therefore declares the
+port file as its `ready_path`, and the runtime removes it before it starts the proxy
+(decision-204, TASK-0150): the wrap checks nothing about where the file came from, because
+the only file that can be there is this launch's.
+
 **Why the wait is in the wrap and not a `LAUNCH_SCOPED` helper.** Both
 work: `_start_helpers` processes helpers in declared order, so a
 `JAIL_LIFETIME` proxy followed by a `LAUNCH_SCOPED` waiter would also
@@ -265,6 +273,7 @@ class ConnectProxy:
                     name="connect_proxy",
                     argv=_render_helper_argv(self._python, port_path, log_path, policy),
                     lifetime=HelperLifetime.JAIL_LIFETIME,
+                    ready_path=port_path,
                 ),
             ),
             requires=frozenset(),
