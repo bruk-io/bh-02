@@ -3,7 +3,7 @@ id: TASK-0144
 title: >-
   Show a row's first load apart from its reloads on the trajectory, and fold the
   boot
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
@@ -112,4 +112,6 @@ INFO    -  Documentation built in 3.80 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer, not the worker): closed. Full scripts/check exit 0 (recorded above), no files changed by it. AC1: _reloads marks first by row id over time-sorted records, pure; tests in test_trajectory.py and test_row_log.py on the rows.jsonl the real shell writes. AC2: _grouped folds consecutive first loads per writer into one line with count and span; reloads/failures one line each; sub-agent fold and live hold-back tested. AC3: GLOSSARY first load / rows.jsonl / bh-02 trajectory entries and command-line.md + sessions.md updated. Nits, not filed: in --follow a trailing first-load run is held until something follows it, so an idle freshly booted session shows no boot line yet; sessions.md line 101 left unwrapped. Resume-as-reload limit already filed as TASK-0155.
 <!-- SECTION:NOTES:END -->
