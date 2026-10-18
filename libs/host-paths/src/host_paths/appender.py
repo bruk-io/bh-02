@@ -148,6 +148,8 @@ class Appender:
         self._raise()
         if self._closed:
             raise ValueError(f"{self._path} is closed, so it can't be checked")
+        # `_last` becomes the look, so `flush` waits for it: the writer runs its jobs in order on one
+        # thread, so the look finishes after every write queued before it (which `_last` was).
         self._last = self._writer.submit(self._look)
         await self.flush()
 

@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 13:24'
-updated_date: '2026-10-18 21:17'
+updated_date: '2026-10-18 21:19'
 labels:
   - agent
   - size-1
@@ -116,4 +116,72 @@ INFO    -  Documentation built in 4.75 seconds
 ```
 
 Review (independent): not closed. Full scripts/check exited 0 and both ACs are met by the code and tests (loop._reply awaits _checked() before any append; model.requests == [] in the failed-restart conversation test; the check is a writer-thread stat, no flush). close-task refuses: a bug needs its repro recorded (record-check TASK-0152 --repro -- <test that fails>, or a 'No repro:' note). The worker's notes describe a planted violation failing, but it is not recorded as a repro. Worker: record it (e.g. with loop.py's await self._checked() removed, run test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart under record-check --repro), then hand back.
+
+Repro at b3a739b73d56, test files: bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py; command: `uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart` exited 1
+
+(172 earlier lines omitted)
+```text
+_ test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart[nothing written yet-compact] _
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-2586/test_a_reply_after_a_restart_t3')
+command = 'compact', wrote = False
+
+    @pytest.mark.parametrize("command", ["clear", "compact"])
+    @pytest.mark.parametrize("wrote", [True, False], ids=["file held open", "nothing written yet"])
+    async def test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart(
+        tmp_path: Path, command: str, wrote: bool
+    ) -> None:
+        """/clear or /compact replaced the file and its restart failed (the person was told): the
+        transcript still mounted is the old conversation's, over the new one's file. A reply's entries
+        are refused, as a recoverable failure that names `/restart transcript`: not written to the old
+        inode (the descriptor it holds), not written after the new conversation's seed (a transcript
+        that had written nothing yet), and not lost without a word. The refusal comes before the
+        model is asked, at the first message after the failed restart too (TASK-0152): the model
+        sees no request, and the transcript keeps nothing of the message. The restart the message
+        names begins the new conversation from the file."""
+        path = tmp_path / "transcript.jsonl"
+        if not wrote:
+            _session(tmp_path)  # a resumed session: the transcript has read the file and written nothing
+        loader, jobs = Loader(str(path)), Jobs()
+        loader.fails = True
+        old = FileTranscript(str(path))
+        if wrote:
+            await _replied(old, "find the answer")
+        if command == "clear":
+            await _clear(loader, jobs)
+            assert path.read_text() == ""
+        else:
+            await _compact(path, Scripted([text("x holds 42"), stop("end_turn")]), loader=loader, jobs=jobs)
+            assert [m["role"] for m in _entries(path)] == ["user", "assistant"]
+        await _drain(jobs)
+        assert jobs.told == [
+            unrestarted(ConversationConfig(), "LookupError: no row 'transcript'; the rows are loop")
+        ]
+        new, backup = path.read_bytes(), Path(f"{path}.bak").read_bytes()
+    
+        kept, model = old.messages, Scripted([text("an answer from the old conversation")])
+        with pytest.raises(TranscriptReplaced) as refused:
+            await _replied(old, "forged", model)
+        error = refused.value
+        assert isinstance(error, Recoverable) and isinstance(error, OSError)  # chat shows it and carries on
+        assert error.kind == "transcript_replaced"
+        assert str(path) in error.message and "/restart transcript" in error.message
+        assert model.requests == []  # refused before the model was asked, not at the step's entry after it
+>       assert old.messages == kept  # and nothing of the message was kept, not even in memory
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert ({'role': 'sy... later'}, ...) == ({'role': 'sy... read later'})
+E         
+E         Left contains one more item: {'role': 'tools', 'tools': [{'name': 'python', 'description': 'Run Python.', 'parameters': {'type': 'object'}}]}
+E         Use -v to get more diff
+
+bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py:967: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart[file held open-clear]
+FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart[file held open-compact]
+FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart[nothing written yet-clear]
+FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart[nothing written yet-compact]
+============================== 4 failed in 0.36s ===============================
+```
+
+Round 1 review fix. (1) Repro recorded: planted the violation (the 'await self._checked()' at loop.py:759 replaced by 'pass'), ran 'record-check TASK-0152 --repro -- uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart' (4 failed: model.requests held the old conversation's request, and for 'nothing written yet' the tools entry was kept; recorded on the task as 'Repro at b3a739b73d56'), then restored loop.py (byte-identical to the committed one, cmp) and re-ran the test: 4 passed. (2) The reviewer's nit: a two-line comment in libs/host-paths/src/host_paths/appender.py Appender.check saying _last becomes the look so flush waits for it, and why that is right (the writer runs its jobs in order on one thread). Comment only, no behaviour change. scripts/check libs/host-paths: exit 0 (format, lint, types, 80 passed, gates ok, docs ok). loop.py is unchanged from the previous commit, so the agent plugin check was not re-run. The two known limits stay unfiled as the reviewer ruled. The full scripts/check stays the reviewer's.
 <!-- SECTION:NOTES:END -->
