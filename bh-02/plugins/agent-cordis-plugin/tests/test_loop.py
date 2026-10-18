@@ -1217,6 +1217,48 @@ async def test_the_transcript_is_flushed_after_a_reply_cancelled_with_a_call_run
     assert transcript.flushed == [len(transcript.messages)]  # after the answers the stop appended
 
 
+class _Checking(_Flushing):
+    """A transcript whose file can be replaced under it, as `FileTranscript` is: what the loop had
+    appended each time it was asked to `check`, and `refuses` what it is told of a replaced file."""
+
+    def __init__(self, *, refuses: Exception | None = None) -> None:
+        super().__init__()
+        self.checked: list[int] = []
+        self._refuses = refuses
+
+    async def check(self) -> None:
+        await asyncio.sleep(0)  # the writer's look takes its turn, as a thread's does
+        self.checked.append(len(self.messages))
+        if self._refuses is not None:
+            raise self._refuses
+
+
+async def test_a_reply_asks_the_transcript_to_check_its_file_first_and_flushes_it_once() -> None:
+    """The check is the first thing a reply does, before it appends anything, and it is no flush:
+    the flush stays one, at the end of the reply, however many steps the reply has."""
+    transcript = _Checking()
+    scripted = Scripted([text("let me "), call("c1", "python", code="a")], [text("done")], [text("again")])
+    model = LoopModel(scripted, as_tool(Shouting()), transcript, Confined())
+    assert await _collect(model, "go") == "let me done"
+    first = len(transcript.messages)
+    assert transcript.checked == [0]  # once, before the reply appended anything
+    assert transcript.flushed == [first]  # once, with every entry of the reply in
+    assert await _collect(model, "and again") == "again"
+    assert transcript.checked == [0, first]  # the next reply checks as the conversation stood
+    assert transcript.flushed == [first, len(transcript.messages)]
+
+
+async def test_a_transcript_that_refuses_at_the_check_is_never_asked_a_model_step_or_an_entry() -> None:
+    refusal = OSError(errno.ESTALE, "the file was replaced")
+    transcript = _Checking(refuses=refusal)
+    scripted = Scripted([text("an answer nobody should read")])
+    model = LoopModel(scripted, as_tool(Shouting()), transcript, Confined())
+    with pytest.raises(OSError, match="the file was replaced"):
+        await _collect(model, "go")
+    assert scripted.requests == [] and transcript.messages == ()
+    assert transcript.checked == [0]
+
+
 async def test_a_transcript_that_keeps_the_conversation_in_memory_needs_no_flush() -> None:
     assert (
         await _collect(
@@ -1255,6 +1297,28 @@ async def test_a_reply_over_a_slow_disk_ends_with_every_entry_in_the_file(
         entries = [json.loads(line) for line in path.read_text().splitlines()]
         assert entries == list(transcript.messages) and len(entries) == 5
     assert threading.get_ident() not in disk.threads  # none of it was written on the event loop
+
+
+async def test_a_reply_costs_the_event_loop_no_stat_of_the_file_either(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check a reply makes of the file is the writing thread's stat: the event loop is free
+    while it runs and makes no stat of its own, as it makes no write."""
+    path = tmp_path / "transcript.jsonl"
+    path.touch()  # a file there to look at: a resumed session's, or the one an earlier reply made
+    seen: set[int] = set()
+    real = os.stat
+
+    def stat(file: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        if str(file) == str(path):
+            seen.add(threading.get_ident())
+        return real(file, *args, **kwargs)
+
+    async with FileTranscript(str(path)) as transcript:  # made before the stat is watched: its own
+        monkeypatch.setattr(os, "stat", stat)
+        await _collect(LoopModel(Scripted([text("hi")]), as_tool(Shouting()), transcript, Confined()), "go")
+        monkeypatch.undo()
+    assert seen and threading.get_ident() not in seen
 
 
 async def test_a_reply_whose_entries_could_not_be_written_raises_it_rather_than_end_quietly(

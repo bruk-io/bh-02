@@ -857,19 +857,22 @@ def _slow_disk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os, "write", slow)
 
 
-async def _replied(transcript: FileTranscript, message: str = "find x") -> None:
-    """The loop answers `message` over `transcript`: a tool step, then the answer."""
+async def _replied(
+    transcript: FileTranscript, message: str = "find x", scripted: Scripted | None = None
+) -> None:
+    """The loop answers `message` over `transcript`: a tool step, then the answer (`scripted`, if
+    the caller wants to see what the model was asked)."""
 
     async def python(input: Json) -> Json:
         return {"content": "42"}
 
     tools = ToolBroker()
     tools.register(PYTHON, python)
-    scripted = Scripted(
+    model = scripted or Scripted(
         [text("let me see"), {"type": "tool_call", "id": "c1", "name": "python", "input": {"code": "x"}}],
         [text("x holds 42")],
     )
-    loop = LoopModel(scripted, tools, transcript, _Approved(), clock=on("2026-10-07"))
+    loop = LoopModel(model, tools, transcript, _Approved(), clock=on("2026-10-07"))
     assert [e["type"] async for e in loop.reply(message)][-1] == "stop"
 
 
@@ -929,8 +932,10 @@ async def test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart
     transcript still mounted is the old conversation's, over the new one's file. A reply's entries
     are refused, as a recoverable failure that names `/restart transcript`: not written to the old
     inode (the descriptor it holds), not written after the new conversation's seed (a transcript
-    that had written nothing yet), and not lost without a word. The restart the message names
-    begins the new conversation from the file."""
+    that had written nothing yet), and not lost without a word. The refusal comes before the
+    model is asked, at the first message after the failed restart too (TASK-0152): the model
+    sees no request, and the transcript keeps nothing of the message. The restart the message
+    names begins the new conversation from the file."""
     path = tmp_path / "transcript.jsonl"
     if not wrote:
         _session(tmp_path)  # a resumed session: the transcript has read the file and written nothing
@@ -951,12 +956,15 @@ async def test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart
     ]
     new, backup = path.read_bytes(), Path(f"{path}.bak").read_bytes()
 
+    kept, model = old.messages, Scripted([text("an answer from the old conversation")])
     with pytest.raises(TranscriptReplaced) as refused:
-        await _replied(old, "forged")
+        await _replied(old, "forged", model)
     error = refused.value
     assert isinstance(error, Recoverable) and isinstance(error, OSError)  # chat shows it and carries on
     assert error.kind == "transcript_replaced"
     assert str(path) in error.message and "/restart transcript" in error.message
+    assert model.requests == []  # refused before the model was asked, not at the step's entry after it
+    assert old.messages == kept  # and nothing of the message was kept, not even in memory
     with pytest.raises(TranscriptReplaced, match="/restart transcript"):  # the next message, at once
         old.append({"role": "user", "content": "forged again"})
     with pytest.raises(TranscriptReplaced, match="/restart transcript"):

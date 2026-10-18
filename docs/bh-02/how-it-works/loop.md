@@ -49,7 +49,7 @@ readable by you alone (0600 and 0700, not the umask's). A line that can't be wri
 is an error at the end of that reply, not an entry quietly missing from the file. If `/clear` or
 `/compact` replaced the file and the restart that follows failed (you are told), the old conversation
 is still running over a file that now holds the new one: bh-02 writes nothing more to it, and
-the next message answers with an error that says `/restart transcript` begins the new conversation.
+the next message answers, before the model is asked, with an error that says `/restart transcript` begins the new conversation.
 
 ## Steps that don't count
 

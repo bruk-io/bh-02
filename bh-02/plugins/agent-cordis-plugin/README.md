@@ -206,10 +206,14 @@ path is the one it means (`host_paths.Replaced`), and `FileTranscript` says a re
 a recoverable failure (CONTRACTS.md: errors) and `chat:converse` shows it and carries on. The
 message names `/restart transcript`, which begins the conversation the file holds; until then
 every `append`, `flush` and the row's leaving raise it, nothing is written to the old file (the
-`.bak`) or the new one, and an entry refused by `append` is not kept in memory. The check is
-on the writing thread, so the refusal surfaces at the next `append` after it has run, not at the
-`append` that queued the entry: the first message after a failed restart may reach the model once
-before its step's entry is refused.
+`.bak`) or the new one, and an entry refused by `append` is not kept in memory. The appender's check
+is on its writing thread and made before a write, and nothing is queued between the rename and the
+first message after a failed restart, so the loop has the transcript look at its file first
+(`check()`, an optional capability of `FileTranscript` like `flush()`; `MemoryTranscript` has none),
+awaited at the start of a reply before it appends anything: the reply is refused before the model is
+asked and keeps nothing. The look is the one stat the thread makes, queued behind no write at that
+point (the reply before flushed) and awaited with the event loop free, so the event loop makes no
+stat and waits on no disk; it is no flush, so a reply still flushes once, at its end.
 
 A transcript file read when the row starts (a resume, or `/compact` reading it) may end in a
 write that was cut short: a process killed mid-write leaves a last line with no newline that is

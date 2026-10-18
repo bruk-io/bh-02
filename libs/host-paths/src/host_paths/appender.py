@@ -27,7 +27,10 @@ thread checks before each write that the file at the path is still that one (`os
 of the file held, or found when the appender was made, against a `stat` of the path that follows
 no link). A file renamed over, removed, or turned into a link is another file or none: the write
 would land in the old file's inode, which nobody reads, or in a file that holds another
-conversation, so it is refused as `Replaced` and never made.
+conversation, so it is refused as `Replaced` and never made. The thread has not looked at the file
+since its last write, so a caller about to rely on it before it has anything to write (a reply
+that begins) asks it to look now: `check` queues the same look, without a write, on the thread
+and waits for it, so the stat is the thread's and the caller's event loop waits on none.
 
 A write that fails (the disk is full, a link stands at the name, the file was replaced or removed)
 is not lost silently: it is kept, nothing queued after it is written (a file with a hole in it
@@ -128,6 +131,26 @@ class Appender:
             await asyncio.shield(asyncio.wrap_future(self._last))
         self._raise()
 
+    async def check(self) -> None:
+        """Return once the writing thread has looked, after every write queued before this, at the
+        file at the path and found it the one this appender means: the look it makes before each
+        write, made now, with nothing written. A caller whose next write is not queued yet uses it
+        to learn at once that the file was replaced, not at the write that finds it. The stat is
+        the thread's; the caller waits only for the thread, never for a disk of its own. A file
+        found replaced is kept as a failed write is: nothing queued after it is written, and every
+        `append`, `flush` and `close` after it raises it.
+
+        Raises:
+            Replaced: the file at the path is another than the one meant, or none.
+            OSError: a write failed before this, or the stat did.
+            ValueError: the appender is closed.
+        """
+        self._raise()
+        if self._closed:
+            raise ValueError(f"{self._path} is closed, so it can't be checked")
+        self._last = self._writer.submit(self._look)
+        await self.flush()
+
     async def close(self) -> None:
         """Wait for everything queued, then close the file (a file nothing was written to is never
         opened); the appender takes no more. Closing again waits for the first.
@@ -167,6 +190,15 @@ class Appender:
             view = memoryview(data)
             while view:
                 view = view[os.write(self._fd, view) :]
+        except OSError as error:
+            self._failing(error)
+
+    def _look(self) -> None:
+        """Check the file at the path is the one meant, on the thread, unless a write failed before it."""
+        if self._failed is not None:
+            return
+        try:
+            self._unreplaced()
         except OSError as error:
             self._failing(error)
 

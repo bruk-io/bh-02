@@ -29,8 +29,8 @@ queued in `jobs` (CONTRACTS.md: jobs), never run in the chat row's task, which i
 a restart that fails is told to the person, since the new conversation is written by then; the
 chat row reads its next line only once the restart is done, so the line reaches the new loop. The
 transcript left mounted by a restart that failed is the old conversation's over the new one's file,
-and refuses every entry (`transcript.TranscriptReplaced`, naming `/restart transcript`) rather than
-write it into either.
+and refuses the next reply before the model is asked (`transcript.TranscriptReplaced`, naming
+`/restart transcript`) rather than write it into either.
 The pure parts (`asked`, `seeded`, `kept_in`, `_is_seed`, `_unsaid`, `_unusable`, `_summed`,
 `_answer`, `_unchanged`, `_cleared`, `unrestarted`) decide; the rest reads, writes and asks.
 """

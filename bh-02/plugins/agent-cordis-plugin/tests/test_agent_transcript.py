@@ -159,6 +159,28 @@ async def test_a_file_replaced_under_the_transcript_is_refused_naming_the_restar
     assert [json.loads(line)["content"] for line in Path(backup).read_text().splitlines()] == ["one"]
 
 
+async def test_check_of_a_file_replaced_under_the_transcript_is_refused_before_anything_is_appended(
+    tmp_path: Path,
+) -> None:
+    """Nothing is queued after the rewrite, so the thread has not looked at the file: `check` has
+    it look, and says what an `append` after it would, naming the restart, with nothing kept."""
+    path = tmp_path / "transcript.jsonl"
+    transcript = FileTranscript(str(path))
+    transcript.append({"role": "user", "content": "one"})
+    await transcript.flush()
+    await transcript.check()  # the file is the one: nothing to say, and nothing changes
+    assert [m["content"] for m in transcript.messages] == ["one"]
+    rewrite(str(path), SEED)
+    new = path.read_bytes()
+    with pytest.raises(TranscriptReplaced, match="/restart transcript") as refused:
+        await transcript.check()
+    assert (refused.value.kind, str(path) in refused.value.message) == ("transcript_replaced", True)
+    with pytest.raises(TranscriptReplaced, match="/restart transcript"):
+        transcript.append({"role": "user", "content": "two"})
+    assert [m["content"] for m in transcript.messages] == ["one"]
+    assert path.read_bytes() == new
+
+
 def _line(content: str) -> str:
     return json.dumps({"role": "user", "content": content}) + "\n"
 

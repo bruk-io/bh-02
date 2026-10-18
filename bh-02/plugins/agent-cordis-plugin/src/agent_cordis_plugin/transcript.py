@@ -27,7 +27,11 @@ recoverable failure (`kind` and `message`, CONTRACTS.md: errors) whose message t
 `/restart transcript` begins the new conversation. As with any failed write, the entry whose
 write found the file replaced stays in memory and the ones after it are refused before they are
 kept; nothing of the old conversation reaches the new file, and none is written to the old inode,
-where no one would read it.
+where no one would read it. The writer looks at the file only before a write, so a reply asks it to
+look first (`check`), before it appends anything: the refusal then comes before the model is asked,
+not at the step's entry after it. The look is the writing thread's one stat, which the reply waits
+for with the event loop free; it writes nothing, and it waits behind no write at a reply's start,
+since the reply before flushed.
 """
 
 import contextlib
@@ -139,7 +143,7 @@ class FileTranscript(MemoryTranscript):
     Entered as an async context manager (the transcript row does), it waits for the last write
     and closes the file when it leaves, so a restart or a retired sub-agent holds no descriptor.
     A file replaced under it (`/clear` or `/compact`, whose restart failed) is refused:
-    `TranscriptReplaced`, by `append`, `flush` and leaving.
+    `TranscriptReplaced`, by `check`, `append`, `flush` and leaving.
     """
 
     def __init__(self, path: str) -> None:
@@ -194,6 +198,20 @@ class FileTranscript(MemoryTranscript):
         with self._refusing():
             self._appender.append(f"{json.dumps(message)}\n".encode())
         super().append(message)
+
+    async def check(self) -> None:
+        """Return once the writer has looked at the file and found it the one this transcript
+        writes to, which the loop awaits before a reply appends anything, so a file replaced
+        under the transcript is refused before the model is asked. Nothing is written: the look is
+        one stat, on the writing thread, queued behind the writes before it (none, at a reply's
+        start).
+
+        Raises:
+            TranscriptReplaced: the file was replaced under the transcript.
+            OSError: a line could not be written.
+        """
+        with self._refusing():
+            await self._appender.check()
 
     async def flush(self) -> None:
         """Return once every message appended so far is in the file.

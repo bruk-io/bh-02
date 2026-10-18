@@ -479,3 +479,127 @@ async def test_a_file_made_before_the_first_write_when_there_was_none_is_the_fil
     appender.append(b"more\n")
     await appender.close()
     assert path.read_text() == "theirs\nours\nmore\n"
+
+
+@pytest.mark.parametrize("held", [True, False], ids=["held open", "not yet opened"])
+@pytest.mark.parametrize("how", REPLACED_BY)
+async def test_check_finds_a_replaced_file_before_anything_is_queued_for_it(
+    tmp_path: Path, how: str, held: bool
+) -> None:
+    """The thread looks at the file only before a write, so a caller with nothing queued yet (a
+    reply that begins) asks it to look: the file replaced is `Replaced` at once, kept as a failed
+    write is, and the first write that follows it is refused without the thread having to find
+    the file replaced again. Neither the old inode nor what the path holds now is written."""
+    replace, now = REPLACED_BY[how]
+    path = tmp_path / "log"
+    path.write_text("before\n")
+    old = tmp_path / "old"
+    os.link(path, old)
+    appender = Appender.open(str(path)) if held else Appender(str(path))
+    await appender.check()  # the file is the one meant: nothing to say
+    replace(path)
+    with pytest.raises(Replaced) as raised:
+        await appender.check()
+    assert isinstance(raised.value, OSError) and str(path) in str(raised.value)
+    assert appender.failure is not None and appender.failure.error is raised.value
+    with pytest.raises(Replaced):
+        appender.append(b"two\n")  # refused by the caller's thread, with no write queued for it
+    with pytest.raises(Replaced):
+        await appender.flush()
+    with pytest.raises(Replaced):
+        await appender.close()
+    assert old.read_text() == "before\n" and _content(path) == now
+    assert not (tmp_path / "log.new").exists()
+
+
+async def test_check_of_a_file_nothing_was_made_for_finds_nothing_to_refuse_and_makes_none(
+    tmp_path: Path,
+) -> None:
+    """Nothing is meant before a file is there to mean: the check says yes, and writes and opens
+    nothing (the file is made by the first write, as it was)."""
+    path = tmp_path / "log"
+    appender = Appender(str(path))
+    await appender.check()
+    assert not path.exists()
+    appender.append(b"one\n")
+    await appender.close()
+    assert path.read_text() == "one\n"
+
+
+async def test_check_is_made_by_the_writing_thread_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stat is the thread's, so the caller (the event loop the TUI shares) waits for the
+    thread, not for a disk of its own; and the file is only looked at."""
+    path = tmp_path / "log"
+    path.write_text("before\n")
+    appender = Appender.open(str(path))
+    threads: set[int] = set()
+    writes: list[bytes] = []
+    real_stat, real_write = os.stat, os.write
+
+    def stat(file: object, *args: object, **kwargs: object) -> os.stat_result:
+        if file == str(path):
+            threads.add(threading.get_ident())
+        return real_stat(file, *args, **kwargs)  # type: ignore[arg-type]
+
+    def write(fd: int, data: bytes | memoryview) -> int:
+        writes.append(bytes(data))
+        return real_write(fd, data)
+
+    monkeypatch.setattr(os, "stat", stat)
+    monkeypatch.setattr(os, "write", write)
+    await appender.check()
+    monkeypatch.undo()
+    assert threads and threading.get_ident() not in threads
+    assert writes == [] and path.read_text() == "before\n"
+    await appender.close()
+
+
+async def test_check_comes_after_the_writes_queued_before_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The look is queued like a write: a write held on the thread is waited for, and the file
+    it was written to (the one meant when it began) keeps it though the check finds the file
+    replaced since."""
+    path = tmp_path / "log"
+    path.write_text("before\n")
+    old = tmp_path / "old"
+    os.link(path, old)
+    appender = Appender.open(str(path))
+    reached, released = _held(monkeypatch, b"one")
+    appender.append(b"one\n")
+    await asyncio.to_thread(reached.wait, 10)
+    _renamed_over(path)  # while the write is under way
+    checking = asyncio.ensure_future(appender.check())
+    await asyncio.sleep(0.05)
+    assert not checking.done()  # behind the write
+    released.set()
+    with pytest.raises(Replaced):
+        await checking
+    assert old.read_text() == "before\none\n"
+    with pytest.raises(Replaced):
+        await appender.close()
+
+
+async def test_check_raises_the_failure_of_an_earlier_write_and_looks_no_further(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "log"
+    appender = Appender.open(str(path))
+    _full(monkeypatch, after=0)
+    appender.append(b"one\n")
+    with pytest.raises(OSError, match="No space left"):
+        await appender.flush()
+    with pytest.raises(OSError, match="No space left"):
+        await appender.check()
+    monkeypatch.undo()
+    with pytest.raises(OSError, match="No space left"):
+        await appender.close()
+
+
+async def test_a_closed_appender_can_not_be_checked(tmp_path: Path) -> None:
+    appender = Appender(str(tmp_path / "log"))
+    await appender.close()
+    with pytest.raises(ValueError, match="closed"):
+        await appender.check()
