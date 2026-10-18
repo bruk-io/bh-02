@@ -3,9 +3,11 @@ id: TASK-0139
 title: >-
   A transcript whose file /clear or /compact replaced keeps writing to the old
   one if its restart fails
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-18 05:20'
+updated_date: '2026-10-18 13:14'
 labels:
   - agent
   - size-2
