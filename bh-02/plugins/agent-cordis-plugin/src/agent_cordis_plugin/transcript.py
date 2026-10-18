@@ -7,7 +7,13 @@ message in memory and queues its line to `host_paths.Appender`, which writes it 
 order, at 0600, so the event loop the TUI shares never waits on a disk. The file may therefore
 be a few entries behind the memory for a moment: the loop flushes it at the end of every reply
 (`flush`), so whatever reads the file between replies (`/clear`, `/compact`, a resume) finds every
-entry. A line that can't be written is not lost silently: the next `append` and `flush` raise it.
+entry. A line that can't be written is not lost silently: the next `append` and `flush` raise it, as
+`TranscriptWriteFailed`, a recoverable failure (`kind` and `message`, CONTRACTS.md: errors), so a full
+disk is shown to the person like any other failure of a reply and the chat carries on, not ends
+with a traceback. Its message names the file, what failed, and what to do: free space, then
+`/restart transcript`, which begins again from what the file holds. The writer's rule stands: the
+entry whose write failed stays in memory, nothing after it is written, and the ones after it are
+refused before they are kept.
 `/compact` replaces the file whole (`rewrite`, keeping the old one beside it, both at 0600) and
 restarts the row, which then starts with the new conversation.
 
@@ -46,7 +52,7 @@ from typing import Any, Self
 
 from host_paths import Appender, Replaced, write_beneath
 
-__all__ = ["FileTranscript", "MemoryTranscript", "TranscriptReplaced", "rewrite"]
+__all__ = ["FileTranscript", "MemoryTranscript", "TranscriptReplaced", "TranscriptWriteFailed", "rewrite"]
 
 # What the person is told when the transcript's file was replaced under it. `unrestarted` (the
 # conversation row) says the same of a restart that failed; this is what they meet when they type.
@@ -54,6 +60,16 @@ _REPLACED = (
     "the conversation's file {path} was replaced since this conversation began (by a /clear or "
     "/compact whose restart failed, or by hand), so nothing more is written to it: the file holds "
     "another conversation now. /restart transcript begins that one"
+)
+
+# What the person is told when the transcript's writer could not write its file (the disk is full, the
+# directory is gone, the file is a directory). The writer writes nothing after a failed write, so
+# nothing is until the transcript is started again over the file.
+_UNWRITTEN = (
+    "writing the conversation's file {path} failed ({error}), so the entry that failed and every one "
+    "after it are not in the file, and nothing more is written to it. If the disk is full, free some "
+    "space (otherwise put right what the error says), then /restart transcript to carry on from what "
+    "the file holds: what was not written is lost"
 )
 
 # What the person is told when a line before the last is not JSON. Only the last line can be a write
@@ -74,6 +90,18 @@ class TranscriptReplaced(OSError):
     def __init__(self, path: Path) -> None:
         self.kind = "transcript_replaced"
         self.message = _REPLACED.format(path=path)
+        super().__init__(self.message)
+
+
+class TranscriptWriteFailed(OSError):
+    """The transcript's file could not be written (a full disk, a directory gone): a recoverable
+    failure (CONTRACTS.md: errors), its `kind` `transcript_write_failed`, its `message` for the
+    person, naming the file, what failed, and the command that begins again from the file. An
+    `OSError`, as every failed write is; the writer's own error is its `__cause__`."""
+
+    def __init__(self, path: Path, error: OSError) -> None:
+        self.kind = "transcript_write_failed"
+        self.message = _UNWRITTEN.format(path=path, error=error)
         super().__init__(self.message)
 
 
@@ -143,7 +171,8 @@ class FileTranscript(MemoryTranscript):
     Entered as an async context manager (the transcript row does), it waits for the last write
     and closes the file when it leaves, so a restart or a retired sub-agent holds no descriptor.
     A file replaced under it (`/clear` or `/compact`, whose restart failed) is refused:
-    `TranscriptReplaced`, by `check`, `append`, `flush` and leaving.
+    `TranscriptReplaced`, by `check`, `append`, `flush` and leaving. A write that failed (a full
+    disk) is refused the same way, once and for good: `TranscriptWriteFailed`.
     """
 
     def __init__(self, path: str) -> None:
@@ -193,7 +222,8 @@ class FileTranscript(MemoryTranscript):
 
         Raises:
             TranscriptReplaced: the file was replaced under the transcript; nothing is kept.
-            OSError: an earlier line could not be written; nothing after it is.
+            TranscriptWriteFailed: an earlier line could not be written; nothing after it is,
+                and nothing is kept.
         """
         with self._refusing():
             self._appender.append(f"{json.dumps(message)}\n".encode())
@@ -208,7 +238,7 @@ class FileTranscript(MemoryTranscript):
 
         Raises:
             TranscriptReplaced: the file was replaced under the transcript.
-            OSError: a line could not be written.
+            TranscriptWriteFailed: a line could not be written, or the file could not be looked at.
         """
         with self._refusing():
             await self._appender.check()
@@ -218,7 +248,7 @@ class FileTranscript(MemoryTranscript):
 
         Raises:
             TranscriptReplaced: the file was replaced under the transcript.
-            OSError: a line could not be written.
+            TranscriptWriteFailed: a line could not be written.
         """
         with self._refusing():
             await self._appender.flush()
@@ -232,11 +262,14 @@ class FileTranscript(MemoryTranscript):
 
     @contextlib.contextmanager
     def _refusing(self) -> Iterator[None]:
-        """Say a file replaced under the appender as the person is told it."""
+        """Say the appender's failure as the person is told it: a file replaced under it as
+        `TranscriptReplaced`, any other failed write as `TranscriptWriteFailed`."""
         try:
             yield
         except Replaced as replaced:
             raise TranscriptReplaced(self._path) from replaced
+        except OSError as error:
+            raise TranscriptWriteFailed(self._path, error) from error
 
 
 # A transcript is the person's, and not for the model's code to read or write: what `rewrite` makes

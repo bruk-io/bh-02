@@ -59,7 +59,13 @@ from agent_cordis_plugin.records import (
 from agent_cordis_plugin.stops import classify
 from agent_cordis_plugin.system import SystemConfig, SystemPrompt, branch_of, describe
 from agent_cordis_plugin.tools import HOST, JAIL, ToolBroker
-from agent_cordis_plugin.transcript import FileTranscript, MemoryTranscript, TranscriptReplaced, rewrite
+from agent_cordis_plugin.transcript import (
+    FileTranscript,
+    MemoryTranscript,
+    TranscriptReplaced,
+    TranscriptWriteFailed,
+    rewrite,
+)
 from agent_cordis_plugin.wiring import (
     LoopConfig,
     TranscriptConfig,
@@ -109,6 +115,7 @@ __all__ = [
     "Transcript",
     "TranscriptConfig",
     "TranscriptReplaced",
+    "TranscriptWriteFailed",
     "Unchanged",
     "Unstarted",
     "Usage",

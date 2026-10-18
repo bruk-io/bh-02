@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_cordis_plugin import FileTranscript, TranscriptReplaced, rewrite, seeded
+from agent_cordis_plugin import FileTranscript, TranscriptReplaced, TranscriptWriteFailed, rewrite, seeded
 
 # a compacted conversation, as a rewrite is given one
 SEED = seeded("x holds 42", "", {"at": "2026-10-18T03:47:12.345Z"})
@@ -123,15 +123,46 @@ async def test_a_line_that_can_t_be_written_is_raised_by_the_next_append_and_flu
 
     monkeypatch.setattr(os, "write", full)
     transcript.append({"role": "user", "content": "two"})
-    with pytest.raises(OSError, match="No space left"):
+    with pytest.raises(TranscriptWriteFailed, match="No space left") as failed:
         await transcript.flush()
-    with pytest.raises(OSError, match="No space left"):
+    error = failed.value  # a recoverable failure (kind and message): the chat shows it and carries on
+    assert isinstance(error, OSError) and error.kind == "transcript_write_failed"
+    assert error.message == str(error) and isinstance(error.__cause__, OSError)
+    assert str(path) in error.message and "free some space" in error.message
+    assert "/restart transcript" in error.message
+    with pytest.raises(TranscriptWriteFailed, match="No space left"):
         transcript.append({"role": "user", "content": "three"})
     monkeypatch.setattr(os, "write", real)  # room again: the failure stands, nothing is written after it
-    with pytest.raises(OSError, match="No space left"):
+    with pytest.raises(TranscriptWriteFailed, match="No space left"):
         await transcript.flush()
+    with pytest.raises(TranscriptWriteFailed, match="No space left"):  # and the row's leaving says so
+        async with transcript:
+            pass
     assert [m["content"] for m in transcript.messages] == ["one", "two"]
     assert FileTranscript(str(path)).messages == ({"role": "user", "content": "one"},)
+
+
+async def test_a_full_disk_is_a_recoverable_failure_naming_the_file_and_the_restart() -> None:
+    """The disk itself, not a stand-in for its error: `/dev/full` takes no byte. Raised at the
+    first write, by `flush`, `check` and `append` after it, so a reply is refused whole and the
+    chat carries on. Looking for the device is in the test, not a `skipif`: at import time it
+    would be a side effect."""
+    if not os.path.exists("/dev/full"):
+        pytest.skip("a device that is always full: Linux has one")
+    transcript = FileTranscript("/dev/full")
+    transcript.append({"role": "user", "content": "one"})
+    with pytest.raises(TranscriptWriteFailed, match="No space left on device") as full:
+        await transcript.flush()
+    assert (full.value.kind, "/dev/full" in full.value.message) == ("transcript_write_failed", True)
+    assert "free some space" in full.value.message and "/restart transcript" in full.value.message
+    with pytest.raises(TranscriptWriteFailed, match="/restart transcript"):
+        await transcript.check()
+    with pytest.raises(TranscriptWriteFailed, match="/restart transcript"):
+        transcript.append({"role": "user", "content": "two"})
+    assert [m["content"] for m in transcript.messages] == ["one"]
+    with pytest.raises(TranscriptWriteFailed, match="/restart transcript"):
+        async with transcript:
+            pass
 
 
 async def test_a_file_replaced_under_the_transcript_is_refused_naming_the_restart(tmp_path: Path) -> None:

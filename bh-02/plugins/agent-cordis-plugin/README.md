@@ -193,6 +193,15 @@ line then, and only once `jobs.settled()`), so `/clear` and `/compact` read and 
 with no write pending, and a reply that ends has left every entry of it in the file. A line that
 can't be written (a full disk) is not dropped: the next `append` and the flush raise it, and
 nothing after it is written, since a file with a hole in it would resume as another conversation.
+It is raised as `TranscriptWriteFailed`: an `OSError` with a `kind` (`transcript_write_failed`) and
+a `message`, so it is a recoverable failure (CONTRACTS.md: errors) and `chat:converse` shows it
+and carries on, where the writer's bare `OSError` ended bh-02 with a traceback and the
+conversation in memory lost. The message names the file, the error of the write, and what to do:
+free some space if the disk is full (or put right what the error says), then `/restart
+transcript`, which carries on from what the file holds; the entry that failed and the ones after
+it are not in it. Until then every `append`, `check`, `flush` and the row's leaving raise it, so
+the next message is refused before the model is asked. The row's leaving raises it too, and the
+restart goes on all the same.
 The transcript row enters its file, so a restart (or a retired sub-agent) writes what is queued
 and closes it.
 

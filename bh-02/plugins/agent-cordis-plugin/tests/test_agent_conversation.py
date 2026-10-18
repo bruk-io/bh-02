@@ -24,6 +24,7 @@ from agent_cordis_plugin import (
     ToolBroker,
     TranscriptConfig,
     TranscriptReplaced,
+    TranscriptWriteFailed,
     Unchanged,
     asked,
     clear_conversation,
@@ -1013,3 +1014,39 @@ async def test_a_transcript_row_whose_file_was_replaced_restarts_all_the_same(tm
     await rt.shutdown()
     assert [m["role"] for m in _entries(path)] == ["tools", "user", "assistant", "tool", "assistant"]
     assert b"forged" not in path.read_bytes()
+
+
+async def test_a_transcript_row_whose_file_could_not_be_written_restarts_from_what_the_file_holds(
+    tmp_path: Path,
+) -> None:
+    """The remedy a write failure's message names has to work too: the row's leaving raises what
+    the writer kept, cordis ends the row all the same, and the row that takes its place starts from
+    the lines that did reach the file (not the entries since, which the message says are lost)."""
+    directory, moved = tmp_path / "session", tmp_path / "moved"
+    directory.mkdir()
+    path = directory / "transcript.jsonl"
+    rt = Runtime()
+    row = rt.mount(transcript_row, id="transcript", config=TranscriptConfig(path=str(path)))
+    await rt.settle()
+    old = row.ctx.get("transcript")
+    assert isinstance(old, FileTranscript)
+    await _replied(old)
+    held = _entries(path)
+    directory.rename(moved)  # the disk goes: nothing can be written beneath the path
+    directory.write_text("in the way")  # (a file where its directory was; no function of `os` is replaced)
+    with pytest.raises(TranscriptWriteFailed, match="/restart transcript") as refused:
+        await _replied(old, "lost")
+    assert isinstance(refused.value, Recoverable) and str(path) in refused.value.message
+    directory.unlink()  # room again: what the person did before /restart transcript
+    moved.rename(directory)
+    await row.retire()
+    await rt.settle()
+    row = rt.mount(transcript_row, id="transcript", config=TranscriptConfig(path=str(path)))
+    await rt.settle()
+    new = row.ctx.get("transcript")
+    assert isinstance(new, FileTranscript) and new is not old and list(new.messages) == held
+    await _replied(new, "a fresh question")
+    await rt.shutdown()
+    # the conversation went on from the lines the file held (the tools it began with among them)
+    assert [m["role"] for m in _entries(path)][len(held) :] == ["user", "assistant", "tool", "assistant"]
+    assert b"lost" not in path.read_bytes()
