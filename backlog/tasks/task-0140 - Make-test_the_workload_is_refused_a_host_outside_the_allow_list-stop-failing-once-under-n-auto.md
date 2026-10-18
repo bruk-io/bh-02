@@ -3,9 +3,11 @@ id: TASK-0140
 title: >-
   Make test_the_workload_is_refused_a_host_outside_the_allow_list stop failing
   once under -n auto
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-18 05:33'
+updated_date: '2026-10-18 12:57'
 labels:
   - brig
   - size-2
@@ -21,7 +23,29 @@ In one full scripts/check run (3638 passed, 1 failed, 118 skipped, under -n auto
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The cause of the one-off ConnectionRefusedError is found and named in the notes
-- [ ] #2 The test, or the code it exercises, is changed so the run cannot fail this way, and the test is seen failing (planted) before the fix and passing after
-- [ ] #3 scripts/check libs/brig passes
+- [x] #1 The cause of the one-off ConnectionRefusedError is found and named in the notes
+- [x] #2 The test, or the code it exercises, is changed so the run cannot fail this way, and the test is seen failing (planted) before the fix and passing after
+- [x] #3 scripts/check libs/brig passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Reproduce under load: 8 parallel loops x20 runs of the file (done: 3 of 160 failed, every one on a pid-named /tmp/bp<pid>-<n> dir left by an earlier process that had the same pid). 2. Name the cause: the test's jail dir is /tmp/bp<pid>-<n>, never removed, reused with exist_ok; a stale proxy.port (or procs record) from an earlier run is read by the wrap shell before the new proxy replaces it. Plant it: a dead port in proxy.port at the dir the test will use -> the 403 test fails at line 256 with ConnectionRefusedError, 6 of 6. 3. Fix the test: a jail_dir fixture that makes a fresh mkdtemp dir under /tmp (short, realpath'd) and removes it after, used by all five tests. 4. Prove: same plant against the fixed file (stale dirs planted at every old name for the pytest pid) passes; load loop again, no failures. 5. File follow-ups, not done here: the same pid-named dirs in ~19 other brig integration tests; the library hazard that a reused jail dir's stale port file points a new jail at a dead or foreign port (needs a SPEC decision). 6. scripts/check libs/brig once.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+CAUSE (AC1). The test's jail directory was /tmp/bp<pid>-<n>, made with makedirs(exist_ok=True) and never removed. connect_proxy's wrap shell starts the workload as soon as the jail starts and reads <jail_dir>/proxy.port with [ ! -s file ]; the proxy publishes that file (os.replace, after bind+listen, so never before it listens) only when its own Python process has started, tens of ms later. When the directory is one an earlier process with the same pid left (pid_max here is 32768; /tmp held 1685 such dirs from 479 pids), the old proxy.port is already there, the wrap reads it, and the workload's urlopen goes through HTTP_PROXY to a dead port: ConnectionRefusedError in got.err and no '403', which is exactly line 256 (assert "403" in err, err). Not what the task guessed: the workload did not reach 127.0.0.1 directly (the proxy variables were set; NO_PROXY is empty), and the port file was not read before the proxy listened (it is published after listen, atomically). It was read before the NEW proxy had replaced an OLD file.
+
+REPRODUCED UNDER LOAD. 8 parallel loops x 20 runs of the file alone (160 runs): 3 failed. All three were on a reused pid-named dir: two died in Jail.create with JailDirInUse (clear_earlier_records found a procs/ record left by the earlier process), one was the control test failing with 'Connection refused' in got.err (got is truncated by the workload's open(out,'w') before urlopen raises, so _wait_file returned None). The rate matches the share of the pid space already used (479/32768).
+
+PLANTED, BEFORE THE FIX. A scratch copy of the original file whose _new_jail_dir also wrote proxy.port naming a closed port: the 403 test failed 6 of 6, then 11 of 12 on a later batch (the proxy sometimes wins the race), always with ConnectionRefusedError at line 256.
+
+FIX (AC2). libs/brig/tests/integration/test_connect_proxy_launch.py: _new_jail_dir and the itertools counter are replaced by a jail_dir fixture (tempfile.mkdtemp(prefix='bp', dir='/tmp'), realpath'd, rmtree after), the convention test_channel_reservation_starts.py already uses; the five tests take it. A fresh directory cannot hold an earlier jail's files, so the race is not run. origin is now typed (Iterator[_Origin]) because ruff's reformat of the longer signatures moved the old type-ignore comments off their def lines. No library code changed.
+
+PROOF, AFTER THE FIX. A scratch copy of the fixed file that plants a stale proxy.port with a closed port at /tmp/bp<pid>-0..9 (every old name): whole file passed 12 of 12 (the same plant on the unfixed 403 test: 1 of 12 passed). The 160-run 8-way load loop on the fixed file: 160 of 160 passed, and no bp dir was left behind. Scratch files deleted. scripts/check libs/brig: exit 0 (1354 passed, 111 skipped, gates ok, docs ok).
+
+NOT DONE HERE, FILED. TASK-0150: the library hazard itself (a reused jail_dir's stale proxy.port makes the wrap hand a new jail's workload an old port, dead or foreign; needs a SPEC decision). TASK-0151: about 43 other brig integration/e2e files mint /tmp/bg<pid>... dirs the same way. Left in /tmp: the bp* dirs my load and plant runs made before the fix (a sweep of them was refused by the permission check); they only matter to the old naming, which no test uses now.
+<!-- SECTION:NOTES:END -->
