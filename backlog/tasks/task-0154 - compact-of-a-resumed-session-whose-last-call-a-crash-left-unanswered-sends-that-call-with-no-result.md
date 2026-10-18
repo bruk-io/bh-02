@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 13:55'
-updated_date: '2026-10-18 21:49'
+updated_date: '2026-10-18 21:51'
 labels:
   - agent
   - size-2
@@ -106,4 +106,52 @@ INFO    -  Documentation built in 4.54 seconds
 ```
 
 Review (not closed): full scripts/check exited 0, AC1-3 met and ticked, no code findings. close-task refused: a bug needs a recorded repro (record-check TASK-0154 --repro -- <the AC1 test failing before the fix>) or a 'No repro:' note. The worker's notes describe planted violations failing, but none is recorded. Worker to record the repro (e.g. against the parent commit 5ca3338) and resubmit.
+
+Repro at d7e74a4136d4, test files: bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py; command: `uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_compact_over_a_transcript_a_crash_cut_asks_with_a_result_for_every_call` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+============================= test session starts ==============================
+platform linux -- Python 3.15.0, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/user/bh-02
+configfile: pyproject.toml
+plugins: xdist-3.8.0, hypothesis-6.168.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1 item
+
+bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py F     [100%]
+
+=================================== FAILURES ===================================
+_ test_compact_over_a_transcript_a_crash_cut_asks_with_a_result_for_every_call _
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-2625/test_compact_over_a_transcript0')
+
+    async def test_compact_over_a_transcript_a_crash_cut_asks_with_a_result_for_every_call(
+        tmp_path: Path,
+    ) -> None:
+        """The loop answers a call a crash left unanswered at its next reply, and /compact goes through
+        none: the request the model receives answers it the same way, in the calls' order, worded and
+        recorded as the loop's own answer, and the file keeps the entries it had."""
+        path = _session(tmp_path, CUT)
+        old = path.read_bytes()
+        stepped = Stepped()
+        stepped.advance(600.0)  # the session is resumed, and compacted, ten minutes later
+        model = Scripted([text("x is X"), stop("end_turn")])
+        await _compact(path, model, clock=stepped.clock)
+        ((sent, offered),) = model.requests
+        assert offered == [PYTHON]
+>       assert [m["role"] for m in sent] == ["system", "user", "assistant", "tool", "tool", "user"]
+E       AssertionError: assert ['system', 'u...tool', 'user'] == ['system', 'u...tool', 'user']
+E         
+E         At index 4 diff: 'user' != 'tool'
+E         Right contains one more item: 'user'
+E         Use -v to get more diff
+
+bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py:359: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_compact_over_a_transcript_a_crash_cut_asks_with_a_result_for_every_call
+============================== 1 failed in 0.25s ===============================
+```
+
+Round 1 fix (review finding: no recorded repro). Recorded the failing repro with record-check --repro. The test files at the starting commit d7e74a4 are the fixed ones, so for the run only I put loop.py and conversation.py back to their 5ca3338 (pre-fix) content in the working tree (tests untouched, committed), ran: record-check TASK-0154 --repro -- uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_conversation.py::test_compact_over_a_transcript_a_crash_cut_asks_with_a_result_for_every_call. It failed (exit 1) on the assertion that the request has a result for every call: the roles were system, user, assistant, tool, user (index 4: user != tool), one tool entry short, so the lost call c2 went out with no result. record-check recorded the Repro note above (commit d7e74a4136d4, test file test_agent_conversation.py). Then restored both source files from d7e74a4: git diff d7e74a4 outside backlog/ is empty, no code changed this round. With the fix in place the test and test_agent_unanswered_calls.py pass (10 passed), and board-check close TASK-0154 prints 'ok: TASK-0154 can close'. Nothing else changed; no criterion ticked or unticked.
 <!-- SECTION:NOTES:END -->
