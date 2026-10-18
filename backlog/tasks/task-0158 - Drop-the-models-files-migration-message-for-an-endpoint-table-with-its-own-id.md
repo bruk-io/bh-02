@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 19:09'
-updated_date: '2026-10-18 19:17'
+updated_date: '2026-10-18 19:21'
 labels:
   - models
   - size-2
@@ -42,4 +42,70 @@ Risks: _why in test_models_discovery must reproduce the generic message exactly 
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented. Changed: models_cordis_plugin/named.py (removed the 'if "id" in table' branch of _endpoint_problem; _EXAMPLE stays, used by parsed() and the to_add message); tests: test_named_models.py (deleted test_a_single_model_s_table_from_before_endpoints_says_how_to_rewrite_it, whose subject was the old shape, and added in its place a parametrized test over claude-code and openai: an id on an endpoint is refused with 'id is not a setting of a <provider> endpoint; it takes ...'; a parametrized case of test_a_table_with_a_problem now uses colour), test_models_discovery.py (_BROKEN is now a 'colour' setting; _why is the generic message), test_models_discover_names.py (two cases), test_models_broken_file.py (_BAD_DEFAULTS case and _ENDPOINT_PROBLEMS key renamed to 'an unknown setting beside discover', with its reference), app/tests/test_session_dirs.py (the broken table is colour). Docs: models-cordis-plugin/README.md (the 'format before endpoints' sentence, the 'an id on the endpoint itself' problem, the 'an id' example in the endpoint-problem sentence) and docs/bh-02/using/models.md (the sentence that a table with an id is refused and how to move it, the 'an id' example). Old files: a models file whose endpoint table has an id now gets the generic 'is not a setting of' error for claude-code and openai; a factory endpoint (module:attribute) with an id now takes it as a setting (problem() returns None, probed). Planted check: before removing the branch the new test failed in both cases with the old 'names an id, as a single model's table did' message (2 failed); after, 2 passed. Commands and real results: uv run pytest on the 5 models test files and app test_session_dirs.py: 191 passed; ruff check and ruff format --check on the touched paths: passed (first lint run failed on two lines over 110 columns, fixed); scripts/check bh-02/plugins/models-cordis-plugin: exit 0 (format, lint, types, 364 passed 2 skipped, gates, docs); scripts/check bh-02/app --no-gates --no-docs: exit 0 (347 passed, 1 skipped); scripts/arch-check --no-fix: exit 0. Not run: the full scripts/check, so the 'scripts/check passes' part of AC #3 is left unticked for the reviewer; scripts/linux-jail-check not run (per the delegation). decision-0009 read: it covers the trajectory and has nothing on endpoint tables; the task names no section.
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+......s...ss...ssss.s.s...s...s..ss.s..sss.ss.s.s..ss..sss...s.....s.... [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+..........................................ssssssssssssssssssssssssssssss [ 54%]
+sssssssssssssssssssssssssssssssssssss.............................ssssss [ 56%]
+ssss.s............s..................................................... [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+.................sss.................................................... [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+...........s............................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+.............................................                            [100%]
+3817 passed, 118 skipped in 206.70s (0:03:26)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 4.12 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
