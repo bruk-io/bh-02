@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:33'
-updated_date: '2026-10-18 20:27'
+updated_date: '2026-10-18 20:31'
 labels:
   - subagents
   - size-2
@@ -47,4 +47,70 @@ Implemented per the ruling. eventlog.py: _broken became _stopped (host_paths.Fai
 Evidence. Tests with no monkeypatch, written first and seen failing (no 'stopped' attribute / no note: 'assert 0 == 1', 'not enough values to unpack') before the implementation, passing after: test_agents_wiring.py::test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage (file removed under the appender mid-run, host_paths raises Replaced; exactly one note naming the file, the time, the error, bh-02 watch and Ctrl-C, ordered before the usage note; the child still reports), ::test_only_the_child_whose_log_stopped_is_told (a second child with a whole log adds none); the healthy run (test_a_child_s_events_go_to_its_own_log...) and the in-memory session now assert screen.notes() == []. test_agents_eventlog.py: removed file -> stopped is Replaced with at between before/after; a failure only close hears of (a pipe whose reader goes while the caller was cancelled; BrokenPipeError) -> stopped set by close with at before the close began. Planted: close not reading the appender's failure failed the close test; close stamping its own clock failed both at-tests (removed after restoring). test_agents_child.py: log_stopped exact text, UTC conversion.
 AC #2 not run at the wiring level for a log that could not be opened: that needs EventLog.open to fail (the file already there, or an unwritable directory), which the row's own order of work (claim, mkdir, open) and a root test user make unreachable without a monkeypatch; the code path is unchanged (_opened returns EventLog.none(), whose stopped is None, asserted in test_a_log_that_kept_every_record_never_stopped) and an in-memory session, which also has no log, says nothing.
 Checks: scripts/check bh-02/plugins/subagents-cordis-plugin exit 0 (format, lint, mypy, 138 tests, every gate, docs); scripts/arch-check --no-fix exit 0. AC #3's 'scripts/check passes' is left unticked: the full scripts/check is the reviewer's to prove.
+
+Check `scripts/check` exited 1
+
+(62 earlier lines omitted)
+```text
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+.....................................................                    [100%]
+=================================== FAILURES ===================================
+_____ test_an_interrupt_stops_the_reply_says_so_and_the_session_carries_on _____
+[gw1] linux -- Python 3.15.0 /home/user/bh-02/.venv/bin/python
+
+    async def test_an_interrupt_stops_the_reply_says_so_and_the_session_carries_on() -> None:
+        class Endless:
+            def __init__(self) -> None:
+                self.closed = False
+    
+            async def reply(self, message: str) -> AsyncIterator[dict[str, Any]]:
+                try:
+                    yield {"type": "text", "text": "thinking about " + message}
+                    await asyncio.Event().wait()  # a reply that never ends on its own
+                    yield {"type": "text", "text": "never"}  # pragma: no cover
+                finally:
+                    self.closed = True  # a provider's chance to stop its own work
+    
+        model, screen, typed = Endless(), Screen(), Typed("first")
+        session = asyncio.create_task(converse(model, typed, screen))
+        await asyncio.sleep(0.01)
+        typed.interrupt()
+        await asyncio.sleep(0.01)
+        assert model.closed
+        assert screen.shown[0] == "thinking about first"
+>       assert {"type": "stop", "reason": "interrupted"} in screen.events
+E       AssertionError: assert {'type': 'stop', 'reason': 'interrupted'} in [{'type': 'text', 'text': 'thinking about first'}]
+E        +  where [{'type': 'text', 'text': 'thinking about first'}] = <chat_cordis_plugin.testing.Screen object at 0x7f9dc74bad50>.events
+
+bh-02/plugins/chat-cordis-plugin/tests/test_chat.py:80: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/chat-cordis-plugin/tests/test_chat.py::test_an_interrupt_stops_the_reply_says_so_and_the_session_carries_on
+1 failed, 3824 passed, 118 skipped in 208.49s (0:03:28)
+   FAILED: tests
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 4.31 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
