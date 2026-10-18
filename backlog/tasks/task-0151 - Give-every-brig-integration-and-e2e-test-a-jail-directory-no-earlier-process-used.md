@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:55'
-updated_date: '2026-10-18 23:23'
+updated_date: '2026-10-18 23:26'
 labels:
   - brig
   - size-4
@@ -114,4 +114,70 @@ Review (reviewer, not the worker): not closed. Every AC is met: full scripts/che
 Round 1 review fix (blocking finding 1: a bug needs a repro on record).
 
 No repro: the failure is a pid-reuse race and has no deterministic test. A later process is handed an earlier run's /tmp/bg<pid>... directory only when the kernel reuses a pid, which is a matter of chance and of how much of the 32768-pid space earlier runs have used; TASK-0140 measured it at 3 of 160 runs of one file under 8-way load (JailDirInUse twice, ConnectionRefusedError once) and could not make it fail on demand without first planting a stale directory by hand. The fix is the removal of the shape that allowed it, and what pins it is test_no_test_names_a_directory_from_its_pid.py (AC2), which passes on the fixed tree and was seen failing on a planted file (libs/brig/tests/integration/test_zz_plant.py, since removed): that plant is not a committed failing test, so record-check --repro (which needs a committed test that fails) does not fit. Nothing else changed in this round: no code, no criterion.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................s.s...ssss.s..ss [ 48%]
+s..s.s...s.ss.s.s.s..s.s.s.s.ssss..........s............................ [ 50%]
+........................................................................ [ 51%]
+............................................s........................... [ 53%]
+.......................sssssssssssssssssssssssss.sssssssssssssssssssssss [ 55%]
+sssssssssssssssssss...........................ssssssssssss.............. [ 57%]
+.........................................................s.............. [ 59%]
+........................................................................ [ 60%]
+......................................................................ss [ 62%]
+s....................................................................... [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+..........................................................               [100%]
+3902 passed, 118 skipped in 162.74s (0:02:42)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.14 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
