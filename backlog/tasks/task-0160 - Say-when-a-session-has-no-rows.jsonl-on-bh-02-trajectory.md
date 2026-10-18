@@ -1,7 +1,7 @@
 ---
 id: TASK-0160
 title: 'Say when a session has no rows.jsonl, on bh-02 trajectory'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 19:32'
@@ -111,4 +111,6 @@ INFO    -  Documentation built in 4.47 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer, not the worker): closed. Full scripts/check exit 0 (3876 passed, 118 skipped; format, lint, types, gates, docs ok; tree unchanged). AC1: pure test in test_trajectory.py and view tests (exact lines, empty rows file says nothing, no conversation says nothing, follow prints once). AC2: no-rows test renamed and commented with the real case. Nits only, unfiled: the message string is duplicated as NO_ROWS in two test files rather than shared; trajectory()'s default changed to None, so a caller passing no rows now gets the line.
 <!-- SECTION:NOTES:END -->
