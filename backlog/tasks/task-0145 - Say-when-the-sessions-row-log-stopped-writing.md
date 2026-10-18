@@ -1,11 +1,11 @@
 ---
 id: TASK-0145
 title: Say when the session's row log stopped writing
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
-updated_date: '2026-10-18 12:45'
+updated_date: '2026-10-18 12:46'
 labels:
   - app
   - size-1
@@ -258,4 +258,6 @@ INFO    -  Documentation built in 4.43 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 2: closed. Full scripts/check exit 0 (recorded). Both ACs met: the unwritable-log tests in test_row_log.py and test_command_line.py assert one line after exit with file, stamp and error; healthy runs print only the farewell. Repro recorded at cb1d745 failing pre-fix. Nits only: 'when' is when the shell found the failure (TASK-0147 tracks the exact time); the line is terminal-only (TASK-0149). No new drafts.
 <!-- SECTION:NOTES:END -->
