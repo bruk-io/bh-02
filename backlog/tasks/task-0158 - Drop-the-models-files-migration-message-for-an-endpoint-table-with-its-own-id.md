@@ -1,7 +1,7 @@
 ---
 id: TASK-0158
 title: Drop the models file's migration message for an endpoint table with its own id
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 19:09'
@@ -108,4 +108,6 @@ INFO    -  Documentation built in 4.12 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewed: closed. AC1: the id branch is gone from named.py _endpoint_problem; README and docs/bh-02/using/models.md no longer describe the old shape (grep clean). AC2: each swapped test keeps its own subject with an unknown setting (colour). AC3: new parametrized test over openai and claude-code asserts the generic 'id is not a setting of' error; full scripts/check exit 0 (3817 passed, 118 skipped; gates, docs ok). Nit, not filed: the generic message reads 'a openai endpoint' (pre-existing wording in named.py, now asserted by more tests).
 <!-- SECTION:NOTES:END -->
