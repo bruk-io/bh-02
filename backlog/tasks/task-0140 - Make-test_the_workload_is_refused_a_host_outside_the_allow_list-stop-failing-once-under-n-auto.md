@@ -3,11 +3,11 @@ id: TASK-0140
 title: >-
   Make test_the_workload_is_refused_a_host_outside_the_allow_list stop failing
   once under -n auto
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 05:33'
-updated_date: '2026-10-18 13:05'
+updated_date: '2026-10-18 13:06'
 labels:
   - brig
   - size-2
@@ -184,4 +184,6 @@ INFO    -  Documentation built in 3.32 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Closed on independent review. Full scripts/check exit 0, no files changed by the run. AC1: cause named (stale proxy.port in a reused pid-named /tmp/bp<pid>-<n> dir read by the wrap before the new proxy replaced it). AC2: test now uses a fresh mkdtemp jail_dir fixture removed after; planted failure before, pass after, recorded in notes with a No repro: explanation. AC3: met by the full check. Findings: none blocking; library hazard and the same naming in other brig tests already filed as TASK-0150 and TASK-0151. decision-0009 does not bear on this task.
 <!-- SECTION:NOTES:END -->
