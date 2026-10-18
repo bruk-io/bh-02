@@ -109,4 +109,6 @@ INFO    -  Documentation built in 4.70 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review: not closed. All criteria met (full scripts/check exit 0, 3817 passed, 118 skipped; AC1 verified in named.py diff). close-task refused: a bug needs its repro recorded via record-check --repro or a 'No repro:' note. The worker's planted check (12 failed before the fix) is described in prose but not recorded; the worker should record it or say why not.
 <!-- SECTION:NOTES:END -->
