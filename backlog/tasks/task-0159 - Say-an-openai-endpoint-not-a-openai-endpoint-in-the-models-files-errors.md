@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 19:28'
-updated_date: '2026-10-18 19:51'
+updated_date: '2026-10-18 19:53'
 labels:
   - models
   - size-1
@@ -111,4 +111,85 @@ INFO    -  Documentation built in 4.70 seconds
 ```
 
 Review: not closed. All criteria met (full scripts/check exit 0, 3817 passed, 118 skipped; AC1 verified in named.py diff). close-task refused: a bug needs its repro recorded via record-check --repro or a 'No repro:' note. The worker's planted check (12 failed before the fix) is described in prose but not recorded; the worker should record it or say why not.
+
+Repro at 80aaa95f8349, test files: bh-02/plugins/models-cordis-plugin/tests/test_named_models.py, bh-02/plugins/models-cordis-plugin/tests/test_models_discovery.py, bh-02/plugins/models-cordis-plugin/tests/test_models_discover_names.py, bh-02/plugins/models-cordis-plugin/tests/test_models_broken_file.py, bh-02/app/tests/test_session_dirs.py; command: `uv run pytest bh-02/plugins/models-cordis-plugin/tests/test_named_models.py bh-02/plugins/models-cordis-plugin/tests/test_models_discovery.py bh-02/plugins/models-cordis-plugin/tests/test_models_discover_names.py bh-02/plugins/models-cordis-plugin/tests/test_models_broken_file.py bh-02/app/tests/test_session_dirs.py -q --tb=line` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+.......F.......F....F...........F........................FFF............ [ 37%]
+......F...............F.................F....F.......................... [ 75%]
+............F..................................                          [100%]
+=================================== FAILURES ===================================
+E   assert 'base-url is not a setting of an openai endpoint' in "endpoint 'm' (/c/models.toml): base-url is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature"
+     +  where "endpoint 'm' (/c/models.toml): base-url is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" = str("endpoint 'm' (/c/models.toml): base-url is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature")
+     +    where "endpoint 'm' (/c/models.toml): base-url is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" = problem(Named(name='m', provider='openai', id='', table={'provider': 'openai', 'base_url': 'https://h/v1', 'models': {'x': {'id': 'x'}}, 'base-url': 'y'}, source='/c/models.toml', endpoint=True))
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_named_models.py:160: assert 'base-url is not a setting of an openai endpoint' in "endpoint 'm' (/c/models.toml): base-url is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature"
+E   assert 'key is not a setting of an openai model (m/x)' in "endpoint 'm' (/c/models.toml): key is not a setting of a openai model (m/x); a model takes id, max_tokens, temperature, and its endpoint the rest"
+     +  where "endpoint 'm' (/c/models.toml): key is not a setting of a openai model (m/x); a model takes id, max_tokens, temperature, and its endpoint the rest" = str("endpoint 'm' (/c/models.toml): key is not a setting of a openai model (m/x); a model takes id, max_tokens, temperature, and its endpoint the rest")
+     +    where "endpoint 'm' (/c/models.toml): key is not a setting of a openai model (m/x); a model takes id, max_tokens, temperature, and its endpoint the rest" = problem(Named(name='m', provider='openai', id='', table={'provider': 'openai', 'base_url': 'https://h/v1', 'models': {'x': {'id': 'x', 'key': 'K'}}}, source='/c/models.toml', endpoint=True))
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_named_models.py:160: assert 'key is not a setting of an openai model (m/x)' in "endpoint 'm' (/c/models.toml): key is not a setting of a openai model (m/x); a model takes id, max_tokens, temperature, and its endpoint the rest"
+E   assert 'colour is not a setting of an openai endpoint; it takes' in "endpoint 'm' (/c/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature"
+     +  where "endpoint 'm' (/c/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" = str("endpoint 'm' (/c/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature")
+     +    where "endpoint 'm' (/c/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" = problem(Named(name='m', provider='openai', id='', table={'provider': 'openai', 'base_url': 'https://h/v1', 'models': {'x': {'id': 'x'}}, 'colour': 'red'}, source='/c/models.toml', endpoint=True))
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_named_models.py:160: assert 'colour is not a setting of an openai endpoint; it takes' in "endpoint 'm' (/c/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature"
+E   assert False
+     +  where False = <built-in method startswith of str object at 0x7fdaf38e2170>("endpoint 'm' (/c/models.toml): id is not a setting of an openai endpoint; it takes ")
+     +    where <built-in method startswith of str object at 0x7fdaf38e2170> = "endpoint 'm' (/c/models.toml): id is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature".startswith
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_named_models.py:183: assert False
+E   assert ('model_config' == 'model_config'
+      
+        model_config and "endpoint 'lo..., temperature" == "endpoint 'lo..., temperature"
+      
+      Skipping 114 identical leading characters in diff, use -v to show
+      - tting of an openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature
+      ?           -
+      + tting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature)
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_models_discovery.py:173: assert ('model_config' == 'model_config'
+E   assert "endpoint 'lo..., temperature" == "endpoint 'lo..., temperature"
+      
+      Skipping 114 identical leading characters in diff, use -v to show
+      - tting of an openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature
+      ?           -
+      + tting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_models_discovery.py:189: assert "endpoint 'lo..., temperature" == "endpoint 'lo..., temperature"
+E   assert ("endpoint 'lo..., temperature" == "endpoint 'lo..., temperature"
+      
+      Skipping 114 identical leading characters in diff, use -v to show
+      - tting of an openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature
+      ?           -
+      + tting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature)
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_models_discovery.py:201: assert ("endpoint 'lo..., temperature" == "endpoint 'lo..., temperature"
+E   assert 'colour is not a setting of an openai endpoint; it takes' in "endpoint 'x' (/c/m.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature"
+     +  where "endpoint 'x' (/c/m.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" = str("endpoint 'x' (/c/m.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature")
+     +    where "endpoint 'x' (/c/m.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" = problem(Named(name='x', provider='openai', id='', table={'provider': 'openai', 'base_url': 'http://h/v1', 'discover': True, 'colour': 'red'}, source='/c/m.toml', endpoint=True))
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_models_discover_names.py:81: assert 'colour is not a setting of an openai endpoint; it takes' in "endpoint 'x' (/c/m.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature"
+E   assert ("endpoint 'local' (/c/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" is not None and 'colour is not a setting of an openai endpoint; it takes' in "endpoint 'local' (/c/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature")
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_models_discover_names.py:192: assert ("endpoint 'local' (/c/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" is not None and 'colour is not a setting of an openai endpoint; it takes' in "endpoint 'local' (/c/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature")
+E   assert 'colour is not a setting of an openai endpoint' in "endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_a_default_that_can_not_be4/models.toml): colour is not a setti...ndpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature"
+     +  where "endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_a_default_that_can_not_be4/models.toml): colour is not a setti...ndpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" = ModelsError("endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_a_default_that_can_not_be4/models.toml): colour is...dpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature").message
+     +    where ModelsError("endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_a_default_that_can_not_be4/models.toml): colour is...dpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature") = <ExceptionInfo ModelsError("endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_a_default_that_can_not_be4/models.t...t takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature") tblen=4>.value
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_models_broken_file.py:143: assert 'colour is not a setting of an openai endpoint' in "endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_a_default_that_can_not_be4/models.toml): colour is not a setti...ndpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature"
+E   assert ('colour is not a setting of an openai endpoint' in "endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_the_status_bar_names_a_de4/models.toml): colour is not a setti...ndpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" or "not a model's name" in "endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_the_status_bar_names_a_de4/models.toml): colour is not a setti...ndpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature")
+/home/user/bh-02/bh-02/plugins/models-cordis-plugin/tests/test_models_broken_file.py:163: assert ('colour is not a setting of an openai endpoint' in "endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_the_status_bar_names_a_de4/models.toml): colour is not a setti...ndpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature" or "not a model's name" in "endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_the_status_bar_names_a_de4/models.toml): colour is not a setti...ndpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature")
+E   AssertionError: Regex pattern did not match.
+      Expected regex: 'colour is not a setting of an openai endpoint'
+      Actual message: "endpoint 'local' (/tmp/pytest-of-root/pytest-2515/test_the_model_flag_naming_a_m0/config/bh-02/models.toml): colour is not a setting of a openai endpoint; it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, temperature"
+/home/user/bh-02/bh-02/app/tests/test_session_dirs.py:120: AssertionError: Regex pattern did not match.
+=========================== short test summary info ============================
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_named_models.py::test_a_table_with_a_problem_says_what_to_fix[table5-base-url is not a setting of an openai endpoint]
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_named_models.py::test_a_table_with_a_problem_says_what_to_fix[table13-key is not a setting of an openai model (m/x)]
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_named_models.py::test_a_table_with_a_problem_says_what_to_fix[table18-colour is not a setting of an openai endpoint; it takes]
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_named_models.py::test_an_id_on_an_endpoint_of_a_built_in_provider_is_refused_as_any_setting_it_does_not_take[table0-an openai endpoint]
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_models_discovery.py::test_a_layer_s_default_naming_a_model_of_a_broken_endpoint_binds_a_model_that_says_why
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_models_discovery.py::test_the_models_file_s_default_naming_a_model_of_a_broken_endpoint_is_refused_the_same_way
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_models_discovery.py::test_slash_model_name_of_a_broken_endpoint_s_model_is_refused_and_the_status_bar_says_none
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_models_discover_names.py::test_a_table_that_discovers_wrongly_is_that_table_s_problem[table3-colour is not a setting of an openai endpoint; it takes]
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_models_discover_names.py::test_an_endpoint_whose_table_has_a_problem_names_no_model_and_says_that_problem[table0-colour is not a setting of an openai endpoint; it takes]
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_models_broken_file.py::test_a_default_that_can_not_be_used_is_the_row_s_error_and_everything_else_still_works[a broken endpoint's model]
+FAILED bh-02/plugins/models-cordis-plugin/tests/test_models_broken_file.py::test_the_status_bar_names_a_default_that_can_not_be_used_and_says_it_is_unusable[a broken endpoint's model]
+FAILED bh-02/app/tests/test_session_dirs.py::test_the_model_flag_naming_a_model_of_a_broken_endpoint_starts_the_session_and_its_model_says_why
+12 failed, 179 passed in 7.52s
+```
+
+Review round 2, finding 1 (no repro on record). The planted check is now recorded as the repro, above: record-check TASK-0159 --repro -- uv run pytest on the five test files, at commit 80aaa95 (the test files there are the committed ones, unchanged since bfb348e). How it ran: for the run only, named.py was set to its pre-fix text (git show bfb348e^:bh-02/plugins/models-cordis-plugin/src/models_cordis_plugin/named.py) in the working tree, so the tests expect "an openai" and the code says "a openai": 12 failed, 179 passed, pytest exit 1, record-check recorded it (exit 0). Then named.py was restored with git checkout; git status was clean and named.py equals HEAD. The same five files on the fix: uv run pytest, the five paths, -q: 191 passed in 7.20s, exit 0. Closing check (read-only): scripts/board-check close TASK-0159 printed "ok: TASK-0159 can close", exit 0. close-task was not run and the task was not closed. No code changed in this round; the fix is bfb348e and no test file has changed since 80aaa95. Criteria as before.
 <!-- SECTION:NOTES:END -->
