@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 13:24'
-updated_date: '2026-10-18 21:13'
+updated_date: '2026-10-18 21:17'
 labels:
   - agent
   - size-1
@@ -48,4 +48,70 @@ AC#1: test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_re
 AC#2: test_loop.py::test_a_reply_costs_the_event_loop_no_stat_of_the_file_either (a real FileTranscript over an existing file: every os.stat of the file is on the writer thread, none on the event loop's; seen failing with Appender.check changed to look on the caller's thread); test_a_reply_asks_the_transcript_to_check_its_file_first_and_flushes_it_once (a double with check and flush: checked == [0] before anything appended, flushed == [n], one flush per reply across two replies); test_a_transcript_that_refuses_at_the_check_is_never_asked_a_model_step_or_an_entry (both new loop tests seen failing with the check call removed). The existing flush-count tests in test_loop.py (_Flushing, no check method) are unchanged and pass: the check is no flush, so a flush is still one per reply, at its end. Appender tests (libs/host-paths/tests/test_host_paths_appender.py, 6 new): check finds renamed over / removed / linked, held and not yet opened, with nothing queued, keeps it, neither file touched; no file made for a never-made file; stat on the writer thread and nothing written; queued behind a held write; raises an earlier failure; closed -> ValueError (8 fail with _look made a no-op, planted). test_agent_transcript.py: FileTranscript.check refuses naming /restart transcript.
 Commands: scripts/check libs/host-paths (exit 0: format, lint, types, 80 tests, all gates ok, docs ok); scripts/check bh-02/plugins/agent-cordis-plugin --no-gates --no-docs (exit 0, 195 passed, 1 skipped); scripts/arch-check --no-fix (exit 0); uv run pytest bh-02 -n auto --dist loadgroup (1906 passed, 5 skipped).
 Known limits: a Ctrl-C landing in the check's window (microseconds, before anything is kept) keeps neither the message nor any entry; nothing was in the conversation to lose, but the ui's history shows the message. The check waits behind writes still queued from an abandoned flush (a slow disk), none in the normal case. Appender.__init__ still stats on the caller's thread (the reviewer's nit on TASK-0139), not touched. The full scripts/check is the reviewer's.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+......................................s...ssss.s...s..s.ss..s.ss.s.s.s.s [ 48%]
+..ss..ss..sssss..........s.............................................. [ 50%]
+....................................................................s... [ 52%]
+...................................................................sssss [ 54%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss.......... [ 56%]
+...................ssssssssssss......................................... [ 58%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+..........................................sss........................... [ 63%]
+........................................................................ [ 65%]
+....................s................................................... [ 67%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+............                                                             [100%]
+3856 passed, 118 skipped in 207.31s (0:03:27)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 4.75 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
