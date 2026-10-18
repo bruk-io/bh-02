@@ -114,4 +114,6 @@ INFO    -  Documentation built in 5.28 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review: not closed. close-task refuses: a bug closes with its repro recorded (record-check TASK-0147 --repro -- <failing test>, or a 'No repro:' note). Code and ACs otherwise met; full scripts/check exit 0. Nit: _failing takes the timestamp even for non-first failures (harmless).
 <!-- SECTION:NOTES:END -->
