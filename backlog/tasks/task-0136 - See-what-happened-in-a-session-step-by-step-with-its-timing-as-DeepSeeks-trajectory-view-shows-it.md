@@ -1,5 +1,5 @@
 ---
-id: TASK-0133
+id: TASK-0136
 title: >-
   See what happened in a session, step by step, with its timing, as DeepSeek's
   trajectory view shows it
