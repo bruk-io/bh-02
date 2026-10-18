@@ -1,7 +1,7 @@
 ---
 id: TASK-0141
 title: A transcript whose last line is torn still resumes
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
@@ -246,4 +246,6 @@ INFO    -  Documentation built in 4.62 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 2 (philosophy:reviewer): closed. Full scripts/check exit 0 on unchanged code (no code diff since 80e157a; tree clean before and after). Repro now on record at b5e9759 (torn_last_line fails on pre-fix transcript.py with JSONDecodeError). AC1-3 met (ticked in round 1). Non-blocking, filed nowhere: _beside docstring gives only the .bak example; nothing tells the person a torn line was set aside (README says where); a concurrent appender during resume could have its in-flight line cut (known, decision-0009).
 <!-- SECTION:NOTES:END -->
