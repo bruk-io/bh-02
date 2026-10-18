@@ -7,11 +7,16 @@ status: Draft
 assignee:
   - '@bruk'
 created_date: '2026-10-14 03:42'
-updated_date: '2026-10-18 02:01'
+updated_date: '2026-10-18 03:48'
 labels:
   - tui
   - agent
+  - size-8
 dependencies: []
+references:
+  - >-
+    backlog/decisions/decision-0009 -
+    Record-a-sessions-trajectory-as-timing-on-the-transcripts-entries-and-read-it-with-bh-02-trajectory.md
 priority: medium
 type: intent
 ---
@@ -32,14 +37,14 @@ A session's trajectory, recorded as it happens: its model steps, tool calls, app
 - tui:ui keeps depending on nothing; rows contribute data, the TUI owns how it looks (decision-0003's split).
 
 ## Open questions
-- [ ] Where the record lives: timing and approvals added to the transcript's entries; a trajectory plugin with a recorder broker the loop, providers, approval and the agents row report spans to (generalising the sub-agents' event log); or derived after the fact from what is already kept.
-- [ ] Whether raw requests are recorded, opt-in, and how they are bounded.
-- [ ] How it is shown, and in what order: a read-only viewer command (bh-02 trajectory SESSION, as bh-02 watch), a trajectory screen inside the TUI beside the chat, an HTML export, or one data shape with more than one renderer.
-- [ ] Whether the TUI grows a general place rows contribute views to (data, never widgets), or only a trajectory screen.
-- [ ] Live first, or after the fact first.
-- [ ] How long trajectories are kept, and their size.
+- [x] Where the record lives: timing, answers, usage and sub-agent links on the transcript's own entries, plus rows.jsonl for row reloads (decision-0009).
+- [x] Whether raw requests are recorded: never stored; rebuilt from the transcript and the recorded settings, shown once the projection functions move to a shared library (decision-0009).
+- [x] How it is shown: a read-only command first, bh-02 trajectory [ID] with --follow (decision-0009).
+- [ ] Carried forward: whether the TUI grows a general place rows contribute views to, or only a trajectory screen; the TUI screen comes after the command, once the projection functions are in a library.
+- [x] Live first, or after the fact first: both from the start; --follow re-reads the files while a reply runs (decision-0009).
+- [ ] Carried forward: how long trajectories are kept and their size; they last as long as the session's own files, a few fields more per entry, until sessions are pruned.
 
-Drafted by the orchestrator from the owner's ask and a brainstorm (2026-10-14); the owner corrects it before anyone accepts it. No spec yet: the open questions come first, likely as a design task.
+Drafted by the orchestrator from the owner's ask and a brainstorm (2026-10-14); corrected and accepted by the owner with decision-0009 (2026-10-18).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
