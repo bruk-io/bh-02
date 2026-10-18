@@ -17,6 +17,7 @@ from bh_02.trajectory import Line, Trajectory, Transcript, is_conversation_file,
 type Json = Mapping[str, object]
 
 LIVE = "transcript.jsonl"
+NO_ROWS = "rows.jsonl not found: row reloads are not shown"
 # UTC-7: a time on the 18th at 03:47 UTC is the 17th at 20:47 here, so a line that shows the date
 # shows the person's day, not the file's
 LOCAL = datetime.timezone(datetime.timedelta(hours=-7))
@@ -477,6 +478,17 @@ def test_the_rows_file_is_read_into_the_trajectory_by_time_skipping_what_is_not_
         ("reload", "model", None),
     ]
     assert laid(file(CONVERSATION)).reloads == ()
+
+
+def test_a_conversation_with_no_rows_file_has_no_reloads_and_is_said_so_first() -> None:
+    """`rows` None is a session with no rows.jsonl, which is not the same as an empty one: that has no
+    reloads and is not said so. Only a session with a conversation is said so."""
+    missing = trajectory([file(CONVERSATION)])
+    assert missing.reloads is None
+    assert text(missing)[0] == NO_ROWS
+    assert NO_ROWS not in text(laid(file(CONVERSATION)))  # an empty rows file: found, no reloads
+    assert laid(file(CONVERSATION)).reloads == ()
+    assert text(trajectory([])) == []  # no conversation: nothing to say
 
 
 def reload_record(at: str, kind: str, row: str, **more: object) -> Json:

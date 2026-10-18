@@ -174,6 +174,10 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   a line of its own, `{"at": ..., "kind": "run"}`, that names no row and prints nothing. The rows the
   resumed run comes up with were all seen in the run before, and they are one `row first load` line
   like the first run's: a `row reload` line is a row of the run you are in loading again.
+
+  A session with a conversation and no `rows.jsonl` has no row lines to print. The shell makes that
+  file at boot, before any reply, so it was removed or never written, and the first line says so:
+  `rows.jsonl not found: row reloads are not shown`.
 - **Conversations** are the session's transcript files: the backups `/clear` and `/compact` kept
   come first, in the order of their first `at` (else of the time they were copied), and the live
   `transcript.jsonl` is last. A conversation `/compact` began says so, with what you asked it to

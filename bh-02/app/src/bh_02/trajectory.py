@@ -38,7 +38,9 @@ resumed run comes up with, which was all seen before, is that run's first loads,
 run's are. The line itself prints nothing. The first loads of a run that follow one another with
 nothing else of their writer's between them (no reload, no failure, no line of the session's or the
 sub-agent's) are one line: the session's boot, and under each sub-agent the rows it came up with, which
-would otherwise bury the reloads that matter. A reload and a failure are a line each, as ever.
+would otherwise bury the reloads that matter. A reload and a failure are a line each, as ever. A session
+with a conversation and no `rows.jsonl` has no reloads to place, so it is said so by one line, printed
+first: the shell makes that file at boot, so its log was removed or never written.
 
 A line that is not a JSON object is skipped: the last one may be half written while the loop appends.
 A call whose `tool` entry is not there shows `no result recorded`.
@@ -77,6 +79,7 @@ _ROWS = "rows"  # the first element of a row reload's key
 _RELOAD = "reload"  # the kind of a record in `rows.jsonl` that is a row's setup beginning
 _RUN = "run"  # the kind of a record in `rows.jsonl` that marks a run's start; it names no row
 _AGENTS = "agents"  # the first part of the id of a sub-agent's row
+_NO_ROWS = "rows.jsonl not found: row reloads are not shown"  # said once, first, when there is none
 
 
 # What the files hold, as the agent plugin's `records.py` writes it. Not imported: bh_02 reads the
@@ -316,11 +319,12 @@ class _Reload:
 class Trajectory:
     """A session laid out in time. `conversations`: its own, in order, with the sub-agents they
     started inside their calls. `unlinked`: the sub-agents no call names, by their first time.
-    `reloads`: its row reloads (first loads included) and failures, by time."""
+    `reloads`: its row reloads (first loads included) and failures, by time; None when the session has
+    no `rows.jsonl`, which is not the same as one with none in it."""
 
     conversations: tuple[_Conversation, ...]
     unlinked: tuple[_Agent, ...]
-    reloads: tuple[_Reload, ...]
+    reloads: tuple[_Reload, ...] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,8 +332,9 @@ class Line:
     """One line of `rendered`, without its newline. `key` says where in the trajectory it is, in a way
     that stays the same as the files grow and a file is replaced, so a viewer that follows them prints
     a line once; its first element is whose it is (`""`: the session's own conversations, a
-    sub-agent's name, or `"rows"`: a row reload). `at` is when what it shows happened, and `depth`
-    how far it is indented (what it is inside), for a line that has a time."""
+    sub-agent's name, or `"rows"`: a row reload, or the line that says there is no `rows.jsonl`). `at`
+    is when what it shows happened, and `depth` how far it is indented (what it is inside), for a line
+    that has a time."""
 
     key: Key
     text: str
@@ -670,10 +675,11 @@ def _reloads(rows: bytes) -> tuple[_Reload, ...]:
     return tuple(marked)
 
 
-def trajectory(conversations: Sequence[Transcript], rows: bytes = b"") -> Trajectory:
+def trajectory(conversations: Sequence[Transcript], rows: bytes | None = None) -> Trajectory:
     """A session's trajectory from the transcript files read (`conversations`: the session's own, and
-    each sub-agent's, told apart by `Transcript.agent`) and its `rows.jsonl` (`rows`: the bytes). No
-    file is opened and nothing is stored: the same files give the same trajectory."""
+    each sub-agent's, told apart by `Transcript.agent`) and its `rows.jsonl` (`rows`: the bytes, or None
+    when there is no such file). No file is opened and nothing is stored: the same files give the same
+    trajectory."""
     read = [(transcript, _entries(transcript.data)) for transcript in conversations]
     names = sorted({transcript.agent for transcript in conversations if transcript.agent is not None})
     # depth one (decision-0002): a sub-agent has no sub-agents, so what its calls name is not followed
@@ -688,7 +694,7 @@ def trajectory(conversations: Sequence[Transcript], rows: bytes = b"") -> Trajec
             agent.name,
         ),
     )
-    return Trajectory(own, tuple(unlinked), _reloads(rows))
+    return Trajectory(own, tuple(unlinked), None if rows is None else _reloads(rows))
 
 
 # --- laying out ------------------------------------------------------------------------------------
@@ -1008,7 +1014,8 @@ def rendered(laid: Trajectory, tz: datetime.tzinfo | None = None, *, live: bool 
     Each row reload (`Trajectory.reloads`) is a line of its own, in time order among the lines of its
     row's owner, the session's or its sub-agent's (`_with_reloads`), except that the first loads which
     follow one another are one line: the session's boot, and a sub-agent's rows coming up under it.
-    Sub-agents no call names come last, by their own times.
+    Sub-agents no call names come last, by their own times. A session with a conversation and no
+    `rows.jsonl` (`Trajectory.reloads` None) starts with the line that says so.
 
     Times are in the zone `tz` (None: the machine's), with the date where it differs from the
     reply's. With `live`, the files are still being written: a call of the last step whose result is
@@ -1017,4 +1024,6 @@ def rendered(laid: Trajectory, tz: datetime.tzinfo | None = None, *, live: bool 
     lines = list(_conversations_lines(_OWN, laid.conversations, 0, view))
     for agent in laid.unlinked:
         lines.extend(_agent_lines(agent, 0, "(no call that started it is recorded)", view))
-    return tuple(_with_reloads(lines, laid.reloads, view))
+    if laid.reloads is None and laid.conversations:
+        lines.insert(0, Line((_ROWS, "missing"), _NO_ROWS))
+    return tuple(_with_reloads(lines, laid.reloads or (), view))
