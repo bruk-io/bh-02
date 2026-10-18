@@ -223,6 +223,21 @@ async def test_what_kept_an_extension_from_loading_is_said_where_the_model_reads
         assert h.frame.fields()["extensions"] == "ext: broken ✗ empty ✗ half ✗"
 
 
+async def test_an_extension_that_asks_for_the_transcript_gets_nothing_and_waits(tmp_path: Path) -> None:
+    # the transcript is the session's record: no extension is offered it, so one that asks waits,
+    # as one asking for any key bh-02 doesn't offer does, and the model is told what is offered
+    async with _running(tmp_path) as h:
+        h.write(
+            "reader",
+            "from cordis import Effects, bind, component\n\n"
+            "@component\nasync def reads(*, transcript) -> Effects:\n    yield bind('read', True)\n",
+        )
+        await h.extensions.look()
+        row = h.status()["reader"]["rows"]["reader.reads"]
+        assert row.startswith("waiting on: transcript")
+        assert row.endswith("bh-02 offers commands, frame, system, tools)")
+
+
 async def test_background_work_updates_a_field_and_what_it_pushed_leaves_with_it(tmp_path: Path) -> None:
     ticking = (
         "import asyncio\n"
