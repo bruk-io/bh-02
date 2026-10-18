@@ -400,6 +400,38 @@ async def test_a_child_s_state_directories_are_made_off_the_event_loop(
     await _bounded(rt.shutdown())
 
 
+async def test_a_call_that_started_a_child_keeps_its_name_on_its_record_in_the_foreground_and_the_background(
+    tmp_path: Path,
+) -> None:
+    """The `agent` tool answers `child: NAME` beside its content, and the loop keeps it on the
+    call's record as it keeps `touched`; a call that started none (an unknown type, a start the
+    person refused) has no `child`."""
+    model = _Model(
+        parent=[
+            [
+                _call("1", "agent", prompt="p", type="nosuch"),
+                _call("2", "agent", prompt="count", type="general"),
+                _call("3", "agent", prompt="later", type="general", background=True),
+            ],
+            _text("ok"),
+        ],
+        child={"general-1": [_text("three")], "general-2": [_text("four")]},
+    )
+    booted = await _booted(_rows(model, _Screen(), tmp_path / "transcript.jsonl"))
+    rt = booted.runtime
+    tool = rt.root.get("tools").get("agent")
+    refused = await _bounded(tool.run({"prompt": "p", "type": "nosuch"}))
+    assert "child" not in refused  # no child started
+    await _bounded(_reply(rt, "go"))
+    await _bounded(rt.root.get("tools").get("agent_wait").run({"names": ["general-2"]}))  # it has ended
+    answers = [m for m in rt.root.get("transcript").messages if m["role"] == "tool"]
+    assert [a["call"].get("child") for a in answers] == [None, "general-1", "general-2"]
+    assert all("answer" in a["call"] and "took" in a["call"] for a in answers[1:])  # they ran
+    assert answers[1]["content"].startswith("Report from agent general-1")
+    assert answers[2]["content"].startswith("agent general-2 (general) started in the background")
+    await _bounded(rt.shutdown())
+
+
 async def test_a_second_child_gets_the_next_name_and_an_unknown_type_mounts_nothing(tmp_path: Path) -> None:
     (tmp_path / "agents" / "general-1").mkdir(parents=True)  # a resumed session's first child
     model = _Model(
@@ -949,6 +981,7 @@ async def test_a_background_agent_answers_its_name_and_agent_wait_returns_report
         f"agent {n} (general) started in the background; agent_wait(names=[{n!r}]) returns its report"
         for n in ("general-1", "general-2")
     ]
+    assert [s["child"] for s in started] == ["general-1", "general-2"]  # the name, beside the content
     first = (await _bounded(wait.run({"names": ["general-1", "general-2", "general-9"], "timeout": 0.5})))[
         "content"
     ]

@@ -10,10 +10,12 @@ import pytest
 from agent_cordis_plugin import (
     DECLINED,
     FAILED,
+    Answer,
     Clock,
     LoopConfig,
     LoopModel,
     MemoryTranscript,
+    Ran,
     ToolBroker,
     Unstarted,
     asides,
@@ -87,8 +89,10 @@ class _Approval:
         self.asked.append(question)
         return self.answer
 
-    async def approve(self, question: Any) -> bool:  # the loop's own, as `Asked` gives it
-        return self.unasked(question) or await self.confirm(question)
+    async def approve(self, question: Any) -> Answer:  # the loop's own, as `Asked` gives it
+        if self.unasked(question):
+            return Answer.UNASKED
+        return Answer.YES if await self.confirm(question) else Answer.NO
 
 
 class _Nowhere:
@@ -179,15 +183,36 @@ async def test_a_call_answers_what_its_tool_said_and_a_tool_s_fault_is_the_model
     def tool(name: str) -> Any:
         return broker.get(name)
 
-    assert await called(tool("echo"), "echo", {"text": "hi"}) == ("echo: hi", ("/p/said.txt",), False)
-    assert await called(tool("fails"), "fails", {}) == (
-        "error: the fails tool failed (OSError: disk gone); tell the person",
-        (),
-        True,
+    assert await called(tool("echo"), "echo", {"text": "hi"}) == Ran("echo: hi", ("/p/said.txt",))
+    assert await called(tool("fails"), "fails", {}) == Ran(
+        "error: the fails tool failed (OSError: disk gone); tell the person", failed=True
     )
-    content, touched, failed = await called(tool("mumbles"), "mumbles", {})
-    assert content.startswith("error: the mumbles tool answered with something other than its result")
-    assert touched == () and failed
+    mumbled = await called(tool("mumbles"), "mumbles", {})
+    assert mumbled.content.startswith("error: the mumbles tool answered with something other than its result")
+    assert mumbled.touched == () and mumbled.child is None and mumbled.failed
+
+
+async def test_a_call_keeps_the_sub_agent_its_result_names_as_it_keeps_the_files_it_touched() -> None:
+    broker = ToolBroker()
+
+    async def starts(input: Any) -> Json:
+        return {"content": "report", "child": "general-1"}
+
+    async def odd(input: Any) -> Json:
+        return {"content": "report", "child": 7}
+
+    async def none(input: Any) -> Json:
+        return {"content": "report", "child": ""}
+
+    for name, run in (("starts", starts), ("odd", odd), ("none", none)):
+        broker.register(_spec(name), run)
+
+    def tool(name: str) -> Any:
+        return broker.get(name)
+
+    assert await called(tool("starts"), "starts", {}) == Ran("report", child="general-1")
+    assert (await called(tool("odd"), "odd", {})).child is None  # not a name
+    assert (await called(tool("none"), "none", {})).child is None  # no name
 
 
 def test_a_call_is_shown_as_its_tool_says_else_as_its_input() -> None:

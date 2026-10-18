@@ -14,6 +14,7 @@ import pytest
 from agent_cordis_plugin import (
     FAILED,
     STOPPED,
+    Answer,
     Clock,
     FileTranscript,
     LoopModel,
@@ -23,7 +24,7 @@ from agent_cordis_plugin import (
     summed,
 )
 from agent_cordis_plugin.loop import request_for
-from agent_cordis_plugin.records import settings_to_record, step_record
+from agent_cordis_plugin.records import call_record, nested_record, settings_to_record, step_record
 from agent_cordis_plugin.testing import Stepped, noon
 
 type Json = Mapping[str, Any]
@@ -83,8 +84,8 @@ class Listing(Timing):
 
 
 class Approved:
-    async def approve(self, question: Json) -> bool:
-        return True
+    async def approve(self, question: Json) -> Answer:
+        return Answer.YES
 
 
 class Prompt:
@@ -432,3 +433,253 @@ async def test_a_transcript_from_before_the_records_resumes_and_is_sent_exactly_
     assert new["at"] == START and answer["step"]["settings"] == SETTINGS  # none recorded in it yet: now
     await transcript.flush()
     assert list(FileTranscript(str(path)).messages[: len(old)]) == old  # the file keeps them as they were
+
+
+SLOW: Json = {
+    "name": "slow",
+    "description": "Take some time.",
+    "parameters": {"type": "object", "properties": {"seconds": {"type": "number"}}, "required": ["seconds"]},
+}
+OUTER: Json = {
+    "name": "outer",
+    "description": "Call others.",
+    "parameters": {"type": "object", "properties": {}},
+}
+AT = "2026-10-18T03:47:12.845Z"  # the first call's `at`: the half second its step took, after the start
+
+
+def slow(id: str, seconds: float) -> Json:
+    return {"type": "tool_call", "id": id, "name": "slow", "input": {"seconds": seconds}}
+
+
+class Asking:
+    """An `approval` whose person takes the seconds each answer names (on the test's clock) and then
+    gives it, a `Rule`-less stand-in for `Asked`; it keeps what it was asked."""
+
+    def __init__(self, stepped: Stepped, *answers: tuple[float, Answer]) -> None:
+        self.stepped, self.answers = stepped, list(answers)
+        self.asked: list[Json] = []
+
+    async def approve(self, question: Json) -> Answer:
+        self.asked.append(question)
+        seconds, answer = self.answers.pop(0)
+        self.stepped.advance(seconds)
+        return answer
+
+
+def slow_tools(stepped: Stepped, ran: list[float]) -> ToolBroker:
+    """A `slow` tool that runs as many seconds as it is told on the test's clock."""
+    broker = ToolBroker()
+
+    async def run(input: Json) -> Json:
+        ran.append(float(input["seconds"]))
+        stepped.advance(float(input["seconds"]))
+        return {"content": f"took {input['seconds']}"}
+
+    broker.register(SLOW, run)
+    return broker
+
+
+async def slow_reply(
+    stepped: Stepped, approval: Asking, *calls: Json, tools: ToolBroker | None = None
+) -> tuple[MemoryTranscript, list[float]]:
+    """A reply whose first step makes `calls` (after half a second) and whose second answers."""
+    ran: list[float] = []
+    transcript = MemoryTranscript()
+    model = Timing(
+        stepped, transcript, steps((0.5, text("on it")), *((0.0, c) for c in calls)), steps((0.0, text("ok")))
+    )
+    broker = tools if tools is not None else slow_tools(stepped, ran)
+    await reply(LoopModel(model, broker, transcript, approval, clock=stepped.clock), "go")
+    return transcript, ran
+
+
+async def test_a_call_the_rule_lets_run_unasked_records_when_it_began_and_how_long_it_ran() -> None:
+    stepped = Stepped()
+    transcript, ran = await slow_reply(stepped, Asking(stepped, (0.0, Answer.UNASKED)), slow("c1", 2.5))
+    (result,) = entries(transcript, "tool")
+    assert result["call"] == {"at": AT, "answer": "unasked", "took": 2.5}  # nobody asked: no `waited`
+    assert result["call"]["answer"] is Answer.UNASKED and ran == [2.5]
+
+
+async def test_a_call_the_person_said_yes_to_records_how_long_they_took_and_how_long_it_ran(
+    tmp_path: Path,
+) -> None:
+    stepped = Stepped()
+    ran: list[float] = []
+    transcript = FileTranscript(str(tmp_path / "transcript.jsonl"))
+    model = Timing(
+        stepped, transcript, steps((0.5, text("on it")), (0.0, slow("c1", 1.5))), steps((0.0, text("ok")))
+    )
+    approval = Asking(stepped, (4.0, Answer.YES))
+    await reply(LoopModel(model, slow_tools(stepped, ran), transcript, approval, clock=stepped.clock), "go")
+    (result,) = entries(transcript, "tool")
+    assert result["call"] == {"at": AT, "answer": "yes", "waited": 4.0, "took": 1.5}
+    assert ran == [1.5] and len(approval.asked) == 1
+    await transcript.flush()
+    written = [json.loads(line) for line in (tmp_path / "transcript.jsonl").read_text().splitlines()]
+    (on_disk,) = (entry["call"] for entry in written if entry["role"] == "tool")
+    assert on_disk == {"at": AT, "answer": "yes", "waited": 4.0, "took": 1.5}  # the word, as a string
+
+
+async def test_a_no_never_runs_its_call_and_records_the_wait_and_no_run_time() -> None:
+    """The member `no` is a non-empty string, so a truthiness check on an answer would run it."""
+    stepped = Stepped()
+    transcript, ran = await slow_reply(stepped, Asking(stepped, (2.25, Answer.NO)), slow("c1", 9.0))
+    (result,) = entries(transcript, "tool")
+    assert ran == []  # the tool never ran
+    assert result["content"].startswith("denied:") and result["asides"] == []
+    assert result["call"] == {"at": AT, "answer": "no", "waited": 2.25}
+
+
+async def test_a_call_refused_before_approval_has_the_time_alone_and_nobody_is_asked() -> None:
+    stepped = Stepped()
+    approval = Asking(stepped)
+    unknown = {"type": "tool_call", "id": "c1", "name": "nope", "input": {}}
+    malformed = {"type": "tool_call", "id": "c2", "name": "slow", "input": {"seconds": "soon"}}
+    transcript, ran = await slow_reply(stepped, approval, unknown, malformed)
+    refused = entries(transcript, "tool")
+    assert [r["content"].split(":")[0] for r in refused] == ["error", "error"]
+    assert [r["call"] for r in refused] == [{"at": AT}, {"at": AT}]
+    assert approval.asked == [] and ran == []
+
+
+async def test_calls_a_stopped_reply_never_reached_have_the_time_alone_and_the_one_it_stopped_is_timed() -> (
+    None
+):
+    stepped = Stepped()
+    transcript = MemoryTranscript()
+    hanging = ToolBroker()
+
+    async def hang(input: Json) -> Json:
+        stepped.advance(3.0)
+        await asyncio.Event().wait()
+        return {"content": "never"}  # pragma: no cover
+
+    hanging.register(SLOW, hang)
+    model = Timing(
+        stepped, transcript, steps((0.5, text("on it")), (0.0, slow("c1", 0)), (0.0, slow("c2", 0)))
+    )
+    task = asyncio.create_task(
+        reply(
+            LoopModel(
+                model, hanging, transcript, Asking(stepped, (0.0, Answer.UNASKED)), clock=stepped.clock
+            ),
+            "go",
+        )
+    )
+    await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    interrupted, not_run = entries(transcript, "tool")
+    assert interrupted["content"].startswith("interrupted:")
+    assert interrupted["call"] == {"at": AT, "answer": "unasked", "took": 3.0}  # timed to the stop
+    assert not_run["content"].startswith("not run:")
+    assert not_run["call"] == {"at": "2026-10-18T03:47:15.845Z"}  # when the stop found it so
+
+
+async def test_a_call_whose_question_the_stop_withdrew_has_the_time_alone() -> None:
+    stepped = Stepped()
+    transcript = MemoryTranscript()
+
+    class Waiting:
+        async def approve(self, question: Json) -> Answer:
+            stepped.advance(1.0)
+            await asyncio.Event().wait()
+            return Answer.YES  # pragma: no cover
+
+    model = Timing(stepped, transcript, steps((0.5, text("on it")), (0.0, slow("c1", 0))))
+    task = asyncio.create_task(
+        reply(LoopModel(model, slow_tools(stepped, []), transcript, Waiting(), clock=stepped.clock), "go")
+    )
+    await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    (result,) = entries(transcript, "tool")
+    assert result["content"].startswith("not run:")
+    assert result["call"] == {"at": AT}  # it reached approval, and no answer came
+
+
+async def test_an_input_s_calls_through_tools_are_recorded_in_order_each_with_its_tool_s_name() -> None:
+    """The calls an input makes through `tools.NAME(...)`: each a call record with its tool's
+    name (one asked and said yes to, one said no to, one refused before approval, one that
+    started a sub-agent), in the order they were made, on the call that made them; their asides are told
+    with it."""
+    stepped = Stepped()
+    broker = slow_tools(stepped, [])
+    started: list[str] = []
+
+    async def spawn(input: Json) -> Json:
+        started.append("general-1")
+        stepped.advance(0.75)
+        return {"content": "report", "child": "general-1"}
+
+    async def outer(input: Json) -> Json:
+        stepped.advance(0.25)
+        for name, seconds in (("slow", 1.5), ("slow", 9.0), ("spawn", 0), ("nothing", 0)):
+            await broker.call(name, {"seconds": seconds})
+        return {"content": "outer done"}
+
+    broker.register({**OUTER, "name": "spawn"}, spawn)
+    broker.register(OUTER, outer)
+    approval = Asking(
+        stepped, (0.0, Answer.UNASKED), (2.0, Answer.YES), (4.0, Answer.NO), (0.0, Answer.UNASKED)
+    )
+    transcript = MemoryTranscript()
+    model = Timing(
+        stepped,
+        transcript,
+        steps((0.5, text("on it")), (0.0, {"type": "tool_call", "id": "c1", "name": "outer", "input": {}})),
+        steps((0.0, text("ok"))),
+    )
+    runner = LoopModel(
+        model,
+        broker,
+        transcript,
+        approval,
+        clock=stepped.clock,
+        asides=[lambda call: f"aside of {call['name']}"],
+    )
+    broker.serve(runner.nested)
+    await reply(runner, "go")
+    (result,) = entries(transcript, "tool")
+    assert result["asides"] == ["aside of outer", "aside of slow", "aside of spawn"]
+    record = result["call"]
+    assert record["nested"] == [
+        {"name": "slow", "at": "2026-10-18T03:47:13.095Z", "answer": "yes", "waited": 2.0, "took": 1.5},
+        {"name": "slow", "at": "2026-10-18T03:47:16.595Z", "answer": "no", "waited": 4.0},
+        {
+            "name": "spawn",
+            "at": "2026-10-18T03:47:20.595Z",
+            "answer": "unasked",
+            "took": 0.75,
+            "child": "general-1",
+        },
+        {"name": "nothing", "at": "2026-10-18T03:47:21.345Z"},
+    ]
+    # the call itself: its input's own quarter second, and the four calls it made, run inside it
+    assert {key: record[key] for key in ("at", "answer", "took")} == {
+        "at": AT,
+        "answer": "unasked",
+        "took": 8.5,
+    }
+    assert started == ["general-1"]
+
+
+def test_a_call_record_holds_only_what_it_was_given_and_a_nested_one_adds_its_tool_s_name() -> None:
+    at = datetime.datetime(2026, 10, 18, 3, 47, 12, 345000, tzinfo=datetime.UTC)
+    assert call_record(at, None, None, None, None, []) == {"at": START}
+    whole = call_record(at, Answer.YES, 2.00049, 1.23456, "general-1", [])
+    assert whole == {"at": START, "answer": "yes", "waited": 2.0, "took": 1.235, "child": "general-1"}
+    inner = nested_record("slow", whole)
+    assert inner == {
+        "name": "slow",
+        "at": START,
+        "answer": "yes",
+        "waited": 2.0,
+        "took": 1.235,
+        "child": "general-1",
+    }
+    outer = call_record(at, Answer.UNASKED, None, 4.0, None, [inner])
+    assert outer == {"at": START, "answer": "unasked", "took": 4.0, "nested": [inner]}
+    assert "nested" not in nested_record("outer", outer)  # a nested call lists none of its own

@@ -2,7 +2,8 @@
 
 Each entry is appended once and never changed, and every field here is optional, so a transcript
 from before them reads as it did. They are the loop's own: a provider sends an entry's `role`,
-`content` and the keys it reads, never these (CONTRACTS.md: message, step record; decision-0009).
+`content` and the keys it reads, never these (CONTRACTS.md: message, step record, call record;
+decision-0009).
 
 Time is data. `at` is UTC ISO-8601 to the millisecond with `Z` (`2026-10-18T03:47:12.345Z`), so it
 sorts as text (`stamp`); a duration is seconds from a monotonic clock, rounded to the
@@ -12,6 +13,11 @@ A step's record (`StepRecord`) is built from what the step's chunks said (`step_
 usage chunks summed by the one function `/compact` sums its own with (`summed`), the id that
 answered, and the model's settings when they are new to the conversation (`settings_to_record`).
 
+A call's record (`CallRecord`, on its `tool` entry) is built from what the loop saw of the call
+(`call_record`): when it reached approval, what approval made of it (`Answer`) and how long the
+person took, how long the tool ran, the sub-agent it started and the calls its input made through
+`tools` (`nested_record`).
+
 Everything here is pure but the real `Clock` and `day_of`, which reads the machine's time zone.
 """
 
@@ -19,17 +25,23 @@ import datetime
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from functools import partial
 from typing import Any, Final, Literal, NotRequired, TypedDict, cast
 
 from agent_cordis_plugin.toolset import LISTED
 
 __all__ = [
+    "Answer",
+    "CallRecord",
     "Clock",
+    "NestedRecord",
     "Settings",
     "StepRecord",
     "Usage",
+    "call_record",
     "day_of",
+    "nested_record",
     "settings_to_record",
     "stamp",
     "step_record",
@@ -50,6 +62,17 @@ class Clock:
 
     now: Callable[[], datetime.datetime] = partial(datetime.datetime.now, datetime.UTC)
     monotonic: Callable[[], float] = time.monotonic
+
+
+class Answer(StrEnum):
+    """What approval made of a call (`Asked.approve`): `unasked`, the `approval` rule let it run and
+    nobody was asked; `yes` or `no`, the person was asked and said that. A `no` call never runs,
+    and the member `no` is a non-empty string, so a use of an answer is a `match` on it, never a
+    test of its truth. Written to a call's record as the word."""
+
+    UNASKED = "unasked"
+    YES = "yes"
+    NO = "no"
 
 
 class Settings(TypedDict, closed=True):
@@ -89,6 +112,35 @@ class StepRecord(TypedDict, closed=True):
     usage: NotRequired[Usage]
     settings: NotRequired[Settings]
     tool_changes: NotRequired[Literal["listed"]]
+
+
+class CallRecord(TypedDict, closed=True):
+    """A call's `call` on its `tool` entry: `at`, when it reached approval, or was refused before it
+    (an unknown or malformed call, a tool not running); `answer`, what approval made of it
+    (`Answer`), left out for a call refused before approval or never reached (the reply was
+    stopped first); `waited`, the seconds from the question put to the person to its answer,
+    queueing behind another question included, only when someone was asked; `took`, the seconds the
+    tool ran (a question the tool puts during its own run stays inside it); `child`, the sub-agent
+    the call started; `nested`, the calls its input made through `tools`, in order."""
+
+    at: str
+    answer: NotRequired[Answer]
+    waited: NotRequired[float]
+    took: NotRequired[float]
+    child: NotRequired[str]
+    nested: NotRequired[list[NestedRecord]]
+
+
+class NestedRecord(TypedDict, closed=True):
+    """A call an input made through `tools.NAME(...)`, in its call's `nested`: a `CallRecord` with
+    its tool's `name`, and no `nested` of its own (the calls it made are listed beside it)."""
+
+    name: str
+    at: str
+    answer: NotRequired[Answer]
+    waited: NotRequired[float]
+    took: NotRequired[float]
+    child: NotRequired[str]
 
 
 def stamp(moment: datetime.datetime) -> str:
@@ -168,3 +220,38 @@ def step_record(
     if mode == LISTED:
         record["tool_changes"] = LISTED
     return record
+
+
+def call_record(
+    at: datetime.datetime,
+    answer: Answer | None,
+    waited: float | None,
+    took: float | None,
+    child: str | None,
+    nested: Sequence[NestedRecord],
+) -> CallRecord:
+    """A call's `call`: it reached approval (or was refused) at `at`; `answer` is what approval made
+    of it (None: it was refused before approval, or never reached it); `waited`, the seconds the
+    person took (None unless they were asked); `took`, the seconds its tool ran (None: it did not);
+    `child`, the sub-agent it started; `nested`, the calls its input made. Each left out when
+    there is none."""
+    record = CallRecord(at=stamp(at))
+    if answer is not None:
+        record["answer"] = answer
+    if waited is not None:
+        record["waited"] = round(waited, _MILLISECONDS)
+    if took is not None:
+        record["took"] = round(took, _MILLISECONDS)
+    if child is not None:
+        record["child"] = child
+    if nested:
+        record["nested"] = list(nested)
+    return record
+
+
+def nested_record(name: str, record: CallRecord) -> NestedRecord:
+    """The call `record` an input made through `tools`, as its call's `nested` lists it: with the
+    name of its tool, and none of its own `nested`."""
+    return cast(
+        NestedRecord, {"name": name} | {key: value for key, value in record.items() if key != "nested"}
+    )

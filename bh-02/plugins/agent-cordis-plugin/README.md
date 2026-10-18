@@ -44,7 +44,9 @@ and only once it may (`Asked`): at once when the `approval` rule says it runs un
 (`approval.unasked({"name", "input", "runs", "title", "lines", ...})`, `shown`: the tool's own
 `show(input)`, else its input as JSON; it runs in a runner that confines it, or is the memory
 tool, `runs="memory"`, which is never asked), else on the
-person's yes, which the loop asks itself (`output.confirm`, the approval modal). A no is its
+person's yes, which the loop asks itself (`output.confirm`, the approval modal). What approval
+makes of a call is an `Answer` (`Asked.approve`): `unasked`, `yes` or `no`, which the loop
+matches and never tests for truth (a `no` is a non-empty string). A no is its
 answer (`DECLINED`: `denied: ...`), so approval is one rule for any model provider and any tool,
 and the loop
 keeps no copy of it. A call to a name it did not offer (`refusal`), or one whose input doesn't
@@ -56,7 +58,8 @@ read) with that result, the rest (the one at the approval question included) wit
 ...`. A call a tool's own call makes (an input's `tools.NAME(...)`) runs the same way: the loop
 row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.call`), so it is put
 to the rule and the person as the model's own would be, run through the tool its name has now,
-and given to `asides`, whose asides go with the result of the call that made it (`_nested`); it
+and given to `asides`, whose asides go with the result of the call that made it (`_nested`, one
+list of the calls it made, each with its record and its asides); it
 answers `{"content", "failed"}`, `failed` when it did not run (no such tool, its input malformed,
 a no) or the tool failed. The transcript and the tools are rows of their own, so the conversation and
 the namespace outlive the loop: replace `model` (or the ui) and the loop reloads while it
@@ -138,6 +141,18 @@ from the end of the transcript, so a resumed conversation compares with what it 
 sent as it was, and no provider sends one (`replayed` and `records_for` read the keys they use). The
 entry that answers a message the model was never asked (the reply stopped while the prompt was read)
 is no step and has no `step`.
+
+It records on each `tool` entry the call it answers, `call` (CONTRACTS.md: call record): `at` (when
+the call reached approval, or was refused before it), `answer` (the `Answer`, written as its
+word), `waited` (seconds from the question put to the person to their answer, a wait queued behind
+another question included, and only when they were asked: the `unasked` ones have none), `took`
+(seconds its tool ran, a question the tool puts during its run inside it), `child` (the sub-agent
+the call started: the `agent` tool's result names it beside `content`, and `called` keeps it as it
+keeps `touched`) and `nested` (the calls its input made through `tools`, each a record of its own with
+its tool's `name`, in the order they ended, a refused or declined one included). A call refused
+before approval, or never reached because the stop came first (`not run: ...`, the one at the
+approval question included), has `at` alone; one the stop interrupted has what it had by then, its
+`took` up to the stop. A `_Call` collects a call's record as `_Step` does a step's.
 
 Reading the prompt (`system.text()`, whose sections may read many files: memory's reads every
 CLAUDE.md, the python tool's asks its jail what it reads) and asking `asides` (memory's on-touch function reads rule

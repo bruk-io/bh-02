@@ -106,7 +106,10 @@ input, which the loop serves as it does the model's own calls) starts one child:
    when that was not an answer, and its usage (`framed`). That is the tool's result, so the
    model reads it as another agent's account, never as instructions. A child that never comes
    up (`start` seconds) answers which of its rows is not up and what each waits on; a
-   recoverable failure of its reply (`kind`, `message`) answers that it failed and why.
+   recoverable failure of its reply (`kind`, `message`) answers that it failed and why. The
+   tool's result also names the child, `child: NAME` beside `content` (the foreground report and
+   the background start alike; a call that started none has no `child`), which the loop keeps on
+   the call's record in the transcript (CONTRACTS.md: call record).
 7. **Its end**: retired (`Fiber.retire`, idempotent) when the run ends, however it ends; then
    what it used, summed over its steps, is shown through the parent's `output.show` as one usage
    event after a note naming it (`agent NAME (TYPE) ended; it used:`), so it joins the session's

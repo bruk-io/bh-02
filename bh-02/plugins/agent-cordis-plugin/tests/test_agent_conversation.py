@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from agent_cordis_plugin import (
+    Answer,
     ConversationConfig,
     FileTranscript,
     LoopModel,
@@ -247,8 +248,8 @@ async def test_the_new_conversation_is_bh_02_s_message_then_the_summary_and_the_
             return "the prompt as it reads now"
 
     class Approved:
-        async def approve(self, question: Json) -> bool:
-            return True
+        async def approve(self, question: Json) -> Answer:
+            return Answer.YES
 
     async def nothing(input: Json) -> Json:
         return {"content": ""}
@@ -653,8 +654,8 @@ async def test_clear_that_can_t_write_changes_nothing(
 
 
 class _Approved:
-    async def approve(self, question: Json) -> bool:
-        return True
+    async def approve(self, question: Json) -> Answer:
+        return Answer.YES
 
 
 def _slow_disk(monkeypatch: pytest.MonkeyPatch) -> None:

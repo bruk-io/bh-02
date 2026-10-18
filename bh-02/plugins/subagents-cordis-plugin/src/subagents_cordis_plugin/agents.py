@@ -476,6 +476,9 @@ class Agents:
     async def agent(self, input: Json) -> dict[str, Any]:
         """Start one child on `input["prompt"]` and answer with its report, framed
         (`child.framed`), or why it gave none; with `input["background"]`, its name at once.
+        A call that started a child answers `child: NAME` beside `content`, which the loop keeps on
+        the call's record (CONTRACTS.md: call record); one that started none (a type there is
+        none of, a start the person refused) answers `content` alone.
 
         Raises:
             ValueError: the layer's `rows` gives a child the agents row or auto memory
@@ -531,12 +534,13 @@ class Agents:
         self._changed()
         run = self._run(live, kind, str(input.get("prompt", "")), rows)
         if not background:
-            return {"content": await run}
+            return {"content": await run, "child": name}
         self._background[name] = task = asyncio.ensure_future(run)
         task.add_done_callback(_retrieved)  # a run nobody waits for does not leave its failure unretrieved
         return {
             "content": f"agent {name} ({kind.name}) started in the background; "
-            f"agent_wait(names=[{name!r}]) returns its report"
+            f"agent_wait(names=[{name!r}]) returns its report",
+            "child": name,
         }
 
     async def agent_wait(self, input: Json) -> dict[str, Any]:

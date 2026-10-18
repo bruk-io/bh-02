@@ -56,15 +56,20 @@ from collections.abc import (
 )
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, assert_never, runtime_checkable
 
 from agent_cordis_plugin.executor import OneAtATime
 from agent_cordis_plugin.prompt import changes, edits, latest
 from agent_cordis_plugin.records import (
+    Answer,
+    CallRecord,
     Clock,
+    NestedRecord,
     Settings,
     StepRecord,
+    call_record,
     day_of,
+    nested_record,
     settings_to_record,
     stamp,
     step_record,
@@ -83,6 +88,7 @@ __all__ = [
     "Model",
     "LoopModel",
     "Asides",
+    "Ran",
     "Rule",
     "System",
     "Tool",
@@ -148,10 +154,10 @@ class Asides(Protocol):
 
 @runtime_checkable
 class Approval(Protocol):
-    """What the loop asks of each call: whether it may run (`Asked`: unasked by the `approval`
-    rule, else the person's answer)."""
+    """What the loop asks of each call: whether it may run, as an `Answer` (`Asked`: `unasked` by
+    the `approval` rule, else the person's `yes` or `no`)."""
 
-    async def approve(self, question: Json) -> bool: ...
+    async def approve(self, question: Json) -> Answer: ...
 
 
 @runtime_checkable
@@ -172,15 +178,17 @@ class Confirm(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class Asked:
-    """Whether a call may run: at once when the `approval` rule says it runs unasked, else the
-    person's answer through `output.confirm`. The rule is the runner plugin's, in one place; the
-    asking is the asker's."""
+    """Whether a call may run, as an `Answer`: `unasked` at once when the `approval` rule says it
+    runs unasked, else the person's `yes` or `no` through `output.confirm`. The rule is the runner
+    plugin's, in one place; the asking is the asker's."""
 
     rule: Rule
     output: Confirm
 
-    async def approve(self, question: Json) -> bool:
-        return self.rule.unasked(question) or await self.output.confirm(question)
+    async def approve(self, question: Json) -> Answer:
+        if self.rule.unasked(question):
+            return Answer.UNASKED
+        return Answer.YES if await self.output.confirm(question) else Answer.NO
 
 
 @runtime_checkable
@@ -276,12 +284,12 @@ def _asked(message: str, today: str | None, aside: str, at: str) -> dict[str, An
     return {"role": "user", "content": "\n\n".join(told)} | ({"today": today} if today else {}) | {"at": at}
 
 
-def _answer(call: Json, content: str, asides: Sequence[str]) -> dict[str, Any]:
+def _answer(call: Json, content: str, asides: Sequence[str], record: CallRecord) -> dict[str, Any]:
     """The transcript entry answering `call`: `content`, what the model reads (the input's result,
-    then its asides and any change in the instructions, each after a blank line), and the asides
-    alone (`asides`, `[]` for none), so what was told is read back without searching the text.
-    The loop's own, as `today` is: a provider sends `content`."""
-    return {"role": "tool", "content": content, "call_id": call["id"], "asides": list(asides)}
+    then its asides and any change in the instructions, each after a blank line), the asides
+    alone (`asides`, `[]` for none), so what was told is read back without searching the text, and
+    the call's `record` (`call`). The loop's own, as `today` is: a provider sends `content`."""
+    return {"role": "tool", "content": content, "call_id": call["id"], "asides": list(asides), "call": record}
 
 
 def asides_for(functions: Iterable[Aside], input: Json) -> list[str]:
@@ -393,23 +401,41 @@ def shown(tool: Tool, name: str, input: Json) -> dict[str, Any]:
     return title | {"lines": lines, "language": "json"}
 
 
-async def called(tool: Tool, name: str, input: Json) -> tuple[str, tuple[str, ...], bool]:
-    """One call run through `tool`: what the model reads, the files it opened, and whether the
-    tool failed. A tool that fails, or answers with something other than `{"content": str,
-    ...}`, answers with an error the model reads, so one tool's fault is never the reply's."""
+@dataclass(frozen=True, slots=True)
+class Ran:
+    """One call run through its tool (`called`): `content`, what the model reads; `touched`, the
+    files the tool says it opened; `child`, the sub-agent it started, as the `agent` tool's result
+    names it (CONTRACTS.md: tool result); `failed`, whether the tool failed rather than answered."""
+
+    content: str
+    touched: tuple[str, ...] = ()
+    child: str | None = None
+    failed: bool = False
+
+
+async def called(tool: Tool, name: str, input: Json) -> Ran:
+    """One call run through `tool`: what the model reads, the files it opened, the sub-agent it
+    started, and whether the tool failed. A tool that fails, or answers with something other than
+    `{"content": str, ...}`, answers with an error the model reads, so one tool's fault is never
+    the reply's."""
     try:
         ran = await tool.run(input)
     except Exception as error:
-        return f"error: the {name} tool failed ({type(error).__name__}: {error}); tell the person", (), True
+        return Ran(
+            f"error: the {name} tool failed ({type(error).__name__}: {error}); tell the person", failed=True
+        )
     content = ran.get("content") if isinstance(ran, Mapping) else None
     if not isinstance(content, str):
-        return (
+        return Ran(
             f"error: the {name} tool answered with something other than its result as text; tell the person",
-            (),
-            True,
+            failed=True,
         )
-    touched = ran.get("touched") or ()
-    return content, tuple(str(path) for path in touched) if isinstance(touched, list | tuple) else (), False
+    touched, child = ran.get("touched") or (), ran.get("child")
+    return Ran(
+        content,
+        tuple(str(path) for path in touched) if isinstance(touched, list | tuple) else (),
+        child if isinstance(child, str) and child else None,
+    )
 
 
 class LoopModel:
@@ -421,8 +447,8 @@ class LoopModel:
     in one reply, then shown as the reason the reply stopped. The
     provider's assistant message rides on its transcript entry as `provider`, for the
     model to replay as it was received. An `act` step's calls run one at a time, each only on
-    `approval.approve({"name", "input", "runs", "title", "lines", ...})`'s yes (`shown`); a no
-    is that call's answer, `DECLINED`.
+    `approval.approve({"name", "input", "runs", "title", "lines", ...})`'s `unasked` or `yes`
+    (`shown`); a `no` is that call's answer, `DECLINED`.
 
     The tools are read at a conversation's first request (`tools.specs()`, in name order), once
     the ones `requires` names have registered (waiting up to `wait` seconds, and saying so; one
@@ -452,10 +478,15 @@ class LoopModel:
     first on that message, then any change to the instructions, then the message.
 
     The loop also records, on the entries it appends, when and how long (`records`; CONTRACTS.md:
-    message, step record): `at` on the person's message, and on each assistant entry a model step
-    made, its `step`: when its request was handed over, the seconds to its first and its last
-    chunk, the model that answered, its usage, and the model's settings when they are new to the
-    conversation. A provider sends none of it.
+    message, step record, call record): `at` on the person's message, and on each assistant entry a
+    model step made, its `step`: when its request was handed over, the seconds to its first and
+    its last chunk, the model that answered, its usage, and the model's settings when they are
+    new to the conversation. On each `tool` entry it records the call, its `call`: when it
+    reached approval, what approval made of it (`Answer`: `unasked`, `yes` or `no`) and the
+    seconds the person took when they were asked, the seconds its tool ran, the sub-agent it
+    started (the tool's result names it as `child`) and the calls its input made through
+    `tools`, in order, each a record of its own; a call refused before approval, or never
+    reached, has the time alone. A provider sends none of it.
 
     The prompt is read, and `asides` asked, on `executor` (the `executor` row's, which a reloaded
     loop shares with the last one); a loop built without one (a test, direct use) makes its own.
@@ -499,7 +530,7 @@ class LoopModel:
         self._clock = clock if clock is not None else Clock()
         self._ready = False  # whether the tools `requires` names have registered, once
         self._missing: dict[str, float] = {}  # a tool the conversation has, missing since when
-        self._nested: list[str] = []  # what `asides` said of the calls the running call made (`nested`)
+        self._nested: list[_Made] = []  # the calls the running call made through `tools` (`nested`)
 
     def _prompt(self) -> str:
         """The system prompt as it reads now. Run on `executor` (`_told`)."""
@@ -615,19 +646,30 @@ class LoopModel:
         once `approval` says yes, then asked of `asides`, whose asides are told with the call it
         was made from. Answers `{"content", "failed"}`: what the caller reads, and whether that
         is why it did not run or failed rather than its result."""
+        call = _Call(self._clock)
         tool = self._tools.get(name)
         if tool is None:
+            self._made(name, call, ())
             return {"content": f"error: there is no {name} tool now", "failed": True}
         if (why := malformed(tool.spec, input)) is not None:
+            self._made(name, call, ())
             return {"content": why, "failed": True}
-        if not await self._approval.approve(
-            {"name": name, "input": input, "runs": tool.runs, **shown(tool, name, input)}
+        if not await call.ask(
+            self._approval, {"name": name, "input": input, "runs": tool.runs, **shown(tool, name, input)}
         ):
+            self._made(name, call, ())
             return {"content": DECLINED, "failed": True}
-        result, touched, failed = await called(tool, name, input)
-        ran = {"name": name, "input": input, "result": result, "touched": touched}
-        self._nested += await self._executor.run(partial(asides_for, tuple(self._asides or ()), ran))
-        return {"content": result, "failed": failed}
+        with call.running():
+            ran = await called(tool, name, input)
+        call.child = ran.child
+        done = {"name": name, "input": input, "result": ran.content, "touched": ran.touched}
+        asides = await self._executor.run(partial(asides_for, tuple(self._asides or ()), done))
+        self._made(name, call, asides)
+        return {"content": ran.content, "failed": ran.failed}
+
+    def _made(self, name: str, call: _Call, asides: Sequence[str]) -> None:
+        """Keep a call an input made, once it has ended: its record, and the asides told of it."""
+        self._nested.append(_Made(nested_record(name, call.record()), tuple(asides)))
 
     def _unanswered(self, message: str, dated: str | None, why: str, at: str) -> None:
         """Keep the person's message (that came `at`), answered with `why`: the reply ended before
@@ -705,27 +747,33 @@ class LoopModel:
                 answered, running = 0, False  # running: the unanswered call reached its tool
                 result: str | None = None  # the unanswered call's answer, once it has one
                 asides: list[str] = []  # and what `asides` said with it
+                collected: _Call | None = None  # and its record so far, from its reaching approval
+                made: list[_Made] = []  # and the calls its input made, once it has ended
                 try:
                     for call in step.calls:
                         name, input = str(call["name"]), call["input"]
-                        asides = []
+                        asides, collected, made = [], None, []
                         tool = await self._callable(call, offered)
+                        collected = _Call(self._clock)
                         if isinstance(tool, str):  # why it can't run
                             result = tool
-                        elif not await self._approval.approve(
-                            {"name": name, "input": input, "runs": tool.runs, **shown(tool, name, input)}
+                        elif not await collected.ask(
+                            self._approval,
+                            {"name": name, "input": input, "runs": tool.runs, **shown(tool, name, input)},
                         ):
                             result = DECLINED
                         else:
                             running, self._nested = True, []
-                            result, touched, _ = await called(tool, name, input)
+                            with collected.running():
+                                ran = await called(tool, name, input)
                             running = False
-                            ran = {"name": name, "input": input, "result": result, "touched": touched}
+                            result, collected.child = ran.content, ran.child
+                            done = {"name": name, "input": input, "result": result, "touched": ran.touched}
                             # off the event loop too (an on-touch section reads rule files), over
                             # the functions `asides` holds now. A stop meanwhile waits for them: each
                             # has marked what it told as told, so the answer must carry it
                             asked = asyncio.ensure_future(
-                                self._executor.run(partial(asides_for, tuple(self._asides or ()), ran))
+                                self._executor.run(partial(asides_for, tuple(self._asides or ()), done))
                             )
                             try:
                                 asides = await asyncio.shield(asked)
@@ -733,10 +781,13 @@ class LoopModel:
                                 asides = await asked
                                 raise
                             # what the calls it made said too: each marked its aside as told
-                            asides, self._nested = sorted([*asides, *self._nested]), []
+                            made, self._nested = self._nested, []
+                            asides = sorted([*asides, *(each for one in made for each in one.asides)])
                         aside, shown_told = await self._told()
                         said = "\n\n".join([result, *asides, *([aside] if aside else [])])
-                        self._transcript.append(_answer(call, said, asides))
+                        self._transcript.append(
+                            _answer(call, said, asides, collected.record([m.record for m in made]))
+                        )
                         answered, answer, result = answered + 1, result, None
                         yield {
                             "type": "tool_result",
@@ -757,11 +808,14 @@ class LoopModel:
                     # with its asides.
                     for n, call in enumerate(step.calls[answered:]):
                         said, kept = _NOT_RUN, []
+                        # the call the stop came to keeps its record so far; any other has the time alone
+                        so_far = collected if n == 0 and collected is not None else _Call(self._clock)
                         if n == 0 and result is not None:
                             said, kept = "\n\n".join([result, *asides]), asides
                         elif n == 0 and running:
                             said = _INTERRUPTED
-                        self._transcript.append(_answer(call, said, kept))
+                        nested = [one.record for one in [*made, *self._nested]] if n == 0 else []
+                        self._transcript.append(_answer(call, said, kept, so_far.record(nested)))
                 continue
             yield {"type": "stop", "reason": stop}
             if stop in (ANSWERED, REFUSED) or nudges >= self._max_nudges:
@@ -773,6 +827,63 @@ class LoopModel:
             self._transcript.append(fed)
             for text in shown_told:
                 yield {"type": "note", "text": text}
+
+
+@dataclass(frozen=True, slots=True)
+class _Made:
+    """A call an input made through `tools` (`LoopModel.nested`), once it has ended: its record, and
+    the asides `asides` said of it, which are told with the call the input was made from."""
+
+    record: NestedRecord
+    asides: tuple[str, ...]
+
+
+class _Call:
+    """One call's `call` record, collected as the call goes (`record`). It begins when the call
+    reaches approval, or is refused before it. `ask` puts it to approval and keeps the answer, and the
+    seconds the person took when they were asked; `running` times its tool; `child` is the
+    sub-agent it started."""
+
+    def __init__(self, clock: Clock) -> None:
+        self._clock = clock
+        self._at = clock.now()
+        self._answer: Answer | None = None
+        self._waited: float | None = None
+        self._took: float | None = None
+        self.child: str | None = None
+
+    async def ask(self, approval: Approval, question: Json) -> bool:
+        """Put the call to `approval`; whether it may run. Only a person asked is timed: `waited`
+        runs from the question put to its answer, the time it queued behind another question
+        included, since the ui shows one at a time. A call whose question the reply's stop
+        withdrew (it is cancelled here) keeps no answer."""
+        began = self._clock.monotonic()
+        answer = await approval.approve(question)
+        waited = self._clock.monotonic() - began
+        self._answer = answer
+        match answer:
+            case Answer.UNASKED:
+                may = True
+            case Answer.YES:
+                may, self._waited = True, waited
+            case Answer.NO:
+                may, self._waited = False, waited
+            case _ as unreachable:
+                assert_never(unreachable)
+        return may
+
+    @contextlib.contextmanager
+    def running(self) -> Iterator[None]:
+        """Time the tool's run, however it ends: one the stop interrupts is timed to the stop."""
+        began = self._clock.monotonic()
+        try:
+            yield
+        finally:
+            self._took = self._clock.monotonic() - began
+
+    def record(self, nested: Sequence[NestedRecord] = ()) -> CallRecord:
+        """This call's `call` (`records.call_record`), with the calls its input made, `nested`."""
+        return call_record(self._at, self._answer, self._waited, self._took, self.child, nested)
 
 
 class _Step:

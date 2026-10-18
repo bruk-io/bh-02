@@ -18,6 +18,7 @@ from agent_cordis_plugin import (
     DECLINED,
     FAILED,
     STOPPED,
+    Answer,
     Asked,
     Clock,
     FileTranscript,
@@ -113,8 +114,8 @@ class Confined:
     """An approval over a runner that confines the Python process: every input runs, nobody is
     asked. The loop's own (`approve`), and the `approval` rule and `output` a row binds."""
 
-    async def approve(self, question: Json) -> bool:
-        return True
+    async def approve(self, question: Json) -> Answer:
+        return Answer.UNASKED
 
     def unasked(self, question: Json) -> bool:
         return True
@@ -133,14 +134,14 @@ class Person:
         self.hang = hang
         self.asked: list[Json] = []
 
-    async def approve(self, question: Json) -> bool:
+    async def confirm(self, question: Json) -> bool:
         self.asked.append(question)
         if self.hang:
             await asyncio.Event().wait()
         return self.answers.pop(0) if self.answers else False
 
-    async def confirm(self, question: Json) -> bool:
-        return await self.approve(question)
+    async def approve(self, question: Json) -> Answer:
+        return Answer.YES if await self.confirm(question) else Answer.NO
 
 
 def text(s: str) -> Json:
@@ -148,8 +149,8 @@ def text(s: str) -> Json:
 
 
 def _bare(entry: Json) -> dict[str, Any]:
-    """An entry without the records the loop adds to it (`at`, `step`): what the model was told."""
-    return {key: value for key, value in entry.items() if key not in ("at", "step")}
+    """An entry without the records the loop adds to it (`at`, `step`, `call`): what the model was told."""
+    return {key: value for key, value in entry.items() if key not in ("at", "step", "call")}
 
 
 def call(id: str, name: str, **input: Any) -> Json:
@@ -197,7 +198,12 @@ async def test_a_tool_step_runs_the_call_as_an_input_and_asks_again() -> None:
         == "let me QUIET it is"
     )
     assert [m["role"] for m in transcript.messages] == ["tools", "user", "assistant", "tool", "assistant"]
-    assert transcript.messages[3] == {"role": "tool", "content": "QUIET", "call_id": "c1", "asides": []}
+    assert _bare(transcript.messages[3]) == {
+        "role": "tool",
+        "content": "QUIET",
+        "call_id": "c1",
+        "asides": [],
+    }
     assert scripted.requests[1][0][-1]["content"] == "QUIET"  # the result went back to the model
 
 
@@ -230,11 +236,14 @@ async def test_a_call_runs_unasked_when_the_rule_says_so_else_on_the_person_s_an
         def unasked(self, question: Json) -> bool:
             return question.get("runs", "jail") == "jail"
 
-    person = Person(False)
+    person = Person(False, True)
     asked = Asked(Rule(), person)
-    assert await asked.approve({"name": "python", "input": {}})
-    assert not await asked.approve({"name": "search", "input": {}, "runs": "host"})
-    assert person.asked == [{"name": "search", "input": {}, "runs": "host"}]
+    assert await asked.approve({"name": "python", "input": {}}) is Answer.UNASKED
+    assert await asked.approve({"name": "search", "input": {}, "runs": "host"}) is Answer.NO
+    assert await asked.approve({"name": "search", "input": {}, "runs": "host"}) is Answer.YES
+    assert (
+        person.asked == [{"name": "search", "input": {}, "runs": "host"}] * 2
+    )  # the unasked one never reached them
 
 
 async def test_a_call_that_is_not_an_input_is_never_put_to_approval() -> None:
@@ -856,7 +865,7 @@ async def test_the_asides_told_with_a_result_are_kept_on_its_entry_beside_what_t
     tools = [m for m in transcript.messages if m["role"] == "tool"]
     asides = ["From a.md, a rule for *.py:\n\nOne.\n\n(Two.)", "Zebra: another row's aside."]
     told = "\n\n".join(["A", *asides, changes("in /a", "in /b")])
-    assert tools[0] == {"role": "tool", "content": told, "call_id": "c1", "asides": asides}
+    assert _bare(tools[0]) == {"role": "tool", "content": told, "call_id": "c1", "asides": asides}
     assert scripted.requests[1][0][-3] == tools[0]  # the model is sent the entry, which it reads as content
     assert [m["asides"] for m in tools[1:]] == [[], []]  # a call that can't run, and one declined
     assert [m["content"] for m in tools[1:]] == [refusal(call("c2", "nope", code="b"), ["python"]), DECLINED]
