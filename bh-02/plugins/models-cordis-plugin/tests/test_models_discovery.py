@@ -149,16 +149,14 @@ async def test_a_model_of_an_endpoint_means_a_model_with_no_network_call(tmp_pat
     assert row.config == {"state": "/s/claude", "default": "local/other:1b"}  # a layer's default
 
 
-_BROKEN = _FILE + 'id = "x"\n'  # an endpoint with an id, as a single model's table had: its table's problem
+_BROKEN = _FILE + 'colour = "red"\n'  # an endpoint with a setting it does not take: its table's problem
 
 
 def _why(tmp_path: Path) -> str:
     return (
-        f"endpoint 'local' ({tmp_path / 'models.toml'}) names an id, as a single model's table did: a "
-        "table is an endpoint now, and its models are under it. Move the id to a model of it, "
-        '`[local.models.MODEL]` with `id = "x"` (named local/MODEL), and keep the rest here; e.g.\n'
-        '[local]\nprovider = "openai"\nbase_url = "https://HOST/v1"\nkey = "LINE_IN_LOCAL_ENV"\n\n'
-        '[local.models.MODEL]\nid = "MODEL ID"'
+        f"endpoint 'local' ({tmp_path / 'models.toml'}): colour is not a setting of a openai endpoint; "
+        "it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, "
+        "temperature"
     )
 
 
@@ -190,7 +188,7 @@ async def test_the_models_file_s_default_naming_a_model_of_a_broken_endpoint_is_
         resolved(config)
     assert raised.value.message == _why(tmp_path)
     async with opened(config) as model:
-        with pytest.raises(ModelsError, match="names an id, as a single model's table did"):
+        with pytest.raises(ModelsError, match="colour is not a setting of a openai endpoint"):
             [chunk async for chunk in model.complete([{"role": "user", "content": "hi"}], [])]
     assert get.calls == []
 

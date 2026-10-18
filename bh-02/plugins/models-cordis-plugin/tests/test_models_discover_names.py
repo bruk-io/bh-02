@@ -65,7 +65,7 @@ def test_an_endpoint_that_discovers_needs_no_models_of_its_own_and_is_no_model()
             "include narrows the models an endpoint's server lists; add `discover = true`",
         ),
         ({"discover": False, "models": {"m": {"id": "x"}}, "include": ["a*"]}, "add `discover = true`"),
-        ({"discover": True, "id": "x"}, "names an id, as a single model's table did"),
+        ({"discover": True, "colour": "red"}, "colour is not a setting of a openai endpoint; it takes"),
         (
             {"discover": True, "include": "qwen*"},
             'include must be a list of patterns, like `include = ["qwen*"]`',
@@ -173,7 +173,7 @@ def test_a_name_that_is_nothing_lists_the_models_and_the_endpoints_whose_models_
 @pytest.mark.parametrize(
     ("table", "said"),
     [
-        ({"id": "x"}, "names an id, as a single model's table did: a table is an endpoint now"),
+        ({"colour": "red"}, "colour is not a setting of a openai endpoint; it takes"),
         ({"include": "qwen*"}, 'include must be a list of patterns, like `include = ["qwen*"]`'),
         ({"include": []}, "include must be a list of patterns"),
         ({"base_url": "localhost:1234"}, "base_url 'localhost:1234' is not an http(s) URL with a host"),

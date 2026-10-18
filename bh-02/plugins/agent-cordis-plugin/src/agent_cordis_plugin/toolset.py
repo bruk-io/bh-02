@@ -43,7 +43,8 @@ def _named(specs: Iterable[Json]) -> dict[str, Json]:
 
 def begun(entries: Iterable[Json]) -> list[Json] | None:
     """The tools the conversation began with: its first `tools` entry's list; None when the
-    transcript records none (a new conversation, or one begun before the loop kept its tools)."""
+    transcript records none (a new conversation, or one `/compact` began: its list is kept at its
+    next request)."""
     first = next((entry for entry in entries if entry.get("role") == "tools" and "tools" in entry), None)
     return None if first is None else [dict(spec) for spec in first["tools"]]
 

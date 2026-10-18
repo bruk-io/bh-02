@@ -227,7 +227,7 @@ not copied. A click leaves the focus on the label, as it does on a thinking bloc
 
 **History.** With `history` in its config (a session's layer sets `{"history":
 "<session>/events.jsonl"}`), the app appends every entry the chat view draws to that file
-(JSON lines: the events, streamed runs joined, and the ui's own `user`, `turn_end` and
+(JSON lines: the events, streamed runs joined, and the ui's own `user`, `reply_end` and
 `noted`), and the row draws
 its last `replay` entries (400; a streamed run counts as one) again when it starts. Once the
 file holds more than twice `replay` entries it is trimmed as the row starts (a temporary file,
@@ -238,9 +238,7 @@ whole, removes its temporary file and says so in the chat view. `/clear` reaches
 with any line typed after `/clear` that is still waiting to be read (it is drawn again);
 the file records `cleared` like any event, and a replay starts after the last one (`/compact`'s
 too, so a resume shows the conversation from the note carrying the summary), while the
-usage before it still counts (the session's totals). An older bh-02 emptied the file underneath
-the app (the operator's `forget`, gone now); the next write then puts a `carried` entry first for
-what was forgotten, so the usage a resume adds up is the usage shown live. The file is the ui's own; the row still
+usage before it still counts (the session's totals). The file is the ui's own; the row still
 depends on its config alone.
 
 **The look is bh-01's.** `scripts/sync-tokens` copies bh-01's `dist/tokens/colors.css` and

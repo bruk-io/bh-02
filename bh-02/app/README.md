@@ -99,6 +99,15 @@ row's dependencies are active would make it depend on them, and a `/model` switc
 with them. A resumed session that does not come up is kept and not offered a resume (it would fail
 the same way): the command line says it did not start and where its own layer is.
 
+`main` holds the session for the whole run (`sessions.held`, entered in `cli._session`): an exclusive
+`flock` on `running.lock` in the session's directory, with the process's pid written there, taken
+for a new session right after it is made and for a resumed one before its layer is read or `--model`
+rewrites it. A second run of the same session finds it taken and is refused (`sessions.Held`, said
+as `error: ...`, exit code 1) before any row starts, naming the pid. The operating system drops the
+lock with the process, so a crash leaves nothing to clear, and the descriptor is not inherited, so
+no child outlives the run holding it. The commands that only read a session (`sessions`,
+`trajectory`, `watch`) never take it.
+
 What the rows depend on, which is what decides what reloads when:
 
 ```
@@ -170,14 +179,19 @@ is, a pure core and a thin shell:
   in order (the live `transcript.jsonl` last, the backups `/clear` and `/compact` kept before it by their
   first `at`, else their modification time), each with its replies, their steps and calls, and
   each sub-agent under the call that started it, or after the conversations by its own times when no
-  call names it, and its row reloads by time. `rendered` lays it out as lines, in local time, with every
-  control character stripped, each row reload a line of its own before the first line that came after
-  it, among the lines of the writer whose row it is (the session's, or the sub-agent's for
-  `agents/NAME/...`).
+  call names it, and its row reloads by time, each marked `first` when its row id is not in the records
+  before it (cordis has no first-load event, so a row's first load is recorded as a `reload`). `rendered`
+  lays it out as lines, in local time, with every control character stripped, each row reload a line of
+  its own before the first line that came after it, among the lines of the writer whose row it is (the
+  session's, or the sub-agent's for `agents/NAME/...`), except that first loads which follow one another
+  there, with no reload, failure or line of that writer's between, are one line (`row first load`, how
+  many rows and the time from the first to the last): the session's boot, and a sub-agent's rows coming
+  up, under its `sub-agent` line. While following, a run of them at the very end waits for something
+  after it, so it is printed once with its final count.
   `bh_02` imports no plugin (`plugin-layering`), so it reads the entries as TypedDicts of its own; a
   test holds them to what the agent plugin's loop writes (`test_trajectory_records.py`). A line that is
   not a JSON object (the loop's half-written last line) is skipped, a field that is missing or of the
-  wrong type is left out, and a conversation from before the records prints with no times.
+  wrong type is left out.
 - `viewing.py` is the shell: it lists a session's directory and reads each file, `rows.jsonl` included, through
   `host_paths` (`directory_beneath`, `read_beneath`: beneath the sessions' state, through no link, with a
   cap), takes a sub-agent only from the names in `agents/` that `bh-02 watch` would accept, and runs the
@@ -196,8 +210,11 @@ runtime beside `--trace`'s (`_row_log`), which hears every row's lifecycle event
 writes it on a thread at 0600, so the event loop never waits on a disk. `reload` is a row's setup
 beginning (it came up, was restarted, or a dependency was replaced) and `failed` its setup raising,
 with the error; cordis emits no `restart`, a restarted row's old fiber ends `unloading` and `inactive`
-and the new one begins with a `reload`. A write that fails ends the log and not the run. `--trace FILE`
-is the same stream in full, untimed and written on the loop, and stays as it was.
+and the new one begins with a `reload`; so does a row's first load, which the file does not mark, and
+the trajectory tells it by the row id (a row's first record in the file). A write that fails ends the
+log and not the run, and the shell says so once after the app has exited: the file, when it found the
+write failing, and the error. `--trace FILE` is the same stream in full, untimed and written on the
+loop, and stays as it was.
 
 ## The plugins
 

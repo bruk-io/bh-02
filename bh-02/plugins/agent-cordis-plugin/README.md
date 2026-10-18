@@ -55,8 +55,12 @@ is answered with text saying so, runs nothing, and is put to nobody. A reply sto
 still answers every call: the one with its tool when the stop came with `interrupted: ... it may
 have partly run`, one that had its result (the stop came while its asides were made or the prompt
 read) with that result, the rest (the one at the approval question included) with `not run:
-...`. A call a tool's own call makes (an input's `tools.NAME(...)`) runs the same way: the loop
-row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.call`), so it is put
+...`. A process that dies mid-call answers none (a step's entry is appended before its calls
+run), so the next reply begins by answering each call of the last step that no `tool` entry follows
+(`_unanswered_calls`) with `interrupted: bh-02 stopped before this call finished; it may have partly
+run`, in the calls' order and before any request, with a call record of the time alone: so a
+resumed conversation is whole and no provider is sent a call with no result after it. A call a tool's own call makes (an input's
+`tools.NAME(...)`) runs the same way: the loop row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.call`), so it is put
 to the rule and the person as the model's own would be, run through the tool its name has now,
 and given to `asides`, whose asides go with the result of the call that made it (`_nested`, one
 list of the calls it made, each with its record and its asides); it
@@ -77,8 +81,7 @@ the call's own result, and a `note` for each of those asides, by its first line.
 row of its own, depending on nothing, so neither the loop nor a row adding to it reloads the
 other; a row that adds to it (`memory:on_touch`) depends on `transcript`, so `/clear` starts it
 afresh and it tells a new conversation again; it reads its `messages` too, so a resumed one is
-not told again an aside a `tool` entry's `asides` hold (an entry without them, from before the
-loop kept them or from when it called them `notes`, is searched; CONTRACTS.md: transcript).
+not told again an aside a `tool` entry's `asides` hold (CONTRACTS.md: transcript).
 
 Each model step is classified by `stops.classify` (pure; the table is in its docstring): only
 `act` runs calls, only `answered` ends the reply, and a
@@ -107,9 +110,7 @@ where it starts, how many are gone and what stands there now, `{"at", "drop", "a
 session where extensions load, the branch switches or CLAUDE.md is edited keeps the prompt in its
 transcript once, not once per change. What the model was last told is the first entry with
 each later one's edits applied in turn (`prompt.latest`, pure), which the loop works out when it
-meets a transcript it has not read and then keeps up itself. A transcript from before the loop
-kept edits has every reading whole; `latest` takes those as they are, so it resumes unchanged
-and its next change is kept as edits from its last whole reading. An entry whose edits `edits`
+meets a transcript it has not read and then keeps up itself. An entry whose edits `edits`
 could not have made (a transcript edited by hand or damaged) is passed over, the reading before
 it standing, so the session still answers and its next change is kept as edits from that one. Only the first entry reaches a
 model, as `{"role": "system", "content"}`; the edits are the loop's own. A loop that reloads (a
@@ -137,8 +138,9 @@ provider's `usage` chunk named), `usage` (the step's usage chunks summed, `cost_
 `records.summed`, which `/compact` sums its own with), `settings` (the model's optional `settings`
 attribute, only on a conversation's first step and when it differs from the last one recorded, found
 from the end of the transcript, so a resumed conversation compares with what it recorded) and
-`tool_changes` (only when `listed`). All are optional: an entry from before them reads as it did and is
-sent as it was, and no provider sends one (`replayed` and `records_for` read the keys they use). The
+`tool_changes` (only when `listed`). A field is left out only where there is nothing to record (a step
+that got no chunk has no `first_chunk`), and no provider sends one (`replayed` and `records_for` read
+the keys they use). The
 entry that answers a message the model was never asked (the reply stopped while the prompt was read)
 is no step and has no `step`.
 
@@ -151,8 +153,9 @@ the call started: the `agent` tool's result names it beside `content`, and `call
 keeps `touched`) and `nested` (the calls its input made through `tools`, each a record of its own with
 its tool's `name`, in the order they ended, a refused or declined one included). A call refused
 before approval, or never reached because the stop came first (`not run: ...`, the one at the
-approval question included), has `at` alone; one the stop interrupted has what it had by then, its
-`took` up to the stop. A `_Call` collects a call's record as `_Step` does a step's.
+approval question included), has `at` alone, as does one a crash left unanswered and the next
+reply answered (its `at` is when that reply began); one the stop interrupted has what it had by
+then, its `took` up to the stop. A `_Call` collects a call's record as `_Step` does a step's.
 
 Reading the prompt (`system.text()`, whose sections may read many files: memory's reads every
 CLAUDE.md, the python tool's asks its jail what it reads) and asking `asides` (memory's on-touch function reads rule
@@ -193,6 +196,37 @@ nothing after it is written, since a file with a hole in it would resume as anot
 The transcript row enters its file, so a restart (or a retired sub-agent) writes what is queued
 and closes it.
 
+A file replaced under a transcript is refused, not written to. `/clear` and `/compact` replace the
+transcript row's file by rename and queue the restart of the loop and the transcript; if that
+restart fails (the person is told), the transcript still mounted is the old conversation's, its
+descriptor on the old file's inode (or, if it had written nothing yet, about to open the new
+file after the old conversation). The appender checks before every write that the file at the
+path is the one it means (`host_paths.Replaced`), and `FileTranscript` says a refusal as
+`TranscriptReplaced`: an `OSError` with a `kind` (`transcript_replaced`) and a `message`, so it is
+a recoverable failure (CONTRACTS.md: errors) and `chat:converse` shows it and carries on. The
+message names `/restart transcript`, which begins the conversation the file holds; until then
+every `append`, `flush` and the row's leaving raise it, nothing is written to the old file (the
+`.bak`) or the new one, and an entry refused by `append` is not kept in memory. The check is
+on the writing thread, so the refusal surfaces at the next `append` after it has run, not at the
+`append` that queued the entry: the first message after a failed restart may reach the model once
+before its step's entry is refused.
+
+A transcript file read when the row starts (a resume, or `/compact` reading it) may end in a
+write that was cut short: a process killed mid-write leaves a last line with no newline that is
+not JSON. That is an entry that was never made, so the file is mended before the appender's first
+write: the unfinished line is kept beside the file (`transcript.jsonl.torn`, and
+`transcript.jsonl.torn.2`, ... the first name not taken, as `.bak` is: an earlier one is never
+replaced or read, and each is made at 0600 through `host_paths.write_beneath`, no link followed),
+then the file is cut to its last whole line, so the next entry starts a line of its own instead of
+being glued onto the bytes. The bytes are kept before they are cut: when they can't be (a link at
+the name, no room), the transcript stops with that reason and the file is as it was. A last
+line that is whole but for its newline (cut at the final byte) is an entry: it is read and given
+its newline. Only that last line is forgiven. A line that is not JSON anywhere else, or a last
+line that ends in a newline, is damage and not a write cut short: the row stops, with a
+`ValueError` naming the file and the line number and telling the person to repair or remove the
+line, or begin a new session without `--resume`, and nothing is changed. Nothing tells the person
+a torn line was set aside; the `.torn` file is where to look when the last reply seems missing.
+
 `/compact` (`agent:conversation`, `conversation.py`) is for a conversation grown long: a local model
 processes more prompt before each first token, and any model nears its context window. It asks
 the model for a summary in one step: the request is the loop's own (`loop.request_for`: the
@@ -215,7 +249,7 @@ conversation's start, a resume's too, so it says the namespace was kept at the c
 empties as the python tool's instructions say). The seed also records the step (decision-0009,
 Conversations): the message carries `at` and `seed: {keep}`, the text the person gave `/compact
 WHAT TO KEEP` (`""` for none), so no reader matches the seed's wording (`/compact` itself knows a
-seed by the field, and by the wording in a file from before it), and the summary carries the
+seed by the field alone), and the summary carries the
 step's record (`at`, `first_chunk`, `took`, `model`, `usage`, `settings`). The step is collected
 by the loop's own `Step` over the loop's own `Clock` (`summarise`), so one piece of code builds
 both records, with the model's `settings` and `tool_changes` read as the loop reads them; the summary is
@@ -254,5 +288,5 @@ so). Both commands' restarts are queued in `jobs` (CONTRACTS.md: jobs), never ru
 row's task, which they reload; the chat row reads its next line once they are done. A restart
 that fails is told to the person (the jobs row's `output.notice`), since the new conversation
 is written by then. Both are one row's, beside the transcript they rewrite, rather than the operator's:
-the operator keeps not depending on the model, and nothing outside the row (once the
-operator's `forget`) has to be kept in step with the transcript row's file.
+the operator keeps not depending on the model, and nothing outside the row has to be kept in
+step with the transcript row's file.

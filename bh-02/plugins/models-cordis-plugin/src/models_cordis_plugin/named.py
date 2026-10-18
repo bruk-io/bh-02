@@ -390,13 +390,6 @@ def problem(named: Named) -> str | None:
 def _endpoint_problem(named: Named, where: str, *, factory: bool) -> str | None:
     """What is wrong with an endpoint's table, or one of its models', or None."""
     table = named.table
-    if "id" in table:
-        return (
-            f"{where} names an id, as a single model's table did: a table is an endpoint now, and its "
-            f"models are under it. Move the id to a model of it, `[{named.name}.models.MODEL]` with "
-            f'`id = "{table["id"]}"` (named {named.name}/MODEL), and keep the rest here; e.g.\n'
-            + _EXAMPLE.replace("NAME", named.name)
-        )
     if "/" in named.name:
         return (
             f"{where}: an endpoint's name may not hold '/': its models are named ENDPOINT/MODEL, split "

@@ -46,15 +46,15 @@ def test_edits_hold_only_the_paragraphs_that_changed_and_give_the_reading_back_e
     assert edits(extended, _BEGAN) == [{"at": 3, "drop": 1, "add": []}]
 
 
-def test_latest_is_what_the_model_was_last_told_whether_kept_whole_or_as_edits() -> None:
-    """A transcript from before the loop kept edits has every reading whole; one resumed since
-    has edits after them, from the last whole one."""
+def test_latest_is_the_first_reading_with_each_later_one_s_edits_applied() -> None:
+    """The first `system` entry is the reading kept whole; each later one holds the edits from the
+    reading before it."""
     a, b, c = _BEGAN, _BEGAN.replace("main", "b"), _BEGAN.replace("main", "c") + "\n\nMore."
     assert latest([]) is None
-    assert latest([{"role": "system", "content": a}, {"role": "system", "content": b}]) == b
+    assert latest([{"role": "system", "content": a}]) == a
     entries = [
         {"role": "system", "content": a},
-        {"role": "system", "content": b},
+        {"role": "system", "edits": edits(a, b)},
         {"role": "system", "edits": edits(b, c)},
     ]
     assert latest(entries) == c

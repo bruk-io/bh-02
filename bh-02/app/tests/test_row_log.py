@@ -2,6 +2,8 @@
 kept at 0600, for `bh-02 trajectory` to lay out (decision-0009, Row reloads)."""
 
 import asyncio
+import datetime
+import errno
 import json
 import os
 import re
@@ -14,6 +16,7 @@ import pytest
 
 from bh_02 import layers, run
 from bh_02.bootstrap import NotStarted
+from bh_02.trajectory import rendered, trajectory
 from cordis import Row
 
 type Record = dict[str, str]
@@ -84,6 +87,35 @@ async def test_a_row_restarted_by_a_command_is_kept_as_the_reload_of_its_new_fib
     assert sum(record["row"] == "ui" for record in kept) == 1  # the ui depends on nothing: no restart
 
 
+async def test_the_trajectory_of_the_rows_written_is_the_boot_as_one_line_and_each_restart_as_reloads(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """cordis has no first-load event, so the log records a row's first load as a reload; the trajectory
+    tells it by the row id, from the file as the shell writes it."""
+    import fragile
+
+    log = tmp_path / "rows.jsonl"
+    fragile.script("/clear", "after")
+    ui = composition(
+        '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n'
+    )
+    await asyncio.wait_for(run([*layers(), ui], row_log=log), 10)
+    seen: set[str] = set()
+    firsts: list[str] = []
+    again: list[str] = []
+    for record in records(log):
+        (again if record["row"] in seen else firsts).append(record["row"])
+        seen.add(record["row"])
+    assert len(firsts) > 20 and {"loop", "transcript", "python"} <= set(
+        again
+    )  # a boot, and what /clear restarted
+    lines = [line.text for line in rendered(trajectory([], log.read_bytes()), datetime.UTC)]
+    assert re.fullmatch(rf"row first load  [0-9:.-]+ [0-9:.]+  {len(firsts)} rows in [0-9.]+s", lines[0])
+    assert [line.split()[2] for line in lines[1:]] == again
+    assert all(line.startswith("row reload ") for line in lines[1:])
+
+
 async def test_a_row_that_fails_is_kept_with_its_error_though_the_run_stops_for_it(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
@@ -142,10 +174,25 @@ async def test_a_log_that_cannot_be_written_ends_and_the_run_goes_on(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
     """The log is for the person, not the run: its directory is gone (a session being removed), the first
-    write fails on its thread, and the listener stops without taking down the row that was emitting."""
+    write fails on its thread, and the listener stops without taking down the row that was emitting. The
+    person is told once, after the rows have unwound, through `report`: the file, when the shell found the
+    write failing, and the error."""
     log = tmp_path / "gone" / "rows.jsonl"
-    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], row_log=log), 10)
+    told: list[str] = []
+    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], report=told.append, row_log=log), 10)
     assert not log.exists()
+    (line,) = told
+    assert line.startswith(f"{log} stopped being written (the shell found a write failing at ")
+    assert STAMP.search(line)
+    assert line.endswith(f"{os.strerror(errno.ENOENT)}; the row reloads from that write on are not in it")
+
+
+async def test_a_log_that_was_written_to_the_end_tells_nobody_anything(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    log, told = tmp_path / "rows.jsonl", []
+    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], report=told.append, row_log=log), 10)
+    assert records(log) and told == []
 
 
 async def test_no_log_is_kept_unless_one_is_asked_for(

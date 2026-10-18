@@ -17,7 +17,7 @@ _TRANSCRIPT = [
             "role": "assistant",
             "content": [
                 {"type": "thinking", "thinking": "hm", "signature": "sig"},
-                {"type": "tool_use", "id": "t1", "name": "python", "input": {"code": "1"}},  # anthropic-era
+                {"type": "tool_use", "id": "t1", "name": "mcp__bh__python", "input": {"code": "1"}},
             ],
         },
     },
@@ -36,7 +36,7 @@ def test_records_are_a_linear_chain_in_claude_code_s_shape() -> None:
     assert all(r["sessionId"] == "s1" and r["cwd"] == "/w" for r in records)
     assert records[0]["message"] == {"role": "user", "content": "run it"}
     thinking, call = records[1]["message"]["content"]
-    assert thinking["signature"] == "sig" and call["name"] == "mcp__bh__python"  # prefixed for Claude Code
+    assert thinking["signature"] == "sig" and call["name"] == "mcp__bh__python"  # as Claude Code sent it
     assert (
         records[1]["message"]["model"] == "claude-sonnet-5"
         and records[1]["message"]["stop_reason"] == "tool_use"

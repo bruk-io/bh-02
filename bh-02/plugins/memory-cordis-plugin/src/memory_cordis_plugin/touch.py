@@ -25,11 +25,6 @@ _CUT = "\n... ["  # the mark of an aside cut short (`_cut`'s)
 # imports follows within that text (`From FILE, imported by ...`, `(bh-02 did not import ...)`),
 # so it begins nothing: a text whose imports changed since reads as changed, and is told again.
 _FROM, _HEADS = "From ", (", instructions ", ", a rule for ")
-# What may follow a text told whole in a `tool` entry from before the loop kept `asides`, where
-# its aside ends (other than at the entry's end): the mark of an aside cut short, or another
-# aside: bh-02's begin with "(" (a shell hint, a function that failed, a change in the
-# instructions), memory's with "From ".
-_ENDS = (_CUT, "\n\n(", "\n\nFrom ")
 
 
 @runtime_checkable
@@ -59,21 +54,15 @@ class Transcript(Protocol):
     def messages(self) -> Sequence[Mapping[str, Any]]: ...
 
 
-def _before(messages: Iterable[Mapping[str, Any]]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _before(messages: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
     """What the inputs in `messages` (a transcript's) were told: the asides the loop kept on each
-    `tool` entry (`asides`), and the text of each entry from before it kept them (the input's
-    result, then the asides told with it, each after a blank line), which is searched instead."""
+    `tool` entry (`asides`)."""
     asides: list[str] = []
-    texts: list[str] = []
     for m in messages:
-        if m.get("role") != "tool":
-            continue
         kept = m.get("asides")
-        if isinstance(kept, list | tuple):
+        if m.get("role") == "tool" and isinstance(kept, list | tuple):
             asides += [aside for aside in kept if isinstance(aside, str)]
-        else:
-            texts.append(str(m.get("content") or ""))
-    return tuple(asides), tuple(texts)
+    return tuple(asides)
 
 
 def _holds(aside: str, text: str) -> bool:
@@ -102,23 +91,6 @@ def _begins(aside: str, at: int) -> bool:
     ends = aside.find("\n", at)
     line = aside[at:] if ends == -1 else aside[at:ends]
     return any(head in line for head in _HEADS)
-
-
-def _told_in(results: Sequence[str], text: str) -> bool:
-    """Whether `text` was told in `results`, the text of `tool` entries from before the loop kept
-    `asides` (`_before`): its exact text, after a blank line, where an aside ends (the entry's
-    end, or `_ENDS`). Not at an entry's start, nor cut short (an aside over `_MAX_CHARS`), nor
-    followed by more of itself (a file cut back since: the paragraphs now gone follow it). Where
-    the result ends is not marked, so a text an input printed after a blank line counts too."""
-    aside = f"\n\n{text}"
-    for result in results:
-        at = result.find(aside)
-        while at != -1:
-            end = at + len(aside)
-            if end == len(result) or result.startswith(_ENDS, end):
-                return True
-            at = result.find(aside, at + 1)
-    return False
 
 
 def _cut(texts: Sequence[str]) -> tuple[str, int]:
@@ -163,7 +135,7 @@ class OnTouch:
         self._told: set[tuple[str, str]] = set()
         # what the inputs before this began were told (`_before`): None until the first input
         # that opens a file reads it
-        self._before: tuple[tuple[str, ...], tuple[str, ...]] | None = None
+        self._before: tuple[str, ...] | None = None
 
     def __call__(self, input: Mapping[str, Any]) -> str:
         touched = input.get("touched") or ()
@@ -194,14 +166,9 @@ class OnTouch:
         began (read once, at the first call that asks), which are marked told here."""
         if self._before is None:
             self._before = _before(self._transcript.messages)
-        asides, texts = self._before
         said = self._memory.touched(list(paths))
         unseen = [
             item for item in dict.fromkeys(said) if item not in self._told and item[0] not in self._opened
         ]
-        self._told.update(
-            item
-            for item in unseen
-            if any(_holds(aside, item[1]) for aside in asides) or _told_in(texts, item[1])
-        )
+        self._told.update(item for item in unseen if any(_holds(aside, item[1]) for aside in self._before))
         return [item for item in unseen if item not in self._told]

@@ -46,7 +46,10 @@ The file is written on a thread, in order, so the screen never waits on a disk, 
 for the last write when a reply ends, however it ends. `/clear` and `/compact` run only after the
 reply before them, so they find every entry. The file, its backups and the session's directory are
 readable by you alone (0600 and 0700, not the umask's). A line that can't be written (a full disk)
-is an error at the end of that reply, not an entry quietly missing from the file.
+is an error at the end of that reply, not an entry quietly missing from the file. If `/clear` or
+`/compact` replaced the file and the restart that follows failed (you are told), the old conversation
+is still running over a file that now holds the new one: bh-02 writes nothing more to it, and
+the next message answers with an error that says `/restart transcript` begins the new conversation.
 
 ## Steps that don't count
 
@@ -63,6 +66,12 @@ still answered in the transcript: the one running as interrupted (it may have pa
 rest as not run. The stopped reply stays in the transcript with what it said and that it was
 stopped, so your next message doesn't redo it. A step that fails (a 429, a dropped connection)
 is kept the same way, with what it said and that it failed.
+
+If bh-02 itself dies while a call runs (it is killed, or the machine loses power), nothing answers
+the call, and the conversation you resume holds a call with no result. Your next message makes it
+whole first: each such call is answered, before the model is asked anything, as interrupted by bh-02
+stopping (it may have partly run). Otherwise the provider would reject the call with no result, or
+the model would answer it by running the call again.
 
 ## The model row and its providers
 

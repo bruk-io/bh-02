@@ -458,14 +458,14 @@ async def test_a_provider_that_takes_the_list_as_it_reads_now_is_offered_it() ->
     )
 
 
-async def test_a_conversation_begun_before_the_loop_kept_its_tools_begins_its_list_now() -> None:
-    """A resumed transcript with no `tools` entry (kept before the loop kept them) takes the list
-    as it reads at its next request, telling nothing."""
+async def test_a_compacted_conversation_has_no_tools_entry_and_begins_its_list_at_its_next_request() -> None:
+    """What `/compact` leaves (the seed and its summary, no `tools` entry yet) takes the list as it
+    reads at its next request, telling nothing."""
     broker = ToolBroker()
     broker.register(ECHO, _echo)
     transcript = MemoryTranscript()
-    transcript.append({"role": "user", "content": "old"})
-    transcript.append({"role": "assistant", "content": "answer"})
+    transcript.append({"role": "user", "content": "(bh-02: carries on ...)", "seed": {"keep": ""}})
+    transcript.append({"role": "assistant", "content": "the summary"})
     model = _Scripted([_text("hi")])
     events = await _said(LoopModel(model, broker, transcript, _Approval()), "new")
     assert _conversation(transcript) == [{"role": "tools", "tools": [ECHO]}]

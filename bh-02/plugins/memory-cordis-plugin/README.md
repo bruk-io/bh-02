@@ -76,10 +76,7 @@ where the aside does, where it was cut short, or where the next text begins (`Fr
 instructions ...` or `From FILE, a rule for ...`; a file a text imports is part of it, so a text
 whose imports changed reads as changed, and is told again). Every aside there was told before the
 row began (a resumed session's, or before a reload), wherever it sorted among the others and
-whatever the result printed. It reads them once, at the first input that opens a file. An entry without them (from before the
-loop kept them, or from when it called them `notes`) is searched instead: a text told whole after a
-blank line, up to the entry's end or the next aside, though not one the entry starts with; where the result ends is not marked there, so a
-text an input printed that way counts too.
+whatever the result printed. It reads them once, at the first input that opens a file.
 
 ## What bh-02 does differently, and why
 

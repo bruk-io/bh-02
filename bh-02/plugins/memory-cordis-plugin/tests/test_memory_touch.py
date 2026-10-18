@@ -99,21 +99,26 @@ def test_it_asks_the_memory_value_and_tells_each_once() -> None:
     assert told({"code": "1"}) == "" and len(found.asked) == 2  # nothing opened: nothing asked
 
 
-def test_a_resumed_conversation_from_before_the_loop_kept_asides_is_searched_for_what_it_told() -> None:
+def test_a_resumed_conversation_is_not_told_again_what_its_entries_asides_hold() -> None:
     """A resumed session (or the row reloaded) starts a new `OnTouch`, but the transcript holds
-    what the model was told. An entry from before the loop kept `asides` holds it only in its
-    text: a text it holds whole, after a blank line, is told already. One the person quoted, one
-    an entry starts with (an input printed it), one cut short and one that changed since were
-    not, so each is told. The transcript is read once, at the
-    first input that opens a file; an empty one (after /clear) tells each afresh."""
+    what the model was told: the asides kept on each `tool` entry (`asides`). A text one holds
+    whole is told already. One the person quoted, one an input printed, one cut short and one
+    that changed since were not, so each is told. The transcript is read once, at the first input
+    that opens a file; an empty one (after /clear) tells each afresh."""
     rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand.\n\nNever by script."
     guide = "From src/db/CLAUDE.md, instructions for work under src/db/:\n\nUse the session."
     long, quoted, printed = "From long.md:\n\n" + "L" * 30, "From q.md:\n\nQ.", "From p.md:\n\nP."
+    cut = f"{long[:20]}\n... [12 more chars of memory]"
     transcript = _Kept(
         {"role": "user", "content": f"what is this?\n\n{quoted}"},
-        {"role": "tool", "content": f"6\n\n{guide}\n\n{rule}", "call_id": "c0"},
-        {"role": "tool", "content": f"{printed}\n\n(this input ran `cat` ...)", "call_id": "c1"},
-        {"role": "tool", "content": f"0\n\n{long[:20]}\n... [12 more chars of memory]", "call_id": "c2"},
+        {
+            "role": "tool",
+            "content": f"6\n\n{guide}\n\n{rule}",
+            "call_id": "c0",
+            "asides": [f"{guide}\n\n{rule}"],
+        },
+        {"role": "tool", "content": f"{printed}\n\n(an aside)", "call_id": "c1", "asides": ["(an aside)"]},
+        {"role": "tool", "content": f"0\n\n{cut}", "call_id": "c2", "asides": [cut]},
     )
     assert isinstance(transcript, Transcript)
     changed = rule.replace("by hand", "by the tool")
@@ -124,23 +129,6 @@ def test_a_resumed_conversation_from_before_the_loop_kept_asides_is_searched_for
     assert told({"touched": ("/p/src/db/y.py",)}) == "" and transcript.reads == 1
     afresh = OnTouch(_Said(*said), _Kept())
     assert afresh({"touched": ("/p/src/db/x.py",)}) == "\n\n".join(text for _, text in said)
-
-
-def test_a_text_cut_back_since_a_resumed_conversation_was_told_it_is_told_again() -> None:
-    """A rule cut back to its first paragraphs since the conversation was told it is still whole
-    in the old aside, but with the paragraph now gone after it: told again. A text counts as told
-    only where its aside ends: at the entry's end, at the mark of an aside cut short, or where
-    another aside begins (bh-02's begin with `(`, memory's with `From `)."""
-    rule = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."
-    guide = "From src/db/CLAUDE.md, instructions for work under src/db/:\n\nUse the session."
-    near, changed = "From near.md:\n\nN.", "(bh-02: your instructions have changed ...)"
-    transcript = _Kept(
-        {"role": "tool", "content": f"6\n\n{rule}\n\nNever touch prod.", "call_id": "c0"},
-        {"role": "tool", "content": f"7\n\n{guide}\n\n{changed}", "call_id": "c1"},
-        {"role": "tool", "content": f"8\n\n{near}\n... [40 more chars of guidance]", "call_id": "c2"},
-    )
-    said = [("/p/rule.md", rule), ("/p/CLAUDE.md", guide), ("/p/near.md", near)]
-    assert OnTouch(_Said(*said), transcript)({"touched": ("/p/src/db/x.py",)}) == rule
 
 
 _RULE = "From .claude/rules/db.md, a rule for src/db/**:\n\nMigrations by hand."

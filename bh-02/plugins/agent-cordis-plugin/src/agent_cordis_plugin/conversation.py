@@ -27,7 +27,10 @@ seconds to answer, and a note says so as the step begins; the person leaving can
 command (`chat:converse`), and nothing is written until the summary is whole. The restart is
 queued in `jobs` (CONTRACTS.md: jobs), never run in the chat row's task, which it reloads, and
 a restart that fails is told to the person, since the new conversation is written by then; the
-chat row reads its next line only once the restart is done, so the line reaches the new loop.
+chat row reads its next line only once the restart is done, so the line reaches the new loop. The
+transcript left mounted by a restart that failed is the old conversation's over the new one's file,
+and refuses every entry (`transcript.TranscriptReplaced`, naming `/restart transcript`) rather than
+write it into either.
 The pure parts (`asked`, `seeded`, `kept_in`, `_is_seed`, `_unsaid`, `_unusable`, `_summed`,
 `_answer`, `_unchanged`, `_cleared`, `unrestarted`) decide; the rest reads, writes and asks.
 """
@@ -97,12 +100,11 @@ _KEEP = "(The person asks that the summary keep, in particular: {})"
 # stays at the conversation's start for good, a resume's included, so it says only what stays
 # true: the namespace was kept when the conversation was compacted, and empties as the python
 # tool's instructions say.
-_SEEDED_START = "(bh-02: this conversation carries on from an earlier one"
 _SEEDED = (
-    f"{_SEEDED_START}, compacted (/compact) to the summary of it you wrote, which follows. Your "
-    "Python namespace was kept when it was compacted, holding what the earlier inputs defined; "
-    "it empties as your instructions about python say (bh-02 starting again, a resumed session "
-    "too), so check that a name is still there before relying on it.)"
+    "(bh-02: this conversation carries on from an earlier one, compacted (/compact) to the summary "
+    "of it you wrote, which follows. Your Python namespace was kept when it was compacted, holding "
+    "what the earlier inputs defined; it empties as your instructions about python say (bh-02 "
+    "starting again, a resumed session too), so check that a name is still there before relying on it.)"
 )
 # Shown as the summary step begins: a command shows nothing until it answers.
 _ASKING = (
@@ -245,17 +247,15 @@ def seeded(summary: str, keep: str, step: StepRecord) -> list[Json]:
 
 
 def _is_seed(message: Json) -> bool:
-    """Whether `message` is the first entry of a compacted conversation: it carries `seed`; or,
-    in a transcript from before the field, it opens with the wording `seeded` wrote."""
-    return "seed" in message or str(message.get("content", "")).startswith(_SEEDED_START)
+    """Whether `message` is the first entry of a compacted conversation: it carries `seed`."""
+    return "seed" in message
 
 
 def _unsaid(messages: Sequence[Json]) -> str | None:
     """Why `messages` hold nothing to compact, or None: an empty conversation, or one that is only
     a summary's seed (`seeded`), nothing said since (compacting it again would summarise a
     summary, with no prompt to begin the request, and replace the backup of the conversation
-    before it). A seed is known by its `seed` field, and by its wording in a file written before
-    the field."""
+    before it). A seed is known by its `seed` field alone, never by its wording."""
     said = [m for m in messages if m.get("role") not in ("system", "tools")]
     if not said:
         return "nothing to compact: the conversation is empty"

@@ -107,6 +107,40 @@ def test_a_saved_state_from_a_crash_reads_as_failed() -> None:
     assert Held.from_json(kept.to_json()) == kept
 
 
+def test_a_crash_mid_call_resumed_with_the_loop_s_answer_for_the_lost_call_rebuilds_with_it() -> None:
+    """The saved state says two calls were parked (a crash reads as failed), and the transcript the
+    resumed loop sends has a result for each: the one it had, and the one it wrote, with the
+    `asides` and `call` keys the loop puts on every tool entry (it sends `content` alone)."""
+    asked = [_user("run both")]
+    parked = _held(asked, emitted=_CALLING, ended=OPEN, calls=("t1", "t2"))
+    held = Held.from_json(parked.to_json())  # read back by the process that resumes
+    assert held.ended == FAILED
+    entry = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "t1"}, {"id": "t2"}],
+        "provider": _CALLING,
+    }
+    ran = {
+        "role": "tool",
+        "content": "1",
+        "call_id": "t1",
+        "asides": [],
+        "call": {"at": "2026-10-18T03:47:12.345Z"},
+    }
+    lost = {
+        "role": "tool",
+        "content": "interrupted: bh-02 stopped before this call finished; it may have partly run",
+        "call_id": "t2",
+        "asides": [],
+        "call": {"at": "2026-10-18T03:57:12.345Z"},
+    }
+    rest = [*asked, entry, ran, lost, _user("carry on")]
+    # the session is written from everything but the new line, the lost call's result in it
+    assert reconcile(held, rest) == Rebuild("the last step failed", 4, "carry on")
+    assert reconcile(held, rest[:-1]) == Rebuild("the last step failed", 4, CONTINUE)  # no line typed yet
+
+
 def test_the_digest_ignores_key_order_and_tuples() -> None:
     assert digest([{"a": 1, "b": (1, 2)}]) == digest([{"b": [1, 2], "a": 1}])
     assert digest([{"a": 1}]) != digest([{"a": 2}])

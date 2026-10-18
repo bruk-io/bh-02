@@ -14,9 +14,45 @@ started and a short suffix, such as `20261008-225423-07f8`. It holds:
 | `session.toml` | the session's own layer: the model, and where the rows below keep their files. `/model` edits it. |
 | `transcript.jsonl` | the conversation, which the model is sent again at each step |
 | `events.jsonl` | what the screen showed, drawn again when you resume |
-| `rows.jsonl` | each row that reloaded or failed, with the time (one JSON object a line, readable by you alone); `bh-02 trajectory` prints it |
+| `rows.jsonl` | each row that loaded or failed, with the time (one JSON object a line, readable by you alone); `bh-02 trajectory` prints it, the first loads of a start as one line |
 | `meta.json` | the session's id, the directory it ran in, when it started, the model it started on, and any `--patch` files it started with |
+| `running.lock` | the lock the running bh-02 holds on the session, with its process id in it (see [One bh-02 at a time](#one-bh-02-at-a-time)) |
 | `claude/` | Claude Code's own state for the session, when the model is Claude |
+
+## One bh-02 at a time
+
+A running bh-02 holds its session: it takes a lock on `running.lock` in the session's directory when
+it starts and keeps it until it ends. A second `bh-02 --resume` of that session, from another
+terminal, is refused before it starts a thing, because two bh-02s writing one session would
+interleave their conversations in its transcript, its screen history and its row log:
+
+```text
+error: session 20261008-225423-07f8 is held by bh-02 process 4242, which is running it; two bh-02s writing one session would interleave its conversation. Leave that bh-02 first (Ctrl-Q in its window), then resume the session again
+```
+
+Leave the one that holds it (Ctrl-Q, or end the process the message names) and resume again. The
+lock is the operating system's, so it goes when the process does, however it ends: a bh-02 that
+crashed or was killed leaves no stale lock, and `running.lock` staying in the directory means
+nothing. `bh-02 sessions`, `bh-02 trajectory` and `bh-02 watch` only read, take no lock and work on
+a session that is held; so does a second bh-02 that starts a new session, which is a session of its
+own.
+
+## When bh-02 was killed mid-write
+
+If bh-02 is killed while it writes the conversation, `transcript.jsonl` can end in half a line.
+`--resume` carries on without that unfinished entry: the half line is kept beside the file as
+`transcript.jsonl.torn` (readable by you alone; a second time makes `transcript.jsonl.torn.2`),
+and the conversation continues from the last whole entry. Any other line that is not JSON is not
+a write cut short, so a resume stops and names the file and the line number: repair or remove the
+line in an editor, or start a new session instead.
+
+## When bh-02 was killed during a call
+
+A call the model asked for is run after the step that asked for it is written to the conversation.
+If bh-02 is killed while one runs, `--resume` finds a call with no result. The next message you send
+answers it first, telling the model that bh-02 stopped before the call finished and that it may
+have partly run, so the model can check what it did instead of assuming it ran or did not. The
+answer is written to `transcript.jsonl` like any other; nothing is shown on screen.
 
 ## Listing sessions
 
@@ -25,9 +61,9 @@ bh-02 sessions
 ```
 
 This lists the sessions started in the current directory, newest first, one line each: the id, when
-it started, and the model it started on (its stack; an earlier bh-02's session says `claude` or
-`ollama`, and one that started with no model named (no `--model`, no `default` in the models file) or whose
-`default` couldn't be used says `default`: it follows that default, and the first message says what
+it started, and the model it started on (its stack; a session that started with no model named (no
+`--model`, no `default` in the models file) or whose `default` couldn't be used says `default`: it
+follows that default, and the first message says what
 to write or what is wrong with it), then `patched:` and the names of any
 `--patch` files it started with (`patched: echo.toml`). That label is what the session started on,
 not always the model that answered: `/model` switches, a patch can replace the `loop` row, and a
@@ -58,10 +94,12 @@ bh-02 trajectory --follow     # keep reading, and print what is new, while a rep
 time, each model step with the model, the time to its first chunk, how long it generated, the speed
 in tokens per second, the tokens used, what it cost and its settings, each call with what approval
 made of it, how long you took to answer, how long it ran and the calls its input made, each sub-agent
-under the call that started it, each `/compact` with the summary step's time and cost, and each row
-that reloaded or failed (from `rows.jsonl`) among the lines it fell between. Times are your local
-time. Conversations come in order, the ones `/clear` and `/compact` kept first, and `--follow`
-carries on across either. A session from before bh-02 recorded times prints without them.
+under the call that started it, each `/compact` with the summary step's time and cost, and the rows
+(from `rows.jsonl`) among the lines they fell between: the rows the session came up with as one line
+(how many, and how long they took to load), the same for the rows a sub-agent came up with under it,
+and each row that reloaded, as a `/clear` or a `/model` switch makes it, or failed as a line of its
+own, so they are not buried under the start. Times are your local time. Conversations come in order, the ones `/clear` and `/compact` kept first, and `--follow`
+carries on across either.
 The [command line](../reference/command-line.md#bh-02-trajectory) shows the output and says what it
 holds back.
 

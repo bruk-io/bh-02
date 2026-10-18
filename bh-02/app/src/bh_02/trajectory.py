@@ -9,8 +9,9 @@ files are found, read and printed by `bh_02.viewing` and `bh_02.cli`.
 bh_02 imports no plugin (plugin-layering), so the entries are read as TypedDicts of this module's
 own (`_Entry` and the records on it), which say what the agent plugin's `records.py` writes. The
 file is the person's, but a hand-edited or half-written one must not stop the view: every field is
-checked as it is read, and one that is missing or of the wrong type is left out, as it is in a
-transcript from before the records, which prints with no times.
+checked as it is read, and one that is missing or of the wrong type is left out. A field the loop
+leaves out for its own reason is left out of the line the same way: the answer to a message the model
+was never asked is no step and has no `step`, and a call refused before approval has no `answer`.
 
 A conversation is one transcript file. The live `transcript.jsonl` is the last, and the backups
 `/clear` and `/compact` keep (`transcript.jsonl.bak`, `.bak.2`, ...) come before it, in the order of
@@ -26,6 +27,14 @@ session's own or a sub-agent's (`agents/NAME/...`): before the first reply, step
 of theirs that came after it, at that line's indentation, and after the last line when none did. A
 sub-agent's lines run alongside the session's, so each is placed by its own.
 
+cordis has no first-load event, so a row's first load is a `reload` like any other. It is told apart by
+the row id: the first record of a row in the session is its first load, every later `reload` is a
+reload (a restart, a dependency replaced, a layer edit), and a `failed` is always a failure. The first
+loads that follow one another with nothing else of their writer's between them (no reload, no failure,
+no line of the session's or the sub-agent's) are one line: the session's boot, and under each
+sub-agent the rows it came up with, which would otherwise bury the reloads that matter. A reload and a
+failure are a line each, as ever.
+
 A line that is not a JSON object is skipped: the last one may be half written while the loop appends.
 A call whose `tool` entry is not there shows `no result recorded`.
 
@@ -40,7 +49,8 @@ import math
 import re
 from collections import Counter, deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from itertools import groupby
 from typing import Any, Literal, NotRequired, TypedDict, assert_never, cast
 
 from bh_02.sessions import TRANSCRIPT
@@ -59,6 +69,7 @@ _DATED = "(Today's date: {}.)"  # what the loop puts before a message that tells
 _UNKNOWN = "?"
 _OWN = ""  # the first element of a key from the session's own conversations; a sub-agent's is its name
 _ROWS = "rows"  # the first element of a row reload's key
+_RELOAD = "reload"  # the kind of a record in `rows.jsonl` that is a row's setup beginning
 _AGENTS = "agents"  # the first part of the id of a sub-agent's row
 
 
@@ -281,19 +292,22 @@ class _Agent:
 @dataclass(frozen=True, slots=True)
 class _Reload:
     """A row's lifecycle event kept in a session's `rows.jsonl`: a `reload` (a row's setup began: it
-    came up, was restarted, or a dependency was replaced) or a `failed` (with its `error`)."""
+    came up, was restarted, or a dependency was replaced) or a `failed` (with its `error`). `first`: a
+    `reload` of a row not recorded before in the session, which is its first load (cordis emits no
+    event of its own for one)."""
 
     at: datetime.datetime
     kind: str
     row: str
     error: str | None
+    first: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class Trajectory:
     """A session laid out in time. `conversations`: its own, in order, with the sub-agents they
     started inside their calls. `unlinked`: the sub-agents no call names, by their first time.
-    `reloads`: its row reloads and failures, by time."""
+    `reloads`: its row reloads (first loads included) and failures, by time."""
 
     conversations: tuple[_Conversation, ...]
     unlinked: tuple[_Agent, ...]
@@ -613,6 +627,8 @@ def _calls(conversations: Sequence[_Conversation]) -> Iterator[_Call]:
 
 
 def _reloads(rows: bytes) -> tuple[_Reload, ...]:
+    """The records of `rows` in time order, each `reload` of a row the records have not named before
+    marked `first`; a row that has failed has been named, so its next `reload` is not."""
     found: list[_Reload] = []
     for line in rows.splitlines():
         try:
@@ -625,7 +641,13 @@ def _reloads(rows: bytes) -> tuple[_Reload, ...]:
         at, kind, row = _moment(record.get("at")), _text(record.get("kind")), _text(record.get("row"))
         if at is not None and kind is not None and row is not None:
             found.append(_Reload(at, kind, row, _text(record.get("error"))))
-    return tuple(sorted(found, key=lambda reload: reload.at))
+    ordered = sorted(found, key=lambda reload: reload.at)
+    seen: set[str] = set()
+    marked: list[_Reload] = []
+    for reload in ordered:
+        marked.append(replace(reload, first=reload.kind == _RELOAD and reload.row not in seen))
+        seen.add(reload.row)
+    return tuple(marked)
 
 
 def trajectory(conversations: Sequence[Transcript], rows: bytes = b"") -> Trajectory:
@@ -870,6 +892,51 @@ def _reload_line(key: Key, reload: _Reload, depth: int, near: datetime.datetime 
     return Line(key, text, reload.at, depth)
 
 
+type _Group = tuple[
+    Key, tuple[_Reload, ...]
+]  # what one line of the rows' log shows: its key, and its records
+
+
+def _first_loads_line(
+    key: Key, run: Sequence[_Reload], depth: int, near: datetime.datetime | None, view: _View
+) -> Line:
+    """The first loads of a run (`_grouped`) as a line, with its date unless it is `near`'s day: the row,
+    when it is one, else how many rows and the time from the first to the last."""
+    first, last = run[0], run[-1]
+    when = _when(first.at, view, _day(near, view))
+    if len(run) == 1:
+        text = _line(depth, f"row first load {_say(first.row)}", when)
+    else:
+        text = _line(
+            depth,
+            "row first load",
+            when,
+            f"{len(run)} rows in {_seconds((last.at - first.at).total_seconds())}",
+        )
+    return Line(key, text, first.at, depth)
+
+
+def _grouped(batch: Iterable[tuple[Key, _Reload]]) -> Iterator[_Group]:
+    """`batch`, the records of one writer's rows that fall in one place among its lines, in time order,
+    as what is printed for each: a run of first loads that follow one another is one item (the key of the
+    run's first record, and the run), every other record an item of its own."""
+    for first, run in groupby(batch, key=lambda item: item[1].first):
+        items = list(run)
+        if first:
+            yield items[0][0], tuple(reload for _, reload in items)
+        else:
+            for key, reload in items:
+                yield key, (reload,)
+
+
+def _group_line(
+    key: Key, group: Sequence[_Reload], depth: int, near: datetime.datetime | None, view: _View
+) -> Line:
+    if group[0].first:
+        return _first_loads_line(key, group, depth, near, view)
+    return _reload_line(key, group[0], depth, near, view)
+
+
 def _owner(row: str) -> str:
     """Whose row it is, by the key its lines start with: a sub-agent's (`agents/NAME` or
     `agents/NAME/...`) is NAME's, any other the session's own."""
@@ -877,11 +944,21 @@ def _owner(row: str) -> str:
     return rest.partition("/")[0] if head == _AGENTS and rest else _OWN
 
 
+def _unclosed(groups: list[_Group], view: _View) -> list[_Group]:
+    """`groups`, the last of a writer's, without a last run of first loads when the files are still being
+    written (`live`): nothing has come after it, so rows may still be loading, and printing it now would
+    print it once with a count that goes on growing."""
+    return groups[:-1] if view.live and groups and groups[-1][1][0].first else groups
+
+
 def _with_reloads(lines: Iterable[Line], reloads: Sequence[_Reload], view: _View) -> Iterator[Line]:
     """`lines` with each reload put before the first line of its owner's (`_owner`) that has a later
     time, at that line's depth, and the rest after the last line, by time. A line with no time places
     nothing. A sub-agent's lines run alongside the session's own, so a reload is placed by the lines of
-    the writer whose row it is, and its own order among them stays the order of the time."""
+    the writer whose row it is, and its own order among them stays the order of the time. The first
+    loads that fall in one place, one after another, are one line (`_grouped`): the boot is the rows the
+    session came up with, before its first line. While the files are still being written (`live`), the
+    first loads at the very end are held back, as more may be coming."""
     waiting: dict[str | int, deque[tuple[Key, _Reload]]] = {}
     for key, reload in zip(_reload_keys(reloads), reloads, strict=True):
         waiting.setdefault(_owner(reload.row), deque()).append((key, reload))
@@ -889,14 +966,17 @@ def _with_reloads(lines: Iterable[Line], reloads: Sequence[_Reload], view: _View
     for line in lines:
         if line.at is not None:
             queue = waiting.get(line.key[0])
+            placed: list[tuple[Key, _Reload]] = []
             while queue and queue[0][1].at < line.at:
-                key, reload = queue.popleft()
-                yield _reload_line(key, reload, line.depth, (last or line).at, view)
+                placed.append(queue.popleft())
+            for key, group in _grouped(placed):
+                yield _group_line(key, group, line.depth, (last or line).at, view)
             last = line
         yield line
-    rest = sorted((item for queue in waiting.values() for item in queue), key=lambda item: item[1].at)
-    for key, reload in rest:
-        yield _reload_line(key, reload, 0, last.at if last is not None else None, view)
+    trailing = [_unclosed(list(_grouped(queue)), view) for queue in waiting.values()]
+    rest = sorted((item for groups in trailing for item in groups), key=lambda item: item[1][0].at)
+    for key, group in rest:
+        yield _group_line(key, group, 0, last.at if last is not None else None, view)
 
 
 def rendered(laid: Trajectory, tz: datetime.tzinfo | None = None, *, live: bool = False) -> tuple[Line, ...]:
@@ -905,8 +985,9 @@ def rendered(laid: Trajectory, tz: datetime.tzinfo | None = None, *, live: bool 
     model, time to first chunk, generation time, speed, usage, cost and any settings, each step's calls
     with their answer, wait, run time and nested calls, and under a call the sub-agent it started.
     Each row reload (`Trajectory.reloads`) is a line of its own, in time order among the lines of its
-    row's owner, the session's or its sub-agent's (`_with_reloads`). Sub-agents no call names come last,
-    by their own times.
+    row's owner, the session's or its sub-agent's (`_with_reloads`), except that the first loads which
+    follow one another are one line: the session's boot, and a sub-agent's rows coming up under it.
+    Sub-agents no call names come last, by their own times.
 
     Times are in the zone `tz` (None: the machine's), with the date where it differs from the
     reply's. With `live`, the files are still being written: a call of the last step whose result is

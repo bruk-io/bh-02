@@ -13,18 +13,25 @@ A `meta.json` that can't be read (not JSON, a key missing, a value of the wrong 
 `Broken` record: listing skips it and says which one it is and what is wrong, so one bad file
 never stops the app, `bh-02 sessions` or `--resume`.
 
+A session is written by one bh-02 at a time: `held` takes an exclusive advisory lock on the
+session's `running.lock` for a run, which a second `bh-02 --resume` of it finds taken and refuses
+(`Held`) before it starts a row, naming the process (the pid the holder wrote there). Listing,
+`bh-02 trajectory` and `bh-02 watch` only read, and never take it.
+
 `session_layer`, `with_model` and `resume_command` (and the private helpers) are pure; the
 rest reads or writes the state directory. `Listing` is the `session` value
 (CONTRACTS.md) the shell binds for the status bar.
 """
 
+import contextlib
 import datetime
+import fcntl
 import json
 import os
 import secrets
 import shutil
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, assert_never
@@ -37,12 +44,14 @@ from host_paths import config_home, passes, roots, state_home
 __all__ = [
     "ROWS",
     "Broken",
+    "Held",
     "Listing",
     "Session",
     "chosen",
     "create",
     "discard",
     "find",
+    "held",
     "listed",
     "pins_model",
     "resume_command",
@@ -60,6 +69,7 @@ _META = "meta.json"
 TRANSCRIPT = "transcript.jsonl"
 _EVENTS = "events.jsonl"
 ROWS = "rows.jsonl"
+_LOCK = "running.lock"  # held (flock) by the bh-02 running the session, which writes its pid in it
 _MODEL_ROW = "model"  # the row whose `default` (the model's name) /model and --model set
 _CLAUDE_STATE = (
     "claude"  # the claude-code provider's own state: Claude Code's config, its session, its stderr
@@ -77,7 +87,7 @@ class Session:
     id: str
     dir: Path
     cwd: str
-    stack: str  # the model it started on (an earlier bh-02's: `claude` or `ollama`, its provider)
+    stack: str  # the model it started on
     created: str
     patches: tuple[str, ...] = ()  # the --patch files it started with (by name)
 
@@ -304,6 +314,56 @@ def _record(content: bytes, dir: Path, cwd: str) -> Session | Broken | None:
     if not isinstance(patches, list) or not all(isinstance(p, str) for p in patches):
         return Broken(dir, "`patches` is not a list of file names")
     return Session(data["id"], dir, cwd, data["stack"], data["created"], tuple(patches))
+
+
+class Held(Exception):
+    """The session is held by another bh-02: `message` says by which process and what to do."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+def _refusal(session_id: str, written: str) -> str:
+    """What to tell the person whose run found the session held: which process, when the holder's
+    pid (`written`: what its lock file holds) reads as one, and what to do. A pid that is not there
+    (the holder has locked the file and not written it yet) leaves the process unnamed."""
+    pid = written.strip()
+    holder = f"bh-02 process {pid}" if pid.isdecimal() else "another bh-02"
+    return (
+        f"session {session_id} is held by {holder}, which is running it; two bh-02s writing one "
+        "session would interleave its conversation. Leave that bh-02 first (Ctrl-Q in its window), "
+        "then resume the session again"
+    )
+
+
+@contextlib.contextmanager
+def held(session: Session) -> Iterator[None]:
+    """Hold the session for a run: an exclusive advisory lock (`flock`) on its `running.lock`,
+    with this process's pid written there for a refusal to name. It is released when the block
+    ends, however it ends, and by the operating system when the process dies (a crash, SIGKILL,
+    the terminal going away), so a session is never left locked. The descriptor is not inherited
+    by a child (`os.open` makes it non-inheritable), so nothing the run starts keeps the session
+    held after the run has gone.
+
+    The lock is the whole claim: the pid is a name for the person, written after it is taken, and
+    one a crashed holder left stays in the file until the next holder writes its own. Reading the
+    session (listing, `bh-02 trajectory`, `bh-02 watch`) takes no lock and is not stopped by one.
+
+    Raises:
+        Held: another process holds the session.
+    """
+    fd = os.open(session.dir / _LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Held(_refusal(session.id, os.pread(fd, 32, 0).decode(errors="replace"))) from None
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode())
+        yield
+    finally:
+        os.close(fd)  # drops the lock with the descriptor
 
 
 def discard(session: Session) -> None:

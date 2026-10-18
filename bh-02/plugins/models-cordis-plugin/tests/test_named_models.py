@@ -129,7 +129,7 @@ _GATE: dict[str, Any] = {
         ({**_OPEN, "models": {"x": "x"}}, "models.x is not a table"),
         ({**_OPEN, "models": {"a/b": {"id": "x"}}}, "'a/b' can't name a model"),
         ({**_OPEN, "models": ["x"]}, "models must be a table of models"),
-        ({**_OPEN, "id": "x"}, "names an id, as a single model's table did: a table is an endpoint now"),
+        ({**_OPEN, "colour": "red"}, "colour is not a setting of a openai endpoint; it takes"),
         ({"provider": "claude-code", "base_url": "https://h/v1", "models": _X}, "a gateway needs both"),
         ({"provider": "claude-code", "key_command": "c", "models": _X}, "a gateway needs both"),
         ({"provider": "claude-code", "experimental_betas": False, "models": _X}, "experimental_betas is for"),
@@ -162,12 +162,23 @@ def test_a_table_with_a_problem_says_what_to_fix(table: dict[str, Any], said: st
     assert "endpoint 'm' (/c/models.toml)" in message or "model 'm/x' (/c/models.toml)" in message
 
 
-def test_a_single_model_s_table_from_before_endpoints_says_how_to_rewrite_it() -> None:
-    table = {"provider": "openai", "id": "llama3.2", "base_url": "http://localhost:11434/v1"}
-    (named,) = [m for m in combined({"llama": table}, "/c/models.toml", {}) if m.name == "llama"]
+@pytest.mark.parametrize(
+    ("table", "provider"),
+    [
+        ({"provider": "openai", "base_url": "https://h/v1", "models": _X}, "openai"),
+        ({"provider": "claude-code", "models": _X}, "claude-code"),
+    ],
+)
+def test_an_id_on_an_endpoint_of_a_built_in_provider_is_refused_as_any_setting_it_does_not_take(
+    table: dict[str, Any], provider: str
+) -> None:
+    """TASK-0158: an endpoint has no id (its models carry them), so a built-in provider's endpoint refuses
+    one with the generic error for a setting it does not take, not with a message about an old shape."""
+    (named,) = [m for m in combined({"m": {**table, "id": "x"}}, "/c/models.toml", {}) if m.name == "m"]
     said = str(problem(named))
-    assert 'Move the id to a model of it, `[llama.models.MODEL]` with `id = "llama3.2"`' in said
-    assert '[llama]\nprovider = "openai"' in said and "[llama.models.MODEL]" in said
+    assert said.startswith(
+        f"endpoint 'm' (/c/models.toml): id is not a setting of a {provider} endpoint; it takes "
+    )
 
 
 def test_an_endpoint_s_name_can_not_hold_a_slash_but_may_be_any_other_name() -> None:

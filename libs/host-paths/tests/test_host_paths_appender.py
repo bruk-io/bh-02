@@ -7,12 +7,12 @@ import errno
 import os
 import stat
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
-from host_paths import Appender
+from host_paths import Appender, Replaced
 
 
 @pytest.fixture
@@ -325,3 +325,125 @@ async def test_an_appender_with_nothing_queued_flushes_and_closes_at_once(tmp_pa
     async with asyncio.timeout(5):
         await appender.flush()
         await appender.close()
+
+
+def _renamed_over(path: Path) -> None:
+    """What `/clear` does to a transcript: the new file is made beside it and renamed over it."""
+    other = path.with_name("other")
+    other.write_text("the new conversation\n")
+    other.replace(path)
+
+
+def _removed(path: Path) -> None:
+    path.unlink()
+
+
+def _linked(path: Path) -> None:
+    """The model's doing, if it could write where the file is: a link to a file of its choosing."""
+    path.with_name("elsewhere").write_text("not yours\n")
+    path.unlink()
+    path.symlink_to(path.with_name("elsewhere"))
+
+
+def _content(path: Path) -> str | None:
+    """What a reader of `path` finds (through a link, as a reader would), or None for no file."""
+    return path.read_text() if path.exists() else None
+
+
+REPLACED_BY: dict[str, tuple[Callable[[Path], None], str | None]] = {
+    "renamed over": (_renamed_over, "the new conversation\n"),
+    "removed": (_removed, None),
+    "turned into a link": (_linked, "not yours\n"),
+}
+
+
+@pytest.mark.parametrize("held", [True, False], ids=["held open", "not yet opened"])
+@pytest.mark.parametrize("how", REPLACED_BY)
+async def test_a_file_replaced_under_the_appender_is_refused_and_neither_file_is_written(
+    tmp_path: Path, how: str, held: bool
+) -> None:
+    """The descriptor an appender holds stays on the inode it opened, so a write after a rename
+    would land in a file nobody reads, and one to a path opened late in the new file, after the
+    old conversation: either way the file is another's. The write is refused as `Replaced`, kept
+    like any failed write, and neither the old inode nor what the path holds now is touched."""
+    replace, now = REPLACED_BY[how]
+    path = tmp_path / "log"
+    path.write_text("before\n")
+    old = tmp_path / "old"
+    os.link(path, old)  # keeps the inode we mean in reach, whatever happens to the name
+    appender = Appender.open(str(path)) if held else Appender(str(path))
+    if held:
+        appender.append(b"one\n")
+        await appender.flush()
+    replace(path)
+    appender.append(b"two\n")
+    with pytest.raises(Replaced) as raised:
+        await appender.flush()
+    assert isinstance(raised.value, OSError) and str(path) in str(raised.value)
+    assert str(path) in "".join(raised.value.__notes__) and "dropped" in "".join(raised.value.__notes__)
+    with pytest.raises(Replaced):
+        appender.append(b"three\n")  # kept, as a full disk is: nothing after it is written either
+    with pytest.raises(Replaced):
+        await appender.close()
+    assert old.read_text() == ("before\none\n" if held else "before\n")
+    assert _content(path) == now  # the new file as it was, or no file made in its place
+    assert not (tmp_path / "log.new").exists()
+
+
+async def test_what_was_written_before_the_file_was_replaced_stays_written(tmp_path: Path) -> None:
+    """The check is at the write: the lines written while the file was the one stay in it."""
+    path = tmp_path / "log"
+    appender = Appender.open(str(path))
+    for n in range(20):
+        appender.append(f"{n}\n".encode())
+    await appender.flush()
+    old = tmp_path / "old"
+    os.link(path, old)
+    _renamed_over(path)
+    appender.append(b"late\n")
+    with pytest.raises(Replaced):
+        await appender.flush()
+    assert old.read_text().splitlines() == [str(n) for n in range(20)]
+
+
+async def test_a_replaced_file_closes_the_descriptor_it_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "log"
+    appender = Appender.open(str(path))
+    closed = _closes_of(monkeypatch, path)
+    _renamed_over(path)
+    appender.append(b"one\n")
+    with pytest.raises(Replaced):
+        await appender.close()
+    assert len(closed) == 1
+
+
+async def test_a_file_rewritten_in_place_is_still_the_file(tmp_path: Path) -> None:
+    """The same inode: truncated or written to by someone else, it is the file the appender
+    means and it goes on appending (a second process appending to it is the point of `O_APPEND`)."""
+    path = tmp_path / "log"
+    path.write_text("before\n")
+    appender = Appender.open(str(path))
+    appender.append(b"one\n")
+    await appender.flush()
+    path.write_text("")  # truncated in place
+    appender.append(b"two\n")
+    await appender.flush()
+    with path.open("ab") as other:  # another process's append
+        other.write(b"theirs\n")
+    appender.append(b"three\n")
+    await appender.close()
+    assert path.read_text() == "two\ntheirs\nthree\n"
+
+
+async def test_a_file_made_before_the_first_write_when_there_was_none_is_the_file(tmp_path: Path) -> None:
+    """An appender made over no file means the one its first write finds or makes: a second
+    process that got there first (a session resumed twice) is appended to, not refused."""
+    path = tmp_path / "log"
+    appender = Appender(str(path))
+    path.write_text("theirs\n")
+    appender.append(b"ours\n")
+    appender.append(b"more\n")
+    await appender.close()
+    assert path.read_text() == "theirs\nours\nmore\n"

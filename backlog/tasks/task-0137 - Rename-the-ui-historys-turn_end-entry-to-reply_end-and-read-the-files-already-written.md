@@ -3,9 +3,11 @@ id: TASK-0137
 title: >-
   Rename the ui history's turn_end entry to reply_end, and read the files
   already written
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-18 04:15'
+updated_date: '2026-10-18 13:13'
 labels:
   - tui
   - naming
@@ -22,7 +24,97 @@ decision-0009 retires "turn" (TASK-0136.02 renamed every use that was not a stor
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The ui writes {"type": "reply_end"} where it wrote turn_end, and history.py, frame.py, the transcript widget, tui README and the tests use it
-- [ ] #2 A history file written before this change either resumes as it did (the tag read as reply_end) or the task's notes record the owner's choice not to read it, with a test of whichever holds
-- [ ] #3 No match of turn_end remains under bh-02/ except where the notes say why
+- [x] #1 The ui writes {"type": "reply_end"} where it wrote turn_end, and history.py, frame.py, the transcript widget, tui README and the tests use it
+- [x] #2 A history file written before this change either resumes as it did (the tag read as reply_end) or the task's notes record the owner's choice not to read it, with a test of whichever holds
+- [x] #3 No match of turn_end remains under bh-02/ except where the notes say why
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Rename the tag in the writer (app.py on_reply_ended), the readers (frame.total_usage, chat_view replay), history.py's doc, the tui README and the tests, by sed over the six files. The owner chose no backwards compatibility, so no reader of the old tag and no translation (criterion 2, second option). Proof: a test that writes a file through the app now and resumes it (separate replies stay separate blocks, a stopped reply counts as uncounted), seen failing with the writer, the replay reader and total_usage each planted wrong; git grep for the old tag under bh-02 finds nothing; scripts/check for the tui member.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner, 2026-10-18: no backwards compatibility. History files written before the rename are neither read for turn_end nor translated (criterion #2's second option); the rename is clean, as bh-02/CLAUDE.md's naming rule says.
+
+Done. Renamed the stored tag to reply_end in: tui app.py (on_reply_ended writes it), frame.py (total_usage counts a reply ended with partial usage), widgets/chat_view.py (replay closes the block), history.py (module doc; the sentence saying the tag kept its first name is gone), the tui README, and tests test_chat_view.py, test_frame.py, test_history.py.
+
+Criterion 2, owner's choice (2026-10-18, above): no backwards compatibility. A history file written before this change is neither read for the old tag nor translated, so a resumed old session loses its reply boundaries (text of consecutive replies joins into one block, a stopped reply's partial usage is left uncounted). The test for what holds: new test_chat_view.py::test_a_reply_end_written_now_closes_its_reply_and_counts_its_usage_when_resumed writes a file through BhApp now (text, ReplyEnded, text with partial usage, ReplyEnded), reads it back (types text, reply_end, text, usage, reply_end; frame.total_usage uncounted == 1) and resumes it in a second app (blocks one and two, not onetwo). No test feeds an old-tag file: a test line naming the old tag would be the one match criterion 3 forbids, and the owner's rule is that nothing reads it.
+
+Seen failing (planted, then restored): app.py writing the old tag made test_chat_view's three history tests fail (first at the kinds list: turn_end != reply_end); chat_view replay case renamed so it matches nothing made the new test fail with ['onetwo'] != ['one', 'two']; frame.total_usage case renamed likewise made the new test and test_frame.py::test_a_reply_stopped_before_its_output_was_counted_makes_the_totals_lower_bounds fail (uncounted 0 != 1).
+
+Criterion 3: git grep -n turn_end -- bh-02 docs libs examples scripts finds nothing (exit 1); only stale untracked .pyc files from the old transcript.py name hold it. Remaining mentions are in backlog/ (task-0089.10, task-0136.02, this task) as history, outside bh-02/.
+
+Checks: scripts/check bh-02/plugins/tui-cordis-plugin exit 0 (346 passed, mypy, ruff, gates, docs ok; tokens skipped: no bh-01 dist). Whole-repo scripts/check is the reviewer's.
+
+Check `scripts/check` exited 0
+
+(30 earlier lines omitted)
+```text
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+..........................................ss...ssss.s..s.ss..ss...s...s. [ 48%]
+s.s..ss.s..sss.sss.s............s....................................... [ 50%]
+........................................................................ [ 51%]
+.......s................................................................ [ 53%]
+sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss..... [ 55%]
+...........................sssssssss..s...ss............................ [ 57%]
+...................................s.................................... [ 59%]
+........................................................................ [ 61%]
+...............................................sss...................... [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+...................................................................      [100%]
+3767 passed, 118 skipped in 201.03s (0:03:21)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.49 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Reviewed: full scripts/check exit 0, tree clean after it. git grep turn_end -- bh-02 finds nothing. Writer (app.py), readers (frame.total_usage, chat_view replay), history.py doc, README and tests all use reply_end. Criterion 2 met by the recorded owner choice (no backwards compatibility) plus a new round-trip resume test. Nit, not filed: AC1 names 'the transcript widget', which is now chat_view.py. Old sessions on disk lose reply boundaries on resume, accepted by the owner.
+<!-- SECTION:NOTES:END -->

@@ -16,7 +16,7 @@ says what each name is; this file is where things go and what the gate holds.
 - `src/host_paths/appender.py`: `Appender`, the one appender of a file bh-02 keeps for the person (a
   transcript, a sub-agent's event log, a session's row log): a queue of writes on one thread, opened
   for append through no link at 0600, `flush` and `close` waiting for the last, a failed write kept
-  and raised. Its docstring says why each flag.
+  and raised, a file replaced under it refused (`Replaced`). Its docstring says why each flag.
 - `tests/test_host_paths.py`: the XDG directories (an empty or relative value is unset), the walk
   against a table of links in a temporary directory (absolute, relative, the file itself, `..`
   after a link, dangling, missing, a loop that ends at `MOST_LINKS`), and `passes` over roots as
@@ -28,7 +28,9 @@ says what each name is; this file is where things go and what the gate holds.
 - `tests/test_host_paths_appender.py`: the appender: bytes in the order queued, `append` with no event
   loop, a held write that `append` returns before and `flush` waits for, a cancelled waiter, a link
   refused (at once and at the first write), the mode under a umask that takes nothing away, `new`, a
-  failed write (raised by `append`, `flush` and `close`, nothing after it written) and `close`.
+  failed write (raised by `append`, `flush` and `close`, nothing after it written), a file replaced
+  under it (renamed over, removed, turned into a link: held or not yet opened, `Replaced`, nothing
+  written to either file) and `close`.
 - `tests/test_host_paths_writing.py`: the writer and the remover against the same table, with a
   link to a file outside the root, a dangling one and a hard link among the cases: nothing outside
   the root is written or removed, and a link planted after the check is replaced, not followed.

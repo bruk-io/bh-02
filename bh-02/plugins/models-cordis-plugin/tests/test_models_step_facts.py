@@ -158,7 +158,7 @@ def test_the_claude_code_records_do_not_hold_what_the_loop_records() -> None:
             "tool_calls": [{"id": "t1", "name": "python", "input": {"code": "1"}}],
             "provider": {
                 "role": "assistant",
-                "content": [{"type": "tool_use", "id": "t1", "name": "python", "input": {}}],
+                "content": [{"type": "tool_use", "id": "t1", "name": "mcp__bh__python", "input": {}}],
             },
         },
         {"role": "tool", "content": "1", "call_id": "t1"},

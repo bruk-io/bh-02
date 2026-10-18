@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@bruk'
 created_date: '2026-10-14 03:42'
-updated_date: '2026-10-18 07:47'
+updated_date: '2026-10-18 12:15'
 labels:
   - tui
   - agent
@@ -130,4 +130,6 @@ INFO    -  Documentation built in 5.19 seconds
 ```
 
 Reviewed by philosophy:reviewer (did not do the work). All 11 subtasks Done. Full scripts/check exit 0 (recorded). AC1: step/call records (timing, model, usage, settings, answer+wait, sub-agent child, nested calls), compact seed, rows.jsonl, all via host_paths.Appender off the event loop at 0600 (test_agent_records, test_row_log). AC2: bh-02 trajectory [ID] --follow prints replies, steps, calls, sub-agents, boundaries and reloads as decision-0009 Reading specifies; raw request deliberately not shown and TUI screen carried forward (test_trajectory, test_trajectory_view, test_trajectory_records). AC3: request equals request_for over entries (test_agent_records:298,405); writes off loop; tui:ui row has no deps and gates pass. No blocking findings; no drafts filed.
+
+2026-10-18, after the merge (PR #27): the three defects noted above are filed at the owner's word: TASK-0141 (torn last line), TASK-0142 (a call left unanswered by a crash), TASK-0143 (two processes on one session). Also filed: TASK-0144 (first loads apart from reloads on the trajectory) and TASK-0145 (say when the row log stopped).
 <!-- SECTION:NOTES:END -->

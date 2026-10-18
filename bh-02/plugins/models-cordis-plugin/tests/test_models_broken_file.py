@@ -48,8 +48,8 @@ _BAD_DEFAULTS = {
     "a list": ('default = ["llama"]\n' + _LLAMA, "not a model's name"),
     "no model": ('default = "gone"\n' + _LLAMA, "no model named 'gone', the default in the models file"),
     "a broken endpoint's model": (
-        'default = "local/x:7b"\n' + _ENDPOINT.replace("true\n", 'true\nid = "y"\n') + _LLAMA,
-        "names an id, as a single model's table did",
+        'default = "local/x:7b"\n' + _ENDPOINT.replace("true\n", 'true\ncolour = "red"\n') + _LLAMA,
+        "colour is not a setting of a openai endpoint",
     ),
 }
 
@@ -226,7 +226,7 @@ async def _switch(path: Path, tmp_path: Path, name: str, **config: Any) -> tuple
 
 
 _ENDPOINT_PROBLEMS = {
-    "an id beside discover": _ENDPOINT.replace("true\n", 'true\nid = "y"\n'),  # a single model's table
+    "an unknown setting beside discover": _ENDPOINT.replace("true\n", 'true\ncolour = "red"\n'),
     "discover that is no bool": _ENDPOINT.replace("true", '"yes"'),
     "include with no discover": _ENDPOINT.replace("discover = true\n", 'include = ["q*"]\n'),
     "an include that is no list": _ENDPOINT + 'include = "q*"\n',
@@ -255,7 +255,7 @@ async def test_model_name_of_a_valid_model_still_switches_while_a_table_or_the_d
     elif kind in _UNREAD:
         text = _UNREAD[kind][0]
     else:
-        text = 'default = "gone"\n' + _ENDPOINT_PROBLEMS["an id beside discover"] + _LLAMA
+        text = 'default = "gone"\n' + _ENDPOINT_PROBLEMS["an unknown setting beside discover"] + _LLAMA
     answer, queued, layer = await _switch(_file(tmp_path, text), tmp_path, target, extra=_EXTRA)
     assert [type(a) for a in answer] == [dict, dict] and f"switching to {target}" in str(answer[0]["text"])
     (row,) = read_layer(layer)

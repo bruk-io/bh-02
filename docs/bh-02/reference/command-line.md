@@ -43,6 +43,10 @@ Commands:
   model ([Models](../using/models.md#a-patch-that-sets-the-model)).
 - `--resume` with `--no-jail` is refused: a resumed session keeps the jail it started with.
 - `--resume` with `--model` carries the session on with that model.
+- `--resume` of a session another bh-02 is running is refused, exit code 1, naming the process that
+  holds it, before any row starts and before the session is touched; leave that bh-02 first
+  ([One bh-02 at a time](../using/sessions.md#one-bh-02-at-a-time)). `sessions`, `trajectory` and
+  `watch` read a held session as they do any other.
 - A layer (the shipped one, the session's or a `--patch` file) that names a plugin or component
   bh-02 doesn't have fails at boot, exit code 1, with the loader's error naming the row, its `use`
   and the installed plugins; nothing translates an old name
@@ -116,7 +120,7 @@ the reply's. The date the model is told is also your local day, so near midnight
 differ from the date in the files.
 
 ```text
-row reload loop  20:40:00.000
+row first load  20:40:00.000  34 rows in 0.12s
 conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   reply 1  2026-10-17 20:47:12.345  fix the bug in foo
     step 1  20:47:12.400  claude-opus-5-5  first chunk 1.20s  generated in 3.40s  62.4 tokens/s  in 1,200 tokens  out 212 tokens  cache read 1,000  cost $0.0312
@@ -126,6 +130,7 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
         nested call read_file  20:47:17.100  answer unasked  ran 0.01s
       call agent  20:47:18.000  answer unasked  ran 12.00s  started sub-agent general-1
         sub-agent general-1
+          row first load  20:47:18.900  15 rows in 0.06s
           conversation 1  transcript.jsonl  2026-10-17 20:47:19.000
             reply 1  2026-10-17 20:47:19.000  count the files
               step 1  20:47:20.000  claude-haiku-5  first chunk 0.30s  generated in 0.70s
@@ -140,12 +145,23 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   call** shows its tool, what approval made of it (`answer unasked`, `yes` or `no`) and how long you
   took to answer, how long the tool ran, and the calls its input made through `tools` under it. A
   call whose result is not in the transcript says `no result recorded`.
-- **A row reload** is a row of the composition starting to load (`row reload NAME`: it came up, was
-  restarted, as `/clear` does, or a dependency it uses was replaced) or failing (`row failed NAME`,
-  with the error), from the session's `rows.jsonl`. It is printed in time order, before the first reply,
-  step or call that came after it, at that line's indentation; one with nothing after it comes last. A
-  sub-agent's rows (`agents/NAME/...`) are placed among that sub-agent's lines. A session starts with a
-  `row reload` for each row, and each restart adds those of the rows that depend on what it replaced.
+- **A row line** is a row of the composition loading or failing, from the session's `rows.jsonl`. It is
+  printed in time order, before the first reply, step or call that came after it, at that line's
+  indentation; one with nothing after it comes last. A sub-agent's rows (`agents/NAME/...`) are placed
+  among that sub-agent's lines. There are three kinds:
+  - **`row first load`** is a row loading for the first time in the session: its row id is not in the
+    file before. The first loads that follow one another, with no reload or failure of that
+    writer's rows and none of its lines between, are one line with how many rows came up and the time
+    from the first to the last (`row first load  20:40:00.000  34 rows in 0.12s`): that is the session
+    starting, before your first reply, and under a `sub-agent` line the rows that sub-agent came up with.
+    A single row is named (`row first load NAME`). Rows that come up after your first reply, such as
+    ones a layer edit adds, are a line of their own, counted the same way. `rows.jsonl` has the names.
+  - **`row reload NAME`** is a row that loaded again: it was restarted, as `/clear` does, or a
+    dependency it uses was replaced (a `/model` switch, an edit to a layer). Each is a line.
+  - **`row failed NAME`** is a row whose setup failed, with the error. Each is a line.
+
+  A session you `--resume` goes on in the same `rows.jsonl`, so the rows of the resumed run, which
+  were all seen before, are `row reload` lines.
 - **Conversations** are the session's transcript files: the backups `/clear` and `/compact` kept
   come first, in the order of their first `at` (else of the time they were copied), and the live
   `transcript.jsonl` is last. A conversation `/compact` began says so, with what you asked it to
@@ -153,7 +169,8 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
 - **A sub-agent** is shown under the call that started it, with its own times (a background agent
   keeps running after the call returns). One no call names, such as a call you interrupted, comes
   after the conversations, in the order of its own times.
-- **A session from before the records**, or a field the file does not have, prints with no times.
+- **A field the file does not have** is left out of its line: the answer to a message the model was
+  never asked is a step with no time, and a call refused before approval has no answer.
 - **`--follow`** reads every file again each second and prints the lines it has not printed, so a
   `/clear` or `/compact` that replaces the live file carries on with the new one. A call whose result
   is not written yet is printed once it is. Ctrl-C leaves it.
@@ -193,7 +210,7 @@ block that does not parse, or has no blank line before it).
 | Code | When |
 |---|---|
 | `0` | the session ended normally, or a subcommand did its job (`check-examples`: no finding) |
-| `1` | a layer file can't be read, names old rows or has a row with no `use`, the composition could not start, or the session ended with an error. bh-02 says why in one line, starting `error:`. |
+| `1` | a layer file can't be read, names old rows or has a row with no `use`, the session `--resume` names is held by another bh-02, the composition could not start, or the session ended with an error. bh-02 says why in one line, starting `error:`. |
 | `2` | a usage error: an unknown option, a `--patch` file that doesn't exist, a `--resume` that matches no session or more than one. For `check-examples`, also a file it can't check (not readable, not Python): it exits `1` only for a finding. |
 
 ## Environment

@@ -229,6 +229,9 @@ class _Flushable(Protocol):
 
 
 _INTERRUPTED = "interrupted: the person stopped this call before it finished; it may have partly run"
+# What a call is answered with when the process that ran it died, found so when the session
+# resumes: bh-02 itself stopped, which no one asked, and what the call did is unknown.
+_LOST = "interrupted: bh-02 stopped before this call finished; it may have partly run"
 # A call the stop came before: at the person's approval, or queued behind the one stopped.
 _NOT_RUN = "not run: the person stopped the reply before this call started, so none of it ran"
 # What a call the person said no to answers the model with.
@@ -270,8 +273,8 @@ def _listed(names: Sequence[str]) -> str:
 
 def _undated(messages: Sequence[Json], today: str) -> bool:
     """Whether the model is yet to be told `today`: the transcript has told it no date (a new
-    conversation, or one begun before the loop told dates), or the last one it told (a user
-    entry's `today`) is another day's (a conversation run past midnight, or resumed later)."""
+    conversation, or one `/compact` began), or the last one it told (a user entry's `today`) is
+    another day's (a conversation run past midnight, or resumed later)."""
     told = next((str(m["today"]) for m in reversed(messages) if m.get("today")), None)
     return told != today
 
@@ -312,6 +315,21 @@ def asides_for(functions: Iterable[Aside], input: Json) -> list[str]:
         if said.strip():
             asides.append(said.strip())
     return sorted(asides)
+
+
+def _unanswered_calls(messages: Sequence[Json]) -> list[Json]:
+    """The calls a transcript's `messages` leave without an answer, in the calls' order: those of
+    its last `assistant` entry that no `tool` entry after it answers. A step's entry is appended
+    before its calls run, and a reply that ends answers every one, so only a process that died
+    mid-call leaves any."""
+    answered: set[str] = set()
+    for message in reversed(messages):
+        role = message.get("role")
+        if role == "tool":
+            answered.add(str(message.get("call_id")))
+        elif role == "assistant":
+            return [call for call in message.get("tool_calls") or () if call["id"] not in answered]
+    return []
 
 
 def request_for(messages: Sequence[Json]) -> list[Json]:
@@ -466,7 +484,11 @@ class LoopModel:
     still leaves the transcript whole: what the step said so far, then `STOPPED`, as the
     assistant's answer; a model step that fails (it raises: rate limited, cut off) the same,
     with `FAILED`. Otherwise the next request would carry that message unanswered, and the
-    model would answer it too, doing the stopped work again before the next one.
+    model would answer it too, doing the stopped work again before the next one. A process that
+    dies mid-call answers nothing, since a step's entry is appended before its calls run, so the
+    next reply, before anything else, answers each call of the last step that no `tool` entry
+    answers with `_LOST` (it may have partly run), in the calls' order, each with a call record of
+    the time alone: a resumed conversation is whole before its first request (`_unanswered_calls`).
 
     The system prompt (`system.text()`, the sections rows add, the python tool's among them) is
     read before each message the model reads, on `executor`, but sent as the conversation began
@@ -671,6 +693,14 @@ class LoopModel:
         """Keep a call an input made, once it has ended: its record, and the asides told of it."""
         self._nested.append(_Made(nested_record(name, call.record()), tuple(asides)))
 
+    def _answer_the_unanswered(self) -> None:
+        """Answer each call a process that died left unanswered (`_unanswered_calls`) with `_LOST`,
+        in the calls' order, so the conversation is whole before any request. The record of each
+        has the time alone, as a call the stop never reached has: no answer, wait or run time was
+        recorded, and none is known."""
+        for call in _unanswered_calls(self._transcript.messages):
+            self._transcript.append(_answer(call, _LOST, [], _Call(self._clock).record()))
+
     def _unanswered(self, message: str, dated: str | None, why: str, at: str) -> None:
         """Keep the person's message (that came `at`), answered with `why`: the reply ended before
         the model was asked, so the answer is no step and has no `step` record."""
@@ -700,6 +730,7 @@ class LoopModel:
 
     async def _reply(self, message: str) -> AsyncGenerator[Json]:
         """`reply`, without the flush: run model steps until one answers the message."""
+        self._answer_the_unanswered()  # first: however the reply ends, the conversation is whole
         came = self._clock.now()
         at, today = stamp(came), day_of(came)
         dated = today if _undated(self._transcript.messages, today) else None

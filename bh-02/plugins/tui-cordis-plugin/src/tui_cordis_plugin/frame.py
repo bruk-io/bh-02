@@ -72,7 +72,7 @@ _USAGE_ENTRIES = frozenset({"usage", "carried"})
 
 def total_usage(entries: Iterable[Mapping[str, Any]]) -> Usage:
     """The totals of every usage event in `entries` (a session's history, say), counting each
-    reply that ended (`turn_end`) with its last usage event still `partial` as `uncounted`."""
+    reply that ended (`reply_end`) with its last usage event still `partial` as `uncounted`."""
     return functools.reduce(_add_entry, entries, (Usage(), False))[0]
 
 
@@ -84,7 +84,7 @@ def _add_entry(state: tuple[Usage, bool], entry: Mapping[str, Any]) -> tuple[Usa
             return add_usage(total, entry), bool(entry.get("partial"))
         case "carried":
             return add_usage(total, entry), partial
-        case "turn_end" if partial:
+        case "reply_end" if partial:
             return output_uncounted(total), False
     return total, partial
 

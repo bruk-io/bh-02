@@ -335,8 +335,30 @@ def _row_line(event: Event, at: datetime.datetime) -> bytes | None:
     return f"{json.dumps(record)}\n".encode()
 
 
+@dataclass(frozen=True, slots=True)
+class _RowLogStop:
+    """When the shell found that the session's row log had stopped being written, and the error."""
+
+    at: datetime.datetime
+    error: OSError
+
+
+def _stopped_line(path: Path, stopped: _RowLogStop | None) -> str | None:
+    """What to tell the person when the session's row log at `path` stopped being written (`_row_log`):
+    the file, when the shell found a write failing, and the error, on one line. None when it never stopped."""
+    if stopped is None:
+        return None
+    why = stopped.error.strerror or str(stopped.error)
+    return (
+        f"{path} stopped being written (the shell found a write failing at {_stamp(stopped.at)}): {why}; "
+        "the row reloads from that write on are not in it"
+    )
+
+
 @contextlib.asynccontextmanager
-async def _row_log(runtime: Runtime, path: Path | None) -> AsyncIterator[None]:
+async def _row_log(
+    runtime: Runtime, path: Path | None, report: Callable[[str], None] | None
+) -> AsyncIterator[None]:
     """Keep the lifecycle events that count (`_KEPT`) in the session's `rows.jsonl`, at `path`, while
     the body runs; with no path, keep none. The shell hears every row's events, a sub-agent's
     included, as `--trace` does.
@@ -345,20 +367,26 @@ async def _row_log(runtime: Runtime, path: Path | None) -> AsyncIterator[None]:
     this one only queues the line to a `host_paths.Appender`, which writes it on a thread, in order, at
     0600 and through no link; the log is closed (every line written) once the body, which unwinds the
     rows, is done. A write that fails (the disk is full, the session's directory is gone) ends the log
-    and not the run: the file is for the person, as a sub-agent's event log is.
+    and not the run: the file is for the person, as a sub-agent's event log is. The person is told
+    once, through `report`, after the rows have unwound, so after the app has exited: that the log
+    stopped, when the shell found it had (the appender writes on a thread and keeps no time of its own,
+    so that is the next line queued, or the close), and the error.
     """
     if path is None:
         yield
         return
     appender = Appender(str(path))  # opened by the first write, on its thread
+    stopped: _RowLogStop | None = None  # the first failure the shell heard of, or the close found
 
     def hear(event: Event) -> None:
+        nonlocal stopped
         if (line := _row_line(event, datetime.datetime.now(datetime.UTC))) is None:
             return
         try:
             appender.append(line)
-        except OSError:  # an earlier line could not be written: nothing after it will be
+        except OSError as error:  # an earlier line could not be written: nothing after it will be
             runtime.listeners.remove(hear)
+            stopped = _RowLogStop(datetime.datetime.now(datetime.UTC), error)
 
     runtime.listeners.append(hear)
     try:
@@ -366,8 +394,13 @@ async def _row_log(runtime: Runtime, path: Path | None) -> AsyncIterator[None]:
     finally:
         if hear in runtime.listeners:
             runtime.listeners.remove(hear)
-        with contextlib.suppress(OSError):  # the log is best-effort
+        try:
             await appender.close()
+        except OSError as error:  # a write that the listener did not hear of, or a file that would not close
+            if stopped is None:  # the same failure again is already told
+                stopped = _RowLogStop(datetime.datetime.now(datetime.UTC), error)
+        if (line := _stopped_line(path, stopped)) is not None and report is not None:
+            report(line)
 
 
 async def run(
@@ -418,10 +451,10 @@ async def run(
     or newly-inactive rows) can end a run early. A background failure elsewhere stays visible
     in `status()`/`explain()`, not surfaced here. `trace` sees every lifecycle event (reload,
     active, bind, unbind, unloading, ...) as one line, from the first row on; `report` hears
-    about a layer file that changed but could not be reloaded. `row_log` is the file the
-    session's row reloads and failures are kept in (`sessions.ROWS`; none: none is kept), one
-    `{at, kind, row, error?}` a line, queued to a thread and closed once the rows have unwound
-    (`_row_log`).
+    about a layer file that changed but could not be reloaded, and, once the rows have unwound, that
+    the row log stopped being written. `row_log` is the file the session's row reloads and failures
+    are kept in (`sessions.ROWS`; none: none is kept), one `{at, kind, row, error?}` a line, queued to
+    a thread and closed once the rows have unwound (`_row_log`).
 
     The layer files are watched while the program runs: edit one and the composition reshapes
     itself.
@@ -452,7 +485,7 @@ async def run(
     rt = Runtime()
     if trace is not None:
         rt.listeners.append(lambda event: trace(str(event)))
-    async with _row_log(rt, row_log):
+    async with _row_log(rt, row_log, report):
         booted: Booted = await boot(paths, last, rt, report=report)
         try:
             _raise_if_stalled(booted, "could not start", NotStarted)

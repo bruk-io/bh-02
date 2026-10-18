@@ -18,13 +18,15 @@ cannot be explained by unreachability.
 from __future__ import annotations
 
 import contextlib
-import itertools
 import json
 import os
+import shutil
 import socket
 import sys
+import tempfile
 import threading
 import time
+from collections.abc import Iterator
 
 import pytest
 
@@ -37,7 +39,6 @@ from tests.conftest import launch, workload_argv
 
 pytestmark = pytest.mark.integration
 
-_jail_counter = itertools.count()
 _BODY = b"origin-server-payload"
 
 
@@ -89,7 +90,7 @@ def _launching_environment_exempts_loopback(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.fixture
-def origin():  # type: ignore[no-untyped-def]
+def origin() -> Iterator[_Origin]:
     server = _Origin()
     try:
         yield server
@@ -97,10 +98,31 @@ def origin():  # type: ignore[no-untyped-def]
         server.close()
 
 
-def _new_jail_dir() -> str:
-    path = f"/tmp/bp{os.getpid()}-{next(_jail_counter)}"
-    os.makedirs(path, exist_ok=True)
-    return os.path.realpath(path)
+@pytest.fixture
+def jail_dir() -> Iterator[str]:
+    """A jail directory nothing has ever been in, removed after the test.
+
+    **It is new on purpose, never named from the process id.** The wrap reads
+    `proxy.port` the moment the workload starts, and the proxy publishes it
+    some tens of milliseconds later (Python start-up), so a directory that
+    already holds one -- a jail's earlier run left it -- is read first: the
+    workload is pointed at a port nobody listens on and its request dies with
+    `ConnectionRefusedError`, where the 403 under test was due (TASK-0140). A
+    directory named `/tmp/bp<pid>-<n>` and kept is exactly that: a later
+    process that gets the same pid (a pid space of 32768 wraps within a day of
+    test runs) is handed the earlier one's files, and the failure reads as a
+    proxy that did not deny. A fresh `mkdtemp` directory cannot be anyone's
+    earlier jail, so the race is not run at all.
+
+    Short, under `/tmp` and not `tmp_path`: the proxy's port file and the
+    leak sweep's argv both want short paths. Resolved, as `CompileCtx`
+    requires of a `jail_dir`.
+    """
+    path = os.path.realpath(tempfile.mkdtemp(prefix="bp", dir="/tmp"))
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _jail(jail_dir: str, domains: tuple[str, ...]) -> tuple[CompiledJail, object]:
@@ -214,11 +236,12 @@ def _wait_file(path: str, timeout: float = 25.0) -> str | None:
     return final if final == previous else None
 
 
-def test_the_workload_reaches_an_allowed_host_through_the_proxy(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
+def test_the_workload_reaches_an_allowed_host_through_the_proxy(
+    run_id: str, jail_dir: str, origin: _Origin
+) -> None:
     """THE CONTROL: the origin's own payload arrives in the workload's
     hands, so the proxy variables were set, the helper was running, and
     traffic actually flowed."""
-    jail_dir = _new_jail_dir()
     out = os.path.join(jail_dir, "got")
     jail, process = _run(
         jail_dir,
@@ -237,12 +260,13 @@ def test_the_workload_reaches_an_allowed_host_through_the_proxy(run_id: str, ori
         jail.destroy()
 
 
-def test_the_workload_is_refused_a_host_outside_the_allow_list(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
+def test_the_workload_is_refused_a_host_outside_the_allow_list(
+    run_id: str, jail_dir: str, origin: _Origin
+) -> None:
     """Same reachable origin, by a name the policy does not permit. The
     workload sees an HTTP 403 carrying the proxy's own signature -- not a
     connection error, which is what a test against an unreachable host
     would have produced whether or not any policy existed."""
-    jail_dir = _new_jail_dir()
     out = os.path.join(jail_dir, "got")
     jail, process = _run(
         jail_dir,
@@ -261,12 +285,13 @@ def test_the_workload_is_refused_a_host_outside_the_allow_list(run_id: str, orig
         jail.destroy()
 
 
-def test_the_denial_signature_matches_what_the_proxy_actually_wrote(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
+def test_the_denial_signature_matches_what_the_proxy_actually_wrote(
+    run_id: str, jail_dir: str, origin: _Origin
+) -> None:
     """The signature is only worth having if it matches the real wire
     text. Checked against bytes the running proxy produced, not against a
     constructed string -- the drift this catches is exactly the one the
     duplicated constant makes possible (decision-133)."""
-    jail_dir = _new_jail_dir()
     out = os.path.join(jail_dir, "got")
     _jail_obj, step = _jail(jail_dir, ("localhost",))
     jail, process = _run(
@@ -290,10 +315,9 @@ def test_the_denial_signature_matches_what_the_proxy_actually_wrote(run_id: str,
         jail.destroy()
 
 
-def test_the_helper_dies_with_the_jail(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
+def test_the_helper_dies_with_the_jail(run_id: str, jail_dir: str, origin: _Origin) -> None:
     """A surviving proxy is a listening socket nobody owns. Proven alive
     first, so "gone after kill" cannot pass against one that never ran."""
-    jail_dir = _new_jail_dir()
     jail, process = _run(jail_dir, ("localhost",), "sleep 30", run_id)
     assert len(jail._base.helper_pids) == 1
     pid = jail._base.helper_pids[0]
@@ -322,7 +346,9 @@ def subprocess_alive(pid: int) -> bool:
     return done.stdout.strip() not in ("", "Z")
 
 
-def test_the_decisions_file_lands_where_the_mechanism_said_it_would(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
+def test_the_decisions_file_lands_where_the_mechanism_said_it_would(
+    run_id: str, jail_dir: str, origin: _Origin
+) -> None:
     """The compile-time `decisions_path` and the file the proxy actually
     writes must be the same path, or a `run`-layer reader
     (`brig.run.egress_decisions`) reads nothing.
@@ -338,7 +364,6 @@ def test_the_decisions_file_lands_where_the_mechanism_said_it_would(run_id: str,
     `_wait_file` measures: the decisions file has become non-empty and has
     stopped changing.
     """
-    jail_dir = _new_jail_dir()
     out = os.path.join(jail_dir, "got")
     jail, process = _run(
         jail_dir,
