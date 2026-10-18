@@ -7,7 +7,7 @@ status: Draft
 assignee:
   - '@bruk'
 created_date: '2026-10-14 03:42'
-updated_date: '2026-10-14 03:42'
+updated_date: '2026-10-18 02:01'
 labels:
   - tui
   - agent
@@ -48,3 +48,13 @@ Drafted by the orchestrator from the owner's ask and a brainstorm (2026-10-14); 
 - [ ] #2 I can browse a session's trajectory (a timeline and the steps, each step's detail) while a reply runs and after the session has ended
 - [ ] #3 Must not break: what the model is sent is unchanged; nothing blocks the event loop; tui:ui depends on nothing
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-18, found while designing the trajectory; kept off the board for now at the owner's word:
+- A torn last line stops a resume: `FileTranscript` raises on it (`json.loads` on every line, agent plugin `transcript.py`).
+- A process that dies mid-call leaves the call unanswered, and a resume sends that call with no result: nothing answers it on open.
+- Two bh-02 processes can append to one session (`--resume` while it runs): nothing locks the session directory.
+- `FileTranscript.append` writes on the event loop the TUI shares, and the transcript, its backups and the session directory take the umask's mode, not 0600 and 0700. This one breaks this draft's must-not-break, so the trajectory design takes it on as its first slice.
+<!-- SECTION:NOTES:END -->
