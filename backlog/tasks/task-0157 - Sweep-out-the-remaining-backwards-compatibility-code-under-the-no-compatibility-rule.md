@@ -3,7 +3,7 @@ id: TASK-0157
 title: >-
   Sweep out the remaining backwards-compatibility code under the
   no-compatibility rule
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 14:39'
@@ -121,4 +121,6 @@ INFO    -  Documentation built in 5.69 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewed by reviewer (not the worker). Full scripts/check exit 0, no files reformatted. AC1-2 met by the inventory and removals in the notes (spot-checked records.py, jail.py; residual grep shows only clean-rename tests and brig prose). AC3 met: old files that stop working listed (a)-(g), check green. Findings, filed nowhere: decision-0009 named by the review brief is the trajectory-timing decision and does not bear on this task; linux-jail-check not run, so the bwrap-only runner test change is unexercised here; the models file's id-table refusal kept, an owner call recorded in the notes.
 <!-- SECTION:NOTES:END -->
