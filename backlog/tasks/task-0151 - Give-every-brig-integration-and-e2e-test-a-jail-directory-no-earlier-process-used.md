@@ -110,4 +110,8 @@ INFO    -  Documentation built in 2.96 seconds
 ```
 
 Review (reviewer, not the worker): not closed. Every AC is met: full scripts/check exit 0 (3902 passed, 118 skipped, every gate ok, nothing reformatted). close-task refused: a bug closes with its repro recorded (record-check TASK-0151 --repro -- <failing test>) or a note starting 'No repro:' saying why. The worker should record one: the flaky pid-reuse race (3/160 under 8-way load) likely warrants a 'No repro:' note citing that measurement, or the planted-file run of test_no_test_names_a_directory_from_its_pid.py as the repro. Nits: the detector does not follow a pid through a name (stated in its docstring); darwin-only files migrated by reading only.
+
+Round 1 review fix (blocking finding 1: a bug needs a repro on record).
+
+No repro: the failure is a pid-reuse race and has no deterministic test. A later process is handed an earlier run's /tmp/bg<pid>... directory only when the kernel reuses a pid, which is a matter of chance and of how much of the 32768-pid space earlier runs have used; TASK-0140 measured it at 3 of 160 runs of one file under 8-way load (JailDirInUse twice, ConnectionRefusedError once) and could not make it fail on demand without first planting a stale directory by hand. The fix is the removal of the shape that allowed it, and what pins it is test_no_test_names_a_directory_from_its_pid.py (AC2), which passes on the fixed tree and was seen failing on a planted file (libs/brig/tests/integration/test_zz_plant.py, since removed): that plant is not a committed failing test, so record-check --repro (which needs a committed test that fails) does not fit. Nothing else changed in this round: no code, no criterion.
 <!-- SECTION:NOTES:END -->
