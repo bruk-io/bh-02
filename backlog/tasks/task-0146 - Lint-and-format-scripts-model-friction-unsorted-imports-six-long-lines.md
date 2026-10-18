@@ -1,7 +1,7 @@
 ---
 id: TASK-0146
 title: 'Lint and format scripts/model-friction (unsorted imports, six long lines)'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:20'
@@ -114,4 +114,6 @@ INFO    -  Documentation built in 4.76 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review: closed. Diff to scripts/model-friction is formatting only (blank line removed, four SIGNALS strings parenthesised with text unchanged, one add_argument split). Reviewer reran ruff check --no-fix (exit 0) and ruff format --check (exit 0); full scripts/check exit 0. AC3 accepted on the worker's byte-identical before/after evidence, consistent with a diff that changes no string value. No findings.
 <!-- SECTION:NOTES:END -->
