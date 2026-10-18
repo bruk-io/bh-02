@@ -104,4 +104,6 @@ INFO    -  Documentation built in 4.20 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (not closed): every AC is met and the full scripts/check exits 0, but close-task refuses a bug with no repro recorded. The repro (test_a_port_file_an_earlier_jail_left_is_not_the_port_the_workload_is_pointed_at) passes on HEAD, so record-check --repro cannot record it now; the worker's 6/6 failure before the fix is in the notes but was never recorded through record-check --repro. To close: the worker records the repro against the pre-fix code (e.g. a worktree at c57b8169 with the test applied), or the owner rules a 'No repro:' note acceptable. No code findings.
 <!-- SECTION:NOTES:END -->
