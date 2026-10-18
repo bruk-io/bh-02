@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
-updated_date: '2026-10-18 13:55'
+updated_date: '2026-10-18 13:59'
 labels:
   - agent
   - size-3
@@ -40,4 +40,70 @@ Found designing TASK-0136 (noted there, filed at the owner's word 2026-10-18). T
 
 <!-- SECTION:NOTES:BEGIN -->
 Changed: loop.py gains _LOST ('interrupted: bh-02 stopped before this call finished; it may have partly run', _INTERRUPTED's wording), a pure _unanswered_calls(messages) (the last assistant entry's tool_calls with no tool entry after it; [] when a user entry already follows them, a transcript an older bh-02 resumed unanswered, since an answer appended after the person's message would not make it whole) and LoopModel._answer_the_unanswered(), called first in _reply, so every ending of the reply (stopped, Unstarted, answered) leaves the conversation whole. Each answer is _answer(call, _LOST, [], _Call(clock).record()): a tool entry with asides [] and a call record of at (now) alone, as a _NOT_RUN one has: no answer, waited or took was recorded. CONTRACTS.md (loop section, message call, call record), GLOSSARY, agent and models READMEs, docs loop.md and sessions.md say so. Tests: agent tests/test_agent_unanswered_calls.py (8): a transcript cut after a step's calls with c1 answered and c2 not (request has a result per call, in order, c2 interrupted: with call == {at: resume time}), three unanswered in order, the answers kept in the file once and a second reply adds none, a whole transcript sent unchanged in 4 shapes (nothing added but the message and the answer), an older bh-02's user-after-calls transcript left as it was. Planted: with the _reply call removed 3 of 8 failed (first request lacked the result, the file lacked c2); with the user guard removed the older-transcript test failed; restored, 8 pass. Claude Code provider: models tests/test_claude_code_reconcile.py (a crash-saved OPEN state reads FAILED and the resumed transcript with the loop's answer reconciles to Rebuild(prefix 4, 'carry on'), and to CONTINUE with no line typed) and tests/test_claude_code_model.py (a second ClaudeCodeModel over the first one's crashed state rebuilds the session from the transcript: records user, assistant, user, user, with a tool_result for t1 and t2 in the calls' order; planted: with the lost answer omitted the test failed on the record count). Ran: scripts/check bh-02/plugins/agent-cordis-plugin (exit 0: format, lint, types, 195 passed 1 skipped, gates, docs), scripts/check bh-02/plugins/models-cordis-plugin --no-gates --no-docs (exit 0, 363 passed 2 skipped), scripts/arch-check --no-fix (exit 0), subagents/chat/memory plugin tests (300 passed). AC #3's 'scripts/check passes' is the reviewer's to prove (the full check was not run), so #3 is left unticked though its claude-code part is proven by the tests above. Not done, filed: TASK-0154, /compact right after a resume reads the file itself and sends the unanswered call (it never goes through a reply).
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 33%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+.....................................................................s.s [ 47%]
+s....sss..s.ss..s.ss.s.s...s.s.s.s..s.s.s..ssss.ss.......s.............. [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+...............................sssssssssssssssssssssssssssssssssssssssss [ 55%]
+ssss.sssssssssssssssssssss.....s......................sssssssssss....... [ 56%]
+.s................................................................s..... [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+....sss................................................................. [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+..................................                                       [100%]
+3806 passed, 118 skipped in 195.81s (0:03:15)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.86 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
