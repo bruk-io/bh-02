@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 14:31'
-updated_date: '2026-10-18 22:03'
+updated_date: '2026-10-18 22:07'
 labels:
   - app
   - size-2
@@ -46,4 +46,70 @@ Evidence, criterion 1. New pure tests in test_trajectory.py (a resumed run's boo
 Criterion 2 is left unticked: GLOSSARY.md and the command-line and sessions docs now say what the marker and the line mean, scripts/check bh-02/app passed (exit 0: format, lint, types, 369 tests, all gates including the root and libs gates, docs build; tokens skipped, no bh-01 dist), but 'scripts/check passes' for the whole workspace is the reviewer's to prove.
 
 How a rows.jsonl written before the marker now reads (owner's rule, 2026-10-18: no old-form reading, no test pinning it). Nothing reads it specially, and no test or doc pins it. It has no run line, so the reader takes the whole file as one run: its first boot is one 'row first load' line, and if the session was resumed in it, that resumed run's rows (all seen before) print a 'row reload NAME' line each, as they did before this task. A new run of such a session appends its own run line, and from there the file reads right. I checked this once while writing the tests (the test passed), then removed it so the old form is not pinned. No other file stops working.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 46%]
+......................................................sss...ssss.s.s..ss [ 48%]
+.s.s...s....ss.s.ss.ss..ss..sss.s..........s............................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+..............sssssssssssss.ssssssssssssssssssssssssssssssssssssssssssss [ 55%]
+ssssssssss............................sssssssssss......s................ [ 57%]
+................................................s....................... [ 59%]
+........................................................................ [ 61%]
+............................................................sss......... [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+..............................                                           [100%]
+3874 passed, 118 skipped in 203.16s (0:03:23)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 4.54 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
