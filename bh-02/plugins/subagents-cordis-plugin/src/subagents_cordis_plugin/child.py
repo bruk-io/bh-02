@@ -56,7 +56,7 @@ __all__ = [
     "prefixed",
     "report_of",
     "session_model",
-    "start_request",
+    "start_question",
     "started_record",
     "stepped",
     "stop_note",
@@ -232,8 +232,8 @@ def asked_why(
     return tuple(why)
 
 
-def start_request(kind: AgentType, input: Mapping[str, Any], why: Sequence[str]) -> dict[str, Any]:
-    """The question a child's start puts to the person (CONTRACTS.md: request): the `agent`
+def start_question(kind: AgentType, input: Mapping[str, Any], why: Sequence[str]) -> dict[str, Any]:
+    """The question a child's start puts to the person (CONTRACTS.md: question): the `agent`
     call, titled with what it starts and why it is asked, its prompt shown whole."""
     return {
         "name": "agent",
@@ -253,13 +253,13 @@ def denied(kind: str, why: Sequence[str]) -> str:
 
 
 def label(name: str, kind: str) -> dict[str, str]:
-    """Who asks, as a request carries it (CONTRACTS.md: request, `agent`)."""
+    """Who asks, as a question carries it (CONTRACTS.md: question, `agent`)."""
     return {"name": name, "type": kind}
 
 
-def labelled(request: Mapping[str, Any]) -> bool:
-    """Whether a request says which agent asks, with a name and a type."""
-    agent = request.get("agent")
+def labelled(question: Mapping[str, Any]) -> bool:
+    """Whether a question says which agent asks, with a name and a type."""
+    agent = question.get("agent")
     return isinstance(agent, Mapping) and bool(agent.get("name")) and bool(agent.get("type"))
 
 

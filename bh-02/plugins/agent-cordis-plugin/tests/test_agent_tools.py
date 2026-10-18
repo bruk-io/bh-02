@@ -79,15 +79,15 @@ class _Approval:
         self.asked: list[Any] = []
         self.answer = answer
 
-    def unasked(self, request: Any) -> bool:
+    def unasked(self, question: Any) -> bool:
         return False
 
-    async def confirm(self, request: Any) -> bool:
-        self.asked.append(request)
+    async def confirm(self, question: Any) -> bool:
+        self.asked.append(question)
         return self.answer
 
-    async def approve(self, request: Any) -> bool:  # the loop's own, as `Asked` gives it
-        return self.unasked(request) or await self.confirm(request)
+    async def approve(self, question: Any) -> bool:  # the loop's own, as `Asked` gives it
+        return self.unasked(question) or await self.confirm(question)
 
 
 class _Nowhere:
@@ -483,7 +483,7 @@ async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_asides_told_with_t
         {"content": "error: there is no nothing tool now", "failed": True},
         {"content": "error: echo needs `text`", "failed": True},
     ]
-    assert [request["name"] for request in approval.asked] == ["outer", "echo"]  # each put to approval
+    assert [question["name"] for question in approval.asked] == ["outer", "echo"]  # each put to approval
     (answer,) = [m for m in transcript.messages if m["role"] == "tool"]
     assert answer["asides"] == ["aside of echo: echo: inside"]  # told with the call it came from
     assert answer["content"] == "outer done\n\naside of echo: echo: inside"
@@ -494,10 +494,10 @@ async def test_a_call_a_tool_makes_goes_as_the_model_s_do_its_asides_told_with_t
 SHOWING_OVER = {"title": "t", "lines": ["x"], "runs": "harness", "agent": {"name": "fake"}, "name": "other"}
 
 
-async def test_a_show_cannot_set_a_request_s_runs_agent_or_name_for_a_model_s_call() -> None:
-    """A tool's `show` gives only `title`, `lines` and `language`: the request put to `approval`
+async def test_a_show_cannot_set_a_question_s_runs_agent_or_name_for_a_model_s_call() -> None:
+    """A tool's `show` gives only `title`, `lines` and `language`: the question put to `approval`
     carries the registration's `runs`, the call's own name and input, and no `agent` the show
-    named (CONTRACTS.md: request)."""
+    named (CONTRACTS.md: question)."""
     broker, approval, transcript = ToolBroker(), _Approval(), MemoryTranscript()
     broker.register(ECHO, _echo, runs="host", show=lambda input: SHOWING_OVER)
     model = _Scripted([_call("c1", "echo", text="hi")], [_text("done")])
@@ -507,7 +507,7 @@ async def test_a_show_cannot_set_a_request_s_runs_agent_or_name_for_a_model_s_ca
     ]
 
 
-async def test_a_show_cannot_set_a_request_s_runs_agent_or_name_for_a_nested_call() -> None:
+async def test_a_show_cannot_set_a_question_s_runs_agent_or_name_for_a_nested_call() -> None:
     """The same for a call a tool's own call makes (`tools.call` from an input)."""
     broker, approval = ToolBroker(), _Approval()
     broker.register(ECHO, _echo, runs="host", show=lambda input: SHOWING_OVER)

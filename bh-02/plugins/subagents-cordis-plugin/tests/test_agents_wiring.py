@@ -75,9 +75,9 @@ class _Screen:
         self.shown: list[Json] = []
         self.answer = answer
 
-    async def confirm(self, request: Json) -> bool:
-        self.asked.append(request)
-        return self.answer(request) if callable(self.answer) else self.answer
+    async def confirm(self, question: Json) -> bool:
+        self.asked.append(question)
+        return self.answer(question) if callable(self.answer) else self.answer
 
     async def show(self, events: AsyncIterator[Json]) -> None:
         self.shown += [event async for event in events]
@@ -98,15 +98,15 @@ class _Holding(_Screen):
         self.held = asyncio.Event()  # a sub-agent's question is open
         self.withdrawn: list[Json] = []
 
-    async def confirm(self, request: Json) -> bool:
-        self.asked.append(request)
-        if "agent" not in request:
+    async def confirm(self, question: Json) -> bool:
+        self.asked.append(question)
+        if "agent" not in question:
             return True
         self.held.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            self.withdrawn.append(request)
+            self.withdrawn.append(question)
             raise
         return False
 
@@ -115,7 +115,7 @@ class _Rule:
     def __init__(self, unasked: bool) -> None:
         self._unasked = unasked
 
-    def unasked(self, request: Json) -> bool:
+    def unasked(self, question: Json) -> bool:
         return self._unasked
 
 
@@ -1087,8 +1087,8 @@ async def test_a_type_s_step_limit_ends_its_child_with_what_it_has_said_in_its_r
     await _bounded(booted.runtime.shutdown())
 
 
-def _start_asked(request: Json) -> bool:
-    return request.get("name") != "agent" or "title" not in request
+def _start_asked(question: Json) -> bool:
+    return question.get("name") != "agent" or "title" not in question
 
 
 async def test_past_the_session_budget_each_start_is_asked_and_a_no_refuses_it() -> None:
@@ -1236,7 +1236,7 @@ async def test_a_call_naming_a_model_other_than_its_type_s_is_asked() -> None:
         child=[_text("on sonnet"), _HANG],
     )
     answers = iter([False, True])
-    screen = _Screen(answer=lambda request: next(answers))
+    screen = _Screen(answer=lambda question: next(answers))
     sonnet = Row("model", f"{__name__}:fake_model", {"model": model, "default": "sonnet"})
     booted = await _booted(_rows(model, screen, model=sonnet))
     rt = booted.runtime

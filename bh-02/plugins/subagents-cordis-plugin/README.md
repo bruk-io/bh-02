@@ -8,9 +8,9 @@ foreground or, with `background`, to `agent_wait`. The design is decision-0002
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `subagents:parent` | `asker`: `confirm(request)` over the parent's `output`, only for a request labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor`, `python`; never auto memory), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
+| `subagents:parent` | `asker`: `confirm(question)` over the parent's `output`, only for a question labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor`, `python`; never auto memory), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
 | `subagents:status` | the status bar's `agents` field: `agents: N running` while a sub-agent runs, absent at none; config: none | `roster` (`running`, `watch`), `frame` (`status`) |
-| `subagents:output` | a child's `output`, inside its realm: `confirm(request)` through `asker`, the request labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
+| `subagents:output` | a child's `output`, inside its realm: `confirm(question)` through `asker`, the question labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
 | `subagents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system`, `asides` (`add`: what `agent_send` left) |
 
 The shipped layer fills them as the rows `agents` (`subagents:parent`) and `agents-status`
@@ -61,7 +61,7 @@ input, which the loop serves as it does the model's own calls) starts one child:
 1. **Its start, asked when it must**: past the session's budget (`session_agents` children
    started by this row: a restart of the row counts afresh), or naming a `model` other than its
    type's (the type's, else the parent's model row's `default`), the start is put to the person
-   through the parent's `output.confirm`, titled with what it starts and why (`start_request`),
+   through the parent's `output.confirm`, titled with what it starts and why (`start_question`),
    the prompt shown whole; a no answers the call that the person said no, and starts nothing.
    A model a yes chose is the child's alone: its model row's `default`, in its realm. A start is
    counted as it is admitted, before the child's directory is made (on a thread), so two calls
@@ -127,8 +127,8 @@ and nothing is waited for).
 ## Questions, and nothing else of the parent's output
 
 A child's loop asks through its `output`, which is `subagents:output`'s: `confirm` alone, every
-request labelled `agent: {name, type}` (over whatever it carried) and put through `asker`.
-`asker` puts to the person only a labelled request (any other is a no), through the parent's
+question labelled `agent: {name, type}` (over whatever it carried) and put through `asker`.
+`asker` puts to the person only a labelled question (any other is a no), through the parent's
 `output.confirm`: the ui queues it behind the parent's own, one at a time, and its modal says
 `Agent NAME (TYPE) asks:` above the question. A child never shows anything on the parent's
 screen; the person sees the `agent` call and its report.

@@ -2,9 +2,9 @@
 runner started, and the `python(code)` tool's call (`call`), which runs an input in it; the
 python row registers that with `tools`.
 
-An input is one request and one answer: the worker runs the code and says it is done. Whether
-the person is asked first is the `approval` rule's to answer and the loop's to ask, so the
-process depends on its runner alone and a new ui keeps the namespace. It reads `confined` from
+An input goes to the worker once and is answered once: the worker runs the code and says it is
+done. Whether the person is asked first is the `approval` rule's to answer and the loop's to ask,
+so the process depends on its runner alone and a new ui keeps the namespace. It reads `confined` from
 that rule (`Rule`) only to decide what the model is told and whether the startup files run
 unasked: one place decides what runs unasked. The python row starts and stops it, and on
 `/release` stops it itself (`stopped`), so nothing else ever ends it. Every failure the process knows of (a

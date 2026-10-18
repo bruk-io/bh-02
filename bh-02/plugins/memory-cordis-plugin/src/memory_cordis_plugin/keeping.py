@@ -94,10 +94,10 @@ class Delete:
     name: str
 
 
-type Request = Save | Read | Delete
+type Action = Save | Read | Delete
 
 
-def understood(input: Json) -> Request | str:
+def understood(input: Json) -> Action | str:
     """What a call asks, or why it is refused: the text the model reads, `error: ` and what to
     fix. Nothing is looked up or written here."""
     action = input.get("action")

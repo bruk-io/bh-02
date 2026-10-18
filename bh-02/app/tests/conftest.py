@@ -90,7 +90,7 @@ class Drop:
 
     async def notice(self, message: str) -> None: ...
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
         return False
 
 
@@ -192,8 +192,8 @@ class Record(Drop):
             elif chunk.get("type") == "note":
                 NOTES.append(str(chunk["text"]))
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
-        ASKED.append(request)
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
+        ASKED.append(question)
         return ANSWERS.pop(0) if ANSWERS else False
 
 

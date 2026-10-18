@@ -55,9 +55,9 @@ class Noted(Message):
 class Asked(Message):
     """A yes-or-no question about a call; the answer goes in `answer`."""
 
-    def __init__(self, request: Mapping[str, Any], answer: asyncio.Future[bool]) -> None:
+    def __init__(self, question: Mapping[str, Any], answer: asyncio.Future[bool]) -> None:
         super().__init__()
-        self.request = request
+        self.question = question
         self.answer = answer
 
 

@@ -150,18 +150,18 @@ async def test_a_question_is_a_modal_and_its_answer_goes_back() -> None:
 
 
 async def test_a_sub_agent_s_question_says_which_agent_asks() -> None:
-    """A child's question comes through the parent's `output` labelled (CONTRACTS.md: request,
+    """A child's question comes through the parent's `output` labelled (CONTRACTS.md: question,
     `agent`): the modal says who asks above the question."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         answer = app.bridge.question()
         assert answer is not None
-        request = {
+        question = {
             "name": "python",
             "input": {"code": "1"},
             "agent": {"name": "general-1", "type": "general"},
         }
-        app.post_message(Asked(request, answer))
+        app.post_message(Asked(question, answer))
         await pilot.pause()
         assert isinstance(app.screen, ApprovalScreen)
         title = str(app.screen.query_one("#approval-title", Static).content)

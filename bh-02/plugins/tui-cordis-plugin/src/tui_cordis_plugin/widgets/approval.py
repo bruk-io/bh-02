@@ -27,7 +27,7 @@ GRACE = 0.4
 
 
 class ApprovalScreen(ModalScreen[bool]):
-    """Yes or no about one call (CONTRACTS.md: request). `y` allows; `n` or Escape declines,
+    """Yes or no about one call (CONTRACTS.md: question). `y` allows; `n` or Escape declines,
     once it is `armed`: `grace` seconds after it is shown (`GRACE` unless the app says
     otherwise). Until then its keys line is dimmed and those keys are dropped.
 
@@ -86,21 +86,21 @@ class ApprovalScreen(ModalScreen[bool]):
     }
     """
 
-    def __init__(self, request: Mapping[str, Any], *, grace: float = GRACE) -> None:
+    def __init__(self, question: Mapping[str, Any], *, grace: float = GRACE) -> None:
         super().__init__()
-        self.request = request
+        self.question = question
         self._grace = grace
         self._armed = False
 
     def compose(self) -> ComposeResult:
-        code = render.approval_lines(self.request)
+        code = render.approval_lines(self.question)
         with Vertical(id="approval", classes="-code" if code else ""):
-            yield Static(render.approval_heading(self.request), id="approval-title", markup=False)
+            yield Static(render.approval_heading(self.question), id="approval-title", markup=False)
             if code:
                 with VerticalScroll(id="approval-code"):
                     # highlighted as the chat view highlights code: the theme's colours
                     yield Static(
-                        render.code("\n".join(code), render.approval_language(self.request)),
+                        render.code("\n".join(code), render.approval_language(self.question)),
                         id="approval-source",
                     )
             yield Static(

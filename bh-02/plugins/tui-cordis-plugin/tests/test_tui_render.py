@@ -175,7 +175,7 @@ def test_an_approval_names_the_input_and_shows_its_code_whole() -> None:
     empty = {"name": "python", "input": {"code": ""}}
     assert render.approval_title(empty) == "Run this python code (0 lines)?"
     assert render.approval_lines(empty) == []
-    # a request about something other than an input (an extension to load) asks its own question
+    # a question about something other than an input (an extension to load) has its own title
     asked = {"name": "extension", "title": "Load extension todo, unjailed?", "input": {"code": "x = 1"}}
     assert render.approval_title(asked) == "Load extension todo, unjailed (1 line)?"
     assert render.approval_lines(asked) == ["x = 1"]

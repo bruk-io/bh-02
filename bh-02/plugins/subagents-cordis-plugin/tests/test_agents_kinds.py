@@ -25,7 +25,7 @@ from subagents_cordis_plugin import (
     limited,
     parsed_type,
     session_model,
-    start_request,
+    start_question,
     stepped,
     type_files,
     usage_event,
@@ -276,10 +276,10 @@ def test_a_start_is_asked_past_the_session_budget_and_for_a_model_other_than_its
     )
     assert len(asked_why(started=20, budget=16, kind=general, model="opus", session="sonnet")) == 2
     why = ("the session's budget of 16 sub-agents is spent: 16 have started",)
-    request = start_request(general, {"prompt": "look\nhard", "type": "general"}, why)
-    assert request["name"] == "agent" and "agent" not in {k for k in request if k != "name"}
-    assert request["title"] == f"Start a general sub-agent ({why[0]})?"
-    assert request["lines"] == ["look", "hard"]
+    question = start_question(general, {"prompt": "look\nhard", "type": "general"}, why)
+    assert question["name"] == "agent" and "agent" not in {k for k in question if k != "name"}
+    assert question["title"] == f"Start a general sub-agent ({why[0]})?"
+    assert question["lines"] == ["look", "hard"]
     assert denied("general", why) == (
         f"denied: the person said no to starting a general sub-agent ({why[0]}), so none started; "
         "ask them what they want instead"

@@ -91,20 +91,20 @@ class _System:
 
 @dataclass
 class _Approval:
-    """An `approval` rule that keeps every request: confined, each goes ahead with nobody asked;
+    """An `approval` rule that keeps every question: confined, each goes ahead with nobody asked;
     unconfined, each is put to the person (`confirm`, the `output`'s), who answers `answer`."""
 
     confined: bool = True
     answer: bool = True
-    requests: list[Mapping[str, Any]] = field(default_factory=list)
+    questions: list[Mapping[str, Any]] = field(default_factory=list)
     asked: list[Mapping[str, Any]] = field(default_factory=list)
 
-    def unasked(self, request: Mapping[str, Any]) -> bool:
-        self.requests.append(request)
+    def unasked(self, question: Mapping[str, Any]) -> bool:
+        self.questions.append(question)
         return self.confined
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
-        self.asked.append(request)
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
+        self.asked.append(question)
         return self.answer
 
 
@@ -158,7 +158,7 @@ async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_
         h.write("todo", _TODO)
         await h.extensions.look()
         assert h.extensions.statuses["todo"].ok
-        assert [r["name"] for r in h.approval.requests] == ["extension"]  # put to approval: yes, unasked
+        assert [r["name"] for r in h.approval.questions] == ["extension"]  # put to approval: yes, unasked
         assert "Nobody is asked first" in h.extensions.section()  # the model is told approval's `confined`
         assert await h.commands.runs["todo"]("milk") == "milk"
         assert await h.commands.runs["todo"]("") == "milk"  # its state lives in the worker
@@ -302,14 +302,14 @@ async def test_unjailed_each_extension_is_put_to_the_person_with_its_source(tmp_
     async with _running(tmp_path, confined=False, answer=False) as h:
         h.write("todo", _TODO)
         await h.extensions.look()
-        (asked,) = h.approval.requests
+        (asked,) = h.approval.questions
         assert asked["title"] == "Load the model's extension todo into bh-02, unjailed?"
         assert asked["input"] == {"code": _TODO}
         assert h.commands.runs == {} and h.jail.started == []  # declined: nothing ran
         assert h.status()["todo"]["error"] == "the person declined to load it"
         assert "each is shown to the person" in h.extensions.section()
         await h.extensions.look()
-        assert len(h.approval.requests) == 1  # not asked again until the file changes
+        assert len(h.approval.questions) == 1  # not asked again until the file changes
         h.approval.answer = True
         h.write("todo", _TODO + "\n")
         await h.extensions.look()
@@ -358,7 +358,7 @@ async def test_an_extension_that_is_a_link_is_not_read_and_status_json_says_why(
         (project / ".bh-02" / "plugins" / "leak.py").symlink_to(secret)
         await h.extensions.look()
         assert h.extensions.statuses["todo"].ok  # the rest load
-        assert [r["input"]["code"] for r in h.approval.requests] == [_TODO]  # never read, never put
+        assert [r["input"]["code"] for r in h.approval.questions] == [_TODO]  # never read, never put
         assert h.status()["leak"] == {
             "state": "failed",
             "rows": {},
@@ -380,7 +380,7 @@ async def test_an_extension_with_a_second_name_is_not_read(tmp_path: Path) -> No
         h.write("todo", _TODO)
         os.link(secret, project / ".bh-02" / "plugins" / "leak.py")
         await h.extensions.look()
-        assert [r["input"]["code"] for r in h.approval.requests] == [_TODO]
+        assert [r["input"]["code"] for r in h.approval.questions] == [_TODO]
         assert h.status()["leak"]["error"] == (
             ".bh-02/plugins/leak.py has 2 names (a hard link), and bh-02 does not read one there "
             "(another name could be a file the jail hides): write the extension at "
@@ -418,7 +418,7 @@ async def test_a_link_on_the_way_to_the_extensions_directory_is_not_followed(
     (project / linked).parent.mkdir(parents=True, exist_ok=True)
     (project / linked).symlink_to(elsewhere, target_is_directory=True)
     async with _running(project) as h:
-        assert h.approval.requests == [] and h.jail.started == [] and h.extensions.statuses == {}
+        assert h.approval.questions == [] and h.jail.started == [] and h.extensions.statuses == {}
         assert [p.name for p in plugins.iterdir()] == ["leak.py"]  # no status.json through the link
         assert h.extensions.section().endswith(
             f"\n\n{linked} is a link, so bh-02 loads no extension from .bh-02/plugins (a link could "
@@ -449,7 +449,7 @@ async def test_a_file_swapped_for_a_link_after_it_was_found_is_not_read(tmp_path
         h.write("first", swaps)  # loads first: the names are taken in order
         await h.extensions.look()
         assert (project / ".bh-02" / "plugins" / "second.py").is_symlink()  # swapped once found
-        assert [r["input"]["code"] for r in h.approval.requests] == [swaps]
+        assert [r["input"]["code"] for r in h.approval.questions] == [swaps]
         assert h.status()["second"]["error"].startswith(".bh-02/plugins/second.py is a link")
         assert "not-for-the-model" not in (project / ".bh-02" / "plugins" / "status.json").read_text()
 
@@ -654,6 +654,6 @@ async def test_unjailed_a_call_to_an_extension_s_tool_is_put_to_the_person_as_an
         await h.extensions.look()  # the load is asked about, and the person says yes
         tool = h.tools.get("shout")
         assert tool is not None and tool.show is not None
-        request = {"name": "shout", "input": {"text": "hi"}, "runs": tool.runs, **tool.show({"text": "hi"})}
-        assert not h.approval.unasked(request)  # unconfined: the loop asks the person, so shown
-        assert request["title"] == "Run shout, a tool of the extension loud, with these arguments?"
+        question = {"name": "shout", "input": {"text": "hi"}, "runs": tool.runs, **tool.show({"text": "hi"})}
+        assert not h.approval.unasked(question)  # unconfined: the loop asks the person, so shown
+        assert question["title"] == "Run shout, a tool of the extension loud, with these arguments?"

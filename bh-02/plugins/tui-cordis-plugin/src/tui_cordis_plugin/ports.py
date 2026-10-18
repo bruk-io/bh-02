@@ -455,12 +455,12 @@ class TuiOutput:
         """Show a failure the person can recover from."""
         self._post(Noted(f"error: {message}", "failure"))
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
         """Ask about a call in a modal; no once the app has ended."""
         answer = self._bridge.question()
         if answer is None:
             return False
-        self._post(Asked(request, answer))
+        self._post(Asked(question, answer))
         return await answer
 
     def lifecycle(self, event: _Lifecycle) -> None:

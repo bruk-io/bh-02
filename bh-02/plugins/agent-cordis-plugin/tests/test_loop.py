@@ -108,13 +108,13 @@ class Confined:
     """An approval over a runner that confines the Python process: every input runs, nobody is
     asked. The loop's own (`approve`), and the `approval` rule and `output` a row binds."""
 
-    async def approve(self, request: Json) -> bool:
+    async def approve(self, question: Json) -> bool:
         return True
 
-    def unasked(self, request: Json) -> bool:
+    def unasked(self, question: Json) -> bool:
         return True
 
-    async def confirm(self, request: Json) -> bool:
+    async def confirm(self, question: Json) -> bool:
         raise AssertionError("nobody is asked about a call that runs unasked")
 
 
@@ -128,14 +128,14 @@ class Person:
         self.hang = hang
         self.asked: list[Json] = []
 
-    async def approve(self, request: Json) -> bool:
-        self.asked.append(request)
+    async def approve(self, question: Json) -> bool:
+        self.asked.append(question)
         if self.hang:
             await asyncio.Event().wait()
         return self.answers.pop(0) if self.answers else False
 
-    async def confirm(self, request: Json) -> bool:
-        return await self.approve(request)
+    async def confirm(self, question: Json) -> bool:
+        return await self.approve(question)
 
 
 def text(s: str) -> Json:
@@ -216,8 +216,8 @@ async def test_a_call_runs_unasked_when_the_rule_says_so_else_on_the_person_s_an
     lets run unasked never reaches the person; any other is theirs to answer."""
 
     class Rule:
-        def unasked(self, request: Json) -> bool:
-            return request.get("runs", "jail") == "jail"
+        def unasked(self, question: Json) -> bool:
+            return question.get("runs", "jail") == "jail"
 
     person = Person(False)
     asked = Asked(Rule(), person)

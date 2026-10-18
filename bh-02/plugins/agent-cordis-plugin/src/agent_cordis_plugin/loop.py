@@ -143,7 +143,7 @@ class Approval(Protocol):
     """What the loop asks of each call: whether it may run (`Asked`: unasked by the `approval`
     rule, else the person's answer)."""
 
-    async def approve(self, request: Json) -> bool: ...
+    async def approve(self, question: Json) -> bool: ...
 
 
 @runtime_checkable
@@ -152,14 +152,14 @@ class Rule(Protocol):
     without asking the person (it runs in a runner that confines it, or it is bh-02's own
     harness tool and the runner confines)."""
 
-    def unasked(self, request: Json) -> bool: ...
+    def unasked(self, question: Json) -> bool: ...
 
 
 @runtime_checkable
 class Confirm(Protocol):
     """What the loop needs of the `output` value: the person's yes or no about a call."""
 
-    async def confirm(self, request: Json) -> bool: ...
+    async def confirm(self, question: Json) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,8 +171,8 @@ class Asked:
     rule: Rule
     output: Confirm
 
-    async def approve(self, request: Json) -> bool:
-        return self.rule.unasked(request) or await self.output.confirm(request)
+    async def approve(self, question: Json) -> bool:
+        return self.rule.unasked(question) or await self.output.confirm(question)
 
 
 @runtime_checkable
@@ -365,8 +365,8 @@ _SHOW_KEYS = ("title", "lines", "language")  # the only keys a tool's `show` may
 def shown(tool: Tool, name: str, input: Json) -> dict[str, Any]:
     """How a call is put to the person (`approval`): the tool's own `show(input)`, else the loop's
     way, the tool's name and its input as JSON. A show may give only `title`, `lines` and
-    `language` (CONTRACTS.md: request); any other key it returns is dropped, so a show never sets
-    the request's `name`, `input`, `runs` or `agent`, which are the loop's and the asker's. A
+    `language` (CONTRACTS.md: question); any other key it returns is dropped, so a show never sets
+    the question's `name`, `input`, `runs` or `agent`, which are the loop's and the asker's. A
     `show` that fails, or answers with something other than a mapping, leaves the loop's way."""
     title = {"title": f"Call {name} with this input?"}
     try:

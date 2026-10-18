@@ -57,7 +57,7 @@ from subagents_cordis_plugin.child import (
     parsed_command,
     report_of,
     session_model,
-    start_request,
+    start_question,
     started_record,
     stepped,
     stop_note,
@@ -179,7 +179,7 @@ def section(types: Sequence[str]) -> str:
 class Confirm(Protocol):
     """What the asker needs of the parent's `output` (CONTRACTS.md: output): the person's yes or no."""
 
-    async def confirm(self, request: Json) -> bool: ...
+    async def confirm(self, question: Json) -> bool: ...
 
 
 @runtime_checkable
@@ -187,7 +187,7 @@ class Output(Protocol):
     """What the agents row needs of the parent's `output` (CONTRACTS.md: output): the person's
     yes or no, and a few events shown (a note, a child's usage, which joins the session's totals)."""
 
-    async def confirm(self, request: Json) -> bool: ...
+    async def confirm(self, question: Json) -> bool: ...
     async def show(self, events: AsyncIterator[Json]) -> None: ...
 
 
@@ -228,13 +228,13 @@ type Types = Callable[[], Awaitable[Mapping[str, AgentType | str]]]
 @dataclass(frozen=True, slots=True)
 class Asker:
     """The `asker` key: a confirm-only view of the parent's `output`, for the children's
-    `subagents:output` rows. A request that does not say which agent asks is a no, never put to the
+    `subagents:output` rows. A question that does not say which agent asks is a no, never put to the
     person unlabelled."""
 
     output: Confirm
 
-    async def confirm(self, request: Json) -> bool:
-        return labelled(request) and await self.output.confirm(request)
+    async def confirm(self, question: Json) -> bool:
+        return labelled(question) and await self.output.confirm(question)
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,8 +246,8 @@ class Labelled:
     name: str
     type: str
 
-    async def confirm(self, request: Json) -> bool:
-        return await self.asker.confirm({**request, "agent": label(self.name, self.type)})
+    async def confirm(self, question: Json) -> bool:
+        return await self.asker.confirm({**question, "agent": label(self.name, self.type)})
 
 
 @dataclass(frozen=True, slots=True)
@@ -501,7 +501,7 @@ class Agents:
             model=str(model) if model is not None else None,
             session=session_model(entries, self._config.model_row),
         )
-        if why and not await self._output.confirm(start_request(kind, input, why)):
+        if why and not await self._output.confirm(start_question(kind, input, why)):
             return {"content": denied(kind.name, why)}
         if model is not None:
             kind = dataclasses.replace(kind, model=str(model))

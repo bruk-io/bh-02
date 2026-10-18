@@ -78,7 +78,7 @@ def _asked() -> list[str]:
     """The code of every input the person was asked about."""
     import fragile
 
-    return [str(request["input"]["code"]) for request in fragile.ASKED]
+    return [str(question["input"]["code"]) for question in fragile.ASKED]
 
 
 def _answers(*these: bool) -> None:
@@ -146,7 +146,7 @@ async def test_an_input_calls_another_row_s_tool_as_a_function_put_to_the_person
     out = _shown()
     import fragile
 
-    assert [request["name"] for request in fragile.ASKED] == ["python", "echo", "python", "echo"]
+    assert [question["name"] for question in fragile.ASKED] == ["python", "echo", "python", "echo"]
     echo = fragile.ASKED[1]
     assert echo["runs"] == "host" and echo["input"] == {"text": "from code"}
     assert "[0] (bh-02's other tools, run by bh-02 when you call one: tools.echo;" in out
@@ -756,10 +756,10 @@ class _Added:
     def add(self, section: Callable[[], str]) -> Callable[[], None]:
         return lambda: None
 
-    def unasked(self, request: Mapping[str, Any]) -> bool:
+    def unasked(self, question: Mapping[str, Any]) -> bool:
         return True
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
         raise AssertionError("a confined load is never put to the person")
 
 

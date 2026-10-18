@@ -9,7 +9,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 |---|---|---|
 | `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (default `["local.env"]`), `env` (the names that survive the scrub) | `host` |
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
-| `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(request) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
+| `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
 
 `runner.py`'s `Runner` is the `runner` value both rows bind, over a mechanism (`BrigJail` in
@@ -43,8 +43,8 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 
 `approval.py` is the rule, written once: `is_confined(report)` (the runner enforces `fs_write`
 and `network`), and `Approval`, the `approval` value over the runner: `confined` (read from its
-`report()` each time) and `unasked(request)` (it is the memory tool, `runs` `"memory"`, whatever
-the runner confines; or it runs in the runner, `runs` `"jail"` when the request says nothing, or is
+`report()` each time) and `unasked(question)` (it is the memory tool, `runs` `"memory"`, whatever
+the runner confines; or it runs in the runner, `runs` `"jail"` when the question says nothing, or is
 bh-02's own tool bounded to the session's jail and bh-02's own state, `runs` `"harness"`, and the
 runner confines it). Asking is not the rule's: the loop puts each call the rule does not let run
 unasked to the person (`{"name", "input", "runs", "title", "lines", ...}`: a call to a tool that

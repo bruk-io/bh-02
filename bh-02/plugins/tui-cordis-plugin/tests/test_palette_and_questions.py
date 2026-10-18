@@ -45,10 +45,10 @@ async def _armed(pilot: Pilot[None]) -> None:
     raise AssertionError("the approval modal never began answering keys")
 
 
-def _ask(app: BhApp, request: Mapping[str, Any]) -> asyncio.Future[bool]:
+def _ask(app: BhApp, question: Mapping[str, Any]) -> asyncio.Future[bool]:
     answer = app.bridge.question()
     assert answer is not None
-    app.post_message(Asked(request, answer))
+    app.post_message(Asked(question, answer))
     return answer
 
 
@@ -218,7 +218,7 @@ async def test_questions_are_asked_one_at_a_time_in_order() -> None:
         await pilot.press("y")
         assert await asyncio.wait_for(first, 1) is True
         await _settle(pilot)
-        assert isinstance(app.screen, ApprovalScreen) and app.screen.request["input"] == {"code": "2"}
+        assert isinstance(app.screen, ApprovalScreen) and app.screen.question["input"] == {"code": "2"}
         await _armed(pilot)
         await pilot.press("n")
         assert await asyncio.wait_for(second, 1) is False
@@ -314,14 +314,14 @@ async def test_ctrl_c_refuses_only_the_stopped_reply_s_questions_and_a_backgroun
         running_reply = asyncio.ensure_future(reply())
         parent = _ask(app, {"name": "python", "input": {"code": "2"}})
         await _settle(pilot)
-        assert isinstance(app.screen, ApprovalScreen) and app.screen.request["agent"]["name"] == "general-2"
+        assert isinstance(app.screen, ApprovalScreen) and app.screen.question["agent"]["name"] == "general-2"
         await pilot.press("ctrl+c")
         await asyncio.wait_for(running_reply, 1)
         assert await asyncio.wait_for(parent, 2) is False  # the parent's own: no
         await _settle(pilot, 6)
         assert answered == []  # the foreground child's: withdrawn, not answered
         assert not background.done()  # the background child's: still open, still up
-        assert isinstance(app.screen, ApprovalScreen) and app.screen.request["agent"]["name"] == "general-2"
+        assert isinstance(app.screen, ApprovalScreen) and app.screen.question["agent"]["name"] == "general-2"
         await _armed(pilot)
         await pilot.press("y")
         assert await asyncio.wait_for(background, 2) is True

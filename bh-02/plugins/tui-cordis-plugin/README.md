@@ -47,7 +47,7 @@ question just shown answers nothing for 0.4 s (`GRACE`; `BhApp(grace=...)`), its
 dimmed meanwhile: a person typing when it comes up ("Run n...") must not decline it with the
 `n`. Those keys are dropped, not handed to the composer: the modal holds focus, and a message
 half-typed around a question is less surprising cut short than finished with stray letters.
-Ctrl-C still stops the reply at once. A sub-agent's question (a request carrying `agent`, its
+Ctrl-C still stops the reply at once. A sub-agent's question (one carrying `agent`, its
 name and type) says who asks above it: `Agent general-1 (general) asks:`.
 
 The frame. `tui:palette` pushes the `commands` broker's `specs` method itself, which the

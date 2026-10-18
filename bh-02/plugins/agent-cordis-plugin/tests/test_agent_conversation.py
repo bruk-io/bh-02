@@ -244,7 +244,7 @@ async def test_the_new_conversation_is_bh_02_s_message_then_the_summary_and_the_
             return "the prompt as it reads now"
 
     class Approved:
-        async def approve(self, request: Json) -> bool:
+        async def approve(self, question: Json) -> bool:
             return True
 
     async def nothing(input: Json) -> Json:

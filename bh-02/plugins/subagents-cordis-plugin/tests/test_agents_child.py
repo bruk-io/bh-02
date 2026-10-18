@@ -135,12 +135,12 @@ class _Screen:
     def __init__(self) -> None:
         self.asked: list[Mapping[str, Any]] = []
 
-    async def confirm(self, request: Mapping[str, Any]) -> bool:
-        self.asked.append(request)
+    async def confirm(self, question: Mapping[str, Any]) -> bool:
+        self.asked.append(question)
         return True
 
 
-async def test_the_asker_puts_only_a_labelled_request_to_the_person() -> None:
+async def test_the_asker_puts_only_a_labelled_question_to_the_person() -> None:
     """A child's question reaches the person only labelled with who asks; an unlabelled one is a
     no, never put to them."""
     screen = _Screen()

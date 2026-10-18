@@ -428,47 +428,47 @@ def newest_reply(blocks: Iterable[tuple[str, str]]) -> str | None:
     return "\n\n".join(reversed(said)) or None
 
 
-def approval_title(request: Event) -> str:
-    """The question an approval asks, in one line, with how long what it shows is: the request's
+def approval_title(question: Event) -> str:
+    """The question an approval asks, in one line, with how long what it shows is: the question's
     own `title` (a tool's call as its registration shows it, an extension to load), else run this
     code."""
-    lines = approval_lines(request)
+    lines = approval_lines(question)
     size = f"{len(lines)} line{'s' if len(lines) != 1 else ''}"
-    if title := str(request.get("title") or ""):
-        question = title.removesuffix("?")
-        return f"{question} ({size}){title[len(question) :]}" if lines else title
-    return f"Run this {request.get('name', '?')} code ({size})?"
+    if title := str(question.get("title") or ""):
+        stem = title.removesuffix("?")
+        return f"{stem} ({size}){title[len(stem) :]}" if lines else title
+    return f"Run this {question.get('name', '?')} code ({size})?"
 
 
-def asked_by_a_sub_agent(request: Event) -> bool:
-    """Whether a sub-agent asks (the request's `agent` names one: CONTRACTS.md, request). Ctrl-C
+def asked_by_a_sub_agent(question: Event) -> bool:
+    """Whether a sub-agent asks (the question's `agent` names one: CONTRACTS.md, question). Ctrl-C
     never answers its question: the reply it stops withdraws its foreground child's, and a
     background child's stays queued."""
-    agent = request.get("agent")
+    agent = question.get("agent")
     return isinstance(agent, Mapping) and bool(agent.get("name"))
 
 
-def approval_heading(request: Event) -> str:
+def approval_heading(question: Event) -> str:
     """The question an approval asks (`approval_title`), after who asks when a sub-agent does
-    (the request's `agent`, its name and type: CONTRACTS.md, request)."""
-    agent = request.get("agent")
-    if isinstance(agent, Mapping) and asked_by_a_sub_agent(request):
-        return f"Agent {agent.get('name')} ({agent.get('type', '?')}) asks:\n{approval_title(request)}"
-    return approval_title(request)
+    (the question's `agent`, its name and type: CONTRACTS.md, question)."""
+    agent = question.get("agent")
+    if isinstance(agent, Mapping) and asked_by_a_sub_agent(question):
+        return f"Agent {agent.get('name')} ({agent.get('type', '?')}) asks:\n{approval_title(question)}"
+    return approval_title(question)
 
 
-def approval_lines(request: Event) -> list[str]:
-    """What an approval shows, whole (nobody approves code unseen): the request's own `lines` (a
+def approval_lines(question: Event) -> list[str]:
+    """What an approval shows, whole (nobody approves code unseen): the question's own `lines` (a
     tool's call as its registration shows it), else the code its input carries."""
-    if isinstance(lines := request.get("lines"), list | tuple):
+    if isinstance(lines := question.get("lines"), list | tuple):
         return [str(line) for line in lines]
-    input: Mapping[str, Any] = request.get("input") or {}
+    input: Mapping[str, Any] = question.get("input") or {}
     return str(input.get("code") or "").strip("\n").splitlines()
 
 
-def approval_language(request: Event) -> str:
-    """The language an approval's lines are highlighted as: the request's `language`, else Python."""
-    return str(request.get("language") or "python")
+def approval_language(question: Event) -> str:
+    """The language an approval's lines are highlighted as: the question's `language`, else Python."""
+    return str(question.get("language") or "python")
 
 
 def jail_forms(confined: bool, report: Mapping[str, str]) -> tuple[str, ...]:

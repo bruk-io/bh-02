@@ -15,7 +15,7 @@ type Json = Mapping[str, Any]
 class _Screen:
     """The parent's `output`: the person says yes, and what is shown is dropped."""
 
-    async def confirm(self, request: Json) -> bool:
+    async def confirm(self, question: Json) -> bool:
         return True
 
     async def show(self, events: AsyncIterator[Json]) -> None:

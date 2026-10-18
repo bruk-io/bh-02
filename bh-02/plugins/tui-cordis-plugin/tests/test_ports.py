@@ -90,7 +90,7 @@ async def test_a_question_nobody_can_answer_is_a_no() -> None:
     asking = asyncio.ensure_future(output.confirm({"name": "python", "input": {"code": "1"}}))
     await asyncio.sleep(0)
     (asked,) = posted.messages
-    assert isinstance(asked, Asked) and asked.request["name"] == "python"
+    assert isinstance(asked, Asked) and asked.question["name"] == "python"
     bridge.end()  # the app left with the modal up
     assert await asking is False
     assert await output.confirm({"name": "python", "input": {}}) is False  # nothing posted now

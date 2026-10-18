@@ -383,16 +383,16 @@ class BhApp(App[None]):
                 self.post_message(Withdrawn(answer))
 
         answer.add_done_callback(withdrawn)
-        self._queued.append((message.request, answer))
+        self._queued.append((message.question, answer))
         self._ask_next()
 
     def _ask_next(self) -> None:
         """Put the oldest question still waiting in a modal, unless one is up."""
         while self._asking is None and self._queued:
-            request, answer = self._queued.popleft()
+            question, answer = self._queued.popleft()
             if answer.done():
                 continue
-            screen = ApprovalScreen(request, grace=self.grace)
+            screen = ApprovalScreen(question, grace=self.grace)
             self._asking = (screen, answer)
             self.query_one(Completions).close()
             self.push_screen(screen, self._answerer(answer))
@@ -534,11 +534,11 @@ class BhApp(App[None]):
     def _open_questions(self) -> list[asyncio.Future[bool]]:
         """Every question not yet answered that Ctrl-C answers no: the one up, then the queued
         ones, but a sub-agent's."""
-        shown = [(self._asking[0].request, self._asking[1])] if self._asking is not None else []
+        shown = [(self._asking[0].question, self._asking[1])] if self._asking is not None else []
         return [
             answer
-            for request, answer in [*shown, *self._queued]
-            if not answer.done() and not render.asked_by_a_sub_agent(request)
+            for question, answer in [*shown, *self._queued]
+            if not answer.done() and not render.asked_by_a_sub_agent(question)
         ]
 
     def _decline(self, answers: Sequence[asyncio.Future[bool]]) -> None:
