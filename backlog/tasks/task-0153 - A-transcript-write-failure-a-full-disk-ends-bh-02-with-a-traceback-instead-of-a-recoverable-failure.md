@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 13:24'
-updated_date: '2026-10-18 21:36'
+updated_date: '2026-10-18 21:37'
 labels:
   - agent
   - chat
@@ -106,4 +106,72 @@ INFO    -  Documentation built in 4.32 seconds
 ```
 
 Review: not closed. Full scripts/check exit 0 and both criteria met, but close-task refuses: a bug needs its repro recorded (record-check TASK-0153 --repro -- <loop test that failed without the fix>). The worker's planted check is described in prose only. No code findings.
+
+Repro at dff00254afd7, test files: bh-02/plugins/agent-cordis-plugin/tests/test_loop.py; command: `uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_loop.py::test_a_reply_whose_entries_could_not_be_written_is_a_recoverable_failure_with_nothing_after_it bh-02/plugins/agent-cordis-plugin/tests/test_loop.py::test_a_reply_over_a_file_that_is_a_directory_ends_with_the_failure_the_person_is_shown -q -p no:cacheprovider` exited 1
+
+(45 earlier lines omitted)
+```text
+        `append` the thread had already failed before or at the flush at its end, whichever the thread
+        was first to; the file is named and so is the error of the open."""
+        path = tmp_path / "transcript.jsonl"
+        path.mkdir()
+        transcript = FileTranscript(str(path))
+        scripted = Scripted([text("hi")], [text("never asked")])
+        loop = LoopModel(scripted, as_tool(Shouting()), transcript, Confined())
+        with pytest.raises(TranscriptWriteFailed, match="Is a directory") as failed:
+>           await _collect(loop, "go")
+
+bh-02/plugins/agent-cordis-plugin/tests/test_loop.py:1422: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+bh-02/plugins/agent-cordis-plugin/tests/test_loop.py:167: in _collect
+    return "".join([str(e["text"]) async for e in model.reply(message) if e["type"] == "text"])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+bh-02/plugins/agent-cordis-plugin/src/agent_cordis_plugin/loop.py:745: in reply
+    await self._flushed()
+bh-02/plugins/agent-cordis-plugin/src/agent_cordis_plugin/loop.py:755: in _flushed
+    await self._transcript.flush()
+bh-02/plugins/agent-cordis-plugin/src/agent_cordis_plugin/transcript.py:254: in flush
+    await self._appender.flush()
+libs/host-paths/src/host_paths/appender.py:132: in flush
+    self._raise()
+libs/host-paths/src/host_paths/appender.py:171: in _raise
+    raise self._failed.error
+bh-02/plugins/agent-cordis-plugin/src/agent_cordis_plugin/loop.py:742: in reply
+    async for event in events:
+bh-02/plugins/agent-cordis-plugin/src/agent_cordis_plugin/loop.py:777: in _reply
+    self._transcript.append(_asked(message, dated, aside, at))
+bh-02/plugins/agent-cordis-plugin/src/agent_cordis_plugin/transcript.py:229: in append
+    self._appender.append(f"{json.dumps(message)}\n".encode())
+libs/host-paths/src/host_paths/appender.py:118: in append
+    self._raise()
+libs/host-paths/src/host_paths/appender.py:171: in _raise
+    raise self._failed.error
+libs/host-paths/src/host_paths/appender.py:191: in _write
+    self._fd = self._hold()
+               ^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <host_paths.appender.Appender object at 0x7f149a51ae90>
+
+    def _hold(self) -> int:
+        """Open the file, on the calling thread, and make it the one this appender means (the file
+        found at the path when it was made, if there was one, else the one opened, made if need
+        be).
+    
+        Raises:
+            Replaced: the file opened is not the one found when the appender was made.
+        """
+>       fd = os.open(self._path, _APPEND | (os.O_EXCL if self._new else 0), _MODE)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IsADirectoryError: [Errno 21] Is a directory: '/tmp/pytest-of-root/pytest-2615/test_a_reply_over_a_file_that_0/transcript.jsonl'
+E       appending to /tmp/pytest-of-root/pytest-2615/test_a_reply_over_a_file_that_0/transcript.jsonl failed: this write and every one queued after it were dropped, so the file ends before them
+
+libs/host-paths/src/host_paths/appender.py:215: IsADirectoryError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/agent-cordis-plugin/tests/test_loop.py::test_a_reply_whose_entries_could_not_be_written_is_a_recoverable_failure_with_nothing_after_it
+FAILED bh-02/plugins/agent-cordis-plugin/tests/test_loop.py::test_a_reply_over_a_file_that_is_a_directory_ends_with_the_failure_the_person_is_shown
+2 failed in 0.39s
+```
+
+Review round 1 (blocking: no repro recorded). Fixed by recording it, no code or test changed (git diff dff0025 over bh-02/ and libs/ is empty). With the 'except OSError' branch of FileTranscript._refusing planted out (replaced by 'except ZeroDivisionError', source edited and uncommitted, test files clean), ran record-check TASK-0153 --repro -- uv run pytest test_loop.py::<the reply whose entries could not be written> test_loop.py::<the reply over a file that is a directory>: both FAILED (bare NotADirectoryError / IsADirectoryError, not Recoverable), exit 1, recorded above at dff00254afd7 (the commit this round started from, still an ancestor of the squashed commit, so close-task can diff the test file against it). The source was then restored with git checkout; the tree held only the task file as the auto-commit. With the guard restored: uv run pytest test_loop.py test_agent_transcript.py test_agent_conversation.py: 119 passed, 1 skipped (the existing /dev/full skip), exit 0. board-check close TASK-0153: 'ok: TASK-0153 can close'. The TUI nit (no test drives the TUI to show the notice) stands, as the reviewer left it. scripts/check not re-run: no code changed since its exit 0 above.
 <!-- SECTION:NOTES:END -->
