@@ -25,7 +25,7 @@ Follow-up from TASK-0144. bh-02 trajectory tells a row's first load by its row i
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 A resumed session's boot is one line on bh-02 trajectory, apart from a reload of a running session's row (a restart, a dependency replaced)
-- [ ] #2 GLOSSARY.md and the docs page for bh-02 trajectory say what the marker and the line mean; scripts/check passes
+- [x] #2 GLOSSARY.md and the docs page for bh-02 trajectory say what the marker and the line mean; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
