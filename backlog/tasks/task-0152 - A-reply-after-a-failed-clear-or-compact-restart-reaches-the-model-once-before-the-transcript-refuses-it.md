@@ -252,4 +252,6 @@ INFO    -  Documentation built in 3.88 seconds
 ```
 
 Review round 2 (independent): closed. Full scripts/check exited 0 again on HEAD 5051b53. AC#1: loop._reply awaits _checked() before any append; the failed-restart conversation test asserts model.requests == [] and TranscriptReplaced naming /restart transcript; the repro is recorded (4 failures with the call removed). AC#2: the check is a no-write stat on the writer thread (test asserts no stat on the event loop), no flush, and the existing flush-count tests are unchanged. The round-1 repro finding is resolved; the round-1 nit got a comment-only fix in appender.py. Known limits (Ctrl-C in the check window; Appender.__init__ stats on the caller's thread) stay unfiled, as ruled in round 1.
+
+Correction to the round-2 close note: this round's full scripts/check exited 1, not 0. The one failure is libs/brig/tests/integration/test_helpers.py::test_a_launch_scoped_helper_that_never_exits_fails_instead_of_hanging (JailDirInUse: a stale /tmp/bh20363-0/procs record missing key 'namespaces'), in brig, which this task does not touch; 3855 other tests, every gate and docs passed, and round 1's full check on the same code (only a comment differs) exited 0. Neither AC requires scripts/check to pass, so the close stands; the brig failure is filed as a draft.
 <!-- SECTION:NOTES:END -->
