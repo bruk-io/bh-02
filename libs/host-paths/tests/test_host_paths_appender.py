@@ -41,6 +41,27 @@ def _held(monkeypatch: pytest.MonkeyPatch, holds: bytes) -> tuple[threading.Even
     return reached, released
 
 
+def _closes_of(monkeypatch: pytest.MonkeyPatch, path: Path) -> list[int]:
+    """The descriptors of the file at `path` that get closed, as they are: `os.close` is replaced
+    for the whole process, so a close of any other descriptor (another test's, a thread's of
+    the worker) is let through and not recorded."""
+    file = path.stat()
+    closed: list[int] = []
+    real = os.close
+
+    def close(fd: int) -> None:
+        try:
+            ours = os.path.samestat(os.fstat(fd), file)
+        except OSError:  # not open (or not ours to look at): not the appender's descriptor
+            ours = False
+        if ours:
+            closed.append(fd)
+        real(fd)
+
+    monkeypatch.setattr(os, "close", close)
+    return closed
+
+
 def _full(monkeypatch: pytest.MonkeyPatch, *, after: int, once: bool = False) -> None:
     """The writes past the `after`th fail: the disk is full. With `once`, only the next one does
     (and there is room again after it)."""
@@ -260,9 +281,7 @@ async def test_close_waits_for_the_last_write_then_closes_the_file_and_takes_no_
 ) -> None:
     path = tmp_path / "log"
     appender = Appender.open(str(path))
-    closed: list[int] = []
-    real = os.close
-    monkeypatch.setattr(os, "close", lambda fd: (closed.append(fd), real(fd))[1])
+    closed = _closes_of(monkeypatch, path)
     reached, released = _held(monkeypatch, b"first")
     try:
         appender.append(b"first\n")
@@ -270,6 +289,7 @@ async def test_close_waits_for_the_last_write_then_closes_the_file_and_takes_no_
             await asyncio.to_thread(reached.wait, 10)
         closing = asyncio.ensure_future(appender.close())
         await asyncio.sleep(0.2)
+        os.close(os.open(os.devnull, os.O_RDONLY))  # someone else's close, as in a busy worker
         assert not closing.done() and closed == []  # not closed under a write still on its thread
     finally:
         released.set()
@@ -284,10 +304,9 @@ async def test_close_waits_for_the_last_write_then_closes_the_file_and_takes_no_
 async def test_the_file_is_closed_after_a_failure_too(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    appender = Appender.open(str(tmp_path / "log"))
-    closed: list[int] = []
-    real = os.close
-    monkeypatch.setattr(os, "close", lambda fd: (closed.append(fd), real(fd))[1])
+    path = tmp_path / "log"
+    appender = Appender.open(str(path))
+    closed = _closes_of(monkeypatch, path)
     _full(monkeypatch, after=0)
     appender.append(b"one\n")
     with pytest.raises(OSError):
