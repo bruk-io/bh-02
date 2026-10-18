@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
-updated_date: '2026-10-18 14:34'
+updated_date: '2026-10-18 14:38'
 labels:
   - app
   - size-3
@@ -46,4 +46,70 @@ What changed: bh_02/trajectory.py: _reloads marks each reload of a row id not ye
 Evidence: tests in test_trajectory.py (first flag by time, failed never first, named-by-failing; boot fold with count and span; reload/failure between runs; sub-agent fold under its line and not cut by the session's reload; a late row its own line; no conversation; live hold-back; key stable as rows come up; control characters), test_trajectory_view.py (a sub-agent's rows coming up while following printed once with all 3), test_row_log.py (the rows.jsonl the real shell writes on a boot and a /clear: one first-load line with the exact count of distinct rows, then one row reload line per restarted row). Existing tests with fresh row ids were updated to the new labels. Planted violations seen failing: first forced False -> 16 tests failed (the new fold tests and the 8 updated ones); hold-back removed -> the live test and the follow test failed (the follow one would print the sub-agent's line with 2 rows, never updated). scripts/check bh-02/app: first run lint found 3 over-long lines (fixed), types, 347 tests, gates (all five) and docs ok; rerun --no-gates --no-docs exit 0; scripts/arch-check --no-fix exit 0.
 
 Limit found: --resume goes on in the same rows.jsonl, so a resumed run's boot reads as reloads (every row seen before); documented in command-line.md; filed as TASK-0155 (a marker line when the log is opened), not started. decision-0009's 'each row reload' is left as written. AC #3 left unticked: 'scripts/check passes' is the reviewer's to prove (member check and docs build passed).
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+...............s.s....sss.s.s.s...sss...ss.s.s.s.s.s.ss.s.s..sss......s. [ 49%]
+.s...................................................................... [ 51%]
+.............................................s.......................... [ 53%]
+................................................ssssssssssssssssssssssss [ 54%]
+sssssssssssssssssssssssssssssssssssssssssss............................. [ 56%]
+.sssssssss..........s.....ss............................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+......................sss............................................... [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................s............... [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+...................................................                      [100%]
+3823 passed, 118 skipped in 201.74s (0:03:21)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.80 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
