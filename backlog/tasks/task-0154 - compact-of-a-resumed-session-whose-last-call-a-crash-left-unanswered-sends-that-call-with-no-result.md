@@ -3,7 +3,7 @@ id: TASK-0154
 title: >-
   /compact of a resumed session whose last call a crash left unanswered sends
   that call with no result
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 13:55'
@@ -220,4 +220,6 @@ INFO    -  Documentation built in 4.07 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 2: full scripts/check exited 0 again (no code change since round 1, git diff d7e74a4..HEAD outside backlog/ empty). The round-1 blocker (no recorded repro) is answered: the AC1 test recorded failing against the pre-fix source. AC1-3 met. No other findings.
 <!-- SECTION:NOTES:END -->
