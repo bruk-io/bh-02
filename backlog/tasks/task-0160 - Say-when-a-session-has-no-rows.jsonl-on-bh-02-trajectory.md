@@ -22,7 +22,7 @@ Follow-up from TASK-0149's ruling (Fable, 2026-10-18). The shell makes <session>
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 bh-02 trajectory prints one line, rows.jsonl not found: row reloads are not shown, for a session with a conversation and no rows.jsonl, and nothing new otherwise (tests)
-- [ ] #2 test_trajectory_view.py's no-rows test says what the case is; scripts/check passes
+- [x] #2 test_trajectory_view.py's no-rows test says what the case is; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
