@@ -28,7 +28,7 @@ The owner's rule (root CLAUDE.md, Conventions, 2026-10-18): no backwards compati
 <!-- AC:BEGIN -->
 - [x] #1 _is_seed recognises a seed only by its seed field; the wording check and its test (test_agent_conversation.py, a file from before the field) are gone
 - [x] #2 bh-02 trajectory has no code or docstring for a transcript from before the records, and the tests that pin one are gone (test_trajectory.py, test_trajectory_view.py, and the agent plugin's test that a transcript from before the records resumes unchanged); where a field is legitimately absent today (decision-0009 says when), that stays
-- [ ] #3 decision-0009 is amended where it promises old sessions read unchanged, citing the rule; the notes say which old files stop working; scripts/check passes
+- [x] #3 decision-0009 is amended where it promises old sessions read unchanged, citing the rule; the notes say which old files stop working; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
