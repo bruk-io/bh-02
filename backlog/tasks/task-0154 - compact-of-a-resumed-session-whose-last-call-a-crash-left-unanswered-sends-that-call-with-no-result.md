@@ -25,7 +25,7 @@ Found doing TASK-0142, which answers a call a crash left unanswered at the loop'
 <!-- AC:BEGIN -->
 - [x] #1 A test runs /compact over a transcript cut after a step's calls (one answered, one not) and shows the summary request the model receives has a result for every call, in the calls' order, worded as the loop's _LOST answer
 - [x] #2 A test shows /compact over a whole transcript sends the request it sent before, unchanged
-- [ ] #3 scripts/check passes
+- [x] #3 scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
