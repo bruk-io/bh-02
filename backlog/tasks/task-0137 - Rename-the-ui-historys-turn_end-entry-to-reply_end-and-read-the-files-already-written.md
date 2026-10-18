@@ -3,7 +3,7 @@ id: TASK-0137
 title: >-
   Rename the ui history's turn_end entry to reply_end, and read the files
   already written
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 04:15'
@@ -115,4 +115,6 @@ INFO    -  Documentation built in 3.49 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewed: full scripts/check exit 0, tree clean after it. git grep turn_end -- bh-02 finds nothing. Writer (app.py), readers (frame.total_usage, chat_view replay), history.py doc, README and tests all use reply_end. Criterion 2 met by the recorded owner choice (no backwards compatibility) plus a new round-trip resume test. Nit, not filed: AC1 names 'the transcript widget', which is now chat_view.py. Old sessions on disk lose reply boundaries on resume, accepted by the owner.
 <!-- SECTION:NOTES:END -->
