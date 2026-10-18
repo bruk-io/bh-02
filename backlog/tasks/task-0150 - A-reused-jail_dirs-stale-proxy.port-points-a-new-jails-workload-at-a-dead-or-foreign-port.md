@@ -3,7 +3,7 @@ id: TASK-0150
 title: >-
   A reused jail_dir's stale proxy.port points a new jail's workload at a dead or
   foreign port
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:55'
@@ -210,4 +210,6 @@ INFO    -  Documentation built in 4.11 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 2: closed. The full scripts/check exits 0 again (recorded); code unchanged since round 1, which found no code findings. The round-1 blocker (no recorded repro) is cleared: the repro is recorded at b4812b1f5959 (pre-fix code plus the byte-identical test), failing with ConnectionRefusedError(111) as the bug describes, and board-check close reports ok. AC1-3 met. Follow-up already filed by the worker: TASK-0164.
 <!-- SECTION:NOTES:END -->
