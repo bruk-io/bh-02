@@ -302,7 +302,7 @@ def test_a_log_that_stopped_is_told_with_its_file_when_it_failed_the_error_and_w
     assert log_stopped("general-1", "general", _LOG, full) == (
         f"agent general-1 (general): its event log {_LOG} stopped being written (it failed at "
         "2026-10-18T20:11:21.345Z): No space left on device; `bh-02 watch` shows nothing after that "
-        "and never sees the agent end, so it must be left with Ctrl-C"
+        "and never sees the agent end: it ends when the session is no longer running, or on Ctrl-C"
     )
 
 

@@ -1758,7 +1758,8 @@ async def test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_bef
     )
     assert re.search(r"failed at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z\)", said)
     assert "is no longer the file this appender writes to" in said  # the error (Replaced)
-    assert "`bh-02 watch` shows nothing after that" in said and said.endswith("must be left with Ctrl-C")
+    assert "`bh-02 watch` shows nothing after that" in said
+    assert said.endswith("it ends when the session is no longer running, or on Ctrl-C")
     assert screen.notes().index(said) < screen.notes().index("agent general-1 (general) ended; it used:")
     assert not log.exists()  # nothing was written in its place
     await _bounded(rt.shutdown())

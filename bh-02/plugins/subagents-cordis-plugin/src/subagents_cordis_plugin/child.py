@@ -555,11 +555,11 @@ def _stamp(moment: datetime.datetime) -> str:
 def log_stopped(name: str, kind: str, path: str, stopped: Failure) -> str:
     """The note for a child whose event log (`path`) stopped being written: the file, when the write
     failed (the appender's own time, not when the row heard of it), the error, and that `bh-02 watch`
-    shows nothing after it and, since the log never ends, must be left with Ctrl-C. Told once, when
-    the child's run ends."""
+    shows nothing after it and, since the log never ends, ends when the session is no longer running,
+    or on Ctrl-C. Told once, when the child's run ends."""
     why = stopped.error.strerror or str(stopped.error)
     return (
         f"agent {name} ({kind}): its event log {path} stopped being written (it failed at "
         f"{_stamp(stopped.at)}): {why}; `bh-02 watch` shows nothing after that and never sees the "
-        "agent end, so it must be left with Ctrl-C"
+        "agent end: it ends when the session is no longer running, or on Ctrl-C"
     )
