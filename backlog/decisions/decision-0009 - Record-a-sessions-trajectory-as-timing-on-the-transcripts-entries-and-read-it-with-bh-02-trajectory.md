@@ -45,7 +45,7 @@ What the loop hands the model's `complete` for a step is exactly `request_for(en
 
 ### The records
 
-Each entry is appended once and never changed. Every new field is optional: a transcript from before this reads as it did, and its trajectory shows no times. Each record is a closed TypedDict in the agent plugin, listed in CONTRACTS.md (transcript).
+Each entry is appended once and never changed. A field is left out only where there is nothing to record (a call refused before approval has no `answer`, a step that got no chunk has no `first_chunk`, the answer to a message the model was never asked has no `step`). A transcript written before these records is promised nothing: no code reads or translates it (see Amended). Each record is a closed TypedDict in the agent plugin, listed in CONTRACTS.md (transcript).
 
 **Time is data.** `at` is UTC ISO-8601 to the millisecond with `Z` (`2026-10-18T03:47:12.345Z`), so it sorts as text. Durations are seconds from a monotonic clock, rounded to the millisecond. The loop takes one clock value with `now()` (aware UTC) and `monotonic()`. Today's date derives from `now()`, replacing the loop's `today` function, and tests give a fake clock.
 
@@ -118,7 +118,7 @@ The ui's history (`events.jsonl`); the event log, which only changes its writer;
 
 ## Consequences
 
-- No new log, row, key or file beside the transcript, except `rows.jsonl`. Old sessions read unchanged, with no migration and no format header.
+- No new log, row, key or file beside the transcript, except `rows.jsonl`. A session written before these records stops working with the code that reads them: `/compact` knows a seed by its `seed` field alone, and `bh-02 trajectory` has no case for a transcript that has no times (see Amended). No migration and no format header.
 - The loop gains a clock and two collectors. `Asked.approve` returns `Answer`, and the four test fakes that return a bool change with it. Both providers add `model` to their `usage` chunk and expose `settings`. The `agent` tool's result gains `child`.
 - `host_paths` gains an appender that the transcript, the event log and the shell share. The transcript's writes leave the event loop.
 - `/compact` keeps what the person asked to keep, and records its step.
@@ -129,9 +129,13 @@ The ui's history (`events.jsonl`); the event log, which only changes its writer;
   - **Two rows, a log and a transcript view:** the transcript's restart on `/clear` and `/compact` stays, and `memory:on_touch` and `memory:auto` rely on it.
   - **A full request envelope per step:** settings are recorded when they change, as dsh records a request header. The rest rebuilds from the entries.
   - **A timed token stream per step:** first-chunk and end times give the timings asked for.
-  - **A format header and refusal rules:** every field is optional.
+  - **A format header and refusal rules:** there is no old form to tell from the new one (see Amended).
   - **Changing what `/compact` offers** (`begun` instead of `tools.specs()`): possibly worth doing, but not this decision's.
 - Noted on the intent, not on the board (the owner's call):
   - a torn last line stops a resume;
   - a process that dies mid-call leaves the call unanswered;
   - two processes can append to one session.
+
+## Amended
+
+2026-10-18 (TASK-0156), by the owner's rule, root CLAUDE.md, Conventions, "No backwards compatibility before a supported release": until there is a release the owner plans to support, a change to a stored format breaks what came before: no code reads the old form or translates it, and no test pins it. This decision had promised that old sessions read unchanged: the records' "every new field is optional: a transcript from before this reads as it did, and its trajectory shows no times", and Consequences' "old sessions read unchanged". That promise is withdrawn. A field is still absent where the record above says it is (a call refused before approval has no `answer`; the answer to a message the model was never asked has no `step`), and the reader of the files still leaves out a field that is missing or of the wrong type, since the files are the person's and a hand-edited or half-written one must not stop the view. What no longer works is a session written before the records: `/compact` no longer knows a seed by its wording, so a conversation compacted before the `seed` field is compacted again like any other, summarising the summary; and `bh-02 trajectory` has no code or test for a transcript with no `at`, so one prints as the reader finds it, with whatever times it lacks left out.

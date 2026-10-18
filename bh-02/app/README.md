@@ -191,7 +191,7 @@ is, a pure core and a thin shell:
   `bh_02` imports no plugin (`plugin-layering`), so it reads the entries as TypedDicts of its own; a
   test holds them to what the agent plugin's loop writes (`test_trajectory_records.py`). A line that is
   not a JSON object (the loop's half-written last line) is skipped, a field that is missing or of the
-  wrong type is left out, and a conversation from before the records prints with no times.
+  wrong type is left out.
 - `viewing.py` is the shell: it lists a session's directory and reads each file, `rows.jsonl` included, through
   `host_paths` (`directory_beneath`, `read_beneath`: beneath the sessions' state, through no link, with a
   cap), takes a sub-agent only from the names in `agents/` that `bh-02 watch` would accept, and runs the

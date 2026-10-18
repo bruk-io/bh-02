@@ -1,9 +1,9 @@
 """What the loop records on a transcript's entries besides the conversation: when, how long, who answered.
 
-Each entry is appended once and never changed, and every field here is optional, so a transcript
-from before them reads as it did. They are the loop's own: a provider sends an entry's `role`,
-`content` and the keys it reads, never these (CONTRACTS.md: message, step record, call record;
-decision-0009).
+Each entry is appended once and never changed, and a field is left out only where there is nothing
+to record (a step that got no chunk has no `first_chunk`, a call refused before approval has no
+`answer`). They are the loop's own: a provider sends an entry's `role`, `content` and the keys it
+reads, never these (CONTRACTS.md: message, step record, call record; decision-0009).
 
 Time is data. `at` is UTC ISO-8601 to the millisecond with `Z` (`2026-10-18T03:47:12.345Z`), so it
 sorts as text (`stamp`); a duration is seconds from a monotonic clock, rounded to the

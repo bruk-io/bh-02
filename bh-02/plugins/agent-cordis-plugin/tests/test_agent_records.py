@@ -402,39 +402,6 @@ def test_a_step_record_holds_only_what_it_was_given() -> None:
     assert whole["model"] == "m-1" and whole["tool_changes"] == "listed"
 
 
-async def test_a_transcript_from_before_the_records_resumes_and_is_sent_exactly_as_it_was(
-    tmp_path: Path,
-) -> None:
-    """Nothing is added to the entries already there: the model is sent the old conversation as it
-    was written, and the new message after it, which has its own records."""
-    path = tmp_path / "transcript.jsonl"
-    old: list[Json] = [
-        {"role": "system", "content": "the prompt"},
-        {"role": "tools", "tools": [dict(PYTHON)]},
-        {"role": "user", "content": "(Today's date: 2026-10-06.)\n\nfind x", "today": "2026-10-06"},
-        {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [{"id": "c1", "name": "python", "input": {"code": "x"}}],
-            "provider": {"role": "assistant", "content": None},
-        },
-        {"role": "tool", "content": "X", "call_id": "c1", "asides": []},
-        {"role": "assistant", "content": "x is X"},
-    ]
-    path.write_text("".join(json.dumps(entry) + "\n" for entry in old))
-    stepped = Stepped()
-    transcript = FileTranscript(str(path))
-    model = Configured(stepped, transcript, steps((0.5, text("fine"))), settings=SETTINGS)
-    await reply(loop(model, transcript, stepped, system=Prompt()), "and now?")
-    new, answer = transcript.messages[-2:]
-    ((held, messages, offered),) = model.requests
-    assert list(messages) == [old[0], *old[2:], new]  # the old conversation bit for bit, then the message
-    assert held == len(old) + 1 and list(offered) == [dict(PYTHON)]
-    assert new["at"] == START and answer["step"]["settings"] == SETTINGS  # none recorded in it yet: now
-    await transcript.flush()
-    assert list(FileTranscript(str(path)).messages[: len(old)]) == old  # the file keeps them as they were
-
-
 SLOW: Json = {
     "name": "slow",
     "description": "Take some time.",

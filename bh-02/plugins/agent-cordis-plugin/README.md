@@ -143,8 +143,9 @@ provider's `usage` chunk named), `usage` (the step's usage chunks summed, `cost_
 `records.summed`, which `/compact` sums its own with), `settings` (the model's optional `settings`
 attribute, only on a conversation's first step and when it differs from the last one recorded, found
 from the end of the transcript, so a resumed conversation compares with what it recorded) and
-`tool_changes` (only when `listed`). All are optional: an entry from before them reads as it did and is
-sent as it was, and no provider sends one (`replayed` and `records_for` read the keys they use). The
+`tool_changes` (only when `listed`). A field is left out only where there is nothing to record (a step
+that got no chunk has no `first_chunk`), and no provider sends one (`replayed` and `records_for` read
+the keys they use). The
 entry that answers a message the model was never asked (the reply stopped while the prompt was read)
 is no step and has no `step`.
 
@@ -253,7 +254,7 @@ conversation's start, a resume's too, so it says the namespace was kept at the c
 empties as the python tool's instructions say). The seed also records the step (decision-0009,
 Conversations): the message carries `at` and `seed: {keep}`, the text the person gave `/compact
 WHAT TO KEEP` (`""` for none), so no reader matches the seed's wording (`/compact` itself knows a
-seed by the field, and by the wording in a file from before it), and the summary carries the
+seed by the field alone), and the summary carries the
 step's record (`at`, `first_chunk`, `took`, `model`, `usage`, `settings`). The step is collected
 by the loop's own `Step` over the loop's own `Clock` (`summarise`), so one piece of code builds
 both records, with the model's `settings` and `tool_changes` read as the loop reads them; the summary is

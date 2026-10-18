@@ -9,8 +9,9 @@ files are found, read and printed by `bh_02.viewing` and `bh_02.cli`.
 bh_02 imports no plugin (plugin-layering), so the entries are read as TypedDicts of this module's
 own (`_Entry` and the records on it), which say what the agent plugin's `records.py` writes. The
 file is the person's, but a hand-edited or half-written one must not stop the view: every field is
-checked as it is read, and one that is missing or of the wrong type is left out, as it is in a
-transcript from before the records, which prints with no times.
+checked as it is read, and one that is missing or of the wrong type is left out. A field the loop
+leaves out for its own reason is left out of the line the same way: the answer to a message the model
+was never asked is no step and has no `step`, and a call refused before approval has no `answer`.
 
 A conversation is one transcript file. The live `transcript.jsonl` is the last, and the backups
 `/clear` and `/compact` keep (`transcript.jsonl.bak`, `.bak.2`, ...) come before it, in the order of

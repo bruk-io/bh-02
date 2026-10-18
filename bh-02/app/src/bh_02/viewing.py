@@ -104,7 +104,7 @@ def _read(root: Path, session: str) -> list[Transcript]:
 
 def _rows(root: Path, session: str) -> bytes:
     """The session's `rows.jsonl` (its row reloads), read through no link; nothing for a session that
-    has none (one from before they were kept, or whose rows have not loaded yet).
+    has none (one whose rows have not loaded yet).
 
     Raises:
         Refused: it is a link, or can't be read.

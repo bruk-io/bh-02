@@ -340,28 +340,25 @@ def test_backups_with_the_same_time_keep_the_order_they_were_made_in() -> None:
     assert names == ["transcript.jsonl.bak", "transcript.jsonl.bak.2", "transcript.jsonl.bak.10"]
 
 
-def test_a_conversation_from_before_the_records_prints_with_no_times_and_does_not_fail() -> None:
-    before = jsonl(
-        {"role": "system", "content": "the prompt"},
-        {"role": "user", "content": "(Today's date: 2026-10-07.)\n\nhello", "today": "2026-10-07"},
-        {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [{"id": "c1", "name": "python", "input": {"code": "1"}}],
-            "provider": {"anything": 1},
-        },
-        {"role": "tool", "content": "1", "call_id": "c1"},
-        {"role": "assistant", "content": "done"},
+def test_what_the_loop_leaves_out_for_its_own_reason_is_left_out_of_the_line() -> None:
+    """The answer to a message the model was never asked is no step and has no `step` record, and a
+    call refused before approval has an `at` and no `answer`: each line says what it has."""
+    refused = "(the reply was stopped while the prompt was read)"
+    data = jsonl(
+        user("hello", "2026-10-18T03:47:12.000Z"),
+        assistant(refused),
+        user("run it", "2026-10-18T03:48:00.000Z"),
+        assistant("", step("2026-10-18T03:48:01.000Z", first_chunk=0.5, took=1.0), ("c1", "nowhere")),
+        result("c1", {"at": "2026-10-18T03:48:02.000Z"}),
     )
-    lines = text(laid(file(before)), tz=None)
-    assert lines == [
-        "conversation 1  transcript.jsonl",
-        "  reply 1  hello",
+    assert text(laid(file(data))) == [
+        "conversation 1  transcript.jsonl  2026-10-17 20:47:12.000",
+        "  reply 1  2026-10-17 20:47:12.000  hello",
         "    step 1",
-        "      call python",
-        "    step 2",
+        "  reply 2  2026-10-17 20:48:00.000  run it",
+        "    step 1  20:48:01.000  first chunk 0.50s  generated in 0.50s",
+        "      call nowhere  20:48:02.000  not put to approval",
     ]
-    assert not any(re.search(r"\d\d:\d\d", line) for line in lines)
 
 
 def test_a_field_of_the_wrong_type_or_a_record_that_is_not_one_is_left_out_not_a_failure() -> None:
@@ -591,7 +588,7 @@ def test_a_reload_at_the_time_of_a_line_comes_after_it_and_one_with_no_line_afte
     ]
 
 
-def test_reloads_of_a_session_with_no_conversation_or_no_times_are_all_there_with_their_dates() -> None:
+def test_reloads_of_a_session_with_no_conversation_are_all_there_with_their_dates() -> None:
     rows = jsonl(
         reload_record("2026-10-18T03:00:00.000Z", "reload", "loop"),
         reload_record("2026-10-19T03:00:00.000Z", "failed", "ui", error="boom"),
@@ -600,8 +597,6 @@ def test_reloads_of_a_session_with_no_conversation_or_no_times_are_all_there_wit
         "row first load loop  2026-10-17 20:00:00.000",
         "row failed ui  2026-10-18 20:00:00.000  boom",
     ]
-    old = jsonl({"role": "user", "content": "from before the records"})  # no times to place a reload by
-    assert text(laid(file(old), rows=rows))[-2:] == text(laid(rows=rows))
 
 
 def test_a_reload_shows_its_date_only_when_it_is_not_the_day_of_the_line_it_is_placed_by() -> None:

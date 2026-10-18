@@ -169,7 +169,8 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
 - **A sub-agent** is shown under the call that started it, with its own times (a background agent
   keeps running after the call returns). One no call names, such as a call you interrupted, comes
   after the conversations, in the order of its own times.
-- **A session from before the records**, or a field the file does not have, prints with no times.
+- **A field the file does not have** is left out of its line: the answer to a message the model was
+  never asked is a step with no time, and a call refused before approval has no answer.
 - **`--follow`** reads every file again each second and prints the lines it has not printed, so a
   `/clear` or `/compact` that replaces the live file carries on with the new one. A call whose result
   is not written yet is printed once it is. Ctrl-C leaves it.

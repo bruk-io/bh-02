@@ -121,7 +121,7 @@ def test_the_sessions_row_reloads_are_read_with_its_files_and_shown_among_the_li
 
 
 def test_a_session_with_no_rows_file_is_shown_without_reloads(tmp_path: Path) -> None:
-    put(tmp_path / SESSION / "transcript.jsonl", *ONE)  # a session from before they were kept
+    put(tmp_path / SESSION / "transcript.jsonl", *ONE)  # its rows have not loaded yet
     assert not any("row " in text for text in lines_of(tmp_path))
 
 

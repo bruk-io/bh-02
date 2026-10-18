@@ -99,7 +99,7 @@ under the call that started it, each `/compact` with the summary step's time and
 (how many, and how long they took to load), the same for the rows a sub-agent came up with under it,
 and each row that reloaded, as a `/clear` or a `/model` switch makes it, or failed as a line of its
 own, so they are not buried under the start. Times are your local time. Conversations come in order, the ones `/clear` and `/compact` kept first, and `--follow`
-carries on across either. A session from before bh-02 recorded times prints without them.
+carries on across either.
 The [command line](../reference/command-line.md#bh-02-trajectory) shows the output and says what it
 holds back.
 

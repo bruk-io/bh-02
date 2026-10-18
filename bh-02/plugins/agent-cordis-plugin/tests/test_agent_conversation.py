@@ -216,13 +216,6 @@ async def _compact(
 
 
 AT = "2026-10-18T03:47:12.345Z"
-# What `seeded` wrote before it recorded `seed`: a file from then has the wording alone.
-LEGACY_SEEDED = (
-    "(bh-02: this conversation carries on from an earlier one, compacted (/compact) to the summary of "
-    "it you wrote, which follows. Your Python namespace was kept when it was compacted, holding what "
-    "the earlier inputs defined; it empties as your instructions about python say (bh-02 starting "
-    "again, a resumed session too), so check that a name is still there before relying on it.)"
-)
 
 
 def _seed(summary: str, keep: str = "") -> list[Json]:
@@ -539,19 +532,6 @@ async def test_however_many_usage_parts_a_provider_sends_the_note_comes_right_af
             "nothing to compact: nothing has been said since the last /compact",
         ),
         (
-            # a file from before the field: the seed has only its wording
-            lambda loader, path: path.write_text(
-                "".join(
-                    json.dumps(m) + "\n"
-                    for m in [
-                        {"role": "user", "content": LEGACY_SEEDED},
-                        {"role": "assistant", "content": "x holds 42"},
-                    ]
-                )
-            ),
-            "nothing to compact: nothing has been said since the last /compact",
-        ),
-        (
             lambda loader, path: path.write_text("{half a line\n"),
             "the conversation in {path} can't be read",
         ),
@@ -579,7 +559,7 @@ async def test_a_seed_with_a_message_after_it_compacts_again(tmp_path: Path) -> 
 
 
 async def test_a_conversation_that_only_reads_like_a_seed_is_compacted(tmp_path: Path) -> None:
-    """Neither the field nor the wording: two messages that are a person's and the model's."""
+    """No `seed` field: two messages that are a person's and the model's, whatever the first says."""
     path = _session(
         tmp_path,
         [
