@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:55'
-updated_date: '2026-10-18 22:35'
+updated_date: '2026-10-18 22:38'
 labels:
   - brig
   - size-3
@@ -106,4 +106,42 @@ INFO    -  Documentation built in 4.20 seconds
 ```
 
 Review (not closed): every AC is met and the full scripts/check exits 0, but close-task refuses a bug with no repro recorded. The repro (test_a_port_file_an_earlier_jail_left_is_not_the_port_the_workload_is_pointed_at) passes on HEAD, so record-check --repro cannot record it now; the worker's 6/6 failure before the fix is in the notes but was never recorded through record-check --repro. To close: the worker records the repro against the pre-fix code (e.g. a worktree at c57b8169 with the test applied), or the owner rules a 'No repro:' note acceptable. No code findings.
+
+Repro at b4812b1f5959, test files: libs/brig/tests/integration/test_connect_proxy_launch.py; command: `uv run pytest libs/brig/tests/integration/test_connect_proxy_launch.py::test_a_port_file_an_earlier_jail_left_is_not_the_port_the_workload_is_pointed_at -q` exited 1
+
+(26 earlier lines omitted)
+```text
+        planted = os.path.join(jail_dir, PORT_FILE)
+        with open(planted, "w") as fh:
+            fh.write(str(stale))
+        with pytest.raises(ConnectionRefusedError):
+            socket.create_connection(("127.0.0.1", stale), timeout=5).close()
+        assert _read_nonempty(planted) == str(stale), "the stale port file was not planted"
+    
+        out = os.path.join(jail_dir, "got")
+        jail, process = _run(
+            jail_dir,
+            ("localhost",),
+            _outcome_script(f"http://127.0.0.1:{origin.port}/x", out),
+            run_id,
+        )
+        try:
+            seen = _wait_file(out)
+            assert seen is not None, "the workload neither succeeded nor failed"
+>           assert seen.startswith("HTTP 403: "), (
+                f"the workload did not get a 403 from the proxy; it saw {seen!r} -- "
+                f"it was pointed at the stale port {stale} the earlier jail left"
+            )
+E           AssertionError: the workload did not get a 403 from the proxy; it saw "ERROR URLError(ConnectionRefusedError(111, 'Connection refused'))" -- it was pointed at the stale port 44641 the earlier jail left
+E           assert False
+E            +  where False = <built-in method startswith of str object at 0x7ff60e8e47a0>('HTTP 403: ')
+E            +    where <built-in method startswith of str object at 0x7ff60e8e47a0> = "ERROR URLError(ConnectionRefusedError(111, 'Connection refused'))".startswith
+
+libs/brig/tests/integration/test_connect_proxy_launch.py:354: AssertionError
+=========================== short test summary info ============================
+FAILED libs/brig/tests/integration/test_connect_proxy_launch.py::test_a_port_file_an_earlier_jail_left_is_not_the_port_the_workload_is_pointed_at
+1 failed in 0.55s
+```
+
+Round 2 (review finding: a bug closes with a recorded repro). No code changed; the finding was that the repro was never recorded with record-check --repro, and it cannot be recorded on HEAD because the test passes there. Recorded it against the code before the fix instead: a scratch git worktree at c57b8169 (the commit before the fix; brig imported from that worktree's own venv, uv sync --all-packages --offline, and I confirmed brig there has no ready_path), with only libs/brig/tests/integration/test_connect_proxy_launch.py taken from the branch HEAD (4c34d65) and committed there as b4812b1f5959 (parent c57b8169; git diff --quiet 4c34d65 b4812b1f5959 -- that file exits 0, so the recorded file is byte-identical to the one on this branch). Ran: python3 <philosophy>/scripts/record-check TASK-0150 --repro --root /home/user/bh-02 -- uv run pytest libs/brig/tests/integration/test_connect_proxy_launch.py::test_a_port_file_an_earlier_jail_left_is_not_the_port_the_workload_is_pointed_at -q. It failed as the bug says (the workload saw URLError(ConnectionRefusedError(111)) instead of the proxy's 403, pointed at the planted stale port), record-check exited 0 and the 'Repro at b4812b1f5959, test files: ...' note above is its record. Repeat runs on the same pre-fix worktree: 8 runs in all, 7 failed with ConnectionRefusedError(111), 1 passed (the race the task describes: when the proxy publishes before the wrap reads, the stale file is not read in time to matter), so the earlier note's '6 of 6' was the sample then, 7 of 8 is the sample now. Evidence this clears the finding: python3 <philosophy>/scripts/board-check close TASK-0150 prints 'ok: TASK-0150 can close' and exits 0, run after the scratch worktree was removed (git worktree remove, prune; git worktree list shows only the main checkout), so it does not depend on the worktree. The repro commit b4812b1f5959 is no longer on any branch (it was made in the scratch worktree and the branch history here is squashed to one commit), it is a loose object in this repository's .git; close-task's check (git diff --quiet b4812b1f5959 -- the test file) needs that object to still exist, so close before a git gc --prune would drop it. Nothing else was changed: the SPEC.md decision-204, the code and the tests are as the reviewer found them (the reviewer's full scripts/check, exit 0, is recorded above), so scripts/check was not re-run for this round. AC1-3 stay ticked on the evidence above and in round 1.
 <!-- SECTION:NOTES:END -->
