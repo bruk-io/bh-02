@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:55'
-updated_date: '2026-10-18 22:31'
+updated_date: '2026-10-18 22:35'
 labels:
   - brig
   - size-3
@@ -38,4 +38,70 @@ Found while fixing TASK-0140. connect_proxy's wrap (libs/brig/src/brig/mech/conn
 
 <!-- SECTION:NOTES:BEGIN -->
 Ruling: libs/brig/SPEC.md section 6, decision-204 (2026-10-18), option 1: Helper gains ready_path; HostRuntime.create removes every helper's declared ready file before it starts any helper (_remove_ready_files in run/host.py; FileNotFoundError ignored, a link removed not followed, any other OSError propagates with a note before anything is started). connect_proxy declares its port file. Chosen over the --ready-fd handshake (the port is wanted by a wrap rendered once by a pure compile(), so it would need a new run-time env channel, and create would block on every helper) and over a provenance check (mtime, pid or token comparisons are new ways to be wrong in the wrap that runs before every workload and fail open to the stale port; a file that does not exist cannot be read). decision-204 is the next free number in libs/brig (highest was 203; decision-0008 reserves 204 onward for new rulings). Code: mech/contract.py (Helper.ready_path, absolute-path guard), mech/connect_proxy.py, run/host.py. Tests: integration/test_connect_proxy_launch.py::test_a_port_file_an_earlier_jail_left_is_not_the_port_the_workload_is_pointed_at (plants proxy.port naming a closed port before Jail.create, with controls: port refused, file present at create, file replaced by the proxy's after); integration/test_helpers.py (stale ready file gone at the helper's own start for JAIL_LIFETIME and LAUNCH_SCOPED, neighbour kept, helper's own publish survives; an unremovable ready path refuses create with no helper started, with a same-test control); unit tests for the field and for connect_proxy declaring the port file. Evidence, AC2 seen failing: on the unchanged code the planted test failed 6 of 6 runs with the workload seeing URLError(ConnectionRefusedError(111)) instead of the proxy's 403; with the fix it passed 8 of 8 reruns of test_connect_proxy_launch.py. Mutation checks (scratch copy plus sha256, restored, hashes match): removing the _remove_ready_files call fails the planted test and 3 test_helpers cases; removing ready_path=port_path from connect_proxy fails the planted test and the unit test. The integration tests run in this container (bwrap present, uid 0; these tests use HostRuntime and no bwrap). AC3: scripts/check libs/brig exit 0 (format, lint, mypy strict, 1360 passed 111 skipped, gates all ok, docs ok; tokens skipped, no bh-01). Not covered, filed: TASK-0164 (proxy-decisions.jsonl is appended across a reused jail_dir and the egress reader folds an earlier jail's lines in). The full scripts/check was not run.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 46%]
+......................................................s..ss.....ss.s.s.s [ 48%]
+.s..ss...sss.s.s...sssss.s.s.ssss...........s........................... [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+...................sssssssssssssssssssssssssssssssssssssssssssssssssssss [ 55%]
+ssssssssssssss...............................ssssssssss...........s..... [ 57%]
+.....s...................................................s.............. [ 59%]
+........................................................................ [ 61%]
+...................................................................ss.s. [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+......................................                                   [100%]
+3882 passed, 118 skipped in 209.56s (0:03:29)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 4.20 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
