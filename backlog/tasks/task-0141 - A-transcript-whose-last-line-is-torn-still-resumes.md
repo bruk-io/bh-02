@@ -27,7 +27,7 @@ Found designing TASK-0136 (noted there, filed at the owner's word 2026-10-18). F
 <!-- AC:BEGIN -->
 - [x] #1 A transcript file whose last line is torn (no newline, not JSON) resumes without that line, and the next entry is written on a line of its own (a test with a torn tail, then an append, then a resume that reads every entry)
 - [x] #2 A line that is not JSON anywhere but the end still stops the transcript, with an error naming the file and the line number and saying what to do
-- [ ] #3 The dropped bytes are not silently lost: they are kept beside the transcript (or the error says where), and the notes say which; scripts/check passes
+- [x] #3 The dropped bytes are not silently lost: they are kept beside the transcript (or the error says where), and the notes say which; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
