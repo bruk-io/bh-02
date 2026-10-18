@@ -23,7 +23,7 @@ Found by Fable ruling TASK-0148 (2026-10-18). bh-02 watch SESSION AGENT follows 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 bh-02 watch ends its follow, saying the session is no longer running, once the session's running.lock is free, even with no agent_end in the log (a test with the lock released and no end line)
-- [ ] #2 A follow of a running session's child is unchanged; watch never takes the lock; scripts/check passes
+- [x] #2 A follow of a running session's child is unchanged; watch never takes the lock; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
