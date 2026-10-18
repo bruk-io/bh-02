@@ -296,6 +296,47 @@ async def test_results_that_are_not_the_parked_call_s_rebuild_the_session_and_re
     assert records[-1]["message"]["content"][0]["tool_use_id"] == "t2"
 
 
+async def test_a_session_resumed_after_a_crash_mid_call_is_rebuilt_with_a_result_for_every_call(
+    tmp_path: Path,
+) -> None:
+    """The process died with two calls parked and one answered; the resumed loop answered the other
+    (`agent:loop`: `interrupted: ...`, with the `asides` and `call` it writes on every tool entry)."""
+    h = _Harness(tmp_path, [FakeStep([_call("t1"), _call("t2")], stop="tool_use")])
+    asked = [{"role": "user", "content": "go"}]
+    first = await h.step(asked)
+    await _parked(h)
+    assert h.saved()["held"]["ended"] == "open" and h.saved()["held"]["calls"] == ["t1", "t2"]
+    ran = {
+        "role": "tool",
+        "content": "2",
+        "call_id": "t1",
+        "asides": [],
+        "call": {"at": "2026-10-18T03:47:12.345Z"},
+    }
+    lost = {
+        "role": "tool",
+        "content": "interrupted: bh-02 stopped before this call finished; it may have partly run",
+        "call_id": "t2",
+        "asides": [],
+        "call": {"at": "2026-10-18T03:57:12.345Z"},
+    }
+    resumed = _Harness(tmp_path, [FakeStep([_text("carried on")])])  # a new process, the same state
+    carry = {"role": "user", "content": "carry on"}
+    after = await resumed.step([*asked, _entry(first), ran, lost, carry])
+    (fake,) = resumed.fakes
+    assert _said(after) == "carried on" and fake.asked == ["carry on"] and fake.results == {}
+    assert fake.options.resume is not None  # rebuilt: a session written from the transcript, then resumed
+    where = project_dir(resumed.state / "config", os.path.realpath(resumed.cwd))
+    assert where is not None
+    records = [json.loads(line) for line in (where / f"{fake.options.resume}.jsonl").read_text().splitlines()]
+    assert [r["type"] for r in records] == ["user", "assistant", "user", "user"]
+    asked_for = [b["id"] for b in records[1]["message"]["content"] if b["type"] == "tool_use"]
+    results = [r["message"]["content"][0] for r in records[2:]]
+    assert asked_for == [r["tool_use_id"] for r in results] == ["t1", "t2"]  # none left without its result
+    assert results[1]["content"][0]["text"] == lost["content"]
+    await h.model.close()
+
+
 async def test_a_conversation_that_cannot_be_written_for_claude_code_says_so_and_starts_nothing(
     tmp_path: Path,
 ) -> None:

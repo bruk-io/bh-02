@@ -79,7 +79,10 @@ reached approval, what approval made of it (`unasked`, `yes` or `no`: a `no` nev
 the person took and the tool ran, and the sub-agent it started; the calls an input made are
 listed in the `nested` of the call that made them. A tool's row tells the model about its tool in a `system` section of its own, never
 in the spec's description, which a model server caches with the list. A reply the person stops
-still answers every call it made: [the loop](../docs/bh-02/how-it-works/loop.md).
+still answers every call it made: [the loop](../docs/bh-02/how-it-works/loop.md). A process that
+dies mid-call answers none, since the step's entry is appended before its calls run; the next reply
+answers each call of the last step that no `tool` entry follows, before anything else, so a resumed
+conversation is whole before its first request (call record, Shapes).
 
 **The model's extensions** reach bh-02 only through four keys, bound in the extensions process,
 each of which only adds: `commands.register` (never `commands.claim`: there it raises),
@@ -162,7 +165,8 @@ message     {"role": "user" | "assistant" | "tool", "content": str,
                                     too; not on the entry that answers a message the model was
                                     never asked, which is no step),
              "call"?: call record  (tool: the call it answers, on every `tool` entry the loop
-                                    writes, the `_NOT_RUN` and interrupted ones too)}
+                                    writes, the `_NOT_RUN` and interrupted ones too, and the
+                                    answer given a call a crash left unanswered)}
                                    `asides`, `today`, `at`, `seed`, `step` and `call` are the loop's own: a provider sends `content` alone
 step record {"at": str, "first_chunk"?: float, "took"?: float, "model"?: str, "usage"?: usage total,
              "settings"?: settings, "tool_changes"?: "listed"}
@@ -187,7 +191,11 @@ call record {"at": str, "answer"?: "unasked" | "yes" | "no", "waited"?: float, "
                         (`approval.unasked` let it run), `yes` or `no` (the person was asked; `no`
                         also covers a question the app closing withdrew, and a `no` call never runs);
                         absent for a call refused before approval, or never reached (the reply was
-                        stopped before it started, or while its question was open: `at` alone).
+                        stopped before it started, or while its question was open: `at` alone;
+                        so too a call a crash left unanswered, which the next reply answered
+                        with `interrupted: bh-02 stopped before this call finished; it may have
+                        partly run`: its `at` is when that reply began, and no answer, wait or run
+                        time was recorded, since the process that had them died with them).
                         `waited`: seconds from the question put to its answer, the time queued
                         behind another question included (the ui shows one at a time); only when
                         the person was asked. `took`: seconds the tool ran, a question the tool puts

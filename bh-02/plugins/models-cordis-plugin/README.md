@@ -494,8 +494,10 @@ only for a new conversation (`/clear`, `/compact`).
 - `stderr.log`: the CLI's stderr, because the TUI owns the terminal.
 
 `bh-02 --resume` continues Claude Code's own session when the transcript still matches. A crash
-with calls parked or a step streaming reads as failed, and the session is rebuilt. Without
-`state`, a temporary directory is used and removed.
+with calls parked or a step streaming reads as failed, and the session is rebuilt. A call the crash
+left without a result is answered by `agent:loop` before the first request (`interrupted: ...`,
+CONTRACTS.md: call record), so the rebuilt session holds a result for every call it asked for.
+Without `state`, a temporary directory is used and removed.
 
 ### The credential
 

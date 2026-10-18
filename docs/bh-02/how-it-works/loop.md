@@ -67,6 +67,12 @@ rest as not run. The stopped reply stays in the transcript with what it said and
 stopped, so your next message doesn't redo it. A step that fails (a 429, a dropped connection)
 is kept the same way, with what it said and that it failed.
 
+If bh-02 itself dies while a call runs (it is killed, or the machine loses power), nothing answers
+the call, and the conversation you resume holds a call with no result. Your next message makes it
+whole first: each such call is answered, before the model is asked anything, as interrupted by bh-02
+stopping (it may have partly run). Otherwise the provider would reject the call with no result, or
+the model would answer it by running the call again.
+
 ## The model row and its providers
 
 The `model` row (`models:model`) is one model step per call. Two providers fill it:

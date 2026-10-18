@@ -27,6 +27,14 @@ and the conversation continues from the last whole entry. Any other line that is
 a write cut short, so a resume stops and names the file and the line number: repair or remove the
 line in an editor, or start a new session instead.
 
+## When bh-02 was killed during a call
+
+A call the model asked for is run after the step that asked for it is written to the conversation.
+If bh-02 is killed while one runs, `--resume` finds a call with no result. The next message you send
+answers it first, telling the model that bh-02 stopped before the call finished and that it may
+have partly run, so the model can check what it did instead of assuming it ran or did not. The
+answer is written to `transcript.jsonl` like any other; nothing is shown on screen.
+
 ## Listing sessions
 
 ```sh

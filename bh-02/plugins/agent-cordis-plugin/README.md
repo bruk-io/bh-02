@@ -55,8 +55,14 @@ is answered with text saying so, runs nothing, and is put to nobody. A reply sto
 still answers every call: the one with its tool when the stop came with `interrupted: ... it may
 have partly run`, one that had its result (the stop came while its asides were made or the prompt
 read) with that result, the rest (the one at the approval question included) with `not run:
-...`. A call a tool's own call makes (an input's `tools.NAME(...)`) runs the same way: the loop
-row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.call`), so it is put
+...`. A process that dies mid-call answers none (a step's entry is appended before its calls
+run), so the next reply begins by answering each call of the last step that no `tool` entry follows
+(`_unanswered_calls`) with `interrupted: bh-02 stopped before this call finished; it may have partly
+run`, in the calls' order and before any request, with a call record of the time alone: so a
+resumed conversation is whole and no provider is sent a call with no result after it. A step the
+person's message already follows (an older bh-02 resumed it as it was) is left alone: an answer
+appended after the message would not make it whole. A call a tool's own call makes (an input's
+`tools.NAME(...)`) runs the same way: the loop row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.call`), so it is put
 to the rule and the person as the model's own would be, run through the tool its name has now,
 and given to `asides`, whose asides go with the result of the call that made it (`_nested`, one
 list of the calls it made, each with its record and its asides); it
@@ -151,8 +157,9 @@ the call started: the `agent` tool's result names it beside `content`, and `call
 keeps `touched`) and `nested` (the calls its input made through `tools`, each a record of its own with
 its tool's `name`, in the order they ended, a refused or declined one included). A call refused
 before approval, or never reached because the stop came first (`not run: ...`, the one at the
-approval question included), has `at` alone; one the stop interrupted has what it had by then, its
-`took` up to the stop. A `_Call` collects a call's record as `_Step` does a step's.
+approval question included), has `at` alone, as does one a crash left unanswered and the next
+reply answered (its `at` is when that reply began); one the stop interrupted has what it had by
+then, its `took` up to the stop. A `_Call` collects a call's record as `_Step` does a step's.
 
 Reading the prompt (`system.text()`, whose sections may read many files: memory's reads every
 CLAUDE.md, the python tool's asks its jail what it reads) and asking `asides` (memory's on-touch function reads rule
