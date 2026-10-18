@@ -9,7 +9,7 @@ from pathlib import Path
 from textual.widgets import Collapsible, Static
 
 from tui_cordis_plugin import BhApp, History, replayable
-from tui_cordis_plugin.messages import Noted, Shown, TurnEnded, TurnStarted
+from tui_cordis_plugin.messages import Noted, ReplyEnded, ReplyStarted, Shown
 from tui_cordis_plugin.widgets import Stream, Transcript
 
 _SIZE = (120, 36)
@@ -39,7 +39,7 @@ async def test_every_kind_of_event_gets_a_block_of_its_own_kind() -> None:
             {"type": "stop", "reason": "end_turn"},  # quiet: no block
         ):
             app.post_message(Shown(event))
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await pilot.pause()
         assert transcript.blocks()[before:] == [
             ("thinking", "Let me check.\nThen answer."),
@@ -54,8 +54,8 @@ async def test_every_kind_of_event_gets_a_block_of_its_own_kind() -> None:
 
 
 async def test_a_model_step_s_usage_in_parts_is_one_line_after_what_it_said() -> None:
-    """Anthropic sends what a turn read as it starts and the rest as it ends: one line, the sum,
-    under the turn; the next model step (after a result) gets a line of its own."""
+    """Anthropic sends what a step read as it starts and the rest as it ends: one line, the sum,
+    under that step; the next model step (after a result) gets a line of its own."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         transcript = app.query_one(Transcript)
@@ -69,7 +69,7 @@ async def test_a_model_step_s_usage_in_parts_is_one_line_after_what_it_said() ->
             {"type": "stop", "reason": "interrupted"},  # stopped before the end: what was read stands
         ):
             app.post_message(Shown(event))
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await pilot.pause()
         assert [b for b in transcript.blocks() if b[0] != "note"] == [
             ("text", "Running it."),
@@ -87,7 +87,7 @@ async def test_a_line_typed_while_a_reply_streams_is_drawn_after_it() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         transcript = app.query_one(Transcript)
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         app.post_message(Shown({"type": "usage", "input_tokens": 900, "output_tokens": 0, "partial": True}))
         app.post_message(Shown({"type": "text", "text": "twenty-"}))
         await pilot.pause()
@@ -95,7 +95,7 @@ async def test_a_line_typed_while_a_reply_streams_is_drawn_after_it() -> None:
         await pilot.pause()
         app.post_message(Shown({"type": "text", "text": "eight"}))
         app.post_message(Shown({"type": "usage", "input_tokens": 0, "output_tokens": 118}))
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await pilot.pause()
         assert [b for b in transcript.blocks() if b[0] != "note"] == [
             ("text", "twenty-eight"),
@@ -203,7 +203,7 @@ async def test_what_is_shown_is_kept_and_drawn_again_by_the_next_app(tmp_path: P
         for text in ("Hel", "lo ", "back"):
             first.post_message(Shown({"type": "text", "text": text}))
         first.post_message(Shown({"type": "tool_call", "id": "c", "name": "python", "input": {"code": "1"}}))
-        first.post_message(TurnEnded())
+        first.post_message(ReplyEnded())
         first.post_message(Noted("error: slow down", "failure"))
         await pilot.pause()
     kinds = [json.loads(line)["type"] for line in path.read_text().splitlines()]
@@ -221,7 +221,7 @@ async def test_what_is_shown_is_kept_and_drawn_again_by_the_next_app(tmp_path: P
             ("note", "↑ the session so far (a resumed session's Python process starts empty)"),
             (
                 "note",
-                "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running turn; Ctrl-P lists commands.",
+                "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running reply; Ctrl-P lists commands.",
             ),
         ]
         await pilot.press(*"again", "enter")
@@ -254,12 +254,12 @@ async def test_cleared_drops_the_conversation_from_the_screen_and_a_resume_start
         await pilot.press(*"hello", "enter")
         assert await asyncio.wait_for(first.bridge.line(), 1) == "hello"  # the chat row reads it
         first.post_message(Shown({"type": "text", "text": "old reply"}, used))
-        first.post_message(TurnEnded())
+        first.post_message(ReplyEnded())
         await pilot.pause()
         assert ("text", "old reply") in first.query_one(Transcript).blocks()
         cleared = {"type": "note", "text": "the conversation was cleared"}
         first.post_message(Shown({"type": "cleared"}, cleared))
-        first.post_message(TurnEnded())
+        first.post_message(ReplyEnded())
         await pilot.pause()
         assert first.query_one(Transcript).blocks() == [("note", "the conversation was cleared")]
         await pilot.press(*"after", "enter")

@@ -2,9 +2,9 @@
 
 A session is where one conversation lives, outside the project (so a jailed input can't touch
 it): `meta.json` (which directory, which stack, when), `session.toml`, the session's own
-layer file, `transcript.jsonl`, the loop's history (what a resume sends the model again), and
+layer file, `transcript.jsonl`, the conversation (what a resume sends the model again), and
 `events.jsonl`, what the ui showed (so a resume shows it again). The session's layer is the
-last shipped layer, so everything a run chose (the model, the jail, where history goes) is
+last shipped layer, so everything a run chose (the model, the jail, where the conversation is kept) is
 composition, and resuming is booting with that layer again. `/model` edits it the same way:
 the layer files stay the only way the running program changes.
 
@@ -101,8 +101,8 @@ class Broken:
 
 
 def session_layer(dir: Path, *, model: str | None, no_jail: bool) -> list[Row]:
-    """The session's layer: where its history goes, what this run chose, and what the
-    switch row's /model acts on.
+    """The session's layer: where its conversation and screen history go, what this run chose, and
+    what the switch row's /model acts on.
 
     bh-02's own loop runs over the `model` row, which names its model (`default`, which
     `--model` and /model set): the conversation is the `transcript` row's, kept in the
@@ -113,13 +113,13 @@ def session_layer(dir: Path, *, model: str | None, no_jail: bool) -> list[Row]:
     bar's session id is the `status` row's, read from the `session` value, not written here.)
     The `ui` row is told where to keep what it shows, which it draws again on a resume from
     the last /clear on (the ui hears `cleared` and keeps its own file; /clear writes over only
-    the model's history, the conversation row finding it from the transcript row's `path`).
+    the conversation's file, the conversation row finding it from the transcript row's `path`).
     """
     ui = {"history": str(dir / _EVENTS)}
-    history = dir / TRANSCRIPT
+    transcript = dir / TRANSCRIPT
     rows = [
         Row("ui", config=ui),
-        Row("transcript", config={"path": str(history)}),
+        Row("transcript", config={"path": str(transcript)}),
         # /model edits this very file
         Row("switch", config={"layer": str(dir / _LAYER), "model_row": _MODEL_ROW}),
     ]

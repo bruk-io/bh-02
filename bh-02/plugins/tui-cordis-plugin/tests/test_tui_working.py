@@ -16,7 +16,7 @@ from textual.command import CommandPalette
 from textual.pilot import Pilot
 
 from tui_cordis_plugin import BhApp, TuiOutput, render
-from tui_cordis_plugin.messages import Asked, Shown, TurnEnded, TurnStarted
+from tui_cordis_plugin.messages import Asked, ReplyEnded, ReplyStarted, Shown
 from tui_cordis_plugin.widgets import ApprovalScreen, Completions, Composer, Transcript, Working
 
 _SIZE = (80, 20)
@@ -65,7 +65,7 @@ def _app(clock: _Clock, every: float = _FAST) -> BhApp:
 
 async def _started(app: BhApp, pilot: Pilot[None]) -> None:
     """A reply began, and the app has taken its start from the clock."""
-    app.post_message(TurnStarted())
+    app.post_message(ReplyStarted())
     await _until(pilot, lambda: app.query_one(Working).ticking)
 
 
@@ -111,7 +111,7 @@ async def test_the_line_sits_between_the_transcript_and_the_composer_and_is_one_
     clock = _Clock()
     app = _app(clock)
     async with app.run_test(size=_SIZE) as pilot:
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         await _until(pilot, lambda: _line(app) is not None)
         transcript, working, composer = (app.query_one(each) for each in (Transcript, Working, Composer))
         assert working.region.height == 1
@@ -140,7 +140,7 @@ async def test_the_screen_answers_keys_between_ticks() -> None:
     clock = _Clock()
     app = _app(clock, every=0.4)
     async with app.run_test(size=_SIZE) as pilot:
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         await pilot.pause()
         await pilot.press(*"typing on")
         assert app.query_one(Composer).text == "typing on"
@@ -154,7 +154,7 @@ async def test_it_goes_when_the_reply_ends_and_comes_back_for_the_next_counting_
         await _started(app, pilot)
         clock.now += 12
         await _until(pilot, lambda: _line(app) == "Working · 12s")
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await _until(pilot, lambda: _line(app) is None)
         assert not app.query_one(Working).ticking
         clock.now += 500  # time passes while nothing runs
@@ -175,13 +175,13 @@ async def test_replies_overlapping_are_one_line_until_the_last_ends() -> None:
         await _started(app, pilot)
         clock.now += 5
         await _until(pilot, lambda: _line(app) == "Working · 5s")
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         clock.now += 1
         await _until(pilot, lambda: _line(app) == "Working · 6s")
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await pilot.pause(0.2)
         assert _line(app) is not None and app.query_one(Working).ticking
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await _until(pilot, lambda: _line(app) is None)
 
 
@@ -217,12 +217,12 @@ async def test_it_goes_when_the_reply_finishes_is_stopped_or_fails(ending: str) 
                 raise _ProviderFailed
             yield {"type": "tool_result", "call_id": "c", "content": "done", "is_error": False}
 
-        turn = asyncio.ensure_future(output.show(reply()))
+        reply_task = asyncio.ensure_future(output.show(reply()))
 
         async def stopped_by_the_person() -> None:
             """What `chat:converse` does with a reply: stop it once the input is interrupted."""
             await app.bridge.interrupted()
-            turn.cancel()
+            reply_task.cancel()
 
         stopper = asyncio.ensure_future(stopped_by_the_person())
         await _until(pilot, lambda: app.query_one(Working).ticking)
@@ -233,13 +233,13 @@ async def test_it_goes_when_the_reply_finishes_is_stopped_or_fails(ending: str) 
         else:
             release.set()
             stopper.cancel()  # nobody interrupts this one
-        await asyncio.gather(turn, stopper, return_exceptions=True)
+        await asyncio.gather(reply_task, stopper, return_exceptions=True)
         await _until(pilot, lambda: _line(app) is None)
         assert not app.query_one(Working).ticking
         # and it comes back for the next reply
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         await _until(pilot, lambda: _line(app) == "Working · 0s")
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await _until(pilot, lambda: _line(app) is None)
 
 
@@ -254,14 +254,14 @@ async def test_the_transcript_keeps_its_end_in_view_as_the_line_comes_and_goes()
         await pilot.pause()
         transcript = app.query_one(Transcript)
         assert transcript.max_scroll_y > 0 and transcript.scroll_y == transcript.max_scroll_y
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         await _until(pilot, lambda: _line(app) is not None)
         await pilot.pause()
         assert transcript.scroll_y == transcript.max_scroll_y and "line 59" in _screen(app)
         app.post_message(Shown({"type": "text", "text": "newest while working\n\n"}))
         await pilot.pause()
         assert "newest while working" in _screen(app)
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await _until(pilot, lambda: _line(app) is None)
         await pilot.pause()
         assert transcript.scroll_y == transcript.max_scroll_y and "newest while working" in _screen(app)
@@ -278,7 +278,7 @@ async def test_the_list_of_commands_opens_under_it_and_the_palette_and_a_questio
     app = _app(clock)
     async with app.run_test(size=_SIZE) as pilot:
         app.frame.commands(lambda: _SPECS)
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         await _until(pilot, lambda: _line(app) is not None)
         composer, working, listed = (
             app.query_one(Composer),
@@ -312,11 +312,11 @@ async def test_at_the_real_clock_and_interval_it_appears_after_a_second_and_coun
     the seconds."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         await pilot.pause(0.4)
         assert _line(app) is None
         await _until(pilot, lambda: _line(app) is not None, within=3.0)
         assert re.fullmatch(r"Working · [12]s", _line(app) or "")
         await _until(pilot, lambda: _line(app) == "Working · 2s", within=3.0)
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await _until(pilot, lambda: _line(app) is None)

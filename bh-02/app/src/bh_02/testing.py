@@ -9,7 +9,7 @@ putting test rows into a plugin. Most bind `loop` (CONTRACTS.md), replacing the 
 
 `echo_model`, `slow_model` and `repl_model` bind `model` instead, so the shipped loop, its
 transcript and the session's own layer (`/clear`, a resume) run as they do with Claude, only
-the one turn being fake. Each takes whatever `config` the row already had, since a patch that
+the model's step being fake. Each takes whatever `config` the row already had, since a patch that
 only names `use` keeps it (the session layer gives `model` a `state`).
 
 `echo_provider`, `slow_provider`, `repl_provider` and `delegating_provider` (every message to a
@@ -81,7 +81,7 @@ def _words(message: Mapping[str, Any]) -> str:
 
 
 class _EchoModel:
-    """One turn: `echo:` and the last user message upper-cased, a word at a time, then which
+    """One step: `echo:` and the last user message upper-cased, a word at a time, then which
     user message of the conversation it was (`(message 2)`), so a screen shows whether the
     transcript was kept, forgotten (`/clear`) or restored (a resume). `name`, when given, is
     said first (`[fake]`), so a screen shows which model answered."""
@@ -154,7 +154,7 @@ def _printed(content: str) -> str:
 
 class _Repl:
     """Each message the person sends is one call of the `python` tool, with the message as its
-    code; once the input has answered, the turn says what it printed."""
+    code; once the input has answered, the next step says what it printed."""
 
     async def complete(
         self, messages: Sequence[Mapping[str, Any]], tools: Sequence[Mapping[str, Any]]
@@ -183,7 +183,7 @@ class _Delegating:
     """Each message the person sends is one call of the `agent` tool, the message its prompt. A
     sub-agent (its prompt says it is one) answers `report:` and its prompt upper-cased, or, for a
     prompt starting `run `, first runs the rest as a python input. Once a call has answered, the
-    turn says what it said: `the agent said: ...`, or a child's `the input said: ...`."""
+    next step says what it said: `the agent said: ...`, or a child's `the input said: ...`."""
 
     async def complete(
         self, messages: Sequence[Mapping[str, Any]], tools: Sequence[Mapping[str, Any]]
@@ -215,7 +215,7 @@ class _Delegating:
 
 def delegating_provider(table: Mapping[str, Any]) -> _Delegating:
     """A provider a models file names: every message the person sends goes to a sub-agent
-    (`agent`), whose report the turn says, so a real screen shows a child end to end."""
+    (`agent`), whose report the next step says, so a real screen shows a child end to end."""
     return _Delegating()
 
 
@@ -282,7 +282,7 @@ class _Unprintable:
 
 
 class _Bomb:
-    """Replies with one text event the ui fails to draw, so the app crashes mid-turn."""
+    """Replies with one text event the ui fails to draw, so the app crashes mid-reply."""
 
     async def reply(self, message: str) -> AsyncIterator[dict[str, Any]]:
         yield {"type": "text", "text": _Unprintable()}

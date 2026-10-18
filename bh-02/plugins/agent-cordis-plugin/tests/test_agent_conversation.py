@@ -234,9 +234,9 @@ async def test_the_new_conversation_is_bh_02_s_message_then_the_summary_and_the_
     seed = seeded("  x holds 42.  ")
     assert [m["role"] for m in seed] == ["user", "assistant"] and seed[1]["content"] == "x holds 42."
     assert str(seed[0]["content"]).startswith("(bh-02: this conversation carries on from an earlier one")
-    history = MemoryTranscript()
+    transcript = MemoryTranscript()
     for message in seed:
-        history.append(message)
+        transcript.append(message)
     model = Scripted([text("carrying on"), stop("end_turn")])
 
     class Prompt:
@@ -252,7 +252,7 @@ async def test_the_new_conversation_is_bh_02_s_message_then_the_summary_and_the_
 
     tools = ToolBroker()
     tools.register(PYTHON, nothing)
-    loop = LoopModel(model, tools, history, Approved(), system=Prompt(), today=lambda: "2026-10-07")
+    loop = LoopModel(model, tools, transcript, Approved(), system=Prompt(), today=lambda: "2026-10-07")
     events = [e async for e in loop.reply("next")]
     assert not [e for e in events if e["type"] == "note"]  # nothing told as changed
     ((messages, _),) = model.requests
@@ -359,7 +359,7 @@ async def test_a_step_that_did_not_answer_gives_no_summary_and_says_why(step: li
 
 
 async def test_a_summary_not_written_in_time_closes_the_step_and_says_so() -> None:
-    """Ctrl-C stops only a turn, so the step has `timeout` seconds; then it is closed, so its
+    """Ctrl-C stops only a reply, so the step has `timeout` seconds; then it is closed, so its
     provider stops what it runs."""
     model = Scripted([USAGE, text("x holds")], hang=True)
     with pytest.raises(Unchanged, match=r"no summary within 0\.05 seconds, so nothing changed") as raised:

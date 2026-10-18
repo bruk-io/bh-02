@@ -24,7 +24,7 @@ __all__ = [
 ]
 
 type Event = Mapping[str, Any]
-"""One thing that happened in a turn (CONTRACTS.md: event). The chat row passes them through unread."""
+"""One thing that happened in a reply (CONTRACTS.md: event). The chat row passes them through unread."""
 
 
 @runtime_checkable
@@ -36,7 +36,7 @@ class Loop(Protocol):
 
 @runtime_checkable
 class Input(Protocol):
-    """Lines from the person; their asking to stop the turn that is running (`interrupted`);
+    """Lines from the person; their asking to stop the reply that is running (`interrupted`);
     and their having left (`closed`: no more lines will come)."""
 
     async def read(self) -> str | None: ...
@@ -100,7 +100,7 @@ async def converse(
     `!` command may run for minutes, and nobody is left to read its answer), which cancels it.
     What commands left for the model (`for_model`: `!`'s output, which `commands` holds) is
     taken and put in front of the person's next message (`_told`), so the model reads it with
-    that and never during a turn. The loop's contract is unchanged: it is given one message.
+    that and never during a reply. The loop's contract is unchanged: it is given one message.
 
     Before each read it waits until no restart a command queued is pending (`jobs.settled`): a
     restart of the loop (`/clear`, `/compact`, `/model NAME`, `/restart loop`) reloads this row,
@@ -135,7 +135,7 @@ async def converse(
 async def _unless_closed[T](work: Awaitable[T], input: Input) -> T | None:
     """Run a command until it answers (its answer), or until the input closes (None): then it
     is cancelled, and its own cleanup (a `!` command's process group ended) runs first. Ctrl-C
-    is a turn's (`interrupted`), so it does not stop a command."""
+    is a reply's (`interrupted`), so it does not stop a command."""
     run = asyncio.ensure_future(work)
     gone = asyncio.ensure_future(input.closed())
     try:
@@ -149,12 +149,12 @@ async def _unless_closed[T](work: Awaitable[T], input: Input) -> T | None:
 
 
 async def _interruptible(
-    turn: Awaitable[None], input: Input, output: Output, commands: Commands | None = None
+    reply: Awaitable[None], input: Input, output: Output, commands: Commands | None = None
 ) -> None:
-    """Run a turn until it ends or the person interrupts it; an interrupted turn is cancelled
+    """Run a reply until it ends or the person interrupts it; an interrupted reply is cancelled
     (its reply closed, so a provider can stop its own work) and shown as stopped, then the notes
     rows have for a stop (`commands.stop_notes`: background agents still running) as notes."""
-    work = asyncio.ensure_future(turn)
+    work = asyncio.ensure_future(reply)
     stop = asyncio.ensure_future(input.interrupted())
     try:
         await asyncio.wait({work, stop}, return_when=asyncio.FIRST_COMPLETED)

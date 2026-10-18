@@ -65,10 +65,10 @@ def _told(app: BhApp) -> list[str]:
 
 
 async def _reply_running(app: BhApp, pilot: Pilot[None]) -> asyncio.Future[None]:
-    turn = asyncio.ensure_future(app.bridge.interrupted())
+    reply_task = asyncio.ensure_future(app.bridge.interrupted())
     await pilot.pause()
-    assert app.bridge.turn_running
-    return turn
+    assert app.bridge.reply_running
+    return reply_task
 
 
 async def _say(app: BhApp, pilot: Pilot[None], text: str = _SAID) -> Static:
@@ -123,13 +123,13 @@ async def test_ctrl_c_after_a_mouse_selection_was_copied_stops_the_reply_on_the_
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         await _select(pilot, block, 6, 10)
         assert app.clipboard == "brave" and _told(app) == ["Copied 5 characters"]
         assert app.screen.get_selected_text() == "brave"  # still shown selected
         _forget(app)
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(turn, 1)  # the first press stopped it
+        await asyncio.wait_for(reply_task, 1)  # the first press stopped it
         assert app.clipboard == "" and _told(app) == ["Copied 5 characters"]  # and copied nothing again
 
 
@@ -143,7 +143,7 @@ async def test_ctrl_c_copies_a_selection_not_copied_yet_and_stops_nothing_a_seco
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         if how == "one character":
             app.screen.selections = {block: Selection.from_offsets(Offset(3, 0), Offset(4, 0))}
             app.screen.post_message(events.TextSelected())
@@ -156,17 +156,17 @@ async def test_ctrl_c_copies_a_selection_not_copied_yet_and_stops_nothing_a_seco
         assert wanted and app.clipboard == ""  # copy on select did not copy it
         await pilot.press("ctrl+c")
         await pilot.pause()
-        assert app.clipboard == wanted and not turn.done()  # copied, and the reply runs on
+        assert app.clipboard == wanted and not reply_task.done()  # copied, and the reply runs on
         assert app.screen.get_selected_text() is None  # cleared, so the next one is a stop
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(turn, 1)
+        await asyncio.wait_for(reply_task, 1)
 
 
 async def test_a_selection_after_a_copied_one_is_a_new_selection_and_ctrl_c_copies_it() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         await _select(pilot, block, 6, 10)  # "brave", copied as the mouse let go
         app.screen.selections = {block: Selection.from_offsets(Offset(3, 0), Offset(4, 0))}  # not "brave"
         app.screen.post_message(events.TextSelected())
@@ -174,7 +174,7 @@ async def test_a_selection_after_a_copied_one_is_a_new_selection_and_ctrl_c_copi
         assert app.clipboard == "brave"  # one character is not copied by the mouse
         await pilot.press("ctrl+c")
         await pilot.pause()
-        assert app.clipboard == "l" and not turn.done()
+        assert app.clipboard == "l" and not reply_task.done()
 
 
 async def test_a_selection_copied_by_cmd_c_is_not_copied_again_by_ctrl_c() -> None:
@@ -183,40 +183,40 @@ async def test_a_selection_copied_by_cmd_c_is_not_copied_again_by_ctrl_c() -> No
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         await _say(app, pilot)
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         app.screen.text_select_all()
         await pilot.pause()
         wanted = app.screen.get_selected_text() or ""
         await pilot.press("super+c")
         await pilot.pause()
-        assert wanted and app.clipboard == wanted and not turn.done()
+        assert wanted and app.clipboard == wanted and not reply_task.done()
         _forget(app)
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(turn, 1)
+        await asyncio.wait_for(reply_task, 1)
         assert app.clipboard == ""
 
 
 async def test_ctrl_c_with_no_selection_stops_a_reply_as_before() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(turn, 1)
+        await asyncio.wait_for(reply_task, 1)
         assert app.clipboard == "" and _told(app) == []
 
 
 async def test_ctrl_c_copies_the_composer_s_own_selection_too_and_stops_nothing() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         await pilot.press(*"hello", "shift+left", "shift+left", "shift+left")
         assert app.query_one(Composer).selected_text == "llo"
         await pilot.press("ctrl+c")
         await pilot.pause()
-        assert app.clipboard == "llo" and not turn.done()
+        assert app.clipboard == "llo" and not reply_task.done()
         assert app.query_one(Composer).text == "hello" and app.query_one(Composer).selected_text == ""
         await pilot.press("ctrl+c")  # nothing selected now: the stop
-        await asyncio.wait_for(turn, 1)
+        await asyncio.wait_for(reply_task, 1)
 
 
 @pytest.mark.parametrize("focus", [Composer, Transcript])
@@ -230,23 +230,23 @@ async def test_cmd_c_copies_the_transcript_selection_as_textual_reports_it_and_s
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         await _select(pilot, block, 6, 10)
         app.query_one(focus).focus()
         _forget(app)
         await pilot.press("super+c")
         await pilot.pause()
-        assert app.clipboard == "brave" and not turn.done()
+        assert app.clipboard == "brave" and not reply_task.done()
         assert "Copied 5 characters" in _told(app)
 
 
 async def test_cmd_c_with_nothing_selected_does_nothing() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         await pilot.press("super+c")
         await pilot.pause()
-        assert app.clipboard == "" and _told(app) == [] and not turn.done()
+        assert app.clipboard == "" and _told(app) == [] and not reply_task.done()
 
 
 async def test_ctrl_t_copies_the_newest_reply_whole_as_the_model_wrote_it() -> None:
@@ -295,23 +295,23 @@ def test_ctrl_t_shadows_no_key_of_the_composer_a_screen_or_the_app() -> None:
 async def test_ctrl_t_copies_while_a_reply_streams() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         app.post_message(Shown({"type": "text", "text": "so far"}))
         await pilot.pause()
         await pilot.press("ctrl+t")
         await pilot.pause()
-        assert app.clipboard == "so far" and not turn.done()
+        assert app.clipboard == "so far" and not reply_task.done()
 
 
 async def test_esc_stops_a_reply_and_never_copies_a_selection() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         await _select(pilot, block, 6, 10)
         _forget(app)
         await pilot.press("escape")
-        await asyncio.wait_for(turn, 1)
+        await asyncio.wait_for(reply_task, 1)
         assert app.clipboard == ""
 
 
@@ -327,7 +327,7 @@ async def test_esc_clears_a_selection_as_textual_does_copies_nothing_and_still_s
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
-        turn = await _reply_running(app, pilot) if running else None
+        reply_task = await _reply_running(app, pilot) if running else None
         await _select(pilot, block, 6, 10)
         app.query_one(focus).focus()
         await pilot.pause()
@@ -337,15 +337,15 @@ async def test_esc_clears_a_selection_as_textual_does_copies_nothing_and_still_s
         await pilot.pause()
         assert app.screen.get_selected_text() is None  # cleared
         assert app.clipboard == ""  # and not copied
-        if turn is not None:
-            await asyncio.wait_for(turn, 1)  # the reply was stopped as well
+        if reply_task is not None:
+            await asyncio.wait_for(reply_task, 1)  # the reply was stopped as well
 
 
 async def test_with_a_question_up_ctrl_c_answers_it_no_and_nothing_is_copied() -> None:
     app = BhApp(grace=0.05)
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot)
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         _forget(app)
         answer = app.bridge.question()
         assert answer is not None
@@ -359,7 +359,7 @@ async def test_with_a_question_up_ctrl_c_answers_it_no_and_nothing_is_copied() -
         await pilot.pause()
         assert app.clipboard == "" and _told(app) == []
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(turn, 1)  # the stop, as ever
+        await asyncio.wait_for(reply_task, 1)  # the stop, as ever
         assert app.clipboard == ""
         await pilot.pause(0.6)
         assert await answer is False
@@ -370,7 +370,7 @@ async def test_what_was_copied_is_said_off_the_conversation_so_a_streaming_reply
     app = BhApp()
     async with app.run_test(size=_SIZE, notifications=True) as pilot:
         block = await _say(app, pilot, "Streaming reply, first part")
-        turn = await _reply_running(app, pilot)
+        reply_task = await _reply_running(app, pilot)
         await _select(pilot, block, 0, 8)
         app.post_message(Shown({"type": "text", "text": " and the rest."}))
         await pilot.press("super+c")  # the selection again, by Cmd-C: Ctrl-C would be the stop
@@ -379,4 +379,4 @@ async def test_what_was_copied_is_said_off_the_conversation_so_a_streaming_reply
         assert _told(app) == ["Copied 9 characters", "Copied 9 characters", "Copied 41 characters"]
         texts = [text for kind, text in app.query_one(Transcript).blocks() if kind == "text"]
         assert texts == ["Streaming reply, first part and the rest."]  # one block, whole
-        assert app.clipboard == "Streaming reply, first part and the rest." and not turn.done()
+        assert app.clipboard == "Streaming reply, first part and the rest." and not reply_task.done()

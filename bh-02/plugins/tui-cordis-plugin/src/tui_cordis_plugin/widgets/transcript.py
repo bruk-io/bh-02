@@ -13,7 +13,7 @@ A result or a piece of code too long to glance at is cut to its first lines (`Cl
 under them that opens the rest and closes it again, by a click or by Enter or Space on it.
 
 A model step's usage is one line however many usage events it sends (Anthropic sends what was
-read as the turn starts, and the rest as it ends): the events are summed and the line drawn
+read as the step starts, and the rest as it ends): the events are summed and the line drawn
 once the step's usage is complete, which is when anything but its own text, thinking
 or calls comes next (a result, a stop, a note, the reply's end; a line the person types
 meanwhile is drawn after the reply, see `BhApp.send`).
@@ -193,7 +193,7 @@ class Clipped(Vertical):
 
 
 class Transcript(VerticalScroll):
-    """Blocks appended as a turn streams in; it follows the end unless scrolled away."""
+    """Blocks appended as a reply streams in; it follows the end unless scrolled away."""
 
     DEFAULT_CSS = """
     Transcript {
@@ -320,7 +320,7 @@ class Transcript(VerticalScroll):
         self._add(Static(text, markup=False), kind)
 
     def event(self, event: Mapping[str, Any]) -> None:
-        """Add one event of a turn (CONTRACTS.md: event); a type it doesn't know is skipped."""
+        """Add one event of a reply (CONTRACTS.md: event); a type it doesn't know is skipped."""
         kind = str(event.get("type", ""))
         if kind == "usage":
             self._usage = event if self._usage is None else render.usage_sum(self._usage, event)
@@ -351,7 +351,7 @@ class Transcript(VerticalScroll):
         self._close_stream()
         self.remove_children()
 
-    def end_turn(self) -> None:
+    def end_reply(self) -> None:
         """The reply ended: what streams next starts a new block."""
         self._settle_usage()
         self._close_stream()
@@ -365,12 +365,12 @@ class Transcript(VerticalScroll):
                 case "user":
                     self.user(str(entry.get("text", "")))
                 case "turn_end":
-                    self.end_turn()
+                    self.end_reply()
                 case "noted":
                     self.note(str(entry.get("text", "")), str(entry.get("kind", "note")))
                 case _:
                     self.event(entry)
-        self.end_turn()
+        self.end_reply()
         if replay.entries:
             self.note("↑ the session so far (a resumed session's Python process starts empty)")
 

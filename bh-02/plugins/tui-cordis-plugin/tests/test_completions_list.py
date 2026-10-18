@@ -11,7 +11,7 @@ from textual.content import Content
 from textual.pilot import Pilot
 
 from tui_cordis_plugin import BhApp, frame
-from tui_cordis_plugin.messages import Asked, Shown, TurnEnded, TurnStarted
+from tui_cordis_plugin.messages import Asked, ReplyEnded, ReplyStarted, Shown
 from tui_cordis_plugin.widgets import ApprovalScreen, Completions, Composer, Transcript
 from tui_cordis_plugin.widgets.completions import row
 
@@ -373,7 +373,7 @@ async def test_enter_on_an_entry_while_a_reply_streams_is_drawn_after_the_reply(
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await _open(pilot)
-        app.post_message(TurnStarted())
+        app.post_message(ReplyStarted())
         app.post_message(Shown({"type": "text", "text": "streaming"}))
         await pilot.pause()
         await pilot.press(*"/he", "enter")
@@ -381,7 +381,7 @@ async def test_enter_on_an_entry_while_a_reply_streams_is_drawn_after_the_reply(
         transcript = app.query_one(Transcript)
         assert ("user", "› /help") not in transcript.blocks()  # held until the reply ends
         assert await _line(app) == "/help"
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         await pilot.pause()
         assert transcript.blocks()[-1] == ("user", "› /help")
 

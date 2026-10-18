@@ -1563,14 +1563,14 @@ async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes
     (project / ".git").mkdir(parents=True)
     home.mkdir()
     (project / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
-    history = tmp_path / "transcript.jsonl"
+    transcript = tmp_path / "transcript.jsonl"
     branches = ("one", "two", "three")
     switches = [f"open('.git/HEAD', 'w').write('ref: refs/heads/{branch}\\n')" for branch in branches]
     rows = (
         f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
-        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{transcript}" }}\n'
     )
     # the scripted model runs each input the transcript has no result for: the session runs two,
     # and its resume, scripted with all three, only the third
@@ -1579,7 +1579,7 @@ async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes
         patch = _inputs(composition, *script, extra=rows)
         await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
         assert _asked() == run_now
-    entries = [json.loads(line) for line in history.read_text().splitlines()]
+    entries = [json.loads(line) for line in transcript.read_text().splitlines()]
     kept = [entry for entry in entries if entry["role"] == "system"]
     assert "Git branch: main" in kept[0]["content"]
     assert len(kept) == 4 and all(set(entry) == {"role", "edits"} for entry in kept[1:])
@@ -1587,7 +1587,7 @@ async def test_a_session_whose_branch_switches_keeps_its_prompt_once_and_resumes
     for result, branch in zip(results, branches, strict=True):
         assert f"Git branch: {branch}\n" in result, result  # told with the input that switched it
     opening = json.dumps(kept[0]["content"].split("\n\n")[0])[1:-1]  # who the model is, as the file has it
-    assert history.read_text().count(opening) == 1
+    assert transcript.read_text().count(opening) == 1
     assert [kept[0]["content"]] == fragile.SYSTEM  # the resumed run's last request began as the first did
 
 
@@ -1607,14 +1607,14 @@ async def test_a_resumed_conversation_is_told_its_asides_once_and_clear_tells_th
     (project / "src" / "db" / "models.py").write_text("X = 1\n")
     (project / "src" / "db" / "CLAUDE.md").write_text("Use the session.")
     (project / ".claude" / "rules" / "db.md").write_text("---\npaths: src/db/**\n---\nMigrations by hand.")
-    history = tmp_path / "transcript.jsonl"
+    transcript = tmp_path / "transcript.jsonl"
     opens = "len(open('src/db/models.py').read())"
     cats = "import subprocess; subprocess.run(['cat', 'src/db/models.py'], capture_output=True).returncode"
     session = (
         f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
-        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{transcript}" }}\n'
     )
     first = _inputs(composition, opens, cats, extra=session)
     _answers(True, True)
@@ -1638,7 +1638,7 @@ async def test_a_resumed_conversation_is_told_its_asides_once_and_clear_tells_th
     assert again.startswith(told) and again.endswith("\n[2] 6\n[3] 0\n"), again  # resumed: none again
     assert afresh.startswith(told) and afresh.endswith("\n[2] 6\n[3] 0\n"), afresh  # /clear: told afresh
     assert (
-        f"the conversation was cleared (the old one is kept as {history}.bak); starting afresh: loop, "
+        f"the conversation was cleared (the old one is kept as {transcript}.bak); starting afresh: loop, "
         "transcript, python, agents"
     ) in fragile.NOTES
 
@@ -1660,13 +1660,13 @@ async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_asides
     guidance = project / "src" / "db" / "CLAUDE.md"
     guidance.write_text("Use the session.\n\n(Never by script.)")
     (project / ".claude" / "rules" / "db.md").write_text("---\npaths: src/db/**\n---\nMigrations by hand.")
-    history = tmp_path / "transcript.jsonl"
+    transcript = tmp_path / "transcript.jsonl"
     opens = "len(open('src/db/models.py').read())"
     session = (
         f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "memory"\nconfig = {{ root = "{project}", home = "{home}" }}\n'
-        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{history}" }}\n'
+        f'[[plugin]]\nid = "transcript"\nconfig = {{ path = "{transcript}" }}\n'
         '[[plugin]]\nid = "another-aside"\nuse = "fragile:another_aside"\n'
     )
     guide = "From src/db/CLAUDE.md, instructions for work under src/db/:"
@@ -1683,7 +1683,7 @@ async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_asides
     out = _shown()
     assert out.endswith(f"\n[1] 6\n\n{trimmed}\n\n{other}\n"), out
     first, resumed = [
-        entry for line in history.read_text().splitlines() if (entry := json.loads(line))["role"] == "tool"
+        entry for line in transcript.read_text().splitlines() if (entry := json.loads(line))["role"] == "tool"
     ]
     assert first["asides"] == [f"{guide}\n\nUse the session.\n\n(Never by script.)\n\n{rule}", other]
     assert resumed["asides"] == [trimmed, other]

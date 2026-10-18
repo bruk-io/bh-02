@@ -168,7 +168,7 @@ async def test_asking_a_slow_server_does_not_block_the_event_loop(tmp_path: Path
         finally:
             ticker.cancel()
     assert _names(catalog) == ["local/m"]
-    assert ticks >= 25  # about 60 turns of the loop in 0.6 s; a blocking call would leave a handful
+    assert ticks >= 25  # about 60 passes of the event loop in 0.6 s; a blocking call would leave a handful
 
 
 def _mock(handler: Any) -> Any:

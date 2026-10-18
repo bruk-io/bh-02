@@ -1,6 +1,6 @@
 """What Claude Code holds against what the loop asks next: the decisions, pure.
 
-Messages are shaped as `agent:loop` writes them (its `_Turn.entry`, `unfinished`, tool results,
+Messages are shaped as `agent:loop` writes them (its `_Step.entry`, `unfinished`, tool results,
 `feedback` lines), so a change there that breaks the agreement shows up here."""
 
 from typing import Any
@@ -89,8 +89,8 @@ def test_a_different_conversation_rebuilds_everything_but_its_last_line() -> Non
     assert reconcile(held, cleared) == Rebuild(
         "the conversation is not the one Claude Code holds", 0, "fresh start"
     )
-    history = [_user("a"), {"role": "assistant", "content": "b"}, _user("c")]  # a resume with no state
-    assert reconcile(Held(), history) == Rebuild("the request is not one new user line", 2, "c")
+    messages = [_user("a"), {"role": "assistant", "content": "b"}, _user("c")]  # a resume with no state
+    assert reconcile(Held(), messages) == Rebuild("the request is not one new user line", 2, "c")
 
 
 def test_a_failed_strayed_or_unfinished_step_rebuilds() -> None:

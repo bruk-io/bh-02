@@ -16,7 +16,7 @@ and asks `asides`, and `/compact`, which begins a new conversation from the mode
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
 | `agent:conversation` | registers `/clear` and `/compact [WHAT TO KEEP]`, each restart queued in `jobs`; config: `timeout` (seconds, 300: /compact's summary), `loop` and `transcript` (the rows /compact restarts), `clear` (the rows /clear restarts: `loop`, `transcript`, `python`) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`), `jobs` (`put`) |
 
-A turn is the reply to one message: a model step, the calls it asked for, and again, until a
+A reply answers one message: a model step, the calls it asked for, and again, until a
 step asks for none. The model is
 offered the tools rows register with `tools` (`agent:tools`, a broker; CodeAct's `python(code)`
 is the python row's registration, and the loop knows of no tool by name), through the
@@ -49,7 +49,7 @@ answer (`DECLINED`: `denied: ...`), so approval is one rule for any model provid
 and the loop
 keeps no copy of it. A call to a name it did not offer (`refusal`), or one whose input doesn't
 fit the spec (`malformed`: a `required` property missing, one not of its schema's simple type),
-is answered with text saying so, runs nothing, and is put to nobody. A turn stopped part-way
+is answered with text saying so, runs nothing, and is put to nobody. A reply stopped part-way
 still answers every call: the one with its tool when the stop came with `interrupted: ... it may
 have partly run`, one that had its result (the stop came while its asides were made or the prompt
 read) with that result, the rest (the one at the approval question included) with `not run:
@@ -58,8 +58,8 @@ row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.cal
 to the rule and the person as the model's own would be, run through the tool its name has now,
 and given to `asides`, whose asides go with the result of the call that made it (`_nested`); it
 answers `{"content", "failed"}`, `failed` when it did not run (no such tool, its input malformed,
-a no) or the tool failed. The transcript and the tools are rows of their own, so the history and
-the namespace outlive the loop: replace `model` (or the ui) and the loop reloads while the conversation
+a no) or the tool failed. The transcript and the tools are rows of their own, so the conversation and
+the namespace outlive the loop: replace `model` (or the ui) and the loop reloads while it
 carries on.
 
 After each call that ran, the loop calls every function in `asides` with
@@ -159,7 +159,7 @@ call the step makes is never run, and a step that calls, is cut off, says nothin
 gives no summary (`stops.classify`): the answer says why (and what the step cost, as one
 `usage` event, which still counts) and nothing changes. A conversation that is only the last
 summary, nothing said since, is not compacted again. A command runs in the chat row's task and
-Ctrl-C stops only a turn, so the step has `timeout` seconds, and a note says so as it begins
+Ctrl-C stops only a reply, so the step has `timeout` seconds, and a note says so as it begins
 (the row shows it itself, `output.show`, since the chat row shows a command's answer only once
 it has one); past them it is closed (its provider stops) and nothing changes. The person
 leaving cancels the command (`chat:converse` races it against `input.closed()`): the step is

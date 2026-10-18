@@ -5,7 +5,7 @@ It answers nothing for its first `GRACE` seconds. A person typing a message when
 up would otherwise answer it with whatever they typed next (the `n` of "Run now", declining the
 input). Keys pressed in that moment are dropped: the modal holds focus, so they never reach the
 composer beneath either, and once it is answered the composer has exactly what was typed before
-it came up. Ctrl-C, the app's own priority binding, still stops the turn at once.
+it came up. Ctrl-C, the app's own priority binding, still stops the reply at once.
 """
 
 from collections.abc import Mapping
@@ -31,7 +31,7 @@ class ApprovalScreen(ModalScreen[bool]):
     once it is `armed`: `grace` seconds after it is shown (`GRACE` unless the app says
     otherwise). Until then its keys line is dimmed and those keys are dropped.
 
-    Ctrl-C (the app's priority binding) withdraws it, as a no, and interrupts the turn.
+    Ctrl-C (the app's priority binding) withdraws it, as a no, and interrupts the reply.
     """
 
     BINDINGS = [
@@ -104,7 +104,7 @@ class ApprovalScreen(ModalScreen[bool]):
                         id="approval-source",
                     )
             yield Static(
-                "y  allow     n / Esc  decline     Ctrl-C  stop the turn",
+                "y  allow     n / Esc  decline     Ctrl-C  stop the reply",
                 id="approval-keys",
                 classes="-arming",
                 markup=False,

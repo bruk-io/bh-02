@@ -1,4 +1,4 @@
-"""What a turn's events, a lifecycle change and a jail's grades say: pure.
+"""What a reply's events, a lifecycle change and a jail's grades say: pure.
 
 Text for what is one line (a stop, usage, a note), `Content` for what has styled parts (a
 reply's markdown, an input's highlighted code, a coloured diff). Every style is a theme token
@@ -279,7 +279,7 @@ def usage_line(event: Event) -> str:
 
 def usage_sum(shown: Event, more: Event) -> dict[str, Any]:
     """One model step's usage, when its provider sends it in parts (Anthropic: what was read as
-    the turn starts, then the rest as it ends): the counts added, and the cost when either has one."""
+    the step starts, then the rest as it ends): the counts added, and the cost when either has one."""
     keys = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
     total: dict[str, Any] = {"type": "usage"} | {
         key: int(shown.get(key) or 0) + int(more.get(key) or 0) for key in keys
@@ -293,12 +293,12 @@ def usage_sum(shown: Event, more: Event) -> dict[str, Any]:
 
 
 def is_quiet_stop(event: Event) -> bool:
-    """Whether a stop is the ordinary end of a turn, which needs no line of its own."""
+    """Whether a stop is the ordinary end of a step, which needs no line of its own."""
     return str(event.get("reason", "")) in _QUIET_STOPS
 
 
 def stop_line(event: Event) -> str:
-    """Why a turn ended, when that was not the model simply finishing."""
+    """Why a step ended, when that was not the model simply finishing."""
     return f"stopped: {event.get('reason', '?')}"
 
 

@@ -1,4 +1,4 @@
-"""The `transcript` values: history in memory, or in a JSONL file a session can be resumed from.
+"""The `transcript` values: the conversation in memory, or in a JSONL file a session can be resumed from.
 
 A row of its own, so it outlives the loop: replace the model and the conversation
 carries on. With a file, it also outlives bh-02: each message is appended as it happens (the

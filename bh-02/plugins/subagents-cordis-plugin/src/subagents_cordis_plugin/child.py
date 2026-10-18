@@ -298,7 +298,7 @@ def limited(steps: Steps, event: Mapping[str, Any], limit: int) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class Report:
-    """What a child's reply came to: its last turn's text, how its last step stopped (None: no
+    """What a child's reply came to: its last step's text, how its last step stopped (None: no
     step stopped), and what it used."""
 
     text: str
@@ -310,8 +310,8 @@ class Report:
 
 
 def report_of(events: Iterable[Mapping[str, Any]]) -> Report:
-    """Fold a child's reply events into its report: only the text of its last turn (a turn
-    begins after a call's result, or after a step the loop fed back), its last stop, and its
+    """Fold a child's reply events into its report: only the text of its last step (a step
+    begins after a call's result, or after one the loop fed back), its last stop, and its
     usage summed (each `usage` event is one step's, CONTRACTS.md: event)."""
     text, fresh, stop = "", True, None
     used_in = used_out = cached = 0

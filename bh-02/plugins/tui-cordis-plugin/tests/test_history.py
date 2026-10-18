@@ -19,7 +19,7 @@ def test_a_streamed_run_is_merged_into_one_entry_per_block() -> None:
         {"type": "text", "text": "Hel"},
         {"type": "text", "text": "lo"},
         {"type": "turn_end"},
-        {"type": "text", "text": "next turn"},
+        {"type": "text", "text": "next reply"},
     ]
     replay = replayable(entries, 100)
     assert replay.skipped == 0
@@ -28,15 +28,15 @@ def test_a_streamed_run_is_merged_into_one_entry_per_block() -> None:
         {"type": "thinking", "text": "hmm"},
         {"type": "text", "text": "Hello"},
         {"type": "turn_end"},
-        {"type": "text", "text": "next turn"},  # a turn's end is never merged across
+        {"type": "text", "text": "next reply"},  # a reply's end is never merged across
     ]
     assert entries[3] == {"type": "text", "text": "Hel"}  # the entries given are left alone
 
 
 def test_a_long_history_is_cut_to_the_last_entries_starting_at_a_message() -> None:
-    turn = [{"type": "user", "text": "q"}, {"type": "text", "text": "a"}, {"type": "turn_end"}]
-    replay = replayable(turn * 10, 4)
-    assert replay.skipped == 27  # the last 4 would start mid-turn: move on to the next message
+    reply = [{"type": "user", "text": "q"}, {"type": "text", "text": "a"}, {"type": "turn_end"}]
+    replay = replayable(reply * 10, 4)
+    assert replay.skipped == 27  # the last 4 would start mid-reply: move on to the next message
     assert [e["type"] for e in replay.entries] == ["user", "text", "turn_end"]
     no_messages = replayable([{"type": "note", "text": str(n)} for n in range(10)], 3)
     assert no_messages.skipped == 7 and len(no_messages.entries) == 3
@@ -135,7 +135,7 @@ def test_a_history_that_cannot_be_written_says_why_and_stops_trying(tmp_path: Pa
 
 
 def test_a_file_grown_past_twice_what_is_kept_is_trimmed_and_carries_its_usage() -> None:
-    turn = [
+    reply = [
         {"type": "user", "text": "q"},
         {"type": "text", "text": "a"},
         {"type": "text", "text": "b"},  # merged with the one before: one entry
@@ -148,7 +148,7 @@ def test_a_file_grown_past_twice_what_is_kept_is_trimmed_and_carries_its_usage()
         },
         {"type": "turn_end"},
     ]
-    entries = turn * 10  # 40 entries once merged
+    entries = reply * 10  # 40 entries once merged
     assert compacted(entries, 20) is None  # not yet past twice 20
     trimmed = compacted(entries, 10)
     assert trimmed is not None

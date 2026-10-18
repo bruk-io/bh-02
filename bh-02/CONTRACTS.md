@@ -21,8 +21,8 @@ as it does is its plugin's README; how the parts fit is under How it works
 
 | Key | Value | Bound by | Read by |
 |---|---|---|---|
-| `loop` | a conversation: `reply(message: str) -> AsyncIterator[event]`, one turn's events in order; a failure the person can recover from raises as Errors says | `agent:loop`, `bh_02.testing:*` (fakes) | `chat:converse` |
-| `input` | `read() -> str \| None` (`None`: no more input); `interrupted()` returns when the person asks to stop the running turn (a stop asked for after a line was read and before `interrupted()` is called is held for it; the next `read()` drops one still held); `closed()` returns once no more lines will come (the person left, or the ui crashed): a command running then is cancelled, since nobody is left to read its answer. Ends with the ui (below) | `tui:ui` | `chat:converse` |
+| `loop` | a conversation: `reply(message: str) -> AsyncIterator[event]`, one reply's events in order; a failure the person can recover from raises as Errors says | `agent:loop`, `bh_02.testing:*` (fakes) | `chat:converse` |
+| `input` | `read() -> str \| None` (`None`: no more input); `interrupted()` returns when the person asks to stop the running reply (a stop asked for after a line was read and before `interrupted()` is called is held for it; the next `read()` drops one still held); `closed()` returns once no more lines will come (the person left, or the ui crashed): a command running then is cancelled, since nobody is left to read its answer. Ends with the ui (below) | `tui:ui` | `chat:converse` |
 | `output` | `show(events: AsyncIterator[event])`, `notice(message: str)`, `confirm(request) -> bool`. Not part of the shape: `lifecycle(event)` (a cordis `Event`: `kind`, `fiber`, `error`), which the ui row `observe`s itself to show rows reloading; no consumer calls it, and it shows nothing of a sub-agent's rows (a `fiber` under `agents/`), which `--trace` keeps. Ends with the ui (below). Inside a sub-agent's realm, `output` is `subagents:output`'s: `confirm` alone, each request labelled with the agent (`agent`) and put through `asker` | `tui:ui`; in a sub-agent's realm, `subagents:output` | `chat:converse`; `agent:loop` and `extensions:process` (`confirm`: what the `approval` rule does not let run unasked); `subagents:parent` (the parent's: `confirm`, behind `asker`, and a sub-agent's start past the session's budget or naming a model other than its type's, unlabelled since the parent's reply asks it; `show`: a note that a sub-agent waits for a slot, and each sub-agent's usage when it ends, one `usage` event after a `note`, so it joins the session's totals); `tui:grades` (`show`: a start's notice, as a `note`); `agent:conversation` (`show`: a `note` as `/compact`'s step begins); `commands:jobs` (`notice`: a queued restart that failed, as its command words it) |
 | `frame` | the app's frame, a broker (below): `status(field: str, text: str, *shorter: str) -> remover` (`shorter`: shorter forms of `text`, each shorter than the last, shown when the line is too narrow); `commands(specs) -> remover` (`specs: () -> Sequence[spec]`, a spec: `name`, `help`, `usage`, `choices`?: `() -> Sequence[{args, help}]`, arguments offered as entries of their own, `/model claude/haiku`; both read when the palette is searched (each time it opens, and per key) and when the composer's list of commands opens (once per opening), so what is registered or added later is offered) | `tui:ui` | `tui:status`, `tui:grades` (`status`); `tui:palette` (`commands`); `extensions:process` (`status`: each extension's fields under its name, and its own `extensions` field); `subagents:status` (`status`: the `agents` field) |
 | `system` | the system prompt, a broker: `text() -> str` (bh-02's own, then the directory and its git branch, `.git/HEAD` read through no link, then the sections rows add; never the date), `add(name, section) -> remover` (`section: () -> str`, read with the rest each time `text()` is). Sections are told sorted by `name`, two of one name by their text, never in the order rows added them, so a row that adds its section again after a restart keeps its place. `text()` is read on `executor`, one call at a time, so a section must not need the event loop. Names no tool: a tool's row tells the model of it in a section. Depends on its config (`root`) alone. Why it is sent unchanged: [the prompt and asides](../docs/bh-02/how-it-works/prompt-and-asides.md#why-the-prompt-stays-fixed-for-a-conversation) | `agent:system` | `agent:loop` (`text`); `add`: `python:tool` (`python`), `subagents:parent` (`agents`), `subagents:child` (`agent`, in a sub-agent's realm), `memory:files` (`memory`), `memory:auto` (`memory: auto`), `extensions:process` (`extensions`, and `extensions: NAME` for each) |
@@ -56,7 +56,7 @@ teardown error would not).
 **A restart a command asks for.** A command never restarts rows in the chat row's task: it
 queues the restart in `jobs` and answers, ending with `restarting` (the rows). `chat:converse`
 reads its next line only once `jobs.settled()`, so the restart reloads it while it holds no line,
-and a line typed meanwhile reaches the new loop: never the old one, never dropped, never a turn
+and a line typed meanwhile reaches the new loop: never the old one, never dropped, never a reply
 the restart stops. How the ui shows rows coming back up: [tui-cordis-plugin](plugins/tui-cordis-plugin/README.md).
 
 **Brokers** (`commands`, `frame`, `system`, `tools`, `asides`, `access`; the paper's, section
@@ -75,7 +75,7 @@ answers a name it did not offer, an input that does not fit the spec (a `require
 missing, one not of its schema's simple type), or a tool removed since the conversation began
 with text saying so, never running it or asking anyone. A call an input makes (`tools.call`) runs
 the same way. A tool's row tells the model about its tool in a `system` section of its own, never
-in the spec's description, which a model server caches with the list. A turn the person stops
+in the spec's description, which a model server caches with the list. A reply the person stops
 still answers every call it made: [the loop](../docs/bh-02/how-it-works/loop.md).
 
 **The model's extensions** reach bh-02 only through four keys, bound in the extensions process,
@@ -211,7 +211,7 @@ its classification; `answered` and `refused` end the reply, and the rest are fed
 as `feedback`, a bounded number of times, never read as the answer. Which reasons each provider
 reports: [models-cordis-plugin](plugins/models-cordis-plugin/README.md).
 
-A reply is a stream of events: everything the person might want to see of a turn, in order.
+A reply is a stream of events: everything the person might want to see of it, in order.
 `text` is the reply itself; the rest describe the work around it. A consumer that shows only
 text keeps `text` and may drop the rest; one that shows more matches on `type` and ignores types
 it doesn't know, so a provider can add one.

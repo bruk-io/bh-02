@@ -68,10 +68,10 @@ def test_write_session_writes_a_new_file_each_time(tmp_path: Path) -> None:
     assert session_file(tmp_path, "no-such-session") is None
 
 
-def test_an_openai_model_s_turn_is_rebuilt_from_the_transcript_s_text_and_calls() -> None:
-    """After `/model sonnet` from an OpenAI-compatible model, its turns carry that API's
+def test_an_openai_model_s_step_is_rebuilt_from_the_transcript_s_text_and_calls() -> None:
+    """After `/model sonnet` from an OpenAI-compatible model, its steps carry that API's
     message (`content` a string, arguments as JSON text): Claude Code gets them rebuilt."""
-    openai_turn = {
+    openai_step = {
         "role": "assistant",
         "content": "",
         "tool_calls": [{"id": "call_1", "name": "python", "input": {"code": "print(1)"}}],
@@ -89,7 +89,7 @@ def test_an_openai_model_s_turn_is_rebuilt_from_the_transcript_s_text_and_calls(
     }
     transcript = [
         {"role": "user", "content": "run it"},
-        openai_turn,
+        openai_step,
         {"role": "tool", "content": "1", "call_id": "call_1"},
         {
             "role": "assistant",

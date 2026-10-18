@@ -1,4 +1,4 @@
-"""The app under Pilot: the layout, the composer, Ctrl-C, a turn drawn as it streams, the
+"""The app under Pilot: the layout, the composer, Ctrl-C, a reply drawn as it streams, the
 approval modal, the status bar; and `running`, which is how the ui row runs it."""
 
 import asyncio
@@ -9,7 +9,7 @@ from textual.pilot import Pilot
 from textual.widgets import Static
 
 from tui_cordis_plugin import AppCrashed, BhApp, running, theme
-from tui_cordis_plugin.messages import Asked, Noted, Shown, TurnEnded
+from tui_cordis_plugin.messages import Asked, Noted, ReplyEnded, Shown
 from tui_cordis_plugin.widgets import ApprovalScreen, Composer, StatusBar, Transcript
 
 _SIZE = (120, 36)
@@ -65,23 +65,23 @@ async def test_exit_in_the_composer_leaves_without_sending_anything() -> None:
         await pilot.press(*"/exit", "enter")
         await pilot.pause()
         assert app.return_code == 0
-    assert not app.bridge.turn_running
+    assert not app.bridge.reply_running
 
 
-async def test_ctrl_c_stops_the_running_turn_and_otherwise_says_how_to_leave() -> None:
+async def test_ctrl_c_stops_the_running_reply_and_otherwise_says_how_to_leave() -> None:
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await pilot.press("ctrl+c")
         assert any(text.startswith("Nothing is running.") for _, text in _blocks(app))
         assert app.return_code is None  # still running: Ctrl-C never quits
-        turn = asyncio.ensure_future(app.bridge.interrupted())
+        reply_task = asyncio.ensure_future(app.bridge.interrupted())
         await pilot.pause()
         await pilot.press("ctrl+c")
-        await asyncio.wait_for(turn, 1)
+        await asyncio.wait_for(reply_task, 1)
 
 
-async def test_ctrl_c_while_a_command_runs_says_it_does_not_stop_one_and_a_starting_turn_hears_it() -> None:
-    """A Ctrl-C held for the line being handled: a turn starting hears it at once and nothing is
+async def test_ctrl_c_while_a_command_runs_says_it_does_not_stop_one_and_a_starting_reply_hears_it() -> None:
+    """A Ctrl-C held for the line being handled: a reply starting hears it at once and nothing is
     said; a command (a `!` one may take minutes) never does, so the app says Ctrl-C doesn't stop
     it, and how to leave."""
     app = BhApp()
@@ -92,11 +92,11 @@ async def test_ctrl_c_while_a_command_runs_says_it_does_not_stop_one_and_a_start
         await pilot.pause(0.5)
         said = [text for _, text in _blocks(app) if text.startswith("A command is running")]
         assert said == [
-            "A command is running, and Ctrl-C stops only a turn: a `!` command or /compact runs until "
+            "A command is running, and Ctrl-C stops only a reply: a `!` command or /compact runs until "
             "it ends or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
         ]
         await pilot.press(*"hello", "enter")
-        assert await asyncio.wait_for(app.bridge.line(), 1) == "hello"  # a turn starts
+        assert await asyncio.wait_for(app.bridge.line(), 1) == "hello"  # a reply starts
         await pilot.press("ctrl+c")
         await asyncio.wait_for(app.bridge.interrupted(), 1)  # and hears the held Ctrl-C
         await pilot.pause(0.5)
@@ -117,7 +117,7 @@ async def test_a_reply_streams_into_one_block_and_other_events_get_their_own() -
             {"type": "stop", "reason": "interrupted"},
         ):
             app.post_message(Shown(event))
-        app.post_message(TurnEnded())
+        app.post_message(ReplyEnded())
         app.post_message(Shown({"type": "text", "text": "Next"}))
         app.post_message(Noted("error: slow down", "failure"))
         await pilot.pause()
@@ -127,7 +127,7 @@ async def test_a_reply_streams_into_one_block_and_other_events_get_their_own() -
             ("tool_result", "⎿ 2"),
             ("text", "Two."),
             ("stop", "stopped: interrupted"),
-            ("text", "Next"),  # a new turn: a new block, not appended to the last one
+            ("text", "Next"),  # a new reply: a new block, not appended to the last one
             ("failure", "error: slow down"),
         ]
 
@@ -177,7 +177,7 @@ async def test_a_question_nobody_waits_for_is_taken_down() -> None:
         app.post_message(Asked({"name": "python", "input": {"code": "1"}}, answer))
         await pilot.pause()
         assert isinstance(app.screen, ApprovalScreen)
-        answer.cancel()  # the turn asking was interrupted
+        answer.cancel()  # the reply asking was interrupted
         await pilot.pause()
         await pilot.pause()
         assert not isinstance(app.screen, ApprovalScreen)

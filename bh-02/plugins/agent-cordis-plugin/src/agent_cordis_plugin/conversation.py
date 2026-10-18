@@ -15,7 +15,7 @@ the summary names what its namespace holds. `/clear` is the same rewrite with an
 conversation, and restarts the python row too (`clear`): nothing is lost for good, the old
 conversation is the `.bak` beside the file.
 
-A command runs in the chat row's task, and Ctrl-C stops only a turn, so the model has `timeout`
+A command runs in the chat row's task, and Ctrl-C stops only a reply, so the model has `timeout`
 seconds to answer, and a note says so as the step begins; the person leaving cancels the
 command (`chat:converse`), and nothing is written until the summary is whole. The restart is
 queued in `jobs` (CONTRACTS.md: jobs), never run in the chat row's task, which it reloads, and
@@ -176,7 +176,7 @@ class Shown(Protocol):
 @dataclass(frozen=True, slots=True)
 class ConversationConfig:
     """`timeout`: the seconds the model has to write `/compact`'s summary (Ctrl-C stops only a
-    turn, so this is the longest /compact keeps the person waiting). `loop` and `transcript`:
+    reply, so this is the longest /compact keeps the person waiting). `loop` and `transcript`:
     the rows /compact restarts, together; the transcript row's config `path` is the file the new
     conversation is written to. The python row is not among them: the summary refers to its
     namespace. `clear`: the rows /clear restarts, together (the python row among them, so the

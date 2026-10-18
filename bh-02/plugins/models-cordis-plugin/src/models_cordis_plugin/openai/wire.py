@@ -95,7 +95,7 @@ def request_for(
 
 
 def replayed(message: Json) -> dict[str, Any]:
-    """A transcript message as the API takes it. An assistant turn this provider sent is
+    """A transcript message as the API takes it. An assistant message this provider sent is
     replayed as it came (`provider`); another provider's (Claude's content blocks, Ollama's
     parsed arguments), in a conversation that switched models, is rebuilt from the
     transcript's own text and calls."""

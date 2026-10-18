@@ -271,12 +271,12 @@ async def test_a_reply_is_one_line_from_the_line_handed_out_and_goes_when_it_end
             yield {"type": "tool_result", "call_id": "c", "content": "done", "is_error": False}
 
         await _handed(app, pilot, "hello")
-        turn = asyncio.ensure_future(TuiOutput(app.post_message, app.bridge).show(reply()))
+        reply_task = asyncio.ensure_future(TuiOutput(app.post_message, app.bridge).show(reply()))
         await _until(pilot, lambda: app.query_one(Working).ticking)
         clock.now += 9
         await _until(pilot, lambda: _line(app) == "Working · 9s")
         release.set()
-        await turn
+        await reply_task
         _read(app)
         await _until(pilot, lambda: _line(app) is None)
         assert not app.query_one(Working).ticking
@@ -317,18 +317,18 @@ async def test_esc_and_ctrl_c_still_stop_a_reply_and_take_the_line_down_with_it(
             await asyncio.Event().wait()
             yield {"type": "text", "text": "never"}
 
-        turn = asyncio.ensure_future(output.show(endless()))
+        reply_task = asyncio.ensure_future(output.show(endless()))
 
         async def stopped_by_the_person() -> None:
             """What `chat:converse` does: cancel the reply once the input is interrupted."""
             await app.bridge.interrupted()
-            turn.cancel()
+            reply_task.cancel()
 
         stopper = asyncio.ensure_future(stopped_by_the_person())
         clock.now += 2
         await _until(pilot, lambda: _line(app) == "Working · 2s")
         await pilot.press("escape")
-        await asyncio.gather(turn, stopper, return_exceptions=True)
+        await asyncio.gather(reply_task, stopper, return_exceptions=True)
         _read(app)
         await _until(pilot, lambda: _line(app) is None)
 

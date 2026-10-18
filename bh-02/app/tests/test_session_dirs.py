@@ -316,7 +316,7 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     yield tmp_path / "state" / "bh-02" / "sessions"
 
 
-def test_every_run_is_a_session_and_resuming_one_reads_its_history_back(
+def test_every_run_is_a_session_and_resuming_one_reads_its_conversation_back(
     composition: Callable[..., Path], state: Path
 ) -> None:
     patch = composition(

@@ -8,7 +8,7 @@ import pytest
 from textual.message import Message
 
 from tui_cordis_plugin import AppCrashed, Bridge, Frame, TuiInput, TuiOutput
-from tui_cordis_plugin.messages import Asked, FrameChanged, Noted, Shown, TurnEnded, TurnStarted
+from tui_cordis_plugin.messages import Asked, FrameChanged, Noted, ReplyEnded, ReplyStarted, Shown
 
 
 class Posted:
@@ -34,14 +34,14 @@ async def test_a_line_typed_before_anyone_reads_is_kept_for_the_next_read() -> N
     assert await waiting == "later"
 
 
-async def test_leaving_the_app_ends_the_input_and_settles_every_turn() -> None:
+async def test_leaving_the_app_ends_the_input_and_settles_every_reply() -> None:
     bridge = Bridge()
     reading = asyncio.ensure_future(bridge.line())
-    turn = asyncio.ensure_future(bridge.interrupted())
+    reply_task = asyncio.ensure_future(bridge.interrupted())
     await asyncio.sleep(0)
     bridge.end()
     assert await reading is None
-    await asyncio.wait_for(turn, 1)
+    await asyncio.wait_for(reply_task, 1)
     assert await bridge.line() is None  # and every read after
     await asyncio.wait_for(bridge.interrupted(), 1)  # returns at once: nothing left to stop
 
@@ -73,15 +73,15 @@ async def test_a_crash_reaches_whoever_reads_next() -> None:
         await bridge.line()
 
 
-async def test_ctrl_c_stops_a_running_turn_and_says_whether_one_was() -> None:
+async def test_ctrl_c_stops_a_running_reply_and_says_whether_one_was() -> None:
     bridge = Bridge()
-    assert not bridge.interrupt() and not bridge.turn_running
-    turn = asyncio.ensure_future(TuiInput(bridge).interrupted())
+    assert not bridge.interrupt() and not bridge.reply_running
+    reply_task = asyncio.ensure_future(TuiInput(bridge).interrupted())
     await asyncio.sleep(0)
-    assert bridge.turn_running
+    assert bridge.reply_running
     assert bridge.interrupt()
-    await asyncio.wait_for(turn, 1)
-    assert not bridge.turn_running
+    await asyncio.wait_for(reply_task, 1)
+    assert not bridge.reply_running
 
 
 async def test_a_question_nobody_can_answer_is_a_no() -> None:
@@ -97,7 +97,7 @@ async def test_a_question_nobody_can_answer_is_a_no() -> None:
     assert len(posted.messages) == 1
 
 
-async def test_a_turn_is_posted_event_by_event_and_its_end_closes_the_stream() -> None:
+async def test_a_reply_is_posted_event_by_event_and_its_end_closes_the_stream() -> None:
     posted, bridge = Posted(), Bridge()
 
     async def reply() -> AsyncIterator[Mapping[str, Any]]:
@@ -105,14 +105,14 @@ async def test_a_turn_is_posted_event_by_event_and_its_end_closes_the_stream() -
         yield {"type": "text", "text": "b"}
 
     await TuiOutput(posted, bridge).show(reply())
-    assert [type(m) for m in posted.messages] == [TurnStarted, Shown, Shown, TurnEnded]
+    assert [type(m) for m in posted.messages] == [ReplyStarted, Shown, Shown, ReplyEnded]
     assert [e["text"] for m in posted.messages if isinstance(m, Shown) for e in m.events] == ["a", "b"]
 
 
 async def test_events_gather_while_the_app_draws_and_ctrl_c_is_heard_mid_burst() -> None:
     """A reply that yields every event at once (it never waits) is posted in batches, no
-    faster than the app draws; and the loop gets a turn between events, so an interrupt
-    arriving mid-burst cancels the turn instead of waiting for all of it."""
+    faster than the app draws; and the event loop runs between events, so an interrupt
+    arriving mid-burst cancels the reply instead of waiting for all of it."""
     bridge = Bridge()
     shown: list[Shown] = []
     output = TuiOutput(lambda m: shown.append(m) or True if isinstance(m, Shown) else True, bridge)
@@ -124,7 +124,7 @@ async def test_events_gather_while_the_app_draws_and_ctrl_c_is_heard_mid_burst()
             read += 1
             yield {"type": "text", "text": f"line {n}\n"}
 
-    turn = asyncio.ensure_future(output.show(burst()))
+    reply_task = asyncio.ensure_future(output.show(burst()))
     for _ in range(5):
         await asyncio.sleep(0)
     assert len(shown) == 1  # the first batch is posted, and nothing more until it is drawn
@@ -133,8 +133,8 @@ async def test_events_gather_while_the_app_draws_and_ctrl_c_is_heard_mid_burst()
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert len(shown) == 2 and len(shown[1].events) > 1  # what gathered meanwhile, as one batch
-    turn.cancel()  # Ctrl-C: the chat session cancels the turn it is racing
-    await asyncio.gather(turn, return_exceptions=True)
+    reply_task.cancel()  # Ctrl-C: the chat session cancels the reply it is racing
+    await asyncio.gather(reply_task, return_exceptions=True)
     assert read < 2_000  # the burst was not read to its end first
 
 
@@ -145,10 +145,10 @@ class _ProviderFailed(Exception):
 
 
 @pytest.mark.parametrize("ending", ["raises", "cancelled"])
-async def test_every_event_read_is_posted_when_a_turn_stops_while_the_app_is_behind(ending: str) -> None:
+async def test_every_event_read_is_posted_when_a_reply_stops_while_the_app_is_behind(ending: str) -> None:
     """The app is still drawing the first batch when the reply fails or Ctrl-C cancels the
-    turn: what gathered meanwhile (a usage event among it, already in the status bar's total)
-    is still posted, so it is drawn and recorded, before the turn's end."""
+    reply: what gathered meanwhile (a usage event among it, already in the status bar's total)
+    is still posted, so it is drawn and recorded, before the reply's end."""
     bridge = Bridge()
     posted: list[Message] = []
     frame = Frame(lambda m: True)
@@ -164,17 +164,17 @@ async def test_every_event_read_is_posted_when_a_turn_stops_while_the_app_is_beh
             raise _ProviderFailed()
         await asyncio.Event().wait()  # a reply still streaming when Ctrl-C comes
 
-    turn = asyncio.ensure_future(output.show(reply()))
+    reply_task = asyncio.ensure_future(output.show(reply()))
     await asyncio.wait_for(gathered.wait(), 1)
     if ending == "cancelled":
         await asyncio.sleep(0)
-        turn.cancel()
-    outcome = (await asyncio.gather(turn, return_exceptions=True))[0]
+        reply_task.cancel()
+    outcome = (await asyncio.gather(reply_task, return_exceptions=True))[0]
     assert isinstance(outcome, _ProviderFailed if ending == "raises" else asyncio.CancelledError)
     events = [e for m in posted if isinstance(m, Shown) for e in m.events]
     assert [e.get("text") for e in events] == ["t0 ", "t1 ", "t2 ", "t3 ", None]
     assert events[-1]["type"] == "usage" and frame.fields() == {"usage": "7 in · 3 out"}
-    assert isinstance(posted[-1], TurnEnded)
+    assert isinstance(posted[-1], ReplyEnded)
 
 
 async def test_what_gathered_is_posted_once_the_app_has_drawn_even_if_the_reply_pauses() -> None:
@@ -191,7 +191,7 @@ async def test_what_gathered_is_posted_once_the_app_has_drawn_even_if_the_reply_
         both.set()
         await asyncio.Event().wait()  # the model thinks, for as long as it likes
 
-    turn = asyncio.ensure_future(output.show(reply()))
+    reply_task = asyncio.ensure_future(output.show(reply()))
     await asyncio.wait_for(both.wait(), 1)
     assert [[e["text"] for e in m.events] for m in shown] == [["first "]]  # "second" gathers
     assert shown[0].drawn is not None
@@ -199,11 +199,11 @@ async def test_what_gathered_is_posted_once_the_app_has_drawn_even_if_the_reply_
     for _ in range(3):
         await asyncio.sleep(0)
     assert [[e["text"] for e in m.events] for m in shown] == [["first "], ["second"]]
-    turn.cancel()
-    await asyncio.gather(turn, return_exceptions=True)
+    reply_task.cancel()
+    await asyncio.gather(reply_task, return_exceptions=True)
 
 
-async def test_a_draw_settled_after_the_turn_ended_posts_nothing_more() -> None:
+async def test_a_draw_settled_after_the_reply_ended_posts_nothing_more() -> None:
     bridge = Bridge()
     posted: list[Message] = []
     output = TuiOutput(lambda m: posted.append(m) or True, bridge)  # draws when told to
@@ -213,18 +213,18 @@ async def test_a_draw_settled_after_the_turn_ended_posts_nothing_more() -> None:
             yield {"type": "text", "text": text}
 
     await asyncio.wait_for(output.show(reply()), 1)
-    assert isinstance(posted[-1], TurnEnded)
+    assert isinstance(posted[-1], ReplyEnded)
     for message in posted:
         if isinstance(message, Shown) and message.drawn is not None and not message.drawn.done():
-            message.drawn.set_result(None)  # the app catches up after the turn's end
+            message.drawn.set_result(None)  # the app catches up after the reply's end
     for _ in range(3):
         await asyncio.sleep(0)
-    assert isinstance(posted[-1], TurnEnded)  # nothing drawn twice, nothing after the end
+    assert isinstance(posted[-1], ReplyEnded)  # nothing drawn twice, nothing after the end
     events = [e["text"] for m in posted if isinstance(m, Shown) for e in m.events]
     assert events == ["a", "b", "c"]
 
 
-async def test_a_turn_waiting_for_the_app_to_draw_ends_when_the_app_does() -> None:
+async def test_a_reply_waiting_for_the_app_to_draw_ends_when_the_app_does() -> None:
     bridge = Bridge()
     output = TuiOutput(lambda m: True, bridge)  # an app that never draws
 
@@ -232,14 +232,14 @@ async def test_a_turn_waiting_for_the_app_to_draw_ends_when_the_app_does() -> No
         for n in range(10_000):
             yield {"type": "text", "text": f"{n}"}
 
-    turn = asyncio.ensure_future(output.show(burst()))
+    reply_task = asyncio.ensure_future(output.show(burst()))
     await asyncio.sleep(0.05)
-    assert not turn.done()  # waiting for a draw that never comes
+    assert not reply_task.done()  # waiting for a draw that never comes
     bridge.end()  # Ctrl-Q
-    await asyncio.wait_for(turn, 1)
+    await asyncio.wait_for(reply_task, 1)
 
 
-async def test_a_turn_stops_being_read_once_the_app_has_ended() -> None:
+async def test_a_reply_stops_being_read_once_the_app_has_ended() -> None:
     posted, bridge = Posted(), Bridge()
     read: list[str] = []
 
@@ -457,21 +457,21 @@ def test_frame_offers_commands_read_afresh() -> None:
     assert frame.offered_commands() == []
 
 
-async def test_a_ctrl_c_before_the_turn_listens_is_held_for_it() -> None:
-    """Between a line being handed out and its turn racing `interrupted()`, Ctrl-C is not lost."""
+async def test_a_ctrl_c_before_the_reply_listens_is_held_for_it() -> None:
+    """Between a line being handed out and its reply racing `interrupted()`, Ctrl-C is not lost."""
     bridge = Bridge()
     reading = asyncio.ensure_future(bridge.line())
     await asyncio.sleep(0)
     assert not bridge.interrupt()  # waiting for a line: nothing is running
     bridge.submit("go")
     assert await reading == "go"
-    assert bridge.interrupt() and bridge.interrupt_held  # the turn has not started listening
+    assert bridge.interrupt() and bridge.interrupt_held  # the reply has not started listening
     await asyncio.wait_for(bridge.interrupted(), 1)  # it hears the held Ctrl-C at once
     assert not bridge.interrupt_held
 
 
 async def test_a_held_ctrl_c_is_dropped_by_the_next_read() -> None:
-    """A slash command is not interrupted: its held Ctrl-C must not kill the next turn."""
+    """A slash command is not interrupted: its held Ctrl-C must not kill the next reply."""
     bridge = Bridge()
     bridge.submit("/rows")
     assert await bridge.line() == "/rows"
@@ -479,11 +479,11 @@ async def test_a_held_ctrl_c_is_dropped_by_the_next_read() -> None:
     bridge.submit("hello")
     assert await bridge.line() == "hello"
     assert not bridge.interrupt_held
-    turn = asyncio.ensure_future(bridge.interrupted())
+    reply_task = asyncio.ensure_future(bridge.interrupted())
     await asyncio.sleep(0.01)
-    assert not turn.done()  # the next turn runs until its own Ctrl-C
+    assert not reply_task.done()  # the next reply runs until its own Ctrl-C
     assert bridge.interrupt()
-    await asyncio.wait_for(turn, 1)
+    await asyncio.wait_for(reply_task, 1)
 
 
 async def test_usage_adds_up_into_the_status_bar() -> None:
@@ -491,29 +491,29 @@ async def test_usage_adds_up_into_the_status_bar() -> None:
     frame = Frame(posted)
     output = TuiOutput(posted, bridge, frame.status)
 
-    async def turn(tokens: int, cost: float | None) -> AsyncIterator[Mapping[str, Any]]:
+    async def reply(tokens: int, cost: float | None) -> AsyncIterator[Mapping[str, Any]]:
         yield {"type": "text", "text": "hi"}
         used = {"type": "usage", "input_tokens": tokens, "output_tokens": 10}
         yield used | ({"cost_usd": cost} if cost is not None else {})
 
-    await output.show(turn(1000, None))
+    await output.show(reply(1000, None))
     assert frame.fields() == {"usage": "1,000 in · 10 out"}
-    await output.show(turn(2000, 0.25))
+    await output.show(reply(2000, 0.25))
     assert frame.fields() == {"usage": "3,000 in · 20 out · $0.2500"}
 
 
-async def test_a_turn_stopped_before_its_output_count_marks_the_totals_as_lower_bounds() -> None:
+async def test_a_reply_stopped_before_its_output_count_marks_the_totals_as_lower_bounds() -> None:
     posted, bridge = Posted(), Bridge()
     frame = Frame(posted)
     output = TuiOutput(posted, bridge, frame.status)
 
-    async def turn(stopped: bool) -> AsyncIterator[Mapping[str, Any]]:
+    async def reply(stopped: bool) -> AsyncIterator[Mapping[str, Any]]:
         yield {"type": "usage", "input_tokens": 1000, "output_tokens": 0, "partial": True}
         yield {"type": "text", "text": "hi"}
         if not stopped:  # the provider's final count
             yield {"type": "usage", "input_tokens": 0, "output_tokens": 10}
 
-    await output.show(turn(stopped=False))
+    await output.show(reply(stopped=False))
     assert frame.fields() == {"usage": "1,000 in · 10 out"}  # partial only until the count came
-    await output.show(turn(stopped=True))
+    await output.show(reply(stopped=True))
     assert frame.fields() == {"usage": "2,000 in · 10+ out"}

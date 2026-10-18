@@ -251,7 +251,7 @@ async def paced_ui() -> Effects:
 
 
 class Counting:
-    """A model that says how many user messages it was shown: history, made visible."""
+    """A model that says how many user messages it was shown: the conversation, made visible."""
 
     async def complete(self, messages: Any, tools: Any) -> AsyncIterator[dict[str, Any]]:
         users = [m for m in messages if m["role"] == "user"]
@@ -538,7 +538,7 @@ DRAWN: list[str] = []
 
 
 class Drawing(Record):
-    """A recording output that gives the loop a turn after each event, as the app's output does
+    """A recording output that yields to the event loop after each event, as the app's output does
     while it draws (so a restart queued meanwhile can land mid-answer)."""
 
     async def show(self, chunks: AsyncIterator[Mapping[str, Any]]) -> None:

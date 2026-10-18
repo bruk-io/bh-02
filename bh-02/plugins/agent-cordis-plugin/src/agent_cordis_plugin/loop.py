@@ -1,4 +1,4 @@
-"""The loop: a turn is one model step plus the calls it asked for, until it asks for none.
+"""The loop: a reply is a model step, the calls it asked for, and the next step, until a step asks for none.
 
 A plain function of the values it declares its own contracts for (CONTRACTS.md: model,
 tools, transcript, system, approval, asides, executor). The model is offered the tools rows
@@ -94,7 +94,7 @@ type Json = Mapping[str, Any]
 
 @runtime_checkable
 class Model(Protocol):
-    """One turn of a model over a transcript, with tools it may ask for but never runs."""
+    """One step of a model over a transcript, with tools it may ask for but never runs."""
 
     def complete(self, messages: Sequence[Json], tools: Sequence[Json]) -> AsyncIterator[Json]: ...
 
@@ -194,7 +194,7 @@ class Executor(Protocol):
 
 @runtime_checkable
 class Transcript(Protocol):
-    """The conversation's history: appended by the loop, read whole for each request."""
+    """The conversation's entries: appended by the loop, read whole for each request."""
 
     @property
     def messages(self) -> Sequence[Json]: ...
@@ -203,10 +203,10 @@ class Transcript(Protocol):
 
 _INTERRUPTED = "interrupted: the person stopped this call before it finished; it may have partly run"
 # A call the stop came before: at the person's approval, or queued behind the one stopped.
-_NOT_RUN = "not run: the person stopped the turn before this call started, so none of it ran"
+_NOT_RUN = "not run: the person stopped the reply before this call started, so none of it ran"
 # What a call the person said no to answers the model with.
 DECLINED = "denied: the person said no to this call, so it did not run; ask them what they want instead"
-# What a turn that never finished ends with in the transcript, after what it said so far: the
+# What a step that never finished ends with in the transcript, after what it said so far: the
 # person stopped it, or the model failed (a 429, a dropped connection).
 STOPPED = "[the person stopped this reply here]"
 FAILED = "[this reply failed here; the person saw the error]"
@@ -399,14 +399,14 @@ async def called(tool: Tool, name: str, input: Json) -> tuple[str, tuple[str, ..
 
 
 class LoopModel:
-    """The `loop` value: the transcript is the history, the model is one step at a time.
+    """The `loop` value: the transcript holds the conversation, and the model answers it one step at a time.
 
-    Each turn is classified (`stops.classify`): only `act` runs calls, and only `answered` (or
+    Each step is classified (`stops.classify`): only `act` runs calls, and only `answered` (or
     `refused`: the provider declined, which asking again won't change) ends the reply. A
-    truncated, silent or undecodable turn is fed back to the model up to `max_nudges` times
+    truncated, silent or undecodable step is fed back to the model up to `max_nudges` times
     in one reply, then shown as the reason the reply stopped. The
     provider's assistant message rides on its transcript entry as `provider`, for the
-    model to replay as it was received. An `act` turn's calls run one at a time, each only on
+    model to replay as it was received. An `act` step's calls run one at a time, each only on
     `approval.approve({"name", "input", "runs", "title", "lines", ...})`'s yes (`shown`); a no
     is that call's answer, `DECLINED`.
 
@@ -421,8 +421,8 @@ class LoopModel:
     runs through the tool its name has now, waiting `wait` seconds for one that is restarting; a
     name it was not offered, or one removed since, answers with an error (`refusal`).
 
-    A reply the person stops (the reply closed, or its task cancelled) while a turn streams
-    still leaves the transcript whole: what the turn said so far, then `STOPPED`, as the
+    A reply the person stops (the reply closed, or its task cancelled) while a step streams
+    still leaves the transcript whole: what the step said so far, then `STOPPED`, as the
     assistant's answer; a model step that fails (it raises: rate limited, cut off) the same,
     with `FAILED`. Otherwise the next request would carry that message unanswered, and the
     model would answer it too, doing the stopped work again before the next one.
@@ -610,7 +610,7 @@ class LoopModel:
         self._transcript.append({"role": "assistant", "content": why})
 
     async def reply(self, message: str) -> AsyncIterator[Json]:
-        """Run turns until one is answered, yielding what happens (CONTRACTS.md: event)."""
+        """Run model steps until one answers the message, yielding what happens (CONTRACTS.md: event)."""
         today = self._today()
         dated = today if _undated(self._transcript.messages, today) else None
         if not self._ready and (waiting := [n for n in self._requires if self._tools.get(n) is None]):
@@ -631,33 +631,33 @@ class LoopModel:
             yield {"type": "note", "text": text}
         nudges = 0
         while True:
-            turn = _Turn()
+            step = _Step()
             tools = self._offered()
             offered = [str(spec["name"]) for spec in tools]
             chunks = self._model.complete(request_for(self._transcript.messages), tools)
             try:
                 async for chunk in chunks:
-                    if (seen := turn.take(chunk)) is not None:
+                    if (seen := step.take(chunk)) is not None:
                         yield seen
             except BaseException as error:
-                # stopped or failed: the turn gets an answer, so the message it was answering is
+                # stopped or failed: the step gets an answer, so the message it was answering is
                 # not asked again with the next one
                 stopped = isinstance(error, GeneratorExit | asyncio.CancelledError)
-                self._transcript.append(turn.unfinished(STOPPED if stopped else FAILED))
+                self._transcript.append(step.unfinished(STOPPED if stopped else FAILED))
                 raise
             finally:
                 # a reply the person stops closes the model step now (its HTTP stream with it),
                 # not whenever the event loop gets round to finalizing an abandoned generator
                 if isinstance(chunks, AsyncGenerator):
                     await chunks.aclose()
-            stop = classify(turn.finish, turn.text, turn.calls)
-            self._transcript.append(turn.entry(stop))
+            stop = classify(step.finish, step.text, step.calls)
+            self._transcript.append(step.entry(stop))
             if stop == ACT:
                 answered, running = 0, False  # running: the unanswered call reached its tool
                 result: str | None = None  # the unanswered call's answer, once it has one
                 asides: list[str] = []  # and what `asides` said with it
                 try:
-                    for call in turn.calls:
+                    for call in step.calls:
                         name, input = str(call["name"]), call["input"]
                         asides = []
                         tool = await self._callable(call, offered)
@@ -706,7 +706,7 @@ class LoopModel:
                     # its tool when the stop came may have partly run; one stopped after it had
                     # its answer (while its asides were made or the prompt read) gets that answer,
                     # with its asides.
-                    for n, call in enumerate(turn.calls[answered:]):
+                    for n, call in enumerate(step.calls[answered:]):
                         said, kept = _NOT_RUN, []
                         if n == 0 and result is not None:
                             said, kept = "\n\n".join([result, *asides]), asides
@@ -725,7 +725,7 @@ class LoopModel:
                 yield {"type": "note", "text": text}
 
 
-class _Turn:
+class _Step:
     """One model step's chunks, collected: its text, its calls, why it stopped, what it was."""
 
     def __init__(self) -> None:
@@ -757,17 +757,17 @@ class _Turn:
         return chunk
 
     def unfinished(self, why: str) -> Json:
-        """The transcript entry for a turn that never finished: what it said, then `why`. No
+        """The transcript entry for a step that never finished: what it said, then `why`. No
         calls: none of them ran."""
         said = self.text.rstrip()
         return {"role": "assistant", "content": f"{said}\n\n{why}" if said else why}
 
     def entry(self, stop: str) -> Json:
-        """The transcript entry for this turn. Only an `act` turn keeps its calls: a call that
+        """The transcript entry for this step. Only an `act` step keeps its calls: a call that
         was cut off or would not decode never ran, so nothing may answer it. The provider's own
         message (thinking blocks and their signatures included) is replayed verbatim for an `act`
-        turn, and for an `answered` or `refused` one that made no call; a truncated or
-        undecodable turn's message is dropped, since its calls would go back with no result."""
+        step, and for an `answered` or `refused` one that made no call; a truncated or
+        undecodable step's message is dropped, since its calls would go back with no result."""
         if stop == ACT:
             entry: dict[str, Any] = {"role": "assistant", "content": self.text, "tool_calls": self.calls}
         elif stop in (ANSWERED, REFUSED) and not self.calls:

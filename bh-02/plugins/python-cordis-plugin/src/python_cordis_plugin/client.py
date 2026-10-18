@@ -767,7 +767,7 @@ class PythonProcess:
     async def _run_startup(self, startup: _Ready) -> tuple[_Output, _Output | None]:
         """Run the startup file as an input and, when it ran and told something, the input that checks
         its docstrings and types (`_check_input`): the file's own and the check's, which is None when
-        there was nothing to check. Both are the file's turn, so one that ends the worker or is stopped
+        there was nothing to check. Both are the file's, so one that ends the worker or is stopped
         ends this one's, and `_opening` answers either the same way."""
         ran = await self._exchange(_startup_input(startup.path, startup.source))
         if ran.error or not _bound(_last(ran.output)):

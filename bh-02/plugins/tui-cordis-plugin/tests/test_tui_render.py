@@ -150,10 +150,10 @@ def test_usage_and_stops() -> None:
     cached = {"input_tokens": 6393, "output_tokens": 5, "cache_read_input_tokens": 6378, "cost_usd": 0.0007}
     assert render.usage_line(cached) == "6,393 in · 6,378 cached · 5 out · $0.0007"
     read = {"input_tokens": 8119, "output_tokens": 0, "cache_read_input_tokens": 8062, "cost_usd": 0.0009}
-    started = read | {"partial": True}  # what was read, sent as the turn started
+    started = read | {"partial": True}  # what was read, sent as the step started
     assert render.usage_line(started) == "8,119 in · 8,062 cached · output not counted · $0.0009 for input"
     rest = {"input_tokens": 0, "output_tokens": 150, "cost_usd": 0.0008}
-    whole = render.usage_sum(started, rest)  # the output count came: the turn is whole
+    whole = render.usage_sum(started, rest)  # the output count came: the step is whole
     assert "partial" not in whole and render.usage_line(whole).endswith("150 out · $0.0017")
     assert render.usage_sum(started, started)["partial"] is True  # nothing brought it yet
     assert render.is_quiet_stop({"reason": "end_turn"})

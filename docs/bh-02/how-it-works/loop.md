@@ -4,9 +4,9 @@ The agent loop is bh-02's own row, `agent:loop`. It sends the conversation to th
 tool calls the model asks for, and decides when a reply is done. Every model goes through the same
 loop: only the model row's provider differs.
 
-## A turn
+## A reply
 
-A turn is the reply to one message. It takes one model step or more:
+A reply answers one message. It takes one model step or more:
 
 1. The loop sends the model the conversation: the system prompt, then the transcript. It offers
    the tools rows have registered with `tools` (`agent:tools`, a broker), through the provider's

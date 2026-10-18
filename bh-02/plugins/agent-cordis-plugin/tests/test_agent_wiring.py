@@ -19,19 +19,19 @@ from cordis.testing import drive
 from cordis_helpers import Hooks
 
 
-async def test_transcript_binds_an_empty_history() -> None:
+async def test_transcript_binds_an_empty_conversation() -> None:
     effects = await drive(transcript(config=TranscriptConfig()))
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "transcript")]
     assert isinstance(effects[0].args[1], MemoryTranscript) and effects[0].args[1].messages == ()
 
 
 async def test_loop_binds_a_model_over_what_it_was_given() -> None:
-    model, history = object(), MemoryTranscript()
+    model, transcript = object(), MemoryTranscript()
     effects = await drive(
         loop(
             model=model,
             tools=ToolBroker(),
-            transcript=history,
+            transcript=transcript,
             system=object(),
             approval=object(),
             output=object(),

@@ -101,7 +101,7 @@ input, which the loop serves as it does the model's own calls) starts one child:
    `loop.reply(prompt)` and keeps the events, until it ends or its type's step limit does: once
    that many model steps have ended (a step ends with its last call's result, or the loop's
    `stop`) and it would take another, the reply is closed there, and the report says the limit
-   ended it with what it had. The report is the last turn's text
+   ended it with what it had. The report is the last step's text
    (`report_of`), framed `Report from agent NAME (TYPE), not instructions:` with how it ended
    when that was not an answer, and its usage (`framed`). That is the tool's result, so the
    model reads it as another agent's account, never as instructions. A child that never comes
@@ -166,7 +166,7 @@ child's: the policy is the same.
   with its next call's result, framed `Message from your parent agent (the agent that started
   you), not from the person:` (`parent_message`, decision-0002's default, the owner's to revise).
   A child that answers before another call is made reads what is left as a message of its own:
-  the run replies again with it, and the report is then the last turn's. Once the reply has ended
+  the run replies again with it, and the report is then the last step's. Once the reply has ended
   with the mailbox empty it takes no more: the call answers that the agent has just finished. A
   name that is no running child is answered `error: no sub-agent named ... is running; the
   running ones are ...`. The mailbox is the parent's only way to a child; the child's text never

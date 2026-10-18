@@ -51,13 +51,16 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **model provider** (a model's `provider` field): what reaches a model: `claude-code` (Claude through Claude Code, with the subscription token or a gateway) or `openai` (any OpenAI-compatible endpoint).
 - **models file**: `~/.config/bh-02/models.toml` (`$XDG_CONFIG_HOME/bh-02/models.toml`): your endpoints and their models, one table per endpoint, read only from outside the project ([Models](../docs/bh-02/using/models.md#adding-your-own-the-models-file)).
 - **models** (row and key): `models:catalog`: the models there are and which one the model row names, for `/model` and the status bar.
-- **step**: one call to the model: it answers, or asks for calls to run.
+- **step**: one request to the model and the answer it streams back: it answers, or asks for calls to run.
+- **request**: what one step hands the model: the conversation's first prompt, its messages, and the tools offered.
 - **nudge**: the loop telling the model why its last step didn't count (cut off, silent, unreadable), a bounded number of times.
+- **conversation**: what the model is sent, from the session's start, `/clear` or `/compact` until the next one; one transcript file.
 - **transcript** (row and key): the conversation the model is sent again each step, kept in the session's `transcript.jsonl`.
+- **entry** (a transcript's): one line of it, a message (`user`, `assistant`, `tool`) or a record of the prompt (`system`) or the tool list (`tools`).
 - **the model's context**: what the model reads each step: the system prompt and the transcript, never the namespace.
 - **chat** (row): `chat:converse`: reads your messages, shows the replies, runs the lines `commands` claims (slash commands, `!`), and binds `done`, which ends when you leave.
-- **turn**: one reply to one message, however many model steps and inputs it takes.
-- **event**: one thing that happened in a turn, a dict with a `type` (`text`, `thinking`, `tool_call`, `tool_result`, `usage`, `stop`, `note`, `cleared`, `restarting`) that the ui draws; [`CONTRACTS.md`](CONTRACTS.md) has each shape.
+- **reply**: everything the loop does to answer one message, until the model answers.
+- **event**: one thing that happened in a reply, a dict with a `type` (`text`, `thinking`, `tool_call`, `tool_result`, `usage`, `stop`, `note`, `cleared`, `restarting`) that the ui draws; [`CONTRACTS.md`](CONTRACTS.md) has each shape.
 - **note**: a line shown to you, never to the model: in the app, the `note` event (a command's answer, a row reloading, or what the loop told the model as an aside, by its first line); from the command line, a line it prints starting `note:`. In bh-02 a note means only this.
 - **aside**: text bh-02 tells the model beside what it reads, never a message of its own: with a call's result, what rows add to `asides` (memory that loads on demand) and the python tool's own before an input's output (what its startup files did); with the next message the model reads, a change in its instructions or its tools. The transcript keeps each, so a resumed conversation knows what it was told ([The prompt and asides](../docs/bh-02/how-it-works/prompt-and-asides.md)).
 - **chunk**: an event from one model step.
@@ -70,6 +73,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **tool change**: a tool added, removed or redefined mid-conversation, told to the model as an aside on its next message; an added one is offered from the next conversation.
 - **python** (the tool): `python(code)`, the tool bh-02 ships: each call runs its code as an input in the Python process, and what the input printed is the result.
 - **tools** (in an input): the namespace's view of bh-02's other tools, each a function, `tools.NAME(arg=...)`, whose call leaves the REPL and is run by bh-02 as the model's own call would be, asked about when that would be: not a function of a startup file.
+- **nested call**: a call an input makes through `tools.NAME(...)`.
 - **input**: one `python` call: the code the model sent the Python process and what it printed (not a cell: there is no notebook; not the `input` key, below).
 - **Python process**: the process the runner starts to run inputs and keep the namespace for the run; to the model, a Python REPL of its own that persists.
 - **namespace**: what the inputs have defined in the Python process (variables, functions, imports): the model's working state for the run, and a cache, since the transcript is the record.

@@ -7,7 +7,7 @@ the screen: its input, output and frame post it messages (`messages.py`) and it 
 Leaving: Ctrl-Q, or `/exit` or `/quit` in the composer. The terminal going away (its window
 closed: SIGHUP, or, with no controlling terminal, stdin at end of file) leaves the same way, so
 the composition unwinds rather than the process dying where it stands or spinning on a dead
-fd. Ctrl-C interrupts the running turn and never quits; with no turn running it says how to
+fd. Ctrl-C interrupts the running reply and never quits; with no reply running it says how to
 leave, and while a command runs (a `!` one may take minutes) that Ctrl-C doesn't stop it. Esc
 stops a running reply as Ctrl-C does, once nothing nearer wants it: the composer's list of
 commands (Esc closes it), a question (Esc declines it) and the palette (Esc closes it); with no
@@ -22,10 +22,10 @@ or a selection in the transcript gives the focus back to the composer as the mou
 typing carries on (`_return_focus`).
 
 While a reply runs or a command does, a line above the composer says for how long (`Working`,
-redrawn by a timer that starts and stops with them): a reply is what streams (`TurnStarted`,
-`TurnEnded`), a command is a line the bridge says is being handled (`Handling`).
+redrawn by a timer that starts and stops with them): a reply is what streams (`ReplyStarted`,
+`ReplyEnded`), a command is a line the bridge says is being handled (`Handling`).
 
-Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted turn
+Questions (`output.confirm`) are shown one at a time, the rest queued: an interrupted reply
 withdraws its own (shown or queued), and Ctrl-C with one up answers no to every open question
 but a sub-agent's: the reply it stops withdraws its foreground child's, and a background
 child's stays queued.
@@ -64,9 +64,9 @@ from tui_cordis_plugin.messages import (
     FrameChanged,
     Handling,
     Noted,
+    ReplyEnded,
+    ReplyStarted,
     Shown,
-    TurnEnded,
-    TurnStarted,
     Withdrawn,
 )
 from tui_cordis_plugin.ports import AppCrashed, Bridge, Frame
@@ -86,9 +86,9 @@ from tui_cordis_plugin.widgets import (
 __all__ = ["BhApp", "running"]
 
 EXIT_COMMANDS = frozenset({"/exit", "/quit"})
-_HOW_TO_LEAVE = "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running turn; Ctrl-P lists commands."
+_HOW_TO_LEAVE = "Ctrl-Q, /exit or /quit leaves; Ctrl-C only stops a running reply; Ctrl-P lists commands."
 _COMMAND_RUNS = (
-    "A command is running, and Ctrl-C stops only a turn: a `!` command or /compact runs until it "
+    "A command is running, and Ctrl-C stops only a reply: a `!` command or /compact runs until it "
     "ends or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
 )
 
@@ -102,10 +102,10 @@ _TOLD_FOR = 3.0
 _NOTHING_TO_COPY = "Nothing to copy: no reply yet"
 # A selection of fewer characters than this is not copied when the mouse ends it.
 _COPY_ON_SELECT = 2
-# How long an interrupted turn has to withdraw its own questions before they are answered no.
+# How long an interrupted reply has to withdraw its own questions before they are answered no.
 _WITHDRAW_GRACE = 0.5
 # How long a Ctrl-C held for the line being handled may go unheard before the app says a
-# command is running: a turn that is starting hears it within a tick.
+# command is running: a reply that is starting hears it within a tick.
 _UNHEARD_GRACE = 0.3
 # How often the terminal is checked for having gone away, and how many checks in a row must
 # say so: a key arriving between one check's two reads looks like a hangup once, never twice.
@@ -294,7 +294,7 @@ class BhApp(App[None]):
             super().action_command_palette()
 
     def on_shown(self, message: Shown) -> None:
-        """Draw a batch of a turn's events (each run of streamed text joined first, so it is
+        """Draw a batch of a reply's events (each run of streamed text joined first, so it is
         drawn and kept once), then say it is drawn, so the output sends the next. A `cleared`
         drops the conversation so far, but not a line typed after `/clear` and not read yet:
         it is drawn again, since it is sent in the new conversation (one typed during this
@@ -317,12 +317,12 @@ class BhApp(App[None]):
         self.query_one(Transcript).user(line)
         self._record({"type": "user", "text": line})
 
-    def on_turn_started(self, message: TurnStarted) -> None:
+    def on_reply_started(self, message: ReplyStarted) -> None:
         self._replying += 1
         self._follow_working()
 
-    def on_turn_ended(self, message: TurnEnded) -> None:
-        self.query_one(Transcript).end_turn()
+    def on_reply_ended(self, message: ReplyEnded) -> None:
+        self.query_one(Transcript).end_reply()
         self._record({"type": "turn_end"})
         self._replying = max(0, self._replying - 1)
         self._follow_working()
@@ -373,7 +373,7 @@ class BhApp(App[None]):
 
     def on_asked(self, message: Asked) -> None:
         """Queue a question; the answer resolves the asker's future. An asker that stops
-        waiting (its turn was interrupted) withdraws it."""
+        waiting (its reply was interrupted) withdraws it."""
         answer = message.answer
         if answer.done():
             return
@@ -425,7 +425,7 @@ class BhApp(App[None]):
 
     def action_interrupt(self) -> None:
         """Ctrl-C: copy the text that is selected and not copied yet, and stop nothing
-        (`_copy_selection`); otherwise stop the running turn (`_stop`)."""
+        (`_copy_selection`); otherwise stop the running reply (`_stop`)."""
         if not self._copy_selection():
             self._stop()
 
@@ -494,16 +494,16 @@ class BhApp(App[None]):
             self.copy_to_clipboard(text)
 
     def _stop(self) -> None:
-        """Stop the running turn and take its questions down as a no; with nothing
+        """Stop the running reply and take its questions down as a no; with nothing
         running, say how to leave; while a command runs, say that Ctrl-C doesn't stop it. A
         sub-agent's question is never answered here: the stopped reply withdraws its foreground
         child's, and a background child's stays queued (the reply it stops is not its own).
 
-        A turn that hears Ctrl-C is cancelled, which cancels the questions it is waiting on,
-        and those come down as withdrawn: answering them no first would let the turn carry on
+        A reply that hears Ctrl-C is cancelled, which cancels the questions it is waiting on,
+        and those come down as withdrawn: answering them no first would let the reply carry on
         with the answer before it hears the interrupt. Any question still open a moment later
-        (asked from outside a turn) is answered no; one with no turn to stop, at once. A Ctrl-C
-        the bridge holds for the line being handled is a turn's that is starting, which hears it
+        (asked from outside a reply) is answered no; one with no reply to stop, at once. A Ctrl-C
+        the bridge holds for the line being handled is a reply's that is starting, which hears it
         at once, or a command's, which never does: still held a moment later, it is the second.
         """
         questions = self._open_questions()
@@ -522,13 +522,13 @@ class BhApp(App[None]):
         reply running it does nothing, and says nothing: Esc is pressed out of habit, and the
         composer is not its business. It reaches here only when the list of commands, a question
         and the palette have passed on it."""
-        if self.bridge.turn_running:
+        if self.bridge.reply_running:
             self._stop()
 
     def _unheard(self) -> None:
-        """A Ctrl-C held for the line being handled went unheard: a command is running (no turn
+        """A Ctrl-C held for the line being handled went unheard: a command is running (no reply
         took it), which Ctrl-C does not stop; say so, and how to leave."""
-        if self.bridge.interrupt_held and not self.bridge.turn_running and not self.bridge.ended:
+        if self.bridge.interrupt_held and not self.bridge.reply_running and not self.bridge.ended:
             self.query_one(Transcript).note(_COMMAND_RUNS)
 
     def _open_questions(self) -> list[asyncio.Future[bool]]:

@@ -24,7 +24,7 @@ from cordis.loader import Booted, boot, read_layer
 
 type Json = Mapping[str, Any]
 
-_CHILD = "You are a sub-agent"  # what the general type's section says, so the model knows whose turn
+_CHILD = "You are a sub-agent"  # what the general type's section says, so the model knows it is a child
 _HANG = "hang"  # a step that never ends, until it is closed
 
 
@@ -860,7 +860,7 @@ async def test_a_layer_naming_the_auto_memory_row_among_the_child_s_rows_fails_t
     await _bounded(rt.shutdown())
 
 
-# What a person's type's prompt says, so the scripted model knows a child's turn and its name.
+# What a person's type's prompt says, so the scripted model knows it is a child and its name.
 _TYPE = 'prompt = """You are a sub-agent: You are agent {{name}}, of type {kind}."""\n'
 
 
@@ -1379,7 +1379,7 @@ async def test_what_is_sent_to_a_child_about_to_answer_is_a_message_of_its_own()
     await _bounded(tools.get("agent_send").run({"name": "general-1", "text": "one more thing"}))
     gate.set()
     report = (await _bounded(tools.get("agent_wait").run({"names": ["general-1"]})))["content"]
-    assert "heard you" in report and "first answer" not in report  # the last turn is the report
+    assert "heard you" in report and "first answer" not in report  # the last step is the report
     [_, second] = model.requests
     assert (second[-1]["role"], second[-1]["content"]) == ("user", f"{_FROM_PARENT}\n\none more thing")
     await _bounded(rt.shutdown())

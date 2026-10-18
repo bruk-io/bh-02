@@ -57,7 +57,7 @@ async def test_a_reply_abandoned_mid_stream_is_closed() -> None:
     assert closed == [True]
 
 
-async def test_an_interrupt_stops_the_turn_says_so_and_the_session_carries_on() -> None:
+async def test_an_interrupt_stops_the_reply_says_so_and_the_session_carries_on() -> None:
     class Endless:
         def __init__(self) -> None:
             self.closed = False
@@ -83,8 +83,8 @@ async def test_an_interrupt_stops_the_turn_says_so_and_the_session_carries_on() 
 
 
 async def test_the_stop_notice_carries_the_notes_rows_have_for_it() -> None:
-    """After a stopped turn the notes rows have for a stop (`commands.stop_notes`: background
-    agents still running) are shown as notes; a turn that ends on its own shows none."""
+    """After a stopped reply the notes rows have for a stop (`commands.stop_notes`: background
+    agents still running) are shown as notes; a reply that ends on its own shows none."""
 
     class Endless:
         async def reply(self, message: str) -> AsyncIterator[dict[str, Any]]:
@@ -154,7 +154,7 @@ async def test_a_command_running_when_the_person_leaves_is_cancelled_and_the_cha
     commands, screen, typed = Hanging(), Screen(), Typed("!sleep 600")
     session = asyncio.create_task(converse(Echo(), typed, screen, commands))  # type: ignore[arg-type]
     await asyncio.wait_for(commands.started.wait(), 1)
-    typed.interrupt()  # Ctrl-C stops a turn, not a command: it runs on
+    typed.interrupt()  # Ctrl-C stops a reply, not a command: it runs on
     await asyncio.sleep(0.01)
     assert not session.done() and not commands.cleaned_up
     typed.close()
@@ -188,9 +188,9 @@ async def test_a_command_that_answers_runs_to_its_end_and_its_answer_is_shown() 
     assert echo.seen == ["(the person ran make)\n\nwell?"]
 
 
-async def test_what_a_command_holds_never_reaches_a_turn_already_running() -> None:
-    """A `!` line typed during a turn is read, and run, once the turn has ended, so its output
-    goes with the message after it, never into the turn."""
+async def test_what_a_command_holds_never_reaches_a_reply_already_running() -> None:
+    """A `!` line typed during a reply is read, and run, once the reply has ended, so its output
+    goes with the message after it, never into the reply."""
 
     class Gated:
         def __init__(self) -> None:
@@ -207,7 +207,7 @@ async def test_what_a_command_holds_never_reaches_a_turn_already_running() -> No
     await asyncio.sleep(0.01)
     typed.type("!pytest")
     await asyncio.sleep(0.01)
-    assert commands.ran == [] and model.seen == ["first"]  # the turn is running: nothing else is
+    assert commands.ran == [] and model.seen == ["first"]  # the reply is running: nothing else is
     model.go.set()
     await asyncio.sleep(0.01)
     assert commands.ran == ["!pytest"]

@@ -29,25 +29,25 @@ terminal.
 The input, output and frame never touch a widget: cordis's coroutines run outside the app's task, so they post a
 message and the app draws it. Whatever ends the app (Ctrl-Q, `/exit`, `/quit`, a crash) ends
 the bridge: a pending `read()` returns None (a crash: raises `AppCrashed`, which reaches the
-command line through the chat row's `done`), turns waiting on Ctrl-C return, `closed()` returns
+command line through the chat row's `done`), replies waiting on Ctrl-C return, `closed()` returns
 (the chat row cancels a command still running, so a `!` command doesn't keep bh-02 alive),
-questions are a no. Ctrl-C is a priority binding that interrupts the running turn and never
-quits; one pressed after a line is sent and before its turn listens (or during a command: a
-slash command, a `!` one) is held for the turn, and the next read drops it. Held and still
+questions are a no. Ctrl-C is a priority binding that interrupts the running reply and never
+quits; one pressed after a line is sent and before its reply listens (or during a command: a
+slash command, a `!` one) is held for the reply, and the next read drops it. Held and still
 unheard a moment later, it was pressed during a command, which it doesn't stop, and the app
 says so, and that leaving does. Esc stops a running reply exactly as Ctrl-C does
 (`stop_reply`, a binding that is not priority, so it is the last to want the key: the list of
 commands closes on it, a question is declined by it and the palette closed by it, and only
 that); with no reply running, a command included, it does nothing and says nothing. `confirm()` comes from
 plain coroutines (not Textual workers), so the modal is `push_screen` with a callback resolving a future. Questions are
-shown one at a time, the rest queued; an interrupted turn cancels its future and its modal
+shown one at a time, the rest queued; an interrupted reply cancels its future and its modal
 comes down wherever it is (anything shown over it is popped first); Ctrl-C with a question up
-answers every open one no and interrupts the turn. No palette opens over a question. A
+answers every open one no and interrupts the reply. No palette opens over a question. A
 question just shown answers nothing for 0.4 s (`GRACE`; `BhApp(grace=...)`), its keys line
 dimmed meanwhile: a person typing when it comes up ("Run n...") must not decline it with the
 `n`. Those keys are dropped, not handed to the composer: the modal holds focus, and a message
 half-typed around a question is less surprising cut short than finished with stray letters.
-Ctrl-C still stops the turn at once. A sub-agent's question (a request carrying `agent`, its
+Ctrl-C still stops the reply at once. A sub-agent's question (a request carrying `agent`, its
 name and type) says who asks above it: `Agent general-1 (general) asks:`.
 
 The frame. `tui:palette` pushes the `commands` broker's `specs` method itself, which the
@@ -114,9 +114,9 @@ start, and the event loop is cordis's too). The theme is registered in `App.__in
 custom `$bh-*` token has a default in `get_theme_variable_defaults` (a test checks), since a
 real launch parses every stylesheet at startup and `run_test()` does not.
 
-**Streaming.** The output posts a turn's events in batches, never faster than the app draws
+**Streaming.** The output posts a reply's events in batches, never faster than the app draws
 them (`Shown` carries a future the app settles once drawn; the next batch gathers meanwhile,
-and reading waits once it is large), and gives the loop a turn after every event, so a reply
+and reading waits once it is large), and yields to the event loop after every event, so a reply
 that yields everything at once still leaves Ctrl-C heard mid-reply. The app joins each run of
 streamed text before drawing and recording it.
 
@@ -133,7 +133,7 @@ Keys table (`docs/bh-02/using/commands.md`) is checked to list the same ones. Ct
 says so and for how long: `Working · 12s`, then `Working · 1m 05s`, then `Working · 1h 02m` (`render.working_line`,
 pure). The `Working` widget redraws it from a Textual timer (`set_interval`, every `WORKING_EVERY`, one second),
 never a loop or a wait: the timer starts with the first of what is running and stops when the last of it ends, and
-the next one counts from its own start. A reply is what is streaming: from `TurnStarted` to `TurnEnded`, which the
+the next one counts from its own start. A reply is what is streaming: from `ReplyStarted` to `ReplyEnded`, which the
 output posts whether the reply finished, was stopped with Ctrl-C or Esc, or failed. A command is a line being
 handled, which the bridge knows and the stream does not (a command is shown only once it answers, and its own notes
 are streams that start and end: `/compact` says it is asking the model, then runs for as long as the summary takes):
@@ -198,7 +198,7 @@ meanings. Esc never copies (it also clears a selection: Textual's own, the scree
 app's non-priority Esc binding leaves to run; a test presses it with the focus in the transcript and
 in the composer, a reply running or not).
 
-**The transcript** draws a turn as it streams: a block per event, a CSS class per kind. Text
+**The transcript** draws a reply as it streams: a block per event, a CSS class per kind. Text
 and thinking grow one `Stream`, which settles its text into pieces of a couple of dozen lines
 and re-draws only the open one, so a chunk costs the same at line 2,000 as at line 1 (a Pilot
 test times it). Text with no newlines settles by size: a piece longer than 2,000 characters is

@@ -345,18 +345,18 @@ async def test_with_the_line_focused_esc_stops_a_running_reply_and_ctrl_p_opens_
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         await _draw(app, pilot, _result(20))
-        turn = asyncio.ensure_future(app.bridge.interrupted())  # a reply waiting to be stopped
+        reply_task = asyncio.ensure_future(app.bridge.interrupted())  # a reply waiting to be stopped
         await pilot.pause()
         await pilot.press("shift+tab")
         assert app.focused is _toggle(_clipped(app)[0])
         await pilot.press("ctrl+p")
         await pilot.pause()
-        assert isinstance(app.screen, CommandPalette) and not turn.done()
+        assert isinstance(app.screen, CommandPalette) and not reply_task.done()
         await pilot.press("escape")  # closes the palette only
         await pilot.pause()
-        assert not isinstance(app.screen, CommandPalette) and not turn.done()
+        assert not isinstance(app.screen, CommandPalette) and not reply_task.done()
         await pilot.press("escape")
-        await asyncio.wait_for(turn, 1)  # the reply heard it
+        await asyncio.wait_for(reply_task, 1)  # the reply heard it
         assert not _clipped(app)[0].opened  # and the line did not take the key
 
 
