@@ -1,5 +1,6 @@
-"""A session's `rows.jsonl`: the lifecycle events that count, queued from the event loop to a thread and
-kept at 0600, for `bh-02 trajectory` to lay out (decision-0009, Row reloads)."""
+"""A session's `rows.jsonl`: a line that marks each run's start, then the lifecycle events that count,
+queued from the event loop to a thread and kept at 0600, for `bh-02 trajectory` to lay out
+(decision-0009, Row reloads)."""
 
 import asyncio
 import datetime
@@ -41,6 +42,14 @@ def records(log: Path) -> list[Record]:
     return [json.loads(line) for line in log.read_text().splitlines()]
 
 
+def rows_of(log: Path) -> list[Record]:
+    """The lines of one run's `rows.jsonl` after the line that marks its start, which is the first."""
+    marker, *kept = records(log)
+    assert set(marker) == {"at", "kind"} and marker["kind"] == "run" and STAMP.fullmatch(marker["at"])
+    assert all(record["kind"] != "run" for record in kept)
+    return kept
+
+
 def patch(composition: Callable[..., Path], more: str = "") -> Path:
     return composition('[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n' + more, one_reply=True)
 
@@ -51,10 +60,10 @@ async def test_each_reload_is_a_line_with_its_time_kind_and_row_in_a_file_for_it
 ) -> None:
     log, heard = tmp_path / "rows.jsonl", []
     await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], trace=heard.append, row_log=log), 10)
-    kept = records(log)
+    kept = rows_of(log)
     assert stat.S_IMODE(log.stat().st_mode) == 0o600  # under a umask that takes nothing away
     assert all(set(record) == {"at", "kind", "row"} and STAMP.fullmatch(record["at"]) for record in kept)
-    assert [record["at"] for record in kept] == sorted(record["at"] for record in kept)
+    assert [record["at"] for record in records(log)] == sorted(record["at"] for record in records(log))
     # only the events that count: a row's setup beginning, or failing; not bind, active, unloading, ...
     assert {record["kind"] for record in kept} == {"reload"}
     assert {"loop", "transcript", "chat", "python", "host", "session"} <= {record["row"] for record in kept}
@@ -81,7 +90,7 @@ async def test_a_row_restarted_by_a_command_is_kept_as_the_reload_of_its_new_fib
         '[[plugin]]\nid = "ui"\nuse = "fragile:scripted_ui"\n'
     )
     await asyncio.wait_for(run([*layers(), ui], row_log=log), 10)
-    kept = records(log)
+    kept = rows_of(log)
     assert {record["kind"] for record in kept} == {"reload"}
     for restarted in ("loop", "transcript", "python"):  # up once, and again for /clear
         assert sum(record["row"] == restarted for record in kept) >= 2
@@ -105,7 +114,7 @@ async def test_the_trajectory_of_the_rows_written_is_the_boot_as_one_line_and_ea
     seen: set[str] = set()
     firsts: list[str] = []
     again: list[str] = []
-    for record in records(log):
+    for record in rows_of(log):
         (again if record["row"] in seen else firsts).append(record["row"])
         seen.add(record["row"])
     assert len(firsts) > 20 and {"loop", "transcript", "python"} <= set(
@@ -124,7 +133,7 @@ async def test_a_row_that_fails_is_kept_with_its_error_though_the_run_stops_for_
     broken = patch(composition, '[[plugin]]\nid = "broken"\nuse = "fragile:broken_on_purpose"\n')
     with pytest.raises(NotStarted):
         await asyncio.wait_for(run([*layers(), broken], [CHAT], row_log=log), 10)
-    (failed,) = [record for record in records(log) if record["kind"] == "failed"]
+    (failed,) = [record for record in rows_of(log) if record["kind"] == "failed"]
     assert failed == {
         "at": failed["at"],
         "kind": "failed",
@@ -140,7 +149,7 @@ async def test_a_sub_agents_rows_are_kept_like_any_other(
     log = tmp_path / "rows.jsonl"
     child = patch(composition, '[[plugin]]\nid = "agents/general-1/heart"\nuse = "fragile:heartbeat"\n')
     await asyncio.wait_for(run([*layers(), child], [CHAT], row_log=log), 10)
-    (kept,) = [record for record in records(log) if record["row"].startswith("agents/")]
+    (kept,) = [record for record in rows_of(log) if record["row"].startswith("agents/")]
     assert (kept["kind"], kept["row"]) == ("reload", "agents/general-1/heart")
 
 
@@ -234,3 +243,24 @@ async def test_no_log_is_kept_unless_one_is_asked_for(
 ) -> None:
     await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT]), 10)
     assert not list(tmp_path.rglob("rows.jsonl"))
+
+
+async def test_a_second_run_goes_on_in_the_same_file_after_a_marker_of_its_own_and_its_boot_is_one_line(
+    composition: Callable[..., Path], tmp_path: Path
+) -> None:
+    """A session resumed appends to its `rows.jsonl`: the rows of the second run were all seen in the
+    first, and without the marker between them each would be a `row reload` line."""
+    log = tmp_path / "rows.jsonl"
+    for _ in range(2):
+        await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], row_log=log), 10)
+    kept = records(log)
+    starts = [number for number, record in enumerate(kept) if record["kind"] == "run"]
+    assert len(starts) == 2 and starts[0] == 0  # one marker for each run, the first line of its part
+    boots = [kept[1 : starts[1]], kept[starts[1] + 1 :]]
+    assert all(record["kind"] == "reload" for boot in boots for record in boot)
+    assert {record["row"] for record in boots[0]} == {record["row"] for record in boots[1]}
+    assert all(len({record["row"] for record in boot}) == len(boot) for boot in boots)  # no row twice
+    shown = [line.text for line in rendered(trajectory([], log.read_bytes()), datetime.UTC)]
+    assert len(shown) == 2  # a boot each, and no reload of a row that came up again
+    for boot, line in zip(boots, shown, strict=True):
+        assert re.fullmatch(rf"row first load  [0-9:.-]+ [0-9:.]+  {len(boot)} rows in [0-9.]+s", line)

@@ -477,7 +477,7 @@ def test_a_sub_agent_s_question_is_labelled_and_its_report_comes_back(launch: La
     # the session keeps the child's rows too, in its own file, for `bh-02 trajectory`
     (session,) = (tmp_path / "state" / "bh-02" / "sessions").iterdir()
     kept = [json.loads(line) for line in (session / "rows.jsonl").read_text().splitlines()]
-    assert {"agents/general-1/loop", "agents/general-1/python"} <= {record["row"] for record in kept}
+    assert {"agents/general-1/loop", "agents/general-1/python"} <= {record.get("row") for record in kept}
 
 
 def test_an_unjailed_input_runs_on_a_yes_and_not_at_all_on_a_no(launch: Launch, tmp_path: Path) -> None:

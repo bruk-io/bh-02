@@ -4,7 +4,8 @@ A session is where one conversation lives, outside the project (so a jailed inpu
 it): `meta.json` (which directory, which stack, when), `session.toml`, the session's own
 layer file, `transcript.jsonl`, the conversation (what a resume sends the model again), and
 `events.jsonl`, what the ui showed (so a resume shows it again), and `rows.jsonl`, the row reloads
-and failures the shell heard, which `bh-02 trajectory` lays out in time. The session's layer is the
+and failures the shell heard, after a line that marks the start of each run, which `bh-02 trajectory`
+lays out in time. The session's layer is the
 last shipped layer, so everything a run chose (the model, the jail, where the conversation is kept) is
 composition, and resuming is booting with that layer again. `/model` edits it the same way:
 the layer files stay the only way the running program changes.

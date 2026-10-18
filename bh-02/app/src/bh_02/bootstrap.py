@@ -315,6 +315,7 @@ def layers() -> list[Traversable]:
 # `inactive`, and its new fiber starts with a `reload`, so a restart is kept as that `reload` (as is a
 # row coming up for the first time). `failed` is a row whose setup raised.
 _KEPT = frozenset({"reload", "failed"})
+_RUN = "run"  # the kind of the line that marks a run's start in `rows.jsonl`; it names no row
 
 
 def _stamp(moment: datetime.datetime) -> str:
@@ -333,6 +334,14 @@ def _row_line(event: Event, at: datetime.datetime) -> bytes | None:
     if event.error:
         record["error"] = event.error
     return f"{json.dumps(record)}\n".encode()
+
+
+def _run_line(at: datetime.datetime) -> bytes:
+    """The line of `rows.jsonl` that marks a run's start, written when the shell opens the log: one JSON
+    object, `{at, kind: "run"}`, ending in a newline. It names no row: a session resumed goes on in the
+    same file, and this is where the reader (`bh-02 trajectory`) tells the rows of a run's boot, which
+    were all seen in the run before, from the reloads of a running session's rows."""
+    return f"{json.dumps({'at': _stamp(at), 'kind': _RUN})}\n".encode()
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,7 +378,9 @@ async def _row_log(
 ) -> AsyncIterator[None]:
     """Keep the lifecycle events that count (`_KEPT`) in the session's `rows.jsonl`, at `path`, while
     the body runs; with no path, keep none. The shell hears every row's events, a sub-agent's
-    included, as `--trace` does.
+    included, as `--trace` does. The first line it writes, before any row's, marks this run's start
+    (`_run_line`): a session resumed goes on in the same file, and the line is where one run's rows end
+    and the next one's begin.
 
     A listener runs on the event loop the TUI shares, inside the transition that emitted the event, so
     this one only queues the line to a `host_paths.Appender`, which writes it on a thread, in order, at
@@ -393,6 +404,7 @@ async def _row_log(
         except OSError:  # an earlier write failed, and the appender keeps it: nothing after it is written
             runtime.listeners.remove(hear)
 
+    appender.append(_run_line(datetime.datetime.now(datetime.UTC)))  # the first write: it opens the file
     runtime.listeners.append(hear)
     try:
         yield
@@ -456,8 +468,9 @@ async def run(
     active, bind, unbind, unloading, ...) as one line, from the first row on; `report` hears
     about a layer file that changed but could not be reloaded, and, once the rows have unwound, that
     the row log stopped being written. `row_log` is the file the session's row reloads and failures
-    are kept in (`sessions.ROWS`; none: none is kept), one `{at, kind, row, error?}` a line, queued to
-    a thread and closed once the rows have unwound (`_row_log`).
+    are kept in (`sessions.ROWS`; none: none is kept), one `{at, kind, row, error?}` a line after the
+    `{at, kind: "run"}` line that marks this run's start, queued to a thread and closed once the rows
+    have unwound (`_row_log`).
 
     The layer files are watched while the program runs: edit one and the composition reshapes
     itself.

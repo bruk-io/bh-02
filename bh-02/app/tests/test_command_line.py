@@ -62,7 +62,8 @@ def test_a_session_keeps_its_row_reloads_beside_its_transcript_and_trace_hears_t
     (session,) = (state / "state" / "bh-02" / "sessions").iterdir()
     log = session / "rows.jsonl"
     assert stat.S_IMODE(log.stat().st_mode) == 0o600
-    kept = [json.loads(line) for line in log.read_text().splitlines()]
+    marker, *kept = [json.loads(line) for line in log.read_text().splitlines()]
+    assert marker["kind"] == "run"  # the run's start, then its rows
     traced = [
         line.split("#")[0].removeprefix("reload ")
         for line in trace.read_text().splitlines()
@@ -70,6 +71,27 @@ def test_a_session_keeps_its_row_reloads_beside_its_transcript_and_trace_hears_t
     ]
     assert kept and sorted(record["row"] for record in kept) == sorted(traced)
     assert "chat" in traced and all(record["kind"] == "reload" for record in kept)
+
+
+def test_a_resumed_sessions_boot_is_one_line_of_its_trajectory_beside_the_first_ones(
+    composition: Callable[..., Path], state: Path
+) -> None:
+    """A session resumed goes on in the same `rows.jsonl`: each run starts its part with a `run` line, so
+    the rows the second run comes up with, all seen in the first, are its boot and not a reload each."""
+    patch = _patch(composition)
+    first = CliRunner().invoke(main, ["--no-jail", "--patch", str(patch)])
+    assert first.exit_code == 0, first.output
+    resumed = CliRunner().invoke(main, ["--resume", "--patch", str(patch)])
+    assert resumed.exit_code == 0, resumed.output
+    (session,) = (state / "state" / "bh-02" / "sessions").iterdir()
+    kept = [json.loads(line) for line in (session / "rows.jsonl").read_text().splitlines()]
+    assert [record["kind"] for record in kept].count("run") == 2
+    (session / "transcript.jsonl").touch()  # the fake ui sends no message, and the command wants a transcript
+    shown = CliRunner().invoke(main, ["trajectory"])
+    assert shown.exit_code == 0, shown.output
+    boots = [line for line in shown.output.splitlines() if "row first load" in line]
+    assert len(boots) == 2 and " rows in " in boots[0] and " rows in " in boots[1]
+    assert "row reload" not in shown.output
 
 
 def test_a_row_log_that_stops_is_said_once_after_the_app_exits_and_a_healthy_one_is_not(

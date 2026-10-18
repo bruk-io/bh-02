@@ -158,19 +158,22 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   printed in time order, before the first reply, step or call that came after it, at that line's
   indentation; one with nothing after it comes last. A sub-agent's rows (`agents/NAME/...`) are placed
   among that sub-agent's lines. There are three kinds:
-  - **`row first load`** is a row loading for the first time in the session: its row id is not in the
-    file before. The first loads that follow one another, with no reload or failure of that
-    writer's rows and none of its lines between, are one line with how many rows came up and the time
-    from the first to the last (`row first load  20:40:00.000  34 rows in 0.12s`): that is the session
-    starting, before your first reply, and under a `sub-agent` line the rows that sub-agent came up with.
-    A single row is named (`row first load NAME`). Rows that come up after your first reply, such as
-    ones a layer edit adds, are a line of their own, counted the same way. `rows.jsonl` has the names.
+  - **`row first load`** is a row loading for the first time in a run of the session: its row id is
+    not in the file since that run began. The first loads that follow one another, with no reload or
+    failure of that writer's rows and none of its lines between, are one line with how many rows came
+    up and the time from the first to the last (`row first load  20:40:00.000  34 rows in 0.12s`):
+    that is the run starting, before its first reply, and under a `sub-agent` line the rows that
+    sub-agent came up with. A single row is named (`row first load NAME`). Rows that come up after
+    your first reply, such as ones a layer edit adds, are a line of their own, counted the same way.
+    `rows.jsonl` has the names.
   - **`row reload NAME`** is a row that loaded again: it was restarted, as `/clear` does, or a
     dependency it uses was replaced (a `/model` switch, an edit to a layer). Each is a line.
   - **`row failed NAME`** is a row whose setup failed, with the error. Each is a line.
 
-  A session you `--resume` goes on in the same `rows.jsonl`, so the rows of the resumed run, which
-  were all seen before, are `row reload` lines.
+  A session you `--resume` goes on in the same `rows.jsonl`, and each run starts its part of it with
+  a line of its own, `{"at": ..., "kind": "run"}`, that names no row and prints nothing. The rows the
+  resumed run comes up with were all seen in the run before, and they are one `row first load` line
+  like the first run's: a `row reload` line is a row of the run you are in loading again.
 - **Conversations** are the session's transcript files: the backups `/clear` and `/compact` kept
   come first, in the order of their first `at` (else of the time they were copied), and the live
   `transcript.jsonl` is last. A conversation `/compact` began says so, with what you asked it to

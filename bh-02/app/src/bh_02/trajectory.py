@@ -22,18 +22,23 @@ started. A sub-agent's own transcripts (under `<session>/agents/NAME/`) are plac
 that started it, and one no call names after the session's own conversations, by its own times.
 
 A session's row reloads are its `rows.jsonl` (the shell appends a line for each row that reloaded or
-failed, a sub-agent's rows too). Each is printed in time order among the lines of whose rows it is, the
-session's own or a sub-agent's (`agents/NAME/...`): before the first reply, step, call or conversation
-of theirs that came after it, at that line's indentation, and after the last line when none did. A
-sub-agent's lines run alongside the session's, so each is placed by its own.
+failed, a sub-agent's rows too, after a line that marks the start of each run). Each is printed in time
+order among the lines of whose rows it is, the session's own or a sub-agent's (`agents/NAME/...`):
+before the first reply, step, call or conversation of theirs that came after it, at that line's
+indentation, and after the last line when none did. A sub-agent's lines run alongside the session's, so
+each is placed by its own.
 
 cordis has no first-load event, so a row's first load is a `reload` like any other. It is told apart by
-the row id: the first record of a row in the session is its first load, every later `reload` is a
-reload (a restart, a dependency replaced, a layer edit), and a `failed` is always a failure. The first
-loads that follow one another with nothing else of their writer's between them (no reload, no failure,
-no line of the session's or the sub-agent's) are one line: the session's boot, and under each
-sub-agent the rows it came up with, which would otherwise bury the reloads that matter. A reload and a
-failure are a line each, as ever.
+the row id: the first record of a row in a run is its first load, every later `reload` is a reload (a
+restart, a dependency replaced, a layer edit), and a `failed` is always a failure. A run is what one
+`bh-02` process wrote: a session resumed goes on in the same `rows.jsonl`, and the shell starts each
+run's part of it with a line of kind `run` (`{at, kind: "run"}`, no row; `bootstrap._run_line`). The
+file's start is the start of the first run, and each `run` line the start of the next, so what a
+resumed run comes up with, which was all seen before, is that run's first loads, folded as the first
+run's are. The line itself prints nothing. The first loads of a run that follow one another with
+nothing else of their writer's between them (no reload, no failure, no line of the session's or the
+sub-agent's) are one line: the session's boot, and under each sub-agent the rows it came up with, which
+would otherwise bury the reloads that matter. A reload and a failure are a line each, as ever.
 
 A line that is not a JSON object is skipped: the last one may be half written while the loop appends.
 A call whose `tool` entry is not there shows `no result recorded`.
@@ -70,6 +75,7 @@ _UNKNOWN = "?"
 _OWN = ""  # the first element of a key from the session's own conversations; a sub-agent's is its name
 _ROWS = "rows"  # the first element of a row reload's key
 _RELOAD = "reload"  # the kind of a record in `rows.jsonl` that is a row's setup beginning
+_RUN = "run"  # the kind of a record in `rows.jsonl` that marks a run's start; it names no row
 _AGENTS = "agents"  # the first part of the id of a sub-agent's row
 
 
@@ -147,11 +153,12 @@ class _Entry(TypedDict, total=False):
 
 
 class _RowRecord(TypedDict, closed=True):
-    """One line of a session's `rows.jsonl` (decision-0009, Row reloads)."""
+    """One line of a session's `rows.jsonl` (decision-0009, Row reloads): a row's `reload` or `failed`, or
+    the `run` line that marks a run's start, which names no row."""
 
     at: str
     kind: str
-    row: str
+    row: NotRequired[str]
     error: NotRequired[str]
 
 
@@ -293,14 +300,16 @@ class _Agent:
 class _Reload:
     """A row's lifecycle event kept in a session's `rows.jsonl`: a `reload` (a row's setup began: it
     came up, was restarted, or a dependency was replaced) or a `failed` (with its `error`). `first`: a
-    `reload` of a row not recorded before in the session, which is its first load (cordis emits no
-    event of its own for one)."""
+    `reload` of a row not recorded before in its run, which is its first load there (cordis emits no
+    event of its own for one). `run`: how many `run` lines came before it in the file, so the first loads
+    of two runs are never one line."""
 
     at: datetime.datetime
     kind: str
     row: str
     error: str | None
     first: bool = False
+    run: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -627,8 +636,10 @@ def _calls(conversations: Sequence[_Conversation]) -> Iterator[_Call]:
 
 
 def _reloads(rows: bytes) -> tuple[_Reload, ...]:
-    """The records of `rows` in time order, each `reload` of a row the records have not named before
-    marked `first`; a row that has failed has been named, so its next `reload` is not."""
+    """The records of `rows` in time order. A `run` record (a run's start) is not one of the reloads: it
+    starts the next run, so the rows after it are told first loads afresh. Each `reload` of a row the
+    records have not named before in its run is marked `first`; a row that has failed has been named,
+    so its next `reload` is not."""
     found: list[_Reload] = []
     for line in rows.splitlines():
         try:
@@ -639,13 +650,22 @@ def _reloads(rows: bytes) -> tuple[_Reload, ...]:
             continue
         record = cast(_RowRecord, value)
         at, kind, row = _moment(record.get("at")), _text(record.get("kind")), _text(record.get("row"))
-        if at is not None and kind is not None and row is not None:
+        if at is None or kind is None:
+            continue
+        if kind == _RUN:
+            found.append(_Reload(at, kind, "", None))
+        elif row is not None:
             found.append(_Reload(at, kind, row, _text(record.get("error"))))
     ordered = sorted(found, key=lambda reload: reload.at)
     seen: set[str] = set()
+    run = 0
     marked: list[_Reload] = []
     for reload in ordered:
-        marked.append(replace(reload, first=reload.kind == _RELOAD and reload.row not in seen))
+        if reload.kind == _RUN:
+            seen.clear()
+            run += 1
+            continue
+        marked.append(replace(reload, first=reload.kind == _RELOAD and reload.row not in seen, run=run))
         seen.add(reload.row)
     return tuple(marked)
 
@@ -918,10 +938,11 @@ def _first_loads_line(
 
 def _grouped(batch: Iterable[tuple[Key, _Reload]]) -> Iterator[_Group]:
     """`batch`, the records of one writer's rows that fall in one place among its lines, in time order,
-    as what is printed for each: a run of first loads that follow one another is one item (the key of the
-    run's first record, and the run), every other record an item of its own."""
-    for first, run in groupby(batch, key=lambda item: item[1].first):
-        items = list(run)
+    as what is printed for each: first loads that follow one another in one run are one item (the key of
+    the first record, and the loads), every other record an item of its own. Two runs' first loads are
+    two items even with nothing between them, as a resumed run's boot follows an earlier one's."""
+    for (first, _), group in groupby(batch, key=lambda item: (item[1].first, item[1].run)):
+        items = list(group)
         if first:
             yield items[0][0], tuple(reload for _, reload in items)
         else:
