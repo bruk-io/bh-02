@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:33'
-updated_date: '2026-10-18 20:38'
+updated_date: '2026-10-18 20:43'
 labels:
   - subagents
   - size-2
@@ -122,4 +122,70 @@ Round 1 review fix (the full scripts/check exit 1 on one flaky chat test; DRAFT-
 Changed: bh-02/plugins/chat-cordis-plugin/tests/test_chat.py only. test_an_interrupt_stops_the_reply_says_so_and_the_session_carries_on waited two fixed asyncio.sleep(0.01); it now waits, bounded (asyncio.timeout(10), a new test-local _until(condition) in the dialect of the subagents tests), first until the reply's text is shown, then until the stop event is shown, and asserts model.closed after that (the loop closes the reply before it shows the stop, chat.py _interruptible). Cause of the flake: when the machine stalls, the 10 ms timer is due on the same loop iteration as the first step of the interrupt chain (interrupt, cancel, gather, show stop, several iterations), so the test resumes with the stop not yet shown: exactly the review's screen.events holding only the text event. Nothing in src/ changed; no cordis, no monkeypatch.
 Evidence. Planted (seen failing): a scratch pytest plugin outside the repo (the event loop's clock runs 5 ms ahead on every read, as a stalled machine does) made the OLD test fail deterministically (assert model.closed, False), 1 failed; the same plugin with the NEW test: 1 passed; plain run 1 passed. The new test under 15 runs with 8 busy-loop processes on 4 cores: 0 failures. scripts/check bh-02/plugins/chat-cordis-plugin exit 0 (format, lint, mypy, 19 tests, every gate, docs). One full scripts/check run after the change: exit 0, 3825 passed, 118 skipped in 208.62s, gates (root and every lib) ok, docs ok, tokens skipped (no bh-01/dist). AC #3 is left unticked as before: the full scripts/check passing is the reviewer's to prove; this run is the evidence it can.
 Not changed, filed: under the same stalled clock two other chat tests fail the same way (test_chat.py::test_the_stop_notice_carries_the_notes_rows_have_for_it and ::test_what_a_command_holds_never_reaches_a_reply_already_running); they passed in the full run but can flake on a busy machine. TASK-0162 files them, with test_chat_wiring.py's sleeps to check. DRAFT-0008 is what this fix does for its one test; it is left a draft for the owner to drop.
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+..................ss.s..sss.s.s.s.s..s.s...ss.s.s.s.s.ss.s.s.ssss....... [ 49%]
+s....................................................................... [ 51%]
+................................................s....................... [ 52%]
+................................................sssssssssss.ssssssssssss [ 54%]
+ssssssssssssssssssssssssssssssssssssssssssss............................ [ 56%]
+...sssssssss..s..........s...s.......................................... [ 58%]
+........................................................................ [ 60%]
+.........................................................s.............. [ 62%]
+........................sss............................................. [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+.....................................................                    [100%]
+3825 passed, 118 skipped in 220.53s (0:03:40)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 5.04 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
