@@ -3,11 +3,11 @@ id: TASK-0147
 title: >-
   Stamp the time a row log's failed write happened, not the time the shell found
   it
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:33'
-updated_date: '2026-10-18 20:17'
+updated_date: '2026-10-18 20:18'
 labels:
   - host-paths
   - size-1
@@ -151,4 +151,6 @@ FAILED libs/host-paths/tests/test_host_paths_appender.py::test_the_first_failure
 ```
 
 Round 2 evidence (review finding 1, the missing repro). No code or test file changed this round; both criteria stay ticked from round 1, nothing re-ticked. The repro is recorded with record-check --repro, command: uv run pytest libs/host-paths/tests/test_host_paths_appender.py::test_the_first_failure_says_when_its_write_failed_not_when_the_caller_heard_of_it -q (the 'Repro at' line names f487c4f, HEAD when it was recorded; the test file there is the one committed in e48ffb7). The run was made with libs/host-paths/src/host_paths/appender.py and __init__.py put back to e48ffb7^ (before the fix) and the test file as committed: it failed, exit 1, AttributeError: 'Appender' object has no attribute 'failure' at the first assertion (test_host_paths_appender.py line 290). record-check then printed 'recorded on TASK-0147' and exited 0. Both files were restored with git checkout to HEAD; uv run pytest libs/host-paths/tests/test_host_paths_appender.py -q on the fixed code: 28 passed, exit 0. The test file is unchanged since f487c4f, so close-task's repro check stays clean. board-check close TASK-0147 (read-only) printed: ok: TASK-0147 can close. Not closed: the reviewer decides.
+
+Review round 2: closed. Full scripts/check exited 0 (recorded, round 1) and no code changed since e48ffb7. Repro recorded: the appender test fails on the pre-fix appender (AttributeError) and passes on HEAD. AC1 and AC2 met per the tests in test_host_paths_appender.py and test_row_log.py. Nit (not filed): _failing takes a timestamp even for non-first failures; harmless.
 <!-- SECTION:NOTES:END -->
