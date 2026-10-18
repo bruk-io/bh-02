@@ -6,9 +6,11 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-18 14:31'
+updated_date: '2026-10-18 19:29'
 labels:
   - app
   - size-2
+  - finish-moved
 dependencies: []
 type: task
 ---
@@ -22,6 +24,11 @@ Follow-up from TASK-0144. bh-02 trajectory tells a row's first load by its row i
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 A resumed session's boot is one line on bh-02 trajectory, apart from a reload of a running session's row (a restart, a dependency replaced)
-- [ ] #2 A rows.jsonl written before the marker (no marker) reads as it does now (tests)
-- [ ] #3 GLOSSARY.md and the docs page for bh-02 trajectory say what the marker and the line mean; scripts/check passes
+- [ ] #2 GLOSSARY.md and the docs page for bh-02 trajectory say what the marker and the line mean; scripts/check passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner's rule, 2026-10-18 (root CLAUDE.md, Conventions: no backwards compatibility before a supported release): criterion #2, 'a rows.jsonl written before the marker reads as it does now', pinned an old form and is removed. A rows.jsonl written before the marker is not read specially; say in the notes how it now reads.
+<!-- SECTION:NOTES:END -->
