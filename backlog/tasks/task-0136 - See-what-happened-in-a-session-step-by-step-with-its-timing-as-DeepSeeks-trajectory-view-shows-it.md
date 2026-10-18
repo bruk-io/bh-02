@@ -3,7 +3,7 @@ id: TASK-0136
 title: >-
   See what happened in a session, step by step, with its timing, as DeepSeek's
   trajectory view shows it
-status: To Do
+status: Done
 assignee:
   - '@bruk'
 created_date: '2026-10-14 03:42'
@@ -128,4 +128,6 @@ INFO    -  Documentation built in 5.19 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewed by philosophy:reviewer (did not do the work). All 11 subtasks Done. Full scripts/check exit 0 (recorded). AC1: step/call records (timing, model, usage, settings, answer+wait, sub-agent child, nested calls), compact seed, rows.jsonl, all via host_paths.Appender off the event loop at 0600 (test_agent_records, test_row_log). AC2: bh-02 trajectory [ID] --follow prints replies, steps, calls, sub-agents, boundaries and reloads as decision-0009 Reading specifies; raw request deliberately not shown and TUI screen carried forward (test_trajectory, test_trajectory_view, test_trajectory_records). AC3: request equals request_for over entries (test_agent_records:298,405); writes off loop; tui:ui row has no deps and gates pass. No blocking findings; no drafts filed.
 <!-- SECTION:NOTES:END -->
