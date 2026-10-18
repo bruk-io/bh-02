@@ -1,7 +1,7 @@
 ---
 id: TASK-0161
 title: End bh-02 watch's follow once the session is no longer running
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 19:32'
@@ -104,4 +104,6 @@ INFO    -  Documentation built in 4.40 seconds
 ```
 
 No repro: the fix is in HEAD, so the repro test (test_session_lock.py::test_a_follow_goes_on_while_the_session_is_held_and_ends_when_the_holder_has_crashed_with_no_end_line) passes here. The worker recorded it failing against the bug planted back (gone = False in watched: the follow hung until timeout 20 exit 124).
+
+Review (reviewer, not the worker): closed. Full scripts/check exited 0 (3841 passed, 118 skipped), tree unchanged after. AC1: watched ends with the 'no longer running' line when running() is False and no agent_end, tested with a SIGKILLed real holder and a clean exit. AC2: running() reads the pid via read_beneath and os.kill(pid,0), takes no lock, uncertain cases read as running so a live follow is unchanged; held() still works after watch in tests. Nits, not filed: pid reuse after a crash keeps the follow going and another pid namespace ends it early, both documented in command-line.md and the docstring.
 <!-- SECTION:NOTES:END -->
