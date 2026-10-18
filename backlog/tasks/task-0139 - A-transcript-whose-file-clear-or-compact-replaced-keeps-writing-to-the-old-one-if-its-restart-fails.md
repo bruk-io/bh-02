@@ -112,4 +112,6 @@ INFO    -  Documentation built in 3.92 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+No repro: the failing test can only be shown against the code before the fix, which a reviewer cannot check out; the regression test is test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart, and the worker recorded it failing with the check planted off (5 agent tests, 8 appender tests DID NOT RAISE).
 <!-- SECTION:NOTES:END -->
