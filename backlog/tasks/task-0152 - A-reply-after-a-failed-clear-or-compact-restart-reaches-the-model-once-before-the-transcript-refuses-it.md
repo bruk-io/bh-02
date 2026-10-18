@@ -114,4 +114,6 @@ INFO    -  Documentation built in 4.75 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (independent): not closed. Full scripts/check exited 0 and both ACs are met by the code and tests (loop._reply awaits _checked() before any append; model.requests == [] in the failed-restart conversation test; the check is a writer-thread stat, no flush). close-task refuses: a bug needs its repro recorded (record-check TASK-0152 --repro -- <test that fails>, or a 'No repro:' note). The worker's notes describe a planted violation failing, but it is not recorded as a repro. Worker: record it (e.g. with loop.py's await self._checked() removed, run test_agent_conversation.py::test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart under record-check --repro), then hand back.
 <!-- SECTION:NOTES:END -->
