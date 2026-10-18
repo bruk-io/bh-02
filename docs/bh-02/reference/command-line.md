@@ -99,11 +99,11 @@ Usage: bh-02 trajectory [OPTIONS] [ID]
 
   Print a session laid out in time, read-only: each reply, its steps (model,
   time to first chunk, generation time, speed, usage, cost), their calls
-  (answer, wait, run time) and the sub-agents they started, with times in your
-  local time. ID is the session as `--resume` takes it (its id, the start of
-  it or its last part; `bh-02 sessions` lists them), the newest in this
-  directory when left out. Nothing is written, and the files are read through
-  no link.
+  (answer, wait, run time), the sub-agents they started and the rows that
+  reloaded, with times in your local time. ID is the session as `--resume`
+  takes it (its id, the start of it or its last part; `bh-02 sessions` lists
+  them), the newest in this directory when left out. Nothing is written, and
+  the files are read through no link.
 
 Options:
   -f, --follow  Keep reading the files and print what is new, until Ctrl-C.
@@ -116,10 +116,12 @@ the reply's. The date the model is told is also your local day, so near midnight
 differ from the date in the files.
 
 ```text
+row reload loop  20:40:00.000
 conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   reply 1  2026-10-17 20:47:12.345  fix the bug in foo
     step 1  20:47:12.400  claude-opus-5-5  first chunk 1.20s  generated in 3.40s  62.4 tokens/s  in 1,200 tokens  out 212 tokens  cache read 1,000  cost $0.0312
       settings: work/opus via claude-code, max_tokens 4096, temperature 0.2
+      row reload transcript  20:47:14.000
       call python  20:47:17.000  answer yes (waited 4.20s)  ran 0.80s
         nested call read_file  20:47:17.100  answer unasked  ran 0.01s
       call agent  20:47:18.000  answer unasked  ran 12.00s  started sub-agent general-1
@@ -127,6 +129,7 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
           conversation 1  transcript.jsonl  2026-10-17 20:47:19.000
             reply 1  2026-10-17 20:47:19.000  count the files
               step 1  20:47:20.000  claude-haiku-5  first chunk 0.30s  generated in 0.70s
+    row failed model  20:47:21.500  RuntimeError('boom')
     step 2  20:47:31.000  first chunk 0.50s  generated in 1.00s  30.0 tokens/s  in 1,500 tokens  out 30 tokens
 ```
 
@@ -137,6 +140,12 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   call** shows its tool, what approval made of it (`answer unasked`, `yes` or `no`) and how long you
   took to answer, how long the tool ran, and the calls its input made through `tools` under it. A
   call whose result is not in the transcript says `no result recorded`.
+- **A row reload** is a row of the composition starting to load (`row reload NAME`: it came up, was
+  restarted, as `/clear` does, or a dependency it uses was replaced) or failing (`row failed NAME`,
+  with the error), from the session's `rows.jsonl`. It is printed in time order, before the first reply,
+  step or call that came after it, at that line's indentation; one with nothing after it comes last. A
+  sub-agent's rows (`agents/NAME/...`) are placed among that sub-agent's lines. A session starts with a
+  `row reload` for each row, and each restart adds those of the rows that depend on what it replaced.
 - **Conversations** are the session's transcript files: the backups `/clear` and `/compact` kept
   come first, in the order of their first `at` (else of the time they were copied), and the live
   `transcript.jsonl` is last. A conversation `/compact` began says so, with what you asked it to
@@ -153,7 +162,7 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   would accept; a line being written when it reads is skipped; and nothing in a transcript reaches the
   terminal as an escape sequence or any other control character.
 
-Row reloads and the raw request of a step are not shown yet.
+The raw request of a step is not shown yet.
 
 ## `bh-02 check-examples`
 

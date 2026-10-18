@@ -227,6 +227,9 @@ exclude = [
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
     "bh_02.cli:_launch",                                      # makes the project's auto memory directory
     "bh_02.bootstrap:project_of",                             # reads .git: a worktree's main repository
+    # the session's rows.jsonl: a listener that reads the clock and queues each kept lifecycle event
+    # to host_paths.Appender (a thread writes it), and `run`, which mounts it around the composition
+    "bh_02.bootstrap:_row_log", "bh_02.bootstrap:_row_log.hear", "bh_02.bootstrap:run",
     "agent_cordis_plugin.transcript:FileTranscript.*",
     "agent_cordis_plugin.transcript:rewrite",                 # /compact: the new conversation written whole (temp, then replace), the old kept as .bak, .bak.2, ...
     "agent_cordis_plugin.conversation:compact_conversation",  # /compact: reads the transcript's file, shows that it asks, then rewrites it

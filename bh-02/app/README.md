@@ -6,7 +6,8 @@ Python, through the tools rows register (the shipped one, `python`, runs in a ja
 process), inside a Textual TUI (`tui:ui`), with every part of the program a plugin that can be
 replaced while it runs. `bh_02` is the shell: `cli.py` (the `bh-02` command), `bootstrap.py`
 (`run()`: read every layer, boot, follow the chat row's `done`, unwind; its own `shell`, `host`
-and `session` rows), `sessions.py` (a session is `$XDG_STATE_HOME/bh-02/sessions/<id>/`),
+and `session` rows), `sessions.py` (a session is `$XDG_STATE_HOME/bh-02/sessions/<id>/`, which holds `rows.jsonl`: the rows that
+reloaded or failed, which the shell hears and queues to a thread),
 `watching.py` and `trajectory.py` with `viewing.py` (`bh-02 watch` and `bh-02 trajectory`, which read a session's files),
 the layer file (`bh-02.toml`) and `testing.py` (fake models). Every capability is a `*-cordis-plugin` workspace member
 (`../plugins/`) that a layer names by string; no package imports another, and they agree on the
@@ -164,16 +165,20 @@ step record and call record), and `bh-02 trajectory [ID]` reads them back. It is
 is, a pure core and a thin shell:
 
 - `trajectory.py` is pure. `trajectory(conversations, rows)` takes the bytes of the transcript files
-  (the session's own, and each sub-agent's) and returns frozen dataclasses: a session's conversations
+  (the session's own, and each sub-agent's) and of the session's `rows.jsonl` and returns frozen
+  dataclasses: a session's conversations
   in order (the live `transcript.jsonl` last, the backups `/clear` and `/compact` kept before it by their
   first `at`, else their modification time), each with its replies, their steps and calls, and
   each sub-agent under the call that started it, or after the conversations by its own times when no
-  call names it. `rendered` lays it out as lines, in local time, with every control character stripped.
+  call names it, and its row reloads by time. `rendered` lays it out as lines, in local time, with every
+  control character stripped, each row reload a line of its own before the first line that came after
+  it, among the lines of the writer whose row it is (the session's, or the sub-agent's for
+  `agents/NAME/...`).
   `bh_02` imports no plugin (`plugin-layering`), so it reads the entries as TypedDicts of its own; a
   test holds them to what the agent plugin's loop writes (`test_trajectory_records.py`). A line that is
   not a JSON object (the loop's half-written last line) is skipped, a field that is missing or of the
   wrong type is left out, and a conversation from before the records prints with no times.
-- `viewing.py` is the shell: it lists a session's directory and reads each file through
+- `viewing.py` is the shell: it lists a session's directory and reads each file, `rows.jsonl` included, through
   `host_paths` (`directory_beneath`, `read_beneath`: beneath the sessions' state, through no link, with a
   cap), takes a sub-agent only from the names in `agents/` that `bh-02 watch` would accept, and runs the
   `--follow` loop. A follow re-reads every file by its path every second and prints the lines whose
@@ -182,8 +187,17 @@ is, a pure core and a thin shell:
   may be running).
 - `cli.py` finds the session as `--resume` does (`sessions.find`, `sessions.chosen`) and prints.
 
-What it does not show yet: row reloads (TASK-0136.11) and the raw request, which needs the agent
-plugin's pure projection functions in a library both may import.
+What it does not show yet: the raw request, which needs the agent plugin's pure projection functions
+in a library both may import.
+
+The row reloads are kept by the shell, not read from the transcript: `run()` appends a listener to the
+runtime beside `--trace`'s (`_row_log`), which hears every row's lifecycle event, sub-agents' rows
+(`agents/NAME/...`) included, and for the two that count queues a line to `host_paths.Appender`, which
+writes it on a thread at 0600, so the event loop never waits on a disk. `reload` is a row's setup
+beginning (it came up, was restarted, or a dependency was replaced) and `failed` its setup raising,
+with the error; cordis emits no `restart`, a restarted row's old fiber ends `unloading` and `inactive`
+and the new one begins with a `reload`. A write that fails ends the log and not the run. `--trace FILE`
+is the same stream in full, untimed and written on the loop, and stays as it was.
 
 ## The plugins
 

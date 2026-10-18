@@ -1,14 +1,14 @@
 """`bh-02 trajectory ID`: a session's files read, and its trajectory handed to the terminal.
 
 The thin shell around `bh_02.trajectory`, which computes and lays out the trajectory and does no
-I/O. This module finds the files (a session's own transcripts, and its sub-agents' under
-`agents/NAME/`), reads them, and prints what is new; it opens nothing for writing and creates
-nothing. Every file is read through `host_paths` (a walk beneath the sessions' state that follows no
-link, from a descriptor it opened read-only), and a name is judged before any path is made of it, with
-the rule `bh-02 watch` uses (`bh_02.watching`): the session id the person's command resolved is
-checked again here, and a sub-agent is a name in the session's `agents/` directory that bh-02 could
-have made, never a name a transcript says. A transcript's `child` is only matched against those, so
-no text of the model's is ever a path.
+I/O. This module finds the files (a session's own transcripts and its `rows.jsonl`, and its
+sub-agents' transcripts under `agents/NAME/`), reads them, and prints what is new; it opens nothing
+for writing and creates nothing. Every file is read through `host_paths` (a walk beneath the sessions'
+state that follows no link, from a descriptor it opened read-only), and a name is judged before any
+path is made of it, with the rule `bh-02 watch` uses (`bh_02.watching`): the session id the person's
+command resolved is checked again here, and a sub-agent is a name in the session's `agents/` directory
+that bh-02 could have made, never a name a transcript says. A transcript's `child` is only matched
+against those, so no text of the model's is ever a path.
 
 `--follow` reads every file again for each poll, by its path, and prints the lines of the trajectory
 it has not printed: a `/clear` or `/compact` that replaced the live file changes nothing about how, as
@@ -22,6 +22,7 @@ from collections.abc import Callable, Iterator, Sequence
 from datetime import tzinfo
 from pathlib import Path
 
+from bh_02.sessions import ROWS
 from bh_02.trajectory import Key, Transcript, is_conversation_file, rendered, trajectory
 from bh_02.watching import Refused, refused_agent, refused_session
 from host_paths import Link, directory_beneath, read_beneath
@@ -101,6 +102,25 @@ def _read(root: Path, session: str) -> list[Transcript]:
     return [*own, *children]
 
 
+def _rows(root: Path, session: str) -> bytes:
+    """The session's `rows.jsonl` (its row reloads), read through no link; nothing for a session that
+    has none (one from before they were kept, or whose rows have not loaded yet).
+
+    Raises:
+        Refused: it is a link, or can't be read.
+    """
+    where = root / session / ROWS
+    try:
+        data = read_beneath(root, [session, ROWS], cap=_CAP)
+    except FileNotFoundError:
+        return b""
+    except OSError as error:
+        raise Refused(f"can't read {where}: {error}") from None
+    if isinstance(data, Link):
+        raise Refused(f"{where} is a link, which bh-02 did not make; it is not read")
+    return data
+
+
 def shown(
     root: Path,
     session: str,
@@ -116,7 +136,7 @@ def shown(
 
     Raises:
         Refused: `session` is not a name bh-02 made, no file is there (not following), or one can't
-            be read (`_read`).
+            be read (`_read`, `_rows`).
     """
     if (why := refused_session(session)) is not None:
         raise Refused(why)
@@ -128,7 +148,7 @@ def shown(
                 f"session {session} has no conversation yet: its transcript.jsonl is made when the "
                 f"first message is sent ({root / session})"
             )
-        for line in rendered(trajectory(files), tz, live=follow):
+        for line in rendered(trajectory(files, _rows(root, session)), tz, live=follow):
             if line.key not in printed:
                 printed.add(line.key)
                 yield line.text

@@ -14,9 +14,9 @@ says what each name is; this file is where things go and what the gate holds.
   `NotOneFile`) and never follow it. Its docstring says why each flag. `__init__.py` only
   re-exports.
 - `src/host_paths/appender.py`: `Appender`, the one appender of a file bh-02 keeps for the person (a
-  transcript, a sub-agent's event log): a queue of writes on one thread, opened for append through no
-  link at 0600, `flush` and `close` waiting for the last, a failed write kept and raised. Its docstring
-  says why each flag.
+  transcript, a sub-agent's event log, a session's row log): a queue of writes on one thread, opened
+  for append through no link at 0600, `flush` and `close` waiting for the last, a failed write kept
+  and raised. Its docstring says why each flag.
 - `tests/test_host_paths.py`: the XDG directories (an empty or relative value is unset), the walk
   against a table of links in a temporary directory (absolute, relative, the file itself, `..`
   after a link, dangling, missing, a loop that ends at `MOST_LINKS`), and `passes` over roots as
@@ -41,8 +41,8 @@ startup file), memory (memory files outside the project, and in it through no li
 memory directory, written through no link), the app
 and brig (the XDG directories), agent (the project's `.git/HEAD`) and the extensions host (the
 model's extensions). The appender is the same kind of function for the files bh-02 writes as a
-session goes on (the agent plugin's transcript, the sub-agents' event log): written off the event
-loop, at 0600, through no link. bh-02's plugins may import nothing of each other's, so a copy in
+session goes on (the agent plugin's transcript, the sub-agents' event log, the shell's row log):
+written off the event loop, at 0600, through no link. bh-02's plugins may import nothing of each other's, so a copy in
 each would drift, and a drifted copy is a hole. It depends on the standard library alone: no
 cordis, no key, row or bh-02 path. A function that names any of those stays in its plugin.
 

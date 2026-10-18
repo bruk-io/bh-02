@@ -103,6 +103,55 @@ def test_a_sessions_files_are_read_and_laid_out_with_its_sub_agents_and_nothing_
     assert not any("leftover" in text or "screen" in text or "event log" in text for text in out)
 
 
+def test_the_sessions_row_reloads_are_read_with_its_files_and_shown_among_the_lines(tmp_path: Path) -> None:
+    session = tmp_path / SESSION
+    put(session / "transcript.jsonl", *ONE)
+    put(
+        session / "rows.jsonl",
+        {"at": "2026-10-18T02:59:00.000Z", "kind": "reload", "row": "loop"},
+        {"at": "2026-10-18T03:00:00.500Z", "kind": "failed", "row": "model", "error": "RuntimeError('x')"},
+    )
+    assert lines_of(tmp_path) == [
+        "row reload loop  19:59:00.000",
+        "conversation 1  transcript.jsonl  2026-10-17 20:00:00.000",
+        "  reply 1  2026-10-17 20:00:00.000  first",
+        "    row failed model  20:00:00.500  RuntimeError('x')",
+        "    step 1  20:00:01.000  claude-opus-5-5  first chunk 0.50s  generated in 0.50s",
+    ]
+
+
+def test_a_session_with_no_rows_file_is_shown_without_reloads(tmp_path: Path) -> None:
+    put(tmp_path / SESSION / "transcript.jsonl", *ONE)  # a session from before they were kept
+    assert not any("row " in text for text in lines_of(tmp_path))
+
+
+def test_a_rows_file_that_is_a_link_or_has_a_second_name_or_is_too_large_is_not_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = put(
+        tmp_path / "outside.jsonl", {"at": "2026-10-18T03:00:00.000Z", "kind": "reload", "row": "SECRET"}
+    )
+    session = tmp_path / "sessions" / SESSION
+    put(session / "transcript.jsonl", *ONE)
+    (session / "rows.jsonl").symlink_to(secret)
+    with pytest.raises(Refused, match="rows.jsonl is a link") as linked:
+        lines_of(tmp_path / "sessions")
+    assert "SECRET" not in linked.value.message
+    (session / "rows.jsonl").unlink()
+    os.link(secret, session / "rows.jsonl")
+    with pytest.raises(Refused, match="one name") as named:
+        lines_of(tmp_path / "sessions")
+    assert "SECRET" not in named.value.message
+    (session / "rows.jsonl").unlink()
+    put(
+        session / "rows.jsonl",
+        {"at": "2026-10-18T03:00:00.000Z", "kind": "failed", "row": "x", "error": "e" * 600},
+    )
+    monkeypatch.setattr(viewing, "_CAP", 500)  # the transcript is read; the rows file is over it
+    with pytest.raises(Refused, match="rows.jsonl is larger than 500 bytes"):
+        lines_of(tmp_path / "sessions")
+
+
 def test_a_session_with_no_transcript_yet_is_refused_and_says_where_it_looked(tmp_path: Path) -> None:
     (tmp_path / SESSION).mkdir()
     with pytest.raises(Refused, match=f"session {SESSION} has no conversation yet"):
@@ -426,6 +475,30 @@ def test_a_sub_agent_printed_before_its_call_was_recorded_is_not_printed_again_u
     assert any(
         text.strip().startswith("call python") and "started sub-agent general-1" in text for text in out
     )
+
+
+def test_a_reload_that_comes_while_following_is_printed_once_where_it_belongs_and_not_again(
+    tmp_path: Path,
+) -> None:
+    path, rows = tmp_path / SESSION / "transcript.jsonl", tmp_path / SESSION / "rows.jsonl"
+    put(path, *ONE)
+    put(rows, {"at": "2026-10-18T03:00:00.500Z", "kind": "reload", "row": "first"})
+
+    def reloaded() -> None:  # the shell appended another, after the last line; the next poll finds it
+        pushed(rows, {"at": "2026-10-18T03:00:02.000Z", "kind": "reload", "row": "second"})
+
+    def replied() -> None:
+        pushed(path, message("next", "2026-10-18T03:01:00.000Z"))
+
+    out, _ = following(tmp_path, [lambda: None, reloaded, replied, lambda: None])
+    assert [text.strip().split("  ")[0] for text in out] == [
+        "conversation 1",
+        "reply 1",
+        "row reload first",
+        "step 1",
+        "row reload second",
+        "reply 2",
+    ]
 
 
 def test_following_a_session_not_yet_started_waits_for_its_first_file(tmp_path: Path) -> None:

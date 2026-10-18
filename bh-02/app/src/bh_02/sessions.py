@@ -3,7 +3,8 @@
 A session is where one conversation lives, outside the project (so a jailed input can't touch
 it): `meta.json` (which directory, which stack, when), `session.toml`, the session's own
 layer file, `transcript.jsonl`, the conversation (what a resume sends the model again), and
-`events.jsonl`, what the ui showed (so a resume shows it again). The session's layer is the
+`events.jsonl`, what the ui showed (so a resume shows it again), and `rows.jsonl`, the row reloads
+and failures the shell heard, which `bh-02 trajectory` lays out in time. The session's layer is the
 last shipped layer, so everything a run chose (the model, the jail, where the conversation is kept) is
 composition, and resuming is booting with that layer again. `/model` edits it the same way:
 the layer files stay the only way the running program changes.
@@ -34,6 +35,7 @@ from cordis.loader import read_layer
 from host_paths import config_home, passes, roots, state_home
 
 __all__ = [
+    "ROWS",
     "Broken",
     "Listing",
     "Session",
@@ -57,6 +59,7 @@ _LAYER = "session.toml"
 _META = "meta.json"
 TRANSCRIPT = "transcript.jsonl"
 _EVENTS = "events.jsonl"
+ROWS = "rows.jsonl"
 _MODEL_ROW = "model"  # the row whose `default` (the model's name) /model and --model set
 _CLAUDE_STATE = (
     "claude"  # the claude-code provider's own state: Claude Code's config, its session, its stderr
@@ -81,6 +84,11 @@ class Session:
     @property
     def layer(self) -> Path:
         return self.dir / _LAYER
+
+    @property
+    def row_log(self) -> Path:
+        """Where the shell keeps the session's row reloads (`bootstrap.run`'s `rows`)."""
+        return self.dir / ROWS
 
 
 @dataclass(frozen=True, slots=True)

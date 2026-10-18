@@ -462,7 +462,7 @@ def test_a_step_shows_its_time_alone_when_it_is_the_replys_day_and_with_its_date
 def test_the_rows_file_is_read_into_the_trajectory_by_time_skipping_what_is_not_a_record() -> None:
     rows = (
         jsonl(
-            {"at": "2026-10-18T03:50:00.000Z", "kind": "restart", "row": "model"},
+            {"at": "2026-10-18T03:50:00.000Z", "kind": "reload", "row": "model"},
             {
                 "at": "2026-10-18T03:40:00.000Z",
                 "kind": "failed",
@@ -477,9 +477,152 @@ def test_the_rows_file_is_read_into_the_trajectory_by_time_skipping_what_is_not_
     reloads = laid(file(CONVERSATION), rows=rows).reloads
     assert [(r.kind, r.row, r.error) for r in reloads] == [
         ("failed", "agents/general-1/loop", "boom"),
-        ("restart", "model", None),
+        ("reload", "model", None),
     ]
     assert laid(file(CONVERSATION)).reloads == ()
+
+
+def reload_record(at: str, kind: str, row: str, **more: object) -> Json:
+    return {"at": at, "kind": kind, "row": row} | more
+
+
+def test_each_row_reload_is_a_line_in_time_order_among_the_steps_and_calls_where_the_next_line_is() -> None:
+    rows = jsonl(
+        # in the order the file has them, which is not the order they happened in
+        reload_record("2026-10-18T03:47:45.000Z", "reload", "python"),  # between the replies
+        reload_record("2026-10-18T03:40:00.000Z", "reload", "loop"),  # before the conversation
+        reload_record(
+            "2026-10-18T03:47:14.000Z", "reload", "transcript"
+        ),  # after the step, before its first call
+        reload_record(
+            "2026-10-18T03:47:17.050Z", "failed", "model", error="RuntimeError('boom')"
+        ),  # after the call, before the call its input made
+        reload_record(
+            "2026-10-18T03:47:19.500Z", "reload", "agents/general-1/loop"
+        ),  # a sub-agent's row: placed by the sub-agent's lines, not the session's
+        reload_record("2026-10-18T03:50:00.000Z", "reload", "loop"),  # after everything
+    )
+    lines = text(laid(file(CONVERSATION), file(CHILD, agent="general-1"), rows=rows))
+    assert "\n".join(lines) == "\n".join(
+        [
+            "row reload loop  20:40:00.000",
+            "conversation 1  transcript.jsonl  2026-10-17 20:47:12.345",
+            "  reply 1  2026-10-17 20:47:12.345  fix the bug in foo",
+            "    step 1  20:47:12.400  claude-opus-5-5  first chunk 1.20s  generated in 3.40s  62.4 tokens/s"
+            "  in 1,200 tokens  out 212 tokens  cache read 1,000  cost $0.0312",
+            "      settings: work/opus via claude-code, max_tokens 4096, temperature 0.2",
+            "      row reload transcript  20:47:14.000",
+            "      call python  20:47:17.000  answer yes (waited 4.20s)  ran 0.80s",
+            "        row failed model  20:47:17.050  RuntimeError('boom')",
+            "        nested call read_file  20:47:17.100  answer unasked  ran 0.01s",
+            "      call agent  20:47:18.000  answer unasked  ran 12.00s  started sub-agent general-1",
+            "        sub-agent general-1",
+            "          conversation 1  transcript.jsonl  2026-10-17 20:47:19.000",
+            "            reply 1  2026-10-17 20:47:19.000  count the files",
+            "              row reload agents/general-1/loop  20:47:19.500",
+            "              step 1  20:47:20.000  claude-haiku-5  first chunk 0.30s  generated in 0.70s",
+            "    step 2  20:47:31.000  first chunk 0.50s  generated in 1.00s  30.0 tokens/s"
+            "  in 1,500 tokens  out 30 tokens",
+            "  row reload python  20:47:45.000",
+            "  reply 2  2026-10-17 20:48:00.000  and bar?",
+            "    step 1  20:48:01.000  no chunk came",
+            "      call python  no result recorded",
+            "row reload loop  20:50:00.000",
+        ]
+    )
+
+
+def test_a_sub_agents_rows_are_placed_by_its_lines_and_the_session_s_by_the_session_s() -> None:
+    """The child runs alongside its parent: a reload of the session's own row while it runs is not put
+    among the child's lines, and the child's rows coming up are put before its first line."""
+    rows = jsonl(
+        reload_record("2026-10-18T03:47:18.900Z", "reload", "agents/general-1"),  # the child's loader
+        reload_record("2026-10-18T03:47:18.950Z", "reload", "agents/general-1/loop"),
+        reload_record("2026-10-18T03:47:19.500Z", "reload", "agents"),  # the parent's agents row
+        reload_record("2026-10-18T03:59:00.000Z", "reload", "agents/ghost-9/loop"),  # a child with no files
+    )
+    lines = text(laid(file(CONVERSATION), file(CHILD, agent="general-1"), rows=rows))
+    assert [line.strip().split("  ")[0] for line in lines[6:]] == [
+        "call agent",
+        "sub-agent general-1",
+        "row reload agents/general-1",  # before the child's first line, at its depth
+        "row reload agents/general-1/loop",
+        "conversation 1",
+        "reply 1",
+        "step 1",
+        "row reload agents",  # the session's, among the session's lines, after the child's block
+        "step 2",
+        "reply 2",
+        "step 1",
+        "call python",
+        "row reload agents/ghost-9/loop",  # no line of the child's to place it: after the last line
+    ]
+    assert lines[8].startswith(" " * 10 + "row reload agents/general-1")
+    assert lines[-1] == "row reload agents/ghost-9/loop  20:59:00.000"
+
+
+def test_a_sub_agent_no_call_names_has_its_rows_in_its_own_block() -> None:
+    rows = jsonl(reload_record("2026-10-18T03:47:18.950Z", "reload", "agents/general-1/loop"))
+    data = jsonl(user("hi", "2026-10-18T03:47:00.000Z"))
+    lines = text(laid(file(data), file(CHILD, agent="general-1"), rows=rows))
+    assert [line.strip().split("  ")[0] for line in lines] == [
+        "conversation 1",
+        "reply 1",
+        "sub-agent general-1",
+        "row reload agents/general-1/loop",
+        "conversation 1",
+        "reply 1",
+        "step 1",
+    ]
+
+
+def test_a_reload_at_the_time_of_a_line_comes_after_it_and_one_with_no_line_after_it_comes_last() -> None:
+    data = jsonl(user("hi", "2026-10-18T03:00:00.000Z"), assistant("a", step("2026-10-18T03:00:01.000Z")))
+    rows = jsonl(
+        reload_record("2026-10-18T03:00:00.000Z", "reload", "same-as-the-reply"),
+        reload_record("2026-10-18T03:00:01.000Z", "reload", "same-as-the-step"),
+    )
+    lines = text(laid(file(data), rows=rows))
+    assert [line.strip().split("  ")[0] for line in lines] == [
+        "conversation 1",
+        "reply 1",
+        "row reload same-as-the-reply",
+        "step 1",
+        "row reload same-as-the-step",
+    ]
+
+
+def test_reloads_of_a_session_with_no_conversation_or_no_times_are_all_there_with_their_dates() -> None:
+    rows = jsonl(
+        reload_record("2026-10-18T03:00:00.000Z", "reload", "loop"),
+        reload_record("2026-10-19T03:00:00.000Z", "failed", "ui", error="boom"),
+    )
+    assert text(laid(rows=rows)) == [
+        "row reload loop  2026-10-17 20:00:00.000",
+        "row failed ui  2026-10-18 20:00:00.000  boom",
+    ]
+    old = jsonl({"role": "user", "content": "from before the records"})  # no times to place a reload by
+    assert text(laid(file(old), rows=rows))[-2:] == text(laid(rows=rows))
+
+
+def test_a_reload_shows_its_date_only_when_it_is_not_the_day_of_the_line_it_is_placed_by() -> None:
+    data = jsonl(user("hi", "2026-10-18T03:00:00.000Z"), assistant("a", step("2026-10-18T03:00:01.000Z")))
+    rows = jsonl(
+        reload_record("2026-10-17T03:00:00.000Z", "reload", "yesterday"),
+        reload_record("2026-10-18T02:59:59.000Z", "reload", "before-it-same-local-day"),
+        reload_record("2026-10-18T09:00:00.000Z", "reload", "later-local-day"),
+    )
+    lines = text(laid(file(data), rows=rows))
+    assert lines[0] == "row reload yesterday  2026-10-16 20:00:00.000"
+    assert lines[1] == "row reload before-it-same-local-day  19:59:59.000"
+    assert lines[-1] == "row reload later-local-day  2026-10-18 02:00:00.000"
+
+
+def test_a_row_reload_never_puts_a_control_character_on_the_terminal() -> None:
+    hostile = "\x1b[2J\x07 name \u202etxt.exe"
+    rows = jsonl(reload_record("2026-10-18T03:00:00.000Z", "failed", f"agents/{hostile}", error=hostile))
+    (line,) = text(laid(rows=rows))
+    assert "name" in line and not UNSAFE.search(line)
 
 
 def test_a_line_keeps_its_key_as_the_files_grow_so_a_follower_prints_it_once() -> None:
@@ -490,6 +633,18 @@ def test_a_line_keeps_its_key_as_the_files_grow_so_a_follower_prints_it_once() -
     for shorter, longer in zip(keys, keys[1:], strict=False):
         assert set(shorter) <= set(longer)
     assert len({k for line in keys[-1:] for k in line}) == len(keys[-1])  # and no two lines share one
+
+
+def test_reloads_have_keys_of_their_own_that_stay_as_the_rows_file_and_the_conversation_grow() -> None:
+    same = reload_record("2026-10-18T03:00:00.000Z", "reload", "loop")
+    first = jsonl(same, same, reload_record("2026-10-18T03:00:00.500Z", "reload", "ui"))
+    later = first + jsonl(reload_record("2026-10-18T04:00:00.000Z", "reload", "loop"))
+    cut = CONVERSATION.splitlines(keepends=True)
+    before = rendered(laid(file(b"".join(cut[:4])), rows=first), LOCAL)
+    after = rendered(laid(file(CONVERSATION), rows=later), LOCAL)
+    assert len({line.key for line in before}) == len(before)  # two alike are two keys
+    assert {line.key for line in before if line.key[0] == "rows"} <= {line.key for line in after}
+    assert len({line.key for line in after}) == len(after)
 
 
 def test_a_conversation_keeps_its_key_when_a_clear_renames_its_file_and_a_new_one_has_another() -> None:

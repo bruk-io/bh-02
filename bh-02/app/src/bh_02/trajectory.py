@@ -20,6 +20,12 @@ each step the calls it made, each call the calls its input made through `tools` 
 started. A sub-agent's own transcripts (under `<session>/agents/NAME/`) are placed under the call
 that started it, and one no call names after the session's own conversations, by its own times.
 
+A session's row reloads are its `rows.jsonl` (the shell appends a line for each row that reloaded or
+failed, a sub-agent's rows too). Each is printed in time order among the lines of whose rows it is, the
+session's own or a sub-agent's (`agents/NAME/...`): before the first reply, step, call or conversation
+of theirs that came after it, at that line's indentation, and after the last line when none did. A
+sub-agent's lines run alongside the session's, so each is placed by its own.
+
 A line that is not a JSON object is skipped: the last one may be half written while the loop appends.
 A call whose `tool` entry is not there shows `no result recorded`.
 
@@ -32,7 +38,8 @@ import datetime
 import json
 import math
 import re
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections import Counter, deque
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, NotRequired, TypedDict, assert_never, cast
 
@@ -50,6 +57,9 @@ _MESSAGES = ("user", "assistant", "tool")  # the roles that are the conversation
 _CLIP = 200  # characters of a message shown on one line
 _DATED = "(Today's date: {}.)"  # what the loop puts before a message that tells the date (CONTRACTS.md)
 _UNKNOWN = "?"
+_OWN = ""  # the first element of a key from the session's own conversations; a sub-agent's is its name
+_ROWS = "rows"  # the first element of a row reload's key
+_AGENTS = "agents"  # the first part of the id of a sub-agent's row
 
 
 # What the files hold, as the agent plugin's `records.py` writes it. Not imported: bh_02 reads the
@@ -270,7 +280,8 @@ class _Agent:
 
 @dataclass(frozen=True, slots=True)
 class _Reload:
-    """A row's lifecycle event kept in a session's `rows.jsonl`."""
+    """A row's lifecycle event kept in a session's `rows.jsonl`: a `reload` (a row's setup began: it
+    came up, was restarted, or a dependency was replaced) or a `failed` (with its `error`)."""
 
     at: datetime.datetime
     kind: str
@@ -282,7 +293,7 @@ class _Reload:
 class Trajectory:
     """A session laid out in time. `conversations`: its own, in order, with the sub-agents they
     started inside their calls. `unlinked`: the sub-agents no call names, by their first time.
-    `reloads`: its row reloads, by time."""
+    `reloads`: its row reloads and failures, by time."""
 
     conversations: tuple[_Conversation, ...]
     unlinked: tuple[_Agent, ...]
@@ -293,10 +304,14 @@ class Trajectory:
 class Line:
     """One line of `rendered`, without its newline. `key` says where in the trajectory it is, in a way
     that stays the same as the files grow and a file is replaced, so a viewer that follows them prints
-    a line once."""
+    a line once; its first element is whose it is (`""`: the session's own conversations, a
+    sub-agent's name, or `"rows"`: a row reload). `at` is when what it shows happened, and `depth`
+    how far it is indented (what it is inside), for a line that has a time."""
 
     key: Key
     text: str
+    at: datetime.datetime | None = None
+    depth: int = 0
 
 
 def is_conversation_file(name: str) -> bool:
@@ -739,7 +754,7 @@ def _call_lines(
     if call.child is not None:
         found = "" if call.agent is not None else " (its transcript was not found)"
         parts.append(f"started sub-agent {_say(call.child)}{found}")
-    yield Line(key, _line(depth, *parts))
+    yield Line(key, _line(depth, *parts), call.at, depth)
     if call.agent is not None:
         yield from _agent_lines(call.agent, depth + 1, "", view)
     for n, nested in enumerate(call.nested, 1):
@@ -749,7 +764,7 @@ def _call_lines(
 def _step_lines(
     key: Key, number: int, step: _Step, depth: int, day: datetime.date | None, tail: bool, view: _View
 ) -> Iterator[Line]:
-    yield Line((*key, "step"), _line(depth, f"step {number}", *_step_parts(step, view, day)))
+    yield Line((*key, "step"), _line(depth, f"step {number}", *_step_parts(step, view, day)), step.at, depth)
     if step.settings is not None:
         yield Line((*key, "settings"), _line(depth + 1, _settings_text(step.settings)))
     for n, call in enumerate(step.calls, 1):
@@ -761,7 +776,9 @@ def _step_lines(
 def _reply_lines(key: Key, number: int, reply: _Reply, depth: int, tail: bool, view: _View) -> Iterator[Line]:
     day = _day(reply.at, view)
     said = _say(reply.message) if reply.message is not None else "(the file begins with no message)"
-    yield Line((*key, "reply"), _line(depth, f"reply {number}", _when(reply.at, view, None), said))
+    yield Line(
+        (*key, "reply"), _line(depth, f"reply {number}", _when(reply.at, view, None), said), reply.at, depth
+    )
     steps = 0
     for n, item in enumerate(reply.items, 1):
         match item:
@@ -770,7 +787,12 @@ def _reply_lines(key: Key, number: int, reply: _Reply, depth: int, tail: bool, v
                 last = tail and n == len(reply.items)
                 yield from _step_lines((*key, n), steps, item, depth + 1, day, last, view)
             case _Nudge(at=at, why=why):
-                yield Line((*key, n, "nudge"), _line(depth + 1, "nudge", _when(at, view, day), _say(why)))
+                yield Line(
+                    (*key, n, "nudge"),
+                    _line(depth + 1, "nudge", _when(at, view, day), _say(why)),
+                    at,
+                    depth + 1,
+                )
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -797,12 +819,19 @@ def _conversation_lines(
             _when(conversation.at, view, None),
             _boundary(conversation, number),
         ),
+        conversation.at,
+        depth,
     )
     if conversation.seed is not None:
         step = conversation.seed.step
         # the boundary's own step: its request was the conversation before this one
         said = _step_parts(step, view, None) if step is not None else ["no step recorded"]
-        yield Line((*key, "summary"), _line(depth + 1, "summary step", *said))
+        yield Line(
+            (*key, "summary"),
+            _line(depth + 1, "summary step", *said),
+            step.at if step is not None else None,
+            depth + 1,
+        )
         if step is not None and step.settings is not None:
             yield Line((*key, "summary", "settings"), _line(depth + 2, _settings_text(step.settings)))
     for n, reply in enumerate(conversation.replies, 1):
@@ -822,19 +851,68 @@ def _agent_lines(agent: _Agent, depth: int, note: str, view: _View) -> Iterator[
     yield from _conversations_lines(agent.name, agent.conversations, depth + 1, view)
 
 
+def _reload_keys(reloads: Sequence[_Reload]) -> list[Key]:
+    """A key for each reload that stays the same as the file grows: its time, kind and row, and which of
+    the reloads that are alike in all three it is."""
+    counts: Counter[tuple[str, str, str]] = Counter()
+    keys: list[Key] = []
+    for reload in reloads:
+        same = (reload.at.isoformat(), reload.kind, reload.row)
+        counts[same] += 1
+        keys.append((_ROWS, *same, counts[same]))
+    return keys
+
+
+def _reload_line(key: Key, reload: _Reload, depth: int, near: datetime.datetime | None, view: _View) -> Line:
+    """A row reload as a line, with its date unless it is `near`'s day."""
+    label = f"row {_say(reload.kind)} {_say(reload.row)}"
+    text = _line(depth, label, _when(reload.at, view, _day(near, view)), _say(reload.error or ""))
+    return Line(key, text, reload.at, depth)
+
+
+def _owner(row: str) -> str:
+    """Whose row it is, by the key its lines start with: a sub-agent's (`agents/NAME` or
+    `agents/NAME/...`) is NAME's, any other the session's own."""
+    head, _, rest = row.partition("/")
+    return rest.partition("/")[0] if head == _AGENTS and rest else _OWN
+
+
+def _with_reloads(lines: Iterable[Line], reloads: Sequence[_Reload], view: _View) -> Iterator[Line]:
+    """`lines` with each reload put before the first line of its owner's (`_owner`) that has a later
+    time, at that line's depth, and the rest after the last line, by time. A line with no time places
+    nothing. A sub-agent's lines run alongside the session's own, so a reload is placed by the lines of
+    the writer whose row it is, and its own order among them stays the order of the time."""
+    waiting: dict[str | int, deque[tuple[Key, _Reload]]] = {}
+    for key, reload in zip(_reload_keys(reloads), reloads, strict=True):
+        waiting.setdefault(_owner(reload.row), deque()).append((key, reload))
+    last: Line | None = None  # the last line that had a time, whose day a reload is shown by
+    for line in lines:
+        if line.at is not None:
+            queue = waiting.get(line.key[0])
+            while queue and queue[0][1].at < line.at:
+                key, reload = queue.popleft()
+                yield _reload_line(key, reload, line.depth, (last or line).at, view)
+            last = line
+        yield line
+    rest = sorted((item for queue in waiting.values() for item in queue), key=lambda item: item[1].at)
+    for key, reload in rest:
+        yield _reload_line(key, reload, 0, last.at if last is not None else None, view)
+
+
 def rendered(laid: Trajectory, tz: datetime.tzinfo | None = None, *, live: bool = False) -> tuple[Line, ...]:
     """The trajectory as lines of text, indented by what is inside what: each conversation (with how
     it began, and for `/compact` the summary step's time and cost), its replies, their steps with the
     model, time to first chunk, generation time, speed, usage, cost and any settings, each step's calls
     with their answer, wait, run time and nested calls, and under a call the sub-agent it started.
-    Sub-agents no call names come last, by their own times.
+    Each row reload (`Trajectory.reloads`) is a line of its own, in time order among the lines of its
+    row's owner, the session's or its sub-agent's (`_with_reloads`). Sub-agents no call names come last,
+    by their own times.
 
     Times are in the zone `tz` (None: the machine's), with the date where it differs from the
     reply's. With `live`, the files are still being written: a call of the last step whose result is
-    not there yet is held back, as it may be running; without it that call shows `no result recorded`.
-    Row reloads are kept in `Trajectory.reloads` and not shown yet (TASK-0136.11)."""
+    not there yet is held back, as it may be running; without it that call shows `no result recorded`."""
     view = _View(tz, live)
-    lines = list(_conversations_lines("", laid.conversations, 0, view))
+    lines = list(_conversations_lines(_OWN, laid.conversations, 0, view))
     for agent in laid.unlinked:
         lines.extend(_agent_lines(agent, 0, "(no call that started it is recorded)", view))
-    return tuple(lines)
+    return tuple(_with_reloads(lines, laid.reloads, view))

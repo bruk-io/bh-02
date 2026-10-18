@@ -374,6 +374,13 @@ async def one_message_ui() -> Effects:
 
 
 @component
+async def broken_on_purpose() -> Effects:
+    """A row whose setup raises."""
+    raise RuntimeError("broken on purpose")
+    yield
+
+
+@component
 async def heartbeat() -> Effects:
     """Background work owned by a row that is not the chat row: never resolves on its own."""
 
