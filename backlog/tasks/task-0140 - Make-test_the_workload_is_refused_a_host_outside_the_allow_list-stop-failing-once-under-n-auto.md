@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 05:33'
-updated_date: '2026-10-18 13:02'
+updated_date: '2026-10-18 13:05'
 labels:
   - brig
   - size-2
@@ -118,4 +118,70 @@ INFO    -  Documentation built in 3.61 seconds
 Review (independent): every criterion met on the evidence; full scripts/check exit 0 (3766 passed, 118 skipped), the run changed no files. Not closed: close-task refuses a bug without a recorded repro. The planted reproduction was a scratch copy since deleted, so the worker should add either record-check TASK-0140 --repro -- <planted test> or a note starting 'No repro:' explaining why (the race needs a stale proxy.port planted in a pid-named dir, which the fixed test no longer uses). Then it can close. Note: decision-0009 (session trajectories) does not bear on this task.
 
 No repro: there is no standing test that fails on the pre-fix code. The failure needed a stale proxy.port in a jail directory named /tmp/bp<pid>-<n>, left by an earlier process that had the same pid, and the wrap shell reading it before the new proxy replaced it; that depends on which pids earlier runs on the machine used and on the proxy's start-up time, so it cannot be made to fail from the test alone. I made it fail only by planting the stale file in a scratch copy of the original test (403 test failed 6 of 6, then 11 of 12, ConnectionRefusedError at line 256), and that copy is deleted: committing it would put a failing test in the suite, and the fixed test no longer names any directory from the pid (jail_dir is a fresh tempfile.mkdtemp), so a test written against it cannot hit the race. The same plant against the fixed file passed 12 of 12 (see the notes above). The library side of the hazard, a reused jail directory's stale proxy.port, is filed as TASK-0150, and a standing repro belongs there if its SPEC decision wants one.
+
+Check `scripts/check` exited 0
+
+(30 earlier lines omitted)
+```text
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................s.s...ssss.s.s.s.s..ss...s.s.s.s [ 48%]
+.s.s..sss.ss..sss.s..........s.......................................... [ 50%]
+........................................................................ [ 51%]
+.......................................................................s [ 53%]
+sssssssssssssssssssssss.ssssssssssssssssssss.sssssssssssssssssssss..ss.. [ 55%]
+..........................sssssssss...s...........s....s................ [ 57%]
+..................................s..................................... [ 59%]
+........................................................................ [ 61%]
+..............................................sss....................... [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+..................................................................       [100%]
+3766 passed, 118 skipped in 203.38s (0:03:23)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.32 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
