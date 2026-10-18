@@ -208,6 +208,22 @@ on the writing thread, so the refusal surfaces at the next `append` after it has
 `append` that queued the entry: the first message after a failed restart may reach the model once
 before its step's entry is refused.
 
+A transcript file read when the row starts (a resume, or `/compact` reading it) may end in a
+write that was cut short: a process killed mid-write leaves a last line with no newline that is
+not JSON. That is an entry that was never made, so the file is mended before the appender's first
+write: the unfinished line is kept beside the file (`transcript.jsonl.torn`, and
+`transcript.jsonl.torn.2`, ... the first name not taken, as `.bak` is: an earlier one is never
+replaced or read, and each is made at 0600 through `host_paths.write_beneath`, no link followed),
+then the file is cut to its last whole line, so the next entry starts a line of its own instead of
+being glued onto the bytes. The bytes are kept before they are cut: when they can't be (a link at
+the name, no room), the transcript stops with that reason and the file is as it was. A last
+line that is whole but for its newline (cut at the final byte) is an entry: it is read and given
+its newline. Only that last line is forgiven. A line that is not JSON anywhere else, or a last
+line that ends in a newline, is damage and not a write cut short: the row stops, with a
+`ValueError` naming the file and the line number and telling the person to repair or remove the
+line, or begin a new session without `--resume`, and nothing is changed. Nothing tells the person
+a torn line was set aside; the `.torn` file is where to look when the last reply seems missing.
+
 `/compact` (`agent:conversation`, `conversation.py`) is for a conversation grown long: a local model
 processes more prompt before each first token, and any model nears its context window. It asks
 the model for a summary in one step: the request is the loop's own (`loop.request_for`: the

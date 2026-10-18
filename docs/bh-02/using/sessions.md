@@ -18,6 +18,15 @@ started and a short suffix, such as `20261008-225423-07f8`. It holds:
 | `meta.json` | the session's id, the directory it ran in, when it started, the model it started on, and any `--patch` files it started with |
 | `claude/` | Claude Code's own state for the session, when the model is Claude |
 
+## When bh-02 was killed mid-write
+
+If bh-02 is killed while it writes the conversation, `transcript.jsonl` can end in half a line.
+`--resume` carries on without that unfinished entry: the half line is kept beside the file as
+`transcript.jsonl.torn` (readable by you alone; a second time makes `transcript.jsonl.torn.2`),
+and the conversation continues from the last whole entry. Any other line that is not JSON is not
+a write cut short, so a resume stops and names the file and the line number: repair or remove the
+line in an editor, or start a new session instead.
+
 ## Listing sessions
 
 ```sh

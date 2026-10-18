@@ -1,9 +1,11 @@
 ---
 id: TASK-0141
 title: A transcript whose last line is torn still resumes
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-18 12:15'
+updated_date: '2026-10-18 13:36'
 labels:
   - agent
   - size-2
@@ -23,7 +25,21 @@ Found designing TASK-0136 (noted there, filed at the owner's word 2026-10-18). F
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A transcript file whose last line is torn (no newline, not JSON) resumes without that line, and the next entry is written on a line of its own (a test with a torn tail, then an append, then a resume that reads every entry)
-- [ ] #2 A line that is not JSON anywhere but the end still stops the transcript, with an error naming the file and the line number and saying what to do
+- [x] #1 A transcript file whose last line is torn (no newline, not JSON) resumes without that line, and the next entry is written on a line of its own (a test with a torn tail, then an append, then a resume that reads every entry)
+- [x] #2 A line that is not JSON anywhere but the end still stops the transcript, with an error naming the file and the line number and saying what to do
 - [ ] #3 The dropped bytes are not silently lost: they are kept beside the transcript (or the error says where), and the notes say which; scripts/check passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1) transcript.py: split FileTranscript's read into a pure _read(data, path) -> _Reading (messages, torn tail bytes, whether a whole last line lacks its newline) and a FileTranscript._mend that does the I/O. A bad line before the last, or a last line that ends in a newline and is not JSON, raises ValueError naming file, line number and what to do (file untouched). 2) A torn last line (no newline, not JSON): kept first beside the file via host_paths.write_beneath (0600, through no link) at transcript.jsonl.torn, then .torn.2, ... (the .bak convention: an earlier one is never replaced), then the file is cut to its last whole line (ftruncate on an O_NOFOLLOW fd) before the appender's first write. A whole last line missing only its newline gets one. 3) Tests in test_agent_transcript.py: torn tail then append then resume reads every entry; torn twice; bad middle line; bad last line with newline; torn kept first (a link at the .torn name refuses and nothing is cut); whole last line w/o newline; 0600. Watch them fail on the current code first, and with keep/cut swapped. 4) Docs: agent plugin README, CONTRACTS.md transcript row, transcript.py docstring. Check: scripts/check bh-02/plugins/agent-cordis-plugin; arch-check --no-fix (root pyproject budget unchanged: FileTranscript.* already excluded; pure _read stays pure).
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Changed: agent plugin transcript.py (FileTranscript reads through a pure _read(data, path) -> _Reading; FileTranscript._mend does the I/O), its tests (test_agent_transcript.py), the plugin README, CONTRACTS.md (transcript row) and docs/bh-02/using/sessions.md.
+Behaviour: a last line with no newline that is not JSON (or not UTF-8) is a write cut short. Before the appender's first write its bytes are kept beside the file through host_paths.write_beneath (0600, no link followed) as transcript.jsonl.torn, then .torn.2, ... the first name not taken (the .bak convention: an earlier file is never replaced; I chose this over appending to one .torn so no cap on reading an old one and nothing read back), and only then is the file cut to its last whole line (ftruncate on an O_NOFOLLOW descriptor). If the bytes cannot be kept (a link at the .torn name, no room) nothing is cut: OSError with a note, file untouched. A last line that is whole JSON but lacks its newline (cut at the final byte) is read and given a newline, since otherwise the next entry would glue onto it (same defect, same site, so done here). Any other non-JSON line (before the last, or a last line ending in a newline) raises ValueError '<file> line N is not JSON (...) ... Repair or remove that line in an editor ..., or leave this session and start a new one without --resume'; the file is untouched, no .torn. conversation.py already catches (OSError, ValueError) for /compact.
+Evidence: AC1 test_a_torn_last_line_is_set_aside_and_the_next_entry_is_written_on_a_line_of_its_own (torn tail, append, flush, resume reads every entry; torn bytes in .torn). AC2 test_a_line_that_is_not_json_before_the_end_stops_the_transcript_naming_where_and_what_to_do (5 cases: first, middle, last ending in newline, after a blank line, damaged then torn; file, line number and --resume checked; file unchanged). AC3 the .torn files are kept at 0600 (test under umask 0), a second tear makes .torn.2, and test_nothing_is_cut_until_the_bytes_are_kept. Seen failing: the 10 new tests that exercise the change fail on the old transcript.py (JSONDecodeError at construction); with the cut moved before the keep, test_nothing_is_cut_until_the_bytes_are_kept fails (1 failed, 22 passed), restored. Ran: scripts/check bh-02/plugins/agent-cordis-plugin exit 0 (187 passed, 1 skipped; format, lint, mypy, gates, docs ok); scripts/arch-check --no-fix exit 0; app, subagents and memory plugin tests 575 passed. Not claimed: AC3's 'scripts/check passes' is the full scripts/check, which is the reviewer's to prove (member check passes). Not done: nothing tells the person a torn line was set aside (FileTranscript has no output channel); the README says where to look. A second process appending to the same session while another resumes could still have its in-flight line cut (decision-0009's noted 'two processes can append to one session').
+<!-- SECTION:NOTES:END -->
