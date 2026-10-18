@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:33'
-updated_date: '2026-10-18 20:15'
+updated_date: '2026-10-18 20:17'
 labels:
   - host-paths
   - size-1
@@ -116,4 +116,39 @@ INFO    -  Documentation built in 5.28 seconds
 ```
 
 Review: not closed. close-task refuses: a bug closes with its repro recorded (record-check TASK-0147 --repro -- <failing test>, or a 'No repro:' note). Code and ACs otherwise met; full scripts/check exit 0. Nit: _failing takes the timestamp even for non-first failures (harmless).
+
+Round 2, review finding 1 (no repro on record, so close-task refuses the bug). No code change this round. Plan: the repro is libs/host-paths/tests/test_host_paths_appender.py::test_the_first_failure_says_when_its_write_failed_not_when_the_caller_heard_of_it, the test as committed in e48ffb7. Run it with libs/host-paths/src/host_paths/appender.py and __init__.py put back to their state before the fix (e48ffb7^), so it must fail; record it with record-check --repro; restore those two files to HEAD; rerun the appender tests on HEAD. The test file is not edited, so close-task's repro check stays clean.
+
+Repro at f487c4fdbb7d, test files: libs/host-paths/tests/test_host_paths_appender.py; command: `uv run pytest libs/host-paths/tests/test_host_paths_appender.py::test_the_first_failure_says_when_its_write_failed_not_when_the_caller_heard_of_it -q` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_the_first_failure_says_when_its_write_failed_not_when_the_caller_heard_of_it _
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-2532/test_the_first_failure_says_wh0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f9c9cc415b0>
+
+    async def test_the_first_failure_says_when_its_write_failed_not_when_the_caller_heard_of_it(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The disk fills on the second write, on the thread, and the caller hears of it 100 ms later. `failure`
+        says when the write failed (UTC, on the thread), with the error that was raised; a later failure, or the
+        close's, does not replace it."""
+        path = tmp_path / "log"
+        appender = Appender(str(path))
+        appender.append(b"one\n")
+        await appender.flush()
+>       assert appender.failure is None
+               ^^^^^^^^^^^^^^^^
+E       AttributeError: 'Appender' object has no attribute 'failure'
+
+libs/host-paths/tests/test_host_paths_appender.py:290: AttributeError
+=========================== short test summary info ============================
+FAILED libs/host-paths/tests/test_host_paths_appender.py::test_the_first_failure_says_when_its_write_failed_not_when_the_caller_heard_of_it
+1 failed in 1.21s
+```
+
+Round 2 evidence (review finding 1, the missing repro). No code or test file changed this round; both criteria stay ticked from round 1, nothing re-ticked. The repro is recorded with record-check --repro, command: uv run pytest libs/host-paths/tests/test_host_paths_appender.py::test_the_first_failure_says_when_its_write_failed_not_when_the_caller_heard_of_it -q (the 'Repro at' line names f487c4f, HEAD when it was recorded; the test file there is the one committed in e48ffb7). The run was made with libs/host-paths/src/host_paths/appender.py and __init__.py put back to e48ffb7^ (before the fix) and the test file as committed: it failed, exit 1, AttributeError: 'Appender' object has no attribute 'failure' at the first assertion (test_host_paths_appender.py line 290). record-check then printed 'recorded on TASK-0147' and exited 0. Both files were restored with git checkout to HEAD; uv run pytest libs/host-paths/tests/test_host_paths_appender.py -q on the fixed code: 28 passed, exit 0. The test file is unchanged since f487c4f, so close-task's repro check stays clean. board-check close TASK-0147 (read-only) printed: ok: TASK-0147 can close. Not closed: the reviewer decides.
 <!-- SECTION:NOTES:END -->
