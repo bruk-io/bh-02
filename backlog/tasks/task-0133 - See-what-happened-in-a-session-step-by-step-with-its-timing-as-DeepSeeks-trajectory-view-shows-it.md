@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0004
+id: TASK-0133
 title: >-
   See what happened in a session, step by step, with its timing, as DeepSeek's
   trajectory view shows it
-status: Draft
+status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-14 03:42'
