@@ -26,7 +26,7 @@ Follow-up from TASK-0136.11's review. When a write to <session>/rows.jsonl fails
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 When the row log stopped, the shell prints one line after the app exits saying it stopped, when, and the error (a test with an unwritable log)
-- [ ] #2 A run whose row log never failed prints nothing new; scripts/check passes
+- [x] #2 A run whose row log never failed prints nothing new; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
