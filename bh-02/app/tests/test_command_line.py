@@ -76,7 +76,7 @@ def test_a_row_log_that_stops_is_said_once_after_the_app_exits_and_a_healthy_one
     composition: Callable[..., Path], state: Path
 ) -> None:
     """A row log that can't be written ends the log and not the run, and the shell says so once, after
-    the app has exited: the file, when the shell found the write failing, and the error. Here a link
+    the app has exited: the file, when the write failed, and the error. Here a link
     stands at the log's name (the appender never follows one), so the first write fails with ELOOP."""
     patch = _patch(composition)
     healthy = CliRunner().invoke(main, ["--no-jail", "--patch", str(patch)])
@@ -93,7 +93,7 @@ def test_a_row_log_that_stops_is_said_once_after_the_app_exits_and_a_healthy_one
     (told,) = before
     stamp = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"
     where, why = re.escape(str(log)), re.escape(os.strerror(errno.ELOOP))
-    shown = rf"error: {where} stopped being written \(the shell found a write failing at {stamp}\): {why}"
+    shown = rf"error: {where} stopped being written \(a write failed at {stamp}\): {why}"
     assert re.fullmatch(rf"{shown}; the row reloads from that write on are not in it", told)
     assert not (state / "elsewhere.jsonl").exists()  # the link was not followed
 

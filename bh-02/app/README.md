@@ -212,8 +212,8 @@ beginning (it came up, was restarted, or a dependency was replaced) and `failed`
 with the error; cordis emits no `restart`, a restarted row's old fiber ends `unloading` and `inactive`
 and the new one begins with a `reload`; so does a row's first load, which the file does not mark, and
 the trajectory tells it by the row id (a row's first record in the file). A write that fails ends the
-log and not the run, and the shell says so once after the app has exited: the file, when it found the
-write failing, and the error. `--trace FILE` is the same stream in full, untimed and written on the
+log and not the run, and the shell says so once after the app has exited: the file, when its first
+write failed (the appender keeps that time), and the error. `--trace FILE` is the same stream in full, untimed and written on the
 loop, and stays as it was.
 
 ## The plugins

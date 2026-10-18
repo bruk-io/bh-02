@@ -3,6 +3,7 @@ queued, on a thread so the caller never waits on the disk, to a file made at 060
 and a write that fails is raised, never lost silently."""
 
 import asyncio
+import datetime
 import errno
 import os
 import stat
@@ -274,6 +275,37 @@ async def test_a_failure_nobody_waited_for_still_comes_with_a_later_append(
                 assert raised.errno == errno.ENOSPC
                 break
             await asyncio.sleep(0.01)
+
+
+async def test_the_first_failure_says_when_its_write_failed_not_when_the_caller_heard_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The disk fills on the second write, on the thread, and the caller hears of it 100 ms later. `failure`
+    says when the write failed (UTC, on the thread), with the error that was raised; a later failure, or the
+    close's, does not replace it."""
+    path = tmp_path / "log"
+    appender = Appender(str(path))
+    appender.append(b"one\n")
+    await appender.flush()
+    assert appender.failure is None
+    before = datetime.datetime.now(datetime.UTC)
+    _full(monkeypatch, after=0)
+    appender.append(b"two\n")
+    async with asyncio.timeout(10):
+        while appender.failure is None:
+            await asyncio.sleep(0.01)
+    await asyncio.sleep(0.1)
+    with pytest.raises(OSError) as raised:
+        appender.append(b"three\n")
+    heard = datetime.datetime.now(datetime.UTC)
+    failure = appender.failure
+    assert failure is not None and failure.error is raised.value
+    assert failure.at.utcoffset() == datetime.timedelta(0)
+    assert before <= failure.at and failure.at + datetime.timedelta(milliseconds=50) < heard
+    with pytest.raises(OSError):
+        await appender.close()
+    assert appender.failure is failure
+    assert path.read_bytes() == b"one\n"
 
 
 async def test_close_waits_for_the_last_write_then_closes_the_file_and_takes_no_more(

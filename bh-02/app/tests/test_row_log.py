@@ -9,6 +9,7 @@ import os
 import re
 import stat
 import threading
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -171,19 +172,52 @@ async def test_the_listener_only_queues_a_line_the_file_is_opened_and_written_of
 
 
 async def test_a_log_that_cannot_be_written_ends_and_the_run_goes_on(
-    composition: Callable[..., Path], tmp_path: Path
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The log is for the person, not the run: its directory is gone (a session being removed), the first
     write fails on its thread, and the listener stops without taking down the row that was emitting. The
-    person is told once, after the rows have unwound, through `report`: the file, when the shell found the
-    write failing, and the error."""
+    person is told once, after the rows have unwound, through `report`: the file, when that write failed
+    (the appender's time, on its thread), and the error. The shell hears of the failure only after the
+    loop has been held for 0.2 s, so a stamp taken when the shell heard of it would miss by that much."""
     log = tmp_path / "gone" / "rows.jsonl"
+    attempted, failed = threading.Event(), threading.Event()
+    failed_at: list[datetime.datetime] = []  # when the open of the log failed, on the writer's thread
+    real_open, held = os.open, False
+
+    def spy_open(path: str, flags: int, *args: int, **kwargs: int) -> int:
+        if str(path) != str(log):
+            return real_open(path, flags, *args, **kwargs)
+        attempted.set()
+        try:
+            return real_open(path, flags, *args, **kwargs)
+        except OSError:
+            failed_at.append(datetime.datetime.now(datetime.UTC))
+            failed.set()
+            raise
+
+    def hold(_: str) -> None:
+        """The shell's trace, called for each event before the shell hears it: once the log's write has
+        been tried, wait for it to fail, then hold the loop 0.2 s before the next event."""
+        nonlocal held
+        if attempted.is_set() and not held:
+            held = True
+            failed.wait(10)
+            time.sleep(0.2)
+
+    monkeypatch.setattr(os, "open", spy_open)
     told: list[str] = []
-    await asyncio.wait_for(run([*layers(), patch(composition)], [CHAT], report=told.append, row_log=log), 10)
+    await asyncio.wait_for(
+        run([*layers(), patch(composition)], [CHAT], trace=hold, report=told.append, row_log=log), 10
+    )
     assert not log.exists()
     (line,) = told
-    assert line.startswith(f"{log} stopped being written (the shell found a write failing at ")
-    assert STAMP.search(line)
+    assert line.startswith(f"{log} stopped being written (a write failed at ")
+    stamp = STAMP.search(line)
+    assert stamp
+    (failed_when,) = failed_at
+    # the stamp is the failure's to the millisecond; the shell heard of it 200 ms later
+    gap = abs(datetime.datetime.fromisoformat(stamp.group()) - failed_when)
+    assert gap < datetime.timedelta(milliseconds=50)
     assert line.endswith(f"{os.strerror(errno.ENOENT)}; the row reloads from that write on are not in it")
 
 

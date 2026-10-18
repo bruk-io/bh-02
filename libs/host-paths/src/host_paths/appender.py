@@ -32,14 +32,18 @@ conversation, so it is refused as `Replaced` and never made.
 A write that fails (the disk is full, a link stands at the name, the file was replaced or removed)
 is not lost silently: it is kept, nothing queued after it is written (a file with a hole in it
 would read as another conversation), and every `append`, `flush` and `close` after it raises it.
-Whoever wants the writes best-effort (the event log) catches it and stops.
+The first failure is kept with the time it happened, on the thread (`failure`), so a caller that
+hears of it later can say when the write failed, not when it heard. Whoever wants the writes
+best-effort (the event log) catches it and stops.
 """
 
 import asyncio
 import concurrent.futures
+import datetime
 import os
+from dataclasses import dataclass
 
-__all__ = ["Appender", "Replaced"]
+__all__ = ["Appender", "Failure", "Replaced"]
 
 _APPEND = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NOCTTY
 _MODE = 0o600
@@ -49,6 +53,16 @@ class Replaced(OSError):
     """The file at an appender's path is no longer the one it means: it was renamed over, removed
     or turned into a link since the appender held it open (or was made, if it had not opened it
     yet). What the appender had queued from then on was not written, so the file ends before it."""
+
+
+@dataclass(frozen=True, slots=True)
+class Failure:
+    """The first write an appender could not make: when it failed, on its thread (aware, UTC), and
+    the error it raised. Set once, with both fields together, so a reader never sees one without the
+    other."""
+
+    at: datetime.datetime
+    error: OSError
 
 
 class Appender:
@@ -69,8 +83,14 @@ class Appender:
         self._meant = _stat_of(path)
         self._writer = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="appender")
         self._last: concurrent.futures.Future[None] | None = None
-        self._failed: OSError | None = None
+        self._failed: Failure | None = None
         self._closed = False
+
+    @property
+    def failure(self) -> Failure | None:
+        """The first write that failed and when it did (on the thread, the moment the write returned
+        its error), or None while every write has gone. Set once and never changed after."""
+        return self._failed
 
     @classmethod
     def open(cls, path: str, *, new: bool = False) -> Appender:
@@ -123,16 +143,18 @@ class Appender:
 
     def _raise(self) -> None:
         if self._failed is not None:
-            raise self._failed
+            raise self._failed.error
 
     def _failing(self, error: OSError) -> None:
-        """Keep the first failure, and say what it cost."""
+        """Keep the first failure, with the time it happened (taken here, on the thread, before
+        anything else), and say what it cost."""
+        at = datetime.datetime.now(datetime.UTC)
         if self._failed is None:
             error.add_note(
                 f"appending to {self._path} failed: this write and every one queued after it were "
                 "dropped, so the file ends before them"
             )
-            self._failed = error
+            self._failed = Failure(at, error)
 
     def _write(self, data: bytes) -> None:
         """Append `data`, on the thread, unless a write failed before it."""

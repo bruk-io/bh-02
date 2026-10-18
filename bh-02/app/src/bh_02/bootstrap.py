@@ -337,20 +337,28 @@ def _row_line(event: Event, at: datetime.datetime) -> bytes | None:
 
 @dataclass(frozen=True, slots=True)
 class _RowLogStop:
-    """When the shell found that the session's row log had stopped being written, and the error."""
+    """When the session's row log's first failed write happened (the appender's own time, taken on its
+    thread), and the error it raised."""
 
     at: datetime.datetime
     error: OSError
 
 
+def _stopped(appender: Appender) -> _RowLogStop | None:
+    """The appender's first failed write as a stop: when it failed, and the error. None when none did."""
+    if (failure := appender.failure) is None:
+        return None
+    return _RowLogStop(failure.at, failure.error)
+
+
 def _stopped_line(path: Path, stopped: _RowLogStop | None) -> str | None:
     """What to tell the person when the session's row log at `path` stopped being written (`_row_log`):
-    the file, when the shell found a write failing, and the error, on one line. None when it never stopped."""
+    the file, when the write that failed was made, and the error, on one line. None when it never stopped."""
     if stopped is None:
         return None
     why = stopped.error.strerror or str(stopped.error)
     return (
-        f"{path} stopped being written (the shell found a write failing at {_stamp(stopped.at)}): {why}; "
+        f"{path} stopped being written (a write failed at {_stamp(stopped.at)}): {why}; "
         "the row reloads from that write on are not in it"
     )
 
@@ -369,24 +377,21 @@ async def _row_log(
     rows, is done. A write that fails (the disk is full, the session's directory is gone) ends the log
     and not the run: the file is for the person, as a sub-agent's event log is. The person is told
     once, through `report`, after the rows have unwound, so after the app has exited: that the log
-    stopped, when the shell found it had (the appender writes on a thread and keeps no time of its own,
-    so that is the next line queued, or the close), and the error.
+    stopped, when its first failed write happened (the appender keeps that time, taken on the thread
+    where the write failed, not when the shell heard of it), and the error.
     """
     if path is None:
         yield
         return
     appender = Appender(str(path))  # opened by the first write, on its thread
-    stopped: _RowLogStop | None = None  # the first failure the shell heard of, or the close found
 
     def hear(event: Event) -> None:
-        nonlocal stopped
         if (line := _row_line(event, datetime.datetime.now(datetime.UTC))) is None:
             return
         try:
             appender.append(line)
-        except OSError as error:  # an earlier line could not be written: nothing after it will be
+        except OSError:  # an earlier write failed, and the appender keeps it: nothing after it is written
             runtime.listeners.remove(hear)
-            stopped = _RowLogStop(datetime.datetime.now(datetime.UTC), error)
 
     runtime.listeners.append(hear)
     try:
@@ -394,12 +399,10 @@ async def _row_log(
     finally:
         if hear in runtime.listeners:
             runtime.listeners.remove(hear)
-        try:
+        # a failure, even one the listener did not hear of, stays with the appender (`_stopped` reads it)
+        with contextlib.suppress(OSError):
             await appender.close()
-        except OSError as error:  # a write that the listener did not hear of, or a file that would not close
-            if stopped is None:  # the same failure again is already told
-                stopped = _RowLogStop(datetime.datetime.now(datetime.UTC), error)
-        if (line := _stopped_line(path, stopped)) is not None and report is not None:
+        if (line := _stopped_line(path, _stopped(appender))) is not None and report is not None:
             report(line)
 
 
