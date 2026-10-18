@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
-updated_date: '2026-10-18 13:40'
+updated_date: '2026-10-18 13:43'
 labels:
   - agent
   - size-2
@@ -34,6 +34,8 @@ Found designing TASK-0136 (noted there, filed at the owner's word 2026-10-18). F
 
 <!-- SECTION:PLAN:BEGIN -->
 1) transcript.py: split FileTranscript's read into a pure _read(data, path) -> _Reading (messages, torn tail bytes, whether a whole last line lacks its newline) and a FileTranscript._mend that does the I/O. A bad line before the last, or a last line that ends in a newline and is not JSON, raises ValueError naming file, line number and what to do (file untouched). 2) A torn last line (no newline, not JSON): kept first beside the file via host_paths.write_beneath (0600, through no link) at transcript.jsonl.torn, then .torn.2, ... (the .bak convention: an earlier one is never replaced), then the file is cut to its last whole line (ftruncate on an O_NOFOLLOW fd) before the appender's first write. A whole last line missing only its newline gets one. 3) Tests in test_agent_transcript.py: torn tail then append then resume reads every entry; torn twice; bad middle line; bad last line with newline; torn kept first (a link at the .torn name refuses and nothing is cut); whole last line w/o newline; 0600. Watch them fail on the current code first, and with keep/cut swapped. 4) Docs: agent plugin README, CONTRACTS.md transcript row, transcript.py docstring. Check: scripts/check bh-02/plugins/agent-cordis-plugin; arch-check --no-fix (root pyproject budget unchanged: FileTranscript.* already excluded; pure _read stays pure).
+
+Review round 1 (the one blocking finding: no failing repro on record). Order: (1) in the working tree only, put transcript.py back to its content before 80e157a (git show 80e157a~1:<path>) and leave test_agent_transcript.py as committed; (2) from the repo root run record-check TASK-0141 --repro -- uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py -k torn_last_line, which must fail and records the note against HEAD (the start commit, an ancestor of the round's commit, so the recorded sha survives the squash); (3) restore transcript.py from HEAD, so the tree carries the fix again; (4) run the tests on the restored code, board-check close TASK-0141 (not close-task: a worker never sets Done); (5) one commit. The non-blocking items (the _beside docstring, telling the person, the concurrent appender) stay as they are.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -110,4 +112,72 @@ INFO    -  Documentation built in 4.96 seconds
 ```
 
 Review (philosophy:reviewer): not closed. Full scripts/check exit 0 (3796 passed, 118 skipped), tree unchanged; AC1-3 met and ticked. Blocking: close-task refuses a bug with no recorded repro. The worker saw the new tests fail on the old transcript.py but did not record it; record it with record-check TASK-0141 --repro -- uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py -k torn_last_line against the code before 80e157a, then re-run close. Nits: _beside docstring (transcript.py) gives only the .bak example; nothing tells the person a torn line was set aside; a concurrent appender during resume could have its in-flight line cut (known, decision-0009).
+
+Repro at b5e975958a0a, test files: bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py; command: `uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py -k torn_last_line` exited 1
+
+(2 earlier lines omitted)
+```text
+platform linux -- Python 3.15.0, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/user/bh-02
+configfile: pyproject.toml
+plugins: xdist-3.8.0, hypothesis-6.168.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 23 items / 22 deselected / 1 selected
+
+bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py F       [100%]
+
+=================================== FAILURES ===================================
+_ test_a_torn_last_line_is_set_aside_and_the_next_entry_is_written_on_a_line_of_its_own _
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-2425/test_a_torn_last_line_is_set_a0')
+
+    async def test_a_torn_last_line_is_set_aside_and_the_next_entry_is_written_on_a_line_of_its_own(
+        tmp_path: Path,
+    ) -> None:
+        """A process killed mid-write leaves a last line with no newline that is not JSON: an entry that
+        was never finished. The session resumes without it, the next entry does not glue onto it, and
+        the bytes cut are kept beside the file."""
+        path = tmp_path / "transcript.jsonl"
+        torn = '{"role": "assistant", "content": [{"type": "te'
+        path.write_text(_line("one") + _line("two") + torn)
+>       async with FileTranscript(str(path)) as transcript:
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py:175: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+bh-02/plugins/agent-cordis-plugin/src/agent_cordis_plugin/transcript.py:85: in __init__
+    super().append(json.loads(line))
+                   ^^^^^^^^^^^^^^^^
+/root/.local/share/uv/python/cpython-3.15.0-linux-x86_64-gnu/lib/python3.15/json/__init__.py:371: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.local/share/uv/python/cpython-3.15.0-linux-x86_64-gnu/lib/python3.15/json/decoder.py:358: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <json.decoder.JSONDecoder object at 0x7f7759364050>
+s = '{"role": "assistant", "content": [{"type": "te', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Unterminated string starting at: line 1 column 44 (char 43)
+
+/root/.local/share/uv/python/cpython-3.15.0-linux-x86_64-gnu/lib/python3.15/json/decoder.py:374: JSONDecodeError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py::test_a_torn_last_line_is_set_aside_and_the_next_entry_is_written_on_a_line_of_its_own
+======================= 1 failed, 22 deselected in 1.71s =======================
+```
+
+Round 2 (review round 1: the repro was not on record). Changed: the board only, no code. I put transcript.py back to its content before 80e157a in the working tree (git show 80e157a~1:bh-02/plugins/agent-cordis-plugin/src/agent_cordis_plugin/transcript.py), left test_agent_transcript.py as committed, ran record-check TASK-0141 --repro -- uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py -k torn_last_line from the repo root (exit 0 = the failure was recorded; the note above reads 'Repro at b5e975958a0a ... exited 1': 1 failed, 22 deselected, JSONDecodeError at construction in the old transcript.py line 85), then restored transcript.py from b5e9759 (git diff b5e9759 -- bh-02 is empty, tree clean). The recorded commit is b5e9759, the start of this round, so it stays an ancestor of the round's commit; the test file is byte-identical at b5e9759 and at 80e157a's tests (git diff --quiet b5e9759 -- the test file: exit 0). Seen passing on the restored code: the same command gives 1 passed, 22 deselected; the whole test_agent_transcript.py gave 23 passed. python3 <philosophy>/scripts/board-check close TASK-0141: 'ok: TASK-0141 can close' (exit 0). I did not run close-task: it sets Done, which is the reviewer's. The -k torn_last_line expression selects the one AC1 test; the other nine new tests were seen failing on the old code in round 1 but that run is not the recorded one. Left alone as not blocking: the _beside docstring's .bak-only example, telling the person a torn line was set aside, a concurrent appender's in-flight line (decision-0009). No code changed, so no member check was run; the reviewer's full scripts/check (exit 0, 3796 passed) stands for the unchanged code.
 <!-- SECTION:NOTES:END -->
