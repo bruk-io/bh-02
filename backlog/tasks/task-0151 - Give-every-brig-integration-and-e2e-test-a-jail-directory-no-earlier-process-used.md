@@ -3,7 +3,7 @@ id: TASK-0151
 title: >-
   Give every brig integration and e2e test a jail directory no earlier process
   used
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:55'
@@ -180,4 +180,6 @@ INFO    -  Documentation built in 3.14 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 2 (reviewer): closed. Full scripts/check exit 0, nothing reformatted. AC1: no getpid-named paths remain under libs/brig/tests (remaining getpid uses are pid comparisons/records). AC2: detector test plus planted-file failure recorded. AC3: check passes. Round-1 blocker (repro) answered by the 'No repro:' note. Nits unfiled: detector does not follow a pid through a name (documented); darwin-only files migrated by reading only.
 <!-- SECTION:NOTES:END -->
