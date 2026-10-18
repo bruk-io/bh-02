@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:55'
-updated_date: '2026-10-18 23:19'
+updated_date: '2026-10-18 23:22'
 labels:
   - brig
   - size-4
@@ -42,4 +42,70 @@ What changed (tests only, no SPEC change: no brig behaviour moved). libs/brig/te
 AC1 evidence: tests/unit/test_no_test_names_a_directory_from_its_pid.py scans every .py under libs/brig/tests with ast. Run over the HEAD versions of the same files it flags exactly the 43 files (48 sites) and no other; over the working tree it finds nothing (uv run pytest libs/brig/tests/unit/test_no_test_names_a_directory_from_its_pid.py: 18 passed). AC2 evidence: that file replaces test_jail_dir_infixes_are_unique.py. Seen failing: a planted libs/brig/tests/integration/test_zz_plant.py with f"/tmp/bg{os.getpid()}zz{next(_n)}" made test_no_test_names_a_directory_from_the_process_id fail, naming 'integration/test_zz_plant.py: line 12'; removed, 18 passed. The detector is itself under test: 10 planted shapes (f-string, bare getpid, %, +, str.format, join, pathlib /, makedirs, mkdtemp) must be found and 7 uses of a pid that is not a path (message, comparison, bytes, a /dev name, docstring, template) must not be. Blind spot, said in its docstring: a pid reaching a path through a name (harness_pid, in the name of conftest's /tmp/bg{harness_pid}-spawnreg FILE, which is appended to and removed at the end of the session) is not followed. The retry was planted too: _REMOVE_TRIES = 1 made test_a_directory_written_into_while_it_is_removed_is_removed_in_the_end fail; conftest.py restored (sha256 278875f3...), 3 passed. AC3 evidence: scripts/check libs/brig exit 0 (run twice, the second on the final tree): format, lint, types (63 files), tests 1380 passed 111 skipped, gates (root, brig, cordis, cordis-helpers, host-paths), docs.
 
 Ran here: uv run pytest libs/brig -m 'integration or e2e' -n auto --dist loadgroup: 329 passed 108 skipped before, 332 passed 108 skipped after (the 3 new fixture tests), no bg-<8> left in /tmp. Skipped here, so migrated by reading the diff only: test_seatbelt_channel, test_seatbelt_fs, test_seatbelt_smoke (darwin); the three darwin tests of e2e/test_probe_forgery.py, the three of e2e/test_scratch_darwin_batteries.py and the two of e2e/test_network_battery_against_a_real_mechanism.py; test_wait_ready's tmp_path-overflow test (darwin). The Docker tests (no daemon) were not touched: none names a pid. test_process_namespaces and test_control_battery skip here (no namespaces in this container) and were not touched. Filed, not started: retire the scratch sweep (_scratch_sweep, decision-121: nothing makes a /tmp/bg<pid> root now), and remove the directories other tests leave in /tmp (tests/supervised_jail.py::new_jail_dir leaves 2 bg-sv-<8> per run).
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+..........................................................s...ssss.s...s [ 48%]
+..sss.s.s.ss.s.s..s.s.ss.s.s..sssss...........s......................... [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+.......................sssssssssssssssssssssssssssssssssssssssssssssssss [ 55%]
+ssssssssssssssssss...............................ssssssssss.....s....... [ 57%]
+......s................................................................. [ 59%]
+........................................................................ [ 60%]
+......................................................................ss [ 62%]
+s....................................................s.................. [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+..........................................................               [100%]
+3902 passed, 118 skipped in 171.23s (0:02:51)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 2.96 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
