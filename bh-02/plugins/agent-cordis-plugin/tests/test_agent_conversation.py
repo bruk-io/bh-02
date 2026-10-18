@@ -2,6 +2,7 @@
 request, the new conversation, the file written in one step, and the restart it queues."""
 
 import asyncio
+import datetime
 import json
 import os
 import re
@@ -38,6 +39,7 @@ from agent_cordis_plugin import (
     unrestarted,
 )
 from agent_cordis_plugin import transcript as transcript_row
+from agent_cordis_plugin.loop import request_for
 from agent_cordis_plugin.testing import Stepped, noon, on
 from cordis import Effects, Runtime, bind, component
 from cordis.composition import Entry
@@ -217,6 +219,7 @@ async def _compact(
 
 
 AT = "2026-10-18T03:47:12.345Z"
+NOW = datetime.datetime(2026, 10, 18, 3, 47, 12, 345000, tzinfo=datetime.UTC)  # what AT stamps
 
 
 def _seed(summary: str, keep: str = "") -> list[Json]:
@@ -256,14 +259,14 @@ def test_the_summary_request_is_the_loop_s_request_then_the_ask() -> None:
     """The prompt the conversation began with, the conversation (the later prompt told as an
     aside, so not sent), then bh-02 asking for the summary in plain text; what the person asks
     the summary to keep goes with it."""
-    request = asked(CONVERSATION)
+    request = asked(CONVERSATION, at=NOW)
     assert request[:-1] == [{"role": "system", "content": "the prompt the conversation began with"}] + [
         m for m in CONVERSATION if m["role"] != "system"
     ]
     ask = str(request[-1]["content"])
     assert request[-1]["role"] == "user" and ask.startswith("(bh-02: the person asked to compact")
     assert "Your Python namespace is kept" in ask and "Do not call python" in ask
-    kept = asked(CONVERSATION, "  the names of the API's endpoints ")
+    kept = asked(CONVERSATION, "  the names of the API's endpoints ", at=NOW)
     assert str(kept[-1]["content"]) == (
         f"{ask}\n\n(The person asks that the summary keep, in particular: the names of the API's endpoints)"
     )
@@ -309,6 +312,115 @@ async def test_the_new_conversation_is_bh_02_s_message_then_the_summary_and_the_
             "at": stamp(noon("2026-10-07")),
         },
     ]
+
+
+def _step_of(*ids: str) -> Json:
+    """The assistant entry of a step that asked for the calls `ids`, as the loop writes it."""
+    calls = [{"id": id, "name": "python", "input": {"code": id}} for id in ids]
+    return {"role": "assistant", "content": "on it", "tool_calls": calls, "step": {"at": AT}}
+
+
+def _result_of(id: str) -> Json:
+    """The tool entry of call `id` that ran, as the loop writes it."""
+    record = {"at": AT, "answer": "unasked", "took": 0.25}
+    return {"role": "tool", "content": id.upper(), "call_id": id, "asides": [], "call": record}
+
+
+# A conversation a process died in, mid-call: a step asked for two calls, and only the first has
+# its result.
+CUT: list[Json] = [
+    {"role": "system", "content": "the prompt the conversation began with"},
+    {"role": "tools", "tools": [PYTHON]},
+    {
+        "role": "user",
+        "content": "(Today's date: 2026-10-18.)\n\nfind x and y",
+        "today": "2026-10-18",
+        "at": AT,
+    },
+    _step_of("c1", "c2"),
+    _result_of("c1"),
+]
+
+
+async def test_compact_over_a_transcript_a_crash_cut_asks_with_a_result_for_every_call(
+    tmp_path: Path,
+) -> None:
+    """The loop answers a call a crash left unanswered at its next reply, and /compact goes through
+    none: the request the model receives answers it the same way, in the calls' order, worded and
+    recorded as the loop's own answer, and the file keeps the entries it had."""
+    path = _session(tmp_path, CUT)
+    old = path.read_bytes()
+    stepped = Stepped()
+    stepped.advance(600.0)  # the session is resumed, and compacted, ten minutes later
+    model = Scripted([text("x is X"), stop("end_turn")])
+    await _compact(path, model, clock=stepped.clock)
+    ((sent, offered),) = model.requests
+    assert offered == [PYTHON]
+    assert [m["role"] for m in sent] == ["system", "user", "assistant", "tool", "tool", "user"]
+    assert [c["id"] for c in sent[2]["tool_calls"]] == [m["call_id"] for m in sent[3:5]] == ["c1", "c2"]
+    assert sent[3] == _result_of("c1")  # the result it had is as it was
+    lost = sent[4]
+    assert lost["content"].startswith("interrupted:")
+    assert "bh-02 stopped before this call finished" in lost["content"]
+    assert lost["content"].endswith("it may have partly run")
+    assert lost["asides"] == []
+    # when /compact asked, and nothing more: no answer, wait or run time was recorded
+    assert lost["call"] == {"at": "2026-10-18T03:57:12.345Z"}
+    assert sent[5]["content"] == asked(CUT, at=stepped.now())[-1]["content"]  # then the ask, as ever
+    # the file is not changed for it: the old conversation is its backup as it was
+    assert Path(f"{path}.bak").read_bytes() == old
+    kept = FileTranscript(str(path)).messages
+    assert kept == tuple(seeded("x is X", "", kept[1]["step"]))
+
+
+async def test_the_answer_compact_sends_for_a_lost_call_is_the_entry_the_loop_keeps_for_it() -> None:
+    """One definition of the answer: the loop's reply over the same transcript at the same time
+    keeps the entry /compact's request carries."""
+    stepped = Stepped()
+    model = Scripted([text("x is X"), stop("end_turn")])
+    request = asked(CUT, at=stepped.now())
+    transcript = MemoryTranscript()
+    for entry in CUT:
+        transcript.append(entry)
+
+    async def python(input: Json) -> Json:
+        return {"content": "42"}
+
+    tools = ToolBroker()
+    tools.register(PYTHON, python)
+    loop = LoopModel(model, tools, transcript, _Approved(), clock=stepped.clock)
+    assert [e async for e in loop.reply("carry on")]
+    (kept,) = (m for m in transcript.messages[len(CUT) :] if m["role"] == "tool")
+    assert kept in request and kept["call_id"] == "c2"
+
+
+@pytest.mark.parametrize(
+    "messages",
+    [
+        pytest.param(CONVERSATION, id="answered"),
+        pytest.param([*CUT, _result_of("c2")], id="every result written, no step after"),
+        pytest.param(
+            [*CUT[:3], {"role": "assistant", "content": "nothing to run"}], id="a step with no calls"
+        ),
+        pytest.param([*CUT[:3], _step_of("c1"), _result_of("c1")], id="a call, answered, no step after"),
+        pytest.param(CUT[:3], id="no step yet"),
+    ],
+)
+async def test_compact_over_a_whole_transcript_sends_the_request_it_always_sent(
+    tmp_path: Path, messages: list[Json]
+) -> None:
+    """Nothing is unanswered, so nothing is added: the conversation as the loop sends it, then the
+    ask, and no entry the file does not hold."""
+    path = _session(tmp_path, messages)
+    model = Scripted([text("a summary"), stop("end_turn")])
+    await _compact(path, model)
+    ((sent, offered),) = model.requests
+    assert offered == [PYTHON]
+    assert sent[:-1] == request_for(messages)
+    ask = sent[-1]
+    assert ask["role"] == "user" and str(ask["content"]).startswith("(bh-02: the person asked to compact")
+    assert len(sent) == len(request_for(messages)) + 1
+    assert not any(str(m.get("content", "")).startswith("interrupted:") for m in sent)
 
 
 def test_the_transcript_s_file_is_the_running_agent_transcript_row_s_path() -> None:
@@ -380,7 +492,7 @@ async def test_a_summary_is_the_text_of_a_step_that_answered_with_its_usage() ->
     model = Scripted(
         [text("x holds "), text("42."), {"type": "thinking", "text": "hm"}, USAGE, stop("end_turn")]
     )
-    summary, usage, step = await summarise(model, asked(CONVERSATION), [PYTHON], 5)
+    summary, usage, step = await summarise(model, asked(CONVERSATION, at=NOW), [PYTHON], 5)
     assert (summary, usage) == ("x holds 42.", [USAGE])
     assert step["usage"] == {  # the step's record holds the usage the answer counts
         "input_tokens": 1200,
@@ -388,7 +500,9 @@ async def test_a_summary_is_the_text_of_a_step_that_answered_with_its_usage() ->
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0,
     }
-    assert model.requests == [(asked(CONVERSATION), [PYTHON])]  # the tool offered as the loop offers it
+    assert model.requests == [
+        (asked(CONVERSATION, at=NOW), [PYTHON])
+    ]  # the tool offered as the loop offers it
 
 
 @pytest.mark.parametrize(
@@ -409,7 +523,7 @@ async def test_a_summary_is_the_text_of_a_step_that_answered_with_its_usage() ->
 )
 async def test_a_step_that_did_not_answer_gives_no_summary_and_says_why(step: list[Json], why: str) -> None:
     with pytest.raises(Unchanged, match=re.escape(why)) as raised:
-        await summarise(Scripted([USAGE, *step]), asked(CONVERSATION), [PYTHON], 5)
+        await summarise(Scripted([USAGE, *step]), asked(CONVERSATION, at=NOW), [PYTHON], 5)
     assert raised.value.usage == [USAGE]  # what the step cost still counts
 
 
@@ -418,7 +532,7 @@ async def test_a_summary_not_written_in_time_closes_the_step_and_says_so() -> No
     provider stops what it runs."""
     model = Scripted([USAGE, text("x holds")], hang=True)
     with pytest.raises(Unchanged, match=r"no summary within 0\.05 seconds, so nothing changed") as raised:
-        await asyncio.wait_for(summarise(model, asked(CONVERSATION), [PYTHON], 0.05), 5)
+        await asyncio.wait_for(summarise(model, asked(CONVERSATION, at=NOW), [PYTHON], 0.05), 5)
     assert model.closed and raised.value.usage == [USAGE]
 
 
@@ -426,7 +540,7 @@ async def test_a_summary_step_cancelled_is_closed() -> None:
     """The person leaving cancels the command (`chat:converse`): the step closes, so its
     provider stops, and nothing is said."""
     model = Scripted([text("x holds")], hang=True)
-    step = asyncio.create_task(summarise(model, asked(CONVERSATION), [PYTHON], 60))
+    step = asyncio.create_task(summarise(model, asked(CONVERSATION, at=NOW), [PYTHON], 60))
     await asyncio.sleep(0.01)
     step.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -436,9 +550,9 @@ async def test_a_summary_step_cancelled_is_closed() -> None:
 
 async def test_a_model_failure_is_said_for_the_person_and_a_bug_is_not_hidden() -> None:
     with pytest.raises(Unchanged, match=r"rate limited; wait a minute \(so nothing changed\)"):
-        await summarise(Failing(Limited()), asked(CONVERSATION), [PYTHON], 5)
+        await summarise(Failing(Limited()), asked(CONVERSATION, at=NOW), [PYTHON], 5)
     with pytest.raises(KeyError):
-        await summarise(Failing(KeyError("bug")), asked(CONVERSATION), [PYTHON], 5)
+        await summarise(Failing(KeyError("bug")), asked(CONVERSATION, at=NOW), [PYTHON], 5)
 
 
 async def test_compact_writes_the_new_conversation_and_queues_the_loop_and_transcript_restart(
@@ -483,7 +597,7 @@ async def test_compact_writes_the_new_conversation_and_queues_the_loop_and_trans
         },
         {"type": "restarting", "rows": ["loop", "transcript"]},
     ]
-    assert model.requests == [(asked(CONVERSATION), [PYTHON])]
+    assert model.requests == [(asked(CONVERSATION, at=NOW), [PYTHON])]
     kept = FileTranscript(str(path)).messages
     assert kept == tuple(seeded(summary, "", kept[1]["step"]))
     assert Path(f"{path}.bak").read_bytes() == old
@@ -909,7 +1023,7 @@ async def test_compact_after_a_reply_summarises_every_entry_of_it(
         await _replied(transcript)
         await _compact(path, model)
         appended = list(transcript.messages)
-    assert model.requests == [(asked(appended), [PYTHON])]  # the whole reply, its answer included
+    assert model.requests == [(asked(appended, at=NOW), [PYTHON])]  # the whole reply, its answer included
     assert _entries(Path(f"{path}.bak")) == appended
     kept = FileTranscript(str(path)).messages
     assert kept == tuple(seeded("x holds 42", "", kept[1]["step"]))

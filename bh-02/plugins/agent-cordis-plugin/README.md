@@ -246,10 +246,16 @@ the model for a summary in one step: the request is the loop's own (`loop.reques
 prompt the conversation began with, then the conversation) with the registered tools offered
 as with every step (`tools.specs()`), so a model server reuses its work on the conversation, then bh-02's message
 asking for the summary in plain text, for the model itself to carry on from, naming what its
-Python namespace holds (`asked`; `/compact WHAT TO KEEP` adds what the person wants kept). A
-call the step makes is never run, and a step that calls, is cut off, says nothing or refuses
-gives no summary (`stops.classify`): the answer says why (and what the step cost, as one
-`usage` event, which still counts) and nothing changes. A conversation that is only the last
+Python namespace holds (`asked`; `/compact WHAT TO KEEP` adds what the person wants kept). A call
+a crash left unanswered, in a session resumed and compacted before its next message (the loop
+answers it at its next reply, which `/compact` does not go through), is answered in that request
+as the loop would answer it (`loop.lost_answers`: `interrupted: bh-02 stopped before this call
+finished; it may have partly run`, a call record of the time alone, its `at` the time of the
+request), so the model is never sent a call with no result after it; the file's entries are not
+changed, and the new conversation does not hold the answers. A call the step makes is never run,
+and a step that calls, is cut off, says nothing or refuses gives no summary (`stops.classify`):
+the answer says why (and what the step cost, as one `usage` event, which still counts) and
+nothing changes. A conversation that is only the last
 summary, nothing said since, is not compacted again. A command runs in the chat row's task and
 Ctrl-C stops only a reply, so the step has `timeout` seconds, and a note says so as it begins
 (the row shows it itself, `output.show`, since the chat row shows a command's answer only once

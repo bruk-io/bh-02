@@ -43,6 +43,7 @@ reply leaves at most one in flight, however often the loop reloads between them.
 
 import asyncio
 import contextlib
+import datetime
 import json
 from collections.abc import (
     AsyncGenerator,
@@ -99,6 +100,7 @@ __all__ = [
     "called",
     "malformed",
     "asides_for",
+    "lost_answers",
     "refusal",
     "request_for",
     "shown",
@@ -341,6 +343,18 @@ def _unanswered_calls(messages: Sequence[Json]) -> list[Json]:
         elif role == "assistant":
             return [call for call in message.get("tool_calls") or () if call["id"] not in answered]
     return []
+
+
+def lost_answers(messages: Sequence[Json], at: datetime.datetime) -> list[dict[str, Any]]:
+    """The `tool` entries that answer each call a transcript's `messages` leave unanswered
+    (`_unanswered_calls`) with `_LOST`, in the calls' order, each with a call record of the time
+    alone (`at`): no answer, wait or run time was recorded, and none is known. The loop keeps them
+    in the transcript at its next reply (`_answer_the_unanswered`); `/compact` sends them with its
+    summary request and keeps nothing (`conversation.asked`), so both word and record them alike."""
+    return [
+        _answer(call, _LOST, [], call_record(at, None, None, None, None, ()))
+        for call in _unanswered_calls(messages)
+    ]
 
 
 def request_for(messages: Sequence[Json]) -> list[Json]:
@@ -713,12 +727,12 @@ class LoopModel:
         self._nested.append(_Made(nested_record(name, call.record()), tuple(asides)))
 
     def _answer_the_unanswered(self) -> None:
-        """Answer each call a process that died left unanswered (`_unanswered_calls`) with `_LOST`,
-        in the calls' order, so the conversation is whole before any request. The record of each
-        has the time alone, as a call the stop never reached has: no answer, wait or run time was
-        recorded, and none is known."""
-        for call in _unanswered_calls(self._transcript.messages):
-            self._transcript.append(_answer(call, _LOST, [], _Call(self._clock).record()))
+        """Keep the answer to each call a process that died left unanswered (`lost_answers`), in the
+        calls' order, so the conversation is whole before any request. The record of each has the
+        time alone, as a call the stop never reached has: no answer, wait or run time was recorded,
+        and none is known."""
+        for entry in lost_answers(self._transcript.messages, self._clock.now()):
+            self._transcript.append(entry)
 
     def _unanswered(self, message: str, dated: str | None, why: str, at: str) -> None:
         """Keep the person's message (that came `at`), answered with `why`: the reply ended before
